@@ -30,6 +30,12 @@ permissions:
   contents: read
   deployments: write
 
+# Opt into Node.js 24 runtime for JS actions before June 2nd, 2026 when
+# GitHub forces the switch anyway. Kills the Node 20 deprecation warnings
+# and catches any incompatibilities now instead of the day of the cutover.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy:
     name: build + wrangler deploy
