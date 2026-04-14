@@ -232,11 +232,16 @@ script. Auditable in one sitting.
 
 Markdown is the source of truth. Same `.md` renders the HTML and is served raw for `/p1.md`, `/p1` under `Accept:
 text/markdown`, and `/llms-full.txt`. `llms.txt` + `llms-full.txt` at site root per llmstxt.org. Schema.org
-`TechArticle` JSON-LD in every HTML `<head>`. Stable per-principle anchor IDs `#p1-non-interactive-by-default` through
-`#p7-bounded-high-signal-responses`. Version and date in footer. Deploy on Cloudflare Workers with Static Assets. SSG
-hard. Mobile-first. A11y baseline: skip-link, semantic landmarks, `prefers-reduced-motion`, `:focus-visible`, contrast
-verified in `docs/design/color-analysis.md`. `Link` and `X-Llms-Txt` response headers advertising the indexes.
-`X-Robots-Tag: noindex` on the markdown variant to prevent search-engine double-indexing.
+`TechArticle` JSON-LD in every HTML `<head>`. **Anchor slugs LOCKED, do not rename:** `#p1-non-interactive-by-default`,
+`#p2-structured-parseable-output`, `#p3-progressive-help-discovery`, `#p4-fail-fast-actionable-errors`,
+`#p5-safe-retries-mutation-boundaries`, `#p6-composable-predictable-command-structure`,
+`#p7-bounded-high-signal-responses`. No tier keyword (MUST/SHOULD/MAY) in the slug. Once shipped these are permanent
+citation primitives — any rename breaks every inbound link, blog quote, HN comment, or agent citation. If a principle is
+merged or split in the upstream `principles/` source, follow the propagation protocol in `principles/AGENTS.md` and
+treat the old slug as a permanent 301 target. Version and date in footer. Deploy on Cloudflare Workers with Static
+Assets. SSG hard. Mobile-first. A11y baseline: skip-link, semantic landmarks, `prefers-reduced-motion`,
+`:focus-visible`, contrast verified in `docs/design/color-analysis.md`. `Link` and `X-Llms-Txt` response headers
+advertising the indexes. `X-Robots-Tag: noindex` on the markdown variant to prevent search-engine double-indexing.
 
 ### 3.6 Second-best: Astro without Starlight
 
@@ -617,14 +622,17 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 
 - `<article>` at `max-inline-size: 68ch`, horizontally centered.
 - Page padding: `--space-5` mobile, `--space-7` desktop.
-- Header: site title left (`agentnative`), minimal links right. **Ships a small `llms.txt` link in the header**
-  (resolving open question 5.5 — "ship it, recall if it feels cute"). Subtle wink to the agent audience; a literal
-  demonstration of the thesis.
-- Footer: version / date / "Created by Brett Davies (davies.fyi)" when davies.fyi is live, "Source on GitHub" otherwise.
-- **Mini-TOC ships on desktop ≥ 1100px** (resolving open question 5.2 — "ship it"). Sticky right-rail `<aside>` in a
-  2-column grid with the article. Lists the 7 principle anchors. Collapses to an inline `<nav>` at top of article below
+- **Header (Terse package)**: wordmark `agentnative` on the left in Uncut Sans Semibold; no link (already on the
+  homepage — clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/check`, `/about`,
+  `llms.txt`. The `llms.txt` link carries `title="Machine-readable index for AI agents"` for hover context. No nav tree,
+  no version pill, no search. Header is one line tall; does not duplicate the mini-TOC's role.
+- **Footer (Terse package)**: a single line. `v0.1 · 2026-04-14 · source on GitHub`. Separator is a middot (`·`) with
+  tabular-figure spacing. Version uses `font-variant-numeric: tabular-nums` so cross-version renders align. No personal
+  attribution on the spec site — the spec-is-bigger-than-the-author stance; `davies.fyi` owns the named surface.
+- **Mini-TOC ships on desktop ≥ 1100px** (resolving open question 5.2). Sticky right-rail `<aside>` in a 2-column grid
+  with the article. Lists the 7 principle anchors. Collapses to an inline `<nav>` at the top of the article below
   1100px. Always visible in one form or the other.
-- `/check` and `/about` use the layout minus the mini-TOC.
+- `/check` and `/about` use the same header + footer chrome, minus the mini-TOC.
 
 ### 4.12 Accessibility baseline
 
