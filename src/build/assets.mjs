@@ -99,7 +99,7 @@ main .anchor-icon { vertical-align: -2px; }
 }
 .site-brand { display: flex; flex-direction: column; gap: 0.1rem; text-decoration: none; color: inherit; }
 .site-brand__name { font-weight: 600; letter-spacing: -0.01em; }
-.site-brand__tag { color: var(--fg-muted, #525960); font-size: 0.9rem; }
+.site-brand__tag { color: var(--fg-body, #1a2026); opacity: 0.78; font-size: 0.9rem; }
 .site-nav { display: flex; gap: 1rem; font-size: 0.95rem; }
 .site-nav a { color: inherit; }
 
@@ -117,11 +117,11 @@ main .anchor-icon { vertical-align: -2px; }
 
 /* Mini-TOC on / */
 .mini-toc { margin: 0 0 2rem; padding: 1rem 1.25rem; background: var(--bg-code, #f0f4f7); border-radius: 0.5rem; }
-.mini-toc__heading { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted, #525960); margin: 0 0 0.6rem; }
+.mini-toc__heading { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-body, #1a2026); margin: 0 0 0.6rem; }
 .mini-toc__list { margin: 0; padding-left: 1.2rem; }
 
 /* Footer */
-.site-footer { border-top: 1px solid var(--border, #cfd5db); padding: 1.25rem clamp(1rem, 4vw, 2rem); color: var(--fg-muted, #525960); font-size: 0.9rem; }
+.site-footer { border-top: 1px solid var(--border, #cfd5db); padding: 1.25rem clamp(1rem, 4vw, 2rem); color: var(--fg-body, #1a2026); font-size: 0.9rem; }
 .site-footer__meta { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
 
 @media (prefers-reduced-motion: reduce) {
