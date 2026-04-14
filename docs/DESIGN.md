@@ -199,13 +199,33 @@ What the build step does, in order: read `content/*.md`, parse with `unified` (`
 headings for anchor generation (`rehype-slug`), syntax-highlight with `shiki` at build (emits dual-theme inline styles),
 convert to HTML with `remark-rehype` + `rehype-stringify`, template into a single shared HTML shell, write
 `dist/*.html`, copy source `.md` files to `dist/*.md`, generate `dist/llms.txt` and `dist/llms-full.txt` from the
-content index, emit `dist/sitemap.xml` and `dist/og-image.png` (the latter via `satori`). Dependencies are all
-build-time and pinned.
+content index, emit `dist/sitemap.xml` and `dist/og-image.png` (copied from `public/og-image.png`; see §3.4.1 and
+`scripts/og/generate.py`). Dependencies are all build-time and pinned.
 
 The Worker is ~80 lines: static assets from `env.ASSETS`, content-negotiation branch on `url.pathname.endsWith(".md")
-|| accept.includes("text/markdown")`, `Link` and `X-Llms-Txt` response headers on every HTML response (copying the
-Mintlify pattern), `X-Robots-Tag: noindex` on the markdown variant so search engines do not double-index. Deploy is
-`wrangler deploy`. Rollback is `wrangler rollback`.
+|| Accepts(req).type(['text/html', 'text/markdown']) === 'text/markdown'` (proper RFC 7231 q-value parsing via the
+[`accepts`](https://www.npmjs.com/package/accepts) npm package — bare `includes("text/markdown")` mishandles `q=0`
+rejections, comma-separated media ranges, and the standard browser `*/*` fallback), `Link` and `X-Llms-Txt` response
+headers on every HTML response (copying the Mintlify pattern), `X-Robots-Tag: noindex` on the markdown variant so search
+engines do not double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
+
+**Static-asset binding (A12).** `env.ASSETS` is the
+[Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/) binding, configured in
+`wrangler.jsonc` with `assets.directory = "./dist"` and `assets.binding = "ASSETS"`. NOT KV. NOT R2. NOT the legacy
+`@cloudflare/kv-asset-handler` package. `env.ASSETS.fetch(request)` resolves static files from `./dist` with
+`html_handling: "auto-trailing-slash"` applied by the platform.
+
+**Response headers (A8).** Exact values pinned here so the Worker and tests agree:
+
+- **HTML responses** carry `Link: </p<n>.md>; rel="alternate"; type="text/markdown"` and `X-Llms-Txt: /llms.txt`.
+- **Markdown responses** carry `Content-Type: text/markdown; charset=utf-8` and `X-Robots-Tag: noindex`.
+
+**Cache strategy (P4).** HTML and `.md` responses carry `Cache-Control: public, max-age=300, s-maxage=86400,
+stale-while-revalidate=60` (short browser cache, long edge cache, SWR for the deploy-between-fetches window). Hashed
+immutable assets — fonts at `/fonts/*`, the content-hashed `/og-image.png` — carry `Cache-Control: public,
+max-age=31536000, immutable`.
+
+**404 handling (A10).** Uses the Workers Static Assets default 404 body; no custom 404 page in v0.
 
 **Why this wins for this site, specifically.**
 
@@ -227,6 +247,19 @@ prebuilt components free — specifically, we hand-wire click-to-copy (native Cl
 buttons (~30 lines), and CSS-only tabbed code (radio/`:checked`, ~60 lines CSS, no JS). The theme toggle (§4.9) is ~40
 lines of JS + CSS. Total hand-rolled surface ≈ 450 lines across HTML template + Worker + JS + CSS, plus the build
 script. Auditable in one sitting.
+
+**CI pipeline (A9).** `.github/workflows/ci.yml` runs on every `pull_request` and must pass before merge:
+
+```text
+markdownlint-cli2  →  bun run build  →  bun test  →  bun x playwright test
+                  →  bun x @lhci/cli autorun  →  bun x wrangler deploy --dry-run
+```
+
+Each stage gates the next. `bun test` includes the three CRITICAL regression snapshots (anchor-slug, `llms.txt` shape,
+markdown byte-equivalence) from the eng review. Lighthouse CI asserts the 800 KB page-payload regression gate on `/p1`
+(§4.8.1) — merge-blocking, scoped to catch runaway growth, not enforce an absolute target. `wrangler deploy --dry-run`
+validates the Worker + assets bundle without publishing. A separate `.github/workflows/deploy.yml` runs on push-to-main
+and performs the real `wrangler deploy` via `cloudflare/wrangler-action@v3`.
 
 ### 3.4.1 Content layout and build contract
 
@@ -261,12 +294,67 @@ the filename — no separate manifest file, no frontmatter ordering key.
 | -------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `_intro.md` + `principles/p[1-7]-*.md` | `index.html`, `index.md`                                         | Intro concatenated with all seven principles in numeric order; each principle wrapped in `<section id="p<n>-<slug>">`. |
 | `principles/p<n>-<slug>.md`            | `p<n>.html`, `p<n>.md`                                           | Per-principle page. HTML has the same header/footer chrome as index; markdown is the source file copied verbatim. |
-| `check.md`                             | `check/index.html`, `check.md`                                   | Sub-page; no mini-TOC.                                             |
-| `about.md`                             | `about/index.html`, `about.md`                                   | Sub-page; no mini-TOC.                                             |
+| `check.md`                             | `check.html`, `check.md`                                         | Sub-page; flat layout (not `check/index.html`); no mini-TOC.       |
+| `about.md`                             | `about.html`, `about.md`                                         | Sub-page; flat layout (not `about/index.html`); no mini-TOC.       |
 | all principle files (titles + slugs)   | `llms.txt`                                                       | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs. |
-| `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`                                | Concatenation of everything, delimited by heading markers; single-fetch endpoint for agents. |
+| `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`                                | Concatenation of everything, each section delimited per the A5 format block below (`# <Title>` heading, `Source:` + `Canonical-Markdown:` URL headers, body, `---` separator); single-fetch endpoint for agents. |
 | all URLs                               | `sitemap.xml`                                                    | Plain sitemap; no priority hacks.                                  |
 | brief in §4.13                         | `og-image.png`                                                   | Generated out-of-band via `scripts/og/generate.py`; committed. Not regenerated on every build. |
+
+**Static asset + CSS + JS pipeline (A2, C3):**
+
+| Source                                     | Emitted as                                    | Notes                                                                                                                                                                    |
+| ------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `docs/design/foundation.css`               | `dist/css/foundation.css`                     | Byte-for-byte copy (C3). `cmp -s docs/design/foundation.css dist/css/foundation.css` passes. Source of truth for palette + type tokens + RFC-keyword color rules. |
+| templated `site.css`                       | `dist/css/site.css`                           | Additive-only: `@font-face` (Uncut Sans + Monaspace Xenon), layout (grid, measure, mini-TOC sticky), code-block chrome, theme-toggle widget, copy-button widget, Shiki dual-theme CSS bridge (§4.6). No overrides of foundation tokens. |
+| `public/fonts/*.woff2`                     | `dist/fonts/*.woff2`                          | Self-hosted variable woff2 files per §4.3. Served under `/fonts/`, not `/assets/fonts/`. `@font-face` in `site.css` references `/fonts/…`.                              |
+| `src/client/theme-init.ts`                 | inline `<script>` in `<head>` of every HTML  | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint — no dark-mode flash. |
+| `src/client/theme.ts`                      | `dist/js/theme.js`                            | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                 |
+| `src/client/clipboard.ts`                  | `dist/js/clipboard.js`                        | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8. |
+
+The HTML shell emits exactly two stylesheet `<link>` tags in `<head>`, in this order:
+
+```html
+<link rel="stylesheet" href="/css/foundation.css">
+<link rel="stylesheet" href="/css/site.css">
+```
+
+Foundation first, site second — cascade order is load-bearing. `site.css` additive rules override nothing in
+`foundation.css`; it supplies what foundation deliberately omits (see §4.3 `@font-face` rationale).
+
+**Asset resolution (A4).** Under `html_handling: "auto-trailing-slash"` + flat layout (all nine HTML files at `dist/`
+root alongside their `.md` twins):
+
+| Request path      | Resolution                                          |
+| ----------------- | --------------------------------------------------- |
+| `/p3`             | 200 → serves `dist/p3.html`                          |
+| `/check`          | 200 → serves `dist/check.html`                       |
+| `/about`          | 200 → serves `dist/about.html`                       |
+| `/check/`         | 307 → redirects to `/check`                          |
+| `/p3.html`        | 307 → redirects to `/p3`                             |
+| `/p3.md`          | 200 → serves `dist/p3.md` (no html_handling applies — not HTML) |
+
+Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/check`,
+`/about`). No `check/index.html` / `about/index.html` asymmetry.
+
+**`llms-full.txt` per-section format (A5).** Each section — `_intro`, p1…p7, `check`, `about` — is emitted in this exact
+shape, concatenated in source order, separated by a bare `---` line:
+
+```text
+# <Title>
+
+Source: <html-url>
+Canonical-Markdown: <md-url>
+
+<body markdown, verbatim from source>
+
+---
+```
+
+Example: the `p3` section opens with `# Progressive help discovery`, then `Source: https://agentnative.dev/p3`,
+`Canonical-Markdown: https://agentnative.dev/p3.md`, a blank line, the file body, a blank line, `---`. Agents consuming
+`llms-full.txt` can split on `^---$` to recover individual sections and resolve per-section citations to either the HTML
+or the markdown twin.
 
 **Build-step semantics:**
 
@@ -336,7 +424,7 @@ choice if Brett wants the dev-server comfort and the community-maintained markdo
 
 - **Scope crosses ~20 pages.** Hand-built navigation, per-page frontmatter wrangling, and a custom search solution start
   eating more time than a framework would. At ~20 pages we revisit Astro-alone; at ~40 we revisit Starlight.
-- **Versioning becomes real.** Phase 2+ work (TODOS.md P2) introducing per-version spec rendering tips toward a
+- **Versioning becomes real.** Phase 2+ work (docs/TODOS.md P2) introducing per-version spec rendering tips toward a
   framework with first-class version handling. Starlight earns its keep here.
 - **Client-side search becomes a requirement.** We do not need it for nine pages, but a "search across all principles"
   add-on requires either a 20–50 KB client bundle (pagefind, flexsearch) or a server endpoint.
@@ -388,7 +476,8 @@ standard courting developer adoption.
 | `--bg`         | `#fafbfd`   | `#060a0e`  | Page background.                          |
 | `--bg-code`    | `#f0f4f7`   | `#0d1218`  | Inline + block code background.           |
 | `--border`     | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.     |
-| `--fg-muted`   | `#525960`   | `#9199a2`  | Secondary text, footer, captions.         |
+| `--fg-muted`     | `#7d848a`   | `#8d949c`  | Decorative/large-only captions (≥1.125rem). Below 4.5:1 small-text contrast by design — use `--fg-secondary` for anything readable under 18px. |
+| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1. |
 | `--fg-body`    | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.  |
 | `--fg-heading` | `#070c11`   | `#f3f2ed`  | Headings.                                 |
 | `--accent`     | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.     |
@@ -396,10 +485,12 @@ standard courting developer adoption.
 | `--should`     | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                      |
 | `--may`        | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                         |
 
-All body pairs pass WCAG AA (≥4.5:1) **and** APCA body minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. Two
-dark-mode tokens (`must`, `accent-subtle`) required a tuning pass after the first APCA run flagged them below the 60
-threshold; the tuning is recorded in the script as a comment, and the second-pass contrast table in the report shows all
-pairs clearing thresholds.
+All body pairs (`--fg-body`, `--fg-secondary`, `--fg-heading`, `--accent`) pass WCAG AA (≥4.5:1) **and** APCA body
+minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` deliberately sits below AA 4.5:1 in both modes
+(≈4.3:1) — it is a decorative caption tier reserved for text ≥1.125rem where the AA large-text threshold (3:1) applies;
+use `--fg-secondary` for any small body-size secondary text. Two dark-mode tokens (`must`, `accent-subtle`) required a
+tuning pass after the first APCA run flagged them below the 60 threshold; the tuning is recorded in the script as a
+comment, and the second-pass contrast table in the report shows all body pairs clearing thresholds.
 
 ### 4.2 Dark mode is deliberately designed (not inverted)
 
@@ -499,6 +590,28 @@ back through the `--font-sans` / `--font-mono` fallback stacks to system fonts. 
 it self-hosts both woff2 files from `/fonts/` using the variable font from GitHub Next's repo directly (checked in to
 the site's own assets), per the `@font-face` block documented above.
 
+#### Font supply chain (A11, C4)
+
+Variable woff2 files are checked in to `public/fonts/` and served from `dist/fonts/` — no runtime CDN dependency. Vendor
+sources and integrity hashes are pinned and verified by a one-shot script.
+
+| Family              | Source                                                                             | License | Checked-in path                        |
+| ------------------- | ---------------------------------------------------------------------------------- | ------- | -------------------------------------- |
+| Uncut Sans variable | Pangram Pangram ([fontshare.com](https://fontshare.com/fonts/uncut-sans))          | OFL     | `public/fonts/uncut-sans-variable.woff2` |
+| Monaspace Xenon     | GitHub Next ([monaspace.githubnext.com](https://monaspace.githubnext.com/))         | OFL     | `public/fonts/monaspace-xenon-variable.woff2` |
+
+**Pipeline.** `scripts/fonts/download.sh` fetches the woff2 files from their vendor URLs, computes sha256 over each, and
+compares against the committed `scripts/fonts/hashes.txt`. Running `scripts/fonts/download.sh --verify` against the
+already-checked-in files re-runs the hash check without re-downloading. CI runs `--verify` so drift against the pinned
+hashes fails the build. Hash bumps are deliberate: refresh the files, regenerate `hashes.txt`, commit both together.
+
+**Preview vs production (C4).** `docs/design/must-should-may-preview.html` loads fonts via CDN (see "Preview behavior"
+above) — fast, zero-local-asset design review. Production self-hosts from `/fonts/` with the checked-in woff2 files. The
+two surfaces are NOT guaranteed byte-identical across versions: Fontshare can push a new Uncut Sans revision at any
+time, and the checked-in production file is pinned by hash. Final visual signoff before the HN launch MUST run against
+the production-hosted fonts (via `bun run dev` against the real `dist/` or the staging workers.dev URL), not the CDN
+preview, because metric drift between vendor revisions can shift leading and break the §4.4 type-scale calibration.
+
 ### 4.4 Type scale
 
 Modular scale, 1.25 ratio (major third), fluid body via `clamp()` from 17px at 360px viewport up to 18px at ~1100px. H1
@@ -565,6 +678,48 @@ Treatment:
 copies the `textContent` of the `<code>` element, which strips span wrappers and returns original source. The markdown
 channel serves the raw `.md` file, so highlighting never contaminates `text/markdown`.
 
+#### Shiki dual-theme config and CSS bridge (A7)
+
+Shiki emits one `<pre>` per fenced block with inline CSS custom properties for each token. With dual-theme mode the
+light token color is set via `color:` and the dark color via `--shiki-dark:`. A tiny CSS bridge couples `--shiki-dark`
+to the site's `[data-theme]` pattern under both system preference and explicit user override.
+
+Shiki config (passed to `codeToHtml` / `@shikijs/rehype` in the build pipeline):
+
+```js
+{
+  themes: { light: 'github-light', dark: 'github-dark-dimmed' },
+  defaultColor: false,   // do not bake a single color into the `color:` property;
+                         // emit both --shiki-light and --shiki-dark custom properties
+}
+```
+
+CSS bridge (lives in `site.css`, not `foundation.css` — it depends on Shiki-emitted class shape):
+
+```css
+/* Default: light. Shiki's emitted `color:` wins. */
+
+/* OS-level dark, user has NOT overridden. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shiki,
+  :root:not([data-theme="light"]) .shiki span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+  }
+}
+
+/* Explicit user override to dark. Beats the media query via specificity. */
+:root[data-theme="dark"] .shiki,
+:root[data-theme="dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+```
+
+`!important` is load-bearing here: Shiki writes its light color inline via `style="color: #..."` on every span, and
+inline styles beat non-`!important` rules. The `:not([data-theme="light"])` clause in the media query ensures an OS
+preference of dark does not override an explicit user choice of light (mirrors the palette pattern in §4.9).
+
 ### 4.7 RFC-keyword treatment — ship 7b (inline), defer block
 
 **Ships: option 7b (inline keyword color only).** The block-level callout variant — originally spec'd as 7b-plus with a
@@ -590,6 +745,42 @@ bare-word occurrences of `MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY` i
 class="rfc-must">MUST</strong>` (and tier-appropriate classes). Skips occurrences inside `<code>`, `<pre>`, and link
 labels so we do not recolor shell output or URL text. Cost: ~30 lines. Raw markdown stays unchanged (uppercase keywords
 in source) so the `text/markdown` channel is a pristine copy.
+
+**Regex and scope (C2).** The plugin visits mdast `text` nodes only (not `inlineCode`, not `code`, not `link` children)
+and replaces matches of:
+
+```text
+/\b(MUST(?: NOT)?|SHOULD(?: NOT)?|MAY)\b/g
+```
+
+Restriction: the `text` node's ancestor chain MUST NOT include `code`, `inlineCode`, or `link`. The plugin walks parents
+at visit time and bails on the node if any disqualifying ancestor is present.
+
+Explicit test cases (wired into `tests/build.test.ts`):
+
+| Input                                    | Expected result                                               |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| `Tools MUST NOT block on prompts.`       | `MUST NOT` → single `<strong class="rfc-must">MUST NOT</strong>` (one match, not two). |
+| `Agents MUST, at minimum, parse JSON.`   | `MUST` → match (word boundary before `,`).                    |
+| `MUSTARD is yellow.`                     | No match (`\b` excludes trailing letters).                    |
+| `The word "must" is lowercase.`          | No match (regex is uppercase-only; no `i` flag).              |
+| `` Call `MUST` explicitly. ``            | No match (inlineCode ancestor disqualifies).                  |
+| `[MUST](https://example.com/must)`       | No match (link ancestor disqualifies; link body + href both skipped). |
+| `## MUST support --json` (heading)       | Match (heading is not an excluded ancestor).                  |
+| `**MUST:** Use try_parse() …` (list item) | Annotate-parent case — see A6 below; no second `<strong>` wrap. |
+
+**Nested-strong handling (A6).** In the principle source files the tier markers are authored as `**MUST:**`,
+`**SHOULD:**`, `**MAY:**` at the start of requirement list items. After mdast parsing those render as `<strong>MUST:
+</strong>`. When the plugin walks into a `text` node whose immediate parent is a `strong` node and the match covers
+the full keyword (`MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY`), it:
+
+1. Adds `class="rfc-must"` (or tier-appropriate) to the existing parent `<strong>`, and
+2. Does NOT emit an inner second `<strong>` wrapper.
+
+Detection: the plugin's visitor sees `(node, index, parent)` where `parent.type === 'strong'`. The result is one
+`<strong class="rfc-must">MUST:</strong>` instead of the invalid nested `<strong><strong
+class="rfc-must">MUST</strong>:</strong>`. Every other context (plain prose, headings, list-item first-child where the
+parent is `listItem`/`paragraph`/etc.) uses the default wrap-in-new-`<strong>` behavior.
 
 #### Deferred: block-level treatment (decide once the site is live)
 
@@ -647,6 +838,52 @@ analytics, no CDN imports at runtime. Every `<script>` tag has one job.
 - Scroll-spy TOC highlighting (`:target` + browser hash-change suffice).
 - Code-block line numbers.
 - Framework runtime of any kind.
+
+**No-JS progressive enhancement (C6).** The theme toggle and copy buttons depend on JS; the rest of the site does
+not. The site degrades cleanly when JS is disabled or fails to load:
+
+```html
+<!-- Inline head script (theme-init.ts), runs before first paint. -->
+<script>document.documentElement.classList.add('js');</script>
+```
+
+```css
+/* Hide JS-only widgets when the `.js` class is absent (CSS/no-JS path). */
+:root:not(.js) .theme-toggle,
+:root:not(.js) .copy-button {
+  display: none;
+}
+```
+
+The `.js` class is set by the inline script (same one that also reads `localStorage` and sets `[data-theme]`) before
+first paint. CSS-only widgets — the tabbed multi-language code blocks (hidden radio + `:checked ~ .panel`), `:target`
+highlighting, `prefers-color-scheme` dark mode — continue to work with zero JS. Prose, code blocks, anchors, and
+navigation are fully functional without the deferred scripts.
+
+### 4.8.1 Performance budget (C1)
+
+Budgets are regression gates, not absolute targets. A Cloudflare edge POP serves each asset in parallel from the nearest
+region; the Monaspace woff2 that dominates page weight is cached hard on second hit. Chasing a small absolute page-size
+number isn't the meaningful signal for this site — catching a PR that silently doubles the payload is.
+
+| Tier                                   | Budget          | Enforcement                                                                     |
+| -------------------------------------- | --------------- | ------------------------------------------------------------------------------- |
+| Client JS — target                     | ≤ 5 KB gzipped  | Build script asserts total of `dist/js/*.js` + inline `theme-init`. PR review.  |
+| Client JS — hard ceiling               | ≤ 20 KB gzipped | Build script fails if exceeded.                                                 |
+| Initial page payload — regression gate | ≤ 800 KB        | `.lighthouserc.json` fires `resource-summary:total:size` error. Merge-blocking. |
+
+"Initial page payload" is HTML + CSS + fonts + JS + any inline SVG on the first render of `/p1` (representative of the
+seven principle pages; the index carries the heaviest paint). Current steady-state ships at ~740 KB with the Monaspace
+Xenon variable woff2 (~570 KB unsubsetted) as the bulk. The 800 KB ceiling is deliberately ~60 KB above current reality
+so a PR that bundles a framework runtime, inlines a large SVG, loads a second font family, or ships an un-minified
+artifact fires the gate. PRs that legitimately add payload bump the ceiling in the same commit — explicit movement,
+recorded in the diff.
+
+Client-JS ceilings stay tight (5 KB / 20 KB) because JS bytes run on the main thread and dominate interaction latency in
+a way raw page weight does not. The shipped `theme.js` + `clipboard.js` are ~2.5 KB combined gz — room to spare.
+
+Font-subsetting Monaspace to Latin glyphs is tracked as TODOS P3. When it lands, drop the page-payload ceiling to match
+the new reality (~200 KB + 60 KB headroom ≈ 260 KB).
 
 ### 4.9 Theme toggle and `prefers-color-scheme` interaction
 
@@ -730,7 +967,9 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 
 ### 4.13 OG image direction (1200×630 brief)
 
-Specification, not a rendered image. Produced in implementation session via `satori` at build.
+Specification, not a rendered image. Produced out-of-band via `scripts/og/generate.py` (Gemini 3 Pro image generation,
+run manually against the brief below), committed as `public/og-image.png`, and copied byte-for-byte into
+`dist/og-image.png` at build time. Not regenerated on every build.
 
 - Background: dark-mode palette (`--bg` + subtle `--bg-code` rectangle bottom-right).
 - Left-anchored headline, ~72pt, `ui-sans-serif` 700, color `--fg-heading`. Line 1: **"agent-native CLI standard"**.
@@ -739,7 +978,7 @@ Specification, not a rendered image. Produced in implementation session via `sat
 - Bottom-right: schematic 7-row code block, mono, ~18pt, showing principle slugs as a stylized `llms.txt` excerpt —
   literal visual proof the site is machine-readable.
 - No logo, no illustration, no gradient, no photography.
-- File: `og-image.png`, 1200×630, under 200 KB. `og:image:alt` = headline text verbatim.
+- File: `public/og-image.png`, 1200×630, under 200 KB. `og:image:alt` = headline text verbatim.
 
 ### 4.14 Schema.org / SEO surface
 
