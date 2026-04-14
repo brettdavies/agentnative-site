@@ -39,7 +39,7 @@ anchors, and semantic HTML. Keep this framing in every decision.
   returns HTML rendered from the same markdown via CommonMark
 - `/llms.txt`, `/llms-full.txt` — llmstxt.org convention (summary index + full concatenated spec)
 - `/sitemap.xml`, `/robots.txt` — hygiene
-- `og-image.png` — 1200x630 designed social preview
+- `public/og-image.png` — 1200x630 designed social preview
 
 Plain HTML + minimal CSS + small Worker script. No frontend framework, no build pipeline beyond the Worker's
 CommonMark render step. Deploy via `wrangler`.
@@ -91,6 +91,8 @@ design principles): [`.impeccable.md`](.impeccable.md).
 | `docs/solutions/` (symlink to `~/dev/solutions-docs/`) | Cross-repo documented solutions; includes the agent-native documentation surface pattern that informs this site's architecture | Relevant when researching architecture or tooling patterns. Search before building from scratch. |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md` | Shared research index for both this site and the `agentnative` CLI linter | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties. |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md` | Canonical spec for P1-P7 (one file per principle, pressure-testable) | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
+| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md` | Build & distribution plan | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified. |
+| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md` | Eng review | Architecture + code quality + test coverage review for M1. §12 lists all DESIGN.md edits. Decisions resolved; no blockers. |
 
 ## Related repos
 
