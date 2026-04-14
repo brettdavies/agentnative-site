@@ -3,19 +3,26 @@
 Status: PROPOSED (revision 2). Authored by `/design-consultation` on 2026-04-13, revised 2026-04-14 after first-round
 feedback. Supersedes the tentative stack and visual placeholders in the CEO plan and AGENT.md where they conflict.
 
-Companion artifacts in `design/`:
+Companion artifacts split by role:
 
-- [`design/color-analysis.md`](design/color-analysis.md) — show-your-work color report: culori + apca-w3 tool outputs,
-  WCAG and APCA contrast tables, gamut verification, swatch preview. No CSS embedded in the report — the stylesheet is a
-  real file (next entry).
-- [`design/tokens.css`](design/tokens.css) — drop-in stylesheet emitted by the palette script. Contains all palette
-  custom properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides) plus the option
-  7b / 7b-plus RFC-keyword rules. Consumed directly by the HTML preview and, later, by the site build.
-- [`design/generate-palette.mjs`](design/generate-palette.mjs) — the script that produces both the report and
-  `tokens.css`. Reproducible via `bun run design/generate-palette.mjs > design/color-analysis.md`.
-- [`design/must-should-may-preview.html`](design/must-should-may-preview.html) — rendered examples of options 7a, 7b,
-  and 7b-plus side by side, with a three-state theme toggle (system / light / dark). Links to `tokens.css` — no keyword
-  or palette CSS inlined.
+**Generated + hand-authored documents — `docs/design/`** (tracked, reviewer-facing):
+
+- [`docs/docs/design/color-analysis.md`](docs/docs/design/color-analysis.md) — show-your-work color report: culori +
+  apca-w3 tool outputs, WCAG and APCA contrast tables, gamut verification, swatch preview. No CSS embedded in the
+  report; the stylesheet is the next entry.
+- [`docs/docs/design/tokens.css`](docs/docs/design/tokens.css) — drop-in stylesheet. Contains all palette custom
+  properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides) plus the option 7b /
+  7b-plus RFC-keyword rules. Consumed directly by the HTML preview and, later, by the site build.
+- [`docs/docs/design/must-should-may-preview.html`](docs/docs/design/must-should-may-preview.html) — rendered examples
+  of options 7a, 7b, and 7b-plus side by side, with a three-state theme toggle (system / light / dark). Links to
+  `tokens.css` — no keyword or palette CSS inlined.
+- [`docs/design/README.md`](docs/design/README.md) — explains the subsystem and reproduction steps.
+
+**Generator — `scripts/design/`** (tooling, not shipped):
+
+- [`scripts/scripts/design/generate-palette.mjs`](scripts/scripts/design/generate-palette.mjs) — the script that emits
+  both the report and `tokens.css` in `docs/design/`. Run via `cd scripts/design && bun install && bun run generate` (or
+  `bun run scripts/scripts/design/generate-palette.mjs` from the repo root).
 
 ## 1. Summary
 
@@ -36,10 +43,10 @@ concrete and documented below.
 **Decision B (visual system): cool-neutral palette at hue 250, navy accent in the same family, deliberately-designed
 dark mode (not inverted), system font stacks as the default with a bounded webfont upgrade path, code as a first-class
 visual element, dark mode via `prefers-color-scheme` *plus* a visible user toggle, sticky mini-TOC on desktop.** Palette
-and contrast work is backed by a reproducible tool run — see `design/color-analysis.md` for inputs, outputs, WCAG + APCA
-numbers, and every clamped value; the stylesheet itself lives at `design/tokens.css`. MUST / SHOULD / MAY keywords ship
-option 7b-plus (inline color **plus** hairline-rule paragraph callouts) — preview at
-`design/must-should-may-preview.html`.
+and contrast work is backed by a reproducible tool run — see `docs/design/color-analysis.md` for inputs, outputs, WCAG +
+APCA numbers, and every clamped value; the stylesheet itself lives at `docs/design/tokens.css`. MUST / SHOULD / MAY
+keywords ship option 7b-plus (inline color **plus** hairline-rule paragraph callouts) — preview at
+`docs/design/must-should-may-preview.html`.
 
 **JS posture.** Pragmatic. The CEO plan's original "total shipped JS ≤25 KB" ceiling is a target, not a guardrail. User
 direction: "use a library if it earns its place; total page payload up to 1–2 MB is acceptable." We still reject
@@ -221,8 +228,8 @@ text/markdown`, and `/llms-full.txt`. `llms.txt` + `llms-full.txt` at site root 
 `TechArticle` JSON-LD in every HTML `<head>`. Stable per-principle anchor IDs `#p1-non-interactive-by-default` through
 `#p7-bounded-high-signal-responses`. Version and date in footer. Deploy on Cloudflare Workers with Static Assets. SSG
 hard. Mobile-first. A11y baseline: skip-link, semantic landmarks, `prefers-reduced-motion`, `:focus-visible`, contrast
-verified in `design/color-analysis.md`. `Link` and `X-Llms-Txt` response headers advertising the indexes. `X-Robots-Tag:
-noindex` on the markdown variant to prevent search-engine double-indexing.
+verified in `docs/design/color-analysis.md`. `Link` and `X-Llms-Txt` response headers advertising the indexes.
+`X-Robots-Tag: noindex` on the markdown variant to prevent search-engine double-indexing.
 
 ### 3.6 Second-best: Astro without Starlight
 
@@ -258,12 +265,12 @@ documentation surface pattern at
 One direction. The CEO plan's stated preference ("simple and traditional with modern web flair, clig.dev >
 12factor.net") is specific enough to commit to a single system.
 
-### 4.1 Palette (summary; full methodology in `design/color-analysis.md`)
+### 4.1 Palette (summary; full methodology in `docs/design/color-analysis.md`)
 
 Cool-neutral base, hue 250, one accent in the same hue family, three semantic warm-or-cool accents for MUST / SHOULD /
 MAY. The choice of cool over warm is load-bearing for spec adoption: research summarized below lands decisively on cool
 neutrals for technical documentation. The full ramps, WCAG ratios, APCA Lc values, and gamut-clamping record live in
-`design/color-analysis.md` — all generated by `design/generate-palette.mjs` using `culori` and `apca-w3`.
+`docs/design/color-analysis.md` — all generated by `scripts/design/generate-palette.mjs` using `culori` and `apca-w3`.
 
 **Why cool, not warm — color psychology for spec adoption.** Synthesized from 2026 industry sources (see sources
 appendix at end of file). Three findings drive the call:
@@ -282,7 +289,7 @@ appendix at end of file). Three findings drive the call:
 This reverses revision 1's warm-neutral palette. The warm palette would have been distinctive but wrong for a
 standard courting developer adoption.
 
-**Emitted token summary** (full table with OKLCH, hex, and contrast in `design/color-analysis.md`):
+**Emitted token summary** (full table with OKLCH, hex, and contrast in `docs/design/color-analysis.md`):
 
 | Role           | Light (hex) | Dark (hex) | Notes                                     |
 | -------------- | ----------- | ---------- | ----------------------------------------- |
@@ -317,7 +324,8 @@ palette was designed independently, not derived by flipping lightness. Four deli
 4. **L curve is smoother through the 30–60 range** than the light-mode curve, because dark UI needs more separation in
    the mid-grays for borders, muted text, and raised surfaces.
 
-Each deviation is documented inline in `design/generate-palette.mjs` (`DARK_SCALE` comments) so a future reviewer
+Each deviation is documented inline in `scripts/design/generate-palette.mjs` (`DARK_SCALE` comments) so a future
+   reviewer
 sees the *why* alongside the numbers.
 
 ### 4.3 Type stack
@@ -390,11 +398,11 @@ channel serves the raw `.md` file, so highlighting never contaminates `text/mark
 ### 4.7 RFC-keyword treatment — ship 7b-plus
 
 Ship **option 7b-plus** (inline color on every keyword in prose **plus** hairline-rule left-edge callouts on each
-requirement-list item). Preview at `design/must-should-may-preview.html` shows all three variants side by side, with
-toggle states for light / dark / system. All colors validated against APCA body minimum (|Lc| ≥ 60) in both modes — see
-`design/color-analysis.md`.
+requirement-list item). Preview at `docs/design/must-should-may-preview.html` shows all three variants side by side,
+with toggle states for light / dark / system. All colors validated against APCA body minimum (|Lc| ≥ 60) in both modes —
+see `docs/design/color-analysis.md`.
 
-The CSS ships in `design/tokens.css` (six rules, reproduced here for review):
+The CSS ships in `docs/design/tokens.css` (six rules, reproduced here for review):
 
 ```css
 .rfc-must   { color: var(--must);   font-weight: 600; letter-spacing: 0.02em; }
@@ -497,12 +505,12 @@ ensures an OS preference of dark does not override an explicit user choice of li
 4. `matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ...)` updates CSS when the OS changes mode,
    but only when the state is `system`.
 
-Full CSS emitted by `design/generate-palette.mjs` already includes the three selector cases
+Full CSS emitted by `scripts/design/generate-palette.mjs` already includes the three selector cases
 (`:root`, `:root:not([data-theme="light"])` inside the media query, `:root[data-theme="dark"]`,
 `:root[data-theme="light"]`). Dropping the block into the site's stylesheet is the implementation.
 
 Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-navigable. The preview at
-`design/must-should-may-preview.html` demonstrates the toggle pattern at the page-footer level.
+`docs/design/must-should-may-preview.html` demonstrates the toggle pattern at the page-footer level.
 
 ### 4.10 Links, anchors, `:target`
 
@@ -535,8 +543,8 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - `:focus-visible` everywhere.
 - `prefers-reduced-motion` honored.
 - Target size ≥ 44×44 CSS pixels on mobile for copy/anchor buttons.
-- Contrast verified in `design/color-analysis.md`. Both WCAG 2.1 AA and APCA body-minimum pass in both modes for all
-  semantic pairs.
+- Contrast verified in `docs/design/color-analysis.md`. Both WCAG 2.1 AA and APCA body-minimum pass in both modes for
+  all semantic pairs.
 - CSS-only tabs: `<label for>` associations; tab panels are `<section role="tabpanel" aria-labelledby="...">`.
   `axe-core` run in CI at `/plan-eng-review` time confirms.
 
@@ -569,9 +577,9 @@ Revision 1 open questions with current status:
    §4.3. Revisit at first visual polish pass.
 2. **Mini-TOC on desktop** → RESOLVED: ship it (§4.11).
 3. **Warm vs cool neutrals** → RESOLVED via color-psychology research: cool neutrals for spec credibility (§4.1
-   narrative); full palette and contrast in `design/color-analysis.md`.
+   narrative); full palette and contrast in `docs/design/color-analysis.md`.
 4. **Colorize MUST / SHOULD / MAY** → RESOLVED: ship option 7b-plus — inline color plus hairline-rule callouts (§4.7);
-   preview at `design/must-should-may-preview.html`.
+   preview at `docs/design/must-should-may-preview.html`.
 5. **`llms.txt` link in header** → RESOLVED: ship it, recall if it reads cute (§4.11).
 6. **`og:url` pre-domain purchase** → RESOLVED: stage on `workers.dev` host, swap constant at cutover (§4.14).
 

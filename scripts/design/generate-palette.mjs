@@ -1,17 +1,20 @@
-// generate-palette.mjs
+// scripts/design/generate-palette.mjs
 // Palette generation and verification for the agentnative spec site.
 //
-// Two outputs:
-//   1. Markdown report on stdout -> design/color-analysis.md
+// Two outputs, both written directly to docs/design/:
+//   1. docs/design/color-analysis.md
 //      Methodology, tool outputs, contrast tables, gamut record, swatch
 //      preview. No embedded CSS (the drop-in block lives in tokens.css).
-//   2. Drop-in stylesheet -> design/tokens.css
-//      Real CSS file consumed by design/must-should-may-preview.html and,
-//      later, by the site build. Contains all palette custom properties
+//   2. docs/design/tokens.css
+//      Drop-in stylesheet consumed by docs/design/must-should-may-preview.html
+//      and, later, by the site build. Contains all palette custom properties
 //      (light default, dark via prefers-color-scheme, explicit [data-theme]
-//      overrides), plus the 7b/7b-plus RFC-keyword rules.
+//      overrides) plus the 7b/7b-plus RFC-keyword rules.
 //
-// Run: bun run generate-palette.mjs > color-analysis.md
+// Run (from anywhere):      bun run scripts/design/generate-palette.mjs
+// Run (from scripts/design): bun run generate
+//
+// Idempotent. Re-running overwrites the two output files in place.
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -28,6 +31,8 @@ import {
 import { APCAcontrast, sRGBtoY, calcAPCA } from "apca-w3";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// Output directory lives at repo-root/docs/design/, two levels up from here.
+const DOCS_DIR = join(__dirname, "..", "..", "docs", "design");
 
 const toRgb = converter("rgb");
 const toOklch = converter("oklch");
@@ -460,7 +465,7 @@ ${cssTokenBlock(dark, ':root[data-theme="dark"]', "dark mode via explicit toggle
 ${cssTokenBlock(light, ':root[data-theme="light"]', "light mode via explicit toggle")}
 ${staticRules}`;
 
-writeFileSync(join(__dirname, "tokens.css"), tokensCss);
+writeFileSync(join(DOCS_DIR, "tokens.css"), tokensCss);
 
 p(hr);
 p("## Emitted stylesheet\n");
@@ -498,4 +503,10 @@ p(
   "that much surface.\n"
 );
 
-process.stdout.write(out.join(""));
+writeFileSync(join(DOCS_DIR, "color-analysis.md"), out.join(""));
+
+// Brief summary to stdout so a human running this locally sees what happened.
+const rel = (p) => p.replace(join(__dirname, "..", ".."), ".");
+console.error(
+  `wrote ${rel(join(DOCS_DIR, "color-analysis.md"))} and ${rel(join(DOCS_DIR, "tokens.css"))}`
+);

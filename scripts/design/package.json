@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Design artifacts for agentnative-site: palette generator, color report, keyword preview. Not shipped.",
   "scripts": {
-    "generate": "bun run generate-palette.mjs > color-analysis.md"
+    "generate": "bun run generate-palette.mjs"
   },
   "dependencies": {
     "apca-w3": "^0.1.9",
