@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agentnative-site",
+  "main": "src/worker/index.ts",
+  "account_id": "REDACTED",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1.0
+  },
+  "placement": { "mode": "smart" }
+  // route / custom_domain added by Brett once domain is purchased (AGENT.md §Domain ownership)
+}

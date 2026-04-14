@@ -43,7 +43,8 @@ No other contradictions surfaced. The eng review's §12 edit list to DESIGN.md h
   Brett-only task.
 - No TODOS.md P1–P5 work.
 - No Cloudflare Workers Builds setup. Deploy is GHA-only per locked decision #1.
-- No re-generating `og-image.png`, `docs/design/foundation.css`, or `scripts/og/generate.py` — all committed artifacts.
+- No re-generating `public/og-image.png`, `docs/design/foundation.css`, or `scripts/og/generate.py` — all committed
+  artifacts.
 
 ## Pinned scaffolding choices (flag to Brett — recommended defaults, easy to flip)
 
@@ -201,7 +202,7 @@ shell emitter, client JS bundles, and asset copy. Depends on M2 (fonts) and M3 (
 - `src/build/shell.mjs` (HTML shell emitter: head with JSON-LD, OG tags, inlined theme-init script, preload font links,
   `<link>` to foundation.css + site.css; body with skip-link, header/footer, `<main>` slot; mini-TOC only on `/`)
 - `src/build/assets.mjs` (copy `docs/design/foundation.css` → `dist/css/foundation.css` byte-equivalent; copy
-  `public/fonts/*` → `dist/fonts/`; copy `og-image.png` → `dist/og-image.png`; copy `public/robots.txt` →
+  `public/fonts/*` → `dist/fonts/`; copy `public/og-image.png` → `dist/og-image.png`; copy `public/robots.txt` →
   `dist/robots.txt`; emit `dist/css/site.css` from a `src/build/templates/site.css.tmpl` or inline string with
   `@font-face` + layout + Shiki CSS bridge + code-block/copy-button/toggle rules from DESIGN.md §4)
 - `src/client/theme-init.ts` (~15 lines; inline-head script per DESIGN.md §4.9; reads localStorage; adds `.js` class to
