@@ -397,13 +397,22 @@ require real metric measurement. Before ship: run [Fontaine](https://github.com/
 with `fontkit`) against the shipped woff2 files, compute the overrides, and commit them into the site build's
 `@font-face` block. Do not guess — wrong overrides cause visible shift, worse than the default.
 
-**Preview behavior.** `docs/design/must-should-may-preview.html` loads Uncut Sans from Fontshare and Monaspace Xenon
-from jsdelivr's Fontsource build via two `<link>` tags at the top of the HTML. Those CDN stylesheets register their own
-`@font-face` rules, which in turn make `"Uncut Sans"` and `"Monaspace Xenon Variable"` available as named families; the
-preview's own `<style>` block overrides `--font-mono` to add the `Variable` suffix variant so the Fontsource-registered
-name wins. Production builds register the mono as `"Monaspace Xenon"` without the suffix, per the site-build
-`@font-face` block above — the token in `foundation.css` uses the unsuffixed name by default, so production works
-unmodified.
+**Preview behavior.** `docs/design/must-should-may-preview.html` loads both families via CDN `<link>` tags so nothing
+needs to be self-hosted for a design review:
+
+- Uncut Sans: [Fontshare](https://fontshare.com) (Pangram Pangram's own CDN) serves the full variable font under family
+  name `"Uncut Sans"`.
+- Monaspace Xenon: [Fontsource via jsdelivr](https://www.jsdelivr.com/package/npm/@fontsource/monaspace-xenon) serves
+  static weight 400 under family name `"Monaspace Xenon"`. We use the static-weight Fontsource package (not
+  `@fontsource-variable/*`) because Fontsource does not publish a variable build for Monaspace Xenon (`variable_support:
+  false` per their API), and GitHub Next's own variable woff2 cannot be mirrored through jsdelivr (the GitHub repo
+  exceeds the 50 MB CDN mirror limit). Weight 400 is enough to render the preview's code samples; no italics.
+
+Both CDN packages register their `@font-face` rules under the exact family names `foundation.css` references, so
+the preview needs no `--font-*` overrides. If either CDN is blocked (offline demo, strict network), the preview falls
+back through the `--font-sans` / `--font-mono` fallback stacks to system fonts. Production does NOT rely on either CDN —
+it self-hosts both woff2 files from `/fonts/` using the variable font from GitHub Next's repo directly (checked in to
+the site's own assets), per the `@font-face` block documented above.
 
 ### 4.4 Type scale
 

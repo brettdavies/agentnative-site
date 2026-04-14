@@ -7,25 +7,27 @@
   <meta name="description" content="Design preview for DESIGN.md §4.3 / §4.4 / §4.7. Consumes docs/design/foundation.css.">
 
   <!--
-    Preview-only CDN font loads. Production self-hosts both families from
-    /fonts/ per foundation.css. If the CDNs fail or are blocked, the preview
-    falls back through the --font-sans / --font-mono stacks in foundation.css.
+    Preview-only CDN font loads. Both packages register @font-face rules
+    under the exact family names foundation.css references, so no --font-*
+    overrides are needed.
+      - Uncut Sans: Fontshare serves the variable font (all weights 400-700).
+      - Monaspace Xenon: Fontsource doesn't build a variable package for this
+        family (variable_support: false per their API), and jsdelivr cannot
+        mirror GitHub Next's repo because it exceeds the 50 MB mirror limit.
+        So we load Fontsource's static weight 400 — sufficient for the code
+        samples in this preview. Production will self-host the variable
+        woff2 from github.com/githubnext/monaspace directly, per DESIGN.md
+        §4.3.
+    If either CDN is blocked, the preview falls back through the
+    --font-sans / --font-mono stacks in foundation.css to the system font.
   -->
   <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=uncut-sans@400,500,600,700&display=swap">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/monaspace-xenon@5.1.3/index.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/monaspace-xenon@latest/400.css">
   <link rel="stylesheet" href="foundation.css">
   <style>
     /* Preview-only layout scaffolding. All palette, typography tokens, and
        keyword rules come from foundation.css (generated). This block only
-       contains page chrome and the small override that points --font-mono
-       at the CDN-registered family name "Monaspace Xenon Variable" (the
-       self-hosted production build will register it as "Monaspace Xenon"
-       without the suffix, hence the override is preview-only). */
-
-    :root {
-      --font-mono: "Monaspace Xenon Variable", "Monaspace Xenon",
-                   ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    }
+       contains page chrome. */
 
     html { color-scheme: light dark; }
     body {
