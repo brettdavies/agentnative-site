@@ -1,0 +1,13 @@
+{
+  "name": "agentnative-design",
+  "private": true,
+  "type": "module",
+  "description": "Design artifacts for agentnative-site: palette generator, color report, keyword preview. Not shipped.",
+  "scripts": {
+    "generate": "bun run generate-palette.mjs > color-analysis.md"
+  },
+  "dependencies": {
+    "apca-w3": "^0.1.9",
+    "culori": "^4.0.2"
+  }
+}
