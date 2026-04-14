@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+.env
+.context/
+# docs/solutions/ is a symlink to ~/dev/solutions-docs (see AGENT.md).
+# Ignore that specific subpath; docs/design/ and any other future docs/
+# subdirectories remain tracked normally.
+/docs/solutions
