@@ -6,3 +6,17 @@ node_modules/
 # Ignore that specific subpath; docs/design/ and any other future docs/
 # subdirectories remain tracked normally.
 /docs/solutions
+
+# Build + tooling artifacts.
+dist/
+.wrangler/
+*.tsbuildinfo
+
+# Un-ignore project source (Brett's global ~/.config/git/ignore has `build/`).
+!src/
+!src/**
+
+# Playwright artifacts
+test-results/
+playwright-report/
+

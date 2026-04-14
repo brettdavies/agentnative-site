@@ -1,0 +1,220 @@
+# Deep regression check. Full Playwright matrix (Chromium + WebKit across
+# desktop + mobile-android + mobile-ios + tablet) + Lighthouse CI
+# resource-size regression gate. Two jobs run in parallel.
+#
+# Triggers:
+#   schedule           — 06:00 UTC daily (~23:00 / 01:00 PT overnight).
+#                        GATED: the `preflight` job skips the two
+#                        expensive jobs when nothing actionable has
+#                        happened since the last deep-check run. See
+#                        "Preflight gate" below.
+#   workflow_dispatch  — manual run, bypasses the preflight gate. Useful
+#                        before a dev → main promotion or when chasing a
+#                        flake.
+#
+# Preflight gate:
+#   The scheduled trigger fires every day at 06:00 UTC regardless of
+#   activity. Without a gate, we pay CI minutes even when dev is quiet
+#   or when the same red state is already on file. The `preflight` job
+#   decides whether the work jobs (`e2e`, `lhci`) actually run:
+#
+#     should_run = true IFF
+#       • no prior deep-check run exists (first-ever run), OR
+#       • there is a successful `ci.yml` run strictly after the last
+#         deep-check run (meaning: new validated code has landed since
+#         we last did a deep sweep).
+#
+#   Alternative compare point ("last passing deep-check") is one word
+#   swap away — see the comment inline at the `last_dc_at` query.
+#   Current choice: compare against the last deep-check run of ANY
+#   status, because retrying the same failed state without new code
+#   is waste; a real fix lands via a PR (which runs ci.yml), which
+#   satisfies the gate on the next scheduled run.
+#
+# Not a PR gate — PR merge is governed by ci.yml. Failures here show up
+# in the Actions tab and (for dispatch-with-ref runs) as a commit status.
+#
+# Secrets: none required. The LHCI step uses the default GITHUB_TOKEN so
+# it can post a commit status (requires statuses:write, granted below).
+
+name: deep-check
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Ref to check (branch, tag, or SHA). Defaults to the default branch HEAD.'
+        required: false
+        type: string
+
+concurrency:
+  group: deep-check-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  statuses: write
+  # Needed by preflight's `gh api actions/workflows/...` calls to list prior runs.
+  actions: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  BUN_VERSION: 1.3.11
+
+jobs:
+  preflight:
+    name: preflight · skip if nothing new
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      should_run: ${{ steps.decide.outputs.should_run }}
+    steps:
+      - name: Decide whether to run
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          THIS_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Manual dispatch always runs. Treat it as "I know what I'm asking for."
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "→ workflow_dispatch — running"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Last deep-check run (any status, any conclusion), excluding the
+          # current in-progress run. To gate on "last PASSING deep-check"
+          # instead, add `status=success&` to the query string below.
+          last_dc_at=$(gh api \
+            "repos/$GH_REPO/actions/workflows/deep-check.yml/runs?per_page=5" \
+            --jq "[.workflow_runs[] | select(.id != $THIS_RUN_ID)] | .[0].created_at // \"\"")
+
+          if [ -z "$last_dc_at" ]; then
+            echo "→ no prior deep-check run — running (first run)"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Last SUCCESSFUL ci.yml run.
+          last_ci_at=$(gh api \
+            "repos/$GH_REPO/actions/workflows/ci.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].created_at // ""')
+
+          if [ -z "$last_ci_at" ]; then
+            echo "→ no successful CI run on record — skipping"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "last deep-check at: $last_dc_at"
+          echo "last passing CI at: $last_ci_at"
+
+          if [ "$(date -d "$last_ci_at" +%s)" -gt "$(date -d "$last_dc_at" +%s)" ]; then
+            echo "→ CI passed after last deep-check — running"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "→ nothing new since last deep-check — skipping"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e:
+    name: e2e · playwright (chromium + webkit)
+    needs: preflight
+    if: needs.preflight.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref || '' }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache bun install cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Playwright browser binaries are ~500 MB for chromium + webkit.
+      # Cache keyed on bun.lock so a @playwright/test version bump
+      # invalidates the cache automatically.
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
+      - name: Install Playwright browsers (cache miss)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: bun x playwright install --with-deps chromium webkit
+
+      - name: Install browser system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: bun x playwright install-deps chromium webkit
+
+      - name: Build
+        run: bun run build
+
+      - name: End-to-end tests (all projects)
+        run: bun run test:e2e
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
+  lhci:
+    name: lhci · lighthouse
+    needs: preflight
+    if: needs.preflight.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref || '' }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache bun install cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Lighthouse CI
+        run: bun x @lhci/cli autorun
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+          LHCI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
