@@ -24,6 +24,12 @@ concurrency:
 permissions:
   contents: read
 
+# Opt into Node.js 24 runtime for JS actions before June 2nd, 2026 when
+# GitHub forces the switch anyway. Kills the Node 20 deprecation warnings
+# and catches any incompatibilities now instead of the day of the cutover.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   ci:
     name: lint · build · test · e2e · lhci · wrangler dry-run
@@ -52,13 +58,16 @@ jobs:
         run: bun test
 
       - name: Install Playwright browsers
-        run: bun x playwright install --with-deps chromium
+        run: bun x playwright install --with-deps chromium webkit
 
       - name: End-to-end tests (Playwright)
         run: bun run test:e2e
 
       - name: Lighthouse CI
         run: bun x @lhci/cli autorun
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+          LHCI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         # Lighthouse depends on network + Chrome launch reliability; a flaky
         # failure should not block a PR while we dial the budgets. Flip to

@@ -15,7 +15,11 @@
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1.0
-  },
-  "placement": { "mode": "smart" }
+  }
+  // Smart Placement intentionally NOT set: this is a static-asset + CN
+  // site with no data source. `placement: { mode: "smart" }` + the
+  // `assets.run_worker_first: true` we need for the CN branch would let
+  // the Worker drift away from the edge for no perf win. Wrangler
+  // surfaces this as a warning on dry-run if both are set.
   // route / custom_domain added by Brett once domain is purchased (AGENT.md §Domain ownership)
 }
