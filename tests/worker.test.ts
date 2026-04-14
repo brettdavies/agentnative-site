@@ -1,6 +1,6 @@
 // Content-negotiation + header-policy tests for the Worker.
 //
-// Covers every row of the decision table in DESIGN.md §3.4 / eng review §3
+// Covers every row of the decision table in docs/DESIGN.md §3.4 / eng review §3
 // diagram, plus the Link/X-Llms-Txt/X-Robots-Tag/Cache-Control assertions
 // from A8 and P4, plus the staging-host guard (locked decision #4).
 //

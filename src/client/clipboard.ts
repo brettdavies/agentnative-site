@@ -1,7 +1,7 @@
-// Click-to-copy for <pre> code blocks and heading permalinks. DESIGN.md
+// Click-to-copy for <pre> code blocks and heading permalinks. docs/DESIGN.md
 // §4.6 + §4.10. Navigator.clipboard with a document.execCommand fallback.
 // Buttons are added client-side so the no-JS case is a clean render with
-// no dead controls (DESIGN.md §4.8 C6).
+// no dead controls (docs/DESIGN.md §4.8 C6).
 
 const COPIED_MS = 1500;
 

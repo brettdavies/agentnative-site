@@ -1,7 +1,7 @@
 // Three CRITICAL regression tests (ce-work prompt). These gate every PR —
 // if any goes red, the site ships with a broken citation primitive.
 //
-//   1. Anchor-slug snapshot against DESIGN.md §3.5's seven LOCKED slugs.
+//   1. Anchor-slug snapshot against docs/DESIGN.md §3.5's seven LOCKED slugs.
 //      Renaming ANY of these breaks every inbound link, HN comment, blog
 //      quote, or agent citation in perpetuity.
 //
@@ -23,9 +23,9 @@ const REPO_ROOT = join(import.meta.dir, '..');
 const DIST = join(REPO_ROOT, 'dist');
 const CONTENT = join(REPO_ROOT, 'content');
 
-// DESIGN.md §3.5 — locked anchor slugs. DO NOT edit this list casually.
-// Renaming here must be simultaneous with a rename in DESIGN.md + a 301
-// redirect in the Worker per DESIGN.md §3.5 "propagation protocol".
+// docs/DESIGN.md §3.5 — locked anchor slugs. DO NOT edit this list casually.
+// Renaming here must be simultaneous with a rename in docs/DESIGN.md + a 301
+// redirect in the Worker per docs/DESIGN.md §3.5 "propagation protocol".
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',
   'p2-structured-parseable-output',
@@ -41,7 +41,7 @@ async function sha256OfFile(path: string): Promise<string> {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-describe('regression #1 — anchor slug snapshot (DESIGN.md §3.5 locked list)', () => {
+describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked list)', () => {
   test('every locked slug appears exactly once as an id in dist/index.html', async () => {
     const html = await readFile(join(DIST, 'index.html'), 'utf8');
     for (const slug of LOCKED_SLUGS) {

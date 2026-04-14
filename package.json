@@ -9,7 +9,8 @@
     "dev": "bun run build && wrangler dev --local",
     "test": "bun test",
     "test:e2e": "playwright test",
-    "lint": "biome check . && markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#dist\" \"#docs/solutions\" \"#docs/design\" \"#TODOS.md\" \"#docs/plans\" \"#content\" \"#CHANGELOG.md\" \"#.claude\"",
+    "types": "wrangler types ./src/worker-configuration.d.ts",
+    "lint": "biome check . && markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#dist\" \"#docs/solutions\" \"#docs/design\" \"#docs/TODOS.md\" \"#docs/plans\" \"#content\" \"#CHANGELOG.md\" \"#.claude\"",
     "format": "biome format --write .",
     "deploy": "bun run build && wrangler deploy",
     "deploy:dryrun": "bun run build && wrangler deploy --dry-run"
