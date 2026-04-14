@@ -6,7 +6,7 @@
 //      drive via CSS.
 //   2. Add `.js` to <html> class list so the progressive-enhancement CSS
 //      rule `:root:not(.js) .theme-toggle { display: none }` unhides the
-//      toggle buttons (DESIGN.md §4.8 C6).
+//      toggle buttons (docs/DESIGN.md §4.8 C6).
 //
 // Size budget: ≤ 500 bytes minified. Inlined into every HTML shell head.
 

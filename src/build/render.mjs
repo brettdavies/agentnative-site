@@ -5,12 +5,12 @@
 //   → rehype-autolink-headings (append, inline-SVG permalink) → rehype-shiki
 //   (dual-theme, defaultColor: false) → rehype-stringify.
 //
-// Pin notes (DESIGN.md §3.4.1 + Pinned scaffolding choices):
+// Pin notes (docs/DESIGN.md §3.4.1 + Pinned scaffolding choices):
 //   - `rehype-autolink-headings` behavior: 'append', class ['anchor'],
 //     properties { ariaLabel: 'Permalink', tabIndex: -1 }, inline SVG content.
 //   - Shiki themes: light 'github-light', dark 'github-dark-dimmed',
 //     defaultColor: false (emits CSS custom props for the theme bridge in
-//     site.css — see DESIGN.md §4.6 A7).
+//     site.css — see docs/DESIGN.md §4.6 A7).
 //   - rfc-keywords runs BEFORE remark-rehype so it walks the mdast tree
 //     (which has distinct `inlineCode` / `code` / `link` node types) and
 //     can enforce ancestor exclusions.

@@ -1,6 +1,6 @@
 // Response-header policy for the agentnative-site Worker.
 //
-// Contract (DESIGN.md §3.4 + eng review A8, A10, A12, P4):
+// Contract (docs/DESIGN.md §3.4 + eng review A8, A10, A12, P4):
 //
 //   HTML responses         Link: </p<n>.md>; rel="alternate"; type="text/markdown"
 //                          X-Llms-Txt: /llms.txt

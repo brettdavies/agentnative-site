@@ -3,7 +3,7 @@
 // package. Falls back to 'html' on absent, malformed, or non-matching Accept
 // headers (html is the citation default; markdown is opt-in).
 //
-// See DESIGN.md §3.4 (Worker paragraph) + eng review A3. Test matrix lives
+// See docs/DESIGN.md §3.4 (Worker paragraph) + eng review A3. Test matrix lives
 // in tests/worker.test.ts.
 
 import accepts from 'accepts';
