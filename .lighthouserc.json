@@ -1,5 +1,4 @@
 {
-  "_comment": "Lighthouse CI budgets. Run against /p1 — representative principle page; indexhas the heaviest payload of any URL. Resource-size budget is split: the error ceiling (~900 KB) is a guardrail against regressions on top of current reality; the warn target (400 KB) is the aspirational budget post-font-subset (Latin-subset Monaspace Xenon — TODOS P3). When the subset lands, collapse both back to 400 KB error.",
   "ci": {
     "collect": {
       "startServerCommand": "bun run build && bun x wrangler dev --local --port 8787",
@@ -15,7 +14,7 @@
       "assertions": {
         "categories:performance": ["error", { "minScore": 0.9 }],
         "categories:accessibility": ["error", { "minScore": 0.95 }],
-        "resource-summary:total:size": ["error", { "maxNumericValue": 900000 }],
+        "resource-summary:total:size": ["error", { "maxNumericValue": 400000 }],
         "total-byte-weight": ["warn", { "maxNumericValue": 400000 }]
       }
     },
