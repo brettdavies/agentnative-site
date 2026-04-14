@@ -1,4 +1,4 @@
-// RFC-keyword annotation plugin (DESIGN.md §4.7, eng review A6/C2).
+// RFC-keyword annotation plugin (docs/DESIGN.md §4.7, eng review A6/C2).
 //
 // Walks mdast `text` nodes and turns bare-word MUST / MUST NOT / SHOULD /
 // SHOULD NOT / MAY into `<strong class="rfc-must|should|may">` markup.

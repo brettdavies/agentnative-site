@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>agentnative — typography + keyword preview</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Design preview for DESIGN.md §4.3 / §4.4 / §4.7. Consumes docs/design/foundation.css.">
+  <meta name="description" content="Design preview for docs/DESIGN.md §4.3 / §4.4 / §4.7. Consumes docs/design/foundation.css.">
 
   <!--
     Preview-only CDN font loads. Both packages register @font-face rules
@@ -16,7 +16,7 @@
         mirror GitHub Next's repo because it exceeds the 50 MB mirror limit.
         So we load Fontsource's static weight 400 — sufficient for the code
         samples in this preview. Production will self-host the variable
-        woff2 from github.com/githubnext/monaspace directly, per DESIGN.md
+        woff2 from github.com/githubnext/monaspace directly, per docs/DESIGN.md
         §4.3.
     If either CDN is blocked, the preview falls back through the
     --font-sans / --font-mono stacks in foundation.css to the system font.
@@ -250,7 +250,7 @@ struct Cli {
         <code>border-left &gt; 1px</code> on callouts is the #1 AI-slop
         pattern per the impeccable skill's <code>&lt;absolute_bans&gt;</code>,
         even with semantic colors. Decide block treatment with live content —
-        see <code>DESIGN.md</code> §4.7.
+        see <code>docs/DESIGN.md</code> §4.7.
       </p>
       <p>
         <strong>Contrast</strong>: every foreground / background pair used
@@ -262,7 +262,7 @@ struct Cli {
   </div>
 
   <script>
-    // DESIGN.md §4.9 three-state toggle.
+    // docs/DESIGN.md §4.9 three-state toggle.
     const KEY = "agentnative-preview-theme";
     const root = document.documentElement;
     const btn = {

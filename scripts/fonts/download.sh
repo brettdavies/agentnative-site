@@ -7,7 +7,7 @@
 #                                       Exits 0 on match, 1 on mismatch. Does not touch public/fonts/.
 #
 # Both fonts are pinned to upstream git commit SHAs per the project's supply-chain policy
-# (DESIGN.md §4.3 "Font supply chain" and ~/.claude/CLAUDE.md "SHA pins, never version/tag pins").
+# (docs/DESIGN.md §4.3 "Font supply chain" and ~/.claude/CLAUDE.md "SHA pins, never version/tag pins").
 # To bump: look up the new commit SHA via `gh api repos/<owner>/<repo>/commits/HEAD --jq .sha`,
 # update the pinned SHA below, re-run this script without --verify, review diffs, commit.
 #

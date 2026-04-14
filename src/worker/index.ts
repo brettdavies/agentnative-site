@@ -3,7 +3,7 @@
 // suffix or Accept header) and we're serving an HTML path, rewrite the
 // asset lookup to the `.md` twin before fetching.
 //
-// Contract (DESIGN.md §3.4 + eng review A3, A8, A12):
+// Contract (docs/DESIGN.md §3.4 + eng review A3, A8, A12):
 //   - Assets served via env.ASSETS (Workers Static Assets product). Not KV,
 //     not R2, not kv-asset-handler.
 //   - CN branch: path ends with `.md` OR `Accepts(req).type(['text/html',

@@ -1,5 +1,5 @@
 // Emit dist/sitemap.xml. One entry per canonical, extension-less URL. No
-// trailing slashes (DESIGN.md §3.4.1 "Asset resolution"). The production
+// trailing slashes (docs/DESIGN.md §3.4.1 "Asset resolution"). The production
 // base URL lives here; override via PUBLIC_BASE_URL env during build if
 // staging needs a different origin.
 

@@ -21,7 +21,7 @@ pushes a noindex staging build to `agentnative-site.<brett>.workers.dev`.
 - `brett-main-build-plan-20260414-130000.md` — target tree, pipeline, wrangler.jsonc shape, five locked decisions.
 - `brett-main-eng-review-20260414-123800.md` — A1–A12, C1–C7, §12 edit list, §9 parallelization lanes.
 - `brett-main-eng-review-test-plan-20260414-123800.md` — Playwright coverage requirements.
-- `DESIGN.md` (rev 2), `AGENT.md`, `VOICE.md`, `.impeccable.md`, `TODOS.md`, `content/**`.
+- `docs/DESIGN.md` (rev 2), `AGENT.md`, `docs/VOICE.md`, `.impeccable.md`, `docs/TODOS.md`, `content/**`.
 
 ## Consistency check across inputs
 
@@ -32,8 +32,8 @@ agent does not re-litigate it:
   supersedes: the shell lives as `src/build/shell.mjs` (a JS emitter, not a static template), and the Worker lives under
   `src/worker/{index,accept,headers}.ts`. Build plan wins; eng-review entries are early shorthand for the same surfaces.
 
-No other contradictions surfaced. The eng review's §12 edit list to DESIGN.md has **not** been applied yet (verified
-2026-04-14 — no "copied from repo-root" string and no shell.mjs reference present in DESIGN.md). §12 edits land in M1.
+No other contradictions surfaced. The eng review's §12 edit list to docs/DESIGN.md has **not** been applied yet (verified
+2026-04-14 — no "copied from repo-root" string and no shell.mjs reference present in docs/DESIGN.md). §12 edits land in M1.
 
 ## Scope boundaries
 
@@ -41,7 +41,7 @@ No other contradictions surfaced. The eng review's §12 edit list to DESIGN.md h
   /clarify.
 - No production-domain attach. Staging-only until `agentnative` v0.1 on crates.io (AGENT.md §Tool-site sequencing).
   Brett-only task.
-- No TODOS.md P1–P5 work.
+- No docs/TODOS.md P1–P5 work.
 - No Cloudflare Workers Builds setup. Deploy is GHA-only per locked decision #1.
 - No re-generating `public/og-image.png`, `docs/design/foundation.css`, or `scripts/og/generate.py` — all committed
   artifacts.
@@ -58,13 +58,13 @@ before M3/M4 land.
    review A7 living in `dist/css/site.css`.
 3. **`rehype-autolink-headings` behavior.** `behavior: 'append'`, inline SVG anchor icon in `content`, class
    `['anchor']`, `properties: { ariaLabel: 'Permalink', tabIndex: -1 }`. The `#p<n>-<slug>` id itself is produced by
-   `rehype-slug` and must match DESIGN.md §3.5 locked slugs (enforced by regression test M3).
+   `rehype-slug` and must match docs/DESIGN.md §3.5 locked slugs (enforced by regression test M3).
 
 If any of the three are wrong, flip before merging M3/M4. None are one-way doors.
 
 ## Three CRITICAL REGRESSION tests (must land in M3, not deferred)
 
-1. **Anchor-slug snapshot** vs DESIGN.md §3.5's seven locked slugs — fails on drift.
+1. **Anchor-slug snapshot** vs docs/DESIGN.md §3.5's seven locked slugs — fails on drift.
 2. **llms.txt shape snapshot** — H1 + summary + H2 "Principles" + 7 `.md` entries.
 3. **Markdown byte-equivalence** — `sha256(dist/p<n>.md) == sha256(content/principles/p<n>-*.md)`.
 
@@ -74,7 +74,7 @@ If any of the three are wrong, flip before merging M3/M4. None are one-way doors
 
 ### M1 — Repo scaffold + planning-surface alignment
 
-**Goal:** Land the inert foundation: config files, tsconfig, lint, gitignore, and apply the DESIGN.md §12 edit list.
+**Goal:** Land the inert foundation: config files, tsconfig, lint, gitignore, and apply the docs/DESIGN.md §12 edit list.
 No code runs yet. One reviewable commit.
 
 **Files touched (create unless noted):**
@@ -86,7 +86,7 @@ No code runs yet. One reviewable commit.
 - `biome.json`
 - `.editorconfig`
 - `.gitignore` (modify: append `dist/`, `node_modules/`, `.wrangler/`, `*.tsbuildinfo`)
-- `DESIGN.md` (modify: apply every §12 bullet verbatim — A1 satori fix, A3 accepts wording, A8 header values, A12
+- `docs/DESIGN.md` (modify: apply every §12 bullet verbatim — A1 satori fix, A3 accepts wording, A8 header values, A12
   env.ASSETS pin, A2 CSS/font/JS sub-table, A4 flat-layout + Asset resolution sub-section, A5 llms-full delimiter, A7
   Shiki config + CSS bridge, A6/C2 remark plugin spec, A11/C4 font supply chain, C1 §4.8.1 perf budget, C6 no-JS
   pattern, P4 cache headers, A10 404 policy)
@@ -98,8 +98,8 @@ No code runs yet. One reviewable commit.
 
 - `bun install` exits 0 and produces `bun.lock`.
 - `bun run lint` exits 0 (no targets yet; Biome + markdownlint pass trivially).
-- `rg "satori" DESIGN.md` returns zero hits after the A1 edit.
-- `rg "env.ASSETS" DESIGN.md` returns ≥1 hit (A12 pin present).
+- `rg "satori" docs/DESIGN.md` returns zero hits after the A1 edit.
+- `rg "env.ASSETS" docs/DESIGN.md` returns ≥1 hit (A12 pin present).
 - `git diff AGENT.md` shows the two new cross-repo rows.
 
 **Parallel-with:** none. Foundation; M2–M7 build on top.
@@ -204,8 +204,8 @@ shell emitter, client JS bundles, and asset copy. Depends on M2 (fonts) and M3 (
 - `src/build/assets.mjs` (copy `docs/design/foundation.css` → `dist/css/foundation.css` byte-equivalent; copy
   `public/fonts/*` → `dist/fonts/`; copy `public/og-image.png` → `dist/og-image.png`; copy `public/robots.txt` →
   `dist/robots.txt`; emit `dist/css/site.css` from a `src/build/templates/site.css.tmpl` or inline string with
-  `@font-face` + layout + Shiki CSS bridge + code-block/copy-button/toggle rules from DESIGN.md §4)
-- `src/client/theme-init.ts` (~15 lines; inline-head script per DESIGN.md §4.9; reads localStorage; adds `.js` class to
+  `@font-face` + layout + Shiki CSS bridge + code-block/copy-button/toggle rules from docs/DESIGN.md §4)
+- `src/client/theme-init.ts` (~15 lines; inline-head script per docs/DESIGN.md §4.9; reads localStorage; adds `.js` class to
   root for C6 progressive enhancement)
 - `src/client/theme.ts` (~40 lines; 3-button toggle; aria-pressed; matchMedia listener for `system` state)
 - `src/client/clipboard.ts` (~40 lines; `<pre>` copy + anchor-copy; Clipboard API with execCommand fallback)
@@ -357,7 +357,7 @@ M1 (scaffold) ──► M2 (fonts)   ─┐
   `/home/brett/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-test-plan-20260414-123800.md`
 - CEO plan: `/home/brett/.gstack/projects/brettdavies-agentnative-site/ceo-plans/2026-04-13-spec-site.md`
 - Architectural pattern: `docs/solutions/architecture-patterns/agent-native-documentation-surface-2026-04-13.md`
-- DESIGN.md rev 2 (this repo) — §3.4.1 build contract, §3.5 locked slugs, §4 visual system.
+- docs/DESIGN.md rev 2 (this repo) — §3.4.1 build contract, §3.5 locked slugs, §4 visual system.
 - AGENT.md (this repo) — tool-site sequencing, domain ownership gate.
 
 ## Handoff

@@ -1,4 +1,4 @@
-// Theme toggle — three states (light / dark / system). DESIGN.md §4.9.
+// Theme toggle — three states (light / dark / system). docs/DESIGN.md §4.9.
 //
 // Markup (emitted by the build shell):
 //   <div class="theme-toggle" role="group" aria-label="Theme">

@@ -9,7 +9,8 @@ const PORT = 8787;
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './tests/e2e',
+  testMatch: /\.e2e\.ts$/,
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
@@ -23,7 +24,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile', use: { ...devices['Pixel 7'] }, testMatch: /flows\.spec\.ts/ },
+    { name: 'mobile', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
   ],
   webServer: {
     command: 'bun run build && bun x wrangler dev --local --port ' + PORT,

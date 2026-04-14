@@ -12,8 +12,8 @@ Structure adapted from
 
 Pair with:
 
-- [`.impeccable.md`](.impeccable.md) — users, brand personality, anti-references.
-- [`DESIGN.md`](DESIGN.md) — typography, palette, layout.
+- [`.impeccable.md`](../.impeccable.md) — users, brand personality, anti-references.
+- [`docs/DESIGN.md`](DESIGN.md) — typography, palette, layout.
 - Voice anchor: `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md`. The
   letter is first-person; the spec site is third-person. Everything else — concrete-before-abstract, numbers-not-
   adjectives, "the code speaks for itself" close — transfers.
