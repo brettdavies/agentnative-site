@@ -1,0 +1,107 @@
+// Three CRITICAL regression tests (ce-work prompt). These gate every PR —
+// if any goes red, the site ships with a broken citation primitive.
+//
+//   1. Anchor-slug snapshot against DESIGN.md §3.5's seven LOCKED slugs.
+//      Renaming ANY of these breaks every inbound link, HN comment, blog
+//      quote, or agent citation in perpetuity.
+//
+//   2. llms.txt shape — H1 + `>` summary + H2 "Principles" + 7 `.md`
+//      bullets. Shape is the llmstxt.org contract for agent discovery.
+//
+//   3. Markdown byte-equivalence: sha256(dist/p<n>.md) must equal
+//      sha256(content/principles/p<n>-*.md). The `/p<n>.md` endpoint
+//      promises the authored bytes, not a re-wrapped derivative.
+//
+// Run `bun run build` before these tests (bun test does not auto-build).
+
+import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const REPO_ROOT = join(import.meta.dir, '..');
+const DIST = join(REPO_ROOT, 'dist');
+const CONTENT = join(REPO_ROOT, 'content');
+
+// DESIGN.md §3.5 — locked anchor slugs. DO NOT edit this list casually.
+// Renaming here must be simultaneous with a rename in DESIGN.md + a 301
+// redirect in the Worker per DESIGN.md §3.5 "propagation protocol".
+const LOCKED_SLUGS = [
+  'p1-non-interactive-by-default',
+  'p2-structured-parseable-output',
+  'p3-progressive-help-discovery',
+  'p4-fail-fast-actionable-errors',
+  'p5-safe-retries-mutation-boundaries',
+  'p6-composable-predictable-command-structure',
+  'p7-bounded-high-signal-responses',
+];
+
+async function sha256OfFile(path: string): Promise<string> {
+  const buf = await readFile(path);
+  return createHash('sha256').update(buf).digest('hex');
+}
+
+describe('regression #1 — anchor slug snapshot (DESIGN.md §3.5 locked list)', () => {
+  test('every locked slug appears exactly once as an id in dist/index.html', async () => {
+    const html = await readFile(join(DIST, 'index.html'), 'utf8');
+    for (const slug of LOCKED_SLUGS) {
+      const matches = html.match(new RegExp(`id="${slug}"`, 'g')) ?? [];
+      expect({ slug, count: matches.length }).toEqual({ slug, count: 1 });
+    }
+  });
+
+  test('every locked slug appears exactly once as an id in its per-principle page', async () => {
+    for (const slug of LOCKED_SLUGS) {
+      const n = LOCKED_SLUGS.indexOf(slug) + 1;
+      const html = await readFile(join(DIST, `p${n}.html`), 'utf8');
+      const matches = html.match(new RegExp(`id="${slug}"`, 'g')) ?? [];
+      expect({ n, slug, count: matches.length }).toEqual({ n, slug, count: 1 });
+    }
+  });
+
+  test('no stray draft slugs (tier keyword in slug, uppercase, etc.)', async () => {
+    const html = await readFile(join(DIST, 'index.html'), 'utf8');
+    // Tier keywords in slug would indicate drift (§3.5 forbids this).
+    expect(html).not.toMatch(/id="p\d+-(must|should|may)-/i);
+    // Uppercase `P<n>-` in ids would fail browser anchor matching.
+    expect(html).not.toMatch(/id="P\d+-/);
+  });
+});
+
+describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
+  test('has H1, blockquote summary, ## Principles section, and 7 .md bullets', async () => {
+    const llms = await readFile(join(DIST, 'llms.txt'), 'utf8');
+    const lines = llms.split('\n');
+
+    // First non-empty line is `# <Title>`.
+    const firstContent = lines.find((l) => l.trim() !== '') ?? '';
+    expect(firstContent.startsWith('# ')).toBe(true);
+
+    // Contains a `> ` blockquote summary line.
+    expect(llms).toMatch(/^> /m);
+
+    // Contains the literal `## Principles` H2.
+    expect(llms).toContain('## Principles');
+
+    // Contains exactly seven `- [...](.../p<n>.md)` bullets.
+    const principleLinks = llms.match(/^- \[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
+    expect(principleLinks.length).toBe(7);
+
+    // Bullets are in p1..p7 order.
+    const orderedNumbers = principleLinks.map((l) => l.match(/\/p(\d+)\.md/)?.[1]).map((s) => (s ? Number(s) : 0));
+    expect(orderedNumbers).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+});
+
+describe('regression #3 — markdown byte-equivalence', () => {
+  test.each(
+    Array.from({ length: 7 }, (_, i) => {
+      const n = i + 1;
+      return [n, `${LOCKED_SLUGS[i]}.md`] as const;
+    }),
+  )('sha256(dist/p%s.md) == sha256(content/principles/%s)', async (n, sourceName) => {
+    const distHash = await sha256OfFile(join(DIST, `p${n}.md`));
+    const sourceHash = await sha256OfFile(join(CONTENT, 'principles', sourceName));
+    expect(distHash).toBe(sourceHash);
+  });
+});
