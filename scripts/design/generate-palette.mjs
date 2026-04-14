@@ -4,12 +4,13 @@
 // Two outputs, both written directly to docs/design/:
 //   1. docs/design/color-analysis.md
 //      Methodology, tool outputs, contrast tables, gamut record, swatch
-//      preview. No embedded CSS (the drop-in block lives in tokens.css).
-//   2. docs/design/tokens.css
+//      preview. No embedded CSS (the drop-in block lives in foundation.css).
+//   2. docs/design/foundation.css
 //      Drop-in stylesheet consumed by docs/design/must-should-may-preview.html
-//      and, later, by the site build. Contains all palette custom properties
+//      and, later, by the site build. Contains palette custom properties
 //      (light default, dark via prefers-color-scheme, explicit [data-theme]
-//      overrides) plus the 7b/7b-plus RFC-keyword rules.
+//      overrides), typography tokens, @font-face declarations, and the
+//      shipped 7b inline RFC-keyword rules.
 //
 // Run (from anywhere):      bun run scripts/design/generate-palette.mjs
 // Run (from scripts/design): bun run generate
@@ -145,17 +146,12 @@ dark.must = mk(82, 0.15, HUE_MUST);
 dark.should = mk(82, 0.12, HUE_SHOULD);
 dark.may = mk(80, 0.1, HUE_MAY);
 
-// Wash tokens for 7b-plus callouts (DESIGN.md §4.7). Very-high-L, very-low-C
-// tints of the keyword hue — used as the left-side start of a linear-gradient
-// that fades to transparent, so callout paragraphs get a hint of semantic
-// color without turning into a full blocky highlight.
-light["must-wash"] = mk(94, 0.04, HUE_MUST);
-light["should-wash"] = mk(94, 0.035, HUE_SHOULD);
-light["may-wash"] = mk(94, 0.025, HUE_MAY);
-
-dark["must-wash"] = mk(22, 0.04, HUE_MUST);
-dark["should-wash"] = mk(22, 0.04, HUE_SHOULD);
-dark["may-wash"] = mk(22, 0.03, HUE_MAY);
+// (Wash tokens for block-level MUST/SHOULD/MAY callouts were removed when
+// the 7b-plus side-stripe variant was rejected per impeccable's absolute
+// ban on border-left callouts. If a future block treatment (leading tag
+// or full-background fill) ships, the wash ramps can be re-derived from
+// light["must" / "should" / "may"] at L=94 / C~0.04 for light mode and
+// L=22 / C~0.04 for dark mode. See DESIGN.md §4.7 deferred variants.)
 
 // -------- Report --------
 
@@ -378,7 +374,7 @@ p(
 );
 
 // CSS emission.
-// The drop-in stylesheet is written to design/tokens.css as a real file that
+// The drop-in stylesheet is written to design/foundation.css as a real file that
 // the HTML preview links to directly, and that the site build will later
 // consume. The markdown report just points at the file so reviewers can see
 // the tool outputs without scrolling through CSS.
@@ -398,9 +394,6 @@ const roleMap = {
   must: "must",
   should: "should",
   may: "may",
-  "must-wash": "must-wash",
-  "should-wash": "should-wash",
-  "may-wash": "may-wash",
 };
 
 const cssTokenBlock = (palette, selector, comment) => {
@@ -416,36 +409,105 @@ const cssTokenBlock = (palette, selector, comment) => {
   return s;
 };
 
-const staticRules = `
-/* ------------------------------------------------------------------ */
-/* RFC-keyword treatment — option 7b-plus (DESIGN.md §4.7).            */
-/* Inline color for the word itself plus hairline-rule callouts on the  */
-/* paragraph. Ship both rule sets; usage picks which applies by markup.  */
-/* ------------------------------------------------------------------ */
+const typographyRules = `
+/* ================================================================== */
+/* Typography — DESIGN.md §4.3 / §4.4.                                */
+/* Body + display: Pangram Pangram's Uncut Sans (OFL).                 */
+/* Code: GitHub Next's Monaspace Xenon (OFL).                          */
+/* Neither appears in impeccable's reflex-fonts-to-reject list.        */
+/* Self-hosted in production; preview loads CDN variants via <link>.   */
+/* ================================================================== */
 
-.rfc-must   { color: var(--must);   font-weight: 600; letter-spacing: 0.02em; }
-.rfc-should { color: var(--should); font-weight: 600; letter-spacing: 0.02em; }
-.rfc-may    { color: var(--may);    font-weight: 600; letter-spacing: 0.02em; }
-
-.callout {
-  border-left: 3px solid;
-  padding: 0.1rem 0 0.1rem 0.85rem;
-  margin: 0.55rem 0;
+/* @font-face declarations assume woff2 files live at /fonts/ in the build.
+ * TO CALIBRATE AT IMPLEMENTATION: run Fontaine (or read tables from the
+ * woff2 with fontkit) to compute ascent-override / descent-override /
+ * size-adjust values that match the fallback stack metrics. Left off for
+ * now because wrong values cause visible layout shift — better to ship
+ * without them than with placeholders. */
+@font-face {
+  font-family: "Uncut Sans";
+  src: url("/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+                 U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191,
+                 U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-.callout.must   { border-color: var(--must);   background: linear-gradient(to right, var(--must-wash),   transparent 55%); }
-.callout.should { border-color: var(--should); background: linear-gradient(to right, var(--should-wash), transparent 55%); }
-.callout.may    { border-color: var(--may);    background: linear-gradient(to right, var(--may-wash),    transparent 55%); }
-.callout strong { font-weight: 600; letter-spacing: 0.02em; }
-.callout.must   strong { color: var(--must); }
-.callout.should strong { color: var(--should); }
-.callout.may    strong { color: var(--may); }
+
+@font-face {
+  font-family: "Monaspace Xenon";
+  src: url("/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2122,
+                 U+2190-21FF, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  /* Fallback stacks pair Uncut Sans with system-ui (closest x-height match)
+   * and Monaspace Xenon with ui-monospace (closest rhythm match). */
+  --font-sans: "Uncut Sans", ui-sans-serif, system-ui, -apple-system,
+               "Segoe UI", Roboto, "Helvetica Neue", sans-serif,
+               "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-mono: "Monaspace Xenon", ui-monospace, "SF Mono", "Cascadia Code",
+               Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display: var(--font-sans);
+
+  /* OpenType feature hints. "kern" always on; ligatures OFF in mono for
+   * explicit spec-operator shapes (>=, !=, ->, etc.). */
+  --ff-sans: "kern" 1, "liga" 1, "clig" 1;
+  --ff-mono: "kern" 1, "liga" 0, "clig" 0, "calt" 0;
+  --ff-tabular: "tnum" 1, "kern" 1; /* for version/date stamps, numeric tables */
+
+  /* Modular scale, 1.25 ratio anchored at --text-base.
+   * Body fluid 17 -> 18px between 360px and ~1100px viewport.
+   * Headings clamp-scale similarly. Captions and secondary stay fixed. */
+  --text-base:       1.0625rem; /* 17px */
+  --text-body:       clamp(1.0625rem, 0.975rem + 0.4vw, 1.125rem);
+  --text-caption:    0.8125rem; /* ~13px */
+  --text-secondary:  0.9375rem; /* ~15px */
+  --text-h4:         1rem;
+  --text-h3:         1.22rem;
+  --text-h2:         1.5rem;
+  --text-h1:         clamp(1.85rem, 1.6rem + 1.2vw, 2.25rem);
+  --text-code:       0.92rem;
+
+  --leading-body:    1.6;
+  --leading-heading: 1.25;
+  --leading-code:    1.5;
+
+  --measure:         68ch;   /* body line length; cap per Butterick 45-75 rule */
+  --tracking-caps:   0.04em; /* small-caps / ALL CAPS labels */
+  --tracking-rfc:    0.02em; /* MUST/SHOULD/MAY inline keywords */
+}
 `;
 
-const tokensCss = `/* design/tokens.css
- * Generated by design/generate-palette.mjs on ${new Date().toISOString().slice(0, 10)}.
- * Do not hand-edit. Reproduce via: bun run design/generate-palette.mjs > design/color-analysis.md
+const staticRules = `
+/* ================================================================== */
+/* RFC-keyword treatment — option 7b (DESIGN.md §4.7).                 */
+/* Inline keyword color only. The side-stripe and background-wash      */
+/* callout variants were rejected because border-left >1px on a        */
+/* card/callout is the #1 banned AI-slop pattern per impeccable's      */
+/* <absolute_bans>, even for semantic colors. Alternative block-level  */
+/* treatments (leading RFC tag, full background tint) are deferred     */
+/* to live-site iteration — see DESIGN.md §4.7.                        */
+/* ================================================================== */
+
+.rfc-must   { color: var(--must);   font-weight: 600; letter-spacing: var(--tracking-rfc); }
+.rfc-should { color: var(--should); font-weight: 600; letter-spacing: var(--tracking-rfc); }
+.rfc-may    { color: var(--may);    font-weight: 600; letter-spacing: var(--tracking-rfc); }
+`;
+
+const foundationCss = `/* docs/design/foundation.css
+ * Generated by scripts/design/generate-palette.mjs on ${new Date().toISOString().slice(0, 10)}.
+ * Do not hand-edit. Reproduce via: cd scripts/design && bun run generate
  *
- * Selector strategy:
+ * Scope: palette (light + dark), typography tokens, @font-face, and RFC-keyword
+ * inline rules. This is the generated foundation layer the site builds on.
+ *
+ * Selector strategy for color modes:
  *   :root                                              -> light-mode defaults
  *   @media (prefers-color-scheme: dark)
  *     :root:not([data-theme="light"])                  -> dark via OS preference
@@ -463,24 +525,25 @@ ${cssTokenBlock(dark, '  :root:not([data-theme="light"])', "dark mode via OS pre
 
 ${cssTokenBlock(dark, ':root[data-theme="dark"]', "dark mode via explicit toggle")}
 ${cssTokenBlock(light, ':root[data-theme="light"]', "light mode via explicit toggle")}
-${staticRules}`;
+${typographyRules}${staticRules}`;
 
-writeFileSync(join(DOCS_DIR, "tokens.css"), tokensCss);
+writeFileSync(join(DOCS_DIR, "foundation.css"), foundationCss);
 
 p(hr);
 p("## Emitted stylesheet\n");
 p(
-  "CSS is written to [`design/tokens.css`](tokens.css) as a real, linkable ",
+  "CSS is written to [`design/foundation.css`](foundation.css) as a real, linkable ",
   "file — not inlined in this report. The HTML preview at ",
   "[`design/must-should-may-preview.html`](must-should-may-preview.html) ",
-  "links to it via `<link rel=\"stylesheet\" href=\"tokens.css\">`. The site ",
+  "links to it via `<link rel=\"stylesheet\" href=\"foundation.css\">`. The site ",
   "build will copy the same file into `dist/`.\n\n",
   "The file contains: light-mode defaults on `:root`; dark-mode tokens under ",
   "`@media (prefers-color-scheme: dark) :root:not([data-theme=\"light\"])`; ",
   "explicit overrides on `:root[data-theme=\"dark\"]` and ",
-  "`:root[data-theme=\"light\"]`; plus the option 7b / 7b-plus RFC-keyword ",
-  "rules (`.rfc-must`, `.rfc-should`, `.rfc-may`, `.callout.must`, ",
-  "`.callout.should`, `.callout.may`).\n"
+  "`:root[data-theme=\"light\"]`; typography tokens and `@font-face` for ",
+  "Uncut Sans + Monaspace Xenon; and the shipped 7b inline-keyword rules ",
+  "(`.rfc-must`, `.rfc-should`, `.rfc-may`). Block-level MUST/SHOULD/MAY ",
+  "callout variants are deferred per DESIGN.md §4.7.\n"
 );
 
 p(hr);
@@ -508,5 +571,5 @@ writeFileSync(join(DOCS_DIR, "color-analysis.md"), out.join(""));
 // Brief summary to stdout so a human running this locally sees what happened.
 const rel = (p) => p.replace(join(__dirname, "..", ".."), ".");
 console.error(
-  `wrote ${rel(join(DOCS_DIR, "color-analysis.md"))} and ${rel(join(DOCS_DIR, "tokens.css"))}`
+  `wrote ${rel(join(DOCS_DIR, "color-analysis.md"))} and ${rel(join(DOCS_DIR, "foundation.css"))}`
 );

@@ -7,22 +7,24 @@ Companion artifacts split by role:
 
 **Generated + hand-authored documents — `docs/design/`** (tracked, reviewer-facing):
 
-- [`docs/docs/design/color-analysis.md`](docs/docs/design/color-analysis.md) — show-your-work color report: culori +
-  apca-w3 tool outputs, WCAG and APCA contrast tables, gamut verification, swatch preview. No CSS embedded in the
-  report; the stylesheet is the next entry.
-- [`docs/docs/design/tokens.css`](docs/docs/design/tokens.css) — drop-in stylesheet. Contains all palette custom
-  properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides) plus the option 7b /
-  7b-plus RFC-keyword rules. Consumed directly by the HTML preview and, later, by the site build.
-- [`docs/docs/design/must-should-may-preview.html`](docs/docs/design/must-should-may-preview.html) — rendered examples
-  of options 7a, 7b, and 7b-plus side by side, with a three-state theme toggle (system / light / dark). Links to
-  `tokens.css` — no keyword or palette CSS inlined.
+- [`docs/design/color-analysis.md`](docs/design/color-analysis.md) — show-your-work color report: culori + apca-w3 tool
+  outputs, WCAG and APCA contrast tables, gamut verification, swatch preview. No CSS embedded in the report; the
+  stylesheet is the next entry.
+- [`docs/design/foundation.css`](docs/design/foundation.css) — generated drop-in stylesheet. Contains palette custom
+  properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides), typography tokens
+  (`--font-sans`, `--font-mono`, scale), `@font-face` declarations for Uncut Sans + Monaspace Xenon, and the shipped 7b
+  inline-keyword rules. Consumed directly by the HTML preview and, later, by the site build.
+- [`docs/design/must-should-may-preview.html`](docs/design/must-should-may-preview.html) — renders the shipped
+  typography + 7b keyword treatment (with a 7a plain-bold baseline alongside for contrast) in both color modes via a
+  three-state theme toggle (system / light / dark). Loads Uncut Sans from Fontshare and Monaspace Xenon from jsdelivr so
+  the fonts render without `/fonts/` self-hosting. Links `foundation.css` directly — no palette or keyword CSS inlined.
 - [`docs/design/README.md`](docs/design/README.md) — explains the subsystem and reproduction steps.
 
 **Generator — `scripts/design/`** (tooling, not shipped):
 
-- [`scripts/scripts/design/generate-palette.mjs`](scripts/scripts/design/generate-palette.mjs) — the script that emits
-  both the report and `tokens.css` in `docs/design/`. Run via `cd scripts/design && bun install && bun run generate` (or
-  `bun run scripts/scripts/design/generate-palette.mjs` from the repo root).
+- [`scripts/design/generate-palette.mjs`](scripts/design/generate-palette.mjs) — the script that emits both the report
+  and `foundation.css` in `docs/design/`. Run via `cd scripts/design && bun install && bun run generate` (or `bun run
+  scripts/design/generate-palette.mjs` from the repo root).
 
 ## 1. Summary
 
@@ -41,12 +43,15 @@ requires a Worker regardless of framework. Astro without Starlight is the credib
 concrete and documented below.
 
 **Decision B (visual system): cool-neutral palette at hue 250, navy accent in the same family, deliberately-designed
-dark mode (not inverted), system font stacks as the default with a bounded webfont upgrade path, code as a first-class
-visual element, dark mode via `prefers-color-scheme` *plus* a visible user toggle, sticky mini-TOC on desktop.** Palette
-and contrast work is backed by a reproducible tool run — see `docs/design/color-analysis.md` for inputs, outputs, WCAG +
-APCA numbers, and every clamped value; the stylesheet itself lives at `docs/design/tokens.css`. MUST / SHOULD / MAY
-keywords ship option 7b-plus (inline color **plus** hairline-rule paragraph callouts) — preview at
-`docs/design/must-should-may-preview.html`.
+dark mode (not inverted), Pangram Pangram's Uncut Sans (body + display) paired with GitHub Next's Monaspace Xenon (code)
+— both OFL, self-hosted, chosen via the impeccable font-selection procedure to avoid the reflex-defaults (Inter, IBM
+Plex, Fraunces, etc.), code as a first-class visual element, `prefers-color-scheme` *plus* a visible user toggle, sticky
+mini-TOC on desktop.** Palette and contrast work is backed by a reproducible tool run — see
+`docs/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value; the full foundation
+stylesheet (palette + typography tokens + @font-face + keyword rules) lives at `docs/design/foundation.css`. MUST /
+SHOULD / MAY keywords ship option 7b (inline color only) — the originally-proposed 7b-plus side-stripe variant was
+pulled after it hit impeccable's banned-pattern list, with block-level alternatives (leading tag, background fill)
+deferred to live-site iteration. Preview at `docs/design/must-should-may-preview.html`.
 
 **JS posture.** Pragmatic. The CEO plan's original "total shipped JS ≤25 KB" ceiling is a target, not a guardrail. User
 direction: "use a library if it earns its place; total page payload up to 1–2 MB is acceptable." We still reject
@@ -330,43 +335,107 @@ sees the *why* alongside the numbers.
 
 ### 4.3 Type stack
 
-Default: system stacks per `modernfontstacks`. Zero bytes shipped, neo-grotesque proportions across macOS / Windows /
-Android.
+**Ship Pangram Pangram's [Uncut Sans](https://fontshare.com/fonts/uncut-sans) for body + display, and GitHub Next's
+[Monaspace Xenon](https://monaspace.githubnext.com/) for code.** Both OFL. Chosen via the full font-selection procedure
+in [impeccable's typography reference](.claude/skills/impeccable/reference/typography.md) — not from the training-data
+defaults (Inter, IBM Plex, Fraunces, Space Grotesk, Instrument Serif, all of which impeccable ships a
+reflex-fonts-to-reject list for). See session notes in [`.impeccable.md`](.impeccable.md) for the 3-word brand voice
+("opinionated, precise, inviting") that drove the pick.
+
+**Stacks emitted in [`docs/design/foundation.css`](docs/design/foundation.css)** — reproduced here for review; do not
+hand-edit the CSS, change the generator:
 
 ```css
---font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-             "Helvetica Neue", Arial, "Noto Sans", sans-serif,
-             "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+--font-sans:    "Uncut Sans", ui-sans-serif, system-ui, -apple-system,
+                "Segoe UI", Roboto, "Helvetica Neue", sans-serif,
+                "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+--font-mono:    "Monaspace Xenon", ui-monospace, "SF Mono", "Cascadia Code",
+                Menlo, Consolas, "Liberation Mono", monospace;
+--font-display: var(--font-sans);   /* single family by default */
 
---font-mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code",
-             "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
+--ff-sans:      "kern" 1, "liga" 1, "clig" 1;
+--ff-mono:      "kern" 1, "liga" 0, "clig" 0, "calt" 0;
+--ff-tabular:   "tnum" 1, "kern" 1;  /* version/date footer, numeric tables */
 ```
 
-Ligatures suppressed on `<pre>` and `<code>` via `font-variant-ligatures: none` — explicit character shapes matter for a
-spec that quotes operators (`>=`, `!=`, `->`).
+Ligatures and contextual alternates are OFF in mono so spec operators (`>=`, `!=`, `->`, `|>`, `->|`) render with
+explicit character shapes — critical for a document whose correctness depends on the reader seeing exactly what is
+written. Body ligatures stay on because common ligatures (fi, fl, ffi) improve Latin prose readability with no operator
+risk.
 
-**Optional webfont upgrade** (per open-question resolution 5.1). Within the relaxed JS/payload budget (up to ~1–2 MB
-total per-page is acceptable), an Inter variable Latin subset (~25 KB gz WOFF2, `font-display: swap`, preloaded) and a
-JetBrains Mono variable subset (~30 KB gz) are defensible if Brett wants the site to feel pen-sharp-identical across
-OSes. Default stays system stacks; the upgrade can ship later as a one-file swap without other design impact.
-Recommendation: ship system-only for v0, revisit at the first visual polish pass.
+**Production loading.** Self-host both variable-font woff2 files at `/fonts/`:
+
+```css
+@font-face {
+  font-family: "Uncut Sans";
+  src: url("/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, ...;
+}
+@font-face {
+  font-family: "Monaspace Xenon";
+  src: url("/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, ...;
+}
+```
+
+Also emit `<link rel="preload" as="font" crossorigin>` for both files in the HTML `<head>` so the swap happens on first
+paint rather than mid-render. Total shipped: ~35–50 KB gz per family (Latin subset, variable axis) — well inside the 1–2
+MB page-payload ceiling.
+
+**Metric-matched fallbacks — TO CALIBRATE AT IMPLEMENTATION.** `foundation.css` currently does not emit
+`ascent-override` / `descent-override` / `size-adjust` on the two `@font-face` declarations. These values reduce layout
+shift during the font-display swap but require real metric measurement. Before ship: run
+[Fontaine](https://github.com/unjs/fontaine) (or read tables directly with `fontkit`) against the shipped woff2 files,
+commit the computed overrides to `scripts/design/generate-palette.mjs`'s typography block, and re-run the generator. Do
+not guess values — wrong overrides cause visible shift, worse than the default.
+
+**Preview behavior.** `docs/design/must-should-may-preview.html` loads Uncut Sans from Fontshare and Monaspace Xenon
+from jsdelivr's Fontsource build so you can see the fonts rendered locally without setting up `/fonts/`. The preview
+includes a one-line CSS override pointing `--font-mono` at `"Monaspace Xenon Variable"` (the Fontsource-registered
+family name, which includes the `Variable` suffix); the self-hosted production build registers it as `"Monaspace Xenon"`
+without the suffix, per the `@font-face` declaration above.
 
 ### 4.4 Type scale
 
-Base 17px mobile, 18px ≥960px via single `clamp()`. One ratio: 1.25 (major third). Line height 1.6 body, 1.3 headings,
-1.5 code.
+Modular scale, 1.25 ratio (major third), fluid body via `clamp()` from 17px at 360px viewport up to 18px at ~1100px. H1
+also clamps. H2–H4 stay fixed (impeccable's guidance: "Fixed `rem` scales for app UIs, fluid for marketing/content page
+headings" — this site is content-page, so body + h1 flex, inner headings do not).
 
-| Element        | Size                  | Weight | Notes                                             |
-| -------------- | --------------------- | ------ | ------------------------------------------------- |
-| Body           | 1rem (17–18px fluid)  |    400 | `line-height: 1.6`; measure clamped to ~68ch.     |
-| `h1`           | 2.0rem                |    700 | One per page.                                     |
-| `h2`           | 1.5rem                |    700 | Principle section start.                          |
-| `h3`           | 1.22rem               |    600 | MUST/SHOULD/MAY group heading.                    |
-| `h4`           | 1.0rem                |    700 | Small-caps tracking `0.04em`; used sparingly.     |
-| `code` inline  | 0.92em                |    400 | `background: var(--bg-code)`, padding `0.1em 0.35em`, radius `3px`. |
-| `pre > code`   | 0.92rem               |    400 | No size-scaling from context.                     |
+All values emitted as tokens in `foundation.css`:
 
-Measure: `max-inline-size: 68ch` on `<article>`. Paragraphs separated by `0.9em`, no first-line indent.
+| Token              | Value                                       | Role                                              |
+| ------------------ | ------------------------------------------- | ------------------------------------------------- |
+| `--text-base`      | `1.0625rem` (17px)                          | Reference unit; body floor.                       |
+| `--text-body`      | `clamp(1.0625rem, 0.975rem + 0.4vw, 1.125rem)` | Body prose, fluid 17→18px.                       |
+| `--text-caption`   | `0.8125rem`                                 | Footer stamp, captions, section eyebrows.         |
+| `--text-secondary` | `0.9375rem`                                 | Sidebar TOC entries, mini-TOC items.              |
+| `--text-h4`        | `1rem`                                      | Used sparingly; small-caps labels.                |
+| `--text-h3`        | `1.22rem`                                   | MUST/SHOULD/MAY group heading.                    |
+| `--text-h2`        | `1.5rem`                                    | Principle section start.                          |
+| `--text-h1`        | `clamp(1.85rem, 1.6rem + 1.2vw, 2.25rem)`   | One per page; fluid display size.                 |
+| `--text-code`      | `0.92rem`                                   | Inline + block code body.                         |
+| `--leading-body`   | `1.6`                                       | Body line-height.                                 |
+| `--leading-heading`| `1.25`                                      | Headings.                                         |
+| `--leading-code`   | `1.5`                                       | Code blocks.                                      |
+| `--measure`        | `68ch`                                      | Body line length; capped per Butterick 45–75 rule.|
+| `--tracking-caps`  | `0.04em`                                    | Small-caps / ALL CAPS labels.                     |
+| `--tracking-rfc`   | `0.02em`                                    | MUST/SHOULD/MAY inline keywords.                  |
+
+Weights: body 400, bold-emphasis 600, headings 600. Uncut Sans ships 100–900 (variable axis); we use 400 + 600. Never
+more than three weights rendered on one page.
+
+**Ship-time calibration item.** Uncut Sans has a slightly lower x-height than `system-ui` on macOS and slightly higher
+than Segoe UI on Windows. The 17→18px body range was tuned against system-ui metrics; with Uncut Sans loaded the
+rendered body may read fractionally smaller (x-height-wise, not absolute size). Open
+`docs/design/must-should-may-preview.html` side-by-side with a reference spec (rust-lang.org/book, clig.dev) and eyeball
+whether body wants to bump to `1.125rem` base. If yes: adjust `--text-base` in the generator, re-run, re-verify APCA
+(smaller text raises the contrast bar).
+
+Measure: `max-inline-size: var(--measure)` on `<article>`. Paragraphs separated by `0.9em`, no first-line indent.
 
 ### 4.5 Spacing scale
 
@@ -386,7 +455,8 @@ via inline CSS custom properties — no client-side theme JS, no FOUC on mode sw
 Treatment:
 
 - Background `var(--bg-code)`, hairline border, radius `6px`, padding `var(--space-4) var(--space-5)`.
-- `font-family: var(--font-mono)`, `line-height: 1.5`, `font-size: 0.92rem`, `font-variant-ligatures: none`.
+- `font-family: var(--font-mono)`, `line-height: var(--leading-code)`, `font-size: var(--text-code)`,
+  `font-feature-settings: var(--ff-mono)` (ligatures + contextual alternates OFF for explicit operator shapes).
 - Horizontal scroll on overflow; no wrap.
 - Language tag in top-right as a `<span>`, `--fg-muted`, `font-size: 0.75rem`, absolute-positioned (parent has
   `position: relative`).
@@ -395,47 +465,54 @@ Treatment:
 copies the `textContent` of the `<code>` element, which strips span wrappers and returns original source. The markdown
 channel serves the raw `.md` file, so highlighting never contaminates `text/markdown`.
 
-### 4.7 RFC-keyword treatment — ship 7b-plus
+### 4.7 RFC-keyword treatment — ship 7b (inline), defer block
 
-Ship **option 7b-plus** (inline color on every keyword in prose **plus** hairline-rule left-edge callouts on each
-requirement-list item). Preview at `docs/design/must-should-may-preview.html` shows all three variants side by side,
-with toggle states for light / dark / system. All colors validated against APCA body minimum (|Lc| ≥ 60) in both modes —
-see `docs/design/color-analysis.md`.
+**Ships: option 7b (inline keyword color only).** The block-level callout variant — originally spec'd as 7b-plus with a
+3px left-edge accent stripe — was pulled after impeccable's `<absolute_bans>` rule flagged `border-left > 1px` on
+callouts as the #1 most-overused AI-slop pattern. The ban applies regardless of semantic color, radius, opacity, or
+variable-name intent. Even a semantic MUST/SHOULD/MAY stripe is banned. The only non-controversial keyword treatment
+that survives the ban is the inline color on the word itself.
 
-The CSS ships in `docs/design/tokens.css` (six rules, reproduced here for review):
+The shipped CSS (three rules, emitted by `foundation.css`):
 
 ```css
-.rfc-must   { color: var(--must);   font-weight: 600; letter-spacing: 0.02em; }
-.rfc-should { color: var(--should); font-weight: 600; letter-spacing: 0.02em; }
-.rfc-may    { color: var(--may);    font-weight: 600; letter-spacing: 0.02em; }
-
-.callout { border-left: 3px solid; padding: 0.1rem 0 0.1rem 0.85rem; margin: 0.55rem 0; }
-.callout.must   { border-color: var(--must);   background: linear-gradient(to right, var(--must-wash),   transparent 55%); }
-.callout.should { border-color: var(--should); background: linear-gradient(to right, var(--should-wash), transparent 55%); }
-.callout.may    { border-color: var(--may);    background: linear-gradient(to right, var(--may-wash),    transparent 55%); }
+.rfc-must   { color: var(--must);   font-weight: 600; letter-spacing: var(--tracking-rfc); }
+.rfc-should { color: var(--should); font-weight: 600; letter-spacing: var(--tracking-rfc); }
+.rfc-may    { color: var(--may);    font-weight: 600; letter-spacing: var(--tracking-rfc); }
 ```
 
-The wash gradients fade to transparent at 55% so the tint never fights body text — the callout reads as a margin
-affordance, not a full highlight.
+Preview at [`docs/design/must-should-may-preview.html`](docs/design/must-should-may-preview.html) shows 7a (plain bold,
+baseline) vs 7b (inline color) side by side in both color modes. Contrast validated against APCA body minimum (|Lc| ≥
+60) in both modes — see `docs/design/color-analysis.md`.
 
-**How the build applies the markup.** A small remark plugin runs at render time. Two passes:
+**How the build applies the markup.** A small remark plugin runs a single inline pass at render time. It replaces
+bare-word occurrences of `MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY` in prose text nodes with `<strong
+class="rfc-must">MUST</strong>` (and tier-appropriate classes). Skips occurrences inside `<code>`, `<pre>`, and link
+labels so we do not recolor shell output or URL text. Cost: ~30 lines. Raw markdown stays unchanged (uppercase keywords
+in source) so the `text/markdown` channel is a pristine copy.
 
-1. **Inline pass.** Replace any bare-word occurrence of `MUST` / `SHOULD` / `MAY` (or `MUST NOT`, `SHOULD NOT`) in prose
-   text nodes with `<strong class="rfc-must">` etc. Skips occurrences inside `<code>`, `<pre>`, and link labels so we do
-   not recolor shell output or URL text.
-2. **Callout pass.** Detect requirement-list contexts in the principles source. In `principles-deep-dive.md` these are
-   list items nested under headings or bold-text anchors like `**MUST:**`, `**SHOULD:**`, `**MAY:**`. The plugin wraps
-   the affected `<li>` inner paragraph with `class="callout must"` (or `should` / `may`) to match the tier. List items
-   inherit the tier from their enclosing anchor; the plugin does not try to parse keyword frequency per line.
+#### Deferred: block-level treatment (decide once the site is live)
 
-Cost: ~90 lines of remark plugin + the CSS shown above. Negligible per user direction. Raw markdown stays unchanged
-(uppercase `MUST` / `SHOULD` / `MAY` in source) so the `text/markdown` channel is a pristine copy — classes are added
-only in the HTML render path.
+The inline keyword color handles mid-sentence references ("Tools MUST detect invalid state early") well. The *tiered
+information architecture* of the principles — `**MUST:**` / `**SHOULD:**` / `**MAY:**` section headers followed by
+bullet lists — will probably want additional visual chunking so a scroll-speed reader can see which tier a given bullet
+belongs to. The ban forecloses the side-stripe; two post-ban candidates remain, both to be evaluated against real
+principle content after the site is rendering:
 
-**Why both passes and not just one.** The inline pass handles MUST/SHOULD/MAY used in the middle of a sentence ("Tools
-MUST detect invalid state early"). The callout pass handles the *tiered* structure (`**MUST:**` / `**SHOULD:**` /
-`**MAY:**` sections) that is the spec's information architecture. Running only the inline pass loses the structure;
-running only the callout pass loses the in-prose emphasis. Together they deliver the rendered feel shown in the preview.
+1. **Leading RFC tag.** Render each requirement-list item with a colored, bold keyword tag as a left prefix: `MUST Use
+   try_parse() instead of parse().` The tag carries the color; no border, no background fill. Reads like a rendered RFC
+   draft. Implementation: remark plugin's second pass inserts `<span class="rfc-tag rfc-must">MUST</span>` before the
+   `<li>` text; a small CSS rule sets fixed-width inline-block. Cost: ~40 lines of plugin + ~8 lines of CSS.
+2. **Full background tint.** Wrap each requirement-list paragraph with `class="callout must"` (or `should` / `may`);
+   foundation.css adds `.callout.* { background: var(--must-wash); padding: ... }` — flat fill, no border. Reads as a
+   tinted panel, more visual weight than the leading tag. Cost: ~20 lines of plugin + ~6 lines of CSS + three wash
+   tokens (the generator knows how to produce them; currently omitted from `foundation.css`). See the generator comment
+   where `light["must-wash"]` used to live.
+
+**Why defer.** Taste calls work better against real content than against mockups. Once the site renders with
+actual principle copy, a 5-minute toggle between inline-only, leading-tag, and background-tint in a live browser is more
+informative than any amount of discussion in advance. The remark plugin and CSS live in the generator and the build, so
+the swap is a PR, not an architecture change. Until then: inline only.
 
 ### 4.8 Interaction menu
 
@@ -578,8 +655,10 @@ Revision 1 open questions with current status:
 2. **Mini-TOC on desktop** → RESOLVED: ship it (§4.11).
 3. **Warm vs cool neutrals** → RESOLVED via color-psychology research: cool neutrals for spec credibility (§4.1
    narrative); full palette and contrast in `docs/design/color-analysis.md`.
-4. **Colorize MUST / SHOULD / MAY** → RESOLVED: ship option 7b-plus — inline color plus hairline-rule callouts (§4.7);
-   preview at `docs/design/must-should-may-preview.html`.
+4. **Colorize MUST / SHOULD / MAY** → RESOLVED: ship option 7b (inline keyword color only). The stronger 7b-plus
+   side-stripe variant was rejected per impeccable's `<absolute_bans>` (border-left >1px on callouts is the #1 AI-slop
+   pattern). Block-level alternatives — leading RFC tag, background-tint fill — deferred to live-site iteration (§4.7).
+   Preview at `docs/design/must-should-may-preview.html`.
 5. **`llms.txt` link in header** → RESOLVED: ship it, recall if it reads cute (§4.11).
 6. **`og:url` pre-domain purchase** → RESOLVED: stage on `workers.dev` host, swap constant at cutover (§4.14).
 

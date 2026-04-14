@@ -4,12 +4,12 @@ Design artifacts for the agentnative spec site. Referenced from [`../../DESIGN.m
 
 ## Contents
 
-| File                           | Role                                                                              | Origin    |
-| ------------------------------ | --------------------------------------------------------------------------------- | --------- |
-| `color-analysis.md`            | Methodology report: tool calls, palette tables, WCAG + APCA contrast, gamut log.  | generated |
-| `tokens.css`                   | Drop-in stylesheet consumed by the preview and (later) the site build.            | generated |
-| `must-should-may-preview.html` | Rendered preview of DESIGN.md §4.7 keyword treatments; links `tokens.css`.        | authored  |
-| `README.md`                    | This file.                                                                        | authored  |
+| File                           | Role                                                                                         | Origin    |
+| ------------------------------ | -------------------------------------------------------------------------------------------- | --------- |
+| `color-analysis.md`            | Methodology report: culori + apca-w3 tool calls, palette tables, WCAG + APCA contrast, gamut log. | generated |
+| `foundation.css`               | Drop-in stylesheet: palette + typography tokens, `@font-face`, 7b inline-keyword rules.      | generated |
+| `must-should-may-preview.html` | Rendered preview of DESIGN.md §4.3 typography and §4.7 keyword treatment; links `foundation.css`. | authored  |
+| `README.md`                    | This file.                                                                                   | authored  |
 
 The generator lives in [`../../scripts/design/`](../../scripts/design/) — generated outputs land here.
 
@@ -18,7 +18,7 @@ The generator lives in [`../../scripts/design/`](../../scripts/design/) — gene
 ```bash
 cd scripts/design
 bun install
-bun run generate   # -> rewrites docs/design/color-analysis.md and docs/design/tokens.css
+bun run generate   # rewrites docs/design/color-analysis.md and docs/design/foundation.css
 ```
 
 Or from the repo root:
@@ -27,10 +27,12 @@ Or from the repo root:
 bun run scripts/design/generate-palette.mjs
 ```
 
-Open `must-should-may-preview.html` in any browser to see the keyword treatments live against both color modes.
+Open `must-should-may-preview.html` in any browser to see the shipped typography and keyword treatment rendered against
+both color modes. The preview loads Uncut Sans from Fontshare and Monaspace Xenon from jsdelivr so the fonts render
+without setting up `/fonts/` self-hosting first.
 
-## Editing the palette
+## Editing the foundation
 
-All palette values live in `scripts/design/generate-palette.mjs`. Change the seed or a scale step, re-run the generator,
-and commit the script change and the updated outputs together. `color-analysis.md` and `tokens.css` are generated files
-— do not hand-edit them.
+All palette values and typography tokens live in `scripts/design/generate-palette.mjs`. Change the seed hue, a scale
+step, a type-scale token, or an `@font-face` declaration there, re-run `bun run generate`, and commit the script change
+and the updated outputs together. `color-analysis.md` and `foundation.css` are generated files — do not hand-edit them.

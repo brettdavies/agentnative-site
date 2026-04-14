@@ -40,9 +40,6 @@ This is the show-your-work artifact behind DESIGN.md §4.1 and §4.2. The palett
 | `--must` | `oklch(50.00% 0.1700 28.00)` | `#af2b25` | `color: oklch(50.00% 0.1700 28.00);` |
 | `--should` | `oklch(55.00% 0.1300 70.00)` | `#a16100` | `color: oklch(55.00% 0.1300 70.00);` |
 | `--may` | `oklch(52.00% 0.1000 200.00)` | `#007980` | `color: oklch(52.00% 0.1000 200.00);` |
-| `--must-wash` | `oklch(94.00% 0.0400 28.00)` | `#ffe2dc` | `color: oklch(94.00% 0.0400 28.00);` |
-| `--should-wash` | `oklch(94.00% 0.0350 70.00)` | `#fbe8d3` | `color: oklch(94.00% 0.0350 70.00);` |
-| `--may-wash` | `oklch(94.00% 0.0250 200.00)` | `#d9f1f2` | `color: oklch(94.00% 0.0250 200.00);` |
 
 ### Dark mode (hue 250 with warm-shift at text tier)
 | Token | OKLCH | sRGB hex | CSS |
@@ -62,9 +59,6 @@ This is the show-your-work artifact behind DESIGN.md §4.1 and §4.2. The palett
 | `--must` | `oklch(82.00% 0.1500 28.00)` | `#ff9c8d` | `color: oklch(82.00% 0.1500 28.00);` |
 | `--should` | `oklch(82.00% 0.1200 70.00)` | `#f6b669` | `color: oklch(82.00% 0.1200 70.00);` |
 | `--may` | `oklch(80.00% 0.1000 200.00)` | `#64d1d7` | `color: oklch(80.00% 0.1000 200.00);` |
-| `--must-wash` | `oklch(22.00% 0.0400 28.00)` | `#2b1310` | `color: oklch(22.00% 0.0400 28.00);` |
-| `--should-wash` | `oklch(22.00% 0.0400 70.00)` | `#261704` | `color: oklch(22.00% 0.0400 70.00);` |
-| `--may-wash` | `oklch(22.00% 0.0300 200.00)` | `#071f20` | `color: oklch(22.00% 0.0300 200.00);` |
 
 ---
 ## Contrast verification
@@ -106,7 +100,6 @@ Values clamped to sRGB at build:
 - `light.accent-subtle` (oklch(92.00% 0.0500 250.00)) was outside sRGB pre-clamp; shipped hex is #cce8ff.
 - `light.should` (oklch(55.00% 0.1300 70.00)) was outside sRGB pre-clamp; shipped hex is #a16100.
 - `light.may` (oklch(52.00% 0.1000 200.00)) was outside sRGB pre-clamp; shipped hex is #007980.
-- `light.must-wash` (oklch(94.00% 0.0400 28.00)) was outside sRGB pre-clamp; shipped hex is #ffe2dc.
 - `dark.accent` (oklch(78.00% 0.1400 250.00)) was outside sRGB pre-clamp; shipped hex is #6dbdff.
 - `dark.must` (oklch(82.00% 0.1500 28.00)) was outside sRGB pre-clamp; shipped hex is #ff9c8d.
 
@@ -120,9 +113,9 @@ This section renders inline on GitHub. For pixel-accurate preview open `design/m
 <div style="display:flex;flex-wrap:wrap;gap:2px;border:1px solid #ccc;padding:2px;"><div style="flex:1;min-width:60px;padding:8px 6px;background:#060a0e;color:#dfded8;font:12px/1.2 monospace;text-align:center">gray-50<br>#060a0e</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#0d1218;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-100<br>#0d1218</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#151b22;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-200<br>#151b22</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#222a32;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-300<br>#222a32</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#3b434d;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-400<br>#3b434d</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#6a737c;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-500<br>#6a737c</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#9199a2;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-600<br>#9199a2</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#b8bec5;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-700<br>#b8bec5</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#dfded8;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-800<br>#dfded8</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#f3f2ed;color:#060a0e;font:12px/1.2 monospace;text-align:center">gray-900<br>#f3f2ed</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#6dbdff;color:#060a0e;font:12px/1.2 monospace;text-align:center">accent<br>#6dbdff</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#ff9c8d;color:#060a0e;font:12px/1.2 monospace;text-align:center">must<br>#ff9c8d</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#f6b669;color:#060a0e;font:12px/1.2 monospace;text-align:center">should<br>#f6b669</div><div style="flex:1;min-width:60px;padding:8px 6px;background:#64d1d7;color:#060a0e;font:12px/1.2 monospace;text-align:center">may<br>#64d1d7</div></div>
 ---
 ## Emitted stylesheet
-CSS is written to [`design/tokens.css`](tokens.css) as a real, linkable file — not inlined in this report. The HTML preview at [`design/must-should-may-preview.html`](must-should-may-preview.html) links to it via `<link rel="stylesheet" href="tokens.css">`. The site build will copy the same file into `dist/`.
+CSS is written to [`design/foundation.css`](foundation.css) as a real, linkable file — not inlined in this report. The HTML preview at [`design/must-should-may-preview.html`](must-should-may-preview.html) links to it via `<link rel="stylesheet" href="foundation.css">`. The site build will copy the same file into `dist/`.
 
-The file contains: light-mode defaults on `:root`; dark-mode tokens under `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])`; explicit overrides on `:root[data-theme="dark"]` and `:root[data-theme="light"]`; plus the option 7b / 7b-plus RFC-keyword rules (`.rfc-must`, `.rfc-should`, `.rfc-may`, `.callout.must`, `.callout.should`, `.callout.may`).
+The file contains: light-mode defaults on `:root`; dark-mode tokens under `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])`; explicit overrides on `:root[data-theme="dark"]` and `:root[data-theme="light"]`; typography tokens and `@font-face` for Uncut Sans + Monaspace Xenon; and the shipped 7b inline-keyword rules (`.rfc-must`, `.rfc-should`, `.rfc-may`). Block-level MUST/SHOULD/MAY callout variants are deferred per DESIGN.md §4.7.
 
 ---
 ## Methodology notes
