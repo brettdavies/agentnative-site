@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>agentnative — typography + keyword preview</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Design preview for DESIGN.md §4.3 / §4.4 / §4.7. Consumes docs/design/foundation.css.">
+
+  <!--
+    Preview-only CDN font loads. Both packages register @font-face rules
+    under the exact family names foundation.css references, so no --font-*
+    overrides are needed.
+      - Uncut Sans: Fontshare serves the variable font (all weights 400-700).
+      - Monaspace Xenon: Fontsource doesn't build a variable package for this
+        family (variable_support: false per their API), and jsdelivr cannot
+        mirror GitHub Next's repo because it exceeds the 50 MB mirror limit.
+        So we load Fontsource's static weight 400 — sufficient for the code
+        samples in this preview. Production will self-host the variable
+        woff2 from github.com/githubnext/monaspace directly, per DESIGN.md
+        §4.3.
+    If either CDN is blocked, the preview falls back through the
+    --font-sans / --font-mono stacks in foundation.css to the system font.
+  -->
+  <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=uncut-sans@400,500,600,700&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/monaspace-xenon@latest/400.css">
+  <link rel="stylesheet" href="foundation.css">
+  <style>
+    /* Preview-only layout scaffolding. All palette, typography tokens, and
+       keyword rules come from foundation.css (generated). This block only
+       contains page chrome. */
+
+    html { color-scheme: light dark; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-sans);
+      font-size: var(--text-body);
+      line-height: var(--leading-body);
+      font-feature-settings: var(--ff-sans);
+      background: var(--bg);
+      color: var(--fg-body);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    code, pre, kbd, samp {
+      font-family: var(--font-mono);
+      font-feature-settings: var(--ff-mono);
+    }
+
+    .wrap { max-width: 68rem; margin: 0 auto; padding: 2rem 1.25rem; }
+
+    header.page {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+    header.page h1 {
+      margin: 0;
+      font-size: var(--text-h2);
+      line-height: var(--leading-heading);
+      color: var(--fg-heading);
+      font-weight: 600;
+    }
+    header.page p { margin: 0; color: var(--fg-muted); font-size: var(--text-secondary); }
+
+    section.spec {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      padding: 1.75rem 2rem;
+      margin: 1.5rem 0;
+    }
+    section.spec > h2 {
+      margin: 0 0 1.25rem;
+      font-size: var(--text-caption);
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: var(--tracking-caps);
+      font-weight: 600;
+    }
+
+    .specimen { max-inline-size: var(--measure); }
+    .specimen h3 { margin: 0 0 0.5rem; font-size: var(--text-h1); line-height: var(--leading-heading); color: var(--fg-heading); font-weight: 600; letter-spacing: -0.01em; }
+    .specimen h4 { margin: 1.25rem 0 0.3rem; font-size: var(--text-h2); line-height: var(--leading-heading); color: var(--fg-heading); font-weight: 600; }
+    .specimen h5 { margin: 1.25rem 0 0.3rem; font-size: var(--text-h3); line-height: var(--leading-heading); color: var(--fg-heading); font-weight: 600; }
+    .specimen p  { margin: 0.4rem 0; }
+    .specimen code { background: var(--bg-code); padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.92em; }
+    .specimen pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      font-size: var(--text-code);
+      line-height: var(--leading-code);
+      margin: 0.9rem 0;
+    }
+    .specimen .version {
+      color: var(--fg-muted);
+      font-size: var(--text-caption);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: var(--tracking-caps);
+      text-transform: uppercase;
+    }
+
+    .grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+    @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+    .grid section.spec { margin: 0; }
+    .grid section.spec h3.local { margin: 0.75rem 0 0.3rem; font-size: var(--text-h4); color: var(--fg-heading); font-weight: 600; }
+
+    .toggles { display: flex; gap: 0.5rem; }
+    .toggles button {
+      font: inherit;
+      padding: 0.4rem 0.9rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--fg-body);
+      cursor: pointer;
+    }
+    .toggles button[aria-pressed="true"] {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+    }
+    .toggles button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    footer.page { margin-top: 2rem; color: var(--fg-muted); font-size: var(--text-secondary); line-height: 1.55; }
+    footer.page code { background: var(--bg-code); padding: 0.1em 0.35em; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <header class="page">
+      <h1>agentnative — typography + keyword preview</h1>
+      <div class="toggles" role="group" aria-label="Theme">
+        <button id="system" aria-pressed="false">System</button>
+        <button id="light" aria-pressed="true">Light</button>
+        <button id="dark" aria-pressed="false">Dark</button>
+      </div>
+    </header>
+
+    <!-- Type specimen: real §4.3 / §4.4 rendering in both color modes. -->
+    <section class="spec">
+      <h2>§4.3 / §4.4 · Type specimen</h2>
+      <div class="specimen">
+        <h3>agent-native CLI standard</h3>
+        <p class="version">v0.1 · 2026-04-14</p>
+
+        <h4>P1 · Non-Interactive by Default</h4>
+        <p>
+          CLI tools that block on interactive prompts are invisible to agents.
+          The agent hangs, the user sees nothing, and the operation times
+          out silently. A tool <strong class="rfc-must">MUST</strong> support a
+          non-interactive path gated by <code>--no-interactive</code>
+          (or the equivalent environment variable) and
+          <strong class="rfc-should">SHOULD</strong> auto-detect TTY
+          presence via <code>std::io::IsTerminal</code>. Rich interactive
+          affordances <strong class="rfc-may">MAY</strong> appear when a TTY
+          is present and <code>--no-interactive</code> is not set.
+        </p>
+
+        <h5>Evidence</h5>
+<pre><code>#[derive(Parser)]
+struct Cli {
+    /// Suppress all interactive prompts.
+    #[arg(long, env = "TOOL_NO_INTERACTIVE", global = true,
+          value_parser = FalseyValueParser::new())]
+    no_interactive: bool,
+}</code></pre>
+
+        <p>
+          Line length capped at ~68ch. Body size clamps from 17&nbsp;px at
+          360&nbsp;px viewport up to 18&nbsp;px at ~1100&nbsp;px. Inline
+          <code>mono</code> shares the Monaspace Xenon family with the block
+          sample above; ligatures are off so <code>!=</code>, <code>&gt;=</code>,
+          and <code>-&gt;</code> render with the explicit spec-operator shapes.
+        </p>
+      </div>
+    </section>
+
+    <!-- Keyword comparison: 7a (plain bold) vs 7b (ships now). -->
+    <div class="grid">
+      <section class="spec">
+        <h2>§4.7 · 7a — plain bold (baseline)</h2>
+        <article class="specimen">
+          <h3 class="local" style="font-size:var(--text-h4);">No keyword color</h3>
+          <p>
+            Tools <strong>MUST</strong> run non-interactively when stdin is
+            not a TTY. The <code>--no-interactive</code> flag
+            <strong>MUST</strong> gate every prompt at the entry point.
+          </p>
+          <p>
+            Tools <strong>SHOULD</strong> auto-detect non-interactive contexts
+            via TTY detection (<code>IsTerminal</code>) and suppress prompts
+            when stderr is not a terminal.
+          </p>
+          <p>
+            Tools <strong>MAY</strong> offer rich interactive experiences
+            (spinners, progress bars) when a TTY is detected.
+          </p>
+        </article>
+      </section>
+
+      <section class="spec">
+        <h2>§4.7 · 7b — inline keyword color (ships)</h2>
+        <article class="specimen">
+          <h3 class="local" style="font-size:var(--text-h4);">rfc-must / rfc-should / rfc-may</h3>
+          <p>
+            Tools <strong class="rfc-must">MUST</strong> run non-interactively
+            when stdin is not a TTY. The <code>--no-interactive</code> flag
+            <strong class="rfc-must">MUST</strong> gate every prompt at the
+            entry point.
+          </p>
+          <p>
+            Tools <strong class="rfc-should">SHOULD</strong> auto-detect
+            non-interactive contexts via TTY detection
+            (<code>IsTerminal</code>) and suppress prompts when stderr is not
+            a terminal.
+          </p>
+          <p>
+            Tools <strong class="rfc-may">MAY</strong> offer rich interactive
+            experiences (spinners, progress bars) when a TTY is detected.
+          </p>
+        </article>
+      </section>
+    </div>
+
+    <footer class="page">
+      <p>
+        <strong>Fonts</strong>: body + display in Pangram Pangram's
+        <code>Uncut Sans</code> (OFL), code in GitHub Next's
+        <code>Monaspace Xenon</code> (OFL). Production self-hosts both from
+        <code>/fonts/</code>; this preview loads them via CDN (Fontshare +
+        jsdelivr). If either CDN is blocked, the preview falls back through
+        <code>var(--font-sans)</code> / <code>var(--font-mono)</code> stacks.
+      </p>
+      <p>
+        <strong>Deferred</strong>: block-level keyword treatments (leading
+        RFC tag, full background tint) are not in <code>foundation.css</code>.
+        The previously-proposed side-stripe variant was rejected because
+        <code>border-left &gt; 1px</code> on callouts is the #1 AI-slop
+        pattern per the impeccable skill's <code>&lt;absolute_bans&gt;</code>,
+        even with semantic colors. Decide block treatment with live content —
+        see <code>DESIGN.md</code> §4.7.
+      </p>
+      <p>
+        <strong>Contrast</strong>: every foreground / background pair used
+        above passes WCAG AA and APCA body-minimum (|Lc| ≥ 60) in both
+        modes. Full table in <code>docs/design/color-analysis.md</code>.
+      </p>
+    </footer>
+
+  </div>
+
+  <script>
+    // DESIGN.md §4.9 three-state toggle.
+    const KEY = "agentnative-preview-theme";
+    const root = document.documentElement;
+    const btn = {
+      system: document.getElementById("system"),
+      light: document.getElementById("light"),
+      dark: document.getElementById("dark"),
+    };
+
+    function apply(mode) {
+      if (mode === "system") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", mode);
+      for (const k of Object.keys(btn)) {
+        btn[k].setAttribute("aria-pressed", String(k === mode));
+      }
+      try { localStorage.setItem(KEY, mode); } catch {}
+    }
+
+    let initial;
+    try { initial = localStorage.getItem(KEY); } catch {}
+    if (initial !== "system" && initial !== "light" && initial !== "dark") initial = "system";
+    apply(initial);
+
+    btn.system.addEventListener("click", () => apply("system"));
+    btn.light.addEventListener("click",  () => apply("light"));
+    btn.dark.addEventListener("click",   () => apply("dark"));
+  </script>
+</body>
+</html>
