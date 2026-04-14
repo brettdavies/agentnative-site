@@ -11,3 +11,7 @@ node_modules/
 dist/
 .wrangler/
 *.tsbuildinfo
+
+# Un-ignore project source (Brett's global ~/.config/git/ignore has `build/`).
+!src/
+!src/**
