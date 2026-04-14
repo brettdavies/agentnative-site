@@ -228,6 +228,86 @@ buttons (~30 lines), and CSS-only tabbed code (radio/`:checked`, ~60 lines CSS, 
 lines of JS + CSS. Total hand-rolled surface ≈ 450 lines across HTML template + Worker + JS + CSS, plus the build
 script. Auditable in one sitting.
 
+### 3.4.1 Content layout and build contract
+
+The site's copy lives under `content/`. The build step concatenates the principle files into the single long index page
+at build time, AND renders each principle to its own per-URL endpoint so per-principle citations (`/p3`, `/p3.md`)
+resolve independently.
+
+**File layout (source):**
+
+```text
+content/
+  _intro.md                                           # framing text above the principles on the index page
+  principles/
+    p1-non-interactive-by-default.md
+    p2-structured-parseable-output.md
+    p3-progressive-help-discovery.md
+    p4-fail-fast-actionable-errors.md
+    p5-safe-retries-mutation-boundaries.md
+    p6-composable-predictable-command-structure.md
+    p7-bounded-high-signal-responses.md
+  check.md
+  about.md
+```
+
+Filename convention for principles is load-bearing: `p<n>-<slug>.md` where `<slug>` matches the locked anchor IDs in
+§3.5. The build derives per-principle URLs (`/p<n>`), anchor slugs (`#p<n>-<slug>`), and the order of concatenation from
+the filename — no separate manifest file, no frontmatter ordering key.
+
+**Build-step outputs (`dist/`):**
+
+| Source                                 | Emitted as                                                       | Notes                                                              |
+| -------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `_intro.md` + `principles/p[1-7]-*.md` | `index.html`, `index.md`                                         | Intro concatenated with all seven principles in numeric order; each principle wrapped in `<section id="p<n>-<slug>">`. |
+| `principles/p<n>-<slug>.md`            | `p<n>.html`, `p<n>.md`                                           | Per-principle page. HTML has the same header/footer chrome as index; markdown is the source file copied verbatim. |
+| `check.md`                             | `check/index.html`, `check.md`                                   | Sub-page; no mini-TOC.                                             |
+| `about.md`                             | `about/index.html`, `about.md`                                   | Sub-page; no mini-TOC.                                             |
+| all principle files (titles + slugs)   | `llms.txt`                                                       | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs. |
+| `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`                                | Concatenation of everything, delimited by heading markers; single-fetch endpoint for agents. |
+| all URLs                               | `sitemap.xml`                                                    | Plain sitemap; no priority hacks.                                  |
+| brief in §4.13                         | `og-image.png`                                                   | Generated out-of-band via `scripts/og/generate.py`; committed. Not regenerated on every build. |
+
+**Build-step semantics:**
+
+- **Order is by filename.** `p1-...md` ships first, `p7-...md` last. Files sort lex-numerically. Introducing `p8-...` in
+  a future revision extends the list without any manifest edit.
+- **Markdown source round-trip is byte-equivalent.** The `/p3.md` endpoint serves exactly the bytes of
+  `content/principles/p3-progressive-help-discovery.md` — no re-rendering, no re-wrapping. The HTML path at `/p3` and
+  `/` is a derivative. If the site render ever drifts from the source (e.g., adds presentational markup the source does
+  not have), the markdown channel wins.
+- **`content/_intro.md` is the only hand-authored framing text.** Everything else is either principle content or
+  sub-page content. No site-render concerns leak into `_intro.md` (no chrome, no TOC fragments, no header duplicates).
+- **Shiki + remark plugins** (the inline-keyword pass from §4.7) run during HTML render only. The source `.md` stays
+  untouched — the `/p3.md` response has `MUST` / `SHOULD` / `MAY` as plain uppercase, no class wrappers.
+
+A ~200-line Node build script implements this. Pseudocode sketch (not the final code, lives in `scripts/build/` once
+the implementation session starts):
+
+```js
+// Sort principle files by their leading `p<n>-` numeric prefix.
+const principles = await sortedGlob("content/principles/p*-*.md");
+
+for (const p of principles) {
+  const { slug, n } = parseFilename(p);       // e.g., "p3", "progressive-help-discovery"
+  const html = await renderMarkdown(p);       // unified → remark → shiki → rehype
+  await writeHtml(`dist/p${n}.html`, wrapChrome(html, { anchor: `p${n}-${slug}` }));
+  await writeFile(`dist/p${n}.md`, await readFile(p));
+}
+
+const indexHtml = wrapChrome(
+  (await renderMarkdown("content/_intro.md")) +
+    (await Promise.all(principles.map(renderPrinciple))).join("\n"),
+  { isIndex: true }
+);
+await writeHtml("dist/index.html", indexHtml);
+await writeFile("dist/index.md", concat("content/_intro.md", ...principles));
+
+await writeFile("dist/llms.txt",      buildLlmsIndex(principles));
+await writeFile("dist/llms-full.txt", buildLlmsFull(principles, "content/check.md", "content/about.md"));
+await writeFile("dist/sitemap.xml",   buildSitemap([...principles, "check", "about"]));
+```
+
 ### 3.5 Invariants (hold regardless of stack)
 
 Markdown is the source of truth. Same `.md` renders the HTML and is served raw for `/p1.md`, `/p1` under `Accept:
