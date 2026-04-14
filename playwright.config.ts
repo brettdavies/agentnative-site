@@ -1,7 +1,16 @@
 // Playwright config — spins up `wrangler dev --local` as the test server
-// and runs every spec under tests/playwright/ in chromium. The webServer
-// block is the cheap way to keep agents.spec.ts (curl-flavored) and
-// flows.spec.ts (browser flows) pointing at the same origin.
+// and runs every `*.e2e.ts` spec under tests/e2e/. The webServer block
+// keeps agents.e2e.ts (Worker integration via fetch) and flows.e2e.ts
+// (browser flows) pointing at the same origin.
+//
+// Project matrix:
+//   chromium       — desktop Chrome. Runs every spec. Primary project.
+//   mobile-android — Pixel 7, Android Chrome. Runs flows only.
+//   mobile-ios     — iPhone 13, iOS Safari (WebKit). Runs flows only.
+//   tablet         — iPad Pro 11, iPadOS Safari (WebKit). Runs flows only.
+//
+// WebKit projects require `bun x playwright install webkit` locally and
+// the matching `--with-deps` line in .github/workflows/ci.yml.
 
 import { defineConfig, devices } from '@playwright/test';
 
@@ -24,7 +33,9 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
+    { name: 'mobile-android', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
+    { name: 'mobile-ios', use: { ...devices['iPhone 13'] }, testMatch: /flows\.e2e\.ts/ },
+    { name: 'tablet', use: { ...devices['iPad Pro 11'] }, testMatch: /flows\.e2e\.ts/ },
   ],
   webServer: {
     command: 'bun run build && bun x wrangler dev --local --port ' + PORT,

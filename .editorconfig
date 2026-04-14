@@ -1,20 +1,20 @@
 root = true
 
+# Universal file hygiene. Biome owns formatting for .ts/.js/.json/.jsonc
+# (see biome.json); markdownlint owns .md rule scope (.markdownlint-cli2.yaml).
+# This file covers the gaps: line endings + charset + final newline on
+# every file type an editor touches, and indent defaults for formats neither
+# Biome nor markdownlint handle (.yml, .sh, .css, .html, .svg).
+
 [*]
 charset = utf-8
 end_of_line = lf
 insert_final_newline = true
 trim_trailing_whitespace = true
+
+[*.{yml,yaml,sh,css,html,svg}]
 indent_style = space
 indent_size = 2
-max_line_length = 120
 
 [*.md]
-trim_trailing_whitespace = false
-
-[Makefile]
-indent_style = tab
-
-[*.{woff2,png,jpg,jpeg,gif,webp,avif,ico}]
-insert_final_newline = false
 trim_trailing_whitespace = false

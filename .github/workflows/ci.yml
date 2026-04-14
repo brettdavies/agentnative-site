@@ -52,7 +52,7 @@ jobs:
         run: bun test
 
       - name: Install Playwright browsers
-        run: bun x playwright install --with-deps chromium
+        run: bun x playwright install --with-deps chromium webkit
 
       - name: End-to-end tests (Playwright)
         run: bun run test:e2e
