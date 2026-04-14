@@ -11,7 +11,7 @@
     "test:e2e": "playwright test",
     "test:e2e:docker": "bash scripts/test-e2e-docker.sh",
     "types": "wrangler types ./src/worker-configuration.d.ts",
-    "lint": "biome check . && markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#dist\" \"#docs/solutions\" \"#docs/design\" \"#docs/TODOS.md\" \"#docs/plans\" \"#content\" \"#CHANGELOG.md\" \"#.claude\"",
+    "lint": "biome check . && markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#dist\" \"#docs/solutions\" \"#docs/design\" \"#content\" \"#CHANGELOG.md\" \"#.claude\"",
     "format": "biome format --write .",
     "deploy": "bun run build && wrangler deploy",
     "deploy:dryrun": "bun run build && wrangler deploy --dry-run"
