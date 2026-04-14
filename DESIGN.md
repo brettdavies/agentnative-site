@@ -12,8 +12,9 @@ Companion artifacts split by role:
   stylesheet is the next entry.
 - [`docs/design/foundation.css`](docs/design/foundation.css) — generated drop-in stylesheet. Contains palette custom
   properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides), typography tokens
-  (`--font-sans`, `--font-mono`, scale), `@font-face` declarations for Uncut Sans + Monaspace Xenon, and the shipped 7b
-  inline-keyword rules. Consumed directly by the HTML preview and, later, by the site build.
+  (`--font-sans`, `--font-mono`, scale), and the shipped 7b inline-keyword rules. `@font-face` declarations are
+  deliberately NOT in this file (see §4.3 — they live in the site build so the stylesheet is safe to load from any
+  origin without phantom 404s). Consumed directly by the HTML preview and, later, by the site build.
 - [`docs/design/must-should-may-preview.html`](docs/design/must-should-may-preview.html) — renders the shipped
   typography + 7b keyword treatment (with a 7a plain-bold baseline alongside for contrast) in both color modes via a
   three-state theme toggle (system / light / dark). Loads Uncut Sans from Fontshare and Monaspace Xenon from jsdelivr so
@@ -47,11 +48,12 @@ dark mode (not inverted), Pangram Pangram's Uncut Sans (body + display) paired w
 — both OFL, self-hosted, chosen via the impeccable font-selection procedure to avoid the reflex-defaults (Inter, IBM
 Plex, Fraunces, etc.), code as a first-class visual element, `prefers-color-scheme` *plus* a visible user toggle, sticky
 mini-TOC on desktop.** Palette and contrast work is backed by a reproducible tool run — see
-`docs/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value; the full foundation
-stylesheet (palette + typography tokens + @font-face + keyword rules) lives at `docs/design/foundation.css`. MUST /
-SHOULD / MAY keywords ship option 7b (inline color only) — the originally-proposed 7b-plus side-stripe variant was
-pulled after it hit impeccable's banned-pattern list, with block-level alternatives (leading tag, background fill)
-deferred to live-site iteration. Preview at `docs/design/must-should-may-preview.html`.
+`docs/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value; the foundation
+stylesheet (palette + typography tokens + keyword rules) lives at `docs/design/foundation.css`. `@font-face`
+declarations live in the site build, not the foundation — see §4.3. MUST / SHOULD / MAY keywords ship option 7b (inline
+color only) — the originally-proposed 7b-plus side-stripe variant was pulled after it hit impeccable's banned-pattern
+list, with block-level alternatives (leading tag, background fill) deferred to live-site iteration. Preview at
+`docs/design/must-should-may-preview.html`.
 
 **JS posture.** Pragmatic. The CEO plan's original "total shipped JS ≤25 KB" ceiling is a target, not a guardrail. User
 direction: "use a library if it earns its place; total page payload up to 1–2 MB is acceptable." We still reject
@@ -363,7 +365,10 @@ explicit character shapes — critical for a document whose correctness depends 
 written. Body ligatures stay on because common ligatures (fi, fl, ffi) improve Latin prose readability with no operator
 risk.
 
-**Production loading.** Self-host both variable-font woff2 files at `/fonts/`:
+**Production loading.** The `@font-face` declarations live in the **site build's** CSS, not in `foundation.css`. Keeping
+them out of `foundation.css` means the generated stylesheet is safe to load from any origin without phantom 404s against
+missing `/fonts/` paths — relevant for design previews, demos, and any consumer that loads `foundation.css` without the
+site around it. At site-build time, emit the following (into the site's `site.css` or inlined in the HTML shell):
 
 ```css
 @font-face {
@@ -386,18 +391,19 @@ Also emit `<link rel="preload" as="font" crossorigin>` for both files in the HTM
 paint rather than mid-render. Total shipped: ~35–50 KB gz per family (Latin subset, variable axis) — well inside the 1–2
 MB page-payload ceiling.
 
-**Metric-matched fallbacks — TO CALIBRATE AT IMPLEMENTATION.** `foundation.css` currently does not emit
-`ascent-override` / `descent-override` / `size-adjust` on the two `@font-face` declarations. These values reduce layout
-shift during the font-display swap but require real metric measurement. Before ship: run
-[Fontaine](https://github.com/unjs/fontaine) (or read tables directly with `fontkit`) against the shipped woff2 files,
-commit the computed overrides to `scripts/design/generate-palette.mjs`'s typography block, and re-run the generator. Do
-not guess values — wrong overrides cause visible shift, worse than the default.
+**Metric-matched fallbacks — TO CALIBRATE AT IMPLEMENTATION.** The `@font-face` block above deliberately omits
+`ascent-override` / `descent-override` / `size-adjust`. These reduce layout shift during the font-display swap but
+require real metric measurement. Before ship: run [Fontaine](https://github.com/unjs/fontaine) (or read tables directly
+with `fontkit`) against the shipped woff2 files, compute the overrides, and commit them into the site build's
+`@font-face` block. Do not guess — wrong overrides cause visible shift, worse than the default.
 
 **Preview behavior.** `docs/design/must-should-may-preview.html` loads Uncut Sans from Fontshare and Monaspace Xenon
-from jsdelivr's Fontsource build so you can see the fonts rendered locally without setting up `/fonts/`. The preview
-includes a one-line CSS override pointing `--font-mono` at `"Monaspace Xenon Variable"` (the Fontsource-registered
-family name, which includes the `Variable` suffix); the self-hosted production build registers it as `"Monaspace Xenon"`
-without the suffix, per the `@font-face` declaration above.
+from jsdelivr's Fontsource build via two `<link>` tags at the top of the HTML. Those CDN stylesheets register their own
+`@font-face` rules, which in turn make `"Uncut Sans"` and `"Monaspace Xenon Variable"` available as named families; the
+preview's own `<style>` block overrides `--font-mono` to add the `Variable` suffix variant so the Fontsource-registered
+name wins. Production builds register the mono as `"Monaspace Xenon"` without the suffix, per the site-build
+`@font-face` block above — the token in `foundation.css` uses the unsuffixed name by default, so production works
+unmodified.
 
 ### 4.4 Type scale
 
