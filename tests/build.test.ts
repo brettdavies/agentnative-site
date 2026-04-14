@@ -46,7 +46,7 @@ describe('parseFilename', () => {
   });
 });
 
-// RFC-keyword regex + plugin cases from DESIGN.md §4.7 (A6/C2).
+// RFC-keyword regex + plugin cases from docs/DESIGN.md §4.7 (A6/C2).
 describe('rfc-keywords plugin', () => {
   async function render(md: string): Promise<string> {
     return renderMarkdown(md);

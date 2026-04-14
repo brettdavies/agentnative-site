@@ -424,7 +424,7 @@ choice if Brett wants the dev-server comfort and the community-maintained markdo
 
 - **Scope crosses ~20 pages.** Hand-built navigation, per-page frontmatter wrangling, and a custom search solution start
   eating more time than a framework would. At ~20 pages we revisit Astro-alone; at ~40 we revisit Starlight.
-- **Versioning becomes real.** Phase 2+ work (TODOS.md P2) introducing per-version spec rendering tips toward a
+- **Versioning becomes real.** Phase 2+ work (docs/TODOS.md P2) introducing per-version spec rendering tips toward a
   framework with first-class version handling. Starlight earns its keep here.
 - **Client-side search becomes a requirement.** We do not need it for nine pages, but a "search across all principles"
   add-on requires either a 20–50 KB client bundle (pagefind, flexsearch) or a server endpoint.
@@ -476,7 +476,8 @@ standard courting developer adoption.
 | `--bg`         | `#fafbfd`   | `#060a0e`  | Page background.                          |
 | `--bg-code`    | `#f0f4f7`   | `#0d1218`  | Inline + block code background.           |
 | `--border`     | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.     |
-| `--fg-muted`   | `#525960`   | `#9199a2`  | Secondary text, footer, captions.         |
+| `--fg-muted`     | `#7d848a`   | `#8d949c`  | Decorative/large-only captions (≥1.125rem). Below 4.5:1 small-text contrast by design — use `--fg-secondary` for anything readable under 18px. |
+| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1. |
 | `--fg-body`    | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.  |
 | `--fg-heading` | `#070c11`   | `#f3f2ed`  | Headings.                                 |
 | `--accent`     | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.     |
@@ -484,10 +485,12 @@ standard courting developer adoption.
 | `--should`     | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                      |
 | `--may`        | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                         |
 
-All body pairs pass WCAG AA (≥4.5:1) **and** APCA body minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. Two
-dark-mode tokens (`must`, `accent-subtle`) required a tuning pass after the first APCA run flagged them below the 60
-threshold; the tuning is recorded in the script as a comment, and the second-pass contrast table in the report shows all
-pairs clearing thresholds.
+All body pairs (`--fg-body`, `--fg-secondary`, `--fg-heading`, `--accent`) pass WCAG AA (≥4.5:1) **and** APCA body
+minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` deliberately sits below AA 4.5:1 in both modes
+(≈4.3:1) — it is a decorative caption tier reserved for text ≥1.125rem where the AA large-text threshold (3:1) applies;
+use `--fg-secondary` for any small body-size secondary text. Two dark-mode tokens (`must`, `accent-subtle`) required a
+tuning pass after the first APCA run flagged them below the 60 threshold; the tuning is recorded in the script as a
+comment, and the second-pass contrast table in the report shows all body pairs clearing thresholds.
 
 ### 4.2 Dark mode is deliberately designed (not inverted)
 

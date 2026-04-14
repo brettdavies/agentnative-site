@@ -14,8 +14,8 @@ The scope for v0 is decided and lives in:
 
 - `~/.gstack/projects/brettdavies-agentnative-site/ceo-plans/2026-04-13-spec-site.md` — approved scope, gaps to close,
   deployment ordering, test plan. Read this before making scope choices.
-- `TODOS.md` — deferred work for later phases (live scorecard embed, versioned spec, community PR flow, `--agent-caps`
-  docs, davies.fyi cross-link).
+- `docs/TODOS.md` — deferred work for later phases (live scorecard embed, versioned spec, community PR flow,
+  `--agent-caps` docs, davies.fyi cross-link).
 - `~/obsidian-vault/Projects/brettdavies-agentnative/principles/` — authoritative spec for the 7 principles (one file
   per principle, MUST/SHOULD/MAY requirements, pressure-testable). The site's principle copy in `content/principles/` is
   written **manually** from these files — no build-time import, no live link. When you write or edit site copy, read the
@@ -71,7 +71,7 @@ narrative, attribution rules) is load-bearing.
 - Mobile-first; a11y baseline (skip-link, semantic landmarks, `>= 4.5:1` contrast, `:focus-visible`,
   `prefers-reduced-motion`)
 
-The design-survey step produces a `DESIGN.md` in the repo with palette, type stack, spacing scale, code-block
+The design-survey step produces a `docs/DESIGN.md` in the repo with palette, type stack, spacing scale, code-block
 treatment, and dark/light tokens before any HTML is written.
 
 Design context consumed by the `/impeccable` and `/typeset` skills (users, brand personality, aesthetic direction,
@@ -92,7 +92,7 @@ design principles): [`.impeccable.md`](.impeccable.md).
 | `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md` | Shared research index for both this site and the `agentnative` CLI linter | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties. |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md` | Canonical spec for P1-P7 (one file per principle, pressure-testable) | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md` | Build & distribution plan | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified. |
-| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md` | Eng review | Architecture + code quality + test coverage review for M1. §12 lists all DESIGN.md edits. Decisions resolved; no blockers. |
+| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md` | Eng review | Architecture + code quality + test coverage review for M1. §12 lists all docs/DESIGN.md edits. Decisions resolved; no blockers. |
 
 ## Related repos
 
@@ -131,6 +131,6 @@ one.
    authoritative spec that the site's `content/principles/` copy is written from (manually, not auto-derived).
 3. Run a reference-site survey for visual design (clig.dev, 12factor.net, htmx.org, rust-lang.org book, json-schema.org,
    fly.io docs, matklad.github.io — pick 3-4 that embody "simple, traditional, modern flair" and extract tokens).
-   Produce `DESIGN.md` before writing any HTML.
+   Produce `docs/DESIGN.md` before writing any HTML.
 4. Scaffold the markdown sources in `content/` first, then the Worker + HTML renderer, then wire deploy.
 5. Check in with Brett before attaching the production domain.

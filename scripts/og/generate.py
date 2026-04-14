@@ -9,7 +9,7 @@
 """
 Generate the og-image.png social card for agentnative.dev.
 
-Invoked by (and mirrors the brief in) DESIGN.md §4.13. Gemini 3 Pro's
+Invoked by (and mirrors the brief in) docs/DESIGN.md §4.13. Gemini 3 Pro's
 image model does the rendering; this script drives it, resizes the
 result to the canonical 1200x630 OG size, and writes PNG.
 

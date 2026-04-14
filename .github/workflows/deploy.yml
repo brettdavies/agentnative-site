@@ -3,7 +3,7 @@
 # `agentnative-site.<brett-subdomain>.workers.dev`. The Worker's
 # staging-host guard (src/worker/headers.ts `isStagingHost`) adds
 # `X-Robots-Tag: noindex` on every response whose Host ends with
-# `.workers.dev` — see DESIGN.md §3.4 locked decision #4.
+# `.workers.dev` — see docs/DESIGN.md §3.4 locked decision #4.
 #
 # Production domain attach is a Brett-only task after `agentnative` v0.1
 # ships to crates.io (AGENT.md §Tool-site sequencing). Once the domain is

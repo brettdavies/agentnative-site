@@ -1,14 +1,14 @@
 # docs/design/
 
-Design artifacts for the agentnative spec site. Referenced from [`../../DESIGN.md`](../../DESIGN.md).
+Design artifacts for the agentnative spec site. Referenced from [`../DESIGN.md`](../DESIGN.md).
 
 ## Contents
 
 | File                           | Role                                                                                         | Origin    |
 | ------------------------------ | -------------------------------------------------------------------------------------------- | --------- |
 | `color-analysis.md`            | Methodology report: culori + apca-w3 tool calls, palette tables, WCAG + APCA contrast, gamut log. | generated |
-| `foundation.css`               | Drop-in stylesheet: palette + typography tokens + 7b inline-keyword rules. No `@font-face` (site-build concern — see DESIGN.md §4.3). | generated |
-| `must-should-may-preview.html` | Rendered preview of DESIGN.md §4.3 typography and §4.7 keyword treatment; links `foundation.css`. | authored  |
+| `foundation.css`               | Drop-in stylesheet: palette + typography tokens + 7b inline-keyword rules. No `@font-face` (site-build concern — see docs/DESIGN.md §4.3). | generated |
+| `must-should-may-preview.html` | Rendered preview of docs/DESIGN.md §4.3 typography and §4.7 keyword treatment; links `foundation.css`. | authored  |
 | `README.md`                    | This file.                                                                                   | authored  |
 
 The generator lives in [`../../scripts/design/`](../../scripts/design/) — generated outputs land here.
