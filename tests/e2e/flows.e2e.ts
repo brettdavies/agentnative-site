@@ -60,7 +60,12 @@ test.describe('keyboard + a11y', () => {
 });
 
 test.describe('code-copy + anchor-copy', () => {
-  test('copy button on <pre> writes code to clipboard', async ({ page, context }) => {
+  // WebKit does not expose clipboard-read / clipboard-write as grantable
+  // permissions, so the Clipboard-API assertions can't run there. Real
+  // iOS / iPadOS Safari users still hit the `execCommand('copy')` fallback
+  // path in src/client/clipboard.ts — Chromium covers the primary path.
+  test('copy button on <pre> writes code to clipboard', async ({ page, context, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit does not support clipboard permission grants');
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     // /check has 4 code blocks. /p3 has none (no shell snippets in p3 prose).
     await page.goto('/check');
@@ -72,7 +77,8 @@ test.describe('code-copy + anchor-copy', () => {
     expect(copied.length).toBeGreaterThan(0);
   });
 
-  test('anchor permalink copies canonical URL and updates the hash', async ({ page, context }) => {
+  test('anchor permalink copies canonical URL and updates the hash', async ({ page, context, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit does not support clipboard permission grants');
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.goto('/p3');
     const anchor = page.locator('h1 a.anchor').first();
