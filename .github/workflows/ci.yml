@@ -72,10 +72,6 @@ jobs:
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
           LHCI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        # Lighthouse depends on network + Chrome launch reliability; a flaky
-        # failure should not block a PR while we dial the budgets. Flip to
-        # hard-fail once the first few runs are stable.
 
       - name: Wrangler config + bundle dry-run
         run: bun x wrangler deploy --dry-run
