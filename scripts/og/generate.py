@@ -28,7 +28,7 @@ from google.genai import types
 from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OUTPUT = REPO_ROOT / "og-image.png"
+OUTPUT = REPO_ROOT / "public" / "og-image.png"
 OG_W, OG_H = 1200, 630
 
 PROMPT = """\
