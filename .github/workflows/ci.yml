@@ -23,6 +23,10 @@ concurrency:
 
 permissions:
   contents: read
+  # Lighthouse CI posts the audit as a commit status (requires statuses:write).
+  # Without this the step logs "GitHub responded with 403 Resource not
+  # accessible by integration" even though the audit itself runs fine.
+  statuses: write
 
 # Opt into Node.js 24 runtime for JS actions before June 2nd, 2026 when
 # GitHub forces the switch anyway. Kills the Node 20 deprecation warnings
