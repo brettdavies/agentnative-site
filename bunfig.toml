@@ -1,7 +1,0 @@
-# Bun configuration.
-# `bun test` defaults to scanning the entire repo for *.test.* and *.spec.*
-# files, which collides with Playwright specs in ./e2e/. Scope bun test to
-# ./tests/ so unit/integration tests live there and Playwright owns e2e/.
-
-[test]
-root = "./tests"
