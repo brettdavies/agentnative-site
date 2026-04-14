@@ -9,7 +9,7 @@ Static HTML + CSS. No build step. Open `index.html` in a browser.
 
 ## Deployment
 
-Cloudflare Pages. Pushes to `main` deploy automatically.
+Cloudflare Workers. Pushes to `main` deploy automatically.
 
 ## Related
 
