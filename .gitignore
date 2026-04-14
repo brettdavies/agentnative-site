@@ -15,3 +15,8 @@ dist/
 # Un-ignore project source (Brett's global ~/.config/git/ignore has `build/`).
 !src/
 !src/**
+
+# Playwright artifacts
+test-results/
+playwright-report/
+
