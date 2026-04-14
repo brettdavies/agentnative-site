@@ -22,7 +22,11 @@ export default defineConfig({
   testMatch: /\.e2e\.ts$/,
   timeout: 30_000,
   expect: { timeout: 5_000 },
-  fullyParallel: false,
+  // Tests within a single spec file run in parallel; each test gets a
+  // fresh browser context so localStorage / URL state don't leak between
+  // them. `wrangler dev` handles concurrent requests without issue.
+  fullyParallel: true,
+  workers: process.env.CI ? 3 : undefined,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
