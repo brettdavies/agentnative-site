@@ -2,7 +2,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "agentnative-site",
   "main": "src/worker/index.ts",
-  "account_id": "REDACTED",
+  // account_id is intentionally NOT in the repo. Wrangler picks it up from
+  // the `CLOUDFLARE_ACCOUNT_ID` env var: the deploy workflow passes it via
+  // `secrets.CF_ACCOUNT_ID`; locally, set it in your shell or `.env.local`.
+  // Not a formal secret — just an identifier we'd rather not expose on a
+  // public repo. See RELEASES.md § Secrets.
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
