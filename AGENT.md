@@ -103,12 +103,22 @@ design principles): [`.impeccable.md`](.impeccable.md).
 
 ## Repo conventions
 
-- **Branch:** `main` only. No dev branch.
+- **Branches:** `main` (production) and `dev` (integration) are both forever branches. Feature work lands via `feat/*` /
+  `fix/*` / `chore/*` → PR to `dev` (squash merge). Dev ships to main via a short-lived `release/*` branch cherry-picked
+  from `origin/main`, PR'd to main. Direct commits to `dev` or `main` are not permitted. See
+  [`RELEASES.md`](./RELEASES.md) for the full workflow.
 - **Commits:** Conventional Commits. Short, specific messages.
-- **PRs:** Squash merge. PR title becomes commit title.
-- **Ruleset:** "Protect main" is active. The `guard-docs / check-forbidden-docs` status check is the gate — see
-  `.github/workflows/guard-main-docs.yml` for what it blocks.
-- **CI:** Cloudflare Workers handles deployment once `wrangler.toml` is wired. No other CI yet.
+- **PRs:** Squash merge. PR title becomes commit title; PR body becomes commit body (repo setting:
+  `squashMergeCommitMessage: PR_BODY`).
+- **Rulesets:** `.github/rulesets/protect-main.json` and `protect-dev.json` are the source of truth for branch
+  protection; apply via `gh api` (see `RELEASES.md § Branch protection`).
+- **CI:**
+- `ci.yml` — fast PR gate (lint · build · test · wrangler dry-run).
+- `deep-check.yml` — scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
+    last deep-check.
+- `deploy.yml` — publishes to the `*.workers.dev` staging on every push to `main`.
+- `guard-main-docs.yml` — blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
+- `guard-release-branch.yml` — rejects PRs to main whose head isn't `release/*`.
 
 ## Tool-site sequencing (do not violate)
 
