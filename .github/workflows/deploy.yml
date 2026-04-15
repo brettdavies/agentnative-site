@@ -12,8 +12,10 @@
 #
 # Secrets:
 #   - `CF_API_TOKEN` — Cloudflare API token with `Workers Scripts:Edit`
-#     + `Account:Read` scope. The account ID is pinned in
-#     `wrangler.jsonc` so no `CF_ACCOUNT_ID` secret is required.
+#     + `Account:Read` scope.
+#   - `CF_ACCOUNT_ID` — Cloudflare account ID. Not a formal secret but
+#     kept out of the public repo; wrangler reads it from the
+#     `CLOUDFLARE_ACCOUNT_ID` env var.
 
 name: deploy
 
@@ -72,4 +74,5 @@ jobs:
         uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3.14.1
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: deploy
