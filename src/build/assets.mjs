@@ -188,8 +188,8 @@ main .anchor-icon { vertical-align: -2px; }
   grid-template-columns: 3rem 1fr;
   grid-template-rows: auto auto;
   column-gap: 1.25rem;
-  row-gap: 0.15rem;
-  padding: 1.15rem 0.75rem;
+  row-gap: 0.25rem;
+  padding: 1.25rem 0.75rem;
   margin: 0 -0.75rem;
   text-decoration: none;
   color: inherit;
@@ -210,7 +210,7 @@ main .anchor-icon { vertical-align: -2px; }
   color: var(--accent, #0058aa);
   line-height: 1.15;
   font-feature-settings: var(--ff-tabular, 'tnum' 1, 'kern' 1);
-  align-self: center;
+  padding-top: 0.15rem;
 }
 
 .principle-entry__title {
@@ -222,9 +222,9 @@ main .anchor-icon { vertical-align: -2px; }
 
 .principle-entry__desc {
   font-size: 0.92rem;
-  color: var(--fg-muted, #525960);
-  line-height: 1.45;
-  max-width: 55ch;
+  color: var(--fg-secondary, #6a7278);
+  line-height: 1.5;
+  max-width: 65ch;
 }
 
 /* Footer */

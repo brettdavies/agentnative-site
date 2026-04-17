@@ -103,11 +103,11 @@ function extractFirstParagraph(markdown) {
 }
 
 /**
- * Extract the first sentence of the `## Definition` section — used as
- * the one-liner in the homepage principle listing. Strips markdown
- * formatting (bold, links, inline code) for plain-text output.
+ * Extract the full `## Definition` paragraph — used as the description
+ * in the homepage principle listing. Strips markdown formatting (bold,
+ * links, inline code) for plain-text output.
  */
-function extractDefinitionSentence(markdown) {
+function extractDefinitionParagraph(markdown) {
   const lines = markdown.split('\n');
   let i = 0;
   while (i < lines.length && !/^##\s+Definition/.test(lines[i])) i++;
@@ -118,13 +118,11 @@ function extractDefinitionSentence(markdown) {
     buf.push(lines[i].trim());
     i++;
   }
-  const full = buf
+  return buf
     .join(' ')
     .replace(/\*\*/g, '') // strip bold markers
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links → label only
     .replace(/`([^`]+)`/g, '$1'); // strip inline code → content only
-  const match = full.match(/^(.+?[.!?])\s/);
-  return match ? match[1] : full.slice(0, 140);
 }
 
 /**
@@ -239,7 +237,7 @@ export async function build() {
     // 5. Markdown twin — byte-equivalent copy.
     await copyFile(file, join(DIST_DIR, `p${n}.md`));
 
-    const shortDesc = extractDefinitionSentence(source);
+    const shortDesc = extractDefinitionParagraph(source);
     principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
   }
 
