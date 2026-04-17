@@ -367,6 +367,7 @@ export async function build() {
     summary: introSummary,
     principles: principles.map((p) => ({ n: p.n, slug: p.slug, title: p.title })),
     subPages: subPageData.map((s) => ({ name: s.name, title: s.title })),
+    scorecardLinks: [{ name: 'Leaderboard', path: '/scorecards.md' }],
   });
   await writeFile(join(DIST_DIR, 'llms.txt'), llmsIndex);
 
@@ -385,6 +386,12 @@ export async function build() {
         htmlPath: `/${s.name}`,
         mdPath: `/${s.name}.md`,
       })),
+      {
+        title: 'ANC 100 — Agent-Native CLI Leaderboard',
+        body: buildLeaderboardMarkdown(leaderboard),
+        htmlPath: '/scorecards',
+        mdPath: '/scorecards.md',
+      },
     ],
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
@@ -392,6 +399,7 @@ export async function build() {
   // 10. Sitemap (includes scorecard paths).
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
+    extraPaths: ['/scorecards', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 

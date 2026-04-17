@@ -12,6 +12,9 @@
 //   - [Check your CLI](/check.md)
 //   - [About this standard](/about.md)
 //
+//   ## Scorecards
+//   - [Leaderboard](/scorecards.md)
+//
 // llms-full.txt layout (A5 format): each section is
 //   # <Title>
 //
@@ -46,9 +49,10 @@ export function extractTitle(markdown) {
  * @param {string} args.summary Short paragraph summary (from _intro.md).
  * @param {Array<{ n: number, slug: string, title: string }>} args.principles
  * @param {Array<{ name: string, title: string }>=} args.subPages
+ * @param {Array<{ name: string, path: string }>=} args.scorecardLinks
  * @param {string=} args.baseUrl
  */
-export function buildLlmsIndex({ introTitle, summary, principles, subPages = [], baseUrl }) {
+export function buildLlmsIndex({ introTitle, summary, principles, subPages = [], scorecardLinks = [], baseUrl }) {
   const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
 
   const lines = [];
@@ -67,6 +71,14 @@ export function buildLlmsIndex({ introTitle, summary, principles, subPages = [],
     lines.push('');
     for (const s of subPages) {
       lines.push(`- [${s.title}](${base}/${s.name}.md)`);
+    }
+  }
+  if (scorecardLinks.length > 0) {
+    lines.push('');
+    lines.push('## Scorecards');
+    lines.push('');
+    for (const s of scorecardLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
     }
   }
   lines.push('');
