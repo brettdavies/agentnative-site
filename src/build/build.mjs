@@ -332,6 +332,7 @@ export async function build() {
       canonicalPath: '/scorecards',
       bodyHtml: leaderboardBody,
       themeInitJs: themeInit,
+      extraScripts: ['/js/leaderboard.js'],
     }),
   );
   await writeFile(join(DIST_DIR, 'scorecards.md'), buildLeaderboardMarkdown(leaderboard));

@@ -72,6 +72,7 @@ export function emitShell({
   isIndex = false,
   principles = [],
   baseUrl,
+  extraScripts = [],
 }) {
   const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
   const canonical = base + canonicalPath;
@@ -180,6 +181,7 @@ ${AI_PROVIDERS.map(
     </footer>
     <script src="/js/theme.js" defer></script>
     <script src="/js/clipboard.js" defer></script>
+${extraScripts.map((s) => `    <script src="${s}" defer></script>`).join('\n')}
   </body>
 </html>
 `;
