@@ -1,14 +1,16 @@
-# Production-staging deploy. Every merge to `main` builds the site and
-# publishes the Worker + static assets to
-# `agentnative-site.<brett-subdomain>.workers.dev`. The Worker's
-# staging-host guard (src/worker/headers.ts `isStagingHost`) adds
-# `X-Robots-Tag: noindex` on every response whose Host ends with
-# `.workers.dev` — see docs/DESIGN.md §3.4 locked decision #4.
+# Deploy workflow — two targets, one workflow.
 #
-# Production domain attach is a Brett-only task after `agentnative` v0.1
-# ships to crates.io (AGENT.md §Tool-site sequencing). Once the domain is
-# purchased, `wrangler.jsonc` gains `route` / `custom_domain` and this
-# workflow starts publishing to production too.
+# Staging (dev branch):
+#   Pushes to `dev` deploy to the `agentnative-site-staging` Worker
+#   at `agentnative-site-staging.<subdomain>.workers.dev`. The Worker's
+#   staging-host guard (src/worker/headers.ts `isStagingHost`) adds
+#   `X-Robots-Tag: noindex` on every *.workers.dev response.
+#
+# Production (main branch):
+#   Pushes to `main` deploy to the `agentnative-site` Worker with
+#   the `anc.dev` custom domain attached. Full indexing, no .workers.dev.
+#
+# Ref: https://developers.cloudflare.com/workers/wrangler/environments/
 #
 # Secrets:
 #   - `CF_API_TOKEN` — Cloudflare API token with `Workers Scripts:Edit`
@@ -23,16 +25,20 @@ on:
   push:
     branches:
       - main
+      - dev
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Ref to deploy (branch, tag, or SHA). Defaults to main HEAD.'
+        description: 'Ref to deploy (branch, tag, or SHA).'
         required: false
         type: string
-
-concurrency:
-  group: deploy-main
-  cancel-in-progress: false
+      environment:
+        description: 'Target: staging (workers.dev) or production (anc.dev).'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
 
 permissions:
   contents: read
@@ -45,19 +51,24 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  deploy:
-    name: build + wrangler deploy
+  staging:
+    name: build + deploy staging
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: true
     environment:
       name: staging
-      url: https://agentnative-site.workers.dev
 
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ inputs.ref || '' }}
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -70,7 +81,45 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Deploy via Wrangler
+      - name: Deploy to staging
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3.14.1
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: deploy --env staging
+
+  production:
+    name: build + deploy production
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://anc.dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Deploy to production
         uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3.14.1
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
