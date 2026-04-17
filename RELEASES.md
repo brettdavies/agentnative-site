@@ -5,9 +5,10 @@ has a PR number in its squash commit message, which keeps the history scannable 
 
 ```text
 feature branch → PR to dev (squash merge)
+              → deploy.yml publishes to staging (agentnative-site-staging.*.workers.dev)
               → cherry-pick to release/* branch
               → PR to main (squash merge)
-              → deploy.yml publishes to staging automatically
+              → deploy.yml publishes to production (anc.dev)
 ```
 
 ## Branches
@@ -81,28 +82,24 @@ on both sides with different content. Always branch from `origin/main` and cherr
 
 ## Deploy
 
-`.github/workflows/deploy.yml` runs on every push to `main`. It builds the static site and publishes the Worker to the
-staging subdomain on `*.workers.dev`. Since PRs are the only way for commits to land on `main`, every deploy maps 1:1 to
-a merged release PR.
+`.github/workflows/deploy.yml` runs on every push to `dev` or `main`, targeting separate Workers via wrangler
+environments:
 
-Manual deploys (for retries after a secret fix, or to deploy a specific SHA without merging) use `workflow_dispatch`:
+| Branch | Worker | Domain | Wrangler command |
+| ------ | ------ | ------ | ---------------- |
+| `dev` | `agentnative-site-staging` | `agentnative-site-staging.<subdomain>.workers.dev` | `wrangler deploy --env staging` |
+| `main` | `agentnative-site` | `anc.dev` (custom domain, `workers_dev: false`) | `wrangler deploy` |
+
+The staging-host guard in `src/worker/headers.ts` adds `X-Robots-Tag: noindex` on any response served from a
+`.workers.dev` host. Production at `anc.dev` gets full indexing.
+
+Manual deploys use `workflow_dispatch` with an explicit environment picker:
 
 ```bash
-gh workflow run deploy.yml --ref main                 # redeploy main HEAD
-gh workflow run deploy.yml --ref release/<slug>       # deploy an unmerged
-                                                       # release branch for
-                                                       # verification
-gh workflow run deploy.yml -f ref=<sha>               # deploy a specific SHA
+gh workflow run deploy.yml -f environment=staging              # redeploy staging
+gh workflow run deploy.yml -f environment=production            # redeploy production
+gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # deploy a specific SHA to staging
 ```
-
-### Production domain attach
-
-The production domain (`agentnative.dev` / `.io` / `.org`) is a purchase Brett hasn't made yet. Until it lands,
-everything runs on `*.workers.dev`. The staging-host guard in `src/worker/headers.ts` adds `X-Robots-Tag: noindex` on
-any response served from a `.workers.dev` host, so staging never ends up in search indexes.
-
-See [AGENT.md § Domain ownership](./AGENT.md#domain-ownership) for the one-line `wrangler.jsonc` swap when the domain
-arrives.
 
 ## Secrets
 
