@@ -177,7 +177,6 @@ ${AI_PROVIDERS.map(
     `          <a href="${p.url(encodeURIComponent(AI_SUMMARY_PROMPT))}" target="_blank" rel="noopener noreferrer" class="ai-summary__link" aria-label="Ask ${p.name}">${p.svg}</a>`,
 ).join('\n')}
         </div>
-        <a href="/llms-full.txt" class="ai-summary__llms">llms-full.txt</a>
       </div>
       <p class="site-footer__meta">
         <span>${SITE_NAME}</span>
