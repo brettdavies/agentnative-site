@@ -83,6 +83,9 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toContain('## Pages');
     const pageLinks = body.match(/^-\s+\[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
     expect(pageLinks.length).toBe(2);
+
+    // Scorecards section with at least the leaderboard link.
+    expect(body).toContain('## Scorecards');
   });
 
   test('/llms-full.txt is served in a single fetch with A5 delimiters', async ({ request }) => {

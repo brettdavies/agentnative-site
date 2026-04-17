@@ -1,4 +1,4 @@
-// Three CRITICAL regression tests (ce-work prompt). These gate every PR —
+// CRITICAL regression tests (ce-work prompt). These gate every PR —
 // if any goes red, the site ships with a broken citation primitive.
 //
 //   1. Anchor-slug snapshot against docs/DESIGN.md §3.5's seven LOCKED slugs.
@@ -6,11 +6,15 @@
 //      quote, or agent citation in perpetuity.
 //
 //   2. llms.txt shape — H1 + `>` summary + H2 "Principles" + 7 `.md`
-//      bullets. Shape is the llmstxt.org contract for agent discovery.
+//      bullets + H2 "Scorecards". Shape is the llmstxt.org contract for
+//      agent discovery.
 //
 //   3. Markdown byte-equivalence: sha256(dist/p<n>.md) must equal
 //      sha256(content/principles/p<n>-*.md). The `/p<n>.md` endpoint
 //      promises the authored bytes, not a re-wrapped derivative.
+//
+//   4. Scorecard pages — leaderboard exists with a <table>, at least one
+//      per-tool scorecard page exists, and sitemap includes scorecard paths.
 //
 // Run `bun run build` before these tests (bun test does not auto-build).
 
@@ -70,7 +74,7 @@ describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked li
 });
 
 describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
-  test('has H1, blockquote summary, ## Principles with 7 .md bullets, and ## Pages', async () => {
+  test('has H1, blockquote summary, ## Principles with 7 .md bullets, ## Pages, and ## Scorecards', async () => {
     const llms = await readFile(join(DIST, 'llms.txt'), 'utf8');
     const lines = llms.split('\n');
 
@@ -96,6 +100,11 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
     expect(llms).toContain('## Pages');
     const pageLinks = llms.match(/^- \[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
     expect(pageLinks.length).toBe(2);
+
+    // Contains ## Scorecards with at least the leaderboard link.
+    expect(llms).toContain('## Scorecards');
+    const scorecardLinks = llms.match(/^- \[[^\]]+\]\([^)]*\/scorecards\.md\)$/gm) ?? [];
+    expect(scorecardLinks.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -109,5 +118,46 @@ describe('regression #3 — markdown byte-equivalence', () => {
     const distHash = await sha256OfFile(join(DIST, `p${n}.md`));
     const sourceHash = await sha256OfFile(join(CONTENT, 'principles', sourceName));
     expect(distHash).toBe(sourceHash);
+  });
+});
+
+describe('regression #4 — scorecard pages', () => {
+  test('dist/scorecards.html exists and contains a <table> element', async () => {
+    const html = await readFile(join(DIST, 'scorecards.html'), 'utf8');
+    expect(html).toContain('<table');
+    expect(html).toContain('class="leaderboard-table"');
+  });
+
+  test('dist/scorecards.md exists and is a readable markdown table', async () => {
+    const md = await readFile(join(DIST, 'scorecards.md'), 'utf8');
+    expect(md).toContain('# ANC 100');
+    expect(md).toContain('| # | Tool |');
+  });
+
+  test('at least one dist/score/*.html file exists', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const files = await readdir(join(DIST, 'score'));
+    const htmlFiles = files.filter((f) => f.endsWith('.html'));
+    expect(htmlFiles.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('each per-tool HTML has a matching .md twin', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const files = await readdir(join(DIST, 'score'));
+    const htmlFiles = files.filter((f) => f.endsWith('.html'));
+    for (const html of htmlFiles) {
+      const md = html.replace('.html', '.md');
+      expect(files).toContain(md);
+    }
+  });
+
+  test('sitemap.xml contains /scorecards', async () => {
+    const sitemap = await readFile(join(DIST, 'sitemap.xml'), 'utf8');
+    expect(sitemap).toContain('/scorecards</loc>');
+  });
+
+  test('sitemap.xml contains at least one /score/<tool> path', async () => {
+    const sitemap = await readFile(join(DIST, 'sitemap.xml'), 'utf8');
+    expect(sitemap).toMatch(/\/score\/[a-z0-9-]+<\/loc>/);
   });
 });
