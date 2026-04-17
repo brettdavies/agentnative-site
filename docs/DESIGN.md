@@ -55,12 +55,11 @@ color only) — the originally-proposed 7b-plus side-stripe variant was pulled a
 list, with block-level alternatives (leading tag, background fill) deferred to live-site iteration. Preview at
 `docs/design/must-should-may-preview.html`.
 
-**JS posture.** Pragmatic. The CEO plan's original "total shipped JS ≤25 KB" ceiling is a target, not a guardrail. User
-direction: "use a library if it earns its place; total page payload up to 1–2 MB is acceptable." We still reject
-shipping a framework runtime for state the site does not use, we still do syntax highlighting at build time, we still
-treat every new dependency as an opt-in that needs a one-line justification in this file. But "roll our own
-click-to-copy to save 600 bytes" is no longer the default posture — use the native Clipboard API directly (which needs
-no library), and when a browser-quirk floor genuinely demands one, name it.
+**JS posture.** Pragmatic. JS is fine — the total homepage budget is 2 MB. We still reject shipping a framework runtime
+for state the site does not use, we still do syntax highlighting at build time, and we still treat every new dependency
+as an opt-in that needs a one-line justification in this file. But the bar is "does it earn its place," not "is it under
+a byte count." Use the native Clipboard API directly (which needs no library), and when a browser-quirk floor genuinely
+demands one, name it.
 
 Both decisions assume the invariants restated in §3.4: markdown is the source of truth, same `.md` renders the HTML and
 is served raw for content negotiation and `llms-full.txt`, stable per-principle anchors, `llms.txt` + `llms-full.txt` at
@@ -870,14 +869,10 @@ number isn't the meaningful signal for this site — catching a PR that silently
 | -------------------------------------- | --------------- | ------------------------------------------------------------------------------- |
 | Client JS — target                     | ≤ 5 KB gzipped  | Build script asserts total of `dist/js/*.js` + inline `theme-init`. PR review.  |
 | Client JS — hard ceiling               | ≤ 20 KB gzipped | Build script fails if exceeded.                                                 |
-| Initial page payload — regression gate | ≤ 800 KB        | `.lighthouserc.json` fires `resource-summary:total:size` error. Merge-blocking. |
+| Initial page payload — regression gate | ≤ 2 MB          | `.lighthouserc.json` fires `resource-summary:total:size` error. Merge-blocking. |
 
-"Initial page payload" is HTML + CSS + fonts + JS + any inline SVG on the first render of `/p1` (representative of the
-seven principle pages; the index carries the heaviest paint). Current steady-state ships at ~740 KB with the Monaspace
-Xenon variable woff2 (~570 KB unsubsetted) as the bulk. The 800 KB ceiling is deliberately ~60 KB above current reality
-so a PR that bundles a framework runtime, inlines a large SVG, loads a second font family, or ships an un-minified
-artifact fires the gate. PRs that legitimately add payload bump the ceiling in the same commit — explicit movement,
-recorded in the diff.
+"Initial page payload" is HTML + CSS + fonts + JS + any inline SVG on the first render. Total homepage budget is 2 MB.
+PRs that legitimately add payload bump the ceiling in the same commit — explicit movement, recorded in the diff.
 
 Client-JS ceilings stay tight (5 KB / 20 KB) because JS bytes run on the main thread and dominate interaction latency in
 a way raw page weight does not. The shipped `theme.js` + `clipboard.js` are ~2.5 KB combined gz — room to spare.
