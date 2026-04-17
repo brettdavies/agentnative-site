@@ -231,6 +231,16 @@ main .anchor-icon { vertical-align: -2px; }
 .site-footer { border-top: 1px solid var(--border, #cfd5db); padding: 1.25rem clamp(1rem, 4vw, 2rem); color: var(--fg-secondary, #6a7278); font-size: 0.9rem; }
 .site-footer__meta { margin: 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
 
+/* AI summary CTA — Lucis-style provider icons above the meta line. */
+.ai-summary { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; padding: 1.5rem 0 1.25rem; }
+.ai-summary__heading { margin: 0; font-size: 0.95rem; color: var(--fg-body, #1a2026); }
+.ai-summary__icons { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
+.ai-summary__link { display: flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; color: var(--fg-body, #1a2026); border-radius: 50%; transition: transform 120ms ease; }
+.ai-summary__link:hover { transform: scale(1.15); }
+.ai-summary__link svg { width: 100%; height: 100%; }
+.ai-summary__llms { font-size: 0.75rem; opacity: 0.5; color: var(--fg-body, #1a2026); text-decoration: underline; text-underline-offset: 2px; transition: opacity 120ms ease; }
+.ai-summary__llms:hover { opacity: 0.8; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
