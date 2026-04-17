@@ -1,18 +1,19 @@
 // Orchestrator — turn content/ into dist/.
 //
-// Pipeline (steps 1–17, M5 complete):
+// Pipeline:
 //   1. Copy static assets + bundle client JS (→ css/, fonts/, js/,
 //      og-image.png, robots.txt).
 //   2. sortedGlob principle files in numeric order.
 //   3. Render each principle; pin H1 id to the locked filename slug.
 //   4. Emit per-principle HTML pages wrapped in the production shell.
 //   5. Copy each principle's markdown source byte-for-byte.
-//   6. Render the intro and concat with all principles for the index page.
+//   6. Build homepage — hero (title + lede) + principle listing (links to
+//      /p{N} pages). No inline principle content on the index page.
 //   7. Render check.md + about.md into sub-pages.
 //   8. Emit llms.txt + llms-full.txt (A5 format).
 //   9. Emit sitemap.xml.
 //  10. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
-//      <a>, every §3.5 locked anchor present, md sha256 matches source.
+//      <a>, locked anchors present on principle pages, md sha256 matches.
 //
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
 // exits non-zero. Regression tests are the verification net.
@@ -76,29 +77,123 @@ function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
 }
 
-async function runInvariantChecks(indexHtml, distDir, principleSlugs, principleSources) {
+function escHtml(s) {
+  return String(s).replace(
+    /[<>&"']/g,
+    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c],
+  );
+}
+
+/**
+ * Extract the first prose paragraph after the H1 — the lede for the
+ * homepage hero. Returns the paragraph as a single string.
+ */
+function extractFirstParagraph(markdown) {
+  const lines = markdown.split('\n');
+  let i = 0;
+  while (i < lines.length && !lines[i].match(/^#\s+/)) i++;
+  i++; // past H1
+  while (i < lines.length && lines[i].trim() === '') i++;
+  const buf = [];
+  while (i < lines.length && lines[i].trim() !== '') {
+    buf.push(lines[i].trim());
+    i++;
+  }
+  return buf.join(' ');
+}
+
+/**
+ * Extract the first sentence of the `## Definition` section — used as
+ * the one-liner in the homepage principle listing. Strips markdown
+ * formatting (bold, links, inline code) for plain-text output.
+ */
+function extractDefinitionSentence(markdown) {
+  const lines = markdown.split('\n');
+  let i = 0;
+  while (i < lines.length && !/^##\s+Definition/.test(lines[i])) i++;
+  i++; // past heading
+  while (i < lines.length && lines[i].trim() === '') i++;
+  const buf = [];
+  while (i < lines.length && lines[i].trim() !== '') {
+    buf.push(lines[i].trim());
+    i++;
+  }
+  const full = buf
+    .join(' ')
+    .replace(/\*\*/g, '') // strip bold markers
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links → label only
+    .replace(/`([^`]+)`/g, '$1'); // strip inline code → content only
+  const match = full.match(/^(.+?[.!?])\s/);
+  return match ? match[1] : full.slice(0, 140);
+}
+
+/**
+ * Build the homepage body HTML — hero section (title + lede) followed by
+ * the seven-principle listing with links to individual pages.
+ */
+function buildHomepageBody(introTitle, introLede, principles) {
+  const entries = principles
+    .map((p) => {
+      const num = String(p.n).padStart(2, '0');
+      const title = escHtml(p.title.replace(/^P\d+:\s*/, ''));
+      const desc = escHtml(p.shortDesc);
+      return `    <li class="principle-entry">
+      <a href="/p${p.n}" class="principle-entry__link">
+        <span class="principle-entry__num">${num}</span>
+        <span class="principle-entry__title">${title}</span>
+        <span class="principle-entry__desc">${desc}</span>
+      </a>
+    </li>`;
+    })
+    .join('\n');
+
+  return `<section class="hero">
+  <h1 class="hero__title">${escHtml(introTitle)}</h1>
+  <p class="hero__lede">${escHtml(introLede)}</p>
+</section>
+<section class="principles-index" aria-label="The seven principles">
+  <ol class="principles-index__list">
+${entries}
+  </ol>
+</section>`;
+}
+
+async function runInvariantChecks(distDir, principleSlugs, principleSources) {
   // 1. No MUST / SHOULD / MAY bare words inside <code> / <pre> / <a>.
-  //    Use a stripped copy — unwrap <code>/<pre>/<a> text content and scan.
+  //    Check every principle page (the index page no longer has inline
+  //    principle content).
   const codePreATextRe = /<(code|pre|a)[^>]*>([\s\S]*?)<\/\1>/gi;
-  for (const match of indexHtml.matchAll(codePreATextRe)) {
-    const [, tag, block] = match;
-    // strong class="rfc-*" would be wrapped inside an <a> or <code>? That
-    // would indicate plugin leak. Detect and flag.
-    if (/<strong class="rfc-(must|should|may)"/.test(block)) {
-      throw new Error(`invariant: RFC-keyword annotation leaked into <${tag}> element`);
+  for (const { n } of principleSources) {
+    const html = await readFile(join(distDir, `p${n}.html`), 'utf8');
+    for (const match of html.matchAll(codePreATextRe)) {
+      const [, tag, block] = match;
+      if (/<strong class="rfc-(must|should|may)"/.test(block)) {
+        throw new Error(`invariant: RFC-keyword annotation leaked into <${tag}> in p${n}.html`);
+      }
     }
   }
 
-  // 2. Every §3.5 locked slug appears exactly once in dist/index.html.
-  for (const slug of principleSlugs) {
+  // 2. Every §3.5 locked slug appears exactly once in its principle page.
+  for (let i = 0; i < principleSlugs.length; i++) {
+    const slug = principleSlugs[i];
+    const n = i + 1;
+    const html = await readFile(join(distDir, `p${n}.html`), 'utf8');
     const re = new RegExp(`id="${slug}"`, 'g');
-    const count = (indexHtml.match(re) ?? []).length;
+    const count = (html.match(re) ?? []).length;
     if (count !== 1) {
-      throw new Error(`invariant: locked slug ${slug} appears ${count}× in index.html (want 1)`);
+      throw new Error(`invariant: locked slug ${slug} appears ${count}× in p${n}.html (want 1)`);
     }
   }
 
-  // 3. sha256(dist/p<n>.md) === sha256(content/principles/p<n>-*.md).
+  // 3. Homepage links to every principle page.
+  const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
+  for (let n = 1; n <= principleSlugs.length; n++) {
+    if (!indexHtml.includes(`href="/p${n}"`)) {
+      throw new Error(`invariant: index.html missing link to /p${n}`);
+    }
+  }
+
+  // 4. sha256(dist/p<n>.md) === sha256(content/principles/p<n>-*.md).
   for (const { n, sourcePath } of principleSources) {
     const distBuf = await readFile(join(distDir, `p${n}.md`));
     const srcBuf = await readFile(sourcePath);
@@ -144,33 +239,43 @@ export async function build() {
     // 5. Markdown twin — byte-equivalent copy.
     await copyFile(file, join(DIST_DIR, `p${n}.md`));
 
-    principles.push({ n, slug, title, description, source, html, filename: file });
+    const shortDesc = extractDefinitionSentence(source);
+    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
   }
 
-  // 6. Intro + index page.
+  // 6. Homepage — hero + principle listing (links to /p{N} pages).
   const introPath = join(CONTENT_DIR, '_intro.md');
   const introSource = await readFile(introPath, 'utf8');
   const introTitle = extractTitle(introSource);
   const introSummary = extractIntroSummary(introSource);
   const introDescription = extractDescription(introSource);
-  const introHtml = await renderMarkdown(introSource);
+  const introLede = extractFirstParagraph(introSource);
 
-  const indexBody = [introHtml, ...principles.map((p) => p.html)].join('\n');
+  const indexBody = buildHomepageBody(introTitle, introLede, principles);
   await writeFile(
     join(DIST_DIR, 'index.html'),
     emitShell({
-      title: `${introTitle}`,
+      title: introTitle,
       description: introDescription,
       canonicalPath: '/',
       bodyHtml: indexBody,
       themeInitJs: themeInit,
       isIndex: true,
-      principles: principles.map((p) => ({ n: p.n, slug: p.slug, title: p.title })),
     }),
   );
 
-  const indexMd = [introSource, ...principles.map((p) => p.source)].join('\n');
-  await writeFile(join(DIST_DIR, 'index.md'), indexMd);
+  // index.md — trimmed to match the HTML homepage.
+  const indexMdLines = [
+    `# ${introTitle}`,
+    '',
+    introLede,
+    '',
+    '## Principles',
+    '',
+    ...principles.map((p) => `- [${p.title}](/p${p.n}) — ${p.shortDesc}`),
+    '',
+  ];
+  await writeFile(join(DIST_DIR, 'index.md'), indexMdLines.join('\n'));
 
   // 7. check.md + about.md.
   const subPages = [
@@ -202,6 +307,7 @@ export async function build() {
     introTitle,
     summary: introSummary,
     principles: principles.map((p) => ({ n: p.n, slug: p.slug, title: p.title })),
+    subPages: subPageData.map((s) => ({ name: s.name, title: s.title })),
   });
   await writeFile(join(DIST_DIR, 'llms.txt'), llmsIndex);
 
@@ -231,9 +337,7 @@ export async function build() {
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
   // 10. Invariant check — fails fast if any critical contract slips.
-  const indexHtml = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
   await runInvariantChecks(
-    indexHtml,
     DIST_DIR,
     LOCKED_SLUGS,
     principles.map((p) => ({ n: p.n, sourcePath: p.filename })),

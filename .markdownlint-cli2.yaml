@@ -1,5 +1,9 @@
 # Global markdownlint-cli2 configuration
+# Canonical version: 2026.04.15
 # Symlinked to ~/.markdownlint-cli2.yaml via stow
+#
+# Per-repo copies should preserve the `Canonical version` line above and bump it on resync;
+# a stale calver compared to this file is the signal that the per-repo copy has drifted.
 #
 # Documentation: https://github.com/DavidAnson/markdownlint-cli2
 # Rules: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
@@ -68,8 +72,11 @@ config:
   MD048:
     style: "backtick"
 
-  # MD060: Table column style - disable (not auto-fixable; wide existing tables)
-  # Local deviation from ~/.markdownlint-cli2.yaml; matches ~/.claude/.markdownlint-cli2.yaml behavior.
+  # MD060: Table column style - disabled. The site has wide hand-authored
+  # tables (changelog, principle matrix) where forcing column alignment
+  # would require widespread reflow with no readability win. This is a
+  # site-local deviation from the dotfiles canonical; it is NOT a hint
+  # to revisit other repos.
   MD060: false
 
 # Ignore patterns
@@ -77,6 +84,7 @@ ignores:
   - "node_modules/**"
   - "**/node_modules/**"
   - "vendor/**"
+  - "target/**"  # Rust build artifacts; harmless for non-Rust projects
   - ".git/**"
   - "*.min.md"
 

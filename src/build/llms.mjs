@@ -8,6 +8,10 @@
 //   - [P1 — Non-Interactive by Default](/p1.md)
 //   ...
 //
+//   ## Pages
+//   - [Check your CLI](/check.md)
+//   - [About this standard](/about.md)
+//
 // llms-full.txt layout (A5 format): each section is
 //   # <Title>
 //
@@ -41,9 +45,10 @@ export function extractTitle(markdown) {
  * @param {string} args.introTitle Title for the H1 (taken from _intro.md).
  * @param {string} args.summary Short paragraph summary (from _intro.md).
  * @param {Array<{ n: number, slug: string, title: string }>} args.principles
+ * @param {Array<{ name: string, title: string }>=} args.subPages
  * @param {string=} args.baseUrl
  */
-export function buildLlmsIndex({ introTitle, summary, principles, baseUrl }) {
+export function buildLlmsIndex({ introTitle, summary, principles, subPages = [], baseUrl }) {
   const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
 
   const lines = [];
@@ -55,6 +60,14 @@ export function buildLlmsIndex({ introTitle, summary, principles, baseUrl }) {
   lines.push('');
   for (const p of principles) {
     lines.push(`- [${p.title}](${base}/p${p.n}.md)`);
+  }
+  if (subPages.length > 0) {
+    lines.push('');
+    lines.push('## Pages');
+    lines.push('');
+    for (const s of subPages) {
+      lines.push(`- [${s.title}](${base}/${s.name}.md)`);
+    }
   }
   lines.push('');
   return lines.join('\n');

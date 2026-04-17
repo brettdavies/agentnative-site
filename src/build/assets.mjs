@@ -115,10 +115,117 @@ main .anchor-icon { vertical-align: -2px; }
 :root.js main pre .copy-button { display: inline-block; }
 .copy-button[data-copy-state='copied'] { background: var(--accent, #0058aa); color: #fff; border-color: var(--accent, #0058aa); }
 
-/* Mini-TOC on / */
-.mini-toc { margin: 0 0 2rem; padding: 1rem 1.25rem; background: var(--bg-code, #f0f4f7); border-radius: 0.5rem; }
-.mini-toc__heading { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-secondary, #6a7278); margin: 0 0 0.6rem; }
-.mini-toc__list { margin: 0; padding-left: 1.2rem; }
+/* ================================================================
+ * Homepage — hero + principle listing
+ * ================================================================ */
+
+/* Hero section — title + lede. The H1 breaks out of the default heading
+   scale to create a clear "this is the landing page" signal. */
+.hero {
+  padding-top: clamp(2rem, 5vw, 4rem);
+  padding-bottom: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.hero__title {
+  font-size: clamp(2.25rem, 3vw + 1.25rem, 3.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  font-weight: 650;
+  color: var(--fg-heading, #0f1419);
+  margin: 0;
+  animation: hero-enter 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.hero__lede {
+  font-size: clamp(1.05rem, 0.9rem + 0.45vw, 1.2rem);
+  line-height: 1.6;
+  color: var(--fg-secondary, #6a7278);
+  max-width: 62ch;
+  margin: 1.25rem 0 0;
+  animation: hero-enter 500ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
+}
+
+@keyframes hero-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Principle listing — numbered entries linking to /p{N} pages. */
+.principles-index {
+  padding-bottom: clamp(1.5rem, 3vw, 2.5rem);
+}
+
+.principles-index__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.principle-entry {
+  border-top: 1px solid var(--border-subtle, #e5e8eb);
+  animation: principle-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.principle-entry:last-child {
+  border-bottom: 1px solid var(--border-subtle, #e5e8eb);
+}
+
+.principle-entry:nth-child(1) { animation-delay: 120ms; }
+.principle-entry:nth-child(2) { animation-delay: 170ms; }
+.principle-entry:nth-child(3) { animation-delay: 220ms; }
+.principle-entry:nth-child(4) { animation-delay: 270ms; }
+.principle-entry:nth-child(5) { animation-delay: 320ms; }
+.principle-entry:nth-child(6) { animation-delay: 370ms; }
+.principle-entry:nth-child(7) { animation-delay: 420ms; }
+
+@keyframes principle-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.principle-entry__link {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 1.25rem;
+  row-gap: 0.15rem;
+  padding: 1.15rem 0.75rem;
+  margin: 0 -0.75rem;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 0.375rem;
+  transition: background-color 120ms ease;
+}
+
+.principle-entry__link:hover,
+.principle-entry__link:focus-visible {
+  background: var(--bg-raised, #f4f5f7);
+}
+
+.principle-entry__num {
+  grid-row: 1 / -1;
+  font-family: var(--font-mono, 'Monaspace Xenon', ui-monospace, monospace);
+  font-size: 1.4rem;
+  font-weight: 350;
+  color: var(--accent, #0058aa);
+  line-height: 1.15;
+  font-feature-settings: var(--ff-tabular, 'tnum' 1, 'kern' 1);
+  align-self: center;
+}
+
+.principle-entry__title {
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--fg-heading, #0f1419);
+  line-height: 1.35;
+}
+
+.principle-entry__desc {
+  font-size: 0.92rem;
+  color: var(--fg-muted, #525960);
+  line-height: 1.45;
+  max-width: 55ch;
+}
 
 /* Footer */
 .site-footer { border-top: 1px solid var(--border, #cfd5db); padding: 1.25rem clamp(1rem, 4vw, 2rem); color: var(--fg-secondary, #6a7278); font-size: 0.9rem; }

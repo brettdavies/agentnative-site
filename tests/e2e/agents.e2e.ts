@@ -70,7 +70,7 @@ test.describe('CN decision table — live Worker', () => {
 });
 
 test.describe('llms.txt + llms-full.txt — live', () => {
-  test('/llms.txt is the llmstxt.org shape', async ({ request }) => {
+  test('/llms.txt is the llmstxt.org shape with principles and pages', async ({ request }) => {
     const res = await request.get(`${BASE}/llms.txt`);
     expect(res.status()).toBe(200);
     const body = await res.text();
@@ -79,6 +79,10 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toContain('## Principles');
     const bullets = body.match(/^-\s+\[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
     expect(bullets.length).toBe(7);
+    // Sub-pages (check, about) present under ## Pages.
+    expect(body).toContain('## Pages');
+    const pageLinks = body.match(/^-\s+\[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
+    expect(pageLinks.length).toBe(2);
   });
 
   test('/llms-full.txt is served in a single fetch with A5 delimiters', async ({ request }) => {

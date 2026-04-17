@@ -5,12 +5,19 @@
 import { expect, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
 
-test.describe('cold HN land → principle scroll → theme dark → reload still dark', () => {
-  test('landing on / and scrolling to #p3 keeps the anchor in the URL', async ({ page }) => {
+test.describe('cold HN land → browse principles → theme dark → reload still dark', () => {
+  test('landing on / shows hero + principle listing with 7 entries', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('h1').first()).toBeVisible();
-    await page.locator('#p3-progressive-help-discovery').scrollIntoViewIfNeeded();
-    await expect(page.locator('#p3-progressive-help-discovery')).toBeInViewport();
+    await expect(page.locator('.hero__title')).toBeVisible();
+    const entries = page.locator('.principle-entry');
+    await expect(entries).toHaveCount(7);
+  });
+
+  test('clicking a principle entry navigates to its detail page', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('.principle-entry__link[href="/p3"]').click();
+    await expect(page).toHaveURL(/\/p3$/);
+    await expect(page.locator('h1')).toContainText('Progressive Help Discovery');
   });
 
   test('theme toggle persists across reload via localStorage', async ({ page }) => {
@@ -87,16 +94,17 @@ test.describe('code-copy + anchor-copy', () => {
   });
 });
 
-test.describe('mini-TOC', () => {
-  test('index page has a principles mini-TOC with 7 links', async ({ page }) => {
+test.describe('principle listing', () => {
+  test('index page has a principle listing with 7 entries', async ({ page }) => {
     await page.goto('/');
-    const links = page.locator('.mini-toc a');
-    await expect(links).toHaveCount(7);
+    const entries = page.locator('.principle-entry');
+    await expect(entries).toHaveCount(7);
   });
 
-  test('mini-TOC link scrolls to its principle', async ({ page }) => {
+  test('principle entry links to its detail page', async ({ page }) => {
     await page.goto('/');
-    await page.locator('.mini-toc a[href="#p5-safe-retries-mutation-boundaries"]').click();
-    await expect(page).toHaveURL(/#p5-safe-retries-mutation-boundaries$/);
+    await page.locator('.principle-entry__link[href="/p5"]').click();
+    await expect(page).toHaveURL(/\/p5$/);
+    await expect(page.locator('h1')).toContainText('Safe Retries');
   });
 });

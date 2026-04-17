@@ -42,11 +42,10 @@ async function sha256OfFile(path: string): Promise<string> {
 }
 
 describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked list)', () => {
-  test('every locked slug appears exactly once as an id in dist/index.html', async () => {
+  test('homepage links to every principle page', async () => {
     const html = await readFile(join(DIST, 'index.html'), 'utf8');
-    for (const slug of LOCKED_SLUGS) {
-      const matches = html.match(new RegExp(`id="${slug}"`, 'g')) ?? [];
-      expect({ slug, count: matches.length }).toEqual({ slug, count: 1 });
+    for (let n = 1; n <= 7; n++) {
+      expect(html).toContain(`href="/p${n}"`);
     }
   });
 
@@ -59,17 +58,19 @@ describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked li
     }
   });
 
-  test('no stray draft slugs (tier keyword in slug, uppercase, etc.)', async () => {
-    const html = await readFile(join(DIST, 'index.html'), 'utf8');
-    // Tier keywords in slug would indicate drift (§3.5 forbids this).
-    expect(html).not.toMatch(/id="p\d+-(must|should|may)-/i);
-    // Uppercase `P<n>-` in ids would fail browser anchor matching.
-    expect(html).not.toMatch(/id="P\d+-/);
+  test('no stray draft slugs in principle pages', async () => {
+    for (let n = 1; n <= 7; n++) {
+      const html = await readFile(join(DIST, `p${n}.html`), 'utf8');
+      // Tier keywords in slug would indicate drift (§3.5 forbids this).
+      expect(html).not.toMatch(/id="p\d+-(must|should|may)-/i);
+      // Uppercase `P<n>-` in ids would fail browser anchor matching.
+      expect(html).not.toMatch(/id="P\d+-/);
+    }
   });
 });
 
 describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
-  test('has H1, blockquote summary, ## Principles section, and 7 .md bullets', async () => {
+  test('has H1, blockquote summary, ## Principles with 7 .md bullets, and ## Pages', async () => {
     const llms = await readFile(join(DIST, 'llms.txt'), 'utf8');
     const lines = llms.split('\n');
 
@@ -90,6 +91,11 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
     // Bullets are in p1..p7 order.
     const orderedNumbers = principleLinks.map((l) => l.match(/\/p(\d+)\.md/)?.[1]).map((s) => (s ? Number(s) : 0));
     expect(orderedNumbers).toEqual([1, 2, 3, 4, 5, 6, 7]);
+
+    // Contains ## Pages with check and about sub-pages.
+    expect(llms).toContain('## Pages');
+    const pageLinks = llms.match(/^- \[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
+    expect(pageLinks.length).toBe(2);
   });
 });
 
