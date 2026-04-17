@@ -327,7 +327,8 @@ export async function build() {
     join(DIST_DIR, 'scorecards.html'),
     emitShell({
       title: 'ANC 100 — Agent-Native CLI Leaderboard',
-      description: 'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
+      description:
+        'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
       canonicalPath: '/scorecards',
       bodyHtml: leaderboardBody,
       themeInitJs: themeInit,

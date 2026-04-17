@@ -5,7 +5,7 @@
 // Pure functions: data-in, data-out. No side effects, no filesystem
 // writes. The build orchestrator (build.mjs) handles I/O.
 
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
 import { escHtml } from './util.mjs';
@@ -39,9 +39,7 @@ export async function loadRegistry(registryPath) {
       throw new Error('registry.yaml: every tool must have a "name" string');
     }
     if (!TOOL_NAME_RE.test(t.name)) {
-      throw new Error(
-        `registry.yaml: name "${t.name}" must match /^[a-z0-9-]+$/ (lowercase, alphanumeric, hyphens)`,
-      );
+      throw new Error(`registry.yaml: name "${t.name}" must match /^[a-z0-9-]+$/ (lowercase, alphanumeric, hyphens)`);
     }
     if (t.name === 'scorecards') {
       throw new Error('registry.yaml: "scorecards" is reserved — slug collision with the leaderboard page');
@@ -376,7 +374,9 @@ export function buildScorecardBody(tool, scorecard, topIssues, principleScore) {
       .map((issue) => {
         const pNum = groupToPrincipleNum(issue.group);
         const statusClass = issue.status === 'fail' ? 'issue--fail' : 'issue--warn';
-        const groupLink = pNum ? `<a href="/p${pNum}">${escHtml(PRINCIPLE_NAMES[issue.group] || issue.group)}</a>` : escHtml(issue.group);
+        const groupLink = pNum
+          ? `<a href="/p${pNum}">${escHtml(PRINCIPLE_NAMES[issue.group] || issue.group)}</a>`
+          : escHtml(issue.group);
         const evidence = issue.evidence ? `<span class="issue__evidence">${escHtml(issue.evidence)}</span>` : '';
         return `    <li class="issue ${statusClass}">
       <span class="issue__status">${escHtml(issue.status.toUpperCase())}</span>
@@ -539,9 +539,7 @@ export function buildScorecardMarkdown(tool, scorecard, topIssues, principleScor
   for (const check of scorecard.results) {
     const pNum = groupToPrincipleNum(check.group);
     const groupLabel = pNum ? `[${check.group}](/p${pNum})` : check.group;
-    lines.push(
-      `| ${check.status.toUpperCase()} | ${check.label} | ${groupLabel} | ${check.evidence || ''} |`,
-    );
+    lines.push(`| ${check.status.toUpperCase()} | ${check.label} | ${groupLabel} | ${check.evidence || ''} |`);
   }
   lines.push('');
 
