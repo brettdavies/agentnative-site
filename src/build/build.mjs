@@ -10,9 +10,11 @@
 //   6. Build homepage — hero (title + lede) + principle listing (links to
 //      /p{N} pages). No inline principle content on the index page.
 //   7. Render check.md + about.md into sub-pages.
-//   8. Emit llms.txt + llms-full.txt (A5 format).
-//   9. Emit sitemap.xml.
-//  10. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
+//   8. Scorecard pages — leaderboard + per-tool pages from registry.yaml
+//      + scorecards/*.json.
+//   9. Emit llms.txt + llms-full.txt (A5 format).
+//  10. Emit sitemap.xml.
+//  11. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
 //      <a>, locked anchors present on principle pages, md sha256 matches.
 //
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
@@ -25,6 +27,17 @@ import { fileURLToPath } from 'node:url';
 import { copyAssets } from './assets.mjs';
 import { buildLlmsFull, buildLlmsIndex, extractIntroSummary, extractTitle } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
+import {
+  buildLeaderboardBody,
+  buildLeaderboardMarkdown,
+  buildScorecardBody,
+  buildScorecardMarkdown,
+  computeLeaderboard,
+  computePrincipleScore,
+  extractTopIssues,
+  loadRegistry,
+  loadScorecards,
+} from './scorecards.mjs';
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { escHtml, parseFilename, sortedGlob } from './util.mjs';
@@ -33,6 +46,8 @@ const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
 const PRINCIPLES_DIR = join(CONTENT_DIR, 'principles');
 const DIST_DIR = join(REPO_ROOT, 'dist');
+const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
+const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',
@@ -293,7 +308,60 @@ export async function build() {
     subPageData.push({ name, source, title });
   }
 
-  // 8. llms.txt + llms-full.txt.
+  // 8. Scorecard pages — leaderboard + per-tool pages.
+  const registry = await loadRegistry(REGISTRY_PATH);
+  const toolsWithScorecards = await loadScorecards(SCORECARDS_DIR, registry);
+  const leaderboard = computeLeaderboard(toolsWithScorecards);
+
+  const methodologyHtml = `  <p>Each tool is scored by running <code>anc check</code> — the open-source agent-native
+  CLI checker. Checks are grouped by principle (P1–P7). The <strong>score</strong> is the
+  pass rate: <code>pass / (pass + warn + fail)</code>. Skipped and errored checks are
+  excluded from the denominator.</p>
+  <p>The <strong>principles met</strong> column counts how many of the seven principles
+  have all checks passing (no failures or warnings in that group).</p>
+  <p>To run the same checks locally:</p>
+  <pre><code>cargo install agentnative &amp;&amp; anc check .</code></pre>`;
+
+  const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
+  await writeFile(
+    join(DIST_DIR, 'scorecards.html'),
+    emitShell({
+      title: 'ANC 100 — Agent-Native CLI Leaderboard',
+      description: 'Automated agent-readiness scores for real CLI tools, scored against the seven agent-native principles.',
+      canonicalPath: '/scorecards',
+      bodyHtml: leaderboardBody,
+      themeInitJs: themeInit,
+    }),
+  );
+  await writeFile(join(DIST_DIR, 'scorecards.md'), buildLeaderboardMarkdown(leaderboard));
+
+  // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
+  await ensureDir(join(DIST_DIR, 'score'));
+  const scorecardPaths = [];
+  for (const entry of leaderboard) {
+    const { tool, scorecard } = entry;
+    const topIssues = extractTopIssues(scorecard);
+    const principleScore = computePrincipleScore(scorecard);
+
+    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore);
+    await writeFile(
+      join(DIST_DIR, 'score', `${tool.name}.html`),
+      emitShell({
+        title: `${tool.name} — Agent-Native Scorecard`,
+        description: `Agent-readiness scorecard for ${tool.name}: ${tool.description}`,
+        canonicalPath: `/score/${tool.name}`,
+        bodyHtml: scorecardBody,
+        themeInitJs: themeInit,
+      }),
+    );
+    await writeFile(
+      join(DIST_DIR, 'score', `${tool.name}.md`),
+      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore),
+    );
+    scorecardPaths.push(`/score/${tool.name}`);
+  }
+
+  // 9. llms.txt + llms-full.txt (includes scorecard section).
   const llmsIndex = buildLlmsIndex({
     introTitle,
     summary: introSummary,
@@ -321,24 +389,26 @@ export async function build() {
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
 
-  // 9. Sitemap.
+  // 10. Sitemap (includes scorecard paths).
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
-  // 10. Invariant check — fails fast if any critical contract slips.
+  // 11. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
     DIST_DIR,
     LOCKED_SLUGS,
     principles.map((p) => ({ n: p.n, sourcePath: p.filename })),
   );
 
+  const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
   return {
     principles: principles.length,
-    htmlPages: principles.length + 3,
-    mdPages: principles.length + 3,
+    htmlPages: principles.length + 3 + scorecardPageCount,
+    mdPages: principles.length + 3 + scorecardPageCount,
     extras: 3,
+    scorecardPages: scorecardPageCount,
   };
 }
 
