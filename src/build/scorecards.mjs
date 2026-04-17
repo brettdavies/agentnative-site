@@ -261,7 +261,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
         <td class="lb-rank">${entry.rank}</td>
         <td class="lb-tool"><a href="/score/${escHtml(entry.tool.name)}">${escHtml(entry.tool.name)}</a></td>
         <td class="lb-desc">${escHtml(entry.tool.description)}</td>
-        ${tierBadge(entry.tool.tier)}
+        <td class="lb-tier">${tierBadge(entry.tool.tier)}</td>
         <td class="lb-lang">${escHtml(entry.tool.language)}</td>
         ${scoreCell(entry)}
         ${principleCell(entry)}
