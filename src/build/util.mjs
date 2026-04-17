@@ -1,4 +1,4 @@
-// Small build helpers: sorted principle glob + filename parsing.
+// Small build helpers: sorted principle glob, filename parsing, HTML escaping.
 // Kept separate from build.mjs so tests/build.test.ts can import directly.
 
 import { readdir } from 'node:fs/promises';
@@ -39,4 +39,16 @@ export function parseFilename(filename) {
     throw new Error(`parseFilename: "${base}" does not match p<n>-<slug>.md`);
   }
   return { n: Number(match[1]), slug: match[2] };
+}
+
+/**
+ * Escape HTML special characters in a string.
+ * @param {string} s
+ * @returns {string}
+ */
+export function escHtml(s) {
+  return String(s).replace(
+    /[<>&"']/g,
+    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c],
+  );
 }

@@ -1,0 +1,129 @@
+# ANC 100 — Agent-Native CLI Tool Registry
+#
+# Single source of truth for tool metadata. The build pipeline reads this
+# file to generate the leaderboard and per-tool scorecard pages. Tool names
+# must match /^[a-z0-9-]+$/ — they become URL slugs (/score/<name>) and
+# scorecard filenames (scorecards/<name>.json).
+#
+# Fields:
+#   name        — URL-safe identifier (lowercase, alphanumeric, hyphens)
+#   repo        — GitHub owner/repo
+#   binary      — executable name resolved from PATH
+#   language    — primary implementation language
+#   tier        — workhorse | agent | notable
+#   creator     — person or org attribution
+#   install     — package manager install command
+#   description — one-line summary
+#   version     — version string scored against
+#   scored_at   — ISO 8601 date of last scoring run
+
+tools:
+  - name: gh
+    repo: cli/cli
+    binary: gh
+    language: Go
+    tier: workhorse
+    creator: GitHub
+    install: brew install gh
+    description: GitHub's official command-line tool
+    version: "2.74.0"
+    scored_at: "2026-04-17"
+
+  - name: ripgrep
+    repo: BurntSushi/ripgrep
+    binary: rg
+    language: Rust
+    tier: workhorse
+    creator: Andrew Gallant
+    install: brew install ripgrep
+    description: Recursively search directories for a regex pattern
+    version: "14.1.1"
+    scored_at: "2026-04-17"
+
+  - name: fd
+    repo: sharkdp/fd
+    binary: fd
+    language: Rust
+    tier: workhorse
+    creator: David Peter
+    install: brew install fd
+    description: A simple, fast, and user-friendly alternative to find
+    version: "10.2.0"
+    scored_at: "2026-04-17"
+
+  - name: jq
+    repo: jqlang/jq
+    binary: jq
+    language: C
+    tier: workhorse
+    creator: Stephen Dolan
+    install: brew install jq
+    description: Command-line JSON processor
+    version: "1.7.1"
+    scored_at: "2026-04-17"
+
+  - name: bat
+    repo: sharkdp/bat
+    binary: bat
+    language: Rust
+    tier: workhorse
+    creator: David Peter
+    install: brew install bat
+    description: A cat clone with syntax highlighting and Git integration
+    version: "0.25.0"
+    scored_at: "2026-04-17"
+
+  - name: claude-code
+    repo: anthropics/claude-code
+    binary: claude
+    language: TypeScript
+    tier: agent
+    creator: Anthropic
+    install: npm install -g @anthropic-ai/claude-code
+    description: Anthropic's agentic coding tool for the terminal
+    version: "1.0.33"
+    scored_at: "2026-04-17"
+
+  - name: aider
+    repo: Aider-AI/aider
+    binary: aider
+    language: Python
+    tier: agent
+    creator: Paul Gauthier
+    install: pipx install aider-chat
+    description: AI pair programming in your terminal
+    version: "0.87.0"
+    scored_at: "2026-04-17"
+
+  - name: llm
+    repo: simonw/llm
+    binary: llm
+    language: Python
+    tier: notable
+    creator: Simon Willison
+    install: brew install llm
+    description: Access large language models from the command-line
+    version: "0.26.1"
+    scored_at: "2026-04-17"
+
+  - name: anc
+    repo: brettdavies/agentnative
+    binary: anc
+    language: Rust
+    tier: notable
+    creator: Brett Davies
+    install: brew install brettdavies/tap/agentnative
+    description: Check CLI tools against the agent-native standard
+    version: "0.1.0"
+    scored_at: "2026-04-17"
+
+  - name: dust
+    repo: bootandy/dust
+    binary: dust
+    language: Rust
+    tier: notable
+    creator: bootandy
+    install: brew install dust
+    description: A more intuitive version of du in Rust
+    version: "1.1.2"
+    scored_at: "2026-04-17"

@@ -5,6 +5,8 @@
 // Inputs are plain data (no filesystem). assets.mjs reads the inline
 // theme-init script from disk and passes it in.
 
+import { escHtml } from './util.mjs';
+
 const SITE_NAME = 'agentnative.dev';
 const SITE_TAGLINE = 'The agent-native CLI standard';
 
@@ -46,19 +48,7 @@ const AI_PROVIDERS = [
   },
 ];
 
-function esc(s) {
-  return String(s).replace(
-    /[<>&"']/g,
-    (c) =>
-      ({
-        '<': '&lt;',
-        '>': '&gt;',
-        '&': '&amp;',
-        '"': '&quot;',
-        "'": '&#39;',
-      })[c],
-  );
-}
+const esc = escHtml;
 
 /**
  * @param {object} args

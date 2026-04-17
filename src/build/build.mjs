@@ -27,7 +27,7 @@ import { buildLlmsFull, buildLlmsIndex, extractIntroSummary, extractTitle } from
 import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
-import { parseFilename, sortedGlob } from './util.mjs';
+import { escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -75,13 +75,6 @@ function extractDescription(markdown, fallback = '') {
 
 function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
-}
-
-function escHtml(s) {
-  return String(s).replace(
-    /[<>&"']/g,
-    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c],
-  );
 }
 
 /**

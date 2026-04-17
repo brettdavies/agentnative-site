@@ -1,0 +1,76 @@
+{
+  "results": [
+    {
+      "id": "p3-help",
+      "label": "Help flag produces useful output",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null
+    },
+    {
+      "id": "p3-version",
+      "label": "Version flag works",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null
+    },
+    {
+      "id": "p2-json-output",
+      "label": "Structured output support",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "fail",
+      "evidence": "no --output/--format flag detected"
+    },
+    {
+      "id": "p4-bad-args",
+      "label": "Rejects invalid arguments",
+      "group": "P4",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null
+    },
+    {
+      "id": "p7-quiet",
+      "label": "Quiet mode available",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no --quiet/-q flag detected in --help output"
+    },
+    {
+      "id": "p6-sigpipe",
+      "label": "Handles SIGPIPE gracefully",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null
+    },
+    {
+      "id": "p1-non-interactive",
+      "label": "Non-interactive by default",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "fail",
+      "evidence": "process launched an interactive session without --no-input flag"
+    },
+    {
+      "id": "p6-no-color-behavioral",
+      "label": "Respects NO_COLOR",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null
+    }
+  ],
+  "summary": {
+    "total": 8,
+    "pass": 5,
+    "warn": 1,
+    "fail": 2,
+    "skip": 0,
+    "error": 0
+  }
+}
