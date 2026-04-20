@@ -7,7 +7,7 @@
 # ]
 # ///
 """
-Generate the og-image.png social card for agentnative.dev.
+Generate the og-image.png social card for anc.dev.
 
 Invoked by (and mirrors the brief in) docs/DESIGN.md §4.13. Gemini 3 Pro's
 image model does the rendering; this script drives it, resizes the
@@ -33,7 +33,7 @@ OG_W, OG_H = 1200, 630
 
 PROMPT = """\
 Generate a 1200x630 social card (OG/Twitter summary_large_image) for a
-technical specification website named agentnative.dev. Placeholder quality
+technical specification website named anc.dev. Placeholder quality
 is fine; prioritize legible text and clean composition over decoration.
 
 COMPOSITION

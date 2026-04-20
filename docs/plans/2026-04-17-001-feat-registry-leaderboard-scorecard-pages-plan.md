@@ -10,7 +10,7 @@ origin: docs/brainstorms/anc-100-audit-requirements.md
 
 ## Overview
 
-Add the "ANC 100" proof layer to agentnative.dev: a machine-readable tool registry, pre-computed scorecard JSON for ~100
+Add the "ANC 100" proof layer to anc.dev: a machine-readable tool registry, pre-computed scorecard JSON for ~100
 CLI tools, a `/scorecards` leaderboard page, and per-tool scorecard pages at `/score/<tool-name>`. All pages follow the
 existing build-time static generation pattern — no runtime data fetches, no Worker changes, no new bindings. The visual
 design of the new pages will be finalized via the `/impeccable` skill during implementation.

@@ -92,7 +92,7 @@ describe('isStagingHost', () => {
   });
 
   test('does not match production domain', () => {
-    expect(isStagingHost('agentnative.dev')).toBe(false);
+    expect(isStagingHost('anc.dev')).toBe(false);
     expect(isStagingHost('localhost:8787')).toBe(false);
   });
 });
@@ -104,7 +104,7 @@ describe('isStagingHost', () => {
 describe('applyHeaders — HTML branch', () => {
   test('/p3 HTML: Link rel=alternate + X-Llms-Txt + short cache', () => {
     const res = applyHeaders(new Response('html'), {
-      request: req('https://agentnative.dev/p3'),
+      request: req('https://anc.dev/p3'),
       servedMarkdown: false,
       pathname: '/p3',
     });
@@ -116,7 +116,7 @@ describe('applyHeaders — HTML branch', () => {
 
   test('/ HTML: Link points to /index.md', () => {
     const res = applyHeaders(new Response('html'), {
-      request: req('https://agentnative.dev/'),
+      request: req('https://anc.dev/'),
       servedMarkdown: false,
       pathname: '/',
     });
@@ -127,7 +127,7 @@ describe('applyHeaders — HTML branch', () => {
 describe('applyHeaders — markdown branch', () => {
   test('/p3.md: Content-Type + X-Robots-Tag noindex + short cache', () => {
     const res = applyHeaders(new Response('md'), {
-      request: req('https://agentnative.dev/p3.md'),
+      request: req('https://anc.dev/p3.md'),
       servedMarkdown: true,
       pathname: '/p3.md',
     });
@@ -140,7 +140,7 @@ describe('applyHeaders — markdown branch', () => {
 describe('applyHeaders — hashed assets', () => {
   test('/fonts/* gets immutable cache', () => {
     const res = applyHeaders(new Response('woff2'), {
-      request: req('https://agentnative.dev/fonts/uncut-sans-variable.woff2'),
+      request: req('https://anc.dev/fonts/uncut-sans-variable.woff2'),
       servedMarkdown: false,
       pathname: '/fonts/uncut-sans-variable.woff2',
     });
@@ -149,7 +149,7 @@ describe('applyHeaders — hashed assets', () => {
 
   test('/og-image.png gets immutable cache', () => {
     const res = applyHeaders(new Response('png'), {
-      request: req('https://agentnative.dev/og-image.png'),
+      request: req('https://anc.dev/og-image.png'),
       servedMarkdown: false,
       pathname: '/og-image.png',
     });
@@ -181,7 +181,7 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
 
   test('production host does NOT get noindex on HTML', () => {
     const res = applyHeaders(new Response('html'), {
-      request: req('https://agentnative.dev/p3'),
+      request: req('https://anc.dev/p3'),
       servedMarkdown: false,
       pathname: '/p3',
     });
@@ -196,14 +196,14 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
 describe('worker.fetch — CN rewrite + asset lookup', () => {
   test('/p3 no Accept → fetches /p3 (HTML, auto-trailing-slash resolves to p3.html)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/p3'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
     expect(res.headers.get('Link')).toContain('</p3.md>');
   });
 
   test('/p3 with Accept: text/markdown → fetches /p3.md (rewritten)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/p3', 'text/markdown'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', 'text/markdown'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3.md');
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
@@ -211,32 +211,32 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 
   test('/p3.md any Accept → fetches /p3.md (suffix wins)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/p3.md', 'text/html'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3.md', 'text/html'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3.md');
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
   });
 
   test('/ with Accept: text/markdown → fetches /index.md', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/', 'text/markdown'), env);
+    const res = await worker.fetch(req('https://anc.dev/', 'text/markdown'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/index.md');
   });
 
   test('/p3 with Accept: text/html,text/markdown;q=0.9 → HTML branch', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/p3', 'text/html,text/markdown;q=0.9'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', 'text/html,text/markdown;q=0.9'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 
   test('/p3 with */* → HTML branch', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/p3', '*/*'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', '*/*'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 
   test('/p3 with malformed Accept → HTML branch', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative.dev/p3', 'garbage,,,;;;'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', 'garbage,,,;;;'), env);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 

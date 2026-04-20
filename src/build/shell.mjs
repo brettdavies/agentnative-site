@@ -7,13 +7,13 @@
 
 import { escHtml } from './util.mjs';
 
-const SITE_NAME = 'agentnative.dev';
+const SITE_NAME = 'anc.dev';
 const SITE_TAGLINE = 'The agent-native CLI standard';
 
-const DEFAULT_BASE = 'https://agentnative.dev';
+const DEFAULT_BASE = 'https://anc.dev';
 
 const AI_SUMMARY_PROMPT =
-  'Summarize the agent-native CLI standard from https://agentnative.dev/llms-full.txt — what are the seven principles and why do they matter for AI agents using CLI tools?';
+  'Summarize the agent-native CLI standard from https://anc.dev/llms-full.txt — what are the seven principles and why do they matter for AI agents using CLI tools?';
 
 const AI_PROVIDERS = [
   {

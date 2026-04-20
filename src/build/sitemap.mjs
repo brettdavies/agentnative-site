@@ -3,13 +3,13 @@
 // base URL lives here; override via PUBLIC_BASE_URL env during build if
 // staging needs a different origin.
 
-const DEFAULT_BASE = 'https://agentnative.dev';
+const DEFAULT_BASE = 'https://anc.dev';
 
 /**
  * @param {object} args
  * @param {number[]} args.principleNumbers e.g. [1, 2, 3, 4, 5, 6, 7]
  * @param {string[]=} args.extraPaths additional canonical paths to include
- * @param {string=} args.baseUrl defaults to process.env.PUBLIC_BASE_URL or https://agentnative.dev
+ * @param {string=} args.baseUrl defaults to process.env.PUBLIC_BASE_URL or https://anc.dev
  * @param {string=} args.lastmod ISO-8601 date string; defaults to today UTC.
  * @returns {string} XML body.
  */

@@ -1,6 +1,6 @@
 # VOICE.md — agentnative spec site
 
-You are writing for **the agent-native CLI standard**, a specification published at `agentnative.dev`. The site has two
+You are writing for **the agent-native CLI standard**, a specification published at `anc.dev`. The site has two
 first-class audiences: developers evaluating the standard (often arriving from a Show HN post) and AI agents consuming
 the spec programmatically. Copy runs on the principle-page index, `/check`, `/about`, the header wordmark, the footer
 colophon, the OG social card, and any future surface. Voice is third-person — the site speaks as a standard, not a

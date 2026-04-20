@@ -350,8 +350,8 @@ Canonical-Markdown: <md-url>
 ---
 ```
 
-Example: the `p3` section opens with `# Progressive help discovery`, then `Source: https://agentnative.dev/p3`,
-`Canonical-Markdown: https://agentnative.dev/p3.md`, a blank line, the file body, a blank line, `---`. Agents consuming
+Example: the `p3` section opens with `# Progressive help discovery`, then `Source: https://anc.dev/p3`,
+`Canonical-Markdown: https://anc.dev/p3.md`, a blank line, the file body, a blank line, `---`. Agents consuming
 `llms-full.txt` can split on `^---$` to recover individual sections and resolve per-section citations to either the HTML
 or the markdown twin.
 
