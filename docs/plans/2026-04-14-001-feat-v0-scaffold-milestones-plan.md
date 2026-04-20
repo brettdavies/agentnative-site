@@ -1,7 +1,7 @@
 ---
 title: agentnative-site v0 scaffold — ordered milestone commits
 type: feat
-status: active
+status: complete
 date: 2026-04-14
 origin: /home/brett/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md
 ---
@@ -366,3 +366,22 @@ Run `/ce-work` against this plan. Start at M1 and proceed sequentially until M2/
 M5, then M6, then M8. Each milestone is one commit.
 
 Do NOT start /ce-work from this file — Brett reviews the milestone list first.
+
+---
+
+## Completion Notes (2026-04-20)
+
+All 8 milestones shipped. The site is live on `anc.dev` (production custom domain) with staging at
+`agentnative-site.workers.dev`.
+
+**Post-plan changes of note:**
+
+- Production domain attached as `anc.dev` (not `agentnative.dev`/`.io`/`.org` — the plan left this open).
+- `wrangler.jsonc` uses `routes: [{ "pattern": "anc.dev", "custom_domain": true }]` for production;
+  staging environment uses `workers.dev` subdomain only.
+- Staging/production deploy split via wrangler environments (`dbe3908`).
+- Homepage redesigned as hero + principle listing (`b3a855c`).
+- All hardcoded `agentnative.dev` references replaced with `anc.dev` (`cc3cc57`).
+- `docs/TODOS.md` migrated to `.context/compound-engineering/todos/` and deleted.
+
+**Remaining post-v0 work** tracked in `.context/compound-engineering/todos/` (001–011).

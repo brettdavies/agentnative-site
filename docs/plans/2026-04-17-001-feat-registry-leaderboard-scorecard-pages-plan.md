@@ -1,7 +1,7 @@
 ---
 title: "feat: registry + leaderboard + scorecard pages"
 type: feat
-status: active
+status: complete
 date: 2026-04-17
 origin: docs/brainstorms/anc-100-audit-requirements.md
 ---
@@ -183,7 +183,7 @@ dist/
 
 ## Implementation Units
 
-- [ ] **Unit 1: Tool registry YAML schema + seed file**
+- [x] **Unit 1: Tool registry YAML schema + seed file**
 
 **Goal:** Create the registry file that maps tool names to metadata. Seed with 5-10 representative tools across all
 three tiers for build pipeline development.
@@ -221,7 +221,7 @@ three tiers for build pipeline development.
 
 ---
 
-- [ ] **Unit 2: Seed scorecard JSON files**
+- [x] **Unit 2: Seed scorecard JSON files**
 
 **Goal:** Commit sample scorecard JSON files matching the `anc check --output json` format. These are the build-time
 data inputs for the leaderboard and scorecard pages.
@@ -252,7 +252,7 @@ data inputs for the leaderboard and scorecard pages.
 
 ---
 
-- [ ] **Unit 3: Build module — `src/build/scorecards.mjs`**
+- [x] **Unit 3: Build module — `src/build/scorecards.mjs`**
 
 **Goal:** New build module that reads the registry + scorecard JSON and produces data structures and HTML builders for
 page generation. Pure functions for data loading/scoring; HTML builder functions for leaderboard and scorecard pages.
@@ -314,7 +314,7 @@ page generation. Pure functions for data loading/scoring; HTML builder functions
 
 ---
 
-- [ ] **Unit 4: Build pipeline — leaderboard page generation**
+- [x] **Unit 4: Build pipeline — leaderboard page generation**
 
 **Goal:** Integrate the scorecards module into `build.mjs` to generate the `/scorecards` leaderboard page (HTML + MD
 twin).
@@ -366,7 +366,7 @@ twin).
 
 ---
 
-- [ ] **Unit 5: Build pipeline — per-tool scorecard page generation**
+- [x] **Unit 5: Build pipeline — per-tool scorecard page generation**
 
 **Goal:** Generate individual scorecard pages at `/score/<tool-name>` for every scored tool in the registry.
 
@@ -422,7 +422,7 @@ dependency — both extend the same build step in `build.mjs` and must not confl
 
 ---
 
-- [ ] **Unit 6: Extend llms.txt, llms-full.txt, and sitemap**
+- [x] **Unit 6: Extend llms.txt, llms-full.txt, and sitemap**
 
 **Goal:** Include scorecard data in the agent-discoverable surfaces (llms.txt, llms-full.txt, sitemap.xml).
 
@@ -469,7 +469,7 @@ dependency — both extend the same build step in `build.mjs` and must not confl
 
 ---
 
-- [ ] **Unit 7: Update nav + add leaderboard to site navigation**
+- [x] **Unit 7: Update nav + add leaderboard to site navigation**
 
 **Goal:** Add the leaderboard page to the site's primary navigation so visitors can discover it.
 
@@ -498,7 +498,7 @@ dependency — both extend the same build step in `build.mjs` and must not confl
 
 ---
 
-- [ ] **Unit 8: Update regression tests**
+- [x] **Unit 8: Update regression tests**
 
 **Goal:** Update locked regression assertions to account for the new scorecard pages.
 
@@ -535,7 +535,7 @@ dependency — both extend the same build step in `build.mjs` and must not confl
 
 ---
 
-- [ ] **Unit 9: Visual design via `/impeccable`**
+- [x] **Unit 9: Visual design via `/impeccable`**
 
 **Goal:** Finalize the visual design of the leaderboard table and per-tool scorecard pages using the `/impeccable`
 skill.
@@ -608,3 +608,35 @@ step, not the first.
 - Regression tests: `tests/regression.test.ts`
 - `anc` scorecard schema: `~/dev/agentnative/src/scorecard.rs`
 - Institutional learning: `docs/solutions/architecture-patterns/agent-native-documentation-surface-2026-04-13.md`
+
+---
+
+## Completion Notes (2026-04-20)
+
+All 9 implementation units shipped across commits `49d3376` through `391e734` on `feat/registry-schema-and-expansion`
+(PR #21 into `dev`).
+
+**Final state:**
+
+- 96 tools in `registry.yaml` across three tiers (Workhorse/Agent/Notable)
+- 10 tools scored with committed JSON in `scorecards/`; remaining 86 listed as "not yet scored"
+- Leaderboard at `/scorecards` with client-side tier filtering and column sorting
+- Per-tool scorecard pages at `/score/<tool-name>` (96 tools × HTML + MD = 192 files)
+- `llms.txt`, `llms-full.txt`, and `sitemap.xml` extended with scorecard data
+- Regression tests updated (78 tests, 243 assertions, all passing)
+- Visual design pass completed via `/impeccable`
+
+**Deviations from plan:**
+
+- Registry expanded well beyond the initial "~100 tools" target — 96 tools in the seed, with versioned scorecard
+  filenames and expanded schema fields (`repo`, `url`, `version`, `scored_at`)
+- Unit 7 (nav link) correctly deferred to Plan 2 as specified
+- `agentnative.dev` references in build code replaced with `anc.dev` (`cc3cc57`) — the plan predates the domain
+  decision
+
+**What Plan 2 inherits:**
+
+- The static leaderboard and per-tool pages as the pre-computed cache layer
+- The registry schema as the tool metadata source of truth
+- The `scorecards.mjs` build module as the data loading and rendering layer
+- Nav link addition (Unit 7, deferred)
