@@ -49,10 +49,13 @@ export async function loadRegistry(registryPath) {
     }
     seen.add(t.name);
 
-    for (const field of ['repo', 'binary', 'language', 'tier', 'creator', 'description']) {
+    for (const field of ['binary', 'language', 'tier', 'creator', 'description']) {
       if (!t[field]) {
         throw new Error(`registry.yaml: tool "${t.name}" missing required field "${field}"`);
       }
+    }
+    if (!t.repo && !t.url) {
+      throw new Error(`registry.yaml: tool "${t.name}" must have at least one of "repo" (GitHub owner/repo) or "url" (canonical project URL)`);
     }
     if (!['workhorse', 'agent', 'notable'].includes(t.tier)) {
       throw new Error(`registry.yaml: tool "${t.name}" has invalid tier "${t.tier}"`);
@@ -63,8 +66,27 @@ export async function loadRegistry(registryPath) {
 }
 
 /**
- * For each registry entry, read scorecards/<name>.json if it exists.
- * Tools without a scorecard file are included but marked unscored.
+ * Construct the scorecard filename for a tool.
+ *
+ * Convention (documented in registry.yaml header):
+ *   Behavioral + project: {name}-v{version}.json
+ *   Source checks (future): {name}-src-{YYYYMMDD}-{branch}-{commit7}.json
+ *
+ * Tools without a `version` field in the registry are definitionally
+ * unscored — no filename can be constructed.
+ *
+ * @param {object} tool — registry entry
+ * @returns {string | null}
+ */
+export function scorecardFilename(tool) {
+  if (!tool.version) return null;
+  return `${tool.name}-v${tool.version}.json`;
+}
+
+/**
+ * For each registry entry, read scorecards/{name}-v{version}.json if it
+ * exists. Tools without a version or without a matching scorecard file
+ * are included but marked unscored.
  *
  * @param {string} scorecardsDir — absolute path to scorecards/
  * @param {Array<object>} registry — from loadRegistry()
@@ -80,8 +102,8 @@ export async function loadScorecards(scorecardsDir, registry) {
 
   const result = [];
   for (const tool of registry) {
-    const filename = `${tool.name}.json`;
-    if (files.has(filename)) {
+    const filename = scorecardFilename(tool);
+    if (filename && files.has(filename)) {
       const raw = await readFile(join(scorecardsDir, filename), 'utf8');
       result.push({ tool, scorecard: JSON.parse(raw) });
     } else {
@@ -337,7 +359,7 @@ export function buildScorecardBody(tool, scorecard, topIssues, principleScore) {
   <div class="scorecard-header__meta">
     <span class="tier-badge tier-badge--${escHtml(tool.tier)}">${escHtml(tool.tier)}</span>
     <span>${escHtml(tool.language)}</span>
-    <a href="https://github.com/${escHtml(tool.repo)}">${escHtml(tool.repo)}</a>
+    ${tool.repo ? `<a href="https://github.com/${escHtml(tool.repo)}">${escHtml(tool.repo)}</a>` : tool.url ? `<a href="${escHtml(tool.url)}">${escHtml(tool.url)}</a>` : ''}
   </div>
 </header>
 `;
@@ -544,7 +566,11 @@ export function buildScorecardMarkdown(tool, scorecard, topIssues, principleScor
   lines.push('');
 
   // Metadata
-  lines.push(`**Repo:** [${tool.repo}](https://github.com/${tool.repo})`);
+  if (tool.repo) {
+    lines.push(`**Repo:** [${tool.repo}](https://github.com/${tool.repo})`);
+  } else if (tool.url) {
+    lines.push(`**Source:** [${tool.url}](${tool.url})`);
+  }
   lines.push(`**Language:** ${tool.language}`);
   lines.push(`**Version scored:** ${tool.version || '—'}`);
   lines.push(`**Install:** \`${tool.install || '—'}\``);
