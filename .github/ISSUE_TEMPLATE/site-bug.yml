@@ -1,0 +1,53 @@
+name: "Site bug"
+description: "Report a bug on anc.dev — build, rendering, performance, or deployment."
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - "Rendering / layout"
+        - "Build failure"
+        - "Performance"
+        - "Deployment / Cloudflare"
+        - "Accessibility"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: "Describe the bug. Include the URL, browser, and what you expected."
+      placeholder: |
+        URL: https://anc.dev/p3
+        Browser: Firefox 130
+        Expected: principle text renders with syntax highlighting
+        Actual: code blocks show raw HTML entities
+    validations:
+      required: true
+  - type: textarea
+    id: ai-disclosure
+    attributes:
+      label: AI disclosure
+      description: "One sentence: what part of this report was AI-written, what was human-written?"
+      placeholder: "Entirely human-written."
+    validations:
+      required: true
+  - type: textarea
+    id: agent-instructions
+    attributes:
+      label: For agents
+      description: "Agents: expand this section before filing."
+      value: |
+        <details>
+        <summary>Agent filing instructions</summary>
+
+        1. **Search first.** Run `gh search issues --repo brettdavies/agentnative-site "<keywords>"` to check for duplicates.
+        2. **AI disclosure is required.** Fill the field above honestly.
+        3. **Site bugs only.** For spec questions or principle edits, file on [brettdavies/agentnative](https://github.com/brettdavies/agentnative). For checker bugs, file on [brettdavies/agentnative-cli](https://github.com/brettdavies/agentnative-cli).
+        4. See [CONTRIBUTING.md](https://github.com/brettdavies/agentnative/blob/main/CONTRIBUTING.md) for full guidelines.
+        </details>
+    validations:
+      required: false

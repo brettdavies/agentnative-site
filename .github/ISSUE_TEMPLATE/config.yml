@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: "Spec questions, principle edits, or CLI grading"
+    url: "https://github.com/brettdavies/agentnative/issues/new/choose"
+    about: "For anything about the standard itself — propose changes, grade a CLI, ask questions — file on the spec repo."
   - name: "Checker bugs (false positives/negatives)"
-    url: "https://github.com/brettdavies/agentnative/issues/new"
+    url: "https://github.com/brettdavies/agentnative-cli/issues/new/choose"
     about: "For bugs in the `anc` checker itself, file on the tool repo."

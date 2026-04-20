@@ -869,7 +869,7 @@ tools:
 
   # Brett Davies (brettdavies) — 3 tools
   - name: anc
-    repo: brettdavies/agentnative
+    repo: brettdavies/agentnative-cli
     binary: anc
     language: Rust
     tier: notable
