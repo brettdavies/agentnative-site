@@ -29,13 +29,13 @@ linter is dual-licensed under MIT and Apache-2.0; see [its LICENSE files](https:
 
 Pressure-testing is how the spec evolves. Three ways to contribute:
 
-1. **Grade a real CLI** against a principle you think the spec gets wrong, and open an issue on the
-   [site repo](https://github.com/brettdavies/agentnative-site) with your findings. Name the CLI, the principle, and the
-   specific MUST/SHOULD/MAY that failed (or passed unexpectedly).
-2. **Report a check that produces a false positive or false negative** on the
-   [`agentnative` repo](https://github.com/brettdavies/agentnative). Include the command, the output, and the check ID.
-3. **Propose a principle edit** — merge, split, rewording, demotion of a MUST to a SHOULD — via an issue with
-   `[pressure-test]` in the title. The pressure-test protocol is documented in the spec's working repo.
+1. **[Grade a real CLI](https://github.com/brettdavies/agentnative-site/issues/new?template=grade-a-cli.yml)** against a
+   principle you think the spec gets wrong. Name the CLI, the principle, and the specific MUST/SHOULD/MAY that failed
+   (or passed unexpectedly).
+2. **[Report a false positive or false negative](https://github.com/brettdavies/agentnative/issues/new)** in the
+   `agentnative` checker. Include the command, the output, and the check ID.
+3. **[Propose a principle edit](https://github.com/brettdavies/agentnative-site/issues/new?template=pressure-test.yml)**
+   — merge, split, rewording, demotion of a MUST to a SHOULD. Describe the problem before proposing a solution.
 
 ## Colophon
 
