@@ -55,7 +55,9 @@ export async function loadRegistry(registryPath) {
       }
     }
     if (!t.repo && !t.url) {
-      throw new Error(`registry.yaml: tool "${t.name}" must have at least one of "repo" (GitHub owner/repo) or "url" (canonical project URL)`);
+      throw new Error(
+        `registry.yaml: tool "${t.name}" must have at least one of "repo" (GitHub owner/repo) or "url" (canonical project URL)`,
+      );
     }
     if (!['workhorse', 'agent', 'notable'].includes(t.tier)) {
       throw new Error(`registry.yaml: tool "${t.name}" has invalid tier "${t.tier}"`);

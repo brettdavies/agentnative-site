@@ -671,7 +671,10 @@ export async function copyAssets({ repoRoot, distDir }) {
   // 6. Client JS.
   const themeJs = await bundleClient(join(repoRoot, 'src/client/theme.ts'), join(distDir, 'js/theme.js'));
   const clipboardJs = await bundleClient(join(repoRoot, 'src/client/clipboard.ts'), join(distDir, 'js/clipboard.js'));
-  const leaderboardJs = await bundleClient(join(repoRoot, 'src/client/leaderboard.ts'), join(distDir, 'js/leaderboard.js'));
+  const leaderboardJs = await bundleClient(
+    join(repoRoot, 'src/client/leaderboard.ts'),
+    join(distDir, 'js/leaderboard.js'),
+  );
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
