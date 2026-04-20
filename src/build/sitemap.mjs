@@ -17,7 +17,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
   const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
   const today = lastmod ?? new Date().toISOString().slice(0, 10);
 
-  const paths = ['/', ...principleNumbers.map((n) => `/p${n}`), '/check', '/about', ...extraPaths];
+  const paths = ['/', ...principleNumbers.map((n) => `/p${n}`), '/check', '/about', '/changelog', ...extraPaths];
 
   const urls = paths
     .map((p) => {

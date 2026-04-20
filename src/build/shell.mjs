@@ -172,6 +172,10 @@ ${AI_PROVIDERS.map(
       <p class="site-footer__meta">
         <span>${SITE_NAME}</span>
         <span> · </span>
+        <span>v0.1.0</span>
+        <span> · </span>
+        <a href="/changelog">Changelog</a>
+        <span> · </span>
         <a href="/llms.txt">llms.txt</a>
         <span> · </span>
         <a href="/llms-full.txt">llms-full.txt</a>
