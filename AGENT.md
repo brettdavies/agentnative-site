@@ -6,7 +6,8 @@ The agentnative spec site. This file is for any agent (Claude Code or otherwise)
 
 A site that publishes the agent-native CLI standard (the 7 principles for CLI tools operated by AI agents). The site is
 the primary launch surface for agentnative. When the HN post goes live ("Show HN: agentnative — check if your CLI is
-agent-native"), it links here. The standard is what launches; the tool (`brettdavies/agentnative`) is how you use it.
+agent-native"), it links here. The standard is what launches; the tool (`brettdavies/agentnative-cli`) is how you use
+it.
 
 ## Authoritative scope
 
@@ -97,7 +98,8 @@ design principles): [`.impeccable.md`](.impeccable.md).
 
 ## Related repos
 
-- `brettdavies/agentnative` (`~/dev/agentnative`, tmux `anc`) — the Rust CLI linter. The site's core CTA links to it.
+- `brettdavies/agentnative-cli` (`~/dev/agentnative`, tmux `anc`) — the Rust CLI linter. The site's core CTA links to
+  it.
 - `brettdavies/brettdavies` (`~/dev/brettdavies`) — GitHub profile. Single-commit policy (amend +
   force-push-with-lease).
 - `brettdavies/davies.fyi` — does not exist yet. The site's /about page will eventually link to it.
