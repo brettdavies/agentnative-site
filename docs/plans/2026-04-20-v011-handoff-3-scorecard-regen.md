@@ -67,12 +67,14 @@ That's it.
 
 ## Definition of done
 
-- [ ] All 10 committed scorecards regenerated against `anc v0.1.1`
-- [ ] Each scorecard includes `coverage_summary`, `audience`, `audit_profile`
-- [ ] `registry.yaml` `scored_at:` dates updated
-- [ ] Site build passes; `/score/<tool>` pages render with new fields visible
-- [ ] Leaderboard numbers not wildly different from pre-regen (sanity check — if every tool's score dropped 30%,
+- [x] All 10 committed scorecards regenerated against `anc v0.1.1`
+- [x] Each scorecard includes `coverage_summary`, `audience`, `audit_profile`
+- [x] `registry.yaml` `scored_at:` dates updated
+- [x] Site build passes; `/score/<tool>` pages render with new fields visible
+- [x] Leaderboard numbers not wildly different from pre-regen (sanity check — if every tool's score dropped 30%,
   something is off; investigate before merging)
+
+**Completed:** 2026-04-21 via PR #25 (squash-merged to dev).
 
 ## Known gotchas
 
