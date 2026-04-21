@@ -387,9 +387,7 @@ ${row('MAY', coverageSummary.may)}
 export function renderAudienceBanner(audience, auditProfile) {
   if (!audience) return '';
 
-  const profilePill = auditProfile
-    ? ` <span class="audit-profile-pill">${escHtml(auditProfile)}</span>`
-    : '';
+  const profilePill = auditProfile ? ` <span class="audit-profile-pill">${escHtml(auditProfile)}</span>` : '';
 
   return `<section class="scorecard-audience-banner">
   <p class="audience-banner__text">Audience signal: <strong>${escHtml(audience)}</strong>${profilePill}</p>
