@@ -336,6 +336,71 @@ ${methodology}
 }
 
 /**
+ * Render the three-way MUST/SHOULD/MAY coverage summary.
+ * Returns empty string if the scorecard lacks `coverage_summary` (v1.0 compat).
+ *
+ * @param {object | undefined} coverageSummary — scorecard.coverage_summary
+ * @returns {string} HTML fragment
+ */
+export function renderCoverageSummary(coverageSummary) {
+  if (!coverageSummary) return '';
+
+  const row = (label, data) =>
+    `      <tr>
+        <td><strong>${escHtml(label)}</strong></td>
+        <td>${data.total}</td>
+        <td>${data.verified}</td>
+        <td>${data.total - data.verified}</td>
+      </tr>`;
+
+  return `<section class="scorecard-coverage">
+  <h2>Spec Coverage</h2>
+  <p>How many of the spec's requirements were verified for this tool.
+  See <a href="/coverage">/coverage</a> for the full matrix.</p>
+  <table class="coverage-level-table" aria-label="Verification coverage">
+    <thead>
+      <tr>
+        <th>Level</th>
+        <th>Total</th>
+        <th>Verified</th>
+        <th>Unverified</th>
+      </tr>
+    </thead>
+    <tbody>
+${row('MUST', coverageSummary.must)}
+${row('SHOULD', coverageSummary.should)}
+${row('MAY', coverageSummary.may)}
+    </tbody>
+  </table>
+</section>
+`;
+}
+
+/**
+ * Render an informational audience banner.
+ * Returns empty string if `audience` is null/undefined (v1.0 compat or stub).
+ *
+ * @param {string | null} audience — scorecard.audience (e.g., "human-primary")
+ * @param {string | null} auditProfile — scorecard.audit_profile (e.g., "tui-by-design")
+ * @returns {string} HTML fragment
+ */
+export function renderAudienceBanner(audience, auditProfile) {
+  if (!audience) return '';
+
+  const profilePill = auditProfile
+    ? ` <span class="audit-profile-pill">${escHtml(auditProfile)}</span>`
+    : '';
+
+  return `<section class="scorecard-audience-banner">
+  <p class="audience-banner__text">Audience signal: <strong>${escHtml(audience)}</strong>${profilePill}</p>
+  <p class="audience-banner__note">This is an informational classification based on the tool's
+  check results, not a quality judgment. Tools optimized for human use may intentionally
+  skip agent-specific affordances.</p>
+</section>
+`;
+}
+
+/**
  * Build a per-tool scorecard page body HTML.
  *
  * @param {object} tool — registry entry
@@ -385,6 +450,12 @@ export function buildScorecardBody(tool, scorecard, topIssues, principleScore) {
   </div>
 </section>
 `;
+
+  // Coverage summary (v1.1+ only — gracefully absent on v1.0 scorecards)
+  html += renderCoverageSummary(scorecard.coverage_summary);
+
+  // Audience banner (v1.3+ only — null until audience detector ships)
+  html += renderAudienceBanner(scorecard.audience, scorecard.audit_profile);
 
   // Top issues or all-pass message
   if (topIssues.length === 0) {
