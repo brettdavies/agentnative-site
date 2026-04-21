@@ -147,6 +147,7 @@ ${principles
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="/check">Check your CLI</a>
+        <a href="/coverage">Coverage</a>
         <a href="/about">About</a>
       </nav>
       <div class="theme-toggle" role="group" aria-label="Theme">
