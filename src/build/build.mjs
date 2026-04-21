@@ -378,8 +378,7 @@ export async function build() {
     join(DIST_DIR, 'coverage.html'),
     emitShell({
       title: 'Spec Coverage Matrix — anc.dev',
-      description:
-        'Which agent-native CLI requirements have automated checks and which remain uncovered.',
+      description: 'Which agent-native CLI requirements have automated checks and which remain uncovered.',
       canonicalPath: '/coverage',
       bodyHtml: coverageBody,
       themeInitJs: themeInit,

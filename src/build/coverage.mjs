@@ -139,9 +139,7 @@ export function buildCoverageBody(matrix) {
       const levelClass = `coverage-level--${row.level}`;
 
       const applicability =
-        row.applicability.kind === 'universal'
-          ? 'Universal'
-          : escHtml(row.applicability.condition || 'Conditional');
+        row.applicability.kind === 'universal' ? 'Universal' : escHtml(row.applicability.condition || 'Conditional');
 
       let verifierCell;
       if (row.verifiers.length === 0) {
