@@ -317,7 +317,7 @@ describe('loadScorecards', () => {
     const dir = join(tmpdir(), `scorecards-${Date.now()}`);
     await mkdir(dir, { recursive: true });
     const sc = makeScorecard();
-    await writeFile(join(dir, 'gh.json'), JSON.stringify(sc));
+    await writeFile(join(dir, 'gh-v2.74.0.json'), JSON.stringify(sc));
     try {
       const registry = [
         {
@@ -328,6 +328,7 @@ describe('loadScorecards', () => {
           tier: 'workhorse',
           creator: 'GitHub',
           description: 'GitHub CLI',
+          version: '2.74.0',
         },
         {
           name: 'rg',
@@ -342,7 +343,7 @@ describe('loadScorecards', () => {
       const result = await loadScorecards(dir, registry);
       expect(result).toHaveLength(2);
       expect(result[0].scorecard).not.toBeNull();
-      expect(result[1].scorecard).toBeNull(); // rg has no JSON file
+      expect(result[1].scorecard).toBeNull(); // rg has no version → unscored
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

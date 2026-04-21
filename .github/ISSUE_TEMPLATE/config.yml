@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Checker bugs (false positives/negatives)"
+    url: "https://github.com/brettdavies/agentnative/issues/new"
+    about: "For bugs in the `anc` checker itself, file on the tool repo."

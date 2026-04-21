@@ -287,6 +287,7 @@ export async function build() {
   const subPages = [
     { name: 'check', path: join(CONTENT_DIR, 'check.md') },
     { name: 'about', path: join(CONTENT_DIR, 'about.md') },
+    { name: 'changelog', path: join(CONTENT_DIR, 'changelog.md') },
   ];
   const subPageData = [];
   for (const { name, path } of subPages) {

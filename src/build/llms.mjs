@@ -27,7 +27,7 @@
 //
 // Sections shipped in llms-full: _intro, p1..p7, check, about.
 
-const DEFAULT_BASE = 'https://agentnative.dev';
+const DEFAULT_BASE = 'https://anc.dev';
 
 /**
  * Extract the first `# Heading` from a markdown string, trimmed.

@@ -104,7 +104,7 @@ resource people return to and an invitation for tool authors to improve.
 
 ## Success Criteria
 
-- A user can paste a GitHub URL on agentnative.dev and see a scorecard within 5 seconds (known tools) or 30 seconds
+- A user can paste a GitHub URL on anc.dev and see a scorecard within 5 seconds (known tools) or 30 seconds
   (unknown tools).
 - The leaderboard renders with scorecards for at least 50 tools at Show HN launch (100 is the target, 50 is the floor).
 - At least one tool from each tier scores well (standard isn't unreachable) and at least one scores poorly (standard has

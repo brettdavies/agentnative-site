@@ -93,6 +93,7 @@ design principles): [`.impeccable.md`](.impeccable.md).
 | `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md` | Canonical spec for P1-P7 (one file per principle, pressure-testable) | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md` | Build & distribution plan | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified. |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md` | Eng review | Architecture + code quality + test coverage review for M1. §12 lists all docs/DESIGN.md edits. Decisions resolved; no blockers. |
+| `docs/plans/2026-04-17-001-feat-registry-leaderboard-scorecard-pages-plan.md` | Registry + leaderboard plan | Plan 1 scope: tool registry, pre-computed scorecards, `/scorecards` leaderboard, `/score/<tool>` pages. Plan 2 (live scoring via CF Sandbox) is separate. |
 
 ## Related repos
 
@@ -115,7 +116,7 @@ design principles): [`.impeccable.md`](.impeccable.md).
 - **CI:**
 - `ci.yml` — fast PR gate (lint · build · test · wrangler dry-run).
 - `deep-check.yml` — scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
-    last deep-check.
+  last deep-check.
 - `deploy.yml` — publishes to the `*.workers.dev` staging on every push to `main`.
 - `guard-main-docs.yml` — blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
 - `guard-release-branch.yml` — rejects PRs to main whose head isn't `release/*`.

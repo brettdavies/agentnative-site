@@ -1,0 +1,33 @@
+name: "Grade a CLI"
+description: "Report findings from scoring a real CLI against the standard."
+labels: ["cli-grading"]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: CLI tool
+      description: "Name and version of the tool you scored."
+      placeholder: "ripgrep 14.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: findings
+    attributes:
+      label: Findings
+      description: |
+        Which principles did it pass, fail, or surprise you on?
+        Focus on cases where the spec got it wrong — a MUST that punishes good design,
+        or a gap where the spec is silent.
+      placeholder: |
+        P3 (Progressive Help): PASS — excellent `--help` hierarchy.
+        P4 (Actionable Errors): FAIL on exit codes — uses 1 for everything.
+        P7 (Bounded Responses): Spec is silent on streaming output — rg streams by default, which is fine for agents but the spec doesn't acknowledge it.
+    validations:
+      required: true
+  - type: textarea
+    id: spec-feedback
+    attributes:
+      label: What should the spec change?
+      description: "Optional. If your grading revealed a spec gap or mistake, describe it."
+    validations:
+      required: false
