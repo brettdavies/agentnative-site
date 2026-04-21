@@ -34,12 +34,12 @@ tool a building block rather than a dead end.
   suppressed automatically.
 - Shell completions available via a `completions` subcommand (clap_complete in Rust; equivalents elsewhere). This is a
   Tier 1 meta-command — it works without config, auth, or network.
-- Network CLIs ship a `--timeout` flag with a sensible default (30 seconds). Agents operating under their own time
-  budgets need to fail fast rather than block on a slow upstream.
-- If the CLI uses a pager (`less`, `more`, `$PAGER`), it supports `--no-pager` or respects `PAGER=""`. Pagers block
-  headless execution indefinitely.
-- When the CLI uses subcommands, agentic flags (`--output`, `--quiet`, `--no-interactive`, `--timeout`) are `global =
-  true` so they propagate to every subcommand automatically.
+- *(Applies when: CLI makes network calls.)* A `--timeout` flag with a sensible default (30 seconds). Agents operating
+  under their own time budgets need to fail fast rather than block on a slow upstream.
+- *(Applies when: CLI invokes a pager for output.)* Support `--no-pager` or respect `PAGER=""`. Pagers block headless
+  execution indefinitely.
+- *(Applies when: CLI uses subcommands.)* Agentic flags (`--output`, `--quiet`, `--no-interactive`, `--timeout`) are
+  `global = true` so they propagate to every subcommand automatically.
 
 **SHOULD:**
 

@@ -25,6 +25,7 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyAssets } from './assets.mjs';
+import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { buildLlmsFull, buildLlmsIndex, extractIntroSummary, extractTitle } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
 import {
@@ -48,6 +49,7 @@ const PRINCIPLES_DIR = join(CONTENT_DIR, 'principles');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
+const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
 
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',
@@ -320,6 +322,10 @@ export async function build() {
   excluded from the denominator.</p>
   <p>The <strong>principles met</strong> column counts how many of the seven principles
   have all checks passing (no failures or warnings in that group).</p>
+  <p>Scorecard compliance is self-reported via <code>--help</code> output analysis;
+  behavioral verification is bounded to timeout probes and non-TTY stdin.
+  See <a href="/coverage">/coverage</a> for which requirements have automated
+  checks and which remain uncovered.</p>
   <p>To run the same checks locally:</p>
   <pre><code>cargo install agentnative &amp;&amp; anc check .</code></pre>`;
 
@@ -364,13 +370,32 @@ export async function build() {
     scorecardPaths.push(`/score/${tool.name}`);
   }
 
+  // 8b. Coverage matrix page — /coverage.
+  const coverageMatrix = await loadCoverageMatrix(COVERAGE_MATRIX_PATH);
+  const coverageBody = buildCoverageBody(coverageMatrix);
+  const coverageMarkdown = buildCoverageMarkdown(coverageMatrix);
+  await writeFile(
+    join(DIST_DIR, 'coverage.html'),
+    emitShell({
+      title: 'Spec Coverage Matrix — anc.dev',
+      description: 'Which agent-native CLI requirements have automated checks and which remain uncovered.',
+      canonicalPath: '/coverage',
+      bodyHtml: coverageBody,
+      themeInitJs: themeInit,
+    }),
+  );
+  await writeFile(join(DIST_DIR, 'coverage.md'), coverageMarkdown);
+
   // 9. llms.txt + llms-full.txt (includes scorecard section).
   const llmsIndex = buildLlmsIndex({
     introTitle,
     summary: introSummary,
     principles: principles.map((p) => ({ n: p.n, slug: p.slug, title: p.title })),
     subPages: subPageData.map((s) => ({ name: s.name, title: s.title })),
-    scorecardLinks: [{ name: 'Leaderboard', path: '/scorecards.md' }],
+    scorecardLinks: [
+      { name: 'Leaderboard', path: '/scorecards.md' },
+      { name: 'Coverage Matrix', path: '/coverage.md' },
+    ],
   });
   await writeFile(join(DIST_DIR, 'llms.txt'), llmsIndex);
 
@@ -395,6 +420,12 @@ export async function build() {
         htmlPath: '/scorecards',
         mdPath: '/scorecards.md',
       },
+      {
+        title: 'Spec Coverage Matrix',
+        body: coverageMarkdown,
+        htmlPath: '/coverage',
+        mdPath: '/coverage.md',
+      },
     ],
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
@@ -402,7 +433,7 @@ export async function build() {
   // 10. Sitemap (includes scorecard paths).
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', ...scorecardPaths],
+    extraPaths: ['/scorecards', '/coverage', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -416,9 +447,9 @@ export async function build() {
   const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
   return {
     principles: principles.length,
-    htmlPages: principles.length + 3 + scorecardPageCount,
-    mdPages: principles.length + 3 + scorecardPageCount,
-    extras: 3,
+    htmlPages: principles.length + 4 + scorecardPageCount, // +4: check, about, changelog, coverage
+    mdPages: principles.length + 4 + scorecardPageCount,
+    extras: 4,
     scorecardPages: scorecardPageCount,
   };
 }

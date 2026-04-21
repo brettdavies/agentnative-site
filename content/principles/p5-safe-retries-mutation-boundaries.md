@@ -18,12 +18,15 @@ modify state" is a better sentence to put in `--help` than to assume.
 
 **MUST:**
 
-- Destructive operations (delete, overwrite, bulk modify) require an explicit `--force` or `--yes` flag. Without it, the
-  tool refuses the operation or enters dry-run mode — never mutates silently.
-- The distinction between read and write commands is clear from the command name and help text alone. An agent reading
-  `--help` immediately knows whether a command mutates state.
-- A `--dry-run` flag is present on every write command. When set, the command validates inputs and reports what it would
-  do without executing. Dry-run output respects `--output json` so agents can parse the preview programmatically.
+- *(Applies when: CLI has destructive operations.)* Destructive operations (delete, overwrite, bulk modify) require an
+  explicit `--force` or `--yes` flag. Without it, the tool refuses the operation or enters dry-run mode — never mutates
+  silently.
+- *(Applies when: CLI has both read and write operations.)* The distinction between read and write commands is clear
+  from the command name and help text alone. An agent reading `--help` immediately knows whether a command mutates
+  state.
+- *(Applies when: CLI has write operations.)* A `--dry-run` flag is present on every write command. When set, the
+  command validates inputs and reports what it would do without executing. Dry-run output respects `--output json` so
+  agents can parse the preview programmatically.
 
 **SHOULD:**
 
