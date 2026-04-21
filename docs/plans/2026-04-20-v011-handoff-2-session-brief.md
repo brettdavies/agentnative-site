@@ -144,15 +144,17 @@ should be network-free and reproducible. Do **not** try to symlink across repos.
 
 ## What to verify before opening the PR
 
-- [ ] `/coverage` page renders all 46 requirements, marks uncovered ones clearly, and links each row to its principle
+- [x] `/coverage` page renders all 46 requirements, marks uncovered ones clearly, and links each row to its principle
   page anchor.
-- [ ] `/score/<tool>` page renders `coverage_summary` counts and handles the absence of `audience` / `audit_profile`
+- [x] `/score/<tool>` page renders `coverage_summary` counts and handles the absence of `audience` / `audit_profile`
   fields (v1.0 scorecards) gracefully — no broken renders.
-- [ ] Old v1.0 scorecards and (hypothetically) new v1.1 scorecards both render without error. Simulate v1.1 by
+- [x] Old v1.0 scorecards and (hypothetically) new v1.1 scorecards both render without error. Simulate v1.1 by
   hand-editing one JSON locally to add the new fields; do not commit the edit.
-- [ ] Principle docs P1 / P5 / P6 / P7 pass the site's markdown lint + link check. The P1 MUST rewording must match the
+- [x] Principle docs P1 / P5 / P6 / P7 pass the site's markdown lint + link check. The P1 MUST rewording must match the
   "Doctrine Decision" section of the CEO plan verbatim.
-- [ ] `bun run build` succeeds; any playwright / vitest suites pass.
+- [x] `bun run build` succeeds; any playwright / vitest suites pass.
+
+**All verified and merged:** 2026-04-21 via PR #24.
 
 ## What **not** to do
 

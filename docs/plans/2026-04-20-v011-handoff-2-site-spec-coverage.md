@@ -78,11 +78,13 @@ Do NOT read the original spike or CEO-review transcripts.
 
 ## Definition of done
 
-- [ ] Principle docs P1/P5/P6/P7 edited; lint + link-check pass
-- [ ] `/coverage` page renders from the committed matrix artifact
-- [ ] `/score/<tool>` detail page renders new `coverage_summary` + `audience` banner when present
-- [ ] Old v1.0 scorecard JSONs (still present until handoff 3 regenerates them) render without error
-- [ ] Site build passes (`bun run build` or equivalent); tests pass
+- [x] Principle docs P1/P5/P6/P7 edited; lint + link-check pass
+- [x] `/coverage` page renders from the committed matrix artifact
+- [x] `/score/<tool>` detail page renders new `coverage_summary` + `audience` banner when present
+- [x] Old v1.0 scorecard JSONs (still present until handoff 3 regenerates them) render without error
+- [x] Site build passes (`bun run build` or equivalent); tests pass
+
+**Completed:** 2026-04-21 via PR #24 (squash-merged to dev).
 
 ## Known gotchas
 
