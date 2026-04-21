@@ -78,7 +78,60 @@ Do NOT re-read doctrine transcripts.
 
 ## Scope
 
-### In `agentnative-site` (site) — everything below is this plan's scope
+### Unit 0: Scorecard regeneration bridge (blocker for every other unit)
+
+Before any renderer work in this plan begins, every committed scorecard must be regenerated against `anc`
+v0.1.3 so that `audience` and `audit_profile` carry real (non-null) values and `p1-env-hints` verdicts reflect Pattern
+2. Until that ships, there is nothing for the banner, filters, or methodology note to read — they would fall through to
+the null/pre-v1.3 rendering path on every tool.
+
+This is bridge work: not a CLI change (CLI H5 already shipped by the time this runs) and not a site renderer change
+(that's Units 1+ below). It's a one-PR data refresh. Called out as Unit 0 so the dependency is explicit in the plan
+rather than implied in the prerequisites.
+
+**Goal:** Refresh every committed scorecard on this repo to v1.3 output, so H6 renderer work has real inputs to read
+against.
+
+**Prerequisite:** CLI H5 shipped — `anc` v0.1.3 installable from crates.io and/or Homebrew.
+
+**Files:**
+
+- Modify: `scorecards/*.json` (all 10 committed tools — `ripgrep`, `fd`, `jq`, `bat`, `dust`, `gh`, `claude-code`,
+  `aider`, `llm`, `anc`).
+- Modify: `scorecards/registry.yaml` (bump `scored_at: 2026-MM-DD` for each tool; add `audit_profile: <category>`
+  entries for tools that belong in an exception category — at minimum `lazygit → human-tui`, `fd → file-traversal` if
+  they're in the 10; `nvidia-smi → diagnostic-only` if applicable; use judgment for the rest).
+- Modify: `src/data/coverage-matrix.json` via `scripts/sync-coverage-matrix.sh` (pulls the updated matrix from the CLI
+  repo — picks up any registry changes from CLI H5, though that plan promises no new registry entries).
+
+**Approach:**
+
+1. Install `anc` v0.1.3 on the site box: `brew upgrade brettdavies/tap/agentnative` or `cargo install --version 0.1.3
+   agentnative`. Verify `anc --version` prints `0.1.3`.
+2. For each of the 10 tools, run `anc check --command <tool> --output json > scorecards/<tool>-v<ver>.json` (adjusting
+   filename per the existing convention). For tools that qualify for an `audit_profile` category, pass `--audit-profile
+   <category>` — e.g. `anc check --command lazygit --audit-profile human-tui --output json`.
+3. Bump each tool's `scored_at` field in `registry.yaml` to today's date. Add `audit_profile` annotations where
+   applicable.
+4. Run `scripts/sync-coverage-matrix.sh` to refresh `src/data/coverage-matrix.json` from the CLI repo.
+5. Land as a single atomic PR to `dev` so the site isn't in a mixed-version state mid-merge.
+
+**Verification:**
+
+- `jaq '.schema_version' scorecards/<tool>-*.json` returns `"1.1"` on every file (schema unchanged).
+- `jaq '.audience' scorecards/<tool>-*.json` returns a string (not `null`) on every tool where the 4 signal checks could
+  all run.
+- `jaq '.audit_profile' scorecards/lazygit-*.json` returns `"human-tui"` (assuming lazygit is in the 10 and was
+  annotated).
+- `jaq '.results[] | select(.id == "p1-env-hints") | .status' scorecards/ripgrep-*.json` returns `"pass"` (Pattern 2 fix
+  flipped it from `"warn"`).
+- CI regression tests on the site continue to pass against the refreshed scorecards (renderers feature-detect any new
+  shape).
+
+**Handoff to Units 1+:** once this PR merges, the renderer work below has real `audience` / `audit_profile`
+values to branch on. Don't start banner / filter / methodology work before this lands.
+
+### Units 1+: In `agentnative-site` (site) — everything below is this plan's scope
 
 - **Audience banner on `/score/<tool>`** — render when `audience != "agent_optimized"` OR `audit_profile` is present
   (non-null). Copy stance: informational, not shaming. Example: "This tool appears optimized for humans, not agents.
