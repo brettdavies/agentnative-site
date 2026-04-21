@@ -135,8 +135,8 @@ tools:
     creator: Andrew Gallant
     install: brew install ripgrep
     description: Recursively search directories for a regex pattern
-    version: "14.1.1"
-    scored_at: "2026-04-17"
+    version: "15.1.0"
+    scored_at: "2026-04-21"
 
   - name: fd
     repo: sharkdp/fd
@@ -146,8 +146,8 @@ tools:
     creator: David Peter
     install: brew install fd
     description: A simple, fast, and user-friendly alternative to find
-    version: "10.2.0"
-    scored_at: "2026-04-17"
+    version: "10.4.2"
+    scored_at: "2026-04-21"
 
   - name: fzf
     repo: junegunn/fzf
@@ -175,8 +175,8 @@ tools:
     creator: Stephen Dolan
     install: brew install jq
     description: Command-line JSON processor
-    version: "1.7.1"
-    scored_at: "2026-04-17"
+    version: "1.8.1"
+    scored_at: "2026-04-21"
 
   - name: xsv
     repo: BurntSushi/xsv
@@ -196,8 +196,8 @@ tools:
     creator: David Peter
     install: brew install bat
     description: A cat clone with syntax highlighting and Git integration
-    version: "0.25.0"
-    scored_at: "2026-04-17"
+    version: "0.26.1"
+    scored_at: "2026-04-21"
 
   - name: eza
     repo: eza-community/eza
@@ -216,8 +216,8 @@ tools:
     creator: bootandy
     install: brew install dust
     description: A more intuitive version of du in Rust
-    version: "1.1.2"
-    scored_at: "2026-04-17"
+    version: "1.2.4"
+    scored_at: "2026-04-21"
 
   - name: procs
     repo: dalance/procs
@@ -328,8 +328,8 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    version: "2.74.0"
-    scored_at: "2026-04-17"
+    version: "2.89.0"
+    scored_at: "2026-04-21"
 
   - name: lazygit
     repo: jesseduffield/lazygit
@@ -719,8 +719,8 @@ tools:
     creator: Anthropic
     install: npm install -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    version: "1.0.33"
-    scored_at: "2026-04-17"
+    version: "2.1.116"
+    scored_at: "2026-04-21"
 
   - name: aider
     repo: Aider-AI/aider
@@ -730,8 +730,8 @@ tools:
     creator: Paul Gauthier
     install: pipx install aider-chat
     description: AI pair programming in your terminal
-    version: "0.87.0"
-    scored_at: "2026-04-17"
+    version: "0.86.2"
+    scored_at: "2026-04-21"
 
   - name: codex
     repo: openai/codex
@@ -818,8 +818,8 @@ tools:
     creator: Simon Willison
     install: brew install llm
     description: Access large language models from the command-line
-    version: "0.26.1"
-    scored_at: "2026-04-17"
+    version: "0.30"
+    scored_at: "2026-04-21"
 
   - name: datasette
     repo: simonw/datasette
@@ -876,8 +876,8 @@ tools:
     creator: Brett Davies
     install: brew install brettdavies/tap/agentnative
     description: Check CLI tools against the agent-native standard
-    version: "0.1.0"
-    scored_at: "2026-04-17"
+    version: "0.1.1"
+    scored_at: "2026-04-21"
 
   - name: bird
     repo: brettdavies/bird
