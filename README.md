@@ -13,4 +13,5 @@ Cloudflare Workers. Pushes to `main` deploy automatically.
 
 ## Related
 
-- [agentnative](https://github.com/brettdavies/agentnative) — the CLI linter that checks compliance with this standard
+- [agentnative-cli](https://github.com/brettdavies/agentnative-cli) — the CLI linter that checks compliance with this
+  standard

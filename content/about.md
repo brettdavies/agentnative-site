@@ -23,19 +23,24 @@ version of the standard it claims to target.
 ## License
 
 Spec text on this site is available under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `agentnative`
-linter is dual-licensed under MIT and Apache-2.0; see [its LICENSE files](https://github.com/brettdavies/agentnative).
+linter is dual-licensed under MIT and Apache-2.0; see
+[its LICENSE files](https://github.com/brettdavies/agentnative-cli).
 
 ## Contributing
 
 Pressure-testing is how the spec evolves. Three ways to contribute:
 
-1. **[Grade a real CLI](https://github.com/brettdavies/agentnative-site/issues/new?template=grade-a-cli.yml)** against a
+1. **[Grade a real CLI](https://github.com/brettdavies/agentnative/issues/new?template=grade-a-cli.yml)** against a
    principle you think the spec gets wrong. Name the CLI, the principle, and the specific MUST/SHOULD/MAY that failed
    (or passed unexpectedly).
-2. **[Report a false positive or false negative](https://github.com/brettdavies/agentnative/issues/new)** in the
-   `agentnative` checker. Include the command, the output, and the check ID.
-3. **[Propose a principle edit](https://github.com/brettdavies/agentnative-site/issues/new?template=pressure-test.yml)**
-   — merge, split, rewording, demotion of a MUST to a SHOULD. Describe the problem before proposing a solution.
+2.
+   **[Report a false positive or false negative](https://github.com/brettdavies/agentnative-cli/issues/new?template=false-positive.yml)**
+   in the `agentnative` checker. Include the command, the output, and the check ID.
+3. **[Propose a principle edit](https://github.com/brettdavies/agentnative/issues/new?template=pressure-test.yml)** —
+   merge, split, rewording, demotion of a MUST to a SHOULD. Describe the problem before proposing a solution.
+
+For full routing guidance, see the spec repo's
+[CONTRIBUTING.md](https://github.com/brettdavies/agentnative/blob/main/CONTRIBUTING.md).
 
 ## Colophon
 

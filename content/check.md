@@ -71,4 +71,4 @@ A `[PASS]` is a requirement met, not a compliment. A `[WARN]` is a SHOULD the to
   will surprise them. Nothing here is a vanity metric — the checks map one-to-one to the requirements on the
   [principles page](/).
 
-Source: [github.com/brettdavies/agentnative](https://github.com/brettdavies/agentnative).
+Source: [github.com/brettdavies/agentnative-cli](https://github.com/brettdavies/agentnative-cli).
