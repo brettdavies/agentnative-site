@@ -21,7 +21,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
 
   const urls = paths
     .map((p) => {
-      const loc = p === '/' ? base + '/' : base + p;
+      const loc = p === '/' ? `${base}/` : base + p;
       return `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${today}</lastmod>\n  </url>`;
     })
     .join('\n');

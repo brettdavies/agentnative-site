@@ -179,7 +179,7 @@ ${AI_PROVIDERS.map(
         <span> · </span>
         <a href="/llms-full.txt">llms-full.txt</a>
         <span> · </span>
-        <a href="${canonicalPath === '/' ? '/index.md' : canonicalPath + '.md'}">This page as markdown</a>
+        <a href="${canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`}">This page as markdown</a>
       </p>
     </footer>
     <script src="/js/theme.js" defer></script>

@@ -23,7 +23,7 @@ async function bundleClient(entryPath, outPath) {
     minify: true,
   });
   if (!result.success) {
-    throw new Error('bundle failed: ' + result.logs.map((l) => String(l)).join('\n'));
+    throw new Error(`bundle failed: ${result.logs.map((l) => String(l)).join('\n')}`);
   }
   const [artifact] = result.outputs;
   const source = await artifact.text();

@@ -95,7 +95,7 @@ export function extractDescription(markdown, fallback = '') {
   const normalized = full.replace(/\s+/g, ' ').trim();
   if (normalized.length === 0) return fallback;
   // Cap at 180 chars for OG/description meta.
-  return normalized.length <= 180 ? normalized : normalized.slice(0, 177).replace(/\s+\S*$/, '') + '…';
+  return normalized.length <= 180 ? normalized : `${normalized.slice(0, 177).replace(/\s+\S*$/, '')}…`;
 }
 
 /**
