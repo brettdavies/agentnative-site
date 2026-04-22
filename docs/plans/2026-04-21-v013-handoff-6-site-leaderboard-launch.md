@@ -10,6 +10,12 @@ blocks: []
 
 # Handoff 6: v0.1.3 ANC 100 leaderboard launch (site)
 
+**Status (2026-04-22):** Renderer Units 1+, methodology page, registry growth, and Unit 0.5 (audience kebab-case flip)
+have all shipped on `feat/v013-leaderboard-launch` (3 commits, 95 tests pass, build green). Unit 0 (scorecard regen) is
+the only remaining work and stays blocked on `anc` v0.1.3 being released to crates.io / Homebrew — local `anc --version`
+still prints `0.1.2`, no `v0.1.3` tag exists on `brettdavies/agentnative-cli` yet. See the Implementation Log below for
+the full as-shipped record.
+
 **Written for**: the session that turns the pre-GA project into a public leaderboard. Happens only after CLI handoff 5
 has shipped `anc` v0.1.3 AND the 100-tool registry has baseline scores. This is the launch-facing release. CLI-side
 v0.1.3 work (audience classifier, `audit_profile` suppression, `p1-env-hints` pattern 2) is **not owned by this plan** —
@@ -33,6 +39,54 @@ the CLI half has shipped and the 10 committed scorecards have been refreshed.
 
 The original filename and handoff number were renamed (H5 → H6) to reflect the post-split sequence; the content below
 has been scoped down to site-only work.
+
+## Implementation log
+
+The plan as originally written assumed strict sequencing: CLI v0.1.3 ships → Unit 0 regenerates the 10 scorecards →
+Units 1+ then build renderers against real `audience` / `audit_profile` values. Reality diverged when the CLI v0.1.3
+release got delayed and the user asked what site work could ship in advance. The renderers were built defensively
+against synthetic v0.1.3-shaped fixtures (see the test file `tests/build.test.ts` for the fixture shapes), so they ship
+green against the existing `audience: null` scorecards and will light up automatically once Unit 0 lands.
+
+As-shipped order on `feat/v013-leaderboard-launch` is the inverse of the plan's strict sequence: the renderer Units 1+,
+Unit 0.5, and the registry growth all landed first against the synthetic-fixture path; Unit 0 will be the final commit
+once `anc` v0.1.3 is installable.
+
+| Commit  | Date       | What                                                                                       | Plan unit       |
+| ------- | ---------- | ------------------------------------------------------------------------------------------ | --------------- |
+| b0fb782 | 2026-04-22 | Audience banner v2, suppressed-check rendering, agent-optimized filter, `/methodology`     | Units 1, 2, 3, 5 |
+| c355cf8 | 2026-04-22 | Registry 96 → 100 (`gemini-cli`, `opencode`, `qmd`, `mcp-agent-mail`)                      | Hard prereq #2 (R1/R2) |
+| f65fef0 | 2026-04-22 | Audience kebab-case flip + suppression-prefix contract pin (with trailing space)           | Unit 0.5        |
+
+What changed vs. the plan as written:
+
+- **Renderers ship before Unit 0 regen.** Because `renderAudienceBanner()` returns `''` for `audience: null` and
+  `renderCheckRows()` only branches on the suppression evidence prefix, every committed v1.1/v1.2 scorecard renders
+  identically to its pre-H6 output. The new code paths exercise only when `audience` and `audit_profile` carry real
+  values — i.e. after Unit 0.
+- **Unit 0.5 was discovered late, mid-execution.** The plan's original "renderer robustness" line listed snake_case
+  audience values; CLI H5's `/ce:review` pass flipped them to kebab-case (2026-04-22, post-merge of the CLI plan). The
+  user surfaced the gap during this session ("there should be additional work to be done regarding updating the
+  casing"). Unit 0.5 was added to this plan and shipped in a single commit alongside a contract-pin fix for the
+  suppression evidence prefix (mirrored exactly from `SUPPRESSION_EVIDENCE_PREFIX` in
+  `agentnative/src/principles/registry.rs`, including the trailing space).
+- **Suppression copy / methodology table rewritten from the actual `SUPPRESSION_TABLE`.** Initial drafts of
+  `AUDIT_PROFILE_COPY` and the methodology table guessed at what each profile suppresses (e.g., `human-tui` was
+  documented as suppressing P7 quiet, `posix-utility` as suppressing P2/P3). The CLI source disagrees; the f65fef0
+  commit aligns both site surfaces with the table that ships with `anc` v0.1.3.
+- **Registry growth landed inside this branch instead of as a separate prerequisite.** R1/R2 of the brainstorm asked for
+  ≥100 entries before launch; the plan deferred that to "registry growth is its own track." In practice four additions
+  (two agent-tier, two notable-tier) were small enough to bundle into this PR. Tier balance after: 70 workhorse / 12
+  agent / 18 notable.
+
+What's still pending:
+
+- **Unit 0** — gated on `anc` v0.1.3 being released to crates.io and Homebrew. Local install is still 0.1.2; latest
+  GitHub release on `brettdavies/agentnative-cli` is v0.1.2 (2026-04-21).
+- **DoD manual sanity checks** — depend on Unit 0 outputs. `gh` no banner, `lazygit` human-tui banner, `ripgrep` no
+  banner (Pattern 2 fix), `fd` file-traversal banner.
+- **`audit_profile` annotations in `registry.yaml`** — should be added in the same Unit 0 commit so the regen call
+  passes the correct `--audit-profile` flag per tool.
 
 ## Sibling handoffs
 
@@ -58,11 +112,16 @@ than authoritative verdict.
    values (not `null`) when the inputs warrant it. **Note the casing of the emitted `audience` values:** v0.1.3 emits
    **kebab-case** (`"agent-optimized"`, `"mixed"`, `"human-primary"`), NOT the snake_case shape previously sketched in
    the original combined H5 plan. See Unit 0.5 below and the CLI H5 Implementation Log entry ("Audience values flipped
-   from snake_case to kebab-case") for rationale.
-2. **`registry.yaml` has ≥100 tools AND every tool has a baseline scorecard committed.** Current status at handoff
-   creation: ~80 entries, 10 with committed scorecards. **Launching before this is met makes the leaderboard look
-   punitive** — 5 of 10 current tools would drop under new checks, producing the HN narrative "new linter rates famous
-   tools badly based on rules written last week" (per the CEO review's outside voice Finding #7).
+   from snake_case to kebab-case") for rationale. Status (2026-04-22): **PENDING.** CLI H5 merged in `agentnative` (PR
+   #26, dc5d741) but no `v0.1.3` tag/release exists yet on `brettdavies/agentnative-cli`. Local `anc --version` is
+   0.1.2.
+2. **`registry.yaml` has ≥100 tools AND every tool has a baseline scorecard committed.** **Launching before this is met
+   makes the leaderboard look punitive** — 5 of 10 current tools would drop under new checks, producing the HN narrative
+   "new linter rates famous tools badly based on rules written last week" (per the CEO review's outside voice Finding
+   #7). Status (2026-04-22): registry-count side **MET** (100 entries; commit c355cf8 added `gemini-cli`, `opencode`,
+   `qmd`, `mcp-agent-mail`); baseline-scorecard side **NOT MET** (10 committed scorecards, all v0.1.1/v0.1.2 outputs
+   with `audience: null`). Both gaps close in Unit 0 — the 10 get regenerated against v0.1.3; growth past 10 is
+   post-launch / R19 community submissions.
 
 If either prerequisite isn't ready, do not start this handoff. Registry growth + initial scoring is its own
 track; it's not covered here.
@@ -83,8 +142,13 @@ Do NOT re-read doctrine transcripts.
 
 ### Unit 0: Scorecard regeneration bridge (blocker for every other unit)
 
-Before any renderer work in this plan begins, every committed scorecard must be regenerated against `anc`
-v0.1.3 so that `audience` and `audit_profile` carry real (non-null) values and `p1-env-hints` verdicts reflect Pattern
+**Status: PENDING (gated on `anc` v0.1.3 release).** Local `anc --version` is 0.1.2; latest tag on
+`brettdavies/agentnative-cli` is `v0.1.2` (2026-04-21). Per the Implementation Log, the renderer work in Units 1+
+shipped first against synthetic fixtures + the null-feature-detect path; Unit 0 will be the final commit on this branch
+once the binary is installable.
+
+Before any renderer work in this plan begins, every committed scorecard must be regenerated against `anc` v0.1.3 so that
+`audience` and `audit_profile` carry real (non-null) values and `p1-env-hints` verdicts reflect Pattern
 2. Until that ships, there is nothing for the banner, filters, or methodology note to read — they would fall through to
 the null/pre-v1.3 rendering path on every tool.
 
@@ -135,6 +199,9 @@ against.
 values to branch on. Don't start banner / filter / methodology work before this lands.
 
 ### Unit 0.5: Absorb the audience kebab-case unification (pre-renderer work)
+
+**Status: SHIPPED (commit f65fef0, 2026-04-22).** The flip + suppression-prefix contract pin landed together. The plan
+text below is preserved as written; the as-shipped notes are in the Implementation Log above.
 
 **Must complete before the regen in Unit 0 runs.** Otherwise v0.1.3 scorecards populate `audience` fields with
 kebab-case strings (`"agent-optimized"` / `"mixed"` / `"human-primary"`) and the site's existing leaderboard filter +
@@ -203,6 +270,11 @@ reviewer inspecting the merge won't see the regression until users do.
 
 ### Units 1+: In `agentnative-site` (site) — everything below is this plan's scope
 
+**Status: SHIPPED (commit b0fb782, 2026-04-22).** All five bullets below landed in one cohesive renderer commit. They
+ship green against the existing `audience: null` scorecards (the renderers null-feature-detect) and will activate
+automatically once Unit 0 regenerates the committed scorecards. Per-bullet detail in the Implementation Log; the prose
+below is preserved as the original spec.
+
 - **Audience banner on `/score/<tool>`** — render when `audience != "agent-optimized"` OR `audit_profile` is present
   (non-null). Copy stance: informational, not shaming. Example: "This tool appears optimized for humans, not agents.
   P1/P2/P7 warnings below reflect that audience choice rather than defects." When `audit_profile` is present, the banner
@@ -249,20 +321,25 @@ reviewer inspecting the merge won't see the regression until users do.
 
 ## Definition of done
 
-- [ ] Unit 0.5 landed before Unit 0: `rg 'agent_optimized|human_primary' src/ tests/ content/` returns zero matches in
-  the site repo, and `bun test` passes against the unchanged (pre-regen, `audience: null`) scorecards.
-- [ ] Per-tool `/score/<tool>` page renders the audience banner when applicable, with copy that matches the methodology
-  stance.
-- [ ] Suppressed checks on `/score/<tool>` show the distinct "N/A by category" treatment separate from genuine Skips.
-- [ ] `/scorecards` leaderboard renders ≥100 tools; sorting and filtering work; the "Agent-optimized only" toggle hides
-  TUI-by-design and file-traversal tools by default.
-- [ ] Methodology note published; linked from the audience banner and from the `/scorecards` header.
+- [x] Unit 0.5 landed: `rg 'agent_optimized|human_primary' src/ tests/ content/` returns zero matches; `bun test` passes
+  (95/95) against the pre-regen `audience: null` scorecards. (commit f65fef0)
+- [x] Per-tool `/score/<tool>` page renders the audience banner when applicable, with copy that matches the methodology
+  stance. Code path shipped; will visibly activate after Unit 0 regen. (commit b0fb782)
+- [x] Suppressed checks on `/score/<tool>` show the distinct "N/A by category" treatment separate from genuine Skips.
+  Code path shipped; will visibly activate after Unit 0 regen. (commit b0fb782)
+- [x] `/scorecards` leaderboard renders ≥100 tools; sorting and filtering work; the "Agent-optimized only" toggle hides
+  TUI-by-design and file-traversal tools by default. Registry now has 100 entries; toggle wired and tested. The
+  TUI-by-design / file-traversal hide behavior depends on Unit 0 populating `audit_profile` on those rows. (commits
+  c355cf8, b0fb782)
+- [x] Methodology note published; linked from the audience banner and from the `/scorecards` header. (commit b0fb782)
 - [ ] Manual sanity check (fixtures known from the CLI side): `gh` renders without a banner (agent-optimized); `lazygit`
   renders with a `human-tui` banner; `ripgrep` renders without a banner after the Pattern 2 env-hint fix; `fd` renders
-  with a `file-traversal` banner.
+  with a `file-traversal` banner. **Pending Unit 0.**
 - [ ] Regression sweep against the 10 committed scorecards: every page loads, no renderer throws on an unknown
-  `audit_profile` string or unexpected `audience` value.
-- [ ] `llms-full.txt` includes the new leaderboard surface and links to per-tool pages.
+  `audit_profile` string or unexpected `audience` value. **Pending Unit 0** — feature-detect path is exercised by tests;
+  full sweep requires v0.1.3 outputs.
+- [x] `llms-full.txt` includes the new leaderboard surface and links to per-tool pages. (already wired by H2; verified
+  intact after this branch's changes)
 
 ## Known gotchas
 
