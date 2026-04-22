@@ -25,20 +25,23 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyAssets } from './assets.mjs';
+import {
+  extractDefinitionParagraph,
+  extractDescription,
+  extractFirstParagraph,
+  extractIntroSummary,
+  extractTitle,
+} from './content.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
-import { buildLlmsFull, buildLlmsIndex, extractIntroSummary, extractTitle } from './llms.mjs';
+import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
+import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
 import {
   buildLeaderboardBody,
   buildLeaderboardMarkdown,
   buildScorecardBody,
   buildScorecardMarkdown,
-  computeLeaderboard,
-  computePrincipleScore,
-  extractTopIssues,
-  loadRegistry,
-  loadScorecards,
-} from './scorecards.mjs';
+} from './scorecards-render.mjs';
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { escHtml, parseFilename, sortedGlob } from './util.mjs';
@@ -65,74 +68,8 @@ async function ensureDir(dir) {
   await mkdir(dir, { recursive: true });
 }
 
-/**
- * Extract the first paragraph after the H1 as a short description for
- * meta tags. Works on the raw markdown, pre-render.
- */
-function extractDescription(markdown, fallback = '') {
-  const lines = markdown.split('\n');
-  let i = 0;
-  while (i < lines.length && !lines[i].match(/^#\s+/)) i++;
-  i++; // past H1
-  // Skip blank lines AND subsequent headings (`## Definition` etc.) until
-  // the first real prose paragraph.
-  while (i < lines.length && (lines[i].trim() === '' || /^#{1,6}\s/.test(lines[i].trim()))) {
-    i++;
-  }
-  const buf = [];
-  while (i < lines.length && lines[i].trim() !== '') {
-    buf.push(lines[i].trim());
-    i++;
-  }
-  const full = buf.join(' ').replace(/\s+/g, ' ').trim();
-  if (full.length === 0) return fallback;
-  // Cap at 180 chars for OG/description meta.
-  return full.length <= 180 ? full : full.slice(0, 177).replace(/\s+\S*$/, '') + '…';
-}
-
 function sha256(buf) {
   return createHash('sha256').update(buf).digest('hex');
-}
-
-/**
- * Extract the first prose paragraph after the H1 — the lede for the
- * homepage hero. Returns the paragraph as a single string.
- */
-function extractFirstParagraph(markdown) {
-  const lines = markdown.split('\n');
-  let i = 0;
-  while (i < lines.length && !lines[i].match(/^#\s+/)) i++;
-  i++; // past H1
-  while (i < lines.length && lines[i].trim() === '') i++;
-  const buf = [];
-  while (i < lines.length && lines[i].trim() !== '') {
-    buf.push(lines[i].trim());
-    i++;
-  }
-  return buf.join(' ');
-}
-
-/**
- * Extract the full `## Definition` paragraph — used as the description
- * in the homepage principle listing. Strips markdown formatting (bold,
- * links, inline code) for plain-text output.
- */
-function extractDefinitionParagraph(markdown) {
-  const lines = markdown.split('\n');
-  let i = 0;
-  while (i < lines.length && !/^##\s+Definition/.test(lines[i])) i++;
-  i++; // past heading
-  while (i < lines.length && lines[i].trim() === '') i++;
-  const buf = [];
-  while (i < lines.length && lines[i].trim() !== '') {
-    buf.push(lines[i].trim());
-    i++;
-  }
-  return buf
-    .join(' ')
-    .replace(/\*\*/g, '') // strip bold markers
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links → label only
-    .replace(/`([^`]+)`/g, '$1'); // strip inline code → content only
 }
 
 /**
@@ -348,11 +285,10 @@ export async function build() {
   await ensureDir(join(DIST_DIR, 'score'));
   const scorecardPaths = [];
   for (const entry of leaderboard) {
-    const { tool, scorecard } = entry;
+    const { tool, scorecard, score, principleScore } = entry;
     const topIssues = extractTopIssues(scorecard);
-    const principleScore = computePrincipleScore(scorecard);
 
-    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore);
+    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score);
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.html`),
       emitShell({
@@ -365,7 +301,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore),
+      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score),
     );
     scorecardPaths.push(`/score/${tool.name}`);
   }
