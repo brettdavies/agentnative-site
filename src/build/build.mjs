@@ -41,13 +41,7 @@ import {
   buildScorecardBody,
   buildScorecardMarkdown,
 } from './scorecards-render.mjs';
-import {
-  computeLeaderboard,
-  computePrincipleScore,
-  extractTopIssues,
-  loadRegistry,
-  loadScorecards,
-} from './scorecards.mjs';
+import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { escHtml, parseFilename, sortedGlob } from './util.mjs';
@@ -291,11 +285,10 @@ export async function build() {
   await ensureDir(join(DIST_DIR, 'score'));
   const scorecardPaths = [];
   for (const entry of leaderboard) {
-    const { tool, scorecard } = entry;
+    const { tool, scorecard, score, principleScore } = entry;
     const topIssues = extractTopIssues(scorecard);
-    const principleScore = computePrincipleScore(scorecard);
 
-    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore);
+    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score);
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.html`),
       emitShell({
@@ -308,7 +301,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore),
+      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score),
     );
     scorecardPaths.push(`/score/${tool.name}`);
   }

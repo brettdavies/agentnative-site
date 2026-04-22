@@ -2,7 +2,6 @@
 // per-tool scorecard pages. Template concern only; data loading and
 // scoring live in scorecards.mjs.
 
-import { computeScore } from './scorecards.mjs';
 import { BONUS_GROUPS, PRINCIPLE_GROUPS, PRINCIPLE_NAMES, escHtml } from './util.mjs';
 
 /**
@@ -185,10 +184,10 @@ export function renderAudienceBanner(audience, auditProfile) {
  * @param {object | null} scorecard — parsed JSON
  * @param {Array} topIssues — from extractTopIssues()
  * @param {object} principleScore — from computePrincipleScore()
+ * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} HTML body
  */
-export function buildScorecardBody(tool, scorecard, topIssues, principleScore) {
-  const score = computeScore(scorecard);
+export function buildScorecardBody(tool, scorecard, topIssues, principleScore, score) {
   const pct = Math.round(score * 100);
 
   // Breadcrumb
@@ -373,9 +372,10 @@ export function buildLeaderboardMarkdown(leaderboard) {
  * @param {object | null} scorecard
  * @param {Array} topIssues
  * @param {object} principleScore
+ * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} markdown
  */
-export function buildScorecardMarkdown(tool, scorecard, topIssues, principleScore) {
+export function buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score) {
   const lines = [`# ${tool.name}`];
   lines.push('');
   lines.push(tool.description);
@@ -387,7 +387,6 @@ export function buildScorecardMarkdown(tool, scorecard, topIssues, principleScor
     return lines.join('\n');
   }
 
-  const score = computeScore(scorecard);
   lines.push(`**Score:** ${Math.round(score * 100)}% pass rate`);
   lines.push(`**Principles:** ${principleScore.met}/${principleScore.total} met`);
   lines.push('');
