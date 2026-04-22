@@ -40,6 +40,8 @@ import {
   buildLeaderboardMarkdown,
   buildScorecardBody,
   buildScorecardMarkdown,
+} from './scorecards-render.mjs';
+import {
   computeLeaderboard,
   computePrincipleScore,
   extractTopIssues,
