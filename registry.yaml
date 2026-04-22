@@ -331,7 +331,11 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    version: "2.91.0"
+    # registry version intentionally lags installed version (2.91.0 on dev box,
+    # 2.89.0 on disk). regen-scorecards.sh will auto-bump + warn at Unit 0
+    # time; pre-bumping here would orphan the gh-v2.89.0.json scorecard and
+    # render gh as "unscored" in the live leaderboard until v0.1.3 ships.
+    version: "2.89.0"
     scored_at: "2026-04-21"
 
   - name: lazygit
@@ -734,7 +738,11 @@ tools:
     creator: Anthropic
     install: npm install -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    version: "2.1.117"
+    # registry version intentionally lags installed version (2.1.117 on dev box,
+    # 2.1.116 on disk). regen-scorecards.sh will auto-bump + warn at Unit 0
+    # time; pre-bumping here would orphan the claude-code-v2.1.116.json scorecard
+    # and render claude-code as "unscored" in the live leaderboard until v0.1.3.
+    version: "2.1.116"
     scored_at: "2026-04-21"
 
   - name: aider
