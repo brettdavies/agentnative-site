@@ -5,12 +5,10 @@
 // Inputs are plain data (no filesystem). assets.mjs reads the inline
 // theme-init script from disk and passes it in.
 
-import { escHtml } from './util.mjs';
+import { escHtml, resolveBaseUrl } from './util.mjs';
 
 const SITE_NAME = 'anc.dev';
 const SITE_TAGLINE = 'The agent-native CLI standard';
-
-const DEFAULT_BASE = 'https://anc.dev';
 
 const AI_SUMMARY_PROMPT =
   'Summarize the agent-native CLI standard from https://anc.dev/llms-full.txt — what are the seven principles and why do they matter for AI agents using CLI tools?';
@@ -74,7 +72,7 @@ export function emitShell({
   baseUrl,
   extraScripts = [],
 }) {
-  const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+  const base = resolveBaseUrl(baseUrl);
   const canonical = base + canonicalPath;
   const ogImage = `${base}/og-image.png`;
 

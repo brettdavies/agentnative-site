@@ -3,7 +3,7 @@
 // base URL lives here; override via PUBLIC_BASE_URL env during build if
 // staging needs a different origin.
 
-const DEFAULT_BASE = 'https://anc.dev';
+import { resolveBaseUrl } from './util.mjs';
 
 /**
  * @param {object} args
@@ -14,7 +14,7 @@ const DEFAULT_BASE = 'https://anc.dev';
  * @returns {string} XML body.
  */
 export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastmod }) {
-  const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+  const base = resolveBaseUrl(baseUrl);
   const today = lastmod ?? new Date().toISOString().slice(0, 10);
 
   const paths = ['/', ...principleNumbers.map((n) => `/p${n}`), '/check', '/about', '/changelog', ...extraPaths];

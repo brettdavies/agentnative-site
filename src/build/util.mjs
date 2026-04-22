@@ -52,3 +52,32 @@ export function escHtml(s) {
     (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c],
   );
 }
+
+// -------------------------------------------------------------------
+// Shared constants (STAR — single authoritative source)
+// -------------------------------------------------------------------
+
+export const PRINCIPLE_NAMES = {
+  P1: 'Non-Interactive by Default',
+  P2: 'Structured, Parseable Output',
+  P3: 'Progressive Help Discovery',
+  P4: 'Fail-Fast, Actionable Errors',
+  P5: 'Safe Retries & Mutation Boundaries',
+  P6: 'Composable, Predictable Command Structure',
+  P7: 'Bounded, High-Signal Responses',
+};
+
+export const PRINCIPLE_GROUPS = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
+
+const DEFAULT_BASE = 'https://anc.dev';
+
+/**
+ * Resolve the site base URL from an explicit value, env, or fallback.
+ * Always strips trailing slashes.
+ *
+ * @param {string=} baseUrl — explicit override (optional)
+ * @returns {string}
+ */
+export function resolveBaseUrl(baseUrl) {
+  return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+}

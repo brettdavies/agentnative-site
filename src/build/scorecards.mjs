@@ -8,10 +8,9 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
-import { escHtml } from './util.mjs';
+import { PRINCIPLE_GROUPS, PRINCIPLE_NAMES, escHtml } from './util.mjs';
 
 const TOOL_NAME_RE = /^[a-z0-9-]+$/;
-const PRINCIPLE_GROUPS = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
 const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
 
 // -------------------------------------------------------------------
@@ -227,20 +226,6 @@ export function computeLeaderboard(tools) {
 
   return scored.map((entry, i) => ({ ...entry, rank: i + 1 }));
 }
-
-// -------------------------------------------------------------------
-// Principle metadata (for linking check groups to principle pages)
-// -------------------------------------------------------------------
-
-const PRINCIPLE_NAMES = {
-  P1: 'Non-Interactive by Default',
-  P2: 'Structured, Parseable Output',
-  P3: 'Progressive Help Discovery',
-  P4: 'Fail-Fast, Actionable Errors',
-  P5: 'Safe Retries & Mutation Boundaries',
-  P6: 'Composable, Predictable Command Structure',
-  P7: 'Bounded, High-Signal Responses',
-};
 
 /**
  * Map a check group string to a principle number (1-7) or null for bonus groups.

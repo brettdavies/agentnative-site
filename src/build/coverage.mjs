@@ -5,17 +5,7 @@
 // Sync via: scripts/sync-coverage-matrix.sh
 
 import { readFile } from 'node:fs/promises';
-import { escHtml } from './util.mjs';
-
-const PRINCIPLE_NAMES = {
-  1: 'Non-Interactive by Default',
-  2: 'Structured, Parseable Output',
-  3: 'Progressive Help Discovery',
-  4: 'Fail-Fast, Actionable Errors',
-  5: 'Safe Retries & Mutation Boundaries',
-  6: 'Composable, Predictable Command Structure',
-  7: 'Bounded, High-Signal Responses',
-};
+import { PRINCIPLE_NAMES, escHtml } from './util.mjs';
 
 /**
  * Load and validate coverage-matrix.json.
@@ -117,7 +107,7 @@ export function buildCoverageBody(matrix) {
 
   // Per-principle sections
   for (const [pNum, pRows] of [...byPrinciple.entries()].sort((a, b) => a[0] - b[0])) {
-    const pName = PRINCIPLE_NAMES[pNum] || `Principle ${pNum}`;
+    const pName = PRINCIPLE_NAMES[`P${pNum}`] || `Principle ${pNum}`;
     const sorted = [...pRows].sort((a, b) => (levelOrder[a.level] ?? 9) - (levelOrder[b.level] ?? 9));
 
     html += `<section class="coverage-principle">
@@ -212,7 +202,7 @@ export function buildCoverageMarkdown(matrix) {
   }
 
   for (const [pNum, pRows] of [...byPrinciple.entries()].sort((a, b) => a[0] - b[0])) {
-    const pName = PRINCIPLE_NAMES[pNum] || `Principle ${pNum}`;
+    const pName = PRINCIPLE_NAMES[`P${pNum}`] || `Principle ${pNum}`;
     const sorted = [...pRows].sort((a, b) => (levelOrder[a.level] ?? 9) - (levelOrder[b.level] ?? 9));
 
     lines.push(`## [P${pNum}: ${pName}](/p${pNum})`);

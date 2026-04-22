@@ -27,7 +27,7 @@
 //
 // Sections shipped in llms-full: _intro, p1..p7, check, about.
 
-const DEFAULT_BASE = 'https://anc.dev';
+import { resolveBaseUrl } from './util.mjs';
 
 /**
  * Extract the first `# Heading` from a markdown string, trimmed.
@@ -53,7 +53,7 @@ export function extractTitle(markdown) {
  * @param {string=} args.baseUrl
  */
 export function buildLlmsIndex({ introTitle, summary, principles, subPages = [], scorecardLinks = [], baseUrl }) {
-  const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+  const base = resolveBaseUrl(baseUrl);
 
   const lines = [];
   lines.push(`# ${introTitle}`);
@@ -93,7 +93,7 @@ export function buildLlmsIndex({ introTitle, summary, principles, subPages = [],
  * @param {string=} args.baseUrl
  */
 export function buildLlmsFull({ sections, baseUrl }) {
-  const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+  const base = resolveBaseUrl(baseUrl);
 
   const chunks = sections.map((s) => {
     const source = base + s.htmlPath;
