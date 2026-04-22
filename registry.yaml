@@ -148,6 +148,9 @@ tools:
     description: A simple, fast, and user-friendly alternative to find
     version: "10.4.2"
     scored_at: "2026-04-21"
+    # Pre-staged for H6 Unit 0: regen will pass `--audit-profile file-traversal`,
+    # suppressing checks the file-traversal exception category covers.
+    audit_profile: file-traversal
 
   - name: fzf
     repo: junegunn/fzf

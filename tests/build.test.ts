@@ -675,3 +675,81 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     expect(html).toContain('href="/methodology"');
   });
 });
+
+// -------------------------------------------------------------------
+// Regression guard — H6 Unit 0.5 audience kebab-case alignment
+// -------------------------------------------------------------------
+//
+// `anc` v0.1.3 emits kebab-case audience values (`agent-optimized`,
+// `human-primary`). Snake_case (`agent_optimized`, `human_primary`) was
+// the pre-flip shape and must never reappear in the site repo — if it
+// does, the leaderboard's "Agent-optimized only" toggle silently
+// excludes every row and the audience banner falls through to its
+// fallback copy. Both failures are silent (no exception), so this test
+// is the only thing that catches the regression before users do.
+//
+// Mirrors the plan's verification step:
+//   `rg 'agent_optimized|human_primary' src/ tests/ content/`
+//
+// Bun test (not biome rule) because the snake_case strings live in
+// content/methodology.md as user-visible prose; biome's lint patterns
+// are TS/JS-only.
+
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join as joinPath } from 'node:path';
+
+describe('audience kebab-case regression guard (H6 Unit 0.5)', () => {
+  // The CLI v0.1.3 contract: audience values serialize as kebab-case.
+  // See `agentnative/src/scorecard/audience.rs` and the H6 plan.
+  const SNAKE_CASE_AUDIENCE_LITERALS = ['agent_optimized', 'human_primary'];
+
+  const SCAN_ROOTS = ['src', 'tests', 'content'];
+  // Self-reference exception: this test file MUST contain the snake_case
+  // literals as test data — that's why we declare them as constants
+  // above. Excluding by absolute path keeps the guard from regressing
+  // on its own existence.
+  const SELF_PATH = import.meta.path;
+
+  function* walk(dir: string): Generator<string> {
+    for (const entry of readdirSync(dir)) {
+      const full = joinPath(dir, entry);
+      if (statSync(full).isDirectory()) {
+        yield* walk(full);
+      } else if (/\.(ts|js|mjs|cjs|tsx|jsx|md)$/.test(entry)) {
+        yield full;
+      }
+    }
+  }
+
+  test(`no snake_case audience literals in ${SCAN_ROOTS.join(', ')}/`, () => {
+    const repoRoot = joinPath(import.meta.dir, '..');
+    const offenders: Array<{ file: string; literal: string; line: number }> = [];
+
+    for (const root of SCAN_ROOTS) {
+      for (const file of walk(joinPath(repoRoot, root))) {
+        if (file === SELF_PATH) continue;
+        const text = readFileSync(file, 'utf8');
+        const lines = text.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          for (const literal of SNAKE_CASE_AUDIENCE_LITERALS) {
+            if (lines[i].includes(literal)) {
+              offenders.push({
+                file: file.slice(repoRoot.length + 1),
+                literal,
+                line: i + 1,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (offenders.length > 0) {
+      const msg = offenders.map((o) => `  ${o.file}:${o.line} → "${o.literal}"`).join('\n');
+      throw new Error(
+        `Found snake_case audience literal(s) — anc v0.1.3 emits kebab-case ` +
+          `(agent-optimized / human-primary). See H6 plan Unit 0.5.\n${msg}`,
+      );
+    }
+  });
+});
