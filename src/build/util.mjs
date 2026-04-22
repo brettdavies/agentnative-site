@@ -67,7 +67,9 @@ export const PRINCIPLE_NAMES = {
   P7: 'Bounded, High-Signal Responses',
 };
 
-export const PRINCIPLE_GROUPS = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'];
+export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);
+
+export const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
 
 const DEFAULT_BASE = 'https://anc.dev';
 

@@ -3,9 +3,7 @@
 // scoring live in scorecards.mjs.
 
 import { computeScore } from './scorecards.mjs';
-import { PRINCIPLE_GROUPS, PRINCIPLE_NAMES, escHtml } from './util.mjs';
-
-const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
+import { BONUS_GROUPS, PRINCIPLE_GROUPS, PRINCIPLE_NAMES, escHtml } from './util.mjs';
 
 /**
  * Map a check group string to a principle number (1-7) or null for bonus groups.
@@ -15,6 +13,23 @@ const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
 function groupToPrincipleNum(group) {
   const match = group.match(/^P(\d+)$/);
   return match ? Number(match[1]) : null;
+}
+
+/**
+ * Render an array of checks as `<tr>` rows for a check-table.
+ * @param {Array<{ status: string, label: string, evidence: string | null }>} checks
+ * @returns {string}
+ */
+function renderCheckRows(checks) {
+  return checks
+    .map(
+      (check) => `        <tr class="check check--${check.status}">
+          <td class="check__status">${escHtml(check.status.toUpperCase())}</td>
+          <td class="check__label">${escHtml(check.label)}</td>
+          <td class="check__evidence">${check.evidence ? escHtml(check.evidence) : ''}</td>
+        </tr>`,
+    )
+    .join('\n');
 }
 
 // -------------------------------------------------------------------
@@ -271,17 +286,8 @@ ${issueItems}
     <h3 class="check-group__title">${groupLink ? `<a href="${groupLink}">` : ''}${escHtml(group)}: ${escHtml(groupName)}${groupLink ? '</a>' : ''}</h3>
     <table class="check-table">
       <tbody>
-`;
-    for (const check of checks) {
-      const statusClass = `check--${check.status}`;
-      html += `        <tr class="check ${statusClass}">
-          <td class="check__status">${escHtml(check.status.toUpperCase())}</td>
-          <td class="check__label">${escHtml(check.label)}</td>
-          <td class="check__evidence">${check.evidence ? escHtml(check.evidence) : ''}</td>
-        </tr>
-`;
-    }
-    html += `      </tbody>
+${renderCheckRows(checks)}
+      </tbody>
     </table>
   </div>
 `;
@@ -294,17 +300,8 @@ ${issueItems}
     <h3 class="check-group__title">Code Quality</h3>
     <table class="check-table">
       <tbody>
-`;
-    for (const check of bonusChecks) {
-      const statusClass = `check--${check.status}`;
-      html += `        <tr class="check ${statusClass}">
-          <td class="check__status">${escHtml(check.status.toUpperCase())}</td>
-          <td class="check__label">${escHtml(check.label)}</td>
-          <td class="check__evidence">${check.evidence ? escHtml(check.evidence) : ''}</td>
-        </tr>
-`;
-    }
-    html += `      </tbody>
+${renderCheckRows(bonusChecks)}
+      </tbody>
     </table>
   </div>
 `;
