@@ -14,11 +14,11 @@ function groupToPrincipleNum(group) {
   return match ? Number(match[1]) : null;
 }
 
-// Evidence prefix the CLI uses to mark a check that was suppressed by an
-// `--audit-profile` category. Mirrors `is_audit_profile_suppression` in
-// agentnative/src/scorecard/audience.rs — the prefix is part of the
-// CLI's behavioral contract (see audience.rs docs).
-const AUDIT_PROFILE_SUPPRESSION_PREFIX = 'suppressed by audit_profile:';
+// Evidence prefix the CLI emits for any check suppressed by `--audit-profile`.
+// Mirrors `SUPPRESSION_EVIDENCE_PREFIX` in agentnative/src/principles/registry.rs
+// — the trailing space is part of the documented contract; the CLI source calls
+// out downstream site renderers as pinned consumers of this exact string.
+const AUDIT_PROFILE_SUPPRESSION_PREFIX = 'suppressed by audit_profile: ';
 
 /**
  * Detect a Skip whose evidence indicates audit_profile suppression and extract
@@ -29,7 +29,7 @@ const AUDIT_PROFILE_SUPPRESSION_PREFIX = 'suppressed by audit_profile:';
 function suppressionCategory(check) {
   if (check.status !== 'skip' || !check.evidence) return null;
   if (!check.evidence.startsWith(AUDIT_PROFILE_SUPPRESSION_PREFIX)) return null;
-  return check.evidence.slice(AUDIT_PROFILE_SUPPRESSION_PREFIX.length).trim();
+  return check.evidence.slice(AUDIT_PROFILE_SUPPRESSION_PREFIX.length);
 }
 
 /**
@@ -188,26 +188,27 @@ ${row('MAY', coverageSummary.may)}
 `;
 }
 
-// Copy for each `audience` label. `agent_optimized` has no entry because the
+// Copy for each `audience` label. `agent-optimized` has no entry because the
 // banner is suppressed for that label unless an `audit_profile` is also set.
 const AUDIENCE_COPY = {
   mixed:
     'This tool sends mixed signals: some agent-readable affordances are present, others are not. Treat the warnings below as friction points, not defects.',
-  human_primary:
+  'human-primary':
     'This tool appears optimized for human use, not agents. P1/P2/P6/P7 warnings below reflect that audience choice rather than defects.',
 };
 
-// Copy for each `audit_profile` category. Used when a tool was scored under
-// `--audit-profile <category>` and certain checks were suppressed by design.
+// Copy for each `audit_profile` category. The "suppresses" wording mirrors the
+// actual SUPPRESSION_TABLE in agentnative/src/principles/registry.rs as of
+// CLI v0.1.3 — keep this in sync when the table changes upstream.
 const AUDIT_PROFILE_COPY = {
   'human-tui':
-    "Scored as a TUI: the standard's non-interactive, SIGPIPE, and quiet-mode checks have been suppressed because they do not apply to interactive terminal UIs.",
+    'Scored as a TUI: the non-interactive checks (P1) and the SIGPIPE check (P6) have been suppressed — TUI apps intercept the TTY by design and install their own signal handlers.',
   'file-traversal':
-    'Scored as a file-traversal tool: the structured-output check has been suppressed because the tool emits filenames as its output protocol.',
+    'Scored as a file-traversal tool: subcommand-shape applicability filters already produce the expected Skip outcomes for fd/find-style tools, so no checks are explicitly suppressed by this profile today.',
   'posix-utility':
-    'Scored as a POSIX utility: structured-output and help-shape checks have been suppressed because the tool predates and follows POSIX conventions.',
+    'Scored as a POSIX utility: the non-interactive checks (P1) have been suppressed — POSIX utilities use stdin as their primary input, satisfying the no-prompt requirement vacuously.',
   'diagnostic-only':
-    'Scored as a diagnostic-only tool: dry-run and idempotency checks have been suppressed because the tool is read-only by design.',
+    'Scored as a diagnostic-only tool: the dry-run check (P5) has been suppressed — read-only tools perform no writes, so the write-safety mutation-boundary requirement does not apply.',
 };
 
 /**
@@ -217,16 +218,16 @@ const AUDIT_PROFILE_COPY = {
  *   - `audience` is null/undefined (v1.0–v1.2 scorecards or insufficient signal), AND
  *   - `auditProfile` is null/undefined.
  *
- * Suppressed when `audience === "agent_optimized"` AND no `auditProfile` is set —
+ * Suppressed when `audience === "agent-optimized"` AND no `auditProfile` is set —
  * the absence of a banner is itself the signal that the tool reads as agent-native
  * with no profile-level scoping applied.
  *
- * @param {string | null} audience — scorecard.audience: one of `agent_optimized`, `mixed`, `human_primary`, or null
+ * @param {string | null} audience — scorecard.audience: one of `agent-optimized`, `mixed`, `human-primary`, or null
  * @param {string | null} auditProfile — scorecard.audit_profile: one of `human-tui`, `file-traversal`, `posix-utility`, `diagnostic-only`, or null
  * @returns {string} HTML fragment
  */
 export function renderAudienceBanner(audience, auditProfile) {
-  const hasAudienceSignal = audience && audience !== 'agent_optimized';
+  const hasAudienceSignal = audience && audience !== 'agent-optimized';
   if (!hasAudienceSignal && !auditProfile) return '';
 
   const lines = [];

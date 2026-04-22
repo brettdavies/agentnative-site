@@ -6,7 +6,7 @@
 //   <table class="leaderboard-table">
 //     <th data-sort-col="rank|tool|score|principles">
 //     <tr data-tier="workhorse|agent|notable"
-//         data-audience="agent_optimized|mixed|human_primary|"
+//         data-audience="agent-optimized|mixed|human-primary|"
 //         data-audit-profile="human-tui|file-traversal|posix-utility|diagnostic-only|">
 //       <td class="lb-score" data-sort="-1|0..100">
 //       <td class="lb-principles" data-sort="0..7">
@@ -91,11 +91,11 @@ if (table) {
   }
 }
 
-// Agent-optimized rows have audience === "agent_optimized" AND no audit_profile.
+// Agent-optimized rows have audience === "agent-optimized" AND no audit_profile.
 // A profile being applied means the tool was scored as a category exception,
 // which the H6 spec excludes from the agent-optimized cohort.
 function isAgentOptimized(row: HTMLTableRowElement): boolean {
-  return row.dataset.audience === 'agent_optimized' && !row.dataset.auditProfile;
+  return row.dataset.audience === 'agent-optimized' && !row.dataset.auditProfile;
 }
 
 function renumberVisibleRanks(rows: ArrayLike<HTMLTableRowElement>): void {

@@ -35,17 +35,17 @@ score. They are language-specific and would create unfair comparisons across too
 
 `anc` v0.1.3+ classifies each scored tool as one of:
 
-- `agent_optimized` — the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or
+- `agent-optimized` — the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or
   warn at most once.
 - `mixed` — two of the four signal checks warn.
-- `human_primary` — three or more of the four signal checks warn.
+- `human-primary` — three or more of the four signal checks warn.
 
 The classifier is **informational, not authoritative**. It is a one-line summary derived from a fixed set of four
-behavioral checks. The per-check evidence on the same page is the ground truth. A tool labeled `human_primary` may still
-be safe to use from an agent in narrow, well-bounded ways. A tool labeled `agent_optimized` may still surprise an agent
+behavioral checks. The per-check evidence on the same page is the ground truth. A tool labeled `human-primary` may still
+be safe to use from an agent in narrow, well-bounded ways. A tool labeled `agent-optimized` may still surprise an agent
 on a check the classifier does not look at.
 
-When the classifier disagrees with intuition — for example, a tool you consider agent-hostile gets `agent_optimized` —
+When the classifier disagrees with intuition — for example, a tool you consider agent-hostile gets `agent-optimized` —
 the fix lives in one of two places:
 
 1. The tool fits an exception category that should suppress some checks → file a registry update adding an
@@ -61,14 +61,16 @@ Some tools intentionally do not satisfy parts of the standard because the standa
 Lazygit is interactive on purpose — it is a TUI. `find` does not emit JSON because POSIX utilities don't. Holding these
 tools to checks that punish their core design produces a misleading score and a hostile leaderboard.
 
-`anc` exposes four exception categories via `--audit-profile`:
+`anc` v0.1.3 exposes four exception categories via `--audit-profile`. The exact suppression set lives in
+[`SUPPRESSION_TABLE`](https://github.com/brettdavies/agentnative-cli/blob/main/src/principles/registry.rs) in the CLI
+source and is the contract this site renders against:
 
 | Category | Suppresses | Use when... |
 |---|---|---|
-| `human-tui` | P1 (non-interactive), P6 (SIGPIPE), P7 (quiet) | Tool's primary mode is an interactive terminal UI. |
-| `file-traversal` | P2 (JSON output) when irrelevant | Tool emits filenames as its output protocol (`fd`, `find`). |
-| `posix-utility` | P2 (JSON output), P3 (`--help` shape) | Tool predates structured output and follows POSIX conventions. |
-| `diagnostic-only` | P5 (dry-run, idempotency) | Tool is read-only by design (`nvidia-smi`, `lsof`). |
+| `human-tui` | P1 non-interactive variants + P6 SIGPIPE | Tool's primary mode is an interactive terminal UI (e.g., `lazygit`). TUIs intercept the TTY by design and install their own signal handlers. |
+| `file-traversal` | (no checks suppressed in v0.1.3) | Tool emits filenames as its output protocol (`fd`, `find`). Today the applicability filter on subcommand-shape checks already produces the right Skip outcome; the table entry is reserved for future checks. |
+| `posix-utility` | P1 non-interactive variants | Tool predates structured output and follows POSIX conventions (`grep`, `awk`). The no-prompt MUST is satisfied vacuously by the stdin protocol. |
+| `diagnostic-only` | P5 dry-run | Tool is read-only by design (`nvidia-smi`, `lsof`). Read-write-distinction and force-yes are still uncovered in v0.1.3. |
 
 When a tool is scored under an audit profile, the suppressed checks still appear on the per-tool page, tagged **N/A by
 category** with a pointer to the profile that excluded them. The reader sees what was excluded and why; the checks are

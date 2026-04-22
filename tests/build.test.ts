@@ -455,16 +455,16 @@ describe('renderAudienceBanner', () => {
     expect(renderAudienceBanner(undefined, undefined)).toBe('');
   });
 
-  test('returns empty for agent_optimized with no audit_profile', () => {
+  test('returns empty for agent-optimized with no audit_profile', () => {
     // Banner suppressed: the *absence* of a banner is the signal that the
     // tool reads as agent-native with no profile-level scoping.
-    expect(renderAudienceBanner('agent_optimized', null)).toBe('');
+    expect(renderAudienceBanner('agent-optimized', null)).toBe('');
   });
 
-  test('renders headline + copy for human_primary', () => {
-    const html = renderAudienceBanner('human_primary', null);
+  test('renders headline + copy for human-primary', () => {
+    const html = renderAudienceBanner('human-primary', null);
     expect(html).toContain('class="scorecard-audience-banner"');
-    expect(html).toContain('<strong>human_primary</strong>');
+    expect(html).toContain('<strong>human-primary</strong>');
     expect(html).toContain('optimized for human use');
     // Methodology link always present in the note line.
     expect(html).toContain('href="/methodology');
@@ -476,27 +476,27 @@ describe('renderAudienceBanner', () => {
     expect(html).toContain('mixed signals');
   });
 
-  test('renders profile pill + copy when audit_profile is set on agent_optimized', () => {
-    // Banner appears even when audience is agent_optimized, as long as a
+  test('renders profile pill + copy when audit_profile is set on agent-optimized', () => {
+    // Banner appears even when audience is agent-optimized, as long as a
     // profile applied — the reader needs to know suppression was in effect.
-    const html = renderAudienceBanner('agent_optimized', 'human-tui');
+    const html = renderAudienceBanner('agent-optimized', 'human-tui');
     expect(html).toContain('class="scorecard-audience-banner"');
     expect(html).toContain('class="audit-profile-pill"');
     expect(html).toContain('human-tui');
     expect(html).toContain('TUI');
-    // No headline line in this case — agent_optimized doesn't get one.
-    expect(html).not.toContain('<strong>agent_optimized</strong>');
+    // No headline line in this case — agent-optimized doesn't get one.
+    expect(html).not.toContain('<strong>agent-optimized</strong>');
   });
 
   test('renders both headline and profile copy when both are present', () => {
-    const html = renderAudienceBanner('human_primary', 'human-tui');
-    expect(html).toContain('<strong>human_primary</strong>');
+    const html = renderAudienceBanner('human-primary', 'human-tui');
+    expect(html).toContain('<strong>human-primary</strong>');
     expect(html).toContain('class="audit-profile-pill"');
   });
 
   test('renders profile-specific copy for each known category', () => {
     expect(renderAudienceBanner(null, 'human-tui')).toContain('TUI');
-    expect(renderAudienceBanner(null, 'file-traversal')).toContain('filenames');
+    expect(renderAudienceBanner(null, 'file-traversal')).toContain('fd/find-style');
     expect(renderAudienceBanner(null, 'posix-utility')).toContain('POSIX');
     expect(renderAudienceBanner(null, 'diagnostic-only')).toContain('read-only');
   });
@@ -594,6 +594,35 @@ describe('suppressed-check rendering', () => {
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] }, 1.0);
     expect(html).toContain('no flags exposed');
   });
+
+  test('only matches the exact CLI prefix "suppressed by audit_profile: " (with trailing space)', () => {
+    // Pins the contract documented at SUPPRESSION_EVIDENCE_PREFIX in
+    // agentnative/src/principles/registry.rs. A near-miss like
+    // "suppressed by audit_profile_human-tui" must NOT be treated as
+    // suppression — it's an organic Skip with prose evidence.
+    const sc = {
+      schema_version: '1.1',
+      audience: null,
+      audit_profile: null,
+      results: [
+        {
+          id: 'p1-x',
+          label: 'X',
+          group: 'P1',
+          layer: 'behavioral',
+          status: 'skip',
+          // Looks similar but isn't the contract — no colon-space.
+          evidence: 'suppressed by audit_profile_human-tui',
+        },
+      ],
+      summary: { total: 1, pass: 0, warn: 0, fail: 0, skip: 1, error: 0 },
+    };
+    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] }, 1.0);
+    expect(html).not.toContain('check--suppressed');
+    expect(html).not.toContain('N/A by');
+    // The status cell stays as the regular SKIP pill.
+    expect(html).toContain('>SKIP<');
+  });
 });
 
 // -------------------------------------------------------------------
@@ -625,9 +654,9 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
   }
 
   test('emits data-audience and data-audit-profile attrs on each row', () => {
-    const lb = [entry('rg', 'agent_optimized', null), entry('lazygit', null, 'human-tui')];
+    const lb = [entry('rg', 'agent-optimized', null), entry('lazygit', null, 'human-tui')];
     const html = buildLeaderboardBody(lb as any, '<p>m</p>');
-    expect(html).toContain('data-audience="agent_optimized"');
+    expect(html).toContain('data-audience="agent-optimized"');
     expect(html).toContain('data-audit-profile="human-tui"');
   });
 
@@ -639,7 +668,7 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
   });
 
   test('emits the agent-optimized-only toggle and methodology link', () => {
-    const html = buildLeaderboardBody([entry('rg', 'agent_optimized', null)] as any, '<p>m</p>');
+    const html = buildLeaderboardBody([entry('rg', 'agent-optimized', null)] as any, '<p>m</p>');
     expect(html).toContain('data-filter="agent-optimized-only"');
     expect(html).toContain('Agent-optimized only');
     // Methodology link in the hero lede.
