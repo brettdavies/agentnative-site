@@ -311,6 +311,111 @@ describe('loadRegistry', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test('accepts each known audit_profile value', async () => {
+    const dir = join(tmpdir(), `registry-profile-ok-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const registryPath = join(dir, 'registry.yaml');
+    // Mirrors the four ExceptionCategory variants in CLI v0.1.3.
+    await writeFile(
+      registryPath,
+      `tools:
+  - name: tui-app
+    repo: x/tui
+    binary: tui
+    language: Go
+    tier: workhorse
+    creator: x
+    description: A tui
+    audit_profile: human-tui
+  - name: file-tool
+    repo: x/file
+    binary: ft
+    language: Rust
+    tier: workhorse
+    creator: x
+    description: A file tool
+    audit_profile: file-traversal
+  - name: posix-tool
+    repo: x/posix
+    binary: pt
+    language: C
+    tier: workhorse
+    creator: x
+    description: A posix tool
+    audit_profile: posix-utility
+  - name: diag-tool
+    repo: x/diag
+    binary: dt
+    language: C
+    tier: workhorse
+    creator: x
+    description: A diag tool
+    audit_profile: diagnostic-only
+`,
+    );
+    try {
+      const tools = await loadRegistry(registryPath);
+      expect(tools).toHaveLength(4);
+      expect(tools.map((t: any) => t.audit_profile)).toEqual([
+        'human-tui',
+        'file-traversal',
+        'posix-utility',
+        'diagnostic-only',
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects unknown audit_profile (typo guard)', async () => {
+    const dir = join(tmpdir(), `registry-profile-bad-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const registryPath = join(dir, 'registry.yaml');
+    await writeFile(
+      registryPath,
+      `tools:
+  - name: bad
+    repo: x/y
+    binary: x
+    language: Rust
+    tier: workhorse
+    creator: x
+    description: x
+    audit_profile: tui-by-design
+`,
+    );
+    try {
+      await expect(loadRegistry(registryPath)).rejects.toThrow(/unknown audit_profile/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('treats missing audit_profile as fine (most tools have none)', async () => {
+    const dir = join(tmpdir(), `registry-profile-absent-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const registryPath = join(dir, 'registry.yaml');
+    await writeFile(
+      registryPath,
+      `tools:
+  - name: plain
+    repo: x/y
+    binary: x
+    language: Go
+    tier: workhorse
+    creator: x
+    description: x
+`,
+    );
+    try {
+      const tools = await loadRegistry(registryPath);
+      expect(tools).toHaveLength(1);
+      expect(tools[0].audit_profile).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('loadScorecards', () => {

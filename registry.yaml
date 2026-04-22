@@ -331,7 +331,7 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    version: "2.89.0"
+    version: "2.91.0"
     scored_at: "2026-04-21"
 
   - name: lazygit
@@ -342,6 +342,18 @@ tools:
     creator: Jesse Duffield
     install: brew install lazygit
     description: Simple terminal UI for git commands
+    version: "0.61.1"
+    scored_at: "2026-04-22"
+    # Pre-staged for H6 Unit 0: TUI by design — regen passes `--audit-profile
+    # human-tui`, suppressing the non-interactive (P1) and SIGPIPE (P6) checks.
+    audit_profile: human-tui
+    # `lazygit --version` emits e.g.
+    #   commit=, build date=, build source=Homebrew, version=0.61.1, os=linux, ...
+    # The default extractor would pick the first SemVer it sees, which for this
+    # output happens to be the lazygit version (correct), but we declare the
+    # extractor explicitly so a future format change doesn't silently shift to
+    # the embedded git version.
+    version_extract: 'lazygit --version | grep -oE "version=[0-9.]+" | head -1 | cut -d= -f2'
 
   - name: git-cliff
     repo: orhun/git-cliff
@@ -722,7 +734,7 @@ tools:
     creator: Anthropic
     install: npm install -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    version: "2.1.116"
+    version: "2.1.117"
     scored_at: "2026-04-21"
 
   - name: aider
