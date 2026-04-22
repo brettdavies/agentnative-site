@@ -227,6 +227,7 @@ export async function build() {
     { name: 'check', path: join(CONTENT_DIR, 'check.md') },
     { name: 'about', path: join(CONTENT_DIR, 'about.md') },
     { name: 'changelog', path: join(CONTENT_DIR, 'changelog.md') },
+    { name: 'methodology', path: join(CONTENT_DIR, 'methodology.md') },
   ];
   const subPageData = [];
   for (const { name, path } of subPages) {
@@ -253,18 +254,15 @@ export async function build() {
   const toolsWithScorecards = await loadScorecards(SCORECARDS_DIR, registry);
   const leaderboard = computeLeaderboard(toolsWithScorecards);
 
-  const methodologyHtml = `  <p>Each tool is scored by running <code>anc check</code> — the open-source agent-native
-  CLI checker. Checks are grouped by principle (P1–P7). The <strong>score</strong> is the
-  pass rate: <code>pass / (pass + warn + fail)</code>. Skipped and errored checks are
-  excluded from the denominator.</p>
-  <p>The <strong>principles met</strong> column counts how many of the seven principles
-  have all checks passing (no failures or warnings in that group).</p>
-  <p>Scorecard compliance is self-reported via <code>--help</code> output analysis;
-  behavioral verification is bounded to timeout probes and non-TTY stdin.
-  See <a href="/coverage">/coverage</a> for which requirements have automated
-  checks and which remain uncovered.</p>
-  <p>To run the same checks locally:</p>
-  <pre><code>cargo install agentnative &amp;&amp; anc check .</code></pre>`;
+  const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.
+  The <strong>score</strong> column is the pass rate <code>pass / (pass + warn + fail)</code>;
+  the <strong>principles met</strong> column counts how many of the seven principles have every
+  check passing. The <strong>audience</strong> classification — when present — is informational,
+  not authoritative; the per-tool page's evidence list is the ground truth.</p>
+  <p>For the full explanation of scoring, audience classification, audit profiles, and how to
+  request a re-score, see the <a href="/methodology">methodology page</a>.</p>
+  <p>To reproduce any row locally:</p>
+  <pre><code>cargo install agentnative &amp;&amp; anc check &lt;binary&gt;</code></pre>`;
 
   const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
   await writeFile(
@@ -381,11 +379,13 @@ export async function build() {
   );
 
   const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
+  // +5: check, about, changelog, methodology, coverage
+  const extraPages = 5;
   return {
     principles: principles.length,
-    htmlPages: principles.length + 4 + scorecardPageCount, // +4: check, about, changelog, coverage
-    mdPages: principles.length + 4 + scorecardPageCount,
-    extras: 4,
+    htmlPages: principles.length + extraPages + scorecardPageCount,
+    mdPages: principles.length + extraPages + scorecardPageCount,
+    extras: extraPages,
     scorecardPages: scorecardPageCount,
   };
 }

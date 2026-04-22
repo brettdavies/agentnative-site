@@ -1,34 +1,51 @@
-// Leaderboard — client-side tier filtering and column sorting.
+// Leaderboard — client-side filtering (tier + audience) and column sorting.
 //
-// Markup (emitted by buildLeaderboardBody in scorecards.mjs):
+// Markup (emitted by buildLeaderboardBody in scorecards-render.mjs):
 //   <button class="tier-filter" data-tier="all|workhorse|agent|notable">
+//   <input class="audience-filter__input" data-filter="agent-optimized-only">
 //   <table class="leaderboard-table">
 //     <th data-sort-col="rank|tool|score|principles">
-//     <tr data-tier="workhorse|agent|notable">
+//     <tr data-tier="workhorse|agent|notable"
+//         data-audience="agent_optimized|mixed|human_primary|"
+//         data-audit-profile="human-tui|file-traversal|posix-utility|diagnostic-only|">
 //       <td class="lb-score" data-sort="-1|0..100">
 //       <td class="lb-principles" data-sort="0..7">
 
 const table = document.querySelector<HTMLTableElement>('.leaderboard-table');
 if (table) {
   // ---------------------------------------------------------------
-  // Tier filtering
+  // Compose tier + audience filters: a row is visible only if both pass.
+  // Tier defaults to "all"; audience-only toggle defaults to off.
   // ---------------------------------------------------------------
-  const filters = document.querySelectorAll<HTMLButtonElement>('.tier-filter');
+  const tierButtons = document.querySelectorAll<HTMLButtonElement>('.tier-filter');
+  const audienceToggle = document.querySelector<HTMLInputElement>('.audience-filter__input');
   const rows = table.querySelectorAll<HTMLTableRowElement>('tbody tr');
 
-  for (const btn of filters) {
-    btn.addEventListener('click', () => {
-      const tier = btn.dataset.tier ?? 'all';
-      for (const f of filters) f.classList.remove('tier-filter--active');
-      btn.classList.add('tier-filter--active');
+  let activeTier = 'all';
+  let agentOptimizedOnly = false;
 
-      for (const row of rows) {
-        if (tier === 'all' || row.dataset.tier === tier) {
-          row.hidden = false;
-        } else {
-          row.hidden = true;
-        }
-      }
+  function applyFilters() {
+    for (const row of rows) {
+      const tierMatch = activeTier === 'all' || row.dataset.tier === activeTier;
+      const audienceMatch = !agentOptimizedOnly || isAgentOptimized(row);
+      row.hidden = !(tierMatch && audienceMatch);
+    }
+    renumberVisibleRanks(rows);
+  }
+
+  for (const btn of tierButtons) {
+    btn.addEventListener('click', () => {
+      activeTier = btn.dataset.tier ?? 'all';
+      for (const f of tierButtons) f.classList.remove('tier-filter--active');
+      btn.classList.add('tier-filter--active');
+      applyFilters();
+    });
+  }
+
+  if (audienceToggle) {
+    audienceToggle.addEventListener('change', () => {
+      agentOptimizedOnly = audienceToggle.checked;
+      applyFilters();
     });
   }
 
@@ -65,17 +82,29 @@ if (table) {
 
       for (const row of sorted) tbody.appendChild(row);
 
-      // Update rank column after re-sort
-      const visible = sorted.filter((r) => !r.hidden);
-      for (let i = 0; i < visible.length; i++) {
-        const rankCell = visible[i].querySelector('.lb-rank');
-        if (rankCell) rankCell.textContent = String(i + 1);
-      }
+      renumberVisibleRanks(sorted);
 
       // Visual indicator on sorted header
       for (const h of headers) h.removeAttribute('aria-sort');
       th.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
     });
+  }
+}
+
+// Agent-optimized rows have audience === "agent_optimized" AND no audit_profile.
+// A profile being applied means the tool was scored as a category exception,
+// which the H6 spec excludes from the agent-optimized cohort.
+function isAgentOptimized(row: HTMLTableRowElement): boolean {
+  return row.dataset.audience === 'agent_optimized' && !row.dataset.auditProfile;
+}
+
+function renumberVisibleRanks(rows: ArrayLike<HTMLTableRowElement>): void {
+  let rank = 1;
+  for (const row of Array.from(rows)) {
+    if (row.hidden) continue;
+    const rankCell = row.querySelector('.lb-rank');
+    if (rankCell) rankCell.textContent = String(rank);
+    rank += 1;
   }
 }
 

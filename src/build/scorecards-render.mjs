@@ -14,20 +14,47 @@ function groupToPrincipleNum(group) {
   return match ? Number(match[1]) : null;
 }
 
+// Evidence prefix the CLI uses to mark a check that was suppressed by an
+// `--audit-profile` category. Mirrors `is_audit_profile_suppression` in
+// agentnative/src/scorecard/audience.rs — the prefix is part of the
+// CLI's behavioral contract (see audience.rs docs).
+const AUDIT_PROFILE_SUPPRESSION_PREFIX = 'suppressed by audit_profile:';
+
+/**
+ * Detect a Skip whose evidence indicates audit_profile suppression and extract
+ * the category name. Returns `null` for organic Skips and non-Skip statuses.
+ * @param {{ status: string, evidence: string | null }} check
+ * @returns {string | null}
+ */
+function suppressionCategory(check) {
+  if (check.status !== 'skip' || !check.evidence) return null;
+  if (!check.evidence.startsWith(AUDIT_PROFILE_SUPPRESSION_PREFIX)) return null;
+  return check.evidence.slice(AUDIT_PROFILE_SUPPRESSION_PREFIX.length).trim();
+}
+
 /**
  * Render an array of checks as `<tr>` rows for a check-table.
+ *
+ * Skips emitted with evidence `"suppressed by audit_profile: <category>"` get
+ * a `check--suppressed` class and an "N/A by &lt;category&gt;" status pill,
+ * distinguishing category-scoped exclusions from organic Skips (e.g., "no flags exposed").
+ *
  * @param {Array<{ status: string, label: string, evidence: string | null }>} checks
  * @returns {string}
  */
 function renderCheckRows(checks) {
   return checks
-    .map(
-      (check) => `        <tr class="check check--${check.status}">
-          <td class="check__status">${escHtml(check.status.toUpperCase())}</td>
+    .map((check) => {
+      const category = suppressionCategory(check);
+      const rowClass = category ? 'check check--skip check--suppressed' : `check check--${check.status}`;
+      const statusLabel = category ? `N/A by ${escHtml(category)}` : escHtml(check.status.toUpperCase());
+      const evidence = check.evidence ? escHtml(check.evidence) : '';
+      return `        <tr class="${rowClass}">
+          <td class="check__status">${statusLabel}</td>
           <td class="check__label">${escHtml(check.label)}</td>
-          <td class="check__evidence">${check.evidence ? escHtml(check.evidence) : ''}</td>
-        </tr>`,
-    )
+          <td class="check__evidence">${evidence}</td>
+        </tr>`;
+    })
     .join('\n');
 }
 
@@ -57,8 +84,10 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   };
 
   const rows = leaderboard
-    .map(
-      (entry) => `      <tr data-tier="${escHtml(entry.tool.tier)}" data-lang="${escHtml(entry.tool.language)}">
+    .map((entry) => {
+      const audience = entry.scorecard?.audience ?? '';
+      const auditProfile = entry.scorecard?.audit_profile ?? '';
+      return `      <tr data-tier="${escHtml(entry.tool.tier)}" data-lang="${escHtml(entry.tool.language)}" data-audience="${escHtml(audience)}" data-audit-profile="${escHtml(auditProfile)}">
         <td class="lb-rank">${entry.rank}</td>
         <td class="lb-tool"><a href="/score/${escHtml(entry.tool.name)}">${escHtml(entry.tool.name)}</a></td>
         <td class="lb-desc">${escHtml(entry.tool.description)}</td>
@@ -66,8 +95,8 @@ export function buildLeaderboardBody(leaderboard, methodology) {
         <td class="lb-lang">${escHtml(entry.tool.language)}</td>
         ${scoreCell(entry)}
         ${principleCell(entry)}
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join('\n');
 
   const tierCounts = {};
@@ -77,7 +106,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
 
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
-  <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>.</p>
+  <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
 </section>
 
 <section class="leaderboard-controls" aria-label="Filters">
@@ -87,6 +116,10 @@ export function buildLeaderboardBody(leaderboard, methodology) {
     <button type="button" class="tier-filter" data-tier="agent">Agent (${tierCounts.agent || 0})</button>
     <button type="button" class="tier-filter" data-tier="notable">Notable (${tierCounts.notable || 0})</button>
   </div>
+  <label class="audience-filter">
+    <input type="checkbox" class="audience-filter__input" data-filter="agent-optimized-only">
+    <span class="audience-filter__label">Agent-optimized only</span>
+  </label>
 </section>
 
 <section class="leaderboard-table-wrap">
@@ -155,24 +188,68 @@ ${row('MAY', coverageSummary.may)}
 `;
 }
 
+// Copy for each `audience` label. `agent_optimized` has no entry because the
+// banner is suppressed for that label unless an `audit_profile` is also set.
+const AUDIENCE_COPY = {
+  mixed:
+    'This tool sends mixed signals: some agent-readable affordances are present, others are not. Treat the warnings below as friction points, not defects.',
+  human_primary:
+    'This tool appears optimized for human use, not agents. P1/P2/P6/P7 warnings below reflect that audience choice rather than defects.',
+};
+
+// Copy for each `audit_profile` category. Used when a tool was scored under
+// `--audit-profile <category>` and certain checks were suppressed by design.
+const AUDIT_PROFILE_COPY = {
+  'human-tui':
+    "Scored as a TUI: the standard's non-interactive, SIGPIPE, and quiet-mode checks have been suppressed because they do not apply to interactive terminal UIs.",
+  'file-traversal':
+    'Scored as a file-traversal tool: the structured-output check has been suppressed because the tool emits filenames as its output protocol.',
+  'posix-utility':
+    'Scored as a POSIX utility: structured-output and help-shape checks have been suppressed because the tool predates and follows POSIX conventions.',
+  'diagnostic-only':
+    'Scored as a diagnostic-only tool: dry-run and idempotency checks have been suppressed because the tool is read-only by design.',
+};
+
 /**
  * Render an informational audience banner.
- * Returns empty string if `audience` is null/undefined (v1.0 compat or stub).
  *
- * @param {string | null} audience — scorecard.audience (e.g., "human-primary")
- * @param {string | null} auditProfile — scorecard.audit_profile (e.g., "tui-by-design")
+ * Suppressed when:
+ *   - `audience` is null/undefined (v1.0–v1.2 scorecards or insufficient signal), AND
+ *   - `auditProfile` is null/undefined.
+ *
+ * Suppressed when `audience === "agent_optimized"` AND no `auditProfile` is set —
+ * the absence of a banner is itself the signal that the tool reads as agent-native
+ * with no profile-level scoping applied.
+ *
+ * @param {string | null} audience — scorecard.audience: one of `agent_optimized`, `mixed`, `human_primary`, or null
+ * @param {string | null} auditProfile — scorecard.audit_profile: one of `human-tui`, `file-traversal`, `posix-utility`, `diagnostic-only`, or null
  * @returns {string} HTML fragment
  */
 export function renderAudienceBanner(audience, auditProfile) {
-  if (!audience) return '';
+  const hasAudienceSignal = audience && audience !== 'agent_optimized';
+  if (!hasAudienceSignal && !auditProfile) return '';
 
-  const profilePill = auditProfile ? ` <span class="audit-profile-pill">${escHtml(auditProfile)}</span>` : '';
+  const lines = [];
+  if (hasAudienceSignal) {
+    lines.push(
+      `<p class="audience-banner__headline">Audience signal: <strong>${escHtml(audience)}</strong></p>`,
+      `<p class="audience-banner__copy">${escHtml(AUDIENCE_COPY[audience] ?? `This tool was classified as ${audience}.`)}</p>`,
+    );
+  }
+  if (auditProfile) {
+    const profileCopy =
+      AUDIT_PROFILE_COPY[auditProfile] ??
+      `Scored under audit profile <code>${escHtml(auditProfile)}</code>: some checks have been suppressed by category.`;
+    lines.push(
+      `<p class="audience-banner__profile"><span class="audit-profile-pill">${escHtml(auditProfile)}</span> ${profileCopy}</p>`,
+    );
+  }
+  lines.push(
+    '<p class="audience-banner__note">This is an informational signal, not an authoritative verdict — see <a href="/methodology#what-the-audience-signal-is-and-is-not">methodology</a>. The per-check evidence below is the ground truth.</p>',
+  );
 
   return `<section class="scorecard-audience-banner">
-  <p class="audience-banner__text">Audience signal: <strong>${escHtml(audience)}</strong>${profilePill}</p>
-  <p class="audience-banner__note">This is an informational classification based on the tool's
-  check results, not a quality judgment. Tools optimized for human use may intentionally
-  skip agent-specific affordances.</p>
+  ${lines.join('\n  ')}
 </section>
 `;
 }
