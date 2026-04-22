@@ -30,18 +30,6 @@
 import { resolveBaseUrl } from './util.mjs';
 
 /**
- * Extract the first `# Heading` from a markdown string, trimmed.
- * Falls back to a stable placeholder if no H1 is present.
- */
-export function extractTitle(markdown) {
-  for (const line of markdown.split('\n')) {
-    const match = line.match(/^#\s+(.+?)\s*$/);
-    if (match) return match[1].trim();
-  }
-  return 'Untitled';
-}
-
-/**
  * Build the short llms.txt index.
  *
  * @param {object} args
@@ -113,23 +101,4 @@ export function buildLlmsFull({ sections, baseUrl }) {
   });
 
   return chunks.join('\n');
-}
-
-/**
- * Extract a one-paragraph summary from _intro.md — the first non-empty
- * paragraph after the H1. Used as the llms.txt `>` line.
- */
-export function extractIntroSummary(introMarkdown) {
-  const lines = introMarkdown.split('\n');
-  let i = 0;
-  while (i < lines.length && !lines[i].match(/^#\s+/)) i++;
-  i++; // past H1
-  while (i < lines.length && lines[i].trim() === '') i++;
-
-  const buf = [];
-  while (i < lines.length && lines[i].trim() !== '') {
-    buf.push(lines[i].trim());
-    i++;
-  }
-  return buf.join(' ');
 }
