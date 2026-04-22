@@ -10,11 +10,12 @@ blocks: []
 
 # Handoff 6: v0.1.3 ANC 100 leaderboard launch (site)
 
-**Status (2026-04-22):** Renderer Units 1+, methodology page, registry growth, and Unit 0.5 (audience kebab-case flip)
-have all shipped on `feat/v013-leaderboard-launch` (3 commits, 95 tests pass, build green). Unit 0 (scorecard regen) is
-the only remaining work and stays blocked on `anc` v0.1.3 being released to crates.io / Homebrew — local `anc --version`
-still prints `0.1.2`, no `v0.1.3` tag exists on `brettdavies/agentnative-cli` yet. See the Implementation Log below for
-the full as-shipped record.
+**Status (2026-04-22):** Renderer Units 1+, methodology page, registry growth, Unit 0.5 (audience kebab-case flip), and
+Unit 0 pre-staging (`fd` audit_profile annotation, regen script, snake_case regression guard) have all shipped on
+`feat/v013-leaderboard-launch` (4 commits, 96 tests pass, build green). Unit 0 itself stays blocked on `anc` v0.1.3
+being released to crates.io / Homebrew — local `anc --version` still prints `0.1.2`, no `v0.1.3` tag exists on
+`brettdavies/agentnative-cli` yet. Once installable, Unit 0 collapses to `bash scripts/regen-scorecards.sh`. See the
+Implementation Log below for the full as-shipped record.
 
 **Written for**: the session that turns the pre-GA project into a public leaderboard. Happens only after CLI handoff 5
 has shipped `anc` v0.1.3 AND the 100-tool registry has baseline scores. This is the launch-facing release. CLI-side
@@ -52,11 +53,12 @@ As-shipped order on `feat/v013-leaderboard-launch` is the inverse of the plan's 
 Unit 0.5, and the registry growth all landed first against the synthetic-fixture path; Unit 0 will be the final commit
 once `anc` v0.1.3 is installable.
 
-| Commit  | Date       | What                                                                                       | Plan unit       |
-| ------- | ---------- | ------------------------------------------------------------------------------------------ | --------------- |
-| b0fb782 | 2026-04-22 | Audience banner v2, suppressed-check rendering, agent-optimized filter, `/methodology`     | Units 1, 2, 3, 5 |
-| c355cf8 | 2026-04-22 | Registry 96 → 100 (`gemini-cli`, `opencode`, `qmd`, `mcp-agent-mail`)                      | Hard prereq #2 (R1/R2) |
-| f65fef0 | 2026-04-22 | Audience kebab-case flip + suppression-prefix contract pin (with trailing space)           | Unit 0.5        |
+| Commit  | Date       | What                                                                                           | Plan unit              |
+| ------- | ---------- | ---------------------------------------------------------------------------------------------- | ---------------------- |
+| b0fb782 | 2026-04-22 | Audience banner v2, suppressed-check rendering, agent-optimized filter, `/methodology`         | Units 1, 2, 3, 5       |
+| c355cf8 | 2026-04-22 | Registry 96 → 100 (`gemini-cli`, `opencode`, `qmd`, `mcp-agent-mail`)                          | Hard prereq #2 (R1/R2) |
+| f65fef0 | 2026-04-22 | Audience kebab-case flip + suppression-prefix contract pin (with trailing space)               | Unit 0.5               |
+| 7f9f64a | 2026-04-22 | Pre-staging: `fd → file-traversal` annotation, `scripts/regen-scorecards.sh`, snake_case guard | Unit 0 prep            |
 
 What changed vs. the plan as written:
 
@@ -82,11 +84,13 @@ What changed vs. the plan as written:
 What's still pending:
 
 - **Unit 0** — gated on `anc` v0.1.3 being released to crates.io and Homebrew. Local install is still 0.1.2; latest
-  GitHub release on `brettdavies/agentnative-cli` is v0.1.2 (2026-04-21).
-- **DoD manual sanity checks** — depend on Unit 0 outputs. `gh` no banner, `lazygit` human-tui banner, `ripgrep` no
-  banner (Pattern 2 fix), `fd` file-traversal banner.
-- **`audit_profile` annotations in `registry.yaml`** — should be added in the same Unit 0 commit so the regen call
-  passes the correct `--audit-profile` flag per tool.
+  GitHub release on `brettdavies/agentnative-cli` is v0.1.2 (2026-04-21). Once installable, Unit 0 collapses to `bash
+  scripts/regen-scorecards.sh` (added in 7f9f64a) — version-gated, idempotent, reads each tool's optional
+  `audit_profile` from the registry, writes scorecards, bumps `scored_at`. The single `audit_profile` annotation in the
+  current 10 (`fd → file-traversal`) is pre-staged in the registry.
+- **DoD manual sanity checks** — depend on Unit 0 outputs. `gh` no banner, `lazygit` human-tui banner (lazygit isn't in
+  the current 10 — would need to be added if this check is required at launch), `ripgrep` no banner (Pattern 2 fix),
+  `fd` file-traversal banner.
 
 ## Sibling handoffs
 
@@ -171,17 +175,17 @@ against.
 - Modify: `src/data/coverage-matrix.json` via `scripts/sync-coverage-matrix.sh` (pulls the updated matrix from the CLI
   repo — picks up any registry changes from CLI H5, though that plan promises no new registry entries).
 
-**Approach:**
+**Approach (as-shipped, post 7f9f64a pre-staging):**
 
-1. Install `anc` v0.1.3 on the site box: `brew upgrade brettdavies/tap/agentnative` or `cargo install --version 0.1.3
-   agentnative`. Verify `anc --version` prints `0.1.3`.
-2. For each of the 10 tools, run `anc check --command <tool> --output json > scorecards/<tool>-v<ver>.json` (adjusting
-   filename per the existing convention). For tools that qualify for an `audit_profile` category, pass `--audit-profile
-   <category>` — e.g. `anc check --command lazygit --audit-profile human-tui --output json`.
-3. Bump each tool's `scored_at` field in `registry.yaml` to today's date. Add `audit_profile` annotations where
-   applicable.
-4. Run `scripts/sync-coverage-matrix.sh` to refresh `src/data/coverage-matrix.json` from the CLI repo.
-5. Land as a single atomic PR to `dev` so the site isn't in a mixed-version state mid-merge.
+1. Install `anc` v0.1.3: `brew upgrade brettdavies/tap/agentnative` or `cargo install --version 0.1.3 agentnative`.
+   Verify `anc --version` prints `0.1.3`.
+2. Run `bash scripts/regen-scorecards.sh` (added in 7f9f64a). The script loops every tool with a `version` field in
+   `registry.yaml`, looks up its optional `audit_profile`, runs `anc check --command <binary> [--audit-profile <cat>]
+   --output json`, writes the result to `scorecards/<name>-v<version>.json`, and bumps `scored_at` to today's date. `fd
+   → file-traversal` is the only `audit_profile` annotation in the current 10 (pre-staged in registry).
+3. Run `scripts/sync-coverage-matrix.sh` to refresh `src/data/coverage-matrix.json` from the CLI repo.
+4. Run `bun test && bun run build` — the regression guard added in 7f9f64a will catch any snake_case audience leak.
+5. Commit as the final commit on `feat/v013-leaderboard-launch`; ship the whole branch as one PR to `dev`.
 
 **Verification:**
 
