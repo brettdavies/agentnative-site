@@ -35,13 +35,13 @@ import {
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
+import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
 import {
   buildLeaderboardBody,
   buildLeaderboardMarkdown,
   buildScorecardBody,
   buildScorecardMarkdown,
 } from './scorecards-render.mjs';
-import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { escHtml, parseFilename, sortedGlob } from './util.mjs';

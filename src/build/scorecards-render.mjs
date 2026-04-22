@@ -2,7 +2,7 @@
 // per-tool scorecard pages. Template concern only; data loading and
 // scoring live in scorecards.mjs.
 
-import { BONUS_GROUPS, PRINCIPLE_GROUPS, PRINCIPLE_NAMES, escHtml } from './util.mjs';
+import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util.mjs';
 
 /**
  * Map a check group string to a principle number (1-7) or null for bonus groups.
@@ -375,7 +375,7 @@ export function buildLeaderboardMarkdown(leaderboard) {
  * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} markdown
  */
-export function buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score) {
+export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, score) {
   const lines = [`# ${tool.name}`];
   lines.push('');
   lines.push(tool.description);

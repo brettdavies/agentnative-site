@@ -5,7 +5,7 @@
 // Sync via: scripts/sync-coverage-matrix.sh
 
 import { readFile } from 'node:fs/promises';
-import { PRINCIPLE_NAMES, escHtml } from './util.mjs';
+import { escHtml, PRINCIPLE_NAMES } from './util.mjs';
 
 /**
  * Load and validate coverage-matrix.json.
