@@ -648,18 +648,12 @@
     {
       "name": "posix-utility",
       "description": "POSIX utilities (cat, sed, awk). Stdin-as-primary-input is their contract; P1 interactive-prompt MUSTs satisfied vacuously.",
-      "suppresses": [
-        "p1-non-interactive",
-        "p1-flag-existence",
-        "p1-non-interactive-source"
-      ]
+      "suppresses": ["p1-non-interactive", "p1-flag-existence", "p1-non-interactive-source"]
     },
     {
       "name": "diagnostic-only",
       "description": "Diagnostic tools (nvidia-smi, vmstat). No write operations, so the P5 mutation-boundary MUSTs do not apply.",
-      "suppresses": [
-        "p5-dry-run"
-      ]
+      "suppresses": ["p5-dry-run"]
     }
   ]
 }
