@@ -108,14 +108,12 @@ Logged for future work (out of scope for this handoff):
 
 - **Platform identification in scorecards** — current `anc check --output json` doesn't emit a platform field
   (`linux/x86_64`, `darwin/arm64`, etc.). Adding it site-side would mean injecting fields into the CLI's JSON output,
-  which forks the schema. Better as a future `anc` enhancement (sidecar metadata or a `--target-platform` field).
+  which forks the schema. Tracked upstream as `agentnative` todo 014. Site-side: render the field on per-tool pages once
+  `anc` emits it.
 - **`anc check` linter exit code** — the regen script had to add `|| true` around `anc check` because anc returns
   non-zero whenever any check fails or warns. That's correct linter behavior, but a CLI flag like `--always-exit-0` or a
-  `--mode report` would let downstream automation skip the workaround. Not blocking; logged for `anc` v0.1.4+.
-- **`scripts/regen-scorecards.sh` registry edits via yq strip blank lines** — yq's in-place edits collapsed the
-  registry's section/category blank-line separators on first run; restored manually with awk in 7e641c1. Future fix:
-  switch the script's `version` and `scored_at` updates to targeted `sed` so yq doesn't reformat. Tracked here so it's
-  not forgotten next regen.
+  `--mode report` would let downstream automation skip the workaround. Tracked upstream as `agentnative` todo 015.
+  Site-side: drop the `|| true` once that ships.
 
 ## Sibling handoffs
 

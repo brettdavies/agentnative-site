@@ -198,10 +198,30 @@ for name in "${scored_names[@]}"; do
   fi
 
   # In-place updates: bump scored_at, and bump version if drift detected.
-  yq -i "(.tools[] | select(.name == \"$name\") | .scored_at) = \"$today\"" "$REGISTRY"
+  # Use awk for targeted edits — `yq -i` strips blank-line separators between
+  # tool entries, destroying the registry's section structure. awk only
+  # rewrites the matching lines inside the named tool's block, leaving every
+  # other byte untouched.
+  new_version=""
   if [[ "$actual" != "$pinned" ]]; then
-    yq -i "(.tools[] | select(.name == \"$name\") | .version) = \"$actual\"" "$REGISTRY"
+    new_version="$actual"
   fi
+  awk \
+    -v target="$name" \
+    -v new_scored_at="$today" \
+    -v new_version="$new_version" \
+    '
+      /^  - name:/ { in_target = ($0 == "  - name: " target) }
+      in_target && /^    scored_at:/ {
+        print "    scored_at: \"" new_scored_at "\""
+        next
+      }
+      in_target && new_version != "" && /^    version:/ {
+        print "    version: \"" new_version "\""
+        next
+      }
+      { print }
+    ' "$REGISTRY" >"$REGISTRY.tmp" && mv "$REGISTRY.tmp" "$REGISTRY"
 done
 
 echo
