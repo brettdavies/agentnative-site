@@ -10,13 +10,11 @@ blocks: []
 
 # Handoff 6: v0.1.3 ANC 100 leaderboard launch (site)
 
-**Status (2026-04-22):** Renderer Units 1+, methodology page, registry growth, Unit 0.5 (audience kebab-case flip), Unit
-0 pre-staging, and a follow-up that makes the scorecard filename trustworthy (extracts the actual installed binary
-version per tool, audit_profile vocabulary validation, lazygit pre-staged for the DoD) have all shipped on
-`feat/v013-leaderboard-launch` (5 commits, 99 tests pass, build green). **Unit 0 is now unblocked** — `anc` v0.1.3 was
-released on 2026-04-22 ([crates.io](https://crates.io/crates/agentnative/0.1.3),
-[GitHub Release](https://github.com/brettdavies/agentnative-cli/releases/tag/v0.1.3), Homebrew bottles uploaded). Unit 0
-collapses to `bash scripts/regen-scorecards.sh`. See the Implementation Log below for the full as-shipped record.
+**Status (2026-04-23):** **All units shipped.** Renderer Units 1+, methodology page, registry growth, Unit 0.5 (audience
+kebab-case flip), Unit 0 pre-staging, scorecard-version-correctness follow-up, and Unit 0 itself (regenerated 11
+scorecards against `anc` v0.1.3) are all on `feat/v013-leaderboard-launch` (7 commits, 99 tests pass, build green, every
+DoD checkbox satisfied). Branch is ready for PR to `dev`. See the Implementation Log below for the full as-shipped
+record.
 
 **Written for**: the session that turns the pre-GA project into a public leaderboard. Happens only after CLI handoff 5
 has shipped `anc` v0.1.3 AND the 100-tool registry has baseline scores. This is the launch-facing release. CLI-side
@@ -61,6 +59,8 @@ once `anc` v0.1.3 is installable.
 | f65fef0 | 2026-04-22 | Audience kebab-case flip + suppression-prefix contract pin (with trailing space)                                    | Unit 0.5               |
 | 7f9f64a | 2026-04-22 | Pre-staging: `fd → file-traversal` annotation, `scripts/regen-scorecards.sh`, snake_case guard                      | Unit 0 prep            |
 | 2afe5bc | 2026-04-22 | Scorecard filename = actually-installed binary version + `audit_profile` build-time validation + lazygit pre-staged | Unit 0 prep follow-up  |
+| 6fc4482 | 2026-04-22 | Revert pre-bumped registry versions for gh + claude-code (broke live leaderboard pre-v0.1.3)                        | Unit 0 prep bug fix    |
+| 7e641c1 | 2026-04-23 | Regen all 11 scorecards against `anc` v0.1.3; auto-bumped gh/claude-code/anc; script tweak for linter exit codes    | Unit 0                 |
 
 What changed vs. the plan as written:
 
@@ -102,18 +102,20 @@ What changed vs. the plan as written:
 
 What's still pending:
 
-- **Unit 0** — **ready to execute as of 2026-04-22.** `anc` v0.1.3 is live on crates.io and Homebrew (GitHub release
-  published 2026-04-23 00:50 UTC, marked `make_latest: true` after manual `finalize-release` dispatch to work around a
-  separate homebrew-tap bug tracked in `brettdavies/.github` todo 006). Run `bash scripts/regen-scorecards.sh` (added
-  7f9f64a, hardened 2afe5bc) — version-gated, idempotent, extracts the actual binary version per tool, applies
-  `audit_profile` flags from the registry, writes scorecards, bumps `scored_at`. The two pre-staged `audit_profile`
-  annotations in the current 11 (`fd → file-traversal`, `lazygit → human-tui`) are already in the registry.
-- **DoD manual sanity checks** — depend on Unit 0 outputs. `gh` no banner, `lazygit` human-tui banner, `ripgrep` no
-  banner (Pattern 2 fix), `fd` file-traversal banner.
+- (Nothing on the H6 critical path.) Branch is ready for PR to `dev`.
+
+Logged for future work (out of scope for this handoff):
+
 - **Platform identification in scorecards** — current `anc check --output json` doesn't emit a platform field
   (`linux/x86_64`, `darwin/arm64`, etc.). Adding it site-side would mean injecting fields into the CLI's JSON output,
-  which forks the schema. Better as a future `anc` enhancement (sidecar metadata or a `--target-platform` field). Not
-  blocking launch; logged here so the gap doesn't get forgotten.
+  which forks the schema. Better as a future `anc` enhancement (sidecar metadata or a `--target-platform` field).
+- **`anc check` linter exit code** — the regen script had to add `|| true` around `anc check` because anc returns
+  non-zero whenever any check fails or warns. That's correct linter behavior, but a CLI flag like `--always-exit-0` or a
+  `--mode report` would let downstream automation skip the workaround. Not blocking; logged for `anc` v0.1.4+.
+- **`scripts/regen-scorecards.sh` registry edits via yq strip blank lines** — yq's in-place edits collapsed the
+  registry's section/category blank-line separators on first run; restored manually with awk in 7e641c1. Future fix:
+  switch the script's `version` and `scored_at` updates to targeted `sed` so yq doesn't reformat. Tracked here so it's
+  not forgotten next regen.
 
 ## Sibling handoffs
 
@@ -366,12 +368,13 @@ below is preserved as the original spec.
   TUI-by-design / file-traversal hide behavior depends on Unit 0 populating `audit_profile` on those rows. (commits
   c355cf8, b0fb782)
 - [x] Methodology note published; linked from the audience banner and from the `/scorecards` header. (commit b0fb782)
-- [ ] Manual sanity check (fixtures known from the CLI side): `gh` renders without a banner (agent-optimized); `lazygit`
-  renders with a `human-tui` banner; `ripgrep` renders without a banner after the Pattern 2 env-hint fix; `fd` renders
-  with a `file-traversal` banner. **Pending Unit 0.**
-- [ ] Regression sweep against the 10 committed scorecards: every page loads, no renderer throws on an unknown
-  `audit_profile` string or unexpected `audience` value. **Pending Unit 0** — feature-detect path is exercised by tests;
-  full sweep requires v0.1.3 outputs.
+- [x] Manual sanity check (fixtures known from the CLI side): `gh` renders without a banner (agent-optimized); `lazygit`
+  renders with a `human-tui` banner + 3 suppressed-check rows; `ripgrep` renders without a banner after the Pattern 2
+  env-hint fix; `fd` renders with a `file-traversal` banner. Bonus: `claude-code` renders the `mixed` audience copy.
+  (commit 7e641c1; verified in `dist/score/<name>.html` post-regen)
+- [x] Regression sweep against the 11 committed scorecards (10 original + lazygit added in 2afe5bc): every page loads,
+  no renderer throws on an unknown `audit_profile` string or unexpected `audience` value. Build emits 113 pages; 99
+  tests pass. (commit 7e641c1)
 - [x] `llms-full.txt` includes the new leaderboard surface and links to per-tool pages. (already wired by H2; verified
   intact after this branch's changes)
 
