@@ -398,14 +398,21 @@ ${renderCheckRows(bonusChecks)}
 </section>
 `;
 
-  // CTA
+  // CTA — reproduce THIS scorecard locally. Includes --audit-profile when
+  // the tool was scored under one, so the reproduction matches the
+  // committed scorecard's suppression set exactly.
+  const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
+  const reproCommand = `brew install brettdavies/tap/agentnative &amp;&amp; anc check --command ${escHtml(tool.binary)}${profileFlag}`;
   const ctaText =
     topIssues.length === 0
-      ? 'Run <code>anc check .</code> in CI to keep it that way.'
-      : 'Run <code>anc check .</code> locally for the full report.';
+      ? `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally:`
+      : `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally and inspect the failing checks:`;
   html += `<section class="scorecard-cta">
   <p>${ctaText}</p>
-  <pre><code>cargo install agentnative &amp;&amp; anc check .</code></pre>
+  <pre><code>${reproCommand}</code></pre>
+  <p class="scorecard-cta__note">Add <code>--output json</code> to get the same JSON shape committed under
+  <a href="https://github.com/brettdavies/agentnative-site/tree/main/scorecards"><code>scorecards/</code></a>.
+  Cargo install: <code>cargo install agentnative</code>.</p>
 </section>`;
 
   return html;
