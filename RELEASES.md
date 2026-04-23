@@ -11,14 +11,22 @@ feature branch → PR to dev (squash merge)
               → deploy.yml publishes to production (anc.dev)
 ```
 
+**Exception — `docs/plans/`.** Plan documents are author-driven thinking artifacts. They don't ship to production
+(`guard-main-docs.yml` blocks `docs/plans/`, `docs/solutions/`, and `docs/brainstorms/` from reaching `main`) and they
+don't need code review. Commit them directly to `dev` with a `docs(plans):` Conventional Commits message — skip the
+feature branch entirely. The dev ruleset's admin bypass (`bypass_actor` for RepositoryRole 5) allows this without
+needing the otherwise-required CI check. The same convention applies to ad-hoc edits of `docs/brainstorms/` and
+`docs/solutions/` (the latter being a symlink to the shared `solutions-docs` repo, which has its own commit flow). Code,
+content, scripts, registry, and everything else still go through the PR pipeline above.
+
 ## Branches
 
-| Branch        | Role                              | Lifetime                       | Protection                                |
-| ------------- | --------------------------------- | ------------------------------ | ----------------------------------------- |
-| `main`        | Production. Only release commits. | Forever.                       | `.github/rulesets/protect-main.json`      |
-| `dev`         | Integration. All feature PRs land here. | Forever. Never delete.   | `.github/rulesets/protect-dev.json`       |
-| `feat/*`, `fix/*`, `chore/*` | Feature work.      | One PR's worth. Auto-deleted on merge. | None — squash into dev freely. |
-| `release/*`   | The head of a dev → main PR.      | One release's worth. Auto-deleted on merge. | None.                     |
+| Branch                       | Role                                    | Lifetime                                    | Protection                           |
+| ---------------------------- | --------------------------------------- | ------------------------------------------- | ------------------------------------ |
+| `main`                       | Production. Only release commits.       | Forever.                                    | `.github/rulesets/protect-main.json` |
+| `dev`                        | Integration. All feature PRs land here. | Forever. Never delete.                      | `.github/rulesets/protect-dev.json`  |
+| `feat/*`, `fix/*`, `chore/*` | Feature work.                           | One PR's worth. Auto-deleted on merge.      | None — squash into dev freely.       |
+| `release/*`                  | The head of a dev → main PR.            | One release's worth. Auto-deleted on merge. | None.                                |
 
 `dev` is a **forever branch**. Never delete it locally or remotely, even after a `release/* → main` merge. The next
 release cycle reuses the same `dev`. The repo's `deleteBranchOnMerge: true` setting doesn't touch `dev` as long as `dev`
@@ -85,10 +93,10 @@ on both sides with different content. Always branch from `origin/main` and cherr
 `.github/workflows/deploy.yml` runs on every push to `dev` or `main`, targeting separate Workers via wrangler
 environments:
 
-| Branch | Worker | Domain | Wrangler command |
-| ------ | ------ | ------ | ---------------- |
-| `dev` | `agentnative-site-staging` | `agentnative-site-staging.<subdomain>.workers.dev` | `wrangler deploy --env staging` |
-| `main` | `agentnative-site` | `anc.dev` (custom domain, `workers_dev: false`) | `wrangler deploy` |
+| Branch | Worker                     | Domain                                             | Wrangler command                |
+| ------ | -------------------------- | -------------------------------------------------- | ------------------------------- |
+| `dev`  | `agentnative-site-staging` | `agentnative-site-staging.<subdomain>.workers.dev` | `wrangler deploy --env staging` |
+| `main` | `agentnative-site`         | `anc.dev` (custom domain, `workers_dev: false`)    | `wrangler deploy`               |
 
 The staging-host guard in `src/worker/headers.ts` adds `X-Robots-Tag: noindex` on any response served from a
 `.workers.dev` host. Production at `anc.dev` gets full indexing.
@@ -105,9 +113,9 @@ gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # deploy a speci
 
 Stored as GitHub Actions secrets on `brettdavies/agentnative-site`. Accessible to workflows via `${{ secrets.<name> }}`.
 
-| Secret          | Purpose                                                   | Rotation              |
-| --------------- | --------------------------------------------------------- | --------------------- |
-| `CF_API_TOKEN`  | Cloudflare API token with `Workers Scripts:Edit` + `Account:Read`. Used by `wrangler-action` to deploy. | Max 1 year; renew before expiry. |
+| Secret          | Purpose                                                                                                                                                                         | Rotation                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `CF_API_TOKEN`  | Cloudflare API token with `Workers Scripts:Edit` + `Account:Read`. Used by `wrangler-action` to deploy.                                                                         | Max 1 year; renew before expiry.                            |
 | `CF_ACCOUNT_ID` | Cloudflare account ID. Not a formal secret, but kept out of the public repo; surfaces to wrangler via `CLOUDFLARE_ACCOUNT_ID` env (passed to `wrangler-action` as `accountId`). | Effectively never — changes only if the CF account changes. |
 
 `GITHUB_TOKEN` is provided automatically by GitHub Actions; no setup needed.
