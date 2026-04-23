@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "2 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "status": "pass",
+      "evidence": null,
       "confidence": "medium"
     },
     {
@@ -103,8 +103,8 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 6,
-    "warn": 3,
+    "pass": 7,
+    "warn": 2,
     "fail": 0,
     "skip": 2,
     "error": 0

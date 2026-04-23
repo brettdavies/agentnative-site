@@ -17,7 +17,15 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
   const base = resolveBaseUrl(baseUrl);
   const today = lastmod ?? new Date().toISOString().slice(0, 10);
 
-  const paths = ['/', ...principleNumbers.map((n) => `/p${n}`), '/check', '/about', '/changelog', ...extraPaths];
+  const paths = [
+    '/',
+    ...principleNumbers.map((n) => `/p${n}`),
+    '/check',
+    '/about',
+    '/changelog',
+    '/methodology',
+    ...extraPaths,
+  ];
 
   const urls = paths
     .map((p) => {

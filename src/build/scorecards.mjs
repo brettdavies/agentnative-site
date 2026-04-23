@@ -12,6 +12,21 @@ import { PRINCIPLE_GROUPS } from './util.mjs';
 
 const TOOL_NAME_RE = /^[a-z0-9-]+$/;
 
+// Mirrors `ExceptionCategory::to_kebab_str()` in
+// agentnative/src/principles/registry.rs (CLI v0.1.3). Adding a new variant
+// upstream means adding it here too — the CLI flag rejects anything not in
+// its enum, so a typo or stale value here would silently invalidate the
+// regen pipeline. Kept as an exported constant so tests and the future
+// regen script can share it.
+export const KNOWN_AUDIT_PROFILES = ['human-tui', 'file-traversal', 'posix-utility', 'diagnostic-only'];
+
+// Default version-extraction pipeline used by scripts/regen-scorecards.sh.
+// Most CLIs print `<name> <version>` on the first --version line; this
+// regex picks the first SemVer-shaped token (2 or 3 components) on that
+// line. Tools whose --version output doesn't yield to this regex MUST
+// declare a `version_extract` shell snippet in registry.yaml.
+export const DEFAULT_VERSION_EXTRACT_REGEX = '[0-9]+\\.[0-9]+(\\.[0-9]+)?';
+
 // -------------------------------------------------------------------
 // Data loading
 // -------------------------------------------------------------------
@@ -59,6 +74,12 @@ export async function loadRegistry(registryPath) {
     }
     if (!['workhorse', 'agent', 'notable'].includes(t.tier)) {
       throw new Error(`registry.yaml: tool "${t.name}" has invalid tier "${t.tier}"`);
+    }
+    if (t.audit_profile != null && !KNOWN_AUDIT_PROFILES.includes(t.audit_profile)) {
+      throw new Error(
+        `registry.yaml: tool "${t.name}" has unknown audit_profile "${t.audit_profile}". ` +
+          `Valid values: ${KNOWN_AUDIT_PROFILES.join(', ')}. See ExceptionCategory in agentnative/src/principles/registry.rs.`,
+      );
     }
   }
 

@@ -136,7 +136,7 @@ tools:
     install: brew install ripgrep
     description: Recursively search directories for a regex pattern
     version: "15.1.0"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: fd
     repo: sharkdp/fd
@@ -147,7 +147,10 @@ tools:
     install: brew install fd
     description: A simple, fast, and user-friendly alternative to find
     version: "10.4.2"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
+    # Pre-staged for H6 Unit 0: regen will pass `--audit-profile file-traversal`,
+    # suppressing checks the file-traversal exception category covers.
+    audit_profile: file-traversal
 
   - name: fzf
     repo: junegunn/fzf
@@ -176,7 +179,7 @@ tools:
     install: brew install jq
     description: Command-line JSON processor
     version: "1.8.1"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: xsv
     repo: BurntSushi/xsv
@@ -197,7 +200,7 @@ tools:
     install: brew install bat
     description: A cat clone with syntax highlighting and Git integration
     version: "0.26.1"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: eza
     repo: eza-community/eza
@@ -217,7 +220,7 @@ tools:
     install: brew install dust
     description: A more intuitive version of du in Rust
     version: "1.2.4"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: procs
     repo: dalance/procs
@@ -328,8 +331,8 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    version: "2.89.0"
-    scored_at: "2026-04-21"
+    version: "2.91.0"
+    scored_at: "2026-04-23"
 
   - name: lazygit
     repo: jesseduffield/lazygit
@@ -339,6 +342,18 @@ tools:
     creator: Jesse Duffield
     install: brew install lazygit
     description: Simple terminal UI for git commands
+    version: "0.61.1"
+    scored_at: "2026-04-23"
+    # Pre-staged for H6 Unit 0: TUI by design — regen passes `--audit-profile
+    # human-tui`, suppressing the non-interactive (P1) and SIGPIPE (P6) checks.
+    audit_profile: human-tui
+    # `lazygit --version` emits e.g.
+    #   commit=, build date=, build source=Homebrew, version=0.61.1, os=linux, ...
+    # The default extractor would pick the first SemVer it sees, which for this
+    # output happens to be the lazygit version (correct), but we declare the
+    # extractor explicitly so a future format change doesn't silently shift to
+    # the embedded git version.
+    version_extract: 'lazygit --version | grep -oE "version=[0-9.]+" | head -1 | cut -d= -f2'
 
   - name: git-cliff
     repo: orhun/git-cliff
@@ -710,7 +725,6 @@ tools:
   # ─────────────────────────────────────────────────────────────────
   # AGENT — AI coding agents and LLM CLI tools
   # ─────────────────────────────────────────────────────────────────
-
   - name: claude-code
     repo: anthropics/claude-code
     binary: claude
@@ -719,8 +733,8 @@ tools:
     creator: Anthropic
     install: npm install -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    version: "2.1.116"
-    scored_at: "2026-04-21"
+    version: "2.1.118"
+    scored_at: "2026-04-23"
 
   - name: aider
     repo: Aider-AI/aider
@@ -731,7 +745,7 @@ tools:
     install: pipx install aider-chat
     description: AI pair programming in your terminal
     version: "0.86.2"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: codex
     repo: openai/codex
@@ -819,7 +833,7 @@ tools:
     install: brew install llm
     description: Access large language models from the command-line
     version: "0.30"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: datasette
     repo: simonw/datasette
@@ -876,8 +890,8 @@ tools:
     creator: Brett Davies
     install: brew install brettdavies/tap/agentnative
     description: Check CLI tools against the agent-native standard
-    version: "0.1.1"
-    scored_at: "2026-04-21"
+    version: "0.1.3"
+    scored_at: "2026-04-23"
 
   - name: bird
     repo: brettdavies/bird
@@ -960,3 +974,39 @@ tools:
     creator: Benjamin Sago
     install: brew install dog
     description: A command-line DNS client
+
+  - name: gemini-cli
+    repo: google-gemini/gemini-cli
+    binary: gemini
+    language: TypeScript
+    tier: agent
+    creator: Google
+    install: npm install -g @google/gemini-cli
+    description: Open-source AI agent that brings Gemini directly into the terminal
+
+  - name: opencode
+    repo: anomalyco/opencode
+    binary: opencode
+    language: TypeScript
+    tier: agent
+    creator: Anomaly
+    install: brew install anomalyco/tap/opencode
+    description: Open source coding agent for the terminal
+
+  - name: qmd
+    repo: tobi/qmd
+    binary: qmd
+    language: TypeScript
+    tier: notable
+    creator: Tobi Lütke
+    install: npm install -g @tobilu/qmd
+    description: Local hybrid search (BM25 + vector + LLM rerank) for personal knowledge bases
+
+  - name: mcp-agent-mail
+    repo: Dicklesworthstone/mcp_agent_mail
+    binary: mcp-agent-mail
+    language: Python
+    tier: notable
+    creator: Jeffrey Emanuel
+    install: "curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/main/scripts/install.sh | bash -s -- --yes"
+    description: Async coordination layer for AI coding agents — identities, inboxes, advisory file leases over FastMCP
