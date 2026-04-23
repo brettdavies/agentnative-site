@@ -13,10 +13,10 @@ blocks: []
 **Status (2026-04-22):** Renderer Units 1+, methodology page, registry growth, Unit 0.5 (audience kebab-case flip), Unit
 0 pre-staging, and a follow-up that makes the scorecard filename trustworthy (extracts the actual installed binary
 version per tool, audit_profile vocabulary validation, lazygit pre-staged for the DoD) have all shipped on
-`feat/v013-leaderboard-launch` (5 commits, 99 tests pass, build green). Unit 0 itself stays blocked on `anc` v0.1.3
-being released to crates.io / Homebrew — local `anc --version` still prints `0.1.2`, no `v0.1.3` tag exists on
-`brettdavies/agentnative-cli` yet. Once installable, Unit 0 collapses to `bash scripts/regen-scorecards.sh`. See the
-Implementation Log below for the full as-shipped record.
+`feat/v013-leaderboard-launch` (5 commits, 99 tests pass, build green). **Unit 0 is now unblocked** — `anc` v0.1.3 was
+released on 2026-04-22 ([crates.io](https://crates.io/crates/agentnative/0.1.3),
+[GitHub Release](https://github.com/brettdavies/agentnative-cli/releases/tag/v0.1.3), Homebrew bottles uploaded). Unit 0
+collapses to `bash scripts/regen-scorecards.sh`. See the Implementation Log below for the full as-shipped record.
 
 **Written for**: the session that turns the pre-GA project into a public leaderboard. Happens only after CLI handoff 5
 has shipped `anc` v0.1.3 AND the 100-tool registry has baseline scores. This is the launch-facing release. CLI-side
@@ -102,12 +102,12 @@ What changed vs. the plan as written:
 
 What's still pending:
 
-- **Unit 0** — gated on `anc` v0.1.3 being released to crates.io and Homebrew. Local install is still 0.1.2; latest
-  GitHub release on `brettdavies/agentnative-cli` is v0.1.2 (2026-04-21). Once installable, Unit 0 collapses to `bash
-  scripts/regen-scorecards.sh` (added 7f9f64a, hardened 2afe5bc) — version-gated, idempotent, extracts the actual binary
-  version per tool, applies `audit_profile` flags from the registry, writes scorecards, bumps `scored_at`. The two
-  pre-staged `audit_profile` annotations in the current 11 (`fd → file-traversal`, `lazygit → human-tui`) are already in
-  the registry.
+- **Unit 0** — **ready to execute as of 2026-04-22.** `anc` v0.1.3 is live on crates.io and Homebrew (GitHub release
+  published 2026-04-23 00:50 UTC, marked `make_latest: true` after manual `finalize-release` dispatch to work around a
+  separate homebrew-tap bug tracked in `brettdavies/.github` todo 006). Run `bash scripts/regen-scorecards.sh` (added
+  7f9f64a, hardened 2afe5bc) — version-gated, idempotent, extracts the actual binary version per tool, applies
+  `audit_profile` flags from the registry, writes scorecards, bumps `scored_at`. The two pre-staged `audit_profile`
+  annotations in the current 11 (`fd → file-traversal`, `lazygit → human-tui`) are already in the registry.
 - **DoD manual sanity checks** — depend on Unit 0 outputs. `gh` no banner, `lazygit` human-tui banner, `ripgrep` no
   banner (Pattern 2 fix), `fd` file-traversal banner.
 - **Platform identification in scorecards** — current `anc check --output json` doesn't emit a platform field
@@ -139,16 +139,18 @@ than authoritative verdict.
    values (not `null`) when the inputs warrant it. **Note the casing of the emitted `audience` values:** v0.1.3 emits
    **kebab-case** (`"agent-optimized"`, `"mixed"`, `"human-primary"`), NOT the snake_case shape previously sketched in
    the original combined H5 plan. See Unit 0.5 below and the CLI H5 Implementation Log entry ("Audience values flipped
-   from snake_case to kebab-case") for rationale. Status (2026-04-22): **PENDING.** CLI H5 merged in `agentnative` (PR
-   #26, dc5d741) but no `v0.1.3` tag/release exists yet on `brettdavies/agentnative-cli`. Local `anc --version` is
-   0.1.2.
-2. **`registry.yaml` has ≥100 tools AND every tool has a baseline scorecard committed.** **Launching before this is met
+   from snake_case to kebab-case") for rationale. Status (2026-04-23): **MET.** CLI H5 merged in `agentnative` (PR #26,
+   dc5d741; PR #27, db11e97 added audience_reason and kebab-case unification). `v0.1.3` released on 2026-04-22 — live on
+   [crates.io](https://crates.io/crates/agentnative/0.1.3), the
+   [GitHub Release](https://github.com/brettdavies/agentnative-cli/releases/tag/v0.1.3) is marked latest, and Homebrew
+   bottles are uploaded. Local install upgrade is the last user-side step before Unit 0 runs.
+1. **`registry.yaml` has ≥100 tools AND every tool has a baseline scorecard committed.** **Launching before this is met
    makes the leaderboard look punitive** — 5 of 10 current tools would drop under new checks, producing the HN narrative
    "new linter rates famous tools badly based on rules written last week" (per the CEO review's outside voice Finding
-   #7). Status (2026-04-22): registry-count side **MET** (100 entries; commit c355cf8 added `gemini-cli`, `opencode`,
-   `qmd`, `mcp-agent-mail`); baseline-scorecard side **NOT MET** (10 committed scorecards, all v0.1.1/v0.1.2 outputs
-   with `audience: null`). Both gaps close in Unit 0 — the 10 get regenerated against v0.1.3; growth past 10 is
-   post-launch / R19 community submissions.
+   #7). Status (2026-04-23): registry-count side **MET** (100 entries; commit c355cf8 added `gemini-cli`, `opencode`,
+   `qmd`, `mcp-agent-mail`); baseline-scorecard side **READY TO EXECUTE** (10 committed scorecards, all v0.1.1/v0.1.2
+   outputs with `audience: null`, now unblocked — `anc` v0.1.3 released 2026-04-22). Unit 0 regenerates the 10 against
+   v0.1.3; growth past 10 is post-launch / R19 community submissions.
 
 If either prerequisite isn't ready, do not start this handoff. Registry growth + initial scoring is its own
 track; it's not covered here.
@@ -169,10 +171,10 @@ Do NOT re-read doctrine transcripts.
 
 ### Unit 0: Scorecard regeneration bridge (blocker for every other unit)
 
-**Status: PENDING (gated on `anc` v0.1.3 release).** Local `anc --version` is 0.1.2; latest tag on
-`brettdavies/agentnative-cli` is `v0.1.2` (2026-04-21). Per the Implementation Log, the renderer work in Units 1+
-shipped first against synthetic fixtures + the null-feature-detect path; Unit 0 will be the final commit on this branch
-once the binary is installable.
+**Status: READY (unblocked 2026-04-22 by `anc` v0.1.3 release).** Latest tag on `brettdavies/agentnative-cli` is
+`v0.1.3` (2026-04-22, marked `make_latest: true`). Local install still needs to be bumped from 0.1.2 to 0.1.3 before
+running the regen script. Per the Implementation Log, the renderer work in Units 1+ shipped first against synthetic
+fixtures and the null-feature-detect path; Unit 0 is the final commit on this branch now that the binary is installable.
 
 Before any renderer work in this plan begins, every committed scorecard must be regenerated against `anc` v0.1.3 so that
 `audience` and `audit_profile` carry real (non-null) values and `p1-env-hints` verdicts reflect Pattern

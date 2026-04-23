@@ -136,7 +136,7 @@ tools:
     install: brew install ripgrep
     description: Recursively search directories for a regex pattern
     version: "15.1.0"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: fd
     repo: sharkdp/fd
@@ -147,7 +147,7 @@ tools:
     install: brew install fd
     description: A simple, fast, and user-friendly alternative to find
     version: "10.4.2"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
     # Pre-staged for H6 Unit 0: regen will pass `--audit-profile file-traversal`,
     # suppressing checks the file-traversal exception category covers.
     audit_profile: file-traversal
@@ -179,7 +179,7 @@ tools:
     install: brew install jq
     description: Command-line JSON processor
     version: "1.8.1"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: xsv
     repo: BurntSushi/xsv
@@ -200,7 +200,7 @@ tools:
     install: brew install bat
     description: A cat clone with syntax highlighting and Git integration
     version: "0.26.1"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: eza
     repo: eza-community/eza
@@ -220,7 +220,7 @@ tools:
     install: brew install dust
     description: A more intuitive version of du in Rust
     version: "1.2.4"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: procs
     repo: dalance/procs
@@ -331,12 +331,8 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    # registry version intentionally lags installed version (2.91.0 on dev box,
-    # 2.89.0 on disk). regen-scorecards.sh will auto-bump + warn at Unit 0
-    # time; pre-bumping here would orphan the gh-v2.89.0.json scorecard and
-    # render gh as "unscored" in the live leaderboard until v0.1.3 ships.
-    version: "2.89.0"
-    scored_at: "2026-04-21"
+    version: "2.91.0"
+    scored_at: "2026-04-23"
 
   - name: lazygit
     repo: jesseduffield/lazygit
@@ -347,7 +343,7 @@ tools:
     install: brew install lazygit
     description: Simple terminal UI for git commands
     version: "0.61.1"
-    scored_at: "2026-04-22"
+    scored_at: "2026-04-23"
     # Pre-staged for H6 Unit 0: TUI by design — regen passes `--audit-profile
     # human-tui`, suppressing the non-interactive (P1) and SIGPIPE (P6) checks.
     audit_profile: human-tui
@@ -729,7 +725,6 @@ tools:
   # ─────────────────────────────────────────────────────────────────
   # AGENT — AI coding agents and LLM CLI tools
   # ─────────────────────────────────────────────────────────────────
-
   - name: claude-code
     repo: anthropics/claude-code
     binary: claude
@@ -738,12 +733,8 @@ tools:
     creator: Anthropic
     install: npm install -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    # registry version intentionally lags installed version (2.1.117 on dev box,
-    # 2.1.116 on disk). regen-scorecards.sh will auto-bump + warn at Unit 0
-    # time; pre-bumping here would orphan the claude-code-v2.1.116.json scorecard
-    # and render claude-code as "unscored" in the live leaderboard until v0.1.3.
-    version: "2.1.116"
-    scored_at: "2026-04-21"
+    version: "2.1.118"
+    scored_at: "2026-04-23"
 
   - name: aider
     repo: Aider-AI/aider
@@ -754,7 +745,7 @@ tools:
     install: pipx install aider-chat
     description: AI pair programming in your terminal
     version: "0.86.2"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: codex
     repo: openai/codex
@@ -842,7 +833,7 @@ tools:
     install: brew install llm
     description: Access large language models from the command-line
     version: "0.30"
-    scored_at: "2026-04-21"
+    scored_at: "2026-04-23"
 
   - name: datasette
     repo: simonw/datasette
@@ -899,8 +890,8 @@ tools:
     creator: Brett Davies
     install: brew install brettdavies/tap/agentnative
     description: Check CLI tools against the agent-native standard
-    version: "0.1.1"
-    scored_at: "2026-04-21"
+    version: "0.1.3"
+    scored_at: "2026-04-23"
 
   - name: bird
     repo: brettdavies/bird

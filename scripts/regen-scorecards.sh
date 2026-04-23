@@ -187,8 +187,15 @@ for name in "${scored_names[@]}"; do
     continue
   fi
 
+  # `anc check` is a linter — it exits non-zero whenever any check fails or
+  # warns, even on a successful run. The JSON output is still well-formed.
+  # Allow non-zero exit and validate the result instead.
   # shellcheck disable=SC2086 # profile_flag must word-split on the space
-  anc check --command "$binary" $profile_flag --output json >"$out"
+  anc check --command "$binary" $profile_flag --output json >"$out" || true
+  if ! jaq -e '.schema_version' "$out" >/dev/null 2>&1; then
+    echo "error: anc check did not produce valid JSON for $name (file: $out)" >&2
+    exit 1
+  fi
 
   # In-place updates: bump scored_at, and bump version if drift detected.
   yq -i "(.tools[] | select(.name == \"$name\") | .scored_at) = \"$today\"" "$REGISTRY"

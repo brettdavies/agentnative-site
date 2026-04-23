@@ -12,6 +12,10 @@
       },
       "verifiers": [
         {
+          "check_id": "p1-env-hints",
+          "layer": "behavioral"
+        },
+        {
           "check_id": "p1-env-flags-source",
           "layer": "source"
         }
@@ -28,6 +32,10 @@
       "verifiers": [
         {
           "check_id": "p1-non-interactive",
+          "layer": "behavioral"
+        },
+        {
+          "check_id": "p1-flag-existence",
           "layer": "behavioral"
         },
         {
@@ -440,6 +448,10 @@
       },
       "verifiers": [
         {
+          "check_id": "p6-no-pager-behavioral",
+          "layer": "behavioral"
+        },
+        {
           "check_id": "p6-no-pager",
           "layer": "source"
         }
@@ -602,6 +614,7 @@
     "total": 46,
     "covered": 19,
     "uncovered": 27,
+    "dual_layer": 7,
     "must": {
       "total": 23,
       "covered": 17
@@ -614,5 +627,39 @@
       "total": 7,
       "covered": 0
     }
-  }
+  },
+  "audit_profiles": [
+    {
+      "name": "human-tui",
+      "description": "TUI-by-design tools (lazygit, k9s, btop). Interactive-prompt MUSTs suppressed; the TTY-driving contract is out of scope for verification.",
+      "suppresses": [
+        "p1-non-interactive",
+        "p1-flag-existence",
+        "p1-non-interactive-source",
+        "p1-tty-detection-source",
+        "p6-sigpipe"
+      ]
+    },
+    {
+      "name": "file-traversal",
+      "description": "File-traversal utilities (fd, find). Subcommand-structure SHOULDs relaxed; these tools have no subcommands by design.",
+      "suppresses": []
+    },
+    {
+      "name": "posix-utility",
+      "description": "POSIX utilities (cat, sed, awk). Stdin-as-primary-input is their contract; P1 interactive-prompt MUSTs satisfied vacuously.",
+      "suppresses": [
+        "p1-non-interactive",
+        "p1-flag-existence",
+        "p1-non-interactive-source"
+      ]
+    },
+    {
+      "name": "diagnostic-only",
+      "description": "Diagnostic tools (nvidia-smi, vmstat). No write operations, so the P5 mutation-boundary MUSTs do not apply.",
+      "suppresses": [
+        "p5-dry-run"
+      ]
+    }
+  ]
 }
