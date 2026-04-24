@@ -90,8 +90,7 @@ on both sides with different content. Always branch from `origin/main` and cherr
 
 ## Deploy
 
-`.github/workflows/deploy.yml` runs on every push to `dev` or `main`, targeting separate Workers via wrangler
-environments:
+`.github/workflows/deploy.yml` runs on pushes to `dev` or `main`, targeting separate Workers via wrangler environments:
 
 | Branch | Worker                     | Domain                                             | Wrangler command                |
 | ------ | -------------------------- | -------------------------------------------------- | ------------------------------- |
@@ -108,6 +107,24 @@ gh workflow run deploy.yml -f environment=staging              # redeploy stagin
 gh workflow run deploy.yml -f environment=production            # redeploy production
 gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # deploy a specific SHA to staging
 ```
+
+### Docs-only commits skip deploy
+
+A `paths-ignore` filter on the `push` trigger skips deploy when a commit only touches paths the build doesn't ingest:
+
+- `docs/**` — all planning, design, and solution docs.
+- Root-level `*.md` — `README.md`, `AGENTS.md`, `RELEASES.md`, `CHANGELOG.md` (the glob doesn't cross `/`, so
+  `content/*.md` pages still deploy).
+
+Everything else — `content/**`, `src/**`, `scripts/**`, workflows, `wrangler.jsonc`, `package.json`, etc. — still
+triggers a deploy on push. `workflow_dispatch` is unaffected, so manual redeploys always work regardless of what
+changed.
+
+The filter is symmetric across `dev` and `main`. In practice the `main` side is mostly theoretical:
+`guard-main-docs.yml` already blocks `docs/plans|solutions|brainstorms|reviews/**` from reaching `main` via PR, and the
+remaining ignored paths (root `*.md`, `docs/DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would
+redeploy a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level
+filter for a job-level changed-files check.
 
 ## Secrets
 
@@ -145,9 +162,8 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
   --input .github/rulesets/protect-main.json
 ```
 
-Committing the JSON alongside the code means ruleset changes land via the same
-review process as workflow changes — a `chore(ci): tighten protect-main` release goes through dev → release/* → main
-like anything else.
+Committing the JSON alongside the code means ruleset changes land via the same review process as workflow changes — a
+`chore(ci): tighten protect-main` release goes through dev → release/* → main like anything else.
 
 ## Related docs
 
