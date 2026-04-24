@@ -126,6 +126,32 @@ remaining ignored paths (root `*.md`, `docs/DESIGN.md`, `docs/TODOS.md`) don't c
 redeploy a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level
 filter for a job-level changed-files check.
 
+## CI
+
+Two workflows gate pull requests:
+
+| Workflow      | Fires on                                           | Purpose                                                                                                        |
+| ------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `ci.yml`      | PR with any change outside `docs/**` / root `*.md` | Heavy pipeline: `bun install → lint → build → test → wrangler --dry-run`. ~30s warm.                           |
+| `ci-stub.yml` | PR that touches only `docs/**` or root `*.md`      | No-op stub. Emits the required check name to satisfy the ruleset gate without running the heavy pipeline. ~5s. |
+
+Both jobs are named `lint · build · test · wrangler` — the same context the dev/main rulesets require. On a PR that
+mixes docs and code, both workflows fire and both pass; the required-check gate is satisfied either way.
+
+### Why the stub
+
+Required status checks + `paths-ignore` is a known
+[GitHub Actions sharp edge](https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution): if
+the workflow is filtered out for a given PR, the required check shows as "Expected" forever and the PR can't merge. The
+stub workflow fires exactly when `ci.yml` is filtered, emits the same check context as a no-op success, and unblocks the
+PR.
+
+### The invariant
+
+`ci.yml`'s `paths-ignore:` list and `ci-stub.yml`'s `paths:` list must stay identical. Drift creates gaps (no workflow
+fires → required check never reports → PR stuck) or benign double-runs on mixed PRs. A comment in both files calls this
+out explicitly; keep them in sync when editing either one.
+
 ## Secrets
 
 Stored as GitHub Actions secrets on `brettdavies/agentnative-site`. Accessible to workflows via `${{ secrets.<name> }}`.
