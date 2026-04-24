@@ -16,6 +16,17 @@ on:
     branches:
       - main
       - dev
+    # Skip the heavy pipeline when a PR only touches docs that aren't
+    # ingested at build time. A companion workflow (ci-stub.yml) mirrors
+    # this list with a `paths:` filter and emits the required
+    # `lint · build · test · wrangler` check name as a no-op success so
+    # the dev/main ruleset gate is still satisfied. The two lists MUST
+    # stay in sync — drift creates gaps (no check) or harmless overlap
+    # (both workflows fire; both pass). See deploy.yml for the matching
+    # filter on the push trigger.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}

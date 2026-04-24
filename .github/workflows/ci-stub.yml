@@ -1,0 +1,46 @@
+# Companion to ci.yml. Runs on PRs that ONLY touch docs paths ci.yml
+# filters out (docs/**, root *.md). Emits the `lint · build · test ·
+# wrangler` check name as a no-op success so the dev/main ruleset
+# `required_status_checks` gate is satisfied without running the heavy
+# pipeline.
+#
+# The `paths:` list here MUST mirror ci.yml's `paths-ignore:` list
+# exactly. Drift creates gaps (no check reports and the PR is stuck)
+# or harmless overlap (both workflows run on mixed PRs; both pass).
+#
+# Related:
+#   - deploy.yml uses the same filter on its push trigger.
+#   - Dev ruleset required context: `lint · build · test · wrangler`
+#     (.github/rulesets/protect-dev.json).
+
+name: ci (docs-only stub)
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'docs/**'
+      - '*.md'
+
+concurrency:
+  group: ci-stub-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: lint · build · test · wrangler
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Report success (docs-only PR)
+        run: |
+          echo "This PR touches only docs/** or root *.md files."
+          echo "ci.yml's heavy pipeline is filtered via paths-ignore."
+          echo "This stub emits the required check name as success so"
+          echo "the branch ruleset gate accepts the merge."
