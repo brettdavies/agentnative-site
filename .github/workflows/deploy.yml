@@ -26,6 +26,16 @@ on:
     branches:
       - main
       - dev
+    # Skip deploy when the commit only touches docs that aren't ingested
+    # at build time. `content/**` (rendered into the site) is deliberately
+    # NOT in this list — content changes must still deploy. `docs/**`
+    # covers planning/design/solution docs, and `*.md` matches only
+    # root-level .md files (README/AGENTS/RELEASES/CHANGELOG) because the
+    # `*` glob doesn't match path separators — `content/*.md` still
+    # triggers deploy. `workflow_dispatch` below is unaffected.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
     inputs:
       ref:
