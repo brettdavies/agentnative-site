@@ -102,7 +102,28 @@ prescribes feature-detection over version gating for reading the artifacts.
 
 ### External References
 
-- None needed. Pattern is local.
+- **`agentnative-cli` sibling `sync-spec.sh`** —
+  [`~/dev/agentnative-cli/scripts/sync-spec.sh`](https://github.com/brettdavies/agentnative-cli/blob/dev/scripts/sync-spec.sh).
+  A working sibling implementation of this exact problem (vendor principles + VERSION + CHANGELOG from the spec repo
+  into a downstream consumer). Diverges from `sync-coverage-matrix.sh` in three ways worth adopting:
+- **Extracts via `git show "$SPEC_REF:<path>" >dest`**, not `cp`. The operator's spec-repo working tree is never
+  perturbed — no `git checkout` of a tag, no risk of leaving the spec clone on a detached HEAD after a sync.
+- **Accepts `SPEC_REF` env var** (default `v0.2.0`). The script itself names the ref it's vendoring; commit messages can
+  cite it directly. `SPEC_REF=v0.2.1 ./scripts/sync-spec.sh` is the standard operator gesture for a version bump.
+- **Enumerates principle files via `git ls-tree --name-only "$SPEC_REF" principles/`**, not a working-tree glob. Sees
+  what's at the ref, not what's lying around in the user's checkout.
+- **Validation gates are explicit**: SPEC_ROOT is a git repo, SPEC_REF resolves to a commit, `principles/` exists at the
+  ref. Each gate has a one-line error message that tells the operator what to do (`try git fetch --tags`, etc.).
+- **Echoes the resolved short SHA** of the ref before extracting, so the operator sees exactly what was vendored.
+- **`agentnative-cli` build-time consumer** —
+  [`~/dev/agentnative-cli/build.rs`](https://github.com/brettdavies/agentnative-cli/blob/dev/build.rs). Demonstrates the
+  consumer-side pattern: read vendored `src/principles/spec/`, parse frontmatter at build time, fail-fast with file +
+  field cited on parse error. Site-side analog (whenever follow-up consumers land — `/llms-full.txt`, footer version,
+  scorecard cross-refs) belongs in `src/build/*.mjs` and should mirror the same fail-fast posture.
+- **`agentnative-cli` plan for the same work** —
+  [`docs/plans/2026-04-23-001-feat-spec-vendor-plan.md`](https://github.com/brettdavies/agentnative-cli/blob/dev/docs/plans/2026-04-23-001-feat-spec-vendor-plan.md)
+  in the CLI repo. Already cross-linked in Sources & References below; named here so the executor reaches for the
+  sibling implementation first, the local `sync-coverage-matrix.sh` second.
 
 ---
 
@@ -127,9 +148,15 @@ prescribes feature-detection over version gating for reading the artifacts.
 - **Does the script need a `--check` mode to fail CI on drift?** — **No.** The spec repo's pre-push hook enforces
   source-side correctness. Consumer-side drift is deliberate (consumer chooses when to resync).
   `sync-coverage-matrix.sh` has no `--check` mode and that's worked fine.
-- **Should the script pull from a git tag or a local checkout?** — **Local checkout.** Matches the existing pattern
-  (`ANC_ROOT` points at a local clone). Users who want a specific tag check out that tag in their spec repo clone and
-  rerun the script. Keeps the script offline-capable.
+- **Should the script pull from a git tag or a local checkout?** — **`git show <ref>:<path>` against a local checkout.**
+  The original resolution favored "user checks out the tag, then `cp`," matching the pre-existing
+  `sync-coverage-matrix.sh` pattern. The `agentnative-cli` sibling has since proven a better approach: extract via `git
+  show "$SPEC_REF:<path>" >dest` so the operator's working tree is not perturbed, and accept `SPEC_REF` as an env var
+  (default `v0.2.0`) so the script itself names the ref. **Adopt this for `sync-spec.sh`** — it's offline-capable (works
+  against the local object store), reproducible (same ref → same vendored bytes regardless of working-tree state), and
+  ergonomic for the operator (no `git checkout v0.2.0 && cp && git checkout dev` dance). See External References above
+  for the concrete patterns. `sync-coverage-matrix.sh` may be retrofitted later or left as-is — that decision is not
+  blocked by this plan.
 
 ### Deferred to Implementation
 
@@ -181,15 +208,27 @@ agentnative-site/
 
 **Approach:**
 
-- Copy `scripts/sync-coverage-matrix.sh`'s structure verbatim.
-- Swap `ANC_ROOT` → `SPEC_ROOT`, default `$HOME/dev/agentnative-spec`.
-- Source → dest mapping (three `cp` invocations, each echoed on success):
-- `$SPEC_ROOT/VERSION` → `src/data/spec/VERSION`
-- `$SPEC_ROOT/CHANGELOG.md` → `src/data/spec/CHANGELOG.md`
-- `$SPEC_ROOT/principles/*.md` → `src/data/spec/principles/` (preserve filenames)
-- `mkdir -p "$dst_dir"` before copying principles so first-run works even if the destination doesn't exist yet.
-- Preserve `set -euo pipefail`, SCRIPT_DIR + SITE_ROOT resolution, hard-error on missing source.
+**Primary reference: `~/dev/agentnative-cli/scripts/sync-spec.sh`.** Adopt its shape directly — it solves the same
+problem one step downstream and has been run in anger. Treat `sync-coverage-matrix.sh` as the secondary reference for
+this repo's local stylistic conventions (header comment voice, repo-root resolution).
+
+- Env vars: `SPEC_ROOT` (default `$HOME/dev/agentnative-spec`) and `SPEC_REF` (default `v0.2.0`). The default for
+  `SPEC_REF` is the same v0.2.0 tag this plan pins against; future syncs override it: `SPEC_REF=v0.2.1 ./sync-spec.sh`.
+- Validation gates (mirror the CLI script):
+- `SPEC_ROOT` is a git repo (else: print path + remediation, exit 1).
+- `SPEC_REF` resolves to a commit (else: suggest `git fetch --tags`, exit 1).
+- `principles/` exists at `SPEC_REF` (else: error citing the ref, exit 1).
+- Resolved-SHA echo: `git -C "$SPEC_ROOT" rev-parse --short=7 "$SPEC_REF^{commit}"` printed before extraction so the
+  operator sees the exact vendored content.
+- Extraction (three artifacts, all via `git show`):
+- `git show "$SPEC_REF:VERSION" >src/data/spec/VERSION`
+- `git show "$SPEC_REF:CHANGELOG.md" >src/data/spec/CHANGELOG.md`
+- Enumerate principle files at the ref via `git -C "$SPEC_ROOT" ls-tree --name-only "$SPEC_REF" principles/`, then `git
+    show "$SPEC_REF:<path>" >src/data/spec/principles/<basename>` per match.
+- `mkdir -p src/data/spec/principles` before extraction so first-run works.
+- `set -euo pipefail`, SCRIPT_DIR + SITE_ROOT resolution per local convention.
 - `chmod +x scripts/sync-spec.sh` after creation.
+- Closing line mirrors the CLI script: `echo "next: review \`git diff\` for unexpected changes, then commit."`
 
 **Patterns to follow:**
 
