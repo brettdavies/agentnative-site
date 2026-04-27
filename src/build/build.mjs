@@ -33,6 +33,7 @@ import {
   extractTitle,
 } from './content.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
+import { emitInstallJson, loadInstallData } from './install.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
 import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
@@ -53,6 +54,7 @@ const DIST_DIR = join(REPO_ROOT, 'dist');
 const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
+const INSTALL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'install.json');
 
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',
@@ -319,6 +321,12 @@ export async function build() {
     }),
   );
   await writeFile(join(DIST_DIR, 'coverage.md'), coverageMarkdown);
+
+  // 8c. /install.json — canonical machine surface for skill distribution.
+  // Validated + emitted from src/data/install.json. Unit 3 adds the HTML +
+  // markdown twin alongside.
+  const installData = await loadInstallData(INSTALL_DATA_PATH);
+  await emitInstallJson(installData, DIST_DIR);
 
   // 9. llms.txt + llms-full.txt (includes scorecard section).
   const llmsIndex = buildLlmsIndex({

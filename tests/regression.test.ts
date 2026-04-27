@@ -121,6 +121,64 @@ describe('regression #3 — markdown byte-equivalence', () => {
   });
 });
 
+describe('regression #5 — /install.json (skill-distribution canonical surface)', () => {
+  test('dist/install.json exists and parses', async () => {
+    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    expect(parsed).toBeDefined();
+  });
+
+  test('dist/install.json source.commit matches src/data/install.json', async () => {
+    const distRaw = await readFile(join(DIST, 'install.json'), 'utf8');
+    const sourceRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'install.json'), 'utf8');
+    const dist = JSON.parse(distRaw);
+    const source = JSON.parse(sourceRaw);
+    expect(dist.source.commit).toBe(source.source.commit);
+    // Pin-freshness invariant: verify.expected mirrors source.commit until
+    // a v2 schema decouples them.
+    expect(dist.verify.expected).toBe(dist.source.commit);
+  });
+
+  test('dist/install.json source.commit is 40-char lowercase hex', async () => {
+    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.source.commit).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  test('dist/install.json has every required key', async () => {
+    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    for (const key of [
+      'schema_version',
+      'type',
+      'name',
+      'version',
+      'description',
+      'principles_url',
+      'license',
+      'source',
+      'install',
+      'verify',
+      'update',
+      'uninstall',
+      'install_page_html',
+    ]) {
+      expect(parsed).toHaveProperty(key);
+    }
+    expect(Object.keys(parsed.install).length).toBeGreaterThan(0);
+  });
+
+  test('dist/install.json is byte-stable: keys sorted, two-space indent, trailing newline', async () => {
+    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+    expect(raw.endsWith('\n')).toBe(true);
+    expect(raw).toContain('  "schema_version"');
+    // Top-level keys come out in alphabetical order.
+    const topLevelKeys = (raw.match(/^ {2}"([^"]+)":/gm) ?? []).map((l) => l.replace(/^\s*"([^"]+)":.*$/, '$1'));
+    const sorted = [...topLevelKeys].sort();
+    expect(topLevelKeys).toEqual(sorted);
+  });
+});
+
 describe('regression #4 — scorecard pages', () => {
   test('dist/scorecards.html exists and contains a <table> element', async () => {
     const html = await readFile(join(DIST, 'scorecards.html'), 'utf8');

