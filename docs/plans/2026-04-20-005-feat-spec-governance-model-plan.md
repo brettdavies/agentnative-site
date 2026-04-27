@@ -1,10 +1,13 @@
 ---
 title: "feat: Implement spec governance model across three repos"
 type: feat
-status: active
+status: complete
 date: 2026-04-20
-origin: docs/brainstorms/spec-governance-requirements.md
 deepened: 2026-04-20
+completed_date: 2026-04-22
+origin: docs/brainstorms/spec-governance-requirements.md
+superseded_by:
+  - units 4, 5, 7 → docs/plans/2026-04-23-001-feat-sync-spec-plan.md
 ---
 
 # feat: Implement spec governance model across three repos
@@ -185,8 +188,8 @@ graph LR
 
 - [ ] **Unit 1: Rename tool repo and update cross-repo references**
 
-**Goal:** Rename the GitHub repo, update crate metadata, and fix all cross-repo URL references to close the
-broken-link window before the new spec repo claims the `agentnative` name.
+**Goal:** Rename the GitHub repo, update crate metadata, and fix all cross-repo URL references to close the broken-link
+window before the new spec repo claims the `agentnative` name.
 
 **Requirements:** R3 (precondition), R8.1 (routing accuracy)
 
@@ -242,8 +245,8 @@ broken-link window before the new spec repo claims the `agentnative` name.
 
 **Requirements:** R1.1, R1.2, R1.3, R1.4, R1.5, R1.6, R4.1, R7.1, R7.2, R7.3, R7.4, R7.5, R7.6, R8.2
 
-**Dependencies:** Unit 1 (rename must complete and all references updated, so the `agentnative` name is available and
-no existing link will accidentally resolve here)
+**Dependencies:** Unit 1 (rename must complete and all references updated, so the `agentnative` name is available and no
+existing link will accidentally resolve here)
 
 **Files:**
 
@@ -299,8 +302,8 @@ no existing link will accidentally resolve here)
 
 - [ ] **Unit 3: Add per-check calver to tool repo and render on scorecard pages**
 
-**Goal:** Add `last-revised` metadata to each check, include revision dates and spec version in JSON output, and
-render check dates on the site's scorecard pages.
+**Goal:** Add `last-revised` metadata to each check, include revision dates and spec version in JSON output, and render
+check dates on the site's scorecard pages.
 
 **Requirements:** R5.1, R5.2, R5.3, R5.4
 
@@ -356,8 +359,8 @@ render check dates on the site's scorecard pages.
 
 - [ ] **Unit 4: Update site build to parse frontmatter and render revision dates**
 
-**Goal:** Update the build pipeline to parse `last-revised` frontmatter from principle files and render it on
-principle pages.
+**Goal:** Update the build pipeline to parse `last-revised` frontmatter from principle files and render it on principle
+pages.
 
 **Requirements:** R4.1, R4.4
 
@@ -432,15 +435,15 @@ principle pages.
 
 - `scripts/sync-spec.sh` (two modes):
 - Default mode: shallow-clones spec repo into temp dir, copies `principles/*.md`, `VERSION`, `CHANGELOG.md` into
-    `content/`. Adds calver-pinned header comment to each copy. Exits 0 if files changed (caller commits).
+  `content/`. Adds calver-pinned header comment to each copy. Exits 0 if files changed (caller commits).
 - `--check` mode: runs the same copy logic to a temp dir, diffs against current `content/`. Exits non-zero if any file
-    differs (signals drift). Does NOT require network access to spec repo — it validates that committed copies are
-    self-consistent with what the script WOULD produce if run. Wait — this does require network access to compare
-    against the spec repo. Revised approach: `--check` validates that committed copies have valid structure (frontmatter
-    present, calver header present, no corruption). True cross-repo drift detection is a manual responsibility
-    (maintainer runs sync periodically).
+  differs (signals drift). Does NOT require network access to spec repo — it validates that committed copies are
+  self-consistent with what the script WOULD produce if run. Wait — this does require network access to compare against
+  the spec repo. Revised approach: `--check` validates that committed copies have valid structure (frontmatter present,
+  calver header present, no corruption). True cross-repo drift detection is a manual responsibility (maintainer runs
+  sync periodically).
 - Actually simplest: `--check` mode fetches spec repo and compares. This runs in CI where network is available. The
-    "offline build" guarantee is about `bun run build` not needing network, not about CI.
+  "offline build" guarantee is about `bun run build` not needing network, not about CI.
 - Site repo CI gains a `sync-check` job that runs `scripts/sync-spec.sh --check` and fails if drift detected
 - Site build itself (`bun run build`) reads from `content/` as before — always offline, no network needed
 - Calver-pinned header in committed copies for quick visual drift detection
@@ -533,8 +536,8 @@ cross-repo routing across all three repos.
 
 - [ ] **Unit 7: Changelog page and footer version from spec repo**
 
-**Goal:** Display the spec changelog grouped by principle with revision dates, and read the spec version dynamically
-for the site footer.
+**Goal:** Display the spec changelog grouped by principle with revision dates, and read the spec version dynamically for
+the site footer.
 
 **Requirements:** R4.5
 
@@ -599,14 +602,14 @@ for the site footer.
 
 ## Risks & Dependencies
 
-| Risk | Mitigation |
-|------|------------|
-| GitHub redirect consumption: new spec repo claims old name | Unit 1 updates ALL cross-repo references before Unit 2 creates the spec repo |
-| crates.io brief dead link (between publish and rename) | Same-session execution minimizes window; crates.io itself has a "repository" link, not a hard dependency |
-| Frontmatter `---` parsed as thematic break by remark | Manual extraction BEFORE unified pipeline; test verifies no `<hr>` at page top |
-| Drift goes undetected if CI `sync-check` is flaky | `--check` mode is deterministic (same inputs → same output); flakiness only from network (spec repo unavailable) |
-| Coupled release not enforced by CI | Proportionate to single-maintainer scale; PR template field is visible in review; can add CI gate later if contributors grow |
-| Invariant check breaks when frontmatter added | Same PR adds frontmatter AND updates invariant logic — never in separate commits |
+| Risk                                                       | Mitigation                                                                                                                   |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| GitHub redirect consumption: new spec repo claims old name | Unit 1 updates ALL cross-repo references before Unit 2 creates the spec repo                                                 |
+| crates.io brief dead link (between publish and rename)     | Same-session execution minimizes window; crates.io itself has a "repository" link, not a hard dependency                     |
+| Frontmatter `---` parsed as thematic break by remark       | Manual extraction BEFORE unified pipeline; test verifies no `<hr>` at page top                                               |
+| Drift goes undetected if CI `sync-check` is flaky          | `--check` mode is deterministic (same inputs → same output); flakiness only from network (spec repo unavailable)             |
+| Coupled release not enforced by CI                         | Proportionate to single-maintainer scale; PR template field is visible in review; can add CI gate later if contributors grow |
+| Invariant check breaks when frontmatter added              | Same PR adds frontmatter AND updates invariant logic — never in separate commits                                             |
 
 ## Documentation / Operational Notes
 
@@ -624,3 +627,42 @@ for the site footer.
 - Related solutions: `cross-repo-artifact-sync-commit-over-fetch`, `norm-vs-mechanism-blind-spot`,
   `calver-pin-for-per-repo-config-drift-detection`, `calver-changelog-as-committed-artifact`
 - External docs: CC BY 4.0 license text, GitHub issue template YAML form spec
+
+## Closeout (2026-04-22)
+
+This plan shipped its architectural objectives (Units 1, 2, 6) and re-homed the site-consumption work (Units 4, 5, 7)
+into [`2026-04-23-001-feat-sync-spec-plan.md`](./2026-04-23-001-feat-sync-spec-plan.md), which now owns the sync
+mechanism end-to-end. The original plan bundled an architectural shift (split into three repos) with a site-consumption
+layer (sync, frontmatter, dynamic version). The shift moved fast; the consumption layer turned out to be its own
+multi-step concern with cross-repo timing nuances. Splitting was the right call.
+
+### Unit-by-unit fate
+
+- **Unit 1 — Rename + cross-repo refs.** Shipped. `brettdavies/agentnative-cli` exists (created 2026-03-31);
+  `brettdavies/agentnative` is THE SPEC (re-purposed 2026-04-21). All site references resolve correctly to spec / CLI /
+  site repos.
+- **Unit 2 — Spec repo with governance.** Shipped. `brettdavies/agentnative` carries CC BY 4.0 license, principles with
+  `last-revised: 2026-04-22` frontmatter, `CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/` (config + grade-a-cli +
+  pressure-test + spec-question), PR template, `VERSION` (currently `0.3.0`), `CHANGELOG.md`. Dual-license additions
+  (`LICENSE-APACHE`, `LICENSE-MIT`) and `cliff.toml` were added beyond original scope.
+- **Unit 3 — Per-check calver in tool repo.** Partial. `SPEC_VERSION` is plumbed through `agentnative-cli`'s
+  `src/scorecard/mod.rs` (line 290) and the scorecard schema bumped to `"0.3"`. R5.1 and R5.4 met. Per-check
+  `last_revised` metadata (R5.2, R5.3) was NOT implemented — scorecard JSON `results[]` carries no `check_last_revised`
+  field. Left as a small follow-up; open a dedicated todo if/when actually wanted, otherwise let it lapse.
+- **Unit 4 — Site frontmatter parsing.** Re-homed to sync-spec plan. The format exists upstream (spec repo principles
+  carry frontmatter); the site parsing + revision-date rendering moves to the sync plan where it sits adjacent to the
+  script that brings frontmatter into `content/principles/`.
+- **Unit 5 — `sync-spec.sh`.** Re-homed to sync-spec plan. That plan now owns the script, vendoring policy, `--check`
+  mode, CI integration end-to-end.
+- **Unit 6 — Issue templates + routing.** Shipped. Site has only `config.yml` + `site-bug.yml`; `config.yml` routes
+  governance to the spec repo and checker bugs to the CLI repo. Spec repo carries the governance templates; CLI repo
+  carries CLI-scoped templates (`false-positive`, `feature-request`, `scoring-bug`). The CLI repo also still carries
+  some governance templates as a transitional artifact — cleanup is cosmetic, not blocking.
+- **Unit 7 — Changelog page + dynamic footer version.** Re-homed to sync-spec plan. The footer's `v0.1.0` stub in
+  `shell.mjs` waits for the sync-spec plan to land `content/VERSION`; the dynamic-read change is a one-liner once that
+  file exists.
+
+### Recorded follow-ups
+
+- Per-check `last_revised` in `agentnative-cli` (R5.2, R5.3) — not currently scheduled.
+- CLI-repo governance template cleanup — cosmetic.
