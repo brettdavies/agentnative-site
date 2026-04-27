@@ -191,6 +191,41 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 Committing the JSON alongside the code means ruleset changes land via the same review process as workflow changes — a
 `chore(ci): tighten protect-main` release goes through dev → release/* → main like anything else.
 
+## Skill releases
+
+`/install.json` and `/install` advertise the `agent-native-cli` skill, hosted at
+[`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). This site vendors the skill's
+upstream commit SHA in `src/data/install.json`; the skill repo holds the actual content. Surface contract in
+`docs/DESIGN.md` §3.9.
+
+The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
+branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release REQUIRES the skill
+maintainer to fast-forward `main` to the new tag before the site re-pins.
+
+### Skill-release procedure
+
+1. **Cut the skill release** (in `agentnative-skill`): edit, commit, tag `v0.x.y` (signed if a key is configured), then
+   `git push origin dev --follow-tags`. Fast-forward `main` to the new tag and push: `git checkout main && git merge
+   --ff-only v0.x.y && git push origin main`. The site's bare `git clone --depth 1` lands on `main`, so the fast-forward
+   is what makes the new release reachable.
+2. **Re-pin in this repo**: edit `src/data/install.json` — bump `version`, `source.commit`, and `verify.expected`
+   (`source.commit` and `verify.expected` are the same SHA until v2 schema decouples them). `loadInstallData()` will
+   reject a non-hex / non-lowercase / non-40-char SHA at build time, so a typo fails fast.
+3. **PR to `dev`**: CI runs the unit + worker tests on the bumped manifest. Squash-merge on green.
+4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
+5. **Cache-purge** `/install`, `/install.json`, and `/install.md` via the Cloudflare cache-purge API. Required for
+   security-relevant pin updates so users don't pick up the old SHA from the 24h `s-maxage` window. Use the API token
+   stored in 1Password (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`).
+6. **Verify the deployed pin**: `curl -s https://anc.dev/install.json | jq -r .source.commit` matches the new SHA.
+
+### Skill-availability probe
+
+`.github/workflows/skill-availability.yml` runs `git ls-remote --exit-code
+https://github.com/brettdavies/agentnative-skill.git HEAD` daily at 13:00 UTC and on `workflow_dispatch`. It catches
+visibility regressions between releases (repo deletion, accidental flip back to private, branch rename). The probe runs
+over unauthenticated HTTPS; failures show up in the Actions tab and email the run owner. After the cutover that flips
+the skill repo public, run `gh workflow run skill-availability.yml` once to seed a green run on the schedule.
+
 ## Related docs
 
 - [`AGENT.md`](./AGENT.md) — onboarding, repo conventions, tool-site sequencing

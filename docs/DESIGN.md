@@ -144,9 +144,9 @@ edge storage via a Worker for routing. This is non-negotiable for three reasons:
 3. **Thesis fit.** The `Accept: text/markdown` and `.md` suffix behavior become trivial when the markdown source **is**
    the artifact — the Worker serves bytes, it doesn't synthesize them.
 
-SSR is out because it adds a runtime dependency (on every request) for content that does not change between
-deployments. CSR is out because it puts the single most important thing on the site (the spec text) behind a client
-runtime, which defeats the agent case entirely.
+SSR is out because it adds a runtime dependency (on every request) for content that does not change between deployments.
+CSR is out because it puts the single most important thing on the site (the spec text) behind a client runtime, which
+defeats the agent case entirely.
 
 ### 3.2 Candidates evaluated
 
@@ -166,19 +166,19 @@ Scoring 1 (bad) to 5 (great). "MD-SoT fit" = markdown-source-of-truth fit. "CN s
 maintenance cost when the standard iterates. "Thesis fit" = alignment with the agent-native documentation surface
 philosophy.
 
-| Criterion                       | Plain+Worker | Astro+Starlight | Astro alone | Hugo+Worker | Eleventy+Worker | Hand-HTML |
-| ------------------------------- | -----------: | --------------: | ----------: | ----------: | --------------: | --------: |
-| Simplicity                      |            5 |               3 |           4 |           3 |               3 |         5 |
-| Bloat risk                      |            5 |               3 |           4 |           4 |               4 |         5 |
-| MD-SoT fit                      |            5 |               5 |           5 |           5 |               5 |         1 |
-| CN story (`.md` + Accept)       |            5 |               4 |           4 |           4 |               4 |         5 |
-| Clickable codeblock             |            5 |               5 |           5 |           4 |               4 |         5 |
-| Tabbed multi-lang code          |            5 |               5 |           4 |           3 |               3 |         4 |
-| Theme-toggle + prefers-cs       |            5 |               5 |           5 |           5 |               5 |         5 |
-| CF deploy                       |            5 |               5 |           5 |           4 |               4 |         5 |
-| Std iter cost                   |            4 |               3 |           4 |           4 |               4 |         1 |
-| Thesis fit                      |            5 |               4 |           4 |           4 |               4 |         1 |
-| **Total (/50)**                 |       **49** |          **42** |      **44** |      **40** |          **40** |    **37** |
+| Criterion                 | Plain+Worker | Astro+Starlight | Astro alone | Hugo+Worker | Eleventy+Worker | Hand-HTML |
+| ------------------------- | -----------: | --------------: | ----------: | ----------: | --------------: | --------: |
+| Simplicity                |            5 |               3 |           4 |           3 |               3 |         5 |
+| Bloat risk                |            5 |               3 |           4 |           4 |               4 |         5 |
+| MD-SoT fit                |            5 |               5 |           5 |           5 |               5 |         1 |
+| CN story (`.md` + Accept) |            5 |               4 |           4 |           4 |               4 |         5 |
+| Clickable codeblock       |            5 |               5 |           5 |           4 |               4 |         5 |
+| Tabbed multi-lang code    |            5 |               5 |           4 |           3 |               3 |         4 |
+| Theme-toggle + prefers-cs |            5 |               5 |           5 |           5 |               5 |         5 |
+| CF deploy                 |            5 |               5 |           5 |           4 |               4 |         5 |
+| Std iter cost             |            4 |               3 |           4 |           4 |               4 |         1 |
+| Thesis fit                |            5 |               4 |           4 |           4 |               4 |         1 |
+| **Total (/50)**           |       **49** |          **42** |      **44** |      **40** |          **40** |    **37** |
 
 Changes from revision 1:
 
@@ -191,8 +191,8 @@ Changes from revision 1:
 
 ### 3.4 Recommendation
 
-**Ship on plain HTML generated from markdown by a ≤200-line build script, routed by a ≤80-line Cloudflare Worker.**
-This is still the right call, and the argument has tightened since revision 1.
+**Ship on plain HTML generated from markdown by a ≤200-line build script, routed by a ≤80-line Cloudflare Worker.** This
+is still the right call, and the argument has tightened since revision 1.
 
 What the build step does, in order: read `content/*.md`, parse with `unified` (`remark-parse` + `remark-gfm`), extract
 headings for anchor generation (`rehype-slug`), syntax-highlight with `shiki` at build (emits dual-theme inline styles),
@@ -289,27 +289,27 @@ the filename — no separate manifest file, no frontmatter ordering key.
 
 **Build-step outputs (`dist/`):**
 
-| Source                                 | Emitted as                                                       | Notes                                                              |
-| -------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `_intro.md` + `principles/p[1-7]-*.md` | `index.html`, `index.md`                                         | Intro concatenated with all seven principles in numeric order; each principle wrapped in `<section id="p<n>-<slug>">`. |
-| `principles/p<n>-<slug>.md`            | `p<n>.html`, `p<n>.md`                                           | Per-principle page. HTML has the same header/footer chrome as index; markdown is the source file copied verbatim. |
-| `check.md`                             | `check.html`, `check.md`                                         | Sub-page; flat layout (not `check/index.html`); no mini-TOC.       |
-| `about.md`                             | `about.html`, `about.md`                                         | Sub-page; flat layout (not `about/index.html`); no mini-TOC.       |
-| all principle files (titles + slugs)   | `llms.txt`                                                       | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs. |
-| `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`                                | Concatenation of everything, each section delimited per the A5 format block below (`# <Title>` heading, `Source:` + `Canonical-Markdown:` URL headers, body, `---` separator); single-fetch endpoint for agents. |
-| all URLs                               | `sitemap.xml`                                                    | Plain sitemap; no priority hacks.                                  |
-| brief in §4.13                         | `og-image.png`                                                   | Generated out-of-band via `scripts/og/generate.py`; committed. Not regenerated on every build. |
+| Source                                                           | Emitted as               | Notes                                                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_intro.md` + `principles/p[1-7]-*.md`                           | `index.html`, `index.md` | Intro concatenated with all seven principles in numeric order; each principle wrapped in `<section id="p<n>-<slug>">`.                                                                                           |
+| `principles/p<n>-<slug>.md`                                      | `p<n>.html`, `p<n>.md`   | Per-principle page. HTML has the same header/footer chrome as index; markdown is the source file copied verbatim.                                                                                                |
+| `check.md`                                                       | `check.html`, `check.md` | Sub-page; flat layout (not `check/index.html`); no mini-TOC.                                                                                                                                                     |
+| `about.md`                                                       | `about.html`, `about.md` | Sub-page; flat layout (not `about/index.html`); no mini-TOC.                                                                                                                                                     |
+| all principle files (titles + slugs)                             | `llms.txt`               | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs.                                                                              |
+| `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`          | Concatenation of everything, each section delimited per the A5 format block below (`# <Title>` heading, `Source:` + `Canonical-Markdown:` URL headers, body, `---` separator); single-fetch endpoint for agents. |
+| all URLs                                                         | `sitemap.xml`            | Plain sitemap; no priority hacks.                                                                                                                                                                                |
+| brief in §4.13                                                   | `og-image.png`           | Generated out-of-band via `scripts/og/generate.py`; committed. Not regenerated on every build.                                                                                                                   |
 
 **Static asset + CSS + JS pipeline (A2, C3):**
 
-| Source                                     | Emitted as                                    | Notes                                                                                                                                                                    |
-| ------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `docs/design/foundation.css`               | `dist/css/foundation.css`                     | Byte-for-byte copy (C3). `cmp -s docs/design/foundation.css dist/css/foundation.css` passes. Source of truth for palette + type tokens + RFC-keyword color rules. |
-| templated `site.css`                       | `dist/css/site.css`                           | Additive-only: `@font-face` (Uncut Sans + Monaspace Xenon), layout (grid, measure, mini-TOC sticky), code-block chrome, theme-toggle widget, copy-button widget, Shiki dual-theme CSS bridge (§4.6). No overrides of foundation tokens. |
-| `public/fonts/*.woff2`                     | `dist/fonts/*.woff2`                          | Self-hosted variable woff2 files per §4.3. Served under `/fonts/`, not `/assets/fonts/`. `@font-face` in `site.css` references `/fonts/…`.                              |
-| `src/client/theme-init.ts`                 | inline `<script>` in `<head>` of every HTML  | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint — no dark-mode flash. |
-| `src/client/theme.ts`                      | `dist/js/theme.js`                            | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                 |
-| `src/client/clipboard.ts`                  | `dist/js/clipboard.js`                        | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8. |
+| Source                       | Emitted as                                  | Notes                                                                                                                                                                                                                                   |
+| ---------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/design/foundation.css` | `dist/css/foundation.css`                   | Byte-for-byte copy (C3). `cmp -s docs/design/foundation.css dist/css/foundation.css` passes. Source of truth for palette + type tokens + RFC-keyword color rules.                                                                       |
+| templated `site.css`         | `dist/css/site.css`                         | Additive-only: `@font-face` (Uncut Sans + Monaspace Xenon), layout (grid, measure, mini-TOC sticky), code-block chrome, theme-toggle widget, copy-button widget, Shiki dual-theme CSS bridge (§4.6). No overrides of foundation tokens. |
+| `public/fonts/*.woff2`       | `dist/fonts/*.woff2`                        | Self-hosted variable woff2 files per §4.3. Served under `/fonts/`, not `/assets/fonts/`. `@font-face` in `site.css` references `/fonts/…`.                                                                                              |
+| `src/client/theme-init.ts`   | inline `<script>` in `<head>` of every HTML | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint — no dark-mode flash.                                                                           |
+| `src/client/theme.ts`        | `dist/js/theme.js`                          | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                                                                                |
+| `src/client/clipboard.ts`    | `dist/js/clipboard.js`                      | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8.                                                           |
 
 The HTML shell emits exactly two stylesheet `<link>` tags in `<head>`, in this order:
 
@@ -324,14 +324,14 @@ Foundation first, site second — cascade order is load-bearing. `site.css` addi
 **Asset resolution (A4).** Under `html_handling: "auto-trailing-slash"` + flat layout (all nine HTML files at `dist/`
 root alongside their `.md` twins):
 
-| Request path      | Resolution                                          |
-| ----------------- | --------------------------------------------------- |
-| `/p3`             | 200 → serves `dist/p3.html`                          |
-| `/check`          | 200 → serves `dist/check.html`                       |
-| `/about`          | 200 → serves `dist/about.html`                       |
-| `/check/`         | 307 → redirects to `/check`                          |
-| `/p3.html`        | 307 → redirects to `/p3`                             |
-| `/p3.md`          | 200 → serves `dist/p3.md` (no html_handling applies — not HTML) |
+| Request path | Resolution                                                      |
+| ------------ | --------------------------------------------------------------- |
+| `/p3`        | 200 → serves `dist/p3.html`                                     |
+| `/check`     | 200 → serves `dist/check.html`                                  |
+| `/about`     | 200 → serves `dist/about.html`                                  |
+| `/check/`    | 307 → redirects to `/check`                                     |
+| `/p3.html`   | 307 → redirects to `/p3`                                        |
+| `/p3.md`     | 200 → serves `dist/p3.md` (no html_handling applies — not HTML) |
 
 Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/check`,
 `/about`). No `check/index.html` / `about/index.html` asymmetry.
@@ -368,8 +368,8 @@ or the markdown twin.
 - **Shiki + remark plugins** (the inline-keyword pass from §4.7) run during HTML render only. The source `.md` stays
   untouched — the `/p3.md` response has `MUST` / `SHOULD` / `MAY` as plain uppercase, no class wrappers.
 
-A ~200-line Node build script implements this. Pseudocode sketch (not the final code, lives in `scripts/build/` once
-the implementation session starts):
+A ~200-line Node build script implements this. Pseudocode sketch (not the final code, lives in `scripts/build/` once the
+implementation session starts):
 
 ```js
 // Sort principle files by their leading `p<n>-` numeric prefix.
@@ -433,11 +433,84 @@ choice if Brett wants the dev-server comfort and the community-maintained markdo
 
 ### 3.8 Delta from the CEO plan
 
-Clarification for `/plan-eng-review`: the AGENT.md phrase "no build pipeline beyond the Worker's CommonMark render
-step" should be amended. The CommonMark + Shiki render happens at **build time** on the author's machine (and in CI),
-not at request time in the Worker. The Worker only routes. This matches the Shiki-at-build guidance in the agent-native
+Clarification for `/plan-eng-review`: the AGENT.md phrase "no build pipeline beyond the Worker's CommonMark render step"
+should be amended. The CommonMark + Shiki render happens at **build time** on the author's machine (and in CI), not at
+request time in the Worker. The Worker only routes. This matches the Shiki-at-build guidance in the agent-native
 documentation surface pattern at
 `docs/solutions/architecture-patterns/agent-native-documentation-surface-2026-04-13.md`.
+
+### 3.9 Skill distribution — `/install` and `/install.json`
+
+Two surfaces, one source. Agents fetch `/install.json` (canonical, machine-primary). Humans fetch `/install` (HTML
+render, identical commands). Both derive from `src/data/install.json` at build time — drift is structurally impossible
+because there's only one source.
+
+**Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships a single skill
+(`agent-native-cli`); the v2 `/skill/<name>` URL pattern is deferred until N>1.
+
+**Source repo coupling.** This site vendors a single string — the upstream commit SHA — committed at site build time
+into `src/data/install.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
+`docs/solutions/architecture-patterns/cross-repo-artifact-sync-commit-over-fetch-20260420.md`. The skill repo
+(`brettdavies/agentnative-skill`) holds `main` as the published-release pointer and `dev` as the integration branch; the
+install command's bare `git clone --depth 1` lands on the skill repo's default branch (`main`), which the skill
+maintainer fast-forwards to each new release tag.
+
+**`/install.json` shape (v1):**
+
+| Key                 | Type                       | Notes                                                                                               |
+| ------------------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `schema_version`    | integer                    | `1`. Bump on incompatible structural change.                                                        |
+| `type`              | string                     | `"agent-skill"`.                                                                                    |
+| `name`              | string                     | `"agent-native-cli"`. Slug, kebab-case.                                                             |
+| `version`           | string                     | Semver. Bumped per skill release.                                                                   |
+| `description`       | string                     | One sentence.                                                                                       |
+| `principles_url`    | string                     | `https://anc.dev/p1`.                                                                               |
+| `license`           | string                     | `"MIT"`.                                                                                            |
+| `source.type`       | string                     | `"git"`.                                                                                            |
+| `source.url`        | string                     | `https://github.com/brettdavies/agentnative-skill.git`.                                             |
+| `source.commit`     | string (40-char lower hex) | The pinned commit. Validated at build time.                                                         |
+| `install`           | object                     | Per-host map: `claude_code`, `codex`, `cursor`, `opencode` → `git clone --depth 1 …` command.       |
+| `verify.command`    | string                     | `git -C <install-dir> rev-parse HEAD`. Agent substitutes `<install-dir>`.                           |
+| `verify.expected`   | string                     | Same SHA as `source.commit` until v2 schema decouples them. Mismatch = upstream moved past the pin. |
+| `verify.semantics`  | string                     | Free-form description of what mismatch means.                                                       |
+| `update`            | string                     | `cd <install-dir> && git pull --ff-only`.                                                           |
+| `uninstall`         | string                     | `rm -rf <install-dir>`.                                                                             |
+| `install_page_html` | string                     | `https://anc.dev/install`.                                                                          |
+
+**Build-emitter validation (`src/build/install.mjs`).** `loadInstallData()` is fail-fast: missing required keys, non-hex
+or non-lowercase `source.commit`, non-semver `version`, empty `install` map, install commands not starting with `git
+clone --depth 1`, and bare-clone commands (no explicit destination path) all reject the build at startup. The
+explicit-destination invariant is non-optional defense for the repo-name asymmetry: the skill repo is named
+`agentnative-skill` but the skill itself is named `agent-native-cli`; a bare `git clone` lands on the repo name and
+breaks every host's skill-discovery convention.
+
+**Header contract (`src/worker/headers.ts`).** The Worker's HTML/markdown branches are joined by a JSON-extension branch
+detected by URL ending in `.json` (extension, not prefix — forward-compat for `/skill/<name>.json` in v2):
+
+```text
+Content-Type:                application/json; charset=utf-8
+Cache-Control:               public, max-age=300, s-maxage=86400, stale-while-revalidate=60
+Access-Control-Allow-Origin: *
+X-Robots-Tag:                noindex
+```
+
+No `Link: rel="alternate"` and no `X-Llms-Txt` on JSON paths — there's no markdown twin for `.json`. The `Accept:
+text/markdown` content-negotiation rewrite in `src/worker/index.ts` short-circuits on `.json` paths so `Accept:
+text/markdown` against `/install.json` returns the JSON unchanged rather than 404'ing on a non-existent
+`/install.json.md` twin.
+
+**Build-step outputs (added to the §3.4.1 table):**
+
+| Source                  | Emitted as                                                  | Notes                                                              |
+| ----------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| `src/data/install.json` | `dist/install.json`, `dist/install.html`, `dist/install.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
+
+`/install` enters `sitemap.xml` and `llms.txt`; `/install.json` enters `llms.txt` (in a new `## Install` section) but
+NOT the sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
+
+**Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version`,
+`source.commit`, and `verify.expected` in `src/data/install.json` (cache-purge `/install`, `/install.json`, and
+`/install.md` against the Cloudflare cache-purge API after deploy).
 
 ## 4. Decision B — visual system
 
@@ -465,24 +538,24 @@ appendix at end of file). Three findings drive the call:
    (MUST keyword in red-orange, SHOULD in ochre) is the pattern that balances cool-credibility with necessary visual
    priority for the MUST/SHOULD/MAY triad.
 
-This reverses revision 1's warm-neutral palette. The warm palette would have been distinctive but wrong for a
-standard courting developer adoption.
+This reverses revision 1's warm-neutral palette. The warm palette would have been distinctive but wrong for a standard
+courting developer adoption.
 
 **Emitted token summary** (full table with OKLCH, hex, and contrast in `docs/design/color-analysis.md`):
 
-| Role           | Light (hex) | Dark (hex) | Notes                                     |
-| -------------- | ----------- | ---------- | ----------------------------------------- |
-| `--bg`         | `#fafbfd`   | `#060a0e`  | Page background.                          |
-| `--bg-code`    | `#f0f4f7`   | `#0d1218`  | Inline + block code background.           |
-| `--border`     | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.     |
+| Role             | Light (hex) | Dark (hex) | Notes                                                                                                                                          |
+| ---------------- | ----------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--bg`           | `#fafbfd`   | `#060a0e`  | Page background.                                                                                                                               |
+| `--bg-code`      | `#f0f4f7`   | `#0d1218`  | Inline + block code background.                                                                                                                |
+| `--border`       | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.                                                                                                          |
 | `--fg-muted`     | `#7d848a`   | `#8d949c`  | Decorative/large-only captions (≥1.125rem). Below 4.5:1 small-text contrast by design — use `--fg-secondary` for anything readable under 18px. |
-| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1. |
-| `--fg-body`    | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.  |
-| `--fg-heading` | `#070c11`   | `#f3f2ed`  | Headings.                                 |
-| `--accent`     | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.     |
-| `--must`       | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                        |
-| `--should`     | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                      |
-| `--may`        | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                         |
+| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1.                                 |
+| `--fg-body`      | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.                                                                                                       |
+| `--fg-heading`   | `#070c11`   | `#f3f2ed`  | Headings.                                                                                                                                      |
+| `--accent`       | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.                                                                                                          |
+| `--must`         | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                                                                                                                             |
+| `--should`       | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                                                                                                                           |
+| `--may`          | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                                                                                                                              |
 
 All body pairs (`--fg-body`, `--fg-secondary`, `--fg-heading`, `--accent`) pass WCAG AA (≥4.5:1) **and** APCA body
 minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` deliberately sits below AA 4.5:1 in both modes
@@ -507,8 +580,7 @@ palette was designed independently, not derived by flipping lightness. Four deli
    the mid-grays for borders, muted text, and raised surfaces.
 
 Each deviation is documented inline in `scripts/design/generate-palette.mjs` (`DARK_SCALE` comments) so a future
-   reviewer
-sees the *why* alongside the numbers.
+reviewer sees the *why* alongside the numbers.
 
 ### 4.3 Type stack
 
@@ -583,21 +655,21 @@ needs to be self-hosted for a design review:
   false` per their API), and GitHub Next's own variable woff2 cannot be mirrored through jsdelivr (the GitHub repo
   exceeds the 50 MB CDN mirror limit). Weight 400 is enough to render the preview's code samples; no italics.
 
-Both CDN packages register their `@font-face` rules under the exact family names `foundation.css` references, so
-the preview needs no `--font-*` overrides. If either CDN is blocked (offline demo, strict network), the preview falls
-back through the `--font-sans` / `--font-mono` fallback stacks to system fonts. Production does NOT rely on either CDN —
-it self-hosts both woff2 files from `/fonts/` using the variable font from GitHub Next's repo directly (checked in to
-the site's own assets), per the `@font-face` block documented above.
+Both CDN packages register their `@font-face` rules under the exact family names `foundation.css` references, so the
+preview needs no `--font-*` overrides. If either CDN is blocked (offline demo, strict network), the preview falls back
+through the `--font-sans` / `--font-mono` fallback stacks to system fonts. Production does NOT rely on either CDN — it
+self-hosts both woff2 files from `/fonts/` using the variable font from GitHub Next's repo directly (checked in to the
+site's own assets), per the `@font-face` block documented above.
 
 #### Font supply chain (A11, C4)
 
 Variable woff2 files are checked in to `public/fonts/` and served from `dist/fonts/` — no runtime CDN dependency. Vendor
 sources and integrity hashes are pinned and verified by a one-shot script.
 
-| Family              | Source                                                                             | License | Checked-in path                        |
-| ------------------- | ---------------------------------------------------------------------------------- | ------- | -------------------------------------- |
-| Uncut Sans variable | Pangram Pangram ([fontshare.com](https://fontshare.com/fonts/uncut-sans))          | OFL     | `public/fonts/uncut-sans-variable.woff2` |
-| Monaspace Xenon     | GitHub Next ([monaspace.githubnext.com](https://monaspace.githubnext.com/))         | OFL     | `public/fonts/monaspace-xenon-variable.woff2` |
+| Family              | Source                                                                      | License | Checked-in path                               |
+| ------------------- | --------------------------------------------------------------------------- | ------- | --------------------------------------------- |
+| Uncut Sans variable | Pangram Pangram ([fontshare.com](https://fontshare.com/fonts/uncut-sans))   | OFL     | `public/fonts/uncut-sans-variable.woff2`      |
+| Monaspace Xenon     | GitHub Next ([monaspace.githubnext.com](https://monaspace.githubnext.com/)) | OFL     | `public/fonts/monaspace-xenon-variable.woff2` |
 
 **Pipeline.** `scripts/fonts/download.sh` fetches the woff2 files from their vendor URLs, computes sha256 over each, and
 compares against the committed `scripts/fonts/hashes.txt`. Running `scripts/fonts/download.sh --verify` against the
@@ -619,23 +691,23 @@ headings" — this site is content-page, so body + h1 flex, inner headings do no
 
 All values emitted as tokens in `foundation.css`:
 
-| Token              | Value                                       | Role                                              |
-| ------------------ | ------------------------------------------- | ------------------------------------------------- |
-| `--text-base`      | `1.0625rem` (17px)                          | Reference unit; body floor.                       |
-| `--text-body`      | `clamp(1.0625rem, 0.975rem + 0.4vw, 1.125rem)` | Body prose, fluid 17→18px.                       |
-| `--text-caption`   | `0.8125rem`                                 | Footer stamp, captions, section eyebrows.         |
-| `--text-secondary` | `0.9375rem`                                 | Sidebar TOC entries, mini-TOC items.              |
-| `--text-h4`        | `1rem`                                      | Used sparingly; small-caps labels.                |
-| `--text-h3`        | `1.22rem`                                   | MUST/SHOULD/MAY group heading.                    |
-| `--text-h2`        | `1.5rem`                                    | Principle section start.                          |
-| `--text-h1`        | `clamp(1.85rem, 1.6rem + 1.2vw, 2.25rem)`   | One per page; fluid display size.                 |
-| `--text-code`      | `0.92rem`                                   | Inline + block code body.                         |
-| `--leading-body`   | `1.6`                                       | Body line-height.                                 |
-| `--leading-heading`| `1.25`                                      | Headings.                                         |
-| `--leading-code`   | `1.5`                                       | Code blocks.                                      |
-| `--measure`        | `68ch`                                      | Body line length; capped per Butterick 45–75 rule.|
-| `--tracking-caps`  | `0.04em`                                    | Small-caps / ALL CAPS labels.                     |
-| `--tracking-rfc`   | `0.02em`                                    | MUST/SHOULD/MAY inline keywords.                  |
+| Token               | Value                                          | Role                                               |
+| ------------------- | ---------------------------------------------- | -------------------------------------------------- |
+| `--text-base`       | `1.0625rem` (17px)                             | Reference unit; body floor.                        |
+| `--text-body`       | `clamp(1.0625rem, 0.975rem + 0.4vw, 1.125rem)` | Body prose, fluid 17→18px.                         |
+| `--text-caption`    | `0.8125rem`                                    | Footer stamp, captions, section eyebrows.          |
+| `--text-secondary`  | `0.9375rem`                                    | Sidebar TOC entries, mini-TOC items.               |
+| `--text-h4`         | `1rem`                                         | Used sparingly; small-caps labels.                 |
+| `--text-h3`         | `1.22rem`                                      | MUST/SHOULD/MAY group heading.                     |
+| `--text-h2`         | `1.5rem`                                       | Principle section start.                           |
+| `--text-h1`         | `clamp(1.85rem, 1.6rem + 1.2vw, 2.25rem)`      | One per page; fluid display size.                  |
+| `--text-code`       | `0.92rem`                                      | Inline + block code body.                          |
+| `--leading-body`    | `1.6`                                          | Body line-height.                                  |
+| `--leading-heading` | `1.25`                                         | Headings.                                          |
+| `--leading-code`    | `1.5`                                          | Code blocks.                                       |
+| `--measure`         | `68ch`                                         | Body line length; capped per Butterick 45–75 rule. |
+| `--tracking-caps`   | `0.04em`                                       | Small-caps / ALL CAPS labels.                      |
+| `--tracking-rfc`    | `0.02em`                                       | MUST/SHOULD/MAY inline keywords.                   |
 
 Weights: body 400, bold-emphasis 600, headings 600. Uncut Sans ships 100–900 (variable axis); we use 400 + 600. Never
 more than three weights rendered on one page.
@@ -757,16 +829,16 @@ at visit time and bails on the node if any disqualifying ancestor is present.
 
 Explicit test cases (wired into `tests/build.test.ts`):
 
-| Input                                    | Expected result                                               |
-| ---------------------------------------- | ------------------------------------------------------------- |
-| `Tools MUST NOT block on prompts.`       | `MUST NOT` → single `<strong class="rfc-must">MUST NOT</strong>` (one match, not two). |
-| `Agents MUST, at minimum, parse JSON.`   | `MUST` → match (word boundary before `,`).                    |
-| `MUSTARD is yellow.`                     | No match (`\b` excludes trailing letters).                    |
-| `The word "must" is lowercase.`          | No match (regex is uppercase-only; no `i` flag).              |
-| `` Call `MUST` explicitly. ``            | No match (inlineCode ancestor disqualifies).                  |
-| `[MUST](https://example.com/must)`       | No match (link ancestor disqualifies; link body + href both skipped). |
-| `## MUST support --json` (heading)       | Match (heading is not an excluded ancestor).                  |
-| `**MUST:** Use try_parse() …` (list item) | Annotate-parent case — see A6 below; no second `<strong>` wrap. |
+| Input                                     | Expected result                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------- |
+| `Tools MUST NOT block on prompts.`        | `MUST NOT` → single `<strong class="rfc-must">MUST NOT</strong>` (one match, not two). |
+| `Agents MUST, at minimum, parse JSON.`    | `MUST` → match (word boundary before `,`).                                             |
+| `MUSTARD is yellow.`                      | No match (`\b` excludes trailing letters).                                             |
+| `The word "must" is lowercase.`           | No match (regex is uppercase-only; no `i` flag).                                       |
+| `` Call `MUST` explicitly. ``             | No match (inlineCode ancestor disqualifies).                                           |
+| `[MUST](https://example.com/must)`        | No match (link ancestor disqualifies; link body + href both skipped).                  |
+| `## MUST support --json` (heading)        | Match (heading is not an excluded ancestor).                                           |
+| `**MUST:** Use try_parse() …` (list item) | Annotate-parent case — see A6 below; no second `<strong>` wrap.                        |
 
 **Nested-strong handling (A6).** In the principle source files the tier markers are authored as `**MUST:**`,
 `**SHOULD:**`, `**MAY:**` at the start of requirement list items. After mdast parsing those render as `<strong>MUST:
@@ -799,8 +871,8 @@ principle content after the site is rendering:
    tokens (the generator knows how to produce them; currently omitted from `foundation.css`). See the generator comment
    where `light["must-wash"]` used to live.
 
-**Why defer.** Taste calls work better against real content than against mockups. Once the site renders with
-actual principle copy, a 5-minute toggle between inline-only, leading-tag, and background-tint in a live browser is more
+**Why defer.** Taste calls work better against real content than against mockups. Once the site renders with actual
+principle copy, a 5-minute toggle between inline-only, leading-tag, and background-tint in a live browser is more
 informative than any amount of discussion in advance. The remark plugin and CSS live in the generator and the build, so
 the swap is a PR, not an architecture change. Until then: inline only.
 
@@ -838,8 +910,8 @@ analytics, no CDN imports at runtime. Every `<script>` tag has one job.
 - Code-block line numbers.
 - Framework runtime of any kind.
 
-**No-JS progressive enhancement (C6).** The theme toggle and copy buttons depend on JS; the rest of the site does
-not. The site degrades cleanly when JS is disabled or fails to load:
+**No-JS progressive enhancement (C6).** The theme toggle and copy buttons depend on JS; the rest of the site does not.
+The site degrades cleanly when JS is disabled or fails to load:
 
 ```html
 <!-- Inline head script (theme-init.ts), runs before first paint. -->
@@ -914,9 +986,9 @@ ensures an OS preference of dark does not override an explicit user choice of li
 4. `matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ...)` updates CSS when the OS changes mode,
    but only when the state is `system`.
 
-Full CSS emitted by `scripts/design/generate-palette.mjs` already includes the three selector cases
-(`:root`, `:root:not([data-theme="light"])` inside the media query, `:root[data-theme="dark"]`,
-`:root[data-theme="light"]`). Dropping the block into the site's stylesheet is the implementation.
+Full CSS emitted by `scripts/design/generate-palette.mjs` already includes the three selector cases (`:root`,
+`:root:not([data-theme="light"])` inside the media query, `:root[data-theme="dark"]`, `:root[data-theme="light"]`).
+Dropping the block into the site's stylesheet is the implementation.
 
 Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-navigable. The preview at
 `docs/design/must-should-may-preview.html` demonstrates the toggle pattern at the page-footer level.
@@ -977,8 +1049,8 @@ run manually against the brief below), committed as `public/og-image.png`, and c
 
 ### 4.14 Schema.org / SEO surface
 
-Schema.org `TechArticle` JSON-LD in `<head>` per page, `isPartOf` pointing to a parent `TechArticle` for the full
-spec. Per the agent-native documentation surface pattern. Twitter card `summary_large_image`. Open Graph: `og:title`,
+Schema.org `TechArticle` JSON-LD in `<head>` per page, `isPartOf` pointing to a parent `TechArticle` for the full spec.
+Per the agent-native documentation surface pattern. Twitter card `summary_large_image`. Open Graph: `og:title`,
 `og:description`, `og:image`, `og:url`, `og:type="article"`, `article:published_time`, `article:modified_time`. Pre-
 purchase domain: canonical + og:url use the staging `workers.dev` host until production cut-over; swap via a single
 constant in the HTML shell. Documented in `wrangler.toml` per CEO plan (resolving open question 5.6 — "yes").

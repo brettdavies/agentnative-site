@@ -25,8 +25,8 @@ The scope for v0 is decided and lives in:
 
 ## Thesis
 
-This is the first proof-of-concept for an **agent-native documentation surface**. The CLI tool eats its own dog food
-at the CLI layer; the spec site eats its own dog food at the documentation layer via markdown-first authoring, implicit
+This is the first proof-of-concept for an **agent-native documentation surface**. The CLI tool eats its own dog food at
+the CLI layer; the spec site eats its own dog food at the documentation layer via markdown-first authoring, implicit
 `.md` URLs, `Accept: text/markdown` content negotiation, `llms.txt` + `llms-full.txt`, Schema.org JSON-LD, stable
 anchors, and semantic HTML. Keep this framing in every decision.
 
@@ -35,6 +35,11 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `index.html` — single-page surface for the 7 principles, anchor-linked (`#p1-...` through `#p7-...`)
 - `/check` — install and usage for the `anc` CLI
 - `/about` — attribution, versioning, credits (subtle: the site does not lead with Brett's name)
+- `/install` — human-facing install page for the `agent-native-cli` skill (rendered HTML; mixed-register prose +
+  per-host clone commands)
+- `/install.json` — canonical machine-primary install manifest. Same data, agent-readable. `Content-Type:
+  application/json`, `X-Robots-Tag: noindex`. Both `/install` and `/install.json` derive from `src/data/install.json` at
+  build time; full surface contract in `docs/DESIGN.md` §3.9
 - `content/*.md` — markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
@@ -42,8 +47,8 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `/sitemap.xml`, `/robots.txt` — hygiene
 - `public/og-image.png` — 1200x630 designed social preview
 
-Plain HTML + minimal CSS + small Worker script. No frontend framework, no build pipeline beyond the Worker's
-CommonMark render step. Deploy via `wrangler`.
+Plain HTML + minimal CSS + small Worker script. No frontend framework, no build pipeline beyond the Worker's CommonMark
+render step. Deploy via `wrangler`.
 
 ## Voice
 
@@ -55,8 +60,8 @@ The site speaks as a **standard**, not a person. Think RFC, not blog post.
 - Good: "MUST support `--output json` for machine-readable output."
 - Bad: "It's really important to have JSON output for your CLI."
 
-Use RFC 2119 language (MUST, SHOULD, MAY) for requirements. Concrete examples, not abstractions. Show the failure
-mode, then show the fix.
+Use RFC 2119 language (MUST, SHOULD, MAY) for requirements. Concrete examples, not abstractions. Show the failure mode,
+then show the fix.
 
 The brand voice anchor is the xAI cover letter in the obsidian vault. Brand doc (see cross-repo table) carries
 positioning context — treat its tactical design specifics as placeholders, not settled. The strategic framing (phases,
@@ -80,21 +85,21 @@ design principles): [`.impeccable.md`](.impeccable.md).
 
 ## Cross-repo context
 
-| Repo / Location | What to read | Why |
-|---|---|---|
-| `~/.gstack/projects/brettdavies-agentnative-site/ceo-plans/2026-04-13-spec-site.md` | CEO plan | v0 scope, gaps, deployment ordering, test plan. Authoritative. |
-| `~/.claude/skills/agent-native-cli/references/framework-idioms.md` | Rust/clap patterns | Code examples for principles. |
-| `~/.claude/skills/agent-native-cli/references/framework-idioms-other-languages.md` | Python/Go/Node patterns | Code examples for other languages. |
-| `~/.gstack/projects/brettdavies-obsidian-vault/brett-main-design-20260413-181410.md` | Brand system design doc | HN Launch Package strategy. Strategic framing is load-bearing; tactical visual specifics are placeholders. |
-| `~/.gstack/projects/brettdavies-agentnative/brett-main-design-20260327-214808.md` | agentnative CLI design doc | The tool this site promotes. The site's `cargo install agentnative` CTA depends on v0.1 of this tool being on crates.io. |
-| `~/.gstack/projects/brettdavies-agentnative/brett-main-naming-rationale-20260327.md` | Naming rationale | Why "agentnative" and "anc". |
-| `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md` | Voice anchor | Canonical in-voice exemplar for Brett (not this site's tone, but useful for adjacent surfaces). |
-| `docs/solutions/` (symlink to `~/dev/solutions-docs/`) | Cross-repo documented solutions; includes the agent-native documentation surface pattern that informs this site's architecture | Relevant when researching architecture or tooling patterns. Search before building from scratch. |
-| `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md` | Shared research index for both this site and the `agentnative` CLI linter | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties. |
-| `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md` | Canonical spec for P1-P7 (one file per principle, pressure-testable) | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
-| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md` | Build & distribution plan | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified. |
-| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md` | Eng review | Architecture + code quality + test coverage review for M1. §12 lists all docs/DESIGN.md edits. Decisions resolved; no blockers. |
-| `docs/plans/2026-04-17-001-feat-registry-leaderboard-scorecard-pages-plan.md` | Registry + leaderboard plan | Plan 1 scope: tool registry, pre-computed scorecards, `/scorecards` leaderboard, `/score/<tool>` pages. Plan 2 (live scoring via CF Sandbox) is separate. |
+| Repo / Location                                                                                     | What to read                                                                                                                   | Why                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/.gstack/projects/brettdavies-agentnative-site/ceo-plans/2026-04-13-spec-site.md`                 | CEO plan                                                                                                                       | v0 scope, gaps, deployment ordering, test plan. Authoritative.                                                                                                                                                             |
+| `~/.claude/skills/agent-native-cli/references/framework-idioms.md`                                  | Rust/clap patterns                                                                                                             | Code examples for principles.                                                                                                                                                                                              |
+| `~/.claude/skills/agent-native-cli/references/framework-idioms-other-languages.md`                  | Python/Go/Node patterns                                                                                                        | Code examples for other languages.                                                                                                                                                                                         |
+| `~/.gstack/projects/brettdavies-obsidian-vault/brett-main-design-20260413-181410.md`                | Brand system design doc                                                                                                        | HN Launch Package strategy. Strategic framing is load-bearing; tactical visual specifics are placeholders.                                                                                                                 |
+| `~/.gstack/projects/brettdavies-agentnative/brett-main-design-20260327-214808.md`                   | agentnative CLI design doc                                                                                                     | The tool this site promotes. The site's `cargo install agentnative` CTA depends on v0.1 of this tool being on crates.io.                                                                                                   |
+| `~/.gstack/projects/brettdavies-agentnative/brett-main-naming-rationale-20260327.md`                | Naming rationale                                                                                                               | Why "agentnative" and "anc".                                                                                                                                                                                               |
+| `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md` | Voice anchor                                                                                                                   | Canonical in-voice exemplar for Brett (not this site's tone, but useful for adjacent surfaces).                                                                                                                            |
+| `docs/solutions/` (symlink to `~/dev/solutions-docs/`)                                              | Cross-repo documented solutions; includes the agent-native documentation surface pattern that informs this site's architecture | Relevant when researching architecture or tooling patterns. Search before building from scratch.                                                                                                                           |
+| `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md`                               | Shared research index for both this site and the `agentnative` CLI linter                                                      | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties.                                |
+| `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md`                             | Canonical spec for P1-P7 (one file per principle, pressure-testable)                                                           | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
+| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md`          | Build & distribution plan                                                                                                      | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified.                                                                            |
+| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md`          | Eng review                                                                                                                     | Architecture + code quality + test coverage review for M1. §12 lists all docs/DESIGN.md edits. Decisions resolved; no blockers.                                                                                            |
+| `docs/plans/2026-04-17-001-feat-registry-leaderboard-scorecard-pages-plan.md`                       | Registry + leaderboard plan                                                                                                    | Plan 1 scope: tool registry, pre-computed scorecards, `/scorecards` leaderboard, `/score/<tool>` pages. Plan 2 (live scoring via CF Sandbox) is separate.                                                                  |
 
 ## Related repos
 
@@ -125,17 +130,16 @@ design principles): [`.impeccable.md`](.impeccable.md).
 
 ## Tool-site sequencing (do not violate)
 
-The site's "Check your CLI" CTA runs `cargo install agentnative`. That command only succeeds once the tool's v0.1
-ships to crates.io. Until then:
+The site's "Check your CLI" CTA runs `cargo install agentnative`. That command only succeeds once the tool's v0.1 ships
+to crates.io. Until then:
 
 - Local development and `workers.dev` staging deploys are fine.
 - Do **not** attach the production domain or publish HN links until `agentnative` v0.1 is installable from crates.io.
 
 ## Domain ownership
 
-The production domain (candidates: agentnative.dev / .io / .org) is **Brett's purchase**. An agent cannot buy it.
-Stub `wrangler.toml` with a placeholder domain; document the one-line swap procedure for when Brett purchases the real
-one.
+The production domain (candidates: agentnative.dev / .io / .org) is **Brett's purchase**. An agent cannot buy it. Stub
+`wrangler.toml` with a placeholder domain; document the one-line swap procedure for when Brett purchases the real one.
 
 ## First action for a fresh agent session
 
