@@ -1,6 +1,6 @@
 // Skill-distribution build emitter — vendors src/data/install.json into
-// dist/install.json (canonical machine surface). Unit 3 adds dist/install.html
-// (human page) and dist/install.md (markdown twin) to this module.
+// dist/install.json (canonical machine surface), dist/install.html (human
+// page), and dist/install.md (markdown twin for content-negotiated agents).
 //
 // Contract (docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md
 // §"/install.json shape"):
@@ -17,6 +17,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { renderMarkdown } from './render.mjs';
 
 const COMMIT_RE = /^[0-9a-f]{40}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -135,4 +136,146 @@ function sortKeys(value) {
     return sorted;
   }
   return value;
+}
+
+// -------------------------------------------------------------------
+// HTML + markdown twin — templated from the same install.json
+// -------------------------------------------------------------------
+
+const HOST_LABELS = {
+  claude_code: 'Claude Code',
+  codex: 'Codex',
+  cursor: 'Cursor',
+  opencode: 'OpenCode',
+};
+
+function hostLabel(host) {
+  return HOST_LABELS[host] ?? host;
+}
+
+/**
+ * Build the markdown body for /install. The same body is written to
+ * dist/install.md (twin for `Accept: text/markdown` agents) AND fed through
+ * the unified+rehype pipeline to produce dist/install.html. Drift between
+ * the JSON manifest, the HTML page, and the markdown twin is structurally
+ * impossible because all three derive from data.install.
+ *
+ * Voice: trust-model paragraph is VOICE.md Register 1 (third-person, failure
+ * mode first). Command sections are Register 2 imperative.
+ *
+ * @param {object} data validated install manifest
+ * @returns {string} markdown body
+ */
+export function buildInstallMarkdown(data) {
+  const hosts = Object.keys(data.install);
+  const lines = [];
+
+  lines.push('# Install agent-native-cli');
+  lines.push('');
+  lines.push(`> ${data.description}`);
+  lines.push('');
+  lines.push(
+    'One skill, one repo. Choose your host below, run the command, the agent picks up `SKILL.md` on next launch. The same machine-readable manifest is at [`/install.json`](/install.json).',
+  );
+  lines.push('');
+
+  lines.push('## Choose your host');
+  lines.push('');
+  for (const host of hosts) {
+    lines.push(`### ${hostLabel(host)}`);
+    lines.push('');
+    lines.push('```bash');
+    lines.push(data.install[host]);
+    lines.push('```');
+    lines.push('');
+  }
+
+  lines.push('## What this does');
+  lines.push('');
+  lines.push(
+    `Clones \`${data.source.url}\` (pinned at commit \`${data.source.commit}\`) into your host's skills directory. \`.git/\` is preserved so future updates are a \`git pull\`.`,
+  );
+  lines.push('');
+
+  lines.push('## Already installed?');
+  lines.push('');
+  lines.push('If the destination directory already holds this skill (origin matches), update in place:');
+  lines.push('');
+  lines.push('```bash');
+  lines.push(data.update);
+  lines.push('```');
+  lines.push('');
+  lines.push('If it holds something else, remove it first, then re-run the install command:');
+  lines.push('');
+  lines.push('```bash');
+  lines.push(data.uninstall);
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Update');
+  lines.push('');
+  lines.push('```bash');
+  lines.push(data.update);
+  lines.push('```');
+  lines.push('');
+  lines.push('To pin a specific release: `git checkout <tag>` after pulling. Tags follow `vX.Y.Z` semver.');
+  lines.push('');
+
+  lines.push('## Uninstall');
+  lines.push('');
+  lines.push('```bash');
+  lines.push(data.uninstall);
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Trust model');
+  lines.push('');
+  lines.push(
+    "Piping a remote shell script into the local shell is the failure mode this install path rejects. Installation runs `git clone` against a content-addressed commit on a specific repository — the scripts are open-source and visible at the producer repo before they execute on the user's machine. The site advertises a single upstream commit SHA in `/install.json`; agents that care about provenance can verify it.",
+  );
+  lines.push('');
+
+  lines.push('## Verify');
+  lines.push('');
+  lines.push("After install, confirm the local checkout matches the site's advertised pin:");
+  lines.push('');
+  lines.push('```bash');
+  lines.push(data.verify.command);
+  lines.push('```');
+  lines.push('');
+  lines.push(
+    `Expected: \`${data.verify.expected}\`. ${data.verify.semantics.charAt(0).toUpperCase()}${data.verify.semantics.slice(1)}.`,
+  );
+  lines.push('');
+
+  lines.push('## Programmatic');
+  lines.push('');
+  lines.push(
+    'Agents fetch [`/install.json`](/install.json) for the canonical manifest — `Content-Type: application/json`, `Accept: text/markdown` returns the JSON unchanged.',
+  );
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
+ * Render the install markdown to HTML via the existing unified+rehype pipeline.
+ *
+ * @param {object} data validated install manifest
+ * @returns {Promise<{ markdown: string, html: string }>}
+ */
+export async function renderInstallPage(data) {
+  const markdown = buildInstallMarkdown(data);
+  const html = await renderMarkdown(markdown);
+  return { markdown, html };
+}
+
+/**
+ * Write dist/install.md from a prebuilt markdown body.
+ *
+ * @param {string} markdown
+ * @param {string} distDir
+ */
+export async function emitInstallMarkdown(markdown, distDir) {
+  await writeFile(join(distDir, 'install.md'), markdown);
 }

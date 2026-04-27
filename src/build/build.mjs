@@ -33,7 +33,7 @@ import {
   extractTitle,
 } from './content.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
-import { emitInstallJson, loadInstallData } from './install.mjs';
+import { emitInstallJson, emitInstallMarkdown, loadInstallData, renderInstallPage } from './install.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
 import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
@@ -322,13 +322,26 @@ export async function build() {
   );
   await writeFile(join(DIST_DIR, 'coverage.md'), coverageMarkdown);
 
-  // 8c. /install.json — canonical machine surface for skill distribution.
-  // Validated + emitted from src/data/install.json. Unit 3 adds the HTML +
-  // markdown twin alongside.
+  // 8c. /install.json + /install + /install.md — skill-distribution surface.
+  // The same manifest is emitted as canonical JSON, rendered HTML (via the
+  // shared unified pipeline), and a markdown twin. Drift is structurally
+  // impossible because all three derive from the same data file.
   const installData = await loadInstallData(INSTALL_DATA_PATH);
   await emitInstallJson(installData, DIST_DIR);
+  const { markdown: installMarkdown, html: installBodyHtml } = await renderInstallPage(installData);
+  await writeFile(
+    join(DIST_DIR, 'install.html'),
+    emitShell({
+      title: `Install ${installData.name}`,
+      description: installData.description,
+      canonicalPath: '/install',
+      bodyHtml: installBodyHtml,
+      themeInitJs: themeInit,
+    }),
+  );
+  await emitInstallMarkdown(installMarkdown, DIST_DIR);
 
-  // 9. llms.txt + llms-full.txt (includes scorecard section).
+  // 9. llms.txt + llms-full.txt (includes scorecard + install sections).
   const llmsIndex = buildLlmsIndex({
     introTitle,
     summary: introSummary,
@@ -337,6 +350,10 @@ export async function build() {
     scorecardLinks: [
       { name: 'Leaderboard', path: '/scorecards.md' },
       { name: 'Coverage Matrix', path: '/coverage.md' },
+    ],
+    installLinks: [
+      { name: 'Install (HTML)', path: '/install.md' },
+      { name: 'Install (canonical JSON)', path: '/install.json' },
     ],
   });
   await writeFile(join(DIST_DIR, 'llms.txt'), llmsIndex);
@@ -368,14 +385,21 @@ export async function build() {
         htmlPath: '/coverage',
         mdPath: '/coverage.md',
       },
+      {
+        title: `Install ${installData.name}`,
+        body: installMarkdown,
+        htmlPath: '/install',
+        mdPath: '/install.md',
+      },
     ],
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
 
-  // 10. Sitemap (includes scorecard paths).
+  // 10. Sitemap (includes scorecard paths). /install is indexed for humans;
+  // /install.json carries X-Robots-Tag: noindex so it stays out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', ...scorecardPaths],
+    extraPaths: ['/scorecards', '/coverage', '/install', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 

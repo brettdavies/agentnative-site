@@ -38,9 +38,18 @@ import { resolveBaseUrl } from './util.mjs';
  * @param {Array<{ n: number, slug: string, title: string }>} args.principles
  * @param {Array<{ name: string, title: string }>=} args.subPages
  * @param {Array<{ name: string, path: string }>=} args.scorecardLinks
+ * @param {Array<{ name: string, path: string }>=} args.installLinks
  * @param {string=} args.baseUrl
  */
-export function buildLlmsIndex({ introTitle, summary, principles, subPages = [], scorecardLinks = [], baseUrl }) {
+export function buildLlmsIndex({
+  introTitle,
+  summary,
+  principles,
+  subPages = [],
+  scorecardLinks = [],
+  installLinks = [],
+  baseUrl,
+}) {
   const base = resolveBaseUrl(baseUrl);
 
   const lines = [];
@@ -66,6 +75,14 @@ export function buildLlmsIndex({ introTitle, summary, principles, subPages = [],
     lines.push('## Scorecards');
     lines.push('');
     for (const s of scorecardLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
+    }
+  }
+  if (installLinks.length > 0) {
+    lines.push('');
+    lines.push('## Install');
+    lines.push('');
+    for (const s of installLinks) {
       lines.push(`- [${s.name}](${base}${s.path})`);
     }
   }
