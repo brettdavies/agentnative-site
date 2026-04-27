@@ -12,6 +12,15 @@
 //                          Cache-Control: public, max-age=300, s-maxage=86400,
 //                                         stale-while-revalidate=60
 //
+//   JSON responses (.json) Content-Type: application/json; charset=utf-8
+//                          Access-Control-Allow-Origin: *
+//                          X-Robots-Tag: noindex
+//                          Cache-Control: public, max-age=300, s-maxage=86400,
+//                                         stale-while-revalidate=60
+//                          (No Link rel=alternate, no X-Llms-Txt — JSON has
+//                          no markdown twin. Detected by URL extension so a
+//                          future /skill/<name>.json reuses the branch.)
+//
 //   Hashed assets          Cache-Control: public, max-age=31536000, immutable
 //   (/fonts/*, /og-image.png)
 //
@@ -45,6 +54,10 @@ function isHashedAsset(pathname: string): boolean {
   return pathname.startsWith('/fonts/') || pathname === '/og-image.png';
 }
 
+function isJson(pathname: string): boolean {
+  return pathname.endsWith('.json');
+}
+
 /**
  * Clone the response and replace its header set with the project's policy.
  * We clone so upstream 304 / redirect status codes flow through unchanged.
@@ -55,6 +68,11 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
 
   if (opts.servedMarkdown) {
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
+    headers.set('X-Robots-Tag', 'noindex');
+    headers.set('Cache-Control', SHORT_CACHE);
+  } else if (isJson(opts.pathname)) {
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    headers.set('Access-Control-Allow-Origin', '*');
     headers.set('X-Robots-Tag', 'noindex');
     headers.set('Cache-Control', SHORT_CACHE);
   } else if (isHashedAsset(opts.pathname)) {

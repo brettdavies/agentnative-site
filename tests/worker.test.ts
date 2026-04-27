@@ -137,6 +137,43 @@ describe('applyHeaders — markdown branch', () => {
   });
 });
 
+describe('applyHeaders — JSON branch (skill-distribution)', () => {
+  test('/install.json: application/json + CORS + noindex + short cache + no Link', () => {
+    const res = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/install.json'),
+      servedMarkdown: false,
+      pathname: '/install.json',
+    });
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+    expect(res.headers.get('Cache-Control')).toContain('stale-while-revalidate=60');
+    // No markdown-twin advertisement on JSON paths.
+    expect(res.headers.get('Link')).toBeNull();
+    expect(res.headers.get('X-Llms-Txt')).toBeNull();
+  });
+
+  test('synthetic /foo.json also matches the JSON-extension branch (forward-compat for v2 /skill/<name>.json)', () => {
+    const res = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/foo.json'),
+      servedMarkdown: false,
+      pathname: '/foo.json',
+    });
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+
+  test('non-.json path keeps HTML-branch headers (Link rel=alternate present)', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/installer'),
+      servedMarkdown: false,
+      pathname: '/installer',
+    });
+    expect(res.headers.get('Content-Type')).not.toBe('application/json; charset=utf-8');
+    expect(res.headers.get('Link')).toContain('rel="alternate"');
+  });
+});
+
 describe('applyHeaders — hashed assets', () => {
   test('/fonts/* gets immutable cache', () => {
     const res = applyHeaders(new Response('woff2'), {
@@ -245,5 +282,23 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     const res = await worker.fetch(req('https://agentnative-site.brett.workers.dev/p3'), env);
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(res.headers.get('Link')).toContain('</p3.md>');
+  });
+
+  test('/install.json with Accept: text/markdown returns the JSON, not a 404 from CN rewrite', async () => {
+    const env = makeEnv({ '/install.json': '{"schema_version":1}' });
+    const res = await worker.fetch(req('https://anc.dev/install.json', 'text/markdown'), env);
+    // CN rewrite must skip .json paths so the asset lookup stays on /install.json.
+    expect(res.headers.get('X-Echo-Path')).toBe('/install.json');
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+    expect(await res.text()).toBe('{"schema_version":1}');
+  });
+
+  test('/install.json no Accept header: JSON branch headers applied', async () => {
+    const env = makeEnv({ '/install.json': '{}' });
+    const res = await worker.fetch(req('https://anc.dev/install.json'), env);
+    expect(res.headers.get('X-Echo-Path')).toBe('/install.json');
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 });

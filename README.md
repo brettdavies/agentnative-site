@@ -15,3 +15,5 @@ Cloudflare Workers. Pushes to `main` deploy automatically.
 
 - [agentnative-cli](https://github.com/brettdavies/agentnative-cli) — the CLI linter that checks compliance with this
   standard
+- [agentnative-skill](https://github.com/brettdavies/agentnative-skill) — the agent-native-cli skill bundle (SKILL.md +
+  checklists + scripts) installed via [anc.dev/install](https://anc.dev/install)

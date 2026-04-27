@@ -34,7 +34,11 @@ export default {
     const pathname = url.pathname;
 
     const pathIsMarkdown = pathname.endsWith('.md');
-    const preferMarkdown = !pathIsMarkdown && detectPreference(request) === 'markdown';
+    const pathIsJson = pathname.endsWith('.json');
+    // CN rewrite is markdown-only. Skip for `.json` paths so `Accept:
+    // text/markdown` against `/install.json` returns the JSON unchanged
+    // instead of rewriting to a non-existent `/install.json.md` twin.
+    const preferMarkdown = !pathIsMarkdown && !pathIsJson && detectPreference(request) === 'markdown';
     const servedMarkdown = pathIsMarkdown || preferMarkdown;
 
     let assetRequest = request;
