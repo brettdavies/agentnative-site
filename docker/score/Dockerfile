@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+#
 # Batch-scoring image for the anc100 leaderboard.
 #
 # Goal: pre-bake every installable tool from registry.yaml + the `anc` linter,
@@ -12,6 +14,19 @@
 #   - glibc base — no musl. Reuses the dev-machine `anc` build artifact.
 #   - Same image structure as the future v2 CF Sandbox container — only the
 #     final stage diverges (batch runner here vs. sandbox server there).
+#
+# Caching strategy:
+#   The install-tools layer uses BuildKit `--mount=type=cache` directives
+#   for each package manager's download cache. The actual installed
+#   binaries land in the image (in /home/linuxbrew/.linuxbrew, ~/.local,
+#   ~/.bun, ~/.cargo); only the DOWNLOAD caches persist across builds.
+#   Effect: changing one tool in registry.yaml invalidates the install
+#   layer (since registry.yaml is COPYed before it), but the re-install
+#   reuses cached bottles/wheels/tarballs. Wall time drops from "redownload
+#   everything" to "reinstall from local cache." First build is cold;
+#   second-onwards builds are ~5-10x faster.
+#
+#   Requires BuildKit (Docker 18.09+, default in modern Docker + compose v2).
 #
 # Usage (from repo root):
 #   docker build -f docker/score/Dockerfile -t anc-scorer .
@@ -57,11 +72,14 @@ RUN brew --version
 # ---- Other package managers (all available via brew so the install is fast) -
 # uv = Python tool runner; bun = JS runtime + package manager;
 # cargo-binstall = Rust prebuilt-only installer.
-RUN brew install uv bun cargo-binstall
+# Cache mount on the brew bottle download dir so re-runs reuse downloads.
+RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
+    brew install uv bun cargo-binstall
 
 # ---- Ergonomic tools the runner script depends on --------------------------
 # yq for parsing registry.yaml; jaq for JSON validation.
-RUN brew install yq jaq
+RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
+    brew install yq jaq
 
 # ---- The anc binary (glibc, built from CLI dev RC) -------------------------
 # Copied in from the build context. The wrapper script `docker/score/build.sh`
@@ -80,9 +98,18 @@ ENV PATH=/home/runner/.local/bin:$PATH
 #
 # This layer takes the longest (~20-40 minutes first build); Docker caches
 # it so subsequent rebuilds skip ahead unless registry.yaml changed.
+#
+# BuildKit cache mounts on every package manager's download cache: re-runs
+# (when registry.yaml does change) reuse cached bottles/wheels/tarballs and
+# skip the network downloads. The CACHED dirs do NOT carry into the final
+# image — only the actually-installed binaries do.
 COPY --chown=runner:runner registry.yaml /build/registry.yaml
 COPY --chown=runner:runner docker/score/install-tools.sh /build/install-tools.sh
-RUN bash /build/install-tools.sh
+RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
+    --mount=type=cache,target=/home/runner/.cache/uv,uid=1000,gid=1000 \
+    --mount=type=cache,target=/home/runner/.bun/install/cache,uid=1000,gid=1000 \
+    --mount=type=cache,target=/home/runner/.cache/cargo-binstall,uid=1000,gid=1000 \
+    bash /build/install-tools.sh
 
 # ---- Scoring runner --------------------------------------------------------
 COPY --chown=runner:runner docker/score/score-anc100.sh /work/score-anc100.sh
