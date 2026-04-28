@@ -762,7 +762,7 @@ tools:
     language: Rust
     tier: agent
     creator: OpenAI
-    install: cargo binstall codex-cli
+    install: bun add -g @openai/codex
     description: Lightweight coding agent that runs in your terminal
 
   - name: goose
