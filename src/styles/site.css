@@ -74,6 +74,15 @@ main pre {
   background: var(--bg-code, #f0f4f7);
   border: 1px solid var(--border, #cfd5db);
 }
+/* Positioning context for the copy button (added client-side by
+ * clipboard.ts). The wrapper is non-scrolling and matches the pre's outer
+ * width, so an `position: absolute` copy-button stays pinned to the right
+ * edge of the visible block — it does not slide leftward when the pre is
+ * horizontally scrolled to read long lines. The wrapper is invisible
+ * (default block flow, no chrome) so it has no visual impact on the pre. */
+main .code-wrap {
+  position: relative;
+}
 main :not(pre) > code {
   background: var(--bg-code, #f0f4f7);
   padding: 0.15rem 0.4rem;
@@ -248,7 +257,7 @@ main .anchor-icon {
 :root[data-theme="dark"] .copy-button {
   background: var(--border, #2c333d);
 }
-:root.js main pre .copy-button {
+:root.js main .code-wrap .copy-button {
   display: inline-block;
 }
 .copy-button[data-copy-state="copied"] {

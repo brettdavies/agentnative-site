@@ -45,6 +45,21 @@ function attachPreButtons() {
   const pres = document.querySelectorAll<HTMLPreElement>('main pre');
   for (const pre of pres) {
     if (pre.dataset.copyAttached === 'true') continue;
+
+    // Wrap the pre in a positioning container BEFORE attaching the copy
+    // button. The pre keeps `overflow-x: auto` for its code; the button
+    // anchors against the wrapper, which is non-scrolling. Otherwise an
+    // `position: absolute` button inside an overflowing pre moves WITH the
+    // scrolled content (since absolute children of a scrolling container
+    // resolve `right: 0` against the scrolled content box, not the visible
+    // padding box).
+    const parent = pre.parentNode;
+    if (!parent) continue;
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    parent.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'copy-button';
@@ -54,7 +69,7 @@ function attachPreButtons() {
       const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
       if (await copyText(code)) flashCopied(btn);
     });
-    pre.prepend(btn);
+    wrap.appendChild(btn);
     pre.dataset.copyAttached = 'true';
   }
 }
