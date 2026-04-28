@@ -634,7 +634,7 @@ describe('suppressed-check rendering', () => {
   // audit_profile-suppressed Skip in the same principle group.
   function suppressedScorecard() {
     return {
-      schema_version: '1.1',
+      schema_version: '0.3',
       audience: null,
       audit_profile: 'human-tui',
       results: [
@@ -707,7 +707,7 @@ describe('suppressed-check rendering', () => {
     // "suppressed by audit_profile_human-tui" must NOT be treated as
     // suppression — it's an organic Skip with prose evidence.
     const sc = {
-      schema_version: '1.1',
+      schema_version: '0.3',
       audience: null,
       audit_profile: null,
       results: [
