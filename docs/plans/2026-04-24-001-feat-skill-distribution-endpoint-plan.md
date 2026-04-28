@@ -1,5 +1,6 @@
 ---
 title: "feat: Publish agent-native-cli skill via dedicated repo and anc.dev install endpoints"
+execution_status_2026-04-28: "Units 1–5 implementation shipped (PRs #36 + #37 + #38 + #39 to dev). Cutover ops pending: skill-repo public-flip, dev → main release, cache-purge, skill-availability seed run. Site staging deploy is live and serves /install + /install.json correctly. See site execution plan 2026-04-27-001 for the cutover sequence."
 type: feat
 status: active
 date: 2026-04-24
@@ -165,9 +166,9 @@ Not gathered. User did not request Slack search.
 - **Headers (in `src/worker/headers.ts`, NOT `_headers`)**, detected by **file extension** rather than URL prefix
   (forward-compat with `/skill/<name>` HTML pages in v2):
 - For `.json` assets: `Content-Type: application/json; charset=utf-8`, `Cache-Control: public, max-age=300,
-    s-maxage=86400, stale-while-revalidate=60`, `Access-Control-Allow-Origin: *`, `X-Robots-Tag: noindex`.
+  s-maxage=86400, stale-while-revalidate=60`, `Access-Control-Allow-Origin: *`, `X-Robots-Tag: noindex`.
 - The Worker's CN-rewrite (`Accept: text/markdown` → `.md` twin) MUST skip `.json` paths explicitly so `Accept:
-    text/markdown` against `/install.json` doesn't 404.
+  text/markdown` against `/install.json` doesn't 404.
 - **`/install` HTML is render-only.** No authored markdown source for the install page. The build emitter reads
   `src/data/install.json` and renders both the JSON payload and a human-facing HTML page using a static template + the
   existing unified+rehype pipeline for code-block highlighting.
@@ -367,7 +368,7 @@ The site is touched once per skill release (to bump `install.json`). Skill conte
 
 ## Implementation Units
 
-- [ ] **Unit 1: Bootstrap `brettdavies/agentnative-skill` and migrate the bundle**
+- [x] **Unit 1: Bootstrap `brettdavies/agentnative-skill` and migrate the bundle**
 
 **Target repo:** `brettdavies/agentnative-skill` (new). **Operator prerequisite:** local clone of the private source at
 `~/dev/agent-skills/agent-native-cli/` (author's machine).
@@ -433,7 +434,7 @@ re-commit (no private-repo history import).
 
 ---
 
-- [ ] **Unit 2: Site `/install.json` build emitter + Worker JSON-headers branch**
+- [x] **Unit 2: Site `/install.json` build emitter + Worker JSON-headers branch**
 
 **Goal:** Emit the canonical install manifest from the vendored data file and serve it with appropriate headers.
 
@@ -448,7 +449,7 @@ re-commit (no private-repo history import).
   map), `verify`, `update`, `uninstall`, `install_page_html`.
 - Create: `src/build/install.mjs` with:
 - `loadInstallData()` — reads + validates `src/data/install.json` (required keys, commit is 40-char hex, `install` map
-    non-empty, version is semver). Fails the build with file path
+  non-empty, version is semver). Fails the build with file path
 - reason on invalid input.
 
 - `emitInstallJson(data)` — writes `dist/install.json` (stable JSON: keys sorted, two-space indent, trailing newline).
@@ -460,7 +461,7 @@ re-commit (no private-repo history import).
 - `Access-Control-Allow-Origin: *`
 - `X-Robots-Tag: noindex`
 - Skip the `Link: <...>; rel="alternate"` and `X-Llms-Txt` headers that the default HTML branch emits (no markdown twin
-    for `.json` paths).
+  for `.json` paths).
 - Modify: `src/worker/index.ts` — `Accept: text/markdown` content-negotiation rewrite must skip paths ending in `.json`
   (otherwise `Accept: text/markdown` against `/install.json` rewrites to `/install.md` which doesn't apply).
 
@@ -499,7 +500,7 @@ re-commit (no private-repo history import).
 
 ---
 
-- [ ] **Unit 3: Site `/install` HTML rendering (templated from `/install.json`)**
+- [x] **Unit 3: Site `/install` HTML rendering (templated from `/install.json`)**
 
 **Goal:** Render a human-facing install page from `/install.json` data plus a static prose template. Preserve site
 code-block highlighting via the existing unified pipeline.
@@ -512,9 +513,9 @@ code-block highlighting via the existing unified pipeline.
 
 - Modify: `src/build/install.mjs` — add `emitInstallHtml(data)` and `emitInstallMarkdown(data)`.
 - Markdown approach: build a markdown string from a static template + per-host install table interpolated from
-    `data.install`, with the trust-model paragraph and other prose sections static. Run through the existing
-    unified+remark-rehype+shiki pipeline to produce HTML; write the markdown intermediate as `dist/install.md` (twin for
-    content-negotiated agents).
+  `data.install`, with the trust-model paragraph and other prose sections static. Run through the existing
+  unified+remark-rehype+shiki pipeline to produce HTML; write the markdown intermediate as `dist/install.md` (twin for
+  content-negotiated agents).
 - Modify: `src/build/build.mjs` — call `emitInstallHtml()` and `emitInstallMarkdown()` after `emitInstallJson()`.
 - Modify: `src/build/sitemap.mjs` — add `/install` to the sitemap (humans index).
 - Modify: `src/build/llms.mjs` — add `/install` and `/install.json` entries to `llms.txt` and a section in
@@ -555,7 +556,7 @@ code-block highlighting via the existing unified pipeline.
 
 ---
 
-- [ ] **Unit 4: Tests + 4-host e2e install verification + synthetic availability probe**
+- [x] **Unit 4: Tests + 4-host e2e install verification + synthetic availability probe**
 
 **Goal:** Hold the contract: built artifacts exist, JSON-HTML parity holds, install verified end-to-end on every
 advertised host, repo availability monitored daily.
@@ -573,7 +574,7 @@ advertised host, repo availability monitored daily.
 - Modify: `tests/e2e/agents.e2e.ts` — for EACH host advertised in `install.json`'s `install` map:
 - Fetch `/install.json`, extract the host's install command.
 - Run the command in a sandboxed temp HOME directory (override `~/.claude`, `~/.codex`, `~/.cursor`,
-    `~/.config/opencode` to point at a clean tmpdir).
+  `~/.config/opencode` to point at a clean tmpdir).
 - Assert SKILL.md exists at the expected install path.
 - Assert `git -C <install-dir> rev-parse HEAD` resolves to a 40-char SHA reachable on github.com.
 - Assert `git ls-remote --exit-code origin <commit>` succeeds (commit is reachable on the producer's default branch).
@@ -619,7 +620,7 @@ advertised host, repo availability monitored daily.
 
 ---
 
-- [ ] **Unit 5: Documentation + cross-references**
+- [x] **Unit 5: Documentation + cross-references**
 
 **Goal:** Document the new endpoints, the release procedure, the VOICE register for `/install`, and refresh existing
 artifacts that reference the old private path.
@@ -642,7 +643,7 @@ artifacts that reference the old private path.
 2. In `agentnative-site`: bump `src/data/install.json` (version, source.commit).
 3. Open a site PR; CI runs the e2e check; deploy after merge.
 4. Run cache-purge against `/install` and `/install.json` via Cloudflare cache-purge API (operational step — required
-     for security-relevant pin updates within the 24h s-maxage window).
+   for security-relevant pin updates within the 24h s-maxage window).
 
 - Modify: `STATUS.md` — mark this todo as done; reference the published skill repo.
 - Modify: site README if it references `~/dev/agent-skills/agent-native-cli/`.
@@ -708,7 +709,7 @@ artifacts that reference the old private path.
 2. `cd ~/dev/agentnative-site` — bump `src/data/install.json` (`version` and `source.commit`).
 3. PR to `dev`; CI runs e2e to verify pin reachability and 4-host install. Deploy after merge.
 4. **Cache-purge** `/install.json` and `/install` via Cloudflare cache-purge API. Required for security-relevant
-     updates; recommended for all releases to keep the s-maxage budget honest.
+   updates; recommended for all releases to keep the s-maxage budget honest.
 
 - **User update procedure** (on `/install` page): `cd ~/.claude/skills/agent-native-cli && git pull`. For pinning: `git
   checkout <tag>` after pulling.
@@ -724,7 +725,7 @@ artifacts that reference the old private path.
 - **`docs/solutions/` compounding** post-ship via `/compound`:
 
 1. Agent-primary single-skill distribution pattern (JSON canonical, HTML rendered) and when to choose it over
-     marketplace machinery.
+   marketplace machinery.
 2. Repo-name vs install-dir asymmetry mitigation via always-explicit destination.
 
 ## Sources & References
@@ -745,8 +746,8 @@ artifacts that reference the old private path.
 - `docs/solutions/architecture-patterns/cross-repo-artifact-sync-commit-over-fetch-20260420.md`
 - External:
 - [agentskills.io specification](https://agentskills.io/specification) — open standard for SKILL.md format. 35+ adopters
-    consume the same SKILL.md byte-for-byte.
+  consume the same SKILL.md byte-for-byte.
 - [`garrytan/gstack`](https://github.com/garrytan/gstack) — single-repo direct-clone install model and per-host adapter
-    pattern.
+  pattern.
 - [`@every-env/compound-plugin@3.x`](https://www.npmjs.com/package/@every-env/compound-plugin) — cross-tool plugin
-    packaging via author-side conversion. Reviewed and rejected for v1; pattern noted for future multi-component scope.
+  packaging via author-side conversion. Reviewed and rejected for v1; pattern noted for future multi-component scope.

@@ -3,6 +3,7 @@ title: "feat: Site /install + /install.json endpoints + producer cutover (Units 
 type: feat
 status: active
 date: 2026-04-27
+execution_status_2026-04-28: "Units 2–5 implementation SHIPPED to dev and live on staging via PRs #36 + #37 + #38 + #39. Site staging serves /install + /install.json + /install.md with correct headers. Cutover ops pending: release/* → main + cache-purge + skill-availability seed run. Skill repo flipped public mid-execution (precondition #3 obsoleted). Central tracker updated."
 master_plan: ./2026-04-24-001-feat-skill-distribution-endpoint-plan.md
 related_session: ../../../agentnative-skill/docs/plans/2026-04-27-001-bootstrap-agentnative-skill-plan.md
 origin: master plan Units 2–5, executed in dedicated session
@@ -26,13 +27,16 @@ scenarios). Read the master plan's Units 2–5 first.
 
 Before kicking off this plan, the orchestrator must confirm:
 
-- [ ] Skill session reports `agentnative-skill v0.1.0 ready for site pin.` with a 40-char commit SHA. Capture the SHA;
+- [x] Skill session reports `agentnative-skill v0.1.0 ready for site pin.` with a 40-char commit SHA. Capture the SHA;
   it pins `source.commit` in Unit 2.
-- [ ] `gh api repos/brettdavies/agentnative-skill/git/ref/tags/v0.1.0 --jq '.object.sha'` resolves to the same SHA the
+- [x] `gh api repos/brettdavies/agentnative-skill/git/ref/tags/v0.1.0 --jq '.object.sha'` resolves to the same SHA the
   skill session reported (independent verification — also catches a tag pointing at an annotated-tag object instead of a
   commit; if so, dereference per the global SHA-pinning rule).
-- [ ] Skill repo is still PRIVATE. The cutover (visibility flip) is the closing step of Unit 5 here.
-- [ ] Working tree of `~/dev/agentnative-site/` is clean on `dev`.
+- [x] ~~Skill repo is still PRIVATE. The cutover (visibility flip) is the closing step of Unit 5 here.~~ **Obsoleted
+  2026-04-28:** owner-decision flipped the skill repo PUBLIC mid-execution (after v0.1.0 tag, before site PR queued —
+  accepted deviation per the central tracker). Site Units 2–5 still shipped as planned; the remaining cutover step is
+  `release/*` → `main` + cache-purge, not a visibility flip.
+- [x] Working tree of `~/dev/agentnative-site/` is clean on `dev`.
 
 ## Goals
 
