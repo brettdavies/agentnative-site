@@ -69,12 +69,18 @@ RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/instal
 ENV PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH
 RUN brew --version
 
-# ---- Other package managers (all available via brew so the install is fast) -
+# ---- Other package managers ------------------------------------------------
 # uv = Python tool runner; bun = JS runtime + package manager;
 # cargo-binstall = Rust prebuilt-only installer.
+#
+# `bun` is not in homebrew-core on Linux — only the macOS formula. The
+# canonical Linux brew install is via the official `oven-sh/bun` tap, which
+# `brew install` auto-taps when given the fully-qualified `tap/formula`
+# spec. uv + cargo-binstall are in homebrew-core, no tap needed.
+#
 # Cache mount on the brew bottle download dir so re-runs reuse downloads.
 RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
-    brew install uv bun cargo-binstall
+    brew install uv cargo-binstall oven-sh/bun/bun
 
 # ---- Ergonomic tools the runner script depends on --------------------------
 # yq for parsing registry.yaml; jaq for JSON validation.
