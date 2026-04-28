@@ -65,12 +65,12 @@ tools to checks that punish their core design produces a misleading score and a 
 [`SUPPRESSION_TABLE`](https://github.com/brettdavies/agentnative-cli/blob/main/src/principles/registry.rs) in the CLI
 source and is the contract this site renders against:
 
-| Category | Suppresses | Use when... |
-|---|---|---|
-| `human-tui` | P1 non-interactive variants + P6 SIGPIPE | Tool's primary mode is an interactive terminal UI (e.g., `lazygit`). TUIs intercept the TTY by design and install their own signal handlers. |
-| `file-traversal` | (no checks suppressed in v0.1.3) | Tool emits filenames as its output protocol (`fd`, `find`). Today the applicability filter on subcommand-shape checks already produces the right Skip outcome; the table entry is reserved for future checks. |
-| `posix-utility` | P1 non-interactive variants | Tool predates structured output and follows POSIX conventions (`grep`, `awk`). The no-prompt MUST is satisfied vacuously by the stdin protocol. |
-| `diagnostic-only` | P5 dry-run | Tool is read-only by design (`nvidia-smi`, `lsof`). Read-write-distinction and force-yes are still uncovered in v0.1.3. |
+| Category          | Suppresses                               | Use when...                                                                                                                                                                                                   |
+| ----------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `human-tui`       | P1 non-interactive variants + P6 SIGPIPE | Tool's primary mode is an interactive terminal UI (e.g., `lazygit`). TUIs intercept the TTY by design and install their own signal handlers.                                                                  |
+| `file-traversal`  | (no checks suppressed in v0.1.3)         | Tool emits filenames as its output protocol (`fd`, `find`). Today the applicability filter on subcommand-shape checks already produces the right Skip outcome; the table entry is reserved for future checks. |
+| `posix-utility`   | P1 non-interactive variants              | Tool predates structured output and follows POSIX conventions (`grep`, `awk`). The no-prompt MUST is satisfied vacuously by the stdin protocol.                                                               |
+| `diagnostic-only` | P5 dry-run                               | Tool is read-only by design (`nvidia-smi`, `lsof`). Read-write-distinction and force-yes are still uncovered in v0.1.3.                                                                                       |
 
 When a tool is scored under an audit profile, the suppressed checks still appear on the per-tool page, tagged **N/A by
 category** with a pointer to the profile that excluded them. The reader sees what was excluded and why; the checks are
@@ -98,9 +98,11 @@ the absence of language coverage in the linter, not for any property of the tool
 Every score on the leaderboard is reproducible:
 
 ```bash
-cargo install agentnative
+brew install brettdavies/tap/agentnative
 anc check <binary> --output json
 ```
+
+Also installable via `cargo install agentnative`.
 
 Pass `--audit-profile <category>` to apply the same suppression set the leaderboard applies. The committed scorecards
 under [`scorecards/`](https://github.com/brettdavies/agentnative-site/tree/main/scorecards) record the exact CLI version
@@ -120,9 +122,9 @@ Re-scoring is manual at launch. When a tool ships a release that changes its age
 
 ## Constructive framing
 
-A low score is a snapshot, not a verdict. Each failing check on a per-tool page links to the principle page that
-defines the requirement and the fix guidance. The leaderboard exists to make the standard concrete, not to shame tool
-authors who built before the standard existed. Most of the tools listed here predate `anc` by years.
+A low score is a snapshot, not a verdict. Each failing check on a per-tool page links to the principle page that defines
+the requirement and the fix guidance. The leaderboard exists to make the standard concrete, not to shame tool authors
+who built before the standard existed. Most of the tools listed here predate `anc` by years.
 
 If you maintain one of the tools on the leaderboard and want to improve its score, the per-tool page is your punch list.
 The check IDs (`p1-non-interactive`, `p2-json-output`, etc.) are stable and citeable in commits and PRs.

@@ -264,7 +264,8 @@ export async function build() {
   <p>For the full explanation of scoring, audience classification, audit profiles, and how to
   request a re-score, see the <a href="/methodology">methodology page</a>.</p>
   <p>To reproduce any row locally:</p>
-  <pre><code>cargo install agentnative &amp;&amp; anc check &lt;binary&gt;</code></pre>`;
+  <pre><code>brew install brettdavies/tap/agentnative &amp;&amp; anc check &lt;binary&gt;</code></pre>
+  <p>Also installable via <code>cargo install agentnative</code>.</p>`;
 
   const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
   await writeFile(
