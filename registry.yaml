@@ -499,8 +499,17 @@ tools:
     language: TypeScript
     tier: workhorse
     creator: Cloudflare
-    install: brew install cloudflare-wrangler2
+    install: brew install cloudflare-wrangler
     description: CLI for Cloudflare Workers
+
+  - name: cf
+    repo: cloudflare/workers-sdk
+    binary: cf
+    language: TypeScript
+    tier: workhorse
+    creator: Cloudflare
+    install: bun add -g cf
+    description: Cloudflare's beta unified CLI (Technical Preview); rebuilt for agent-first ergonomics
 
   - name: aws-cli
     repo: aws/aws-cli
