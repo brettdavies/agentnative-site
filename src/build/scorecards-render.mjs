@@ -269,8 +269,11 @@ export function renderAudienceBanner(audience, auditProfile) {
  * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} HTML body
  */
-export function buildScorecardBody(tool, scorecard, topIssues, principleScore, score) {
+export function buildScorecardBody(tool, scorecard, topIssues, principleScore, score, resolvedVersion) {
   const pct = Math.round(score * 100);
+  // Prefer the version from the matched scorecard filename when present; fall
+  // back to the registry pin for legacy entries where version is set.
+  const version = resolvedVersion ?? tool.version ?? null;
 
   // Breadcrumb
   let html = `<nav class="scorecard-breadcrumb" aria-label="Breadcrumb">
@@ -395,7 +398,7 @@ ${renderCheckRows(bonusChecks)}
   html += `<section class="scorecard-meta">
   <h2>Details</h2>
   <dl class="meta-list">
-    <dt>Version scored</dt><dd>${escHtml(tool.version || '—')}</dd>
+    <dt>Version scored</dt><dd>${escHtml(version || '—')}</dd>
     <dt>Audit date</dt><dd>${escHtml(tool.scored_at || '—')}</dd>
     <dt>Install</dt><dd><code>${escHtml(tool.install || '—')}</code></dd>
   </dl>
@@ -465,7 +468,8 @@ export function buildLeaderboardMarkdown(leaderboard) {
  * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} markdown
  */
-export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, score) {
+export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, score, resolvedVersion) {
+  const version = resolvedVersion ?? tool.version ?? null;
   const lines = [`# ${tool.name}`];
   lines.push('');
   lines.push(tool.description);
@@ -498,7 +502,7 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     lines.push(`**Source:** [${tool.url}](${tool.url})`);
   }
   lines.push(`**Language:** ${tool.language}`);
-  lines.push(`**Version scored:** ${tool.version || '—'}`);
+  lines.push(`**Version scored:** ${version || '—'}`);
   lines.push(`**Install:** \`${tool.install || '—'}\``);
   lines.push('');
 

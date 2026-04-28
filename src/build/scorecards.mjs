@@ -87,14 +87,16 @@ export async function loadRegistry(registryPath) {
 }
 
 /**
- * Construct the scorecard filename for a tool.
+ * Construct the scorecard filename for a tool when registry pins a version.
  *
  * Convention (documented in registry.yaml header):
  *   Behavioral + project: {name}-v{version}.json
  *   Source checks (future): {name}-src-{YYYYMMDD}-{branch}-{commit7}.json
  *
- * Tools without a `version` field in the registry are definitionally
- * unscored — no filename can be constructed.
+ * For tools without a `version` field, the loader falls back to auto-discovery
+ * (see {@link loadScorecards}) — finding the highest-versioned scorecard on
+ * disk for that tool's name. This keeps the registry the inclusion source of
+ * truth without requiring a version pin per entry.
  *
  * @param {object} tool — registry entry
  * @returns {string | null}
@@ -104,14 +106,65 @@ export function scorecardFilename(tool) {
   return `${tool.name}-v${tool.version}.json`;
 }
 
+// Compares two SemVer-shaped version strings (`X.Y` or `X.Y.Z`, optionally
+// with a numeric or `pre`/`rc.N`-style suffix) for sorting. Returns >0 if
+// `a > b`, <0 if `a < b`, 0 if equal. Falls back to lexical compare for
+// anything not recognizable as a numeric tuple.
+function compareVersions(a, b) {
+  const parse = (v) => v.split('.').map((seg) => {
+    const n = Number.parseInt(seg, 10);
+    return Number.isFinite(n) ? n : seg;
+  });
+  const ap = parse(a);
+  const bp = parse(b);
+  const len = Math.max(ap.length, bp.length);
+  for (let i = 0; i < len; i++) {
+    const ai = ap[i] ?? 0;
+    const bi = bp[i] ?? 0;
+    if (typeof ai === 'number' && typeof bi === 'number') {
+      if (ai !== bi) return ai - bi;
+    } else {
+      // Mixed types — defer to lexical.
+      const cmp = String(ai).localeCompare(String(bi));
+      if (cmp !== 0) return cmp;
+    }
+  }
+  return 0;
+}
+
+// Build a map: tool name → array of {filename, version} pairs for every
+// scorecard file matching `<name>-v<version>.json` in the scorecards/ dir.
+// Used by loadScorecards for auto-discovery when registry has no version pin.
+function indexScorecardsByName(filenames) {
+  const idx = new Map();
+  for (const file of filenames) {
+    const m = file.match(/^([a-z0-9-]+)-v([^/]+?)\.json$/);
+    if (!m) continue;
+    const [, name, version] = m;
+    if (!idx.has(name)) idx.set(name, []);
+    idx.get(name).push({ filename: file, version });
+  }
+  // Sort each tool's scorecards highest-version-first.
+  for (const list of idx.values()) {
+    list.sort((a, b) => compareVersions(b.version, a.version));
+  }
+  return idx;
+}
+
 /**
- * For each registry entry, read scorecards/{name}-v{version}.json if it
- * exists. Tools without a version or without a matching scorecard file
- * are included but marked unscored.
+ * For each registry entry, locate and read its scorecard.
+ *
+ * Resolution order:
+ *   1. If `tool.version` is set in the registry, use the exact filename
+ *      `{name}-v{version}.json`. Mark unscored if that file is missing —
+ *      a missing pinned file is a data inconsistency that should surface.
+ *   2. Otherwise auto-discover: pick the highest-versioned `{name}-v*.json`
+ *      file on disk. The resolved version is returned alongside the
+ *      scorecard so the per-tool page can display it without a registry edit.
  *
  * @param {string} scorecardsDir — absolute path to scorecards/
  * @param {Array<object>} registry — from loadRegistry()
- * @returns {Promise<Array<{ tool: object, scorecard: object | null }>>}
+ * @returns {Promise<Array<{ tool: object, scorecard: object | null, version: string | null }>>}
  */
 export async function loadScorecards(scorecardsDir, registry) {
   let files;
@@ -121,14 +174,34 @@ export async function loadScorecards(scorecardsDir, registry) {
     files = new Set();
   }
 
+  const byName = indexScorecardsByName(files);
+
   const result = [];
   for (const tool of registry) {
-    const filename = scorecardFilename(tool);
-    if (filename && files.has(filename)) {
-      const raw = await readFile(join(scorecardsDir, filename), 'utf8');
-      result.push({ tool, scorecard: JSON.parse(raw) });
+    let chosenFile = null;
+    let chosenVersion = null;
+
+    if (tool.version) {
+      // Explicit pin — exact match only.
+      const filename = scorecardFilename(tool);
+      if (filename && files.has(filename)) {
+        chosenFile = filename;
+        chosenVersion = tool.version;
+      }
     } else {
-      result.push({ tool, scorecard: null });
+      // Auto-discover the highest-versioned scorecard for this name.
+      const candidates = byName.get(tool.name);
+      if (candidates && candidates.length > 0) {
+        chosenFile = candidates[0].filename;
+        chosenVersion = candidates[0].version;
+      }
+    }
+
+    if (chosenFile) {
+      const raw = await readFile(join(scorecardsDir, chosenFile), 'utf8');
+      result.push({ tool, scorecard: JSON.parse(raw), version: chosenVersion });
+    } else {
+      result.push({ tool, scorecard: null, version: null });
     }
   }
   return result;

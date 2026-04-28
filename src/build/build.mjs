@@ -21,7 +21,7 @@
 // exits non-zero. Regression tests are the verification net.
 
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyAssets } from './assets.mjs';
@@ -285,12 +285,23 @@ export async function build() {
 
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
   await ensureDir(join(DIST_DIR, 'score'));
+  // Drop stale per-tool pages from prior builds. When a tool is removed from
+  // the registry (e.g., aider, plandex, fabric in PR #40), its old html/md
+  // would otherwise linger in dist/ and ship as broken rows linking back to a
+  // tool the leaderboard no longer knows about.
+  const expectedNames = new Set(leaderboard.map((e) => e.tool.name));
+  for (const file of await readdir(join(DIST_DIR, 'score')).catch(() => [])) {
+    const m = file.match(/^([a-z0-9-]+)\.(html|md)$/);
+    if (m && !expectedNames.has(m[1])) {
+      await unlink(join(DIST_DIR, 'score', file));
+    }
+  }
   const scorecardPaths = [];
   for (const entry of leaderboard) {
-    const { tool, scorecard, score, principleScore } = entry;
+    const { tool, scorecard, score, principleScore, version } = entry;
     const topIssues = extractTopIssues(scorecard);
 
-    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score);
+    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score, version);
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.html`),
       emitShell({
@@ -303,7 +314,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score),
+      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version),
     );
     scorecardPaths.push(`/score/${tool.name}`);
   }

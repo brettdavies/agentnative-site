@@ -354,8 +354,8 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    version: "2.91.0"
-    scored_at: "2026-04-23"
+    version: "2.92.0"
+    scored_at: "2026-04-28"
 
   - name: lazygit
     repo: jesseduffield/lazygit
@@ -795,8 +795,8 @@ tools:
     creator: Anthropic
     install: bun add -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    version: "2.1.118"
-    scored_at: "2026-04-23"
+    version: "2.1.122"
+    scored_at: "2026-04-28"
 
   - name: codex
     repo: openai/codex
@@ -859,8 +859,8 @@ tools:
     creator: Simon Willison
     install: brew install llm
     description: Access large language models from the command-line
-    version: "0.30"
-    scored_at: "2026-04-23"
+    version: "0.31"
+    scored_at: "2026-04-28"
 
   - name: datasette
     repo: simonw/datasette
