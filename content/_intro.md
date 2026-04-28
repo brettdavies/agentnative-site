@@ -14,3 +14,7 @@ reports results by stable check ID (`p1-non-interactive`, `p4-process-exit`, …
 Each of the seven principles below has its own page (`/p1` through `/p7`) for deep-linking, and the same text is
 available as raw markdown at `/p1.md` … `/p7.md` for agent consumption. The entire spec as one file lives at
 [`/llms-full.txt`](/llms-full.txt); a curated index for retrieval-heavy agents lives at [`/llms.txt`](/llms.txt).
+
+For the standard applied at scale, see the [**ANC 100 leaderboard**](/scorecards) — every popular CLI tool, scored
+against the same seven principles. The scoring methodology and per-field schema for the underlying JSON live at
+[`/methodology`](/methodology) and [`/scorecard-schema`](/scorecard-schema).

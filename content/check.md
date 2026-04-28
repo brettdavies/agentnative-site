@@ -68,4 +68,11 @@ choice, not a bug. A `[FAIL]` is a MUST the tool doesn't satisfy; agents will hi
 will surprise them. Nothing here is a vanity metric — the checks map one-to-one to the requirements on the
 [principles page](/).
 
+## See how widely-used CLIs score
+
+The [**ANC 100 leaderboard**](/scorecards) is what running `anc check` produces at scale: every popular CLI tool, scored
+against the same seven principles, with full per-check evidence under `/score/<name>`. The scoring rules are documented
+on the [methodology page](/methodology); the underlying JSON schema is enumerated at
+[/scorecard-schema](/scorecard-schema).
+
 Source: [github.com/brettdavies/agentnative-cli](https://github.com/brettdavies/agentnative-cli).

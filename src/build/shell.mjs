@@ -144,7 +144,9 @@ ${principles
         <span class="site-brand__tag">${SITE_TAGLINE}</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
+        <a href="/scorecards">Leaderboard</a>
         <a href="/check">Check your CLI</a>
+        <a href="/methodology">Methodology</a>
         <a href="/coverage">Coverage</a>
         <a href="/about">About</a>
       </nav>
@@ -174,6 +176,8 @@ ${AI_PROVIDERS.map(
         <span>v0.1.0</span>
         <span> · </span>
         <a href="/changelog">Changelog</a>
+        <span> · </span>
+        <a href="/scorecard-schema">Scorecard schema</a>
         <span> · </span>
         <a href="/llms.txt">llms.txt</a>
         <span> · </span>
