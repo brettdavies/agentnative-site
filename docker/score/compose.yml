@@ -27,10 +27,14 @@ services:
     container_name: anc-scorer
 
     # Bind-mounts: read the host's registry, write scorecards back to host.
+    # docker/score/ is mounted read-only at /work/scripts/ so any helper
+    # script (audit-version-extract.sh, etc.) is invokable without an image
+    # rebuild — just `docker compose run --rm scorer bash /work/scripts/<name>.sh`.
     volumes:
       - ../../registry.yaml:/work/registry.yaml:ro
       - ../../scorecards:/work/scorecards
       - ../../docker/score/out:/work/out
+      - ../../docker/score:/work/scripts:ro
 
     # NVIDIA GPU passthrough so nvidia-smi has something to query.
     # Modern compose syntax (v1.28+); the legacy `runtime: nvidia` is also
