@@ -499,7 +499,7 @@ tools:
     language: TypeScript
     tier: workhorse
     creator: Cloudflare
-    install: npm install -g wrangler
+    install: brew install cloudflare-wrangler2
     description: CLI for Cloudflare Workers
 
   - name: aws-cli
@@ -618,7 +618,7 @@ tools:
     language: Rust
     tier: workhorse
     creator: Biome
-    install: npm install -g @biomejs/biome
+    install: brew install biome
     description: Formatter and linter for JavaScript, TypeScript, JSON, and CSS
 
   - name: bun
@@ -645,7 +645,7 @@ tools:
     language: Rust
     tier: workhorse
     creator: cargo-bins
-    install: cargo install cargo-binstall
+    install: brew install cargo-binstall
     description: Binary installation for Rust projects
 
   - name: pixi
@@ -731,7 +731,7 @@ tools:
     language: TypeScript
     tier: agent
     creator: Anthropic
-    install: npm install -g @anthropic-ai/claude-code
+    install: bun add -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
     version: "2.1.118"
     scored_at: "2026-04-23"
@@ -742,7 +742,7 @@ tools:
     language: Python
     tier: agent
     creator: Paul Gauthier
-    install: pipx install aider-chat
+    install: uv tool install aider-chat
     description: AI pair programming in your terminal
     version: "0.86.2"
     scored_at: "2026-04-23"
@@ -753,7 +753,7 @@ tools:
     language: Rust
     tier: agent
     creator: OpenAI
-    install: cargo install codex-cli
+    install: cargo binstall codex-cli
     description: Lightweight coding agent that runs in your terminal
 
   - name: goose
@@ -780,7 +780,7 @@ tools:
     language: Python
     tier: agent
     creator: Open Interpreter
-    install: pipx install open-interpreter
+    install: uv tool install open-interpreter
     description: A natural language interface for computers
 
   - name: fabric
@@ -789,7 +789,7 @@ tools:
     language: Go
     tier: agent
     creator: Daniel Miessler
-    install: go install github.com/danielmiessler/fabric@latest
+    install: brew install fabric-ai/cli/fabric
     description: An open-source framework for augmenting humans using AI
 
   - name: shell-gpt
@@ -798,7 +798,7 @@ tools:
     language: Python
     tier: agent
     creator: TheR1D
-    install: pipx install shell-gpt
+    install: uv tool install shell-gpt
     description: A command-line productivity tool powered by AI large language models
 
   - name: mods
@@ -841,7 +841,7 @@ tools:
     language: Python
     tier: notable
     creator: Simon Willison
-    install: pipx install datasette
+    install: uv tool install datasette
     description: An open-source multi-tool for exploring and publishing data
 
   - name: sqlite-utils
@@ -850,7 +850,7 @@ tools:
     language: Python
     tier: notable
     creator: Simon Willison
-    install: pipx install sqlite-utils
+    install: uv tool install sqlite-utils
     description: CLI utility and library for manipulating SQLite databases
 
   - name: files-to-prompt
@@ -859,7 +859,7 @@ tools:
     language: Python
     tier: notable
     creator: Simon Willison
-    install: pipx install files-to-prompt
+    install: uv tool install files-to-prompt
     description: Concatenate a directory full of files into a single prompt for LLMs
 
   # Charm (charmbracelet) — 3 tools (glow + mods above)
@@ -981,7 +981,7 @@ tools:
     language: TypeScript
     tier: agent
     creator: Google
-    install: npm install -g @google/gemini-cli
+    install: bun add -g @google/gemini-cli
     description: Open-source AI agent that brings Gemini directly into the terminal
 
   - name: opencode
@@ -999,7 +999,7 @@ tools:
     language: TypeScript
     tier: notable
     creator: Tobi Lütke
-    install: npm install -g @tobilu/qmd
+    install: bun add -g @tobilu/qmd
     description: Local hybrid search (BM25 + vector + LLM rerank) for personal knowledge bases
 
   - name: mcp-agent-mail
