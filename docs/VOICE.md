@@ -175,8 +175,8 @@ Every time copy ships after an edit, add an entry. The site voice lives in these
   standard; `agentnative` is one compliant artifact that happens to measure the others.
 - Use the full binary name `agentnative`. `anc` is a local tmux alias for Brett's workflow, not a public name — don't
   publish it.
-- Install instructions cover `cargo install agentnative` and `cargo binstall agentnative`. Homebrew will land later;
-  wait until the formula ships before writing about it.
+- Install instructions lead with `brew install brettdavies/tap/agentnative`. Mention `cargo install agentnative` and
+  `cargo binstall agentnative` as alternatives.
 - Check output uses check IDs (`p4-process-exit`). Copy that references specific checks names the ID.
 
 ### How to describe the relationship to `davies.fyi`
