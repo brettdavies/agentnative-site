@@ -82,9 +82,11 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
     brew install yq jaq
 
 # ---- The anc binary (glibc, built from CLI dev RC) -------------------------
-# Copied in from the build context. The wrapper script `docker/score/build.sh`
-# verifies the binary exists before invoking docker build.
-COPY --chown=runner:runner anc /home/runner/.local/bin/anc
+# Staged into the build context by docker/score/build.sh (which runs
+# `cargo build --release` in ~/dev/agentnative-cli first, then copies the
+# binary to docker/score/anc). The build context is the repo root, so the
+# file path is docker/score/anc.
+COPY --chown=runner:runner docker/score/anc /home/runner/.local/bin/anc
 RUN chmod +x /home/runner/.local/bin/anc \
     && /home/runner/.local/bin/anc --version
 ENV PATH=/home/runner/.local/bin:$PATH
