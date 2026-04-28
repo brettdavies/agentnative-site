@@ -7,6 +7,16 @@ operate as first-class users.
 
 Static HTML + CSS. No build step. Open `index.html` in a browser.
 
+After cloning, point git at the repo's hook directory once:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+This enables `scripts/hooks/pre-push`, which runs `bun run lint`, `bun run build`, and `bun test` before every push —
+the same gates CI enforces. Bypass intentionally with `git push --no-verify` if you really need to (rare; the hook
+exists to catch what we've lost time to before).
+
 ## Deployment
 
 Cloudflare Workers. Pushes to `main` deploy automatically.

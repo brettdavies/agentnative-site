@@ -111,10 +111,11 @@ export function scorecardFilename(tool) {
 // `a > b`, <0 if `a < b`, 0 if equal. Falls back to lexical compare for
 // anything not recognizable as a numeric tuple.
 function compareVersions(a, b) {
-  const parse = (v) => v.split('.').map((seg) => {
-    const n = Number.parseInt(seg, 10);
-    return Number.isFinite(n) ? n : seg;
-  });
+  const parse = (v) =>
+    v.split('.').map((seg) => {
+      const n = Number.parseInt(seg, 10);
+      return Number.isFinite(n) ? n : seg;
+    });
   const ap = parse(a);
   const bp = parse(b);
   const len = Math.max(ap.length, bp.length);
