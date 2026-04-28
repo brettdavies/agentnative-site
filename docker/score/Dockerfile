@@ -37,7 +37,11 @@
 #
 # Or simpler via docker-compose: `docker compose -f docker/score/compose.yml run --rm scorer`.
 
-FROM debian:bookworm-slim AS base
+# Bookworm (Debian 12) ships GLIBC 2.36, which is older than what Cargo
+# emits when building anc on the host (Ubuntu 24.04 / GLIBC 2.39). Trixie
+# (Debian 13) ships GLIBC 2.41 — satisfies the binary's GLIBC_2.39
+# requirement without forcing us to switch base distros.
+FROM debian:trixie-slim AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
