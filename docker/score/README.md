@@ -14,15 +14,28 @@ docker/score/
 ├── score-anc100.sh     # Second-stage: iterate registry, write scorecards
 ├── anc                 # (gitignored) staged anc binary, written by build.sh
 ├── out/                # (gitignored) per-run logs from inside the container
+├── setup-host.sh       # One-time: install Docker Engine + nvidia-container-toolkit
 └── README.md           # this file
 ```
 
 ## Prerequisites (host)
 
-- Docker + Docker Compose v2.
-- A `~/dev/agentnative-cli/` checkout with `cargo` available. Override path with `ANC_CLI_ROOT=…`.
-- For `nvidia-smi` scoring: NVIDIA driver + `nvidia-container-toolkit` configured against the Docker daemon. Without it,
-  `nvidia-smi` falls back to `install-missing` and the other 99 tools still score.
+- **Docker Engine + Compose v2.** Engine only — NOT Docker Desktop. Install via `bash docker/score/setup-host.sh`
+  (Ubuntu) or follow Docker's apt-repo instructions for your distro.
+- **A `~/dev/agentnative-cli/` checkout** with `cargo` available. Override path with `ANC_CLI_ROOT=…`.
+- **For `nvidia-smi` scoring:** NVIDIA driver + `nvidia-container-toolkit` configured against the Docker daemon. The
+  setup-host.sh script handles this if a host GPU is detected. Without it, `nvidia-smi` falls back to `install-missing`
+  and the other 99 tools still score.
+
+## One-time host setup
+
+```bash
+# Engine only (no Docker Desktop) + nvidia-container-toolkit on Ubuntu:
+bash docker/score/setup-host.sh
+
+# After install, log out + back in (or `newgrp docker`) so the docker
+# group membership takes effect without sudo.
+```
 
 ## Usage
 
