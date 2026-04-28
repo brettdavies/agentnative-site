@@ -1011,11 +1011,3 @@ tools:
     install: bun add -g @tobilu/qmd
     description: Local hybrid search (BM25 + vector + LLM rerank) for personal knowledge bases
 
-  - name: mcp-agent-mail
-    repo: Dicklesworthstone/mcp_agent_mail
-    binary: mcp-agent-mail
-    language: Python
-    tier: notable
-    creator: Jeffrey Emanuel
-    install: "curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/main/scripts/install.sh | bash -s -- --yes"
-    description: Async coordination layer for AI coding agents — identities, inboxes, advisory file leases over FastMCP
