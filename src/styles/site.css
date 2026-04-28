@@ -1044,6 +1044,17 @@ body:has(.leaderboard-hero) main {
   margin: 0;
   color: var(--fg-body, #1a2026);
 }
+/* Inline `<code>` inside the meta-list value column: keep monospace + size
+ * but drop the global pill chrome (background, padding, radius, shrink-size).
+ * The grid puts the value at the column edge; the pill's left padding pushes
+ * the text right while leaving the background flush, so labels above
+ * ("1.8.1", "2026-04-23") and the install command misalign. */
+.meta-list dd code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
 
 /* CTA section */
 .scorecard-cta {
