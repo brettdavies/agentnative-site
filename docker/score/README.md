@@ -52,10 +52,12 @@ Layer order:
 5. Tooling for the runner: `yq`, `jaq`.
 6. The `anc` binary, copied in from the build context (built by `build.sh` from
    `~/dev/agentnative-cli/target/release/anc`).
-7. `install-tools.sh` runs once at image build time, installing every registry tool. Failures are logged to
-   `/work/install-log.txt` but do NOT abort the build — tools that fail to install simply end up missing from PATH and
-   the runner records them as `install-missing`.
-8. `score-anc100.sh` is the entrypoint; iterates the registry at run time.
+7. `install-tools.sh` runs once at image build time, reading the build-time registry baked at `/build/registry.yaml` and
+   installing every entry. Failures are logged to `/build/install-log.txt` but do NOT abort the build — tools that fail
+   to install simply end up missing from PATH and the runner records them as `install-missing`.
+8. `score-anc100.sh` is the entrypoint; iterates the run-time registry at `/work/registry.yaml` (compose bind-mount from
+   the host). If the run-time registry diverges from the baked one, the runner emits a drift warning so the operator
+   knows new tools won't be installed without a rebuild.
 
 ## Failure handling
 

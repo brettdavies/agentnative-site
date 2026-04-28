@@ -5,18 +5,21 @@
 # time, and the runner records them as install-failed. This keeps the image
 # build idempotent across registry tweaks.
 #
-# Layout:
-#   /work/registry.yaml                — copied in by Dockerfile (read-only)
-#   /work/install-log.txt              — per-tool result, persisted in image
+# Layout (build-time only — these paths live INSIDE the image):
+#   /build/registry.yaml               — copied in by Dockerfile (immutable)
+#   /build/install-log.txt             — per-tool result, persisted in image
 #   /home/runner/.local/bin            — uv tool install destination (auto)
 #   /home/linuxbrew/.linuxbrew/bin     — brew destination
 #   /home/runner/.bun/bin              — bun add -g destination
 #   /home/runner/.cargo/bin            — cargo binstall destination
+#
+# Note: /work/registry.yaml is the RUN-TIME path (compose bind-mount). This
+# script never touches it. Run-time consumer is score-anc100.sh.
 
 set -uo pipefail
 
-REGISTRY=/work/registry.yaml
-LOG=/work/install-log.txt
+REGISTRY=/build/registry.yaml
+LOG=/build/install-log.txt
 
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"

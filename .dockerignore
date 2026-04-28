@@ -1,0 +1,65 @@
+# Exclude everything that's irrelevant to the docker/score image build.
+# The build context is the whole repo (compose.yml's build.context: ../..)
+# so an explicit allowlist would be brittle — instead, exclude the heavy
+# directories we know aren't read by the Dockerfile.
+#
+# Read by the Dockerfile (must NOT be excluded):
+#   registry.yaml          — pre-bake input
+#   docker/score/anc       — staged binary from build.sh
+#   docker/score/*.sh      — install + score scripts
+#
+# Everything else is excluded for context-transfer speed.
+
+# Build artifacts and tooling caches
+dist/
+node_modules/
+.wrangler/
+*.tsbuildinfo
+target/
+playwright-report/
+test-results/
+
+# Local-only state (gitignored too — context-belt-and-suspenders)
+.context/
+.gstack/
+.aider*
+
+# Version control + editor metadata
+.git/
+.github/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Solutions docs symlink (irrelevant to image)
+docs/solutions/
+
+# Other docs not needed for image build
+docs/brainstorms/
+docs/plans/
+docs/design/
+docs/DESIGN.md
+docs/VOICE.md
+
+# Site source (the image doesn't render the site)
+src/build/
+src/client/
+src/data/coverage-matrix.json
+src/styles/
+src/worker/
+content/
+public/
+scorecards/
+
+# Tests + scripts not used by the image
+tests/
+scripts/
+
+# Top-level docs
+*.md
+LICENSE
+.impeccable.md
+
+# Anything inside docker/ EXCEPT the score/ subtree we need
+docker/score/out/

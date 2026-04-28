@@ -17,7 +17,8 @@
 
 set -uo pipefail
 
-REGISTRY=/work/registry.yaml
+REGISTRY=/work/registry.yaml             # run-time (bind-mounted from host)
+BUILD_REGISTRY=/build/registry.yaml      # build-time (baked into image)
 OUT_DIR=/work/scorecards
 SUMMARY=/work/scoring-summary.txt
 FAILURES=/work/scoring-failures.txt
@@ -28,9 +29,19 @@ mkdir -p "$OUT_DIR"
 
 echo "=== anc100 batch scorer ==="
 echo "anc version: $(anc --version)"
-echo "registry:    $REGISTRY"
+echo "registry:    $REGISTRY (run-time)"
 echo "output dir:  $OUT_DIR"
 echo
+
+# Drift check: if the run-time registry diverges from the build-time one,
+# any tools added since the build won't be installed. Warn explicitly so
+# the operator knows to rebuild before relying on full coverage.
+if [[ -f "$BUILD_REGISTRY" ]] && ! diff -q "$BUILD_REGISTRY" "$REGISTRY" >/dev/null 2>&1; then
+  echo "WARNING: run-time registry differs from build-time registry."
+  echo "         Tools added since image build will report 'install-missing'."
+  echo "         Rebuild the image (bash docker/score/build.sh) for full coverage."
+  echo
+fi
 
 today=$(date -u +%Y-%m-%d)
 

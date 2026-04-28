@@ -71,12 +71,18 @@ RUN chmod +x /home/runner/.local/bin/anc \
     && /home/runner/.local/bin/anc --version
 ENV PATH=/home/runner/.local/bin:$PATH
 
-# ---- Pre-bake every registry tool via the runner's --install-only mode ------
-# This is the layer that takes the longest (~20-40 minutes the first time);
-# Docker caches it so subsequent rebuilds skip ahead.
-COPY --chown=runner:runner registry.yaml /work/registry.yaml
-COPY --chown=runner:runner docker/score/install-tools.sh /work/install-tools.sh
-RUN bash /work/install-tools.sh
+# ---- Pre-bake every registry tool ------------------------------------------
+# Build-time registry lives at /build/registry.yaml — immutable, frozen at
+# image-build. Runtime registry is bind-mounted to /work/registry.yaml by
+# compose so the runner sees the host's current registry. The runner diffs
+# the two and warns on drift (added/removed tools that didn't make it into
+# the install layer).
+#
+# This layer takes the longest (~20-40 minutes first build); Docker caches
+# it so subsequent rebuilds skip ahead unless registry.yaml changed.
+COPY --chown=runner:runner registry.yaml /build/registry.yaml
+COPY --chown=runner:runner docker/score/install-tools.sh /build/install-tools.sh
+RUN bash /build/install-tools.sh
 
 # ---- Scoring runner --------------------------------------------------------
 COPY --chown=runner:runner docker/score/score-anc100.sh /work/score-anc100.sh
