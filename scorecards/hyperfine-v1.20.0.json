@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "0.3",
   "results": [
     {
       "id": "p3-help",
@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no --output/--format flag detected",
+      "status": "warn",
+      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
       "confidence": "high"
     },
     {
@@ -104,9 +104,9 @@
   "summary": {
     "total": 11,
     "pass": 7,
-    "warn": 2,
+    "warn": 3,
     "fail": 0,
-    "skip": 2,
+    "skip": 1,
     "error": 0
   },
   "coverage_summary": {
@@ -123,6 +123,7 @@
       "verified": 0
     }
   },
-  "audience": "agent-optimized",
-  "audit_profile": null
+  "audience": "mixed",
+  "audit_profile": null,
+  "spec_version": "0.2.0"
 }

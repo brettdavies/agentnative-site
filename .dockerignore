@@ -1,0 +1,13 @@
+# Whitelist build context: ignore everything by default, then re-include
+# only the files docker/score/Dockerfile actually COPYs. Self-maintaining
+# — new files added anywhere in the repo are excluded automatically.
+# Only update this file when the Dockerfile starts reading a new path.
+
+**
+
+# Files COPYed by docker/score/Dockerfile (anything Dockerfile needs to see).
+!registry.yaml
+!docker/score/Dockerfile
+!docker/score/anc
+!docker/score/install-tools.sh
+!docker/score/score-anc100.sh

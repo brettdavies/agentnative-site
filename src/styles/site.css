@@ -648,7 +648,8 @@ body:has(.leaderboard-hero) main {
   white-space: nowrap;
 }
 
-.lb-score--none {
+.lb-score--none,
+.lb-principles--none {
   color: var(--fg-muted, #525960);
 }
 

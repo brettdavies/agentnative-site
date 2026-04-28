@@ -79,6 +79,10 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   };
 
   const principleCell = (entry) => {
+    // Unscored entries get an em-dash, not "0/7" — which would falsely read
+    // as "failed all 7 principles." `data-sort="-1"` matches the score
+    // column's sort behavior so unscored rows cluster at the bottom.
+    if (!entry.scorecard) return '<td class="lb-principles lb-principles--none" data-sort="-1">—/7</td>';
     const ps = entry.principleScore;
     return `<td class="lb-principles" data-sort="${ps.met}">${ps.met}/${ps.total}</td>`;
   };
@@ -441,8 +445,9 @@ export function buildLeaderboardMarkdown(leaderboard) {
   for (const entry of leaderboard) {
     const score = entry.scorecard ? `${Math.round(entry.score * 100)}%` : '—';
     const ps = entry.principleScore;
+    const principles = entry.scorecard ? `${ps.met}/${ps.total}` : '—/7';
     lines.push(
-      `| ${entry.rank} | [${entry.tool.name}](/score/${entry.tool.name}) | ${entry.tool.tier} | ${entry.tool.language} | ${score} | ${ps.met}/${ps.total} |`,
+      `| ${entry.rank} | [${entry.tool.name}](/score/${entry.tool.name}) | ${entry.tool.tier} | ${entry.tool.language} | ${score} | ${principles} |`,
     );
   }
 

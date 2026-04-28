@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "0.3",
   "results": [
     {
       "id": "p3-help",
@@ -124,5 +124,6 @@
     }
   },
   "audience": "mixed",
-  "audit_profile": null
+  "audit_profile": null,
+  "spec_version": "0.2.0"
 }
