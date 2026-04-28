@@ -1,0 +1,48 @@
+# Compose file for the anc100 batch-scoring image.
+#
+# Run from repo root:
+#   docker compose -f docker/score/compose.yml build
+#   docker compose -f docker/score/compose.yml run --rm scorer
+#
+# The wrapper at docker/score/build.sh does both, plus the prerequisite
+# step of building the `anc` binary from the local CLI dev checkout.
+#
+# GPU passthrough notes:
+#   The compose file declares NVIDIA GPU access so `nvidia-smi` (one of
+#   the registry tools) can resolve and score inside the container. The
+#   host needs:
+#     - NVIDIA driver installed (host-side, not in image)
+#     - nvidia-container-toolkit installed and configured
+#       (`sudo nvidia-ctk runtime configure --runtime=docker`)
+#   Without those, `runtime: nvidia` will fail or fall back. The runner
+#   handles a missing nvidia-smi as `install-missing` and proceeds with
+#   the other 99 tools.
+
+services:
+  scorer:
+    build:
+      context: ../..
+      dockerfile: docker/score/Dockerfile
+    image: anc-scorer:latest
+    container_name: anc-scorer
+
+    # Bind-mounts: read the host's registry, write scorecards back to host.
+    volumes:
+      - ../../registry.yaml:/work/registry.yaml:ro
+      - ../../scorecards:/work/scorecards
+      - ../../docker/score/out:/work/out
+
+    # NVIDIA GPU passthrough so nvidia-smi has something to query.
+    # Modern compose syntax (v1.28+); the legacy `runtime: nvidia` is also
+    # accepted by the nvidia-container-toolkit but is deprecated.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Default entrypoint runs the batch scorer. Override with
+    # `docker compose run --rm scorer bash` for an interactive shell.
+    command: ["/work/score-anc100.sh"]
