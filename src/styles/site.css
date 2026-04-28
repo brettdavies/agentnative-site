@@ -115,10 +115,16 @@ main .anchor-icon {
   color: var(--may, #007980);
 }
 
-/* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6 A7). */
+/* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6 A7).
+ * Scope `span` matching to Shiki's own syntax tokens (which live under
+ * `<pre class="shiki"><code>…spans…</code></pre>`). The previous selector
+ * `.shiki span` matched ANY descendant span, including the client-side-
+ * injected `<span data-copy-label>` inside the copy-button — which then
+ * inherited Shiki's dark-dimmed background (#22272e) and read as a light
+ * grey pill on top of the button's intended dark `var(--bg)`. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .shiki,
-  :root:not([data-theme="light"]) .shiki span {
+  :root:not([data-theme="light"]) .shiki code span {
     color: var(--shiki-dark);
     background-color: var(--shiki-dark-bg);
     font-style: var(--shiki-dark-font-style);
@@ -127,7 +133,7 @@ main .anchor-icon {
   }
 }
 :root[data-theme="dark"] .shiki,
-:root[data-theme="dark"] .shiki span {
+:root[data-theme="dark"] .shiki code span {
   color: var(--shiki-dark);
   background-color: var(--shiki-dark-bg);
   font-style: var(--shiki-dark-font-style);
@@ -213,7 +219,14 @@ main .anchor-icon {
   border-left: 1px solid var(--border, #cfd5db);
 }
 
-/* Copy buttons — hidden when JS is off (C6). */
+/* Copy buttons — hidden when JS is off (C6).
+ *
+ * Elevation: in light mode `--bg` (lightest gray, page bg) sits above the
+ * pre's `--bg-code`, so the button reads as a raised pill. In dark mode the
+ * scale inverts — `--bg` (oklch 14%) is BELOW Shiki's dark-dimmed pre bg
+ * (#22272e ≈ oklch 21%), which would render the button as a recessed
+ * darker rectangle. Override the dark-mode bg to `--border` (oklch 28%) so
+ * the pill reads as intentionally raised in both themes. */
 .copy-button {
   display: none;
   position: absolute;
@@ -226,6 +239,14 @@ main .anchor-icon {
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
   cursor: pointer;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .copy-button {
+    background: var(--border, #2c333d);
+  }
+}
+:root[data-theme="dark"] .copy-button {
+  background: var(--border, #2c333d);
 }
 :root.js main pre .copy-button {
   display: inline-block;
