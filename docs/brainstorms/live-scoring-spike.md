@@ -5,6 +5,20 @@ topic: live-scoring-spike
 
 # Live Scoring Spike: "Paste a Repo URL, Get a Score"
 
+> **Status (2026-04-28):** Superseded in part by
+> [docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md](../plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md).
+> This brainstorm captured the original design exploration (2026-04-17). The v2 plan absorbs it with these
+> material changes:
+>
+> - SDK pin: `@cloudflare/sandbox@0.8.x` (was `@0.7.0`); runtime outbound handlers need 0.8.9+.
+> - Image base: stays glibc (Debian-slim) per launch-week constraints — supersedes Alpine+musl framing.
+> - GA: Containers + Sandboxes shipped GA 2026-04-13; "beta enabled" prerequisite removed.
+> - Cost line items updated for 2025-11-21 active-CPU billing.
+> - GPU passthrough references removed (no current Containers schema for it).
+> - Outbound Workers (2026-03-26) added as the security primitive for two-phase egress.
+>
+> Read both this brainstorm and the v2 plan together; the plan is the authoritative current shape.
+
 ## Context
 
 SSL Labs / Lighthouse pattern for ANC — users paste a GitHub repo URL and get an agent-native CLI scorecard on the spot.
@@ -62,14 +76,14 @@ install fails.
 
 ### Supported Install Paths
 
-| Method | Speed | Coverage | Notes |
-|--------|-------|----------|-------|
-| `brew install` | 3-10s | Broadest — most popular CLIs | Requires Homebrew in container |
-| `cargo binstall` | 2-5s | Rust tools with prebuilt binaries | Falls back to `cargo install` |
-| `cargo install` | 30-120s | All Rust tools on crates.io | Compile from source, slowest |
-| `pip install` / `pipx install` | 3-10s | Python CLI tools on PyPI | Usually pre-built wheels |
-| `go install` | 5-15s | Go tools | Compiles from source but fast |
-| `npm install -g` | 3-10s | Node CLI tools on npm | Script-based, no compile |
+| Method                         | Speed   | Coverage                          | Notes                          |
+| ------------------------------ | ------- | --------------------------------- | ------------------------------ |
+| `brew install`                 | 3-10s   | Broadest — most popular CLIs      | Requires Homebrew in container |
+| `cargo binstall`               | 2-5s    | Rust tools with prebuilt binaries | Falls back to `cargo install`  |
+| `cargo install`                | 30-120s | All Rust tools on crates.io       | Compile from source, slowest   |
+| `pip install` / `pipx install` | 3-10s   | Python CLI tools on PyPI          | Usually pre-built wheels       |
+| `go install`                   | 5-15s   | Go tools                          | Compiles from source but fast  |
+| `npm install -g`               | 3-10s   | Node CLI tools on npm             | Script-based, no compile       |
 
 ### Container Image Strategy
 
@@ -145,13 +159,13 @@ RUN npm install -g wrangler
 Image size is capped by instance disk space. Pre-baked tools survive container sleep because they're part of the image —
 only runtime state (cloned repos, temp files) resets.
 
-| Instance Type | vCPU | Memory | Disk (= max image) | Fits our image? |
-|---------------|------|--------|---------------------|-----------------|
-| `lite` | 1/16 | 256 MiB | 2 GB | No — too small |
-| `basic` | 1/4 | 1 GiB | 4 GB | Tight — binaries only, no toolchains |
-| `standard-1` | 1/2 | 4 GiB | 8 GB | Yes — base + tools + 1-2 toolchains |
-| `standard-2` | 1 | 6 GiB | 12 GB | Comfortable — all toolchains + 100 tools |
-| Custom | tunable | tunable | tunable | Match to actual image size |
+| Instance Type | vCPU    | Memory  | Disk (= max image) | Fits our image?                          |
+| ------------- | ------- | ------- | ------------------ | ---------------------------------------- |
+| `lite`        | 1/16    | 256 MiB | 2 GB               | No — too small                           |
+| `basic`       | 1/4     | 1 GiB   | 4 GB               | Tight — binaries only, no toolchains     |
+| `standard-1`  | 1/2     | 4 GiB   | 8 GB               | Yes — base + tools + 1-2 toolchains      |
+| `standard-2`  | 1       | 6 GiB   | 12 GB              | Comfortable — all toolchains + 100 tools |
+| Custom        | tunable | tunable | tunable            | Match to actual image size               |
 
 **Estimated image size breakdown:**
 
@@ -170,12 +184,12 @@ exactly. Total image storage per account: 50 GB limit (plenty for one image).
 
 Workers Paid plan ($5/mo base) includes generous free tiers:
 
-| Resource | Free included | Overage rate |
-|----------|---------------|-------------|
-| Memory | 25 GiB-hours/mo | $0.0000025/GiB-sec |
-| CPU | 375 vCPU-min/mo | $0.000020/vCPU-sec (active usage only) |
-| Disk | 200 GB-hours/mo | $0.00000007/GB-sec |
-| Egress (NA/EU) | 1 TB/mo | $0.025/GB |
+| Resource       | Free included   | Overage rate                           |
+| -------------- | --------------- | -------------------------------------- |
+| Memory         | 25 GiB-hours/mo | $0.0000025/GiB-sec                     |
+| CPU            | 375 vCPU-min/mo | $0.000020/vCPU-sec (active usage only) |
+| Disk           | 200 GB-hours/mo | $0.00000007/GB-sec                     |
+| Egress (NA/EU) | 1 TB/mo         | $0.025/GB                              |
 
 **CPU is billed on active usage only** — not provisioned. If a `standard-1` (0.5 vCPU) runs for 30 seconds but only uses
 50% CPU, you pay for 15 vCPU-seconds, not 30.
@@ -189,13 +203,13 @@ Workers Paid plan ($5/mo base) includes generous free tiers:
 
 **Monthly cost estimates (after free tier):**
 
-| Daily requests | Invocations/mo | Raw cost | With free tier |
-|---------------|----------------|----------|----------------|
-| 50 | 1,500 | $0.75 | **Free** (within included allotments) |
-| 100 | 3,000 | $1.50 | **~$0** (mostly free tier) |
-| 500 | 15,000 | $7.50 | **~$3–5** |
-| 1,000 | 30,000 | $15 | **~$10** |
-| 5,000 | 150,000 | $75 | **~$65** |
+| Daily requests | Invocations/mo | Raw cost | With free tier                        |
+| -------------- | -------------- | -------- | ------------------------------------- |
+| 50             | 1,500          | $0.75    | **Free** (within included allotments) |
+| 100            | 3,000          | $1.50    | **~$0** (mostly free tier)            |
+| 500            | 15,000         | $7.50    | **~$3–5**                             |
+| 1,000          | 30,000         | $15      | **~$10**                              |
+| 5,000          | 150,000        | $75      | **~$65**                              |
 
 The free tier covers light usage entirely. At Show HN launch traffic levels (~500-1000/day), this costs $5-10/mo.
 
@@ -290,13 +304,13 @@ export default {
 
 ## Revised Recommendation
 
-| Component | How | Cost | Latency |
-|-----------|-----|------|---------|
-| **Pre-computed leaderboard** | GitHub Actions nightly cron. Scores all 100 registry tools. Commits JSON. | Free | Async |
-| **Live scoring (known tools)** | CF Sandbox `standard-1`. Binary pre-installed in image. | Free tier for <100/day | 2-5s |
-| **Live scoring (new tools)** | Same Sandbox. Clone repo, detect install path, install, score. | ~$5-10/mo at 500/day | 15-120s |
-| **Fallback (install fails)** | Same Sandbox. Source+project checks only (no binary). | Same | 5-15s |
-| **Cache** | R2. Keyed by (repo, version). 24h TTL. Free egress. | Free tier | Instant |
+| Component                      | How                                                                       | Cost                   | Latency |
+| ------------------------------ | ------------------------------------------------------------------------- | ---------------------- | ------- |
+| **Pre-computed leaderboard**   | GitHub Actions nightly cron. Scores all 100 registry tools. Commits JSON. | Free                   | Async   |
+| **Live scoring (known tools)** | CF Sandbox `standard-1`. Binary pre-installed in image.                   | Free tier for <100/day | 2-5s    |
+| **Live scoring (new tools)**   | Same Sandbox. Clone repo, detect install path, install, score.            | ~$5-10/mo at 500/day   | 15-120s |
+| **Fallback (install fails)**   | Same Sandbox. Source+project checks only (no binary).                     | Same                   | 5-15s   |
+| **Cache**                      | R2. Keyed by (repo, version). 24h TTL. Free egress.                       | Free tier              | Instant |
 
 ### Prerequisites
 
