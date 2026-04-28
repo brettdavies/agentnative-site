@@ -125,6 +125,10 @@ tools:
     creator: Nicholas Marriott
     install: brew install tmux
     description: Terminal multiplexer
+    # Interactive TUI by design — running `tmux` with no args attaches an
+    # existing session or starts one. Suppresses P1 non-interactive variants
+    # and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
     # `tmux --version` is rejected ("tmux: unknown option -- -"); `tmux -V`
     # emits e.g. `tmux 3.6a`. Strip the alpha suffix (`3.6a` → `3.6`).
     version_extract: "tmux -V | grep -oE '[0-9]+\\.[0-9]+'"
@@ -163,6 +167,10 @@ tools:
     creator: Junegunn Choi
     install: brew install fzf
     description: A command-line fuzzy finder
+    # Interactive TUI by design — invoked with stdin to display a fuzzy-match
+    # picker. Suppresses P1 non-interactive variants and P6 SIGPIPE per the
+    # human-tui exception.
+    audit_profile: human-tui
 
   - name: ast-grep
     repo: ast-grep/ast-grep
@@ -245,6 +253,9 @@ tools:
     creator: Clement Tsang
     install: brew install bottom
     description: A cross-platform graphical process/system monitor
+    # Interactive TUI process/system monitor (htop-class). Suppresses P1
+    # non-interactive variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
 
   - name: glow
     repo: charmbracelet/glow
@@ -272,6 +283,10 @@ tools:
     creator: Aram Drevekenin
     install: brew install bandwhich
     description: Terminal bandwidth utilization tool
+    # Interactive TUI network monitor — runs continuously, takes over the
+    # terminal. Suppresses P1 non-interactive variants and P6 SIGPIPE per
+    # the human-tui exception.
+    audit_profile: human-tui
 
   # Edit & transform
   - name: sd
@@ -398,6 +413,9 @@ tools:
     creator: Stephan Dilly
     install: brew install gitui
     description: Blazing fast terminal UI for git
+    # Interactive git TUI (parallel to lazygit). Suppresses P1 non-interactive
+    # variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
 
   - name: jj
     repo: martinvonz/jj
@@ -709,6 +727,10 @@ tools:
     creator: sxyazi
     install: brew install yazi
     description: Blazing fast terminal file manager
+    # Interactive TUI file manager — primary mode is full-screen browse.
+    # Suppresses P1 non-interactive variants and P6 SIGPIPE per the
+    # human-tui exception.
+    audit_profile: human-tui
 
   - name: zoxide
     repo: ajeetdsouza/zoxide
@@ -727,6 +749,9 @@ tools:
     creator: Canop
     install: brew install broot
     description: A new way to see and navigate directory trees
+    # Interactive TUI directory tree browser. Suppresses P1 non-interactive
+    # variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
 
   # Security & crypto
   - name: age
@@ -931,6 +956,11 @@ tools:
     creator: Ellie Huxtable
     install: brew install atuin
     description: Magical shell history
+    # Primary entrypoint is an interactive TUI search over shell history.
+    # Subcommands (`atuin import`, `atuin sync`) are non-interactive but the
+    # bare-binary mode and `atuin search` are TUI-first. Suppresses P1
+    # non-interactive variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
 
   - name: navi
     repo: denisidoro/navi
@@ -940,6 +970,10 @@ tools:
     creator: Denis Isidoro
     install: brew install navi
     description: An interactive cheatsheet tool for the command-line
+    # Interactive cheatsheet picker — primary mode shows a TUI list and
+    # filters as you type. Suppresses P1 non-interactive variants and P6
+    # SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
 
   - name: tealdeer
     repo: dbrgn/tealdeer
@@ -967,6 +1001,10 @@ tools:
     creator: ynqa
     install: brew install jnv
     description: Interactive JSON filter using jq
+    # Interactive TUI for live-editing jq filters against a JSON document.
+    # Suppresses P1 non-interactive variants and P6 SIGPIPE per the
+    # human-tui exception.
+    audit_profile: human-tui
 
   - name: doggo
     repo: mr-karan/doggo

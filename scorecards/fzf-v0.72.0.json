@@ -51,8 +51,8 @@
       "label": "Handles SIGPIPE gracefully",
       "group": "P6",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "skip",
+      "evidence": "suppressed by audit_profile: human-tui",
       "confidence": "high"
     },
     {
@@ -60,8 +60,8 @@
       "label": "Non-interactive by default",
       "group": "P1",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "skip",
+      "evidence": "suppressed by audit_profile: human-tui",
       "confidence": "high"
     },
     {
@@ -70,7 +70,7 @@
       "group": "P1",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "target satisfies P1 via alternative gate (help-on-bare or stdin-primary)",
+      "evidence": "suppressed by audit_profile: human-tui",
       "confidence": "high"
     },
     {
@@ -103,16 +103,16 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 8,
+    "pass": 6,
     "warn": 1,
     "fail": 0,
-    "skip": 2,
+    "skip": 4,
     "error": 0
   },
   "coverage_summary": {
     "must": {
       "total": 23,
-      "verified": 9
+      "verified": 7
     },
     "should": {
       "total": 16,
@@ -123,7 +123,8 @@
       "verified": 0
     }
   },
-  "audience": "agent-optimized",
-  "audit_profile": null,
+  "audience": null,
+  "audience_reason": "suppressed",
+  "audit_profile": "human-tui",
   "spec_version": "0.2.0"
 }
