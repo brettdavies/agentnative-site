@@ -31,8 +31,13 @@ REGISTRY=/work/registry.yaml
 DEFAULT_REGEX='[0-9]+\.[0-9]+(\.[0-9]+)?'
 
 # Read all installable entries (skip nvidia-smi / curl / no-install-method).
+# Use join("\t") instead of @tsv so embedded `"` in extractor scripts aren't
+# CSV-quoted — same fix as score-anc100.sh.
+# Empty version_extract is replaced with "-" sentinel because bash's `read`
+# collapses consecutive IFS tabs (observed on bash 5.3.9), which silently
+# drops the field — same fix as score-anc100.sh.
 mapfile -t entries < <(
-  yq -r '.tools[] | select(.install != null) | select(.install | test("^(included|curl)") | not) | [.name, .binary, .version_extract // ""] | @tsv' "$REGISTRY"
+  yq -r '.tools[] | select(.install != null) | select(.install | test("^(included|curl)") | not) | [.name, .binary, .version_extract // "-"] | join("\t")' "$REGISTRY"
 )
 
 printf "%-22s %-22s %-22s %s\n" "NAME" "BINARY" "STATUS" "FIRST --VERSION LINE"
@@ -45,6 +50,7 @@ ok_count=0
 
 for line in "${entries[@]}"; do
   IFS=$'\t' read -r name binary extractor <<<"$line"
+  [[ "$extractor" == "-" ]] && extractor=""
 
   if [[ -n "$extractor" ]]; then
     # Validate the override actually works.

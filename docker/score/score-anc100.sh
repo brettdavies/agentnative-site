@@ -19,11 +19,16 @@ set -uo pipefail
 
 REGISTRY=/work/registry.yaml             # run-time (bind-mounted from host)
 BUILD_REGISTRY=/build/registry.yaml      # build-time (baked into image)
-OUT_DIR=/work/scorecards
-SUMMARY=/work/scoring-summary.txt
-FAILURES=/work/scoring-failures.txt
+OUT_DIR=/work/scorecards                 # bind-mounted to host scorecards/
+LOG_DIR=/work/out                        # bind-mounted to host docker/score/out/
+# Summary + failures land in the bind-mounted /work/out so the host has them
+# after the container exits. Without this, both files lived in the container's
+# ephemeral filesystem and were lost on every run — forcing the next session
+# to either re-run scoring or grep the (potentially-wiped) /tmp/ run log.
+SUMMARY=$LOG_DIR/scoring-summary.txt
+FAILURES=$LOG_DIR/scoring-failures.txt
 
-mkdir -p "$OUT_DIR"
+mkdir -p "$OUT_DIR" "$LOG_DIR"
 : > "$SUMMARY"
 : > "$FAILURES"
 
@@ -46,7 +51,15 @@ fi
 today=$(date -u +%Y-%m-%d)
 
 mapfile -t entries < <(
-  yq -r '.tools[] | [.name, .binary, .audit_profile // "", .version_extract // ""] | @tsv' "$REGISTRY"
+  # Use join("\t") instead of @tsv so embedded `"` in version_extract scripts
+  # aren't CSV-quoted (`foo"bar` → `"foo""bar"`), which would survive into the
+  # eval and break the override at runtime.
+  #
+  # Fields use "-" as the empty-value sentinel rather than "" because bash's
+  # `read -r ... <<<"$line"` collapses consecutive IFS tabs into a single
+  # delimiter (observed on bash 5.3.9), which would silently drop the
+  # version_extract field whenever audit_profile is unset.
+  yq -r '.tools[] | [.name, .binary, .audit_profile // "-", .version_extract // "-"] | join("\t")' "$REGISTRY"
 )
 
 total=${#entries[@]}
@@ -74,6 +87,9 @@ extract_version() {
 
 for line in "${entries[@]}"; do
   IFS=$'\t' read -r name binary profile extractor <<<"$line"
+  # Decode "-" sentinel back to empty string (see yq pipeline above).
+  [[ "$profile" == "-" ]] && profile=""
+  [[ "$extractor" == "-" ]] && extractor=""
   echo "----- $name ($binary) -----"
 
   if ! command -v "$binary" >/dev/null 2>&1; then
@@ -95,21 +111,22 @@ for line in "${entries[@]}"; do
   profile_flag=""
   if [[ -n "$profile" ]]; then profile_flag="--audit-profile $profile"; fi
 
-  # `anc check` exits non-zero when any check fails or warns. The JSON output
-  # is still well-formed; we keep stderr but allow non-zero exit.
+  # `anc check` exit-code contract:
+  #   0 — every check passed
+  #   1 — at most warn-severity results (no failures)
+  #   2 — at least one fail-severity result (JSON is still well-formed)
+  #   >=3 — anc itself errored (panic, missing binary, malformed args)
+  # Treat 0/1/2 as scoreable; let JSON validation below catch missing/empty
+  # output even on rc <= 2.
   # shellcheck disable=SC2086 # profile_flag must word-split on the space
-  if anc check --command "$binary" $profile_flag --output json >"$out" 2>/dev/null; then
-    : # exit 0
-  else
-    rc=$?
-    # exit 1 = checks failed/warned but JSON is valid; exit 2+ = real error
-    if (( rc > 1 )); then
-      echo "  [fail] anc check exited $rc"
-      echo "$name anc-check-error-rc=$rc" >> "$FAILURES"
-      rm -f "$out"
-      score_failed=$((score_failed + 1))
-      continue
-    fi
+  anc check --command "$binary" $profile_flag --output json >"$out" 2>/dev/null
+  rc=$?
+  if (( rc > 2 )); then
+    echo "  [fail] anc check exited $rc"
+    echo "$name anc-check-error-rc=$rc" >> "$FAILURES"
+    rm -f "$out"
+    score_failed=$((score_failed + 1))
+    continue
   fi
 
   # Validate the JSON output.

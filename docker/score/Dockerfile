@@ -99,7 +99,11 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
 COPY --chown=runner:runner docker/score/anc /home/runner/.local/bin/anc
 RUN chmod +x /home/runner/.local/bin/anc \
     && /home/runner/.local/bin/anc --version
-ENV PATH=/home/runner/.local/bin:$PATH
+# uv tool install drops binaries in ~/.local/bin; bun add -g drops them in
+# ~/.bun/bin; cargo-binstall in ~/.cargo/bin. All three need to be on PATH so
+# the post-install `command -v <binary>` check (in install-tools.sh) and the
+# scoring runtime can resolve them.
+ENV PATH=/home/runner/.local/bin:/home/runner/.bun/bin:/home/runner/.cargo/bin:$PATH
 
 # ---- Pre-bake every registry tool ------------------------------------------
 # Build-time registry lives at /build/registry.yaml — immutable, frozen at
@@ -119,9 +123,14 @@ COPY --chown=runner:runner registry.yaml /build/registry.yaml
 COPY --chown=runner:runner docker/score/install-tools.sh /build/install-tools.sh
 RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
     --mount=type=cache,target=/home/runner/.cache/uv,uid=1000,gid=1000 \
-    --mount=type=cache,target=/home/runner/.bun/install/cache,uid=1000,gid=1000 \
     --mount=type=cache,target=/home/runner/.cache/cargo-binstall,uid=1000,gid=1000 \
     bash /build/install-tools.sh
+# Note: bun install cache mount is intentionally omitted. With a persistent
+# `--mount=type=cache,target=~/.bun/install/cache`, repeated `bun add -g`
+# installs in the install-tools layer fail with "AccessDenied" (verified
+# 2026-04-28 — the same install commands succeed reliably in a fresh
+# container with no cache). Wall-time cost of redownloading bun packages
+# at build time is small (~5s per package, well under a minute total).
 
 # ---- Scoring runner --------------------------------------------------------
 COPY --chown=runner:runner docker/score/score-anc100.sh /work/score-anc100.sh
