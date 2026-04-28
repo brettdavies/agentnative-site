@@ -230,6 +230,7 @@ export async function build() {
     { name: 'about', path: join(CONTENT_DIR, 'about.md') },
     { name: 'changelog', path: join(CONTENT_DIR, 'changelog.md') },
     { name: 'methodology', path: join(CONTENT_DIR, 'methodology.md') },
+    { name: 'scorecard-schema', path: join(CONTENT_DIR, 'scorecard-schema.md') },
   ];
   const subPageData = [];
   for (const { name, path } of subPages) {

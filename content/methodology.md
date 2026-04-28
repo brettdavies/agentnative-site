@@ -2,6 +2,8 @@
 
 How the ANC 100 leaderboard is built, what each score means, and what the leaderboard does *not* claim to measure.
 
+For the field-by-field shape of the underlying JSON, see the [scorecard schema reference](/scorecard-schema).
+
 ## What gets scored
 
 Every entry on the [leaderboard](/scorecards) is the output of `anc check <binary>` against a real CLI tool, run on
@@ -39,6 +41,9 @@ score. They are language-specific and would create unfair comparisons across too
   warn at most once.
 - `mixed` — two of the four signal checks warn.
 - `human-primary` — three or more of the four signal checks warn.
+- `null` with `audience_reason: "suppressed"` — when the active audit profile suppresses one or more of the four signal
+  checks, the classifier has insufficient input and refuses to label. The per-tool page surfaces the reason so a reader
+  can see *why* the field is empty rather than guessing.
 
 The classifier is **informational, not authoritative**. It is a one-line summary derived from a fixed set of four
 behavioral checks. The per-check evidence on the same page is the ground truth. A tool labeled `human-primary` may still
@@ -78,6 +83,36 @@ not silently removed.
 
 Every audit-profile change is a registry change, reviewed in the open. There is no per-tool override that does not show
 its work.
+
+### Profiles applied to the current registry
+
+| Tool        | Profile          | Why                                                                                 |
+| ----------- | ---------------- | ----------------------------------------------------------------------------------- |
+| `lazygit`   | `human-tui`      | Git TUI — primary mode is full-screen interactive UI                                |
+| `gitui`     | `human-tui`      | Git TUI — parallel project to lazygit                                               |
+| `tmux`      | `human-tui`      | Terminal multiplexer — bare invocation attaches/starts an interactive session       |
+| `fzf`       | `human-tui`      | Interactive fuzzy-match picker over stdin                                           |
+| `broot`     | `human-tui`      | Interactive directory-tree browser                                                  |
+| `yazi`      | `human-tui`      | Interactive file manager — full-screen browse is the primary mode                   |
+| `bottom`    | `human-tui`      | Interactive process/system monitor (htop-class)                                     |
+| `bandwhich` | `human-tui`      | Interactive network bandwidth monitor                                               |
+| `atuin`     | `human-tui`      | Interactive shell-history search; bare-binary mode and `atuin search` are TUI-first |
+| `navi`      | `human-tui`      | Interactive cheatsheet picker                                                       |
+| `jnv`       | `human-tui`      | Interactive jq-filter editor over a JSON document                                   |
+| `fd`        | `file-traversal` | Emits filenames as its output protocol; reserved for future suppressions in v0.1.3  |
+
+Profiles **not** currently applied to any tool, with the criteria a future entry must meet:
+
+- `posix-utility` — Tool predates structured output and follows POSIX-style stdin/stdout conventions. Modern stream
+  processors (`jq`, `yq`, `dasel`, `miller`, etc.) already pass P1 non-interactive checks vacuously, so the suppression
+  is unnecessary and `posix-utility` is not applied.
+- `diagnostic-only` — Tool can never mutate state by design. Suppresses only P5 dry-run. The current registry's
+  read-only candidates (`procs`, `dust`, `tree`) all pass P5 already, so the profile would be a no-op annotation. It
+  will become useful when P5 grows checks beyond dry-run that warrant skipping for read-only diagnostics.
+
+The general rule for adding a profile: **apply it only when an unsuppressed check is fighting the tool's category, not
+its design quality**. A TUI legitimately blocks on a TTY; that's a category fact, not a defect. A CLI that *could* be
+non-interactive but isn't is a defect — no profile applies.
 
 ## Layers: behavioral, project, source
 
