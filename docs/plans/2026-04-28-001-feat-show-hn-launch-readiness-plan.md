@@ -251,11 +251,11 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
 - **Q-SITE3: Cold-device cellular network — which carrier?** Whatever phone Brett has. The point is not "Verizon vs.
   AT&T" but "different network than the dev machine's WiFi." Single-carrier verification is sufficient.
 - **Q-SITE4: Which night to cut the release branch?** Inherits from the CLI plan's Q-CLI2 decision (now superseded by
-  parent Q4): **Tuesday 2026-04-28 PT for Wednesday 2026-04-29 09:00 AM PT post.** Site cuts the same night, ideally
-  after the CLI's `v0.2.0` tag has triggered the homebrew dispatch and the formula has updated AND the skill `v0.2.0`
-  tag is published. Tag-cut sequence is: spec `v0.3.0` → CLI `v0.2.0` → skill `v0.2.0` (steps 3a/3b) → site
-  `release/launch` (with `install.json` re-pinned to skill v0.2.0 SHA) → site main deploy. See central tracker § Release
-  Versions and Order — SoT for v0.3.0 launch wave for the canonical ordered sequence.
+  parent Q4, then re-superseded 2026-04-29 by a 24h push): **Wednesday 2026-04-29 PT for Thursday 2026-04-30 09:00 AM PT
+  post.** Site cuts the same night, ideally after the CLI's `v0.2.0` tag has triggered the homebrew dispatch and the
+  formula has updated AND the skill `v0.2.0` tag is published. Tag-cut sequence is: spec `v0.3.0` → CLI `v0.2.0` → skill
+  `v0.2.0` (steps 3a/3b) → site `release/launch` (with `install.json` re-pinned to skill v0.2.0 SHA) → site main deploy.
+  See central tracker § Release Versions and Order — SoT for v0.3.0 launch wave for the canonical ordered sequence.
 - **Q-SITE5: Skill-distribution cutover-ops sequencing.** Cache-purge runs AFTER `release/launch` merges and the
   production deploy completes. The skill-availability probe seed run (`gh workflow run skill-availability.yml`) runs
   AFTER cache-purge confirms `/install.json` returns the correct headers from `anc.dev`. Codified in the Pre-launch
@@ -494,10 +494,10 @@ works.
 
 **Approach:**
 
-- **Pre-cut staging smoke (Tuesday 2026-04-28 morning, before cuts begin):** phone on cellular hits
+- **Pre-cut staging smoke (Wednesday 2026-04-29 morning, before cuts begin):** phone on cellular hits
   `https://agentnative-site-staging.brettdavies.workers.dev/` and walks every link in the homepage hero + footer + at
   least one principle page. Verifies HTTPS, mobile rendering, copy-button taps, theme toggle.
-- **Post-cut production smoke (Wednesday 2026-04-29 morning, before 09:00 AM PT post; after Tuesday night
+- **Post-cut production smoke (Thursday 2026-04-30 morning, before 09:00 AM PT post; after Wednesday night
   `release/launch` merges):** same flow against `https://anc.dev/`. Plus: OG-tag preview via a text/Slack/Twitter share
   to confirm the OG image and meta tags render.
 - **Failure handling:** any blocker (HTTPS error, page-load 5xx, broken nav, missing OG tag) blocks the post. Decide
@@ -518,7 +518,7 @@ works.
 
 - All checks pass on phone-on-cellular. No HTTPS errors, no broken links, no rendering bugs.
 
-**Acceptance:** Brett does the cold-device pass himself (Tue 2026-04-28 morning for staging, Wed 2026-04-29 morning
+**Acceptance:** Brett does the cold-device pass himself (Wed 2026-04-29 morning for staging, Thu 2026-04-30 morning
 before 09:00 AM PT for prod) and confirms green. Failures escalate per the failure-handling note above.
 
 ---
@@ -588,7 +588,7 @@ to "post the post."
 
 ## Pre-launch Release PR Checklist
 
-Run this checklist Tuesday 2026-04-28 PT evening, in order. Do not skip steps. Launch-day post lands Wed 2026-04-29
+Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps. Launch-day post lands Thu 2026-04-30
 09:00 AM PT.
 
 ### Pre-flight (before branching `release/launch`)
@@ -602,7 +602,7 @@ Run this checklist Tuesday 2026-04-28 PT evening, in order. Do not skip steps. L
 - [ ] **Site `dev` is at the expected HEAD:** all PRs #36–#39 are merged to `dev`. P0 todo 014's fix is committed.
 - [ ] **Site `dev` CI is green:** latest `dev` push triggered a green `ci.yml`.
 
-### Branch + cherry-pick (Tuesday 2026-04-28 PT evening)
+### Branch + cherry-pick (Wednesday 2026-04-29 PT evening)
 
 - [ ] `git checkout main && git pull --ff-only origin main`
 - [ ] `git checkout -b release/launch`
@@ -615,7 +615,7 @@ Run this checklist Tuesday 2026-04-28 PT evening, in order. Do not skip steps. L
 - [ ] **Verify no guarded paths leaked:** `git diff main release/launch -- docs/plans/ docs/solutions/
   docs/brainstorms/` → guard-main-docs check should fail-cleanly if anything's wrong; resolve before pushing.
 
-### PR (Tuesday 2026-04-28 PT evening, after branch is ready)
+### PR (Wednesday 2026-04-29 PT evening, after branch is ready)
 
 - [ ] `git push -u origin release/launch`
 - [ ] `gh pr create --base main --head release/launch --title "chore(release): launch — anc.dev v0.x.0" --body "..."`
@@ -633,13 +633,13 @@ Run this checklist Tuesday 2026-04-28 PT evening, in order. Do not skip steps. L
 - [ ] `gh workflow run skill-availability.yml` — seed first green probe run.
 - [ ] **Cold-device prod smoke** — phone on cellular hits anc.dev, walks every link, verifies OG-tag preview in a share.
 
-### Tracker update (Tuesday 2026-04-28 PT evening / Wednesday early AM, after smoke is green)
+### Tracker update (Wednesday 2026-04-29 PT evening / Thursday early AM, after smoke is green)
 
-- [ ] Update central tracker `Day-1 Status Log`: add a 2026-04-29 entry summarizing the cut + cutover. Flip Gates 8, 9,
+- [ ] Update central tracker `Day-1 Status Log`: add a 2026-04-30 entry summarizing the cut + cutover. Flip Gates 8, 9,
   11, 12 to `done`.
 - [ ] Commit as `chore: update launch tracker — pre-launch release cut`.
 
-### Launch-morning final check (Wednesday 2026-04-29 AM PT, before 09:00 AM post)
+### Launch-morning final check (Thursday 2026-04-30 AM PT, before 09:00 AM post)
 
 - [ ] Re-curl the live smoke checks. If anything regressed overnight (Cloudflare incident, DNS hiccup), pause the post.
 - [ ] Re-verify `gh repo view brettdavies/agentnative-skill --json visibility` → `PUBLIC`.
