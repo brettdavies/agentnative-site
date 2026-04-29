@@ -152,6 +152,14 @@ PR.
 fires → required check never reports → PR stuck) or benign double-runs on mixed PRs. A comment in both files calls this
 out explicitly; keep them in sync when editing either one.
 
+### Visual-fidelity gates
+
+Beyond the workflow checks above, two visual-regression rules apply to any change touching CSS, layout, or rendered
+output: a "browser-verify before done" agent-side rule (working today) and a Playwright snapshot diff in CI (planned,
+deferred until the design system stabilizes). Both live in [`AGENTS.md` § Visual fidelity](./AGENTS.md#visual-fidelity)
+— that's the source of truth. A release that didn't satisfy those gates upstream isn't unblocked by this pipeline being
+green.
+
 ## Secrets
 
 Stored as GitHub Actions secrets on `brettdavies/agentnative-site`. Accessible to workflows via `${{ secrets.<name> }}`.
