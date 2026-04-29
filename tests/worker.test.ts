@@ -174,6 +174,46 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
   });
 });
 
+describe('applyHeaders — SVG branch (badge surface)', () => {
+  test('/badge/<tool>.svg: image/svg+xml + CORS + short cache + no noindex + no Link', () => {
+    const res = applyHeaders(new Response('<svg></svg>'), {
+      request: req('https://anc.dev/badge/rg.svg'),
+      servedMarkdown: false,
+      pathname: '/badge/rg.svg',
+    });
+    expect(res.headers.get('Content-Type')).toBe('image/svg+xml; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Cache-Control')).toContain('stale-while-revalidate=60');
+    // SVGs are public-by-default — no noindex (production hosts; staging
+    // gets noindex via the .workers.dev guard regardless of branch).
+    expect(res.headers.get('X-Robots-Tag')).toBeNull();
+    // No markdown-twin advertisement on SVG paths.
+    expect(res.headers.get('Link')).toBeNull();
+    expect(res.headers.get('X-Llms-Txt')).toBeNull();
+  });
+
+  test('badge SVG on staging (.workers.dev) still gets noindex via the staging guard', () => {
+    const res = applyHeaders(new Response('<svg></svg>'), {
+      request: req('https://agentnative-site-staging.workers.dev/badge/rg.svg'),
+      servedMarkdown: false,
+      pathname: '/badge/rg.svg',
+    });
+    expect(res.headers.get('Content-Type')).toBe('image/svg+xml; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+  });
+
+  test('non-.svg path does not get the SVG content-type', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/badge'),
+      servedMarkdown: false,
+      pathname: '/badge',
+    });
+    expect(res.headers.get('Content-Type')).not.toBe('image/svg+xml; charset=utf-8');
+    expect(res.headers.get('Link')).toContain('rel="alternate"');
+  });
+});
+
 describe('applyHeaders — hashed assets', () => {
   test('/fonts/* gets immutable cache', () => {
     const res = applyHeaders(new Response('woff2'), {
