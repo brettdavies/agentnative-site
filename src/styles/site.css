@@ -452,6 +452,13 @@ main .anchor-icon {
     color 120ms ease,
     transform 120ms ease;
 }
+/* iOS Safari paints a 0×0 glyph for inline <svg> with viewBox but no
+ * intrinsic width/height (per SVG2 spec). Size the child explicitly. */
+.ai-summary__link svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
 .ai-summary__link:hover {
   color: var(--fg-body, #1a2026);
   transform: scale(1.12);

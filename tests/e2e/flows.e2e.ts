@@ -108,3 +108,21 @@ test.describe('principle listing', () => {
     await expect(page.locator('h1')).toContainText('Safe Retries');
   });
 });
+
+test.describe('footer AI-provider icons', () => {
+  // Regression guard for #016: iOS Safari paints inline <svg> with viewBox
+  // but no width/height as 0×0. Anchor stays tappable, glyph disappears.
+  // The CSS rule on `.ai-summary__link svg` forces a non-zero box.
+  test('every footer ai-provider icon has a non-zero rendered bounding box', async ({ page }) => {
+    await page.goto('/');
+    const svgs = page.locator('.ai-summary__link svg');
+    await expect(svgs).toHaveCount(5);
+    const count = await svgs.count();
+    for (let i = 0; i < count; i++) {
+      const box = await svgs.nth(i).boundingBox();
+      expect(box, `provider svg #${i} has no bounding box`).not.toBeNull();
+      expect(box!.width).toBeGreaterThan(0);
+      expect(box!.height).toBeGreaterThan(0);
+    }
+  });
+});
