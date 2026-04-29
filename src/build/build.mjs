@@ -367,7 +367,11 @@ export async function build() {
     scorecardLinks: [
       { name: 'Leaderboard', path: '/scorecards.md' },
       { name: 'Coverage Matrix', path: '/coverage.md' },
-      ...leaderboard.map((e) => ({ name: e.tool.name, path: `/score/${e.tool.name}.md` })),
+      // Per-tool scorecards alphabetical so the llms.txt index reads as a
+      // browseable directory; the leaderboard itself owns rank-order presentation.
+      ...leaderboard
+        .map((e) => ({ name: e.tool.name, path: `/score/${e.tool.name}.md` }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     ],
     skillLinks: [
       { name: 'Skill (HTML)', path: '/skill.md' },
