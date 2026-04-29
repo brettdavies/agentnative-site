@@ -9,8 +9,8 @@ agent — the agent hangs, the user sees nothing, and the operation times out si
 
 An agent calling a CLI cannot type. When the tool prompts for a confirmation or a credential, the agent's process stalls
 until timeout: no tokens recovered, no structured signal that interaction was requested, and no way to distinguish
-"waiting for input" from "still processing." Interactive prompts in automation paths are the single most common cause of
-agent-tool deadlock.
+"waiting for input" from "still processing." Interactive prompts in automation paths are a leading cause of agent-tool
+deadlock.
 
 ## Requirements
 
@@ -28,16 +28,17 @@ agent-tool deadlock.
 - When `--no-interactive` is set, or when stdin is not a TTY, the tool does not enter any blocking-interactive surface —
   it uses defaults, reads from stdin, or exits with an actionable error. "Blocking-interactive surface" includes prompt
   library calls AND TUI session initialization.
-- *(Applies when: CLI authenticates against a remote service.)* A headless authentication path. The canonical flag is
-  `--no-browser`, which triggers the OAuth 2.0 Device Authorization Grant
-  ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)): the CLI prints a URL and a code; the user authorizes on another
-  device. Agents cannot open browsers. Non-canonical alternatives (`--device-code`, `--remote`, `--headless`) are
-  acceptable but should migrate toward `--no-browser`.
+- *(Applies when: CLI uses interactive OAuth.)* A headless authentication path. The canonical flag is `--no-browser`,
+  which SHOULD trigger the OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628))
+  when the identity provider supports it: the CLI prints a URL and a code; the user authorizes on another device. Agents
+  cannot open browsers. Non-canonical alternatives (`--device-code`, `--remote`, `--headless`) are acceptable but should
+  migrate toward `--no-browser`. CLIs that authenticate via static API key, PAT, or pre-issued token satisfy this
+  requirement through the env-var-settable flags MUST above — no browser to begin with.
 
 **SHOULD:**
 
 - Auto-detect non-interactive context via TTY detection (`std::io::IsTerminal` in Rust 1.70+, `process.stdin.isTTY` in
-  Node, `sys.stdout.isatty()` in Python) and suppress prompts when stderr is not a terminal, even without an explicit
+  Node, `sys.stdin.isatty()` in Python) and suppress prompts when stdin is not a terminal, even without an explicit
   `--no-interactive` flag.
 - Document default values for prompted inputs in `--help` output so agents can pass them explicitly instead of accepting
   whatever default ships.
@@ -72,5 +73,5 @@ verdicts for TTY-driving-agent scenarios are probable-but-not-verified; see [/co
 - Hard-coded credentials prompts with no env-var or config-file alternative.
 - OAuth flow that unconditionally opens a browser with no headless escape hatch.
 
-Measured by check IDs `p1-non-interactive` (behavioral) and `p1-non-interactive-source` (source). Run `agentnative check
-  --principle 1 .` against your CLI to see both.
+Measured by check IDs `p1-non-interactive`, `p1-flag-existence`, and `p1-env-hints` today. Run `anc check --principle 1
+.` against your CLI to see current coverage.
