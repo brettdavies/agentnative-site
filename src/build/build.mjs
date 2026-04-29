@@ -367,6 +367,7 @@ export async function build() {
     scorecardLinks: [
       { name: 'Leaderboard', path: '/scorecards.md' },
       { name: 'Coverage Matrix', path: '/coverage.md' },
+      ...leaderboard.map((e) => ({ name: e.tool.name, path: `/score/${e.tool.name}.md` })),
     ],
     skillLinks: [
       { name: 'Skill (HTML)', path: '/skill.md' },

@@ -70,19 +70,19 @@ export function buildLlmsIndex({
       lines.push(`- [${s.title}](${base}/${s.name}.md)`);
     }
   }
-  if (scorecardLinks.length > 0) {
-    lines.push('');
-    lines.push('## Scorecards');
-    lines.push('');
-    for (const s of scorecardLinks) {
-      lines.push(`- [${s.name}](${base}${s.path})`);
-    }
-  }
   if (skillLinks.length > 0) {
     lines.push('');
     lines.push('## Skill');
     lines.push('');
     for (const s of skillLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
+    }
+  }
+  if (scorecardLinks.length > 0) {
+    lines.push('');
+    lines.push('## Scorecards');
+    lines.push('');
+    for (const s of scorecardLinks) {
       lines.push(`- [${s.name}](${base}${s.path})`);
     }
   }
