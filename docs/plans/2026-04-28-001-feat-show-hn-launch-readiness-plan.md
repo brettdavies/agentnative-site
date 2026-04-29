@@ -438,7 +438,8 @@ one-line reason. No blank rows. The leaderboard reads as a credible full-registr
 
 ---
 
-- [ ] **U4. Site-copy red-team pass (Gate 11)**
+- [x] **U4. Site-copy red-team pass (Gate 11)** — shipped via PR #48 (`feat/red-team-pass-launch-content` → `a71767a`);
+  Tier 1 + Tier 2 prose edits across 12 files; Tier 3 deferrals captured in the Red-Team Log below
 
 **Goal:** Every visible string on every public-facing page survives an adversarial reading. No "but X exists," "that's
 overclaiming," or "the spec contradicts itself at Y" comments land in the public HN thread.
@@ -718,6 +719,114 @@ docs/
 
 The `release/launch` PR carries the entire `dev` diff — including the skill-distribution PRs from earlier in the week.
 The above is the NEW scope this plan introduces.
+
+---
+
+## Red-Team Log (2026-04-29)
+
+Adversarial review session run via 8 parallel `compound-engineering:document-review:adversarial-document-reviewer`
+dispatches: 7 per-principle reviewers + one combined supporting-pages reviewer (`_intro`, `about`, `check`,
+`methodology`, `install`, `src/data/skill.json` prose). Findings classified `applied` / `[later]` / `[wontfix]`.
+
+All `applied` items shipped via PR #48 (`feat/red-team-pass-launch-content`, squash `a71767a`, merged
+2026-04-29T20:35Z). The summary below is the durable record of what changed and what was deferred.
+
+### Tier 1 — site-spec drift + factual errors (all `applied`)
+
+- **Site-spec drift caught up.** P5 Definition + Why and P7 Why-Agents-Need-It paragraphs ported from spec PR #13's
+  resolved wording (`agentnative` `ca1e4f6`, never propagated to site since no sync-spec mechanism is wired yet).
+- **Check-ID truthing across all 7 principle pages.** Every "Measured by check IDs" trailer verified against
+  `scorecards/*.json` and rewritten. Real ship-set:
+- P1: `p1-non-interactive`, `p1-flag-existence`, `p1-env-hints`
+- P2: `p2-json-output` only
+- P3: `p3-help`, `p3-version` only
+- P4: `p4-bad-args` only
+- P5: none ship; trailer now says so
+- P6: `p6-sigpipe`, `p6-no-color-behavioral`, `p6-no-pager-behavioral`
+- P7: `p7-quiet` only
+- **Fake check IDs in `/check.md` example output** (`p3-after-help`, `p4-process-exit`, `p1-non-interactive-source`)
+  replaced with real ones; "Rust today" → "Rust and Python today".
+- **Binary-name standardization:** `agentnative` → `anc` across `/check`, `/install`, `_intro`, with one-line "(`anc`
+  and `agentnative` are aliases)" callout where the longer form survives.
+- **`/install` platform coverage corrected** to actual reality (Apple Silicon macOS 14/15 + x86_64 Linux bottles only;
+  Intel Mac and arm64 Linux compile from source). "Signed bottles" claim removed — Homebrew uses SHA256 integrity
+  hashes, not cryptographic signing. cargo-binstall prerequisite called out.
+
+### Tier 2 — defensible HN-bait softening (all `applied`)
+
+- **P1**: "single most common cause" → "a leading cause"; stdin/stderr inconsistency in SHOULD bullet fixed;
+  `--no-browser` MUST narrowed to interactive OAuth (with explicit static-token alternative).
+- **P2**: `text|json|jsonl` MUST softened to "machine-readable format flag"; sysexits.h provenance for codes 77/78 added
+  (with acknowledgement that most CLIs don't make the auth/config distinction at the exit-code layer);
+  `OutputFormat`/`OutputConfig` Rust idiom moved out of MUST into a "Rust reference implementation" subsection;
+  `jq`/`dasel` passthrough exemption added to envelope SHOULD; error-stderr rephrased.
+- **P3**: language-agnostic preamble naming `cobra`, `argparse`, `docopt`, `gh`, `kubectl` analogs; "2-3 examples"
+  softened to "at least one … 2-3 when multiple use cases"; `--output json` SHOULD now hedged on P2 capability.
+- **P4**: sysexits.h provenance paragraph added to Why; "self-describing" softened to "paired with this standard's
+  published mapping"; "config and auth before any network call" scoped to "locally-verifiable invariants" (auth often
+  needs a network call); P2 cross-reference for stderr/stdout discipline; `process::exit` only-in-main carved out for
+  signal/panic handlers.
+- **P6**: `--timeout` 30s default reframed as "we recommend"; subcommand-naming taxonomy expanded for verb-only (`git
+  commit`); single-operation-tool exemption (`grep`/`curl`/`jq`) added to subcommands-not-flags SHOULD; three-tier
+  dependency framed as implementation note vs. observable property; SIGPIPE example acknowledges Go and Python
+  equivalents.
+- **P7**: Why paragraph rewritten to cover non-LLM agents (token cost for LLMs, parse cost for scripts); "10,000 lines"
+  softened to "tens of thousands"; "high-signal" defined explicitly in Definition; "falsey-value parser" clap-jargon
+  replaced with explicit override semantics.
+- **`_intro.md`**: "shells out to a binary" → "frequently shells out … the lowest-common-denominator interface where
+  APIs don't exist or don't compose"; "every popular CLI tool" → "100 widely-used CLI tools"; example check IDs in
+  trailer text (`p1-non-interactive`, `p2-json-output`, `p6-sigpipe`) updated to real ones.
+- **`about.md`**: new `## Provenance` section ("authored and maintained in the open by Brett Davies … pressure-tested in
+  public, not a ratified industry standard"); new `## Prior art` section citing **clig.dev**, **12factor.net**, **IETF
+  RFC 2119**, and **Cloudflare's
+  [Building a CLI for all of Cloudflare](https://blog.cloudflare.com/cf-cli-local-explorer)**
+- the 2026-04-13 [HN thread](https://news.ycombinator.com/item?id=47753689) — the actual external validation source from
+    the vault research archive that informed P3, P4, and P6 framing directly. Redirect promise softened to future tense;
+    numbered-list rendering bug fixed.
+
+- **`methodology.md`**: explanatory paragraph added acknowledging the headline pass rate weighs MUST and SHOULD
+  violations equally; readers pointed to the principles-met column for conformance. "Warn at most once" allowance for
+  the audience classifier justified (signal-check correlation rationale).
+
+### Tier 3 — `[later]` (deferred to v0.4.0 + ride along to spec deferrals)
+
+These mirror or extend the spec's already-deferred items; they ship in the v0.4.0 cycle alongside the matching spec
+edits:
+
+- **P3**: language-agnostic restructuring of Evidence/Anti-Patterns sections (mostly `clap`/Rust today). Spec already
+  deferred this to v0.4.0 with `applicability` cleanup tied to the registry parser.
+- **P4**: Rust-leaning structural framing of the `try_parse()` MUST and the `thiserror` enum SHOULD. Reframe as
+  observable behavior with Rust as worked example. Strategic, not urgent.
+- **P5**: `--no-interactive` composition with `--force`/`--yes` (do you error or dry-run when neither is set + non-TTY
+- headless?); `read-write-distinction` MUST verifiability rewrite (currently subjective); flag-name prescription →
+    contract-first framing (`--dry-run` vs. `plan`/`apply` etc.); rollback → reconciliation framing in Anti-Patterns;
+    idempotency precision (state-equivalence vs. retry-safety).
+
+- **P6**: `NO_COLOR` and `TERM=dumb` lumped together (no-color.org's "any non-empty value" semantics not surfaced);
+  `--principle 6 .` example uses Rust-flavored anti-pattern phrasing; `jaq` vs `jq` in pipeline example (judgment call —
+  `jaq` is technically fine but `jq` is the well-known reader expectation).
+- **P7**: `100 items` ceiling justification; `--timeout` MUST/SHOULD overlap with P6 (P6 has conditional MUST for
+  network CLIs; P7 has SHOULD universal — both true, but the relationship isn't on the page); MAY → SHOULD promotion for
+  "automatic verbosity reduction in non-TTY contexts" (registry coordination required).
+- **`skill.json`**: SHA pin discipline. Current `expected: 47a76cce…` is stale vs. live HEAD; `git clone --depth 1`
+  install command lands on HEAD, so verify command always reports mismatch. Plan U6 already accounts for re-pinning to
+  skill v0.2.0 SHA at release cut. Per-host install paths (`~/.codex/skills/`, `~/.cursor/skills/`) need verification
+  against host loader conventions — likely some don't actually load skills from those paths and need different extension
+  mechanisms. Defer to v0.4.0 alongside skill ecosystem expansion.
+- **`methodology.md`**: `fd`'s `file-traversal` profile is a no-op in v0.1.3 (the row admits "reserved for future
+  suppressions" but a careful reader still asks "why is `fd` profiled then?"). Either remove from applied-profiles table
+  or add explicit "no-op today, reserved for v0.2 suppressions" annotation. Low impact.
+
+### `[wontfix]`
+
+- **Rust-only language examples in MUST bullets** (`FalseyValueParser` in P1, `try_parse()` in P4): the language
+  examples are illustrative — they show the *non-obvious* gotchas concretely. The principle is language-agnostic; the
+  example is what makes the gotcha tractable. Keep.
+- **"Agents cannot open browsers"** (P1): an HN commenter could cite Anthropic's computer-use API or browser-use as
+  counterexamples. The Scope paragraph already calls out computer-use desktop agents as a deferred case; the claim is
+  true for the subprocess-agent definition that's the spec's primary scope. Keep.
+- **Definite article in "The agent-native CLI standard"** (`_intro.md` H1): provenance paragraph in `/about` now earns
+  the "the" by stating explicitly that this is one author's proposal pressure-tested in public. Brand survives.
 
 ---
 
