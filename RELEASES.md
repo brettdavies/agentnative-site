@@ -193,9 +193,9 @@ Committing the JSON alongside the code means ruleset changes land via the same r
 
 ## Skill releases
 
-`/install.json` and `/install` advertise the `agent-native-cli` skill, hosted at
+`/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
 [`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). This site vendors the skill's
-upstream commit SHA in `src/data/install.json`; the skill repo holds the actual content. Surface contract in
+upstream commit SHA in `src/data/skill.json`; the skill repo holds the actual content. Surface contract in
 `docs/DESIGN.md` §3.9.
 
 The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
@@ -208,15 +208,19 @@ maintainer to fast-forward `main` to the new tag before the site re-pins.
    `git push origin dev --follow-tags`. Fast-forward `main` to the new tag and push: `git checkout main && git merge
    --ff-only v0.x.y && git push origin main`. The site's bare `git clone --depth 1` lands on `main`, so the fast-forward
    is what makes the new release reachable.
-2. **Re-pin in this repo**: edit `src/data/install.json` — bump `version`, `source.commit`, and `verify.expected`
-   (`source.commit` and `verify.expected` are the same SHA until v2 schema decouples them). `loadInstallData()` will
+2. **Re-pin in this repo**: edit `src/data/skill.json` — bump `version`, `source.commit`, and `verify.expected`
+   (`source.commit` and `verify.expected` are the same SHA until v2 schema decouples them). `loadSkillData()` will
    reject a non-hex / non-lowercase / non-40-char SHA at build time, so a typo fails fast.
 3. **PR to `dev`**: CI runs the unit + worker tests on the bumped manifest. Squash-merge on green.
 4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
-5. **Cache-purge** `/install`, `/install.json`, and `/install.md` via the Cloudflare cache-purge API. Required for
+5. **Cache-purge** `/skill`, `/skill.json`, and `/skill.md` via the Cloudflare cache-purge API. Required for
    security-relevant pin updates so users don't pick up the old SHA from the 24h `s-maxage` window. Use the API token
-   stored in 1Password (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`).
-6. **Verify the deployed pin**: `curl -s https://anc.dev/install.json | jq -r .source.commit` matches the new SHA.
+   stored in 1Password (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). First-deploy-after-rename
+   note (cutover from `/install*` → `/skill*`): also purge `/install`, `/install.json`, and `/install.md` once to evict
+   any cached skill content under the old paths. Skip this on subsequent deploys.
+6. **Verify the deployed pin**: `curl -s https://anc.dev/skill.json | jq -r .source.commit` matches the new SHA. The
+   Playwright `skill` project (`bun x playwright test --project=skill`) re-runs the live 4-host clone against the
+   advertised hosts; run it locally before tagging if anything in the manifest's host commands changed.
 
 ### Skill-availability probe
 

@@ -439,53 +439,56 @@ request time in the Worker. The Worker only routes. This matches the Shiki-at-bu
 documentation surface pattern at
 `docs/solutions/architecture-patterns/agent-native-documentation-surface-2026-04-13.md`.
 
-### 3.9 Skill distribution — `/install` and `/install.json`
+### 3.9 Skill distribution — `/skill` and `/skill.json`
 
-Two surfaces, one source. Agents fetch `/install.json` (canonical, machine-primary). Humans fetch `/install` (HTML
-render, identical commands). Both derive from `src/data/install.json` at build time — drift is structurally impossible
-because there's only one source.
+Two surfaces, one source. Agents fetch `/skill.json` (canonical, machine-primary). Humans fetch `/skill` (HTML render,
+identical commands). Both derive from `src/data/skill.json` at build time — drift is structurally impossible because
+there's only one source.
 
-**Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships a single skill
-(`agent-native-cli`); the v2 `/skill/<name>` URL pattern is deferred until N>1.
+**Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships singular `/skill`
+for the single advertised skill (`agent-native-cli`); per-skill `/skill/<name>` URLs remain deferred until N>1. When a
+second skill ships, `/skill` becomes an index and per-skill content moves under `/skill/<name>` — the Worker's
+JSON-extension dispatch is already shape-agnostic, so no Worker code change is anticipated for that transition.
 
 **Source repo coupling.** This site vendors a single string — the upstream commit SHA — committed at site build time
-into `src/data/install.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
+into `src/data/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
 `docs/solutions/architecture-patterns/cross-repo-artifact-sync-commit-over-fetch-20260420.md`. The skill repo
 (`brettdavies/agentnative-skill`) holds `main` as the published-release pointer and `dev` as the integration branch; the
 install command's bare `git clone --depth 1` lands on the skill repo's default branch (`main`), which the skill
 maintainer fast-forwards to each new release tag.
 
-**`/install.json` shape (v1):**
+**`/skill.json` shape (v1):**
 
-| Key                 | Type                       | Notes                                                                                               |
-| ------------------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `schema_version`    | integer                    | `1`. Bump on incompatible structural change.                                                        |
-| `type`              | string                     | `"agent-skill"`.                                                                                    |
-| `name`              | string                     | `"agent-native-cli"`. Slug, kebab-case.                                                             |
-| `version`           | string                     | Semver. Bumped per skill release.                                                                   |
-| `description`       | string                     | One sentence.                                                                                       |
-| `principles_url`    | string                     | `https://anc.dev/p1`.                                                                               |
-| `license`           | string                     | `"MIT"`.                                                                                            |
-| `source.type`       | string                     | `"git"`.                                                                                            |
-| `source.url`        | string                     | `https://github.com/brettdavies/agentnative-skill.git`.                                             |
-| `source.commit`     | string (40-char lower hex) | The pinned commit. Validated at build time.                                                         |
-| `install`           | object                     | Per-host map: `claude_code`, `codex`, `cursor`, `opencode` → `git clone --depth 1 …` command.       |
-| `verify.command`    | string                     | `git -C <install-dir> rev-parse HEAD`. Agent substitutes `<install-dir>`.                           |
-| `verify.expected`   | string                     | Same SHA as `source.commit` until v2 schema decouples them. Mismatch = upstream moved past the pin. |
-| `verify.semantics`  | string                     | Free-form description of what mismatch means.                                                       |
-| `update`            | string                     | `cd <install-dir> && git pull --ff-only`.                                                           |
-| `uninstall`         | string                     | `rm -rf <install-dir>`.                                                                             |
-| `install_page_html` | string                     | `https://anc.dev/install`.                                                                          |
+| Key                | Type                       | Notes                                                                                               |
+| ------------------ | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `schema_version`   | integer                    | `1`. Bump on incompatible structural change.                                                        |
+| `type`             | string                     | `"agent-skill"`.                                                                                    |
+| `name`             | string                     | `"agent-native-cli"`. Slug, kebab-case.                                                             |
+| `version`          | string                     | Semver. Bumped per skill release.                                                                   |
+| `description`      | string                     | One sentence.                                                                                       |
+| `principles_url`   | string                     | `https://anc.dev/p1`.                                                                               |
+| `license`          | string                     | `"MIT"`.                                                                                            |
+| `source.type`      | string                     | `"git"`.                                                                                            |
+| `source.url`       | string                     | `https://github.com/brettdavies/agentnative-skill.git`.                                             |
+| `source.commit`    | string (40-char lower hex) | The pinned commit. Validated at build time.                                                         |
+| `install`          | object                     | Per-host map: `claude_code`, `codex`, `cursor`, `opencode` → `git clone --depth 1 …` command.       |
+| `verify.command`   | string                     | `git -C <install-dir> rev-parse HEAD`. Agent substitutes `<install-dir>`.                           |
+| `verify.expected`  | string                     | Same SHA as `source.commit` until v2 schema decouples them. Mismatch = upstream moved past the pin. |
+| `verify.semantics` | string                     | Free-form description of what mismatch means.                                                       |
+| `update`           | string                     | `cd <install-dir> && git pull --ff-only`.                                                           |
+| `uninstall`        | string                     | `rm -rf <install-dir>`.                                                                             |
+| `skill_page_html`  | string                     | `https://anc.dev/skill`.                                                                            |
 
-**Build-emitter validation (`src/build/install.mjs`).** `loadInstallData()` is fail-fast: missing required keys, non-hex
-or non-lowercase `source.commit`, non-semver `version`, empty `install` map, install commands not starting with `git
-clone --depth 1`, and bare-clone commands (no explicit destination path) all reject the build at startup. The
+**Build-emitter validation (`src/build/skill.mjs`).** `loadSkillData()` is fail-fast: missing required keys, non-hex or
+non-lowercase `source.commit`, non-semver `version`, empty `install` map, install commands not starting with `git clone
+--depth 1`, and bare-clone commands (no explicit destination path) all reject the build at startup. The
 explicit-destination invariant is non-optional defense for the repo-name asymmetry: the skill repo is named
 `agentnative-skill` but the skill itself is named `agent-native-cli`; a bare `git clone` lands on the repo name and
 breaks every host's skill-discovery convention.
 
 **Header contract (`src/worker/headers.ts`).** The Worker's HTML/markdown branches are joined by a JSON-extension branch
-detected by URL ending in `.json` (extension, not prefix — forward-compat for `/skill/<name>.json` in v2):
+detected by URL ending in `.json` (extension, not prefix — any `/<slug>.json` endpoint reuses the branch, so the v2
+per-skill `/skill/<name>.json` lands on the same code path with no Worker change):
 
 ```text
 Content-Type:                application/json; charset=utf-8
@@ -496,21 +499,45 @@ X-Robots-Tag:                noindex
 
 No `Link: rel="alternate"` and no `X-Llms-Txt` on JSON paths — there's no markdown twin for `.json`. The `Accept:
 text/markdown` content-negotiation rewrite in `src/worker/index.ts` short-circuits on `.json` paths so `Accept:
-text/markdown` against `/install.json` returns the JSON unchanged rather than 404'ing on a non-existent
-`/install.json.md` twin.
+text/markdown` against `/skill.json` returns the JSON unchanged rather than 404'ing on a non-existent `/skill.json.md`
+twin.
 
 **Build-step outputs (added to the §3.4.1 table):**
 
-| Source                  | Emitted as                                                  | Notes                                                              |
-| ----------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------ |
-| `src/data/install.json` | `dist/install.json`, `dist/install.html`, `dist/install.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
+| Source                | Emitted as                                            | Notes                                                              |
+| --------------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
+| `src/data/skill.json` | `dist/skill.json`, `dist/skill.html`, `dist/skill.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
 
-`/install` enters `sitemap.xml` and `llms.txt`; `/install.json` enters `llms.txt` (in a new `## Install` section) but
-NOT the sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
+`/skill` enters `sitemap.xml` and `llms.txt` (under a `## Skill` section); `/skill.json` enters `llms.txt` but NOT the
+sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
 
 **Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version`,
-`source.commit`, and `verify.expected` in `src/data/install.json` (cache-purge `/install`, `/install.json`, and
-`/install.md` against the Cloudflare cache-purge API after deploy).
+`source.commit`, and `verify.expected` in `src/data/skill.json` (cache-purge `/skill`, `/skill.json`, and `/skill.md`
+against the Cloudflare cache-purge API after deploy).
+
+### 3.10 CLI install — `/install`
+
+Different surface, same dispatch mechanism. `/install` is the human-facing install page for the `agentnative` CLI tool
+itself — `brew install brettdavies/tap/agentnative`, `cargo install agentnative`, platform archives. Two
+representations: HTML (`/install`) and the markdown twin (`/install.md` or `Accept: text/markdown` against `/install`).
+**No JSON manifest.** The CLI is human-installable via the package managers documented on the page; an agent-friendly
+install manifest is not in scope today, and `/install.json` returns 404 by simply not emitting the asset.
+
+The page is content-driven from `content/install.md` and runs through the same `subPages` pipeline as `/methodology` and
+`/scorecard-schema` — no dedicated emitter. The 404 contract for `/install.json` is upheld by asset absence:
+Cloudflare's `not_found_handling: "404-page"` (`wrangler.jsonc`) returns the standard 404 page for any path that has no
+asset. A build-time regression test (`tests/regression.test.ts` regression #6) asserts `dist/install.json` is not
+emitted, so a future edit can't accidentally re-create it.
+
+`/install` is the canonical home for the brew/cargo install lines. Three places that previously inlined those commands
+now link here instead:
+
+- `content/check.md`'s `## Install` section — collapsed to a one-line link to `/install`.
+- `src/build/build.mjs`'s leaderboard methodology HTML — links to `/install` instead of inlining brew/cargo.
+- `src/build/scorecards-render.mjs`'s per-tool scorecard CTA — links to `/install` instead of inlining brew.
+
+A grep-based assertion in regression #6 fails the build if `brew install brettdavies/tap/agentnative` or `cargo install
+agentnative` ever reappears outside `content/install.md`.
 
 ## 4. Decision B — visual system
 

@@ -1,8 +1,8 @@
 # Synthetic availability probe for the skill-distribution producer repo.
 #
-# Why: /install.json publishes a clone URL to brettdavies/agentnative-skill.
+# Why: /skill.json publishes a clone URL to brettdavies/agentnative-skill.
 # If the repo flips visibility, gets renamed, or 404s for any reason, every
-# agent following /install.json fails. The probe runs daily, hits the repo
+# agent following /skill.json fails. The probe runs daily, hits the repo
 # via unauthenticated `git ls-remote`, and fails the run on any non-zero
 # exit. CI failure shows up in the Actions tab + emails the run owner.
 #
@@ -45,7 +45,7 @@ jobs:
       - name: ls-remote producer repo HEAD
         run: |
           set -euo pipefail
-          # Hits the same URL /install.json advertises. Unauthenticated.
+          # Hits the same URL /skill.json advertises. Unauthenticated.
           # `--exit-code` makes the command exit non-zero if HEAD is missing
           # (defense-in-depth — `git ls-remote` itself usually returns zero
           # on success, but `--exit-code` also fires when the output is empty).

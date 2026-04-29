@@ -123,15 +123,22 @@ Third-person. Short sections on standard / versioning / RFC 2119 / license / con
 colophon line at the bottom, not a bio section. The site does not lead with Brett's name; davies.fyi owns the named
 surface.
 
-### `/install` and `/install.json`
+### `/skill` and `/skill.json`
 
 Mixed register, page-internal split. Command sections (Choose your host, Update, Uninstall, Verify) are Register 2
 imperative — second person, runnable verbs ("Run …", "Update by …", "Remove with …"), every code fence a real command.
 The Trust-model paragraph is Register 1 — third-person, failure-mode first ("Piping a remote shell script into the local
 shell is the failure mode this install path rejects."), no first-person plural, no marketing voice. The Programmatic
-section is one terse sentence pointing agents at `/install.json`.
+section is one terse sentence pointing agents at `/skill.json`.
 
-`/install.json` is data-only. No prose, no voice register applies. Field semantics live in `docs/DESIGN.md` §3.9.
+`/skill.json` is data-only. No prose, no voice register applies. Field semantics live in `docs/DESIGN.md` §3.9.
+
+### `/install`
+
+Register 2 imperative throughout. Section headings name the package manager (Homebrew, Cargo, GitHub Releases); each
+body is one paragraph plus a real command in a code fence. No "we", no marketing voice, no comparative claims about
+which install path is best. Closes with one short paragraph pointing to `/check` for usage and to `/skill` for the
+companion skill bundle.
 
 ### Footer
 
