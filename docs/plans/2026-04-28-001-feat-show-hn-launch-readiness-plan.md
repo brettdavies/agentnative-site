@@ -12,7 +12,7 @@ parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-laun
 >
 > **Release version + order:** see central tracker § Release Versions and Order — SoT for v0.3.0 launch wave.
 > Site `release/launch` → `main` deploy is **step 4** of the launch wave (cherry-pick scope includes
-> `install.json` re-pin to skill v0.2.0 commit SHA from step 3b). Cutover ops are **step 5**; cold-device prod smoke
+> `skill.json` re-pin to skill v0.2.0 commit SHA from step 3b). Cutover ops are **step 5**; cold-device prod smoke
 > is **step 6**. Hard-blocked on steps 1–3b (spec v0.3.0, CLI v0.2.0 + tap, skill v0.2.0). Slip → push launch 24h.
 
 # feat: Show HN launch readiness — agentnative-site
@@ -181,7 +181,7 @@ specific must-include items:
 
 1. **`.github/ISSUE_TEMPLATE/`** (Gate 9) — already on `dev` via `70b38f9`, must reach `main` in this PR.
 2. **Skill-distribution Units 2–5** (PRs #36 + #37 + #38 + #39 plus their dependent commits) — must reach `main` in this
-   PR for the post body to name-drop `anc.dev/install`. Otherwise omit `/install` from the post.
+   PR for the post body to name-drop `anc.dev/skill`. Otherwise omit `/skill` from the post.
 
 ### Coordinating in-flight plans (do NOT dual-file)
 
@@ -278,11 +278,11 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
   parent Q4, then re-superseded 2026-04-29 by a 24h push): **Wednesday 2026-04-29 PT for Thursday 2026-04-30 09:00 AM PT
   post.** Site cuts the same night, ideally after the CLI's `v0.2.0` tag has triggered the homebrew dispatch and the
   formula has updated AND the skill `v0.2.0` tag is published. Tag-cut sequence is: spec `v0.3.0` → CLI `v0.2.0` → skill
-  `v0.2.0` (steps 3a/3b) → site `release/launch` (with `install.json` re-pinned to skill v0.2.0 SHA) → site main deploy.
+  `v0.2.0` (steps 3a/3b) → site `release/launch` (with `skill.json` re-pinned to skill v0.2.0 SHA) → site main deploy.
   See central tracker § Release Versions and Order — SoT for v0.3.0 launch wave for the canonical ordered sequence.
 - **Q-SITE5: Skill-distribution cutover-ops sequencing.** Cache-purge runs AFTER `release/launch` merges and the
   production deploy completes. The skill-availability probe seed run (`gh workflow run skill-availability.yml`) runs
-  AFTER cache-purge confirms `/install.json` returns the correct headers from `anc.dev`. Codified in the Pre-launch
+  AFTER cache-purge confirms `/skill.json` returns the correct headers from `anc.dev`. Codified in the Pre-launch
   release PR checklist.
 
 ---
@@ -458,8 +458,8 @@ overclaiming," or "the spec contradicts itself at Y" comments land in the public
 - Modify: `content/check.md` — `/check` page copy.
 - Modify: `content/methodology.md` — methodology page.
 - Modify: `content/about.md` — about page.
-- Modify: `src/build/install.mjs` (if needed) — `buildInstallMarkdown` prose template (trust-model paragraph,
-  programmatic section). Voice register is documented in `docs/VOICE.md` `## Surface-Specific Notes`.
+- Modify: `src/build/skill.mjs` (if needed) — `buildSkillMarkdown` prose template (trust-model paragraph, programmatic
+  section). Voice register is documented in `docs/VOICE.md` `## Surface-Specific Notes`.
 - Modify: `src/build/scorecards-render.mjs` — methodology blurb in the leaderboard CTA.
 - Optional: `dist/og-image.png` — only re-generate if the post hook above the principles changes meaningfully (Gate 3
   spec-side already handled the spec-repo equivalent; site-side OG image was generated for v0 and only refreshed if the
@@ -528,16 +528,16 @@ works.
   to confirm the OG image and meta tags render.
 - **Failure handling:** any blocker (HTTPS error, page-load 5xx, broken nav, missing OG tag) blocks the post. Decide
   ship-without-fixing only if the issue is clearly cosmetic and limited in blast radius.
-- **Skill-distribution surfaces (`/install`, `/install.json`, `/install.md`):** included in the smoke pass post-cut.
-  Live verification of `curl -s https://anc.dev/install.json | jq -e '.source.commit | length == 40'` per the cutover
-  ops checklist.
+- **Skill-distribution surfaces (`/skill`, `/skill.json`, `/skill.md`):** included in the smoke pass post-cut. Live
+  verification of `curl -s https://anc.dev/skill.json | jq -e '.source.commit | length == 40'` per the cutover ops
+  checklist.
 
 **Test scenarios:**
 
 - Cold phone (no recent visits, cache cleared) loads the homepage in <2s on cellular.
 - `https://anc.dev/p1` through `/p7` all 200; HTML renders; theme toggle works; copy-buttons work.
-- `https://anc.dev/install` 200; per-host commands visible; copy-button works (light + dark mode).
-- `https://anc.dev/install.json` 200; `Content-Type: application/json`; JSON parseable; `source.commit` is 40-char hex.
+- `https://anc.dev/skill` 200; per-host commands visible; copy-button works (light + dark mode).
+- `https://anc.dev/skill.json` 200; `Content-Type: application/json`; JSON parseable; `source.commit` is 40-char hex.
 - OG-tag preview in a fresh-share text shows the correct image + title + description.
 
 **Verification:**
@@ -585,12 +585,14 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 6. **Squash-merge:** auto-merge fires. Production deploys to anc.dev via `deploy.yml`.
 7. **Skill-distribution cutover ops** (per the master plan's Unit 5 cutover sequence): a. `gh repo view
    brettdavies/agentnative-skill --json visibility -q .visibility` → confirm PUBLIC. b. Run `bun x playwright test
-   --project=install` against the live `anc.dev` URL. All four host clones must succeed via HTTPS now. Failure here is a
-   launch-block. c. Cache-purge `/install`, `/install.json`, `/install.md` via Cloudflare API (token in 1Password
-   `secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). Verify with `curl -sI
-   https://anc.dev/install.json | grep cf-cache-status` returns `MISS` on the first request after purge. d. Smoke-check
-   live: `curl -s https://anc.dev/install.json | jq -e '.source.commit | length == 40'`. Expect `true`. e. Seed daily
-   probe: `gh workflow run skill-availability.yml`. Confirm green run within 5 minutes.
+   --project=skill` against the live `anc.dev` URL. All four host clones must succeed via HTTPS now. Failure here is a
+   launch-block. c. Cache-purge `/skill`, `/skill.json`, `/skill.md` via Cloudflare API (token in 1Password
+   `secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). **One-time legacy eviction:** also purge
+   `/install`, `/install.json`, `/install.md` once on this first deploy after PR #44 — the bundle no longer lives at
+   those paths, but the CDN may still cache pre-split bundle responses. Verify with `curl -sI https://anc.dev/skill.json
+   | grep cf-cache-status` returns `MISS` on the first request after purge. d. Smoke-check live: `curl -s
+   https://anc.dev/skill.json | jq -e '.source.commit | length == 40'`. Expect `true`. e. Seed daily probe: `gh workflow
+   run skill-availability.yml`. Confirm green run within 5 minutes.
 8. **Cold-device prod smoke (U5 second pass):** phone on cellular hits `https://anc.dev/` and walks the same checklist.
 9. **Update central tracker:** record this entry in the Day-1 Status Log with the gates flipped to `done`. Commit as
    `chore: update launch tracker — pre-launch release cut`.
@@ -605,7 +607,7 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 **Verification:**
 
 - All gates flip to `done` in the central tracker.
-- Show HN post can name-drop `anc.dev/install` (skill-distribution shipped).
+- Show HN post can name-drop `anc.dev/skill` (skill-distribution shipped).
 
 **Acceptance:** Production is green; central tracker is updated; Brett approves the post body and the assignment moves
 to "post the post."
@@ -635,7 +637,7 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 - [ ] Apply diff from `dev` per `RELEASES.md` step 3. Either: (a) full reset (`git reset --hard origin/dev` then
   preserve only the path-filtered diff), or (b) cherry-pick by SHA. Repo precedent leans (a).
 - [ ] **Path-filter check:** `git diff main release/launch -- .github/ISSUE_TEMPLATE/` is non-empty (Gate 9).
-- [ ] **Path-filter check:** `git diff main release/launch -- src/data/install.json src/build/install.mjs
+- [ ] **Path-filter check:** `git diff main release/launch -- src/data/skill.json src/build/skill.mjs
   src/worker/headers.ts src/worker/index.ts` shows the skill-distribution PR diffs (Units 2–3 of the master plan).
 - [ ] **Optional drop:** drop `docs/VOICE.md` hunk from `f594a92` (per user direction — internal style guide).
 - [ ] **Verify no guarded paths leaked:** `git diff main release/launch -- docs/plans/ docs/solutions/
@@ -651,11 +653,12 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 
 ### Post-merge cutover (immediately after deploy lands)
 
-- [ ] `curl -s https://anc.dev/install.json | jq -e '.source.commit | length == 40'` returns `true`.
-- [ ] `curl -sI https://anc.dev/install.json | grep -i 'content-type: application/json'` matches.
-- [ ] `bun x playwright test --project=install` against `https://anc.dev/install` — all 4 host clones green.
-- [ ] **Cache-purge** `/install`, `/install.json`, `/install.md` via Cloudflare API. Use the 1Password token by name, DO
-  NOT echo the value.
+- [ ] `curl -s https://anc.dev/skill.json | jq -e '.source.commit | length == 40'` returns `true`.
+- [ ] `curl -sI https://anc.dev/skill.json | grep -i 'content-type: application/json'` matches.
+- [ ] `bun x playwright test --project=skill` against `https://anc.dev/skill` — all 4 host clones green.
+- [ ] **Cache-purge** `/skill`, `/skill.json`, `/skill.md` via Cloudflare API. Use the 1Password token by name, DO NOT
+  echo the value. **One-time legacy eviction:** also purge `/install`, `/install.json`, `/install.md` once on this first
+  deploy after PR #44 — bundle content moved off those paths but the CDN may still serve pre-split cached responses.
 - [ ] `gh workflow run skill-availability.yml` — seed first green probe run.
 - [ ] **Cold-device prod smoke** — phone on cellular hits anc.dev, walks every link, verifies OG-tag preview in a share.
 
@@ -675,14 +678,14 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 
 ## Risks & Mitigations
 
-| Risk                                                                                                                  | Mitigation                                                                                                                                                                                                                                                     |
-| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gate 8 batch-scoring blows up — too many missing scorecards, can't fill in time                                       | Fallback-row-only path (U2 decision option (b)). Trade coverage for credibility — skipped rows with reasons beat blank rows OR "we cherry-picked the working tools."                                                                                           |
-| Adversarial reviewer surfaces a load-bearing finding mid-week (something that requires a data change, not just prose) | Defer to v0.2.0 with a `[later]` note. Don't expand Gate 11 scope. Only ship if truly factually wrong.                                                                                                                                                         |
-| Cold-device verification reveals a Cloudflare cache / DNS / HTTPS issue Wednesday                                     | If reproducible, escalate immediately — Cloudflare's CN headers + custom-domain attach is tested but not invincible. Push the post by 24h if the fix is non-trivial.                                                                                           |
-| `release/launch` PR's CI fails on a guarded-path or stub-check edge case                                              | Read the failure carefully. The stub-check pattern is documented in `RELEASES.md` `### Why the stub` — common failures are: ci.yml's paths-ignore drift, guard-main-docs catching a docs commit. Resolve before merging. Do not bypass via admin.              |
-| Skill-distribution e2e fails post-cutover (Playwright `--project=install` red against live anc.dev)                   | Investigate IMMEDIATELY — the install URLs are user-facing on launch day. If the issue is the producer-repo public flip didn't propagate, retry. If it's a header issue (CN rewrite firing on `.json`), it's a Worker bug — patch and re-deploy before launch. |
-| User cherry-picks `docs/VOICE.md` into the release branch by accident                                                 | Path-filter check in the checklist catches it. If it slips through, that's an accepted outcome (per earlier user direction).                                                                                                                                   |
+| Risk                                                                                                                  | Mitigation                                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate 8 batch-scoring blows up — too many missing scorecards, can't fill in time                                       | Fallback-row-only path (U2 decision option (b)). Trade coverage for credibility — skipped rows with reasons beat blank rows OR "we cherry-picked the working tools."                                                                                                |
+| Adversarial reviewer surfaces a load-bearing finding mid-week (something that requires a data change, not just prose) | Defer to v0.2.0 with a `[later]` note. Don't expand Gate 11 scope. Only ship if truly factually wrong.                                                                                                                                                              |
+| Cold-device verification reveals a Cloudflare cache / DNS / HTTPS issue Wednesday                                     | If reproducible, escalate immediately — Cloudflare's CN headers + custom-domain attach is tested but not invincible. Push the post by 24h if the fix is non-trivial.                                                                                                |
+| `release/launch` PR's CI fails on a guarded-path or stub-check edge case                                              | Read the failure carefully. The stub-check pattern is documented in `RELEASES.md` `### Why the stub` — common failures are: ci.yml's paths-ignore drift, guard-main-docs catching a docs commit. Resolve before merging. Do not bypass via admin.                   |
+| Skill-distribution e2e fails post-cutover (Playwright `--project=skill` red against live anc.dev)                     | Investigate IMMEDIATELY — the skill bundle URLs are user-facing on launch day. If the issue is the producer-repo public flip didn't propagate, retry. If it's a header issue (CN rewrite firing on `.json`), it's a Worker bug — patch and re-deploy before launch. |
+| User cherry-picks `docs/VOICE.md` into the release branch by accident                                                 | Path-filter check in the checklist catches it. If it slips through, that's an accepted outcome (per earlier user direction).                                                                                                                                        |
 
 ---
 
@@ -691,7 +694,7 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 ```text
 src/
   build/
-    install.mjs            # MODIFY (red-team prose pass — only if findings warrant)
+    skill.mjs              # MODIFY (red-team prose pass — only if findings warrant)
     scorecards-render.mjs  # MODIFY (Gate 8 fallback rows; red-team methodology blurb)
   styles/
     site.css               # MODIFY (new .leaderboard-row--skipped class)
@@ -781,8 +784,8 @@ All `applied` items shipped via PR #48 (`feat/red-team-pass-launch-content`, squ
   RFC 2119**, and **Cloudflare's
   [Building a CLI for all of Cloudflare](https://blog.cloudflare.com/cf-cli-local-explorer)**
 - the 2026-04-13 [HN thread](https://news.ycombinator.com/item?id=47753689) — the actual external validation source from
-    the vault research archive that informed P3, P4, and P6 framing directly. Redirect promise softened to future tense;
-    numbered-list rendering bug fixed.
+  the vault research archive that informed P3, P4, and P6 framing directly. Redirect promise softened to future tense;
+  numbered-list rendering bug fixed.
 
 - **`methodology.md`**: explanatory paragraph added acknowledging the headline pass rate weighs MUST and SHOULD
   violations equally; readers pointed to the principles-met column for conformance. "Warn at most once" allowance for
@@ -799,8 +802,8 @@ edits:
   observable behavior with Rust as worked example. Strategic, not urgent.
 - **P5**: `--no-interactive` composition with `--force`/`--yes` (do you error or dry-run when neither is set + non-TTY
 - headless?); `read-write-distinction` MUST verifiability rewrite (currently subjective); flag-name prescription →
-    contract-first framing (`--dry-run` vs. `plan`/`apply` etc.); rollback → reconciliation framing in Anti-Patterns;
-    idempotency precision (state-equivalence vs. retry-safety).
+  contract-first framing (`--dry-run` vs. `plan`/`apply` etc.); rollback → reconciliation framing in Anti-Patterns;
+  idempotency precision (state-equivalence vs. retry-safety).
 
 - **P6**: `NO_COLOR` and `TERM=dumb` lumped together (no-color.org's "any non-empty value" semantics not surfaced);
   `--principle 6 .` example uses Rust-flavored anti-pattern phrasing; `jaq` vs `jq` in pipeline example (judgment call —
