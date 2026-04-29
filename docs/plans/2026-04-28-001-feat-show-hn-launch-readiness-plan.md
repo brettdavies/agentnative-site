@@ -29,15 +29,16 @@ Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~21h out).
   `d710ade feat(scoring): full anc100 leaderboard (96/96 clean) via patched docker pipeline (#40)`. The
   `.leaderboard-row--skipped` class was never written because zero rows are skipped — the U3 contingency design is
   retired.
-- **U4 — site-copy red-team pass (Gate 11):** in progress this session.
+- **U4 ✅ shipped — site-copy red-team pass (Gate 11)** — PR #48 squash `a71767a`, merged 2026-04-29 20:35 UTC. 8
+  parallel adversarial reviewers across 7 principle pages + 1 supporting-pages dispatch; 12 files; +191/-117. Tier 3
+  deferrals captured in the Red-Team Log subsection of this plan.
 - **U5 — cold-device smoke (Gate 12):**
 - Pre-cut staging pass: ✅ confirmed on phone (SVG icons render correctly in iOS Safari, theme toggle works, nav links
   resolve). Did not block on the missing-icon regression that PR #46 fixed.
 - Post-cut prod pass: pending — runs Thu morning before 09:00 PT after `release/launch` deploys.
 - **U6 — `release/launch` PR cut + cutover ops:** blocked on upstream chain. Central-tracker step 1 (spec v0.3.0) done;
   steps 2 (CLI v0.2.0), 3a/3b (skill v0.2.0) still pending. U6 cannot execute until skill v0.2.0 tag is live so
-  `src/data/skill.json` can be re-pinned (note: file is now `skill.json`, not `install.json` — Pre-launch Release PR
-  Checklist below was written before the PR #44 split and uses the old name in places; the substance carries).
+  `src/data/skill.json` can be re-pinned.
 - **Gate 9 — issue templates on `main`:** still passive-clear via U6's full-`dev` cherry-pick. Confirmed
   `.github/ISSUE_TEMPLATE/{config.yml,site-bug.yml}` exist on `dev` and not on `main`.
 
