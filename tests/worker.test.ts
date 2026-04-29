@@ -138,11 +138,11 @@ describe('applyHeaders — markdown branch', () => {
 });
 
 describe('applyHeaders — JSON branch (skill-distribution)', () => {
-  test('/install.json: application/json + CORS + noindex + short cache + no Link', () => {
+  test('/skill.json: application/json + CORS + noindex + short cache + no Link', () => {
     const res = applyHeaders(new Response('{}'), {
-      request: req('https://anc.dev/install.json'),
+      request: req('https://anc.dev/skill.json'),
       servedMarkdown: false,
-      pathname: '/install.json',
+      pathname: '/skill.json',
     });
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -153,7 +153,7 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
     expect(res.headers.get('X-Llms-Txt')).toBeNull();
   });
 
-  test('synthetic /foo.json also matches the JSON-extension branch (forward-compat for v2 /skill/<name>.json)', () => {
+  test('synthetic /foo.json also matches the JSON-extension branch (forward-compat for any /<slug>.json)', () => {
     const res = applyHeaders(new Response('{}'), {
       request: req('https://anc.dev/foo.json'),
       servedMarkdown: false,
@@ -284,20 +284,20 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     expect(res.headers.get('Link')).toContain('</p3.md>');
   });
 
-  test('/install.json with Accept: text/markdown returns the JSON, not a 404 from CN rewrite', async () => {
-    const env = makeEnv({ '/install.json': '{"schema_version":1}' });
-    const res = await worker.fetch(req('https://anc.dev/install.json', 'text/markdown'), env);
-    // CN rewrite must skip .json paths so the asset lookup stays on /install.json.
-    expect(res.headers.get('X-Echo-Path')).toBe('/install.json');
+  test('/skill.json with Accept: text/markdown returns the JSON, not a 404 from CN rewrite', async () => {
+    const env = makeEnv({ '/skill.json': '{"schema_version":1}' });
+    const res = await worker.fetch(req('https://anc.dev/skill.json', 'text/markdown'), env);
+    // CN rewrite must skip .json paths so the asset lookup stays on /skill.json.
+    expect(res.headers.get('X-Echo-Path')).toBe('/skill.json');
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(await res.text()).toBe('{"schema_version":1}');
   });
 
-  test('/install.json no Accept header: JSON branch headers applied', async () => {
-    const env = makeEnv({ '/install.json': '{}' });
-    const res = await worker.fetch(req('https://anc.dev/install.json'), env);
-    expect(res.headers.get('X-Echo-Path')).toBe('/install.json');
+  test('/skill.json no Accept header: JSON branch headers applied', async () => {
+    const env = makeEnv({ '/skill.json': '{}' });
+    const res = await worker.fetch(req('https://anc.dev/skill.json'), env);
+    expect(res.headers.get('X-Echo-Path')).toBe('/skill.json');
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });

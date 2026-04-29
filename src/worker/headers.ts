@@ -18,8 +18,8 @@
 //                          Cache-Control: public, max-age=300, s-maxage=86400,
 //                                         stale-while-revalidate=60
 //                          (No Link rel=alternate, no X-Llms-Txt — JSON has
-//                          no markdown twin. Detected by URL extension so a
-//                          future /skill/<name>.json reuses the branch.)
+//                          no markdown twin. Detected by URL extension so any
+//                          /<slug>.json endpoint reuses the branch.)
 //
 //   Hashed assets          Cache-Control: public, max-age=31536000, immutable
 //   (/fonts/*, /og-image.png)

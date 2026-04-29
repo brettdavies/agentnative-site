@@ -1,14 +1,14 @@
-// Skill-distribution build emitter — vendors src/data/install.json into
-// dist/install.json (canonical machine surface), dist/install.html (human
-// page), and dist/install.md (markdown twin for content-negotiated agents).
+// Skill-distribution build emitter — vendors src/data/skill.json into
+// dist/skill.json (canonical machine surface), dist/skill.html (human
+// page), and dist/skill.md (markdown twin for content-negotiated agents).
 //
 // Contract (docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md
-// §"/install.json shape"):
+// §"/install.json shape", relocated to /skill.json by 2026-04-28-003):
 //
-//   - install.json IS the source of truth. The emitter validates and copies;
+//   - skill.json IS the source of truth. The emitter validates and copies;
 //     it does not synthesize fields. verify.expected and source.commit are
 //     hand-co-edited at release time.
-//   - dist/install.json is byte-stable across runs: keys sorted, two-space
+//   - dist/skill.json is byte-stable across runs: keys sorted, two-space
 //     indent, trailing newline.
 //   - Per-host commands MUST start with `git clone --depth 1` and terminate
 //     with an explicit destination path — defense for the agentnative-skill /
@@ -34,20 +34,20 @@ const REQUIRED_TOP_LEVEL = [
   'verify',
   'update',
   'uninstall',
-  'install_page_html',
+  'skill_page_html',
 ];
 const REQUIRED_SOURCE = ['type', 'url', 'commit'];
 const REQUIRED_VERIFY = ['command', 'expected', 'semantics'];
 
 /**
- * Read + validate src/data/install.json. Fail-fast on missing/malformed
+ * Read + validate src/data/skill.json. Fail-fast on missing/malformed
  * fields — this is the canonical machine surface and a typo here ships to
- * every agent that hits /install.json.
+ * every agent that hits /skill.json.
  *
- * @param {string} dataPath absolute path to src/data/install.json
+ * @param {string} dataPath absolute path to src/data/skill.json
  * @returns {Promise<object>} parsed manifest
  */
-export async function loadInstallData(dataPath) {
+export async function loadSkillData(dataPath) {
   const raw = await readFile(dataPath, 'utf8');
   let data;
   try {
@@ -114,16 +114,16 @@ export async function loadInstallData(dataPath) {
 }
 
 /**
- * Emit dist/install.json with stable byte output. Sorted keys + two-space
+ * Emit dist/skill.json with stable byte output. Sorted keys + two-space
  * indent + trailing newline so two builds against the same input produce
  * byte-identical artifacts (regression hashes don't move on a no-op rebuild).
  *
- * @param {object} data validated manifest from loadInstallData()
+ * @param {object} data validated manifest from loadSkillData()
  * @param {string} distDir absolute path to dist/
  */
-export async function emitInstallJson(data, distDir) {
+export async function emitSkillJson(data, distDir) {
   const serialized = `${JSON.stringify(sortKeys(data), null, 2)}\n`;
-  await writeFile(join(distDir, 'install.json'), serialized);
+  await writeFile(join(distDir, 'skill.json'), serialized);
 }
 
 function sortKeys(value) {
@@ -139,7 +139,7 @@ function sortKeys(value) {
 }
 
 // -------------------------------------------------------------------
-// HTML + markdown twin — templated from the same install.json
+// HTML + markdown twin — templated from the same skill.json
 // -------------------------------------------------------------------
 
 const HOST_LABELS = {
@@ -154,19 +154,19 @@ function hostLabel(host) {
 }
 
 /**
- * Build the markdown body for /install. The same body is written to
- * dist/install.md (twin for `Accept: text/markdown` agents) AND fed through
- * the unified+rehype pipeline to produce dist/install.html. Drift between
+ * Build the markdown body for /skill. The same body is written to
+ * dist/skill.md (twin for `Accept: text/markdown` agents) AND fed through
+ * the unified+rehype pipeline to produce dist/skill.html. Drift between
  * the JSON manifest, the HTML page, and the markdown twin is structurally
  * impossible because all three derive from data.install.
  *
  * Voice: trust-model paragraph is VOICE.md Register 1 (third-person, failure
  * mode first). Command sections are Register 2 imperative.
  *
- * @param {object} data validated install manifest
+ * @param {object} data validated skill manifest
  * @returns {string} markdown body
  */
-export function buildInstallMarkdown(data) {
+export function buildSkillMarkdown(data) {
   const hosts = Object.keys(data.install);
   const lines = [];
 
@@ -175,7 +175,7 @@ export function buildInstallMarkdown(data) {
   lines.push(`> ${data.description}`);
   lines.push('');
   lines.push(
-    'One skill, one repo. Choose your host below, run the command, the agent picks up `SKILL.md` on next launch. The same machine-readable manifest is at [`/install.json`](/install.json).',
+    'One skill, one repo. Choose your host below, run the command, the agent picks up `SKILL.md` on next launch. The same machine-readable manifest is at [`/skill.json`](/skill.json).',
   );
   lines.push('');
 
@@ -231,7 +231,7 @@ export function buildInstallMarkdown(data) {
   lines.push('## Trust model');
   lines.push('');
   lines.push(
-    "Piping a remote shell script into the local shell is the failure mode this install path rejects. Installation runs `git clone` against a content-addressed commit on a specific repository — the scripts are open-source and visible at the producer repo before they execute on the user's machine. The site advertises a single upstream commit SHA in `/install.json`; agents that care about provenance can verify it.",
+    "Piping a remote shell script into the local shell is the failure mode this install path rejects. Installation runs `git clone` against a content-addressed commit on a specific repository — the scripts are open-source and visible at the producer repo before they execute on the user's machine. The site advertises a single upstream commit SHA in `/skill.json`; agents that care about provenance can verify it.",
   );
   lines.push('');
 
@@ -251,7 +251,7 @@ export function buildInstallMarkdown(data) {
   lines.push('## Programmatic');
   lines.push('');
   lines.push(
-    'Agents fetch [`/install.json`](/install.json) for the canonical manifest — `Content-Type: application/json`, `Accept: text/markdown` returns the JSON unchanged.',
+    'Agents fetch [`/skill.json`](/skill.json) for the canonical manifest — `Content-Type: application/json`, `Accept: text/markdown` returns the JSON unchanged.',
   );
   lines.push('');
 
@@ -259,23 +259,23 @@ export function buildInstallMarkdown(data) {
 }
 
 /**
- * Render the install markdown to HTML via the existing unified+rehype pipeline.
+ * Render the skill markdown to HTML via the existing unified+rehype pipeline.
  *
- * @param {object} data validated install manifest
+ * @param {object} data validated skill manifest
  * @returns {Promise<{ markdown: string, html: string }>}
  */
-export async function renderInstallPage(data) {
-  const markdown = buildInstallMarkdown(data);
+export async function renderSkillPage(data) {
+  const markdown = buildSkillMarkdown(data);
   const html = await renderMarkdown(markdown);
   return { markdown, html };
 }
 
 /**
- * Write dist/install.md from a prebuilt markdown body.
+ * Write dist/skill.md from a prebuilt markdown body.
  *
  * @param {string} markdown
  * @param {string} distDir
  */
-export async function emitInstallMarkdown(markdown, distDir) {
-  await writeFile(join(distDir, 'install.md'), markdown);
+export async function emitSkillMarkdown(markdown, distDir) {
+  await writeFile(join(distDir, 'skill.md'), markdown);
 }

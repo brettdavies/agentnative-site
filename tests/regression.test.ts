@@ -121,16 +121,16 @@ describe('regression #3 — markdown byte-equivalence', () => {
   });
 });
 
-describe('regression #5 — /install.json (skill-distribution canonical surface)', () => {
-  test('dist/install.json exists and parses', async () => {
-    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+describe('regression #5 — /skill.json (skill-distribution canonical surface)', () => {
+  test('dist/skill.json exists and parses', async () => {
+    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
     const parsed = JSON.parse(raw);
     expect(parsed).toBeDefined();
   });
 
-  test('dist/install.json source.commit matches src/data/install.json', async () => {
-    const distRaw = await readFile(join(DIST, 'install.json'), 'utf8');
-    const sourceRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'install.json'), 'utf8');
+  test('dist/skill.json source.commit matches src/data/skill.json', async () => {
+    const distRaw = await readFile(join(DIST, 'skill.json'), 'utf8');
+    const sourceRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'skill.json'), 'utf8');
     const dist = JSON.parse(distRaw);
     const source = JSON.parse(sourceRaw);
     expect(dist.source.commit).toBe(source.source.commit);
@@ -139,14 +139,14 @@ describe('regression #5 — /install.json (skill-distribution canonical surface)
     expect(dist.verify.expected).toBe(dist.source.commit);
   });
 
-  test('dist/install.json source.commit is 40-char lowercase hex', async () => {
-    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+  test('dist/skill.json source.commit is 40-char lowercase hex', async () => {
+    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
     const parsed = JSON.parse(raw);
     expect(parsed.source.commit).toMatch(/^[0-9a-f]{40}$/);
   });
 
-  test('dist/install.json has every required key', async () => {
-    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+  test('dist/skill.json has every required key', async () => {
+    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
     const parsed = JSON.parse(raw);
     for (const key of [
       'schema_version',
@@ -161,15 +161,15 @@ describe('regression #5 — /install.json (skill-distribution canonical surface)
       'verify',
       'update',
       'uninstall',
-      'install_page_html',
+      'skill_page_html',
     ]) {
       expect(parsed).toHaveProperty(key);
     }
     expect(Object.keys(parsed.install).length).toBeGreaterThan(0);
   });
 
-  test('dist/install.json is byte-stable: keys sorted, two-space indent, trailing newline', async () => {
-    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+  test('dist/skill.json is byte-stable: keys sorted, two-space indent, trailing newline', async () => {
+    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
     expect(raw.endsWith('\n')).toBe(true);
     expect(raw).toContain('  "schema_version"');
     // Top-level keys come out in alphabetical order.
@@ -178,64 +178,72 @@ describe('regression #5 — /install.json (skill-distribution canonical surface)
     expect(topLevelKeys).toEqual(sorted);
   });
 
-  test('dist/install.html and dist/install.md exist', async () => {
-    const html = await readFile(join(DIST, 'install.html'), 'utf8');
-    const md = await readFile(join(DIST, 'install.md'), 'utf8');
+  test('dist/skill.html and dist/skill.md exist', async () => {
+    const html = await readFile(join(DIST, 'skill.html'), 'utf8');
+    const md = await readFile(join(DIST, 'skill.md'), 'utf8');
     expect(html).toContain('<h1');
     expect(md).toMatch(/^#\s+/);
   });
 
-  test('every install.<host> command appears byte-for-byte in install.md', async () => {
-    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+  test('every install.<host> command appears byte-for-byte in skill.md', async () => {
+    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
     const parsed = JSON.parse(raw);
-    const md = await readFile(join(DIST, 'install.md'), 'utf8');
+    const md = await readFile(join(DIST, 'skill.md'), 'utf8');
     for (const [host, command] of Object.entries(parsed.install) as [string, string][]) {
       expect({ host, match: md.includes(command) }).toEqual({ host, match: true });
     }
   });
 
-  test('every install.<host> command survives Shiki tokenization in install.html (text content)', async () => {
+  test('every install.<host> command survives Shiki tokenization in skill.html (text content)', async () => {
     // Shiki wraps each token in its own <span>, so the raw HTML never holds
     // the contiguous command. Strip tags and decode &#x2F; (the only entity
     // the rendered command produces) to recover the agent-readable text.
-    const raw = await readFile(join(DIST, 'install.json'), 'utf8');
+    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
     const parsed = JSON.parse(raw);
-    const html = await readFile(join(DIST, 'install.html'), 'utf8');
+    const html = await readFile(join(DIST, 'skill.html'), 'utf8');
     const text = html.replace(/<[^>]+>/g, '').replace(/&#x2F;/g, '/');
     for (const [host, command] of Object.entries(parsed.install) as [string, string][]) {
       expect({ host, match: text.includes(command) }).toEqual({ host, match: true });
     }
   });
 
-  test('install.html highlights the canonical command in a code block', async () => {
-    const html = await readFile(join(DIST, 'install.html'), 'utf8');
+  test('skill.html highlights the canonical command in a code block', async () => {
+    const html = await readFile(join(DIST, 'skill.html'), 'utf8');
     // Shiki wraps code blocks in <pre class="shiki ..."> with a <code> child.
     expect(html).toMatch(/<pre[^>]*class="[^"]*shiki/);
     expect(html).toContain('agentnative-skill.git');
   });
 
-  test('sitemap.xml contains /install', async () => {
+  test('sitemap.xml contains /skill', async () => {
     const sitemap = await readFile(join(DIST, 'sitemap.xml'), 'utf8');
-    expect(sitemap).toContain('/install</loc>');
+    expect(sitemap).toContain('/skill</loc>');
   });
 
-  test('sitemap.xml does NOT contain /install.json (noindex)', async () => {
+  test('sitemap.xml does NOT contain /skill.json (noindex)', async () => {
     const sitemap = await readFile(join(DIST, 'sitemap.xml'), 'utf8');
-    expect(sitemap).not.toContain('/install.json</loc>');
+    expect(sitemap).not.toContain('/skill.json</loc>');
   });
 
-  test('llms.txt contains /install.md and /install.json links', async () => {
+  // 404 contract — `/install.json` was the v1 location. After the
+  // 2026-04-28-003 split, the asset must NOT exist; Cloudflare's
+  // not_found_handling: "404-page" returns 404 from asset absence.
+  test('dist/install.json does NOT exist (404 contract via asset absence)', async () => {
+    const path = join(DIST, 'install.json');
+    await expect(readFile(path, 'utf8')).rejects.toThrow(/ENOENT/);
+  });
+
+  test('llms.txt contains /skill.md and /skill.json links under ## Skill', async () => {
     const llms = await readFile(join(DIST, 'llms.txt'), 'utf8');
-    expect(llms).toContain('## Install');
-    expect(llms).toMatch(/\/install\.md\)/);
-    expect(llms).toMatch(/\/install\.json\)/);
+    expect(llms).toContain('## Skill');
+    expect(llms).toMatch(/\/skill\.md\)/);
+    expect(llms).toMatch(/\/skill\.json\)/);
   });
 
-  test('llms-full.txt contains the install section', async () => {
+  test('llms-full.txt contains the skill section', async () => {
     const full = await readFile(join(DIST, 'llms-full.txt'), 'utf8');
     expect(full).toContain('# Install agent-native-cli');
-    expect(full).toContain('Source: https://anc.dev/install');
-    expect(full).toContain('Canonical-Markdown: https://anc.dev/install.md');
+    expect(full).toContain('Source: https://anc.dev/skill');
+    expect(full).toContain('Canonical-Markdown: https://anc.dev/skill.md');
   });
 });
 

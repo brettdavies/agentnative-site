@@ -107,8 +107,8 @@ Code fences name the language.
 ### Principle page (`content/principles/p<n>-...md`)
 
 Five-section shape, locked by
-[`principles/AGENTS.md`](~/obsidian-vault/Projects/brettdavies-agentnative/principles/AGENTS.md): Definition, Why Agents
-Need It, Requirements, Evidence, Anti-Patterns. No intro paragraph above the Definition — the anchor text is the
+[`principles/AGENTS.md`](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md): Definition, Why
+Agents Need It, Requirements, Evidence, Anti-Patterns. No intro paragraph above the Definition — the anchor text is the
 summary. Link-text convention for templates: the path itself (`templates/output-format.rs`) or the flag
 (`--no-interactive`), never "this pattern" or "the reference."
 
