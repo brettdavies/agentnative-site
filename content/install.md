@@ -10,8 +10,11 @@ binary or a project directory.
 brew install brettdavies/tap/agentnative
 ```
 
-The tap publishes signed bottles for macOS (Intel + Apple Silicon) and Linux (x86_64 + arm64). `brew upgrade
-brettdavies/tap/agentnative` updates in place.
+The tap publishes signed bottles for macOS (Intel + Apple Silicon) and Linux (x86_64 + arm64). To update in place:
+
+```bash
+brew upgrade brettdavies/tap/agentnative
+```
 
 ## Cargo
 
@@ -19,7 +22,11 @@ brettdavies/tap/agentnative` updates in place.
 cargo install agentnative
 ```
 
-For a prebuilt binary without compiling from source: `cargo binstall agentnative`.
+For a prebuilt binary without compiling from source:
+
+```bash
+cargo binstall agentnative
+```
 
 ## GitHub Releases
 

@@ -45,7 +45,7 @@ import {
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
-import { escHtml, parseFilename, sortedGlob } from './util.mjs';
+import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -140,12 +140,14 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
     }
   }
 
-  // 4. sha256(dist/p<n>.md) === sha256(content/principles/p<n>-*.md).
+  // 4. dist/p<n>.md == absolutifyMarkdownLinks(content/principles/p<n>-*.md).
+  // Twin-source equivalence post-link-rewrite: site-relative links in source
+  // become absolute https://anc.dev/... in the twin, but no other bytes drift.
   for (const { n, sourcePath } of principleSources) {
-    const distBuf = await readFile(join(distDir, `p${n}.md`));
-    const srcBuf = await readFile(sourcePath);
-    if (sha256(distBuf) !== sha256(srcBuf)) {
-      throw new Error(`invariant: dist/p${n}.md bytes do not match source ${sourcePath}`);
+    const distContent = await readFile(join(distDir, `p${n}.md`), 'utf8');
+    const sourceContent = await readFile(sourcePath, 'utf8');
+    if (distContent !== absolutifyMarkdownLinks(sourceContent)) {
+      throw new Error(`invariant: dist/p${n}.md does not match absolutified ${sourcePath}`);
     }
   }
 }
@@ -183,8 +185,10 @@ export async function build() {
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 
-    // 5. Markdown twin — byte-equivalent copy.
-    await copyFile(file, join(DIST_DIR, `p${n}.md`));
+    // 5. Markdown twin — authored bytes with site-relative links absolutified
+    // so `Accept: text/markdown` agents fetching /p<n>.md get a self-contained
+    // document. Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
+    await writeFile(join(DIST_DIR, `p${n}.md`), absolutifyMarkdownLinks(source));
 
     const shortDesc = extractDefinitionParagraph(source);
     principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
@@ -222,7 +226,7 @@ export async function build() {
     ...principles.map((p) => `- [${p.title}](/p${p.n}) — ${p.shortDesc}`),
     '',
   ];
-  await writeFile(join(DIST_DIR, 'index.md'), indexMdLines.join('\n'));
+  await writeFile(join(DIST_DIR, 'index.md'), absolutifyMarkdownLinks(indexMdLines.join('\n')));
 
   // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
   const subPages = [
@@ -249,7 +253,7 @@ export async function build() {
         themeInitJs: themeInit,
       }),
     );
-    await copyFile(path, join(DIST_DIR, `${name}.md`));
+    await writeFile(join(DIST_DIR, `${name}.md`), absolutifyMarkdownLinks(source));
     subPageData.push({ name, source, title });
   }
 
@@ -281,7 +285,7 @@ export async function build() {
       extraScripts: ['/js/leaderboard.js'],
     }),
   );
-  await writeFile(join(DIST_DIR, 'scorecards.md'), buildLeaderboardMarkdown(leaderboard));
+  await writeFile(join(DIST_DIR, 'scorecards.md'), absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)));
 
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
   await ensureDir(join(DIST_DIR, 'score'));
@@ -314,7 +318,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version),
+      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version)),
     );
     scorecardPaths.push(`/score/${tool.name}`);
   }
@@ -333,7 +337,7 @@ export async function build() {
       themeInitJs: themeInit,
     }),
   );
-  await writeFile(join(DIST_DIR, 'coverage.md'), coverageMarkdown);
+  await writeFile(join(DIST_DIR, 'coverage.md'), absolutifyMarkdownLinks(coverageMarkdown));
 
   // 8c. /skill.json + /skill + /skill.md — skill-distribution surface.
   // The same manifest is emitted as canonical JSON, rendered HTML (via the
@@ -352,7 +356,7 @@ export async function build() {
       themeInitJs: themeInit,
     }),
   );
-  await emitSkillMarkdown(skillMarkdown, DIST_DIR);
+  await emitSkillMarkdown(absolutifyMarkdownLinks(skillMarkdown), DIST_DIR);
 
   // 9. llms.txt + llms-full.txt (includes scorecard + skill sections).
   const llmsIndex = buildLlmsIndex({
@@ -371,36 +375,39 @@ export async function build() {
   });
   await writeFile(join(DIST_DIR, 'llms.txt'), llmsIndex);
 
+  // llms-full.txt embeds each page's markdown body verbatim. Apply the same
+  // .md-twin absolutification policy so site-relative links resolve when an
+  // agent fetches /llms-full.txt directly.
   const llmsFull = buildLlmsFull({
     sections: [
-      { title: introTitle, body: introSource, htmlPath: '/', mdPath: '/index.md' },
+      { title: introTitle, body: absolutifyMarkdownLinks(introSource), htmlPath: '/', mdPath: '/index.md' },
       ...principles.map((p) => ({
         title: p.title,
-        body: p.source,
+        body: absolutifyMarkdownLinks(p.source),
         htmlPath: `/p${p.n}`,
         mdPath: `/p${p.n}.md`,
       })),
       ...subPageData.map((s) => ({
         title: s.title,
-        body: s.source,
+        body: absolutifyMarkdownLinks(s.source),
         htmlPath: `/${s.name}`,
         mdPath: `/${s.name}.md`,
       })),
       {
         title: 'ANC 100 — Agent-Native CLI Leaderboard',
-        body: buildLeaderboardMarkdown(leaderboard),
+        body: absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)),
         htmlPath: '/scorecards',
         mdPath: '/scorecards.md',
       },
       {
         title: 'Spec Coverage Matrix',
-        body: coverageMarkdown,
+        body: absolutifyMarkdownLinks(coverageMarkdown),
         htmlPath: '/coverage',
         mdPath: '/coverage.md',
       },
       {
         title: `Install ${skillData.name}`,
-        body: skillMarkdown,
+        body: absolutifyMarkdownLinks(skillMarkdown),
         htmlPath: '/skill',
         mdPath: '/skill.md',
       },

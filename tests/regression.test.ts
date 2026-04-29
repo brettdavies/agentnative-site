@@ -109,16 +109,36 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
   });
 });
 
-describe('regression #3 — markdown byte-equivalence', () => {
+describe('regression #3 — markdown twin reflects source with site-relative links absolutified', () => {
   test.each(
     Array.from({ length: 7 }, (_, i) => {
       const n = i + 1;
       return [n, `${LOCKED_SLUGS[i]}.md`] as const;
     }),
-  )('sha256(dist/p%s.md) == sha256(content/principles/%s)', async (n, sourceName) => {
-    const distHash = await sha256OfFile(join(DIST, `p${n}.md`));
-    const sourceHash = await sha256OfFile(join(CONTENT, 'principles', sourceName));
-    expect(distHash).toBe(sourceHash);
+  )('dist/p%s.md == absolutifyMarkdownLinks(content/principles/%s)', async (n, sourceName) => {
+    const { absolutifyMarkdownLinks } = await import('../src/build/util.mjs');
+    const distContent = await readFile(join(DIST, `p${n}.md`), 'utf8');
+    const sourceContent = await readFile(join(CONTENT, 'principles', sourceName), 'utf8');
+    expect(distContent).toBe(absolutifyMarkdownLinks(sourceContent));
+  });
+
+  test('absolutification idempotency: re-applying the transform is a no-op', async () => {
+    const { absolutifyMarkdownLinks } = await import('../src/build/util.mjs');
+    const distContent = await readFile(join(DIST, 'p1.md'), 'utf8');
+    expect(absolutifyMarkdownLinks(distContent)).toBe(distContent);
+  });
+
+  test('every dist/*.md page emits absolute https://anc.dev/ URLs for site-internal links', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const files = (await readdir(DIST)).filter((f) => f.endsWith('.md'));
+    for (const file of files) {
+      const content = await readFile(join(DIST, file), 'utf8');
+      // Markdown link target starting with `/` (and not `//`) is the bug
+      // shape: an unresolved site-relative URL in an emitted twin. Image
+      // links match too via the optional `!` prefix.
+      const matches = content.match(/!?\]\(\s*\/[^)\s/]/g) ?? [];
+      expect({ file, relativeMarkdownLinks: matches }).toEqual({ file, relativeMarkdownLinks: [] });
+    }
   });
 });
 
