@@ -571,9 +571,7 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   if (score >= BADGE_FLOOR) {
     lines.push('## Embed the badge');
     lines.push('');
-    lines.push(
-      `This score (${pct}%) clears the [badge floor](/badge) (${floorPct}%). Copy this into your README:`,
-    );
+    lines.push(`This score (${pct}%) clears the [badge floor](/badge) (${floorPct}%). Copy this into your README:`);
     lines.push('');
     lines.push('```markdown');
     lines.push(buildEmbedMarkdown(tool.name));
