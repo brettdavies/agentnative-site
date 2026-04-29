@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
 import { renderMarkdown } from '../src/build/render.mjs';
 import {
   computeLayerScore,
@@ -14,7 +15,7 @@ import {
 } from '../src/build/scorecards.mjs';
 import { buildLeaderboardBody, buildScorecardBody, renderAudienceBanner } from '../src/build/scorecards-render.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { escHtml, parseFilename, sortedGlob } from '../src/build/util.mjs';
+import { BADGE_FLOOR, escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -959,5 +960,235 @@ describe('loadSkillData — fail-fast validation', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// -------------------------------------------------------------------
+// badge-maker rendering — color thresholds, label format, SVG output
+// -------------------------------------------------------------------
+
+describe('badgeColor — threshold mapping', () => {
+  test('100% → brightgreen', () => {
+    expect(badgeColor(100)).toBe('brightgreen');
+  });
+
+  test('80% (floor) → brightgreen — brightline at the eligibility floor', () => {
+    expect(badgeColor(80)).toBe('brightgreen');
+  });
+
+  test('79% → yellow — one point below floor flips color', () => {
+    expect(badgeColor(79)).toBe('yellow');
+  });
+
+  test('60% → yellow — bottom of mid band', () => {
+    expect(badgeColor(60)).toBe('yellow');
+  });
+
+  test('59% → red', () => {
+    expect(badgeColor(59)).toBe('red');
+  });
+
+  test('0% → red', () => {
+    expect(badgeColor(0)).toBe('red');
+  });
+});
+
+describe('badgeFormat — label, message, color contract', () => {
+  test('label cites major.minor of spec version (patch dropped)', () => {
+    const f = badgeFormat(0.91, '0.3.0');
+    expect(f.label).toBe('agent-native v0.3');
+  });
+
+  test('label drops a non-zero patch component too', () => {
+    const f = badgeFormat(0.91, '1.4.7');
+    expect(f.label).toBe('agent-native v1.4');
+  });
+
+  test('default specVersion equals exported SPEC_VERSION constant', () => {
+    const f = badgeFormat(0.91);
+    const expected = SPEC_VERSION.split('.').slice(0, 2).join('.');
+    expect(f.label).toBe(`agent-native v${expected}`);
+  });
+
+  test('message rounds the 0–1 score to integer percent', () => {
+    expect(badgeFormat(0.916).message).toBe('92%');
+    expect(badgeFormat(0.9149).message).toBe('91%');
+    expect(badgeFormat(1.0).message).toBe('100%');
+    expect(badgeFormat(0).message).toBe('0%');
+  });
+
+  test('color follows badgeColor of the rounded percent — green at floor', () => {
+    expect(badgeFormat(BADGE_FLOOR).color).toBe('brightgreen');
+    expect(badgeFormat(0.79).color).toBe('yellow');
+    expect(badgeFormat(0.59).color).toBe('red');
+  });
+
+  test('style is flat — visually identical to shields.io defaults', () => {
+    expect(badgeFormat(0.91).style).toBe('flat');
+  });
+});
+
+describe('renderBadgeSvg — SVG output', () => {
+  test('emits SVG with declared label and message in title', () => {
+    const svg = renderBadgeSvg(0.91, '0.3.0');
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('agent-native v0.3');
+    expect(svg).toContain('91%');
+    expect(svg).toContain('</svg>');
+  });
+
+  test('100% badge uses brightgreen fill (#4c1)', () => {
+    const svg = renderBadgeSvg(1.0, '0.3.0');
+    expect(svg).toContain('#4c1');
+  });
+
+  test('below-floor badge does NOT use brightgreen — visual signal stays honest on regression', () => {
+    const svg = renderBadgeSvg(0.5, '0.3.0');
+    expect(svg).not.toContain('#4c1');
+  });
+});
+
+// -------------------------------------------------------------------
+// Scorecard embed snippet (surface #1 of the badge plan).
+// Above-floor: copy-paste snippet + SVG preview. Below-floor: hint
+// pointing at /badge and the top-issues section.
+// -------------------------------------------------------------------
+
+import { buildEmbedMarkdown } from '../src/build/scorecards-render.mjs';
+
+describe('buildEmbedMarkdown — README embed shape', () => {
+  test('emits standard agent-native markdown link wrapping the SVG', () => {
+    const md = buildEmbedMarkdown('rg');
+    expect(md).toBe('[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)');
+  });
+
+  test('honors PUBLIC_BASE_URL via resolveBaseUrl (explicit override)', () => {
+    const md = buildEmbedMarkdown('rg', 'https://staging.example.com');
+    expect(md).toBe(
+      '[![agent-native](https://staging.example.com/badge/rg.svg)](https://staging.example.com/score/rg)',
+    );
+  });
+});
+
+describe('buildScorecardBody — embed-snippet gating', () => {
+  function tool(name = 'rg') {
+    return {
+      name,
+      binary: name,
+      description: 'fast grep',
+      tier: 'workhorse',
+      language: 'rust',
+      creator: 'BurntSushi',
+      install: `brew install ${name}`,
+      repo: `BurntSushi/${name}`,
+    };
+  }
+
+  function sc(passes: number, fails: number) {
+    const results: any[] = [];
+    for (let i = 0; i < passes; i++) {
+      results.push({
+        id: `p${i}`,
+        label: `pass${i}`,
+        group: 'P1',
+        layer: 'behavioral',
+        status: 'pass',
+        evidence: null,
+      });
+    }
+    for (let i = 0; i < fails; i++) {
+      results.push({
+        id: `f${i}`,
+        label: `fail${i}`,
+        group: 'P2',
+        layer: 'behavioral',
+        status: 'fail',
+        evidence: 'no flag',
+      });
+    }
+    return {
+      schema_version: '1.3',
+      summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
+      results,
+    };
+  }
+
+  test('eligible (score=1.0) renders copy-paste snippet + SVG preview', () => {
+    const html = buildScorecardBody(tool('rg'), sc(10, 0), [], { met: 7, total: 7, details: [] }, 1.0);
+    expect(html).toContain('scorecard-embed--eligible');
+    expect(html).not.toContain('scorecard-embed--below');
+    expect(html).toContain('badge/rg.svg');
+    expect(html).toContain('clears the <a href="/badge">badge floor</a>');
+    // Live preview img so the copyable shape and what it actually looks like sit side-by-side.
+    expect(html).toContain('<img src="/badge/rg.svg"');
+    expect(html).toContain('alt="agent-native badge for rg"');
+  });
+
+  test('eligible at exactly the floor (score=0.80) — brightline check, >= not >', () => {
+    const html = buildScorecardBody(tool('rg'), sc(8, 2), [], { met: 5, total: 7, details: [] }, 0.8);
+    expect(html).toContain('scorecard-embed--eligible');
+    expect(html).not.toContain('scorecard-embed--below');
+  });
+
+  test('one point below the floor (score=0.79) renders the below-floor hint', () => {
+    const sc79 = sc(79, 21);
+    const issues = [{ id: 'f0', label: 'fail0', group: 'P2', status: 'fail', evidence: 'no flag' }];
+    const html = buildScorecardBody(tool('rg'), sc79, issues, { met: 4, total: 7, details: [] }, 0.79);
+    expect(html).toContain('scorecard-embed--below');
+    expect(html).not.toContain('scorecard-embed--eligible');
+    expect(html).not.toContain('<img src="/badge/rg.svg"'); // no preview image below the floor
+    expect(html).toContain('1 point below'); // singular for a 1-point gap (80 - 79 = 1)
+    expect(html).toContain('top issues above are the place to start'); // points at existing issues section
+  });
+
+  test('below-floor with no top issues references the full check list instead', () => {
+    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 4, total: 7, details: [] }, 0.7);
+    expect(html).toContain('See the full check results below for the gaps.');
+    expect(html).not.toContain('top issues above are the place to start');
+  });
+
+  test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
+    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] }, 0.65);
+    expect(html).toContain('15 points below');
+  });
+});
+
+// -------------------------------------------------------------------
+// Leaderboard badge callout (surface #2 of the badge plan).
+// -------------------------------------------------------------------
+
+describe('buildLeaderboardBody — badge callout', () => {
+  function entry(name: string, score: number, scored = true) {
+    return {
+      tool: { name, tier: 'workhorse', language: 'rust', description: name },
+      scorecard: scored ? ({ summary: { pass: 1, warn: 0, fail: 0 } } as any) : null,
+      score,
+      principleScore: { met: 5, total: 7, details: [] },
+      rank: 1,
+    };
+  }
+
+  test('callout cites the floor and the live eligible/total count', () => {
+    const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3, false)];
+    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    expect(html).toContain('leaderboard-badge-callout');
+    expect(html).toContain('above 80%');
+    // Two of four entries clear 0.80; total counts every leaderboard row
+    // including the unscored one (denominator is registry-wide).
+    expect(html).toContain('2 of 4 listed tools');
+  });
+
+  test('callout links to /badge', () => {
+    const html = buildLeaderboardBody([entry('eza', 1.0)] as any, '<p>m</p>');
+    expect(html).toContain('href="/badge"');
+  });
+
+  test('unscored entries are not counted as eligible even at score=0', () => {
+    // An unscored entry has scorecard === null; computeLeaderboard sets
+    // its score to 0. The callout must not count those as "below floor"
+    // — they're "no signal yet."
+    const lb = [entry('rg', 1.0), entry('unscored', 0, false)];
+    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    expect(html).toContain('1 of 2');
   });
 });

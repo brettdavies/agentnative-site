@@ -2,7 +2,7 @@
 // per-tool scorecard pages. Template concern only; data loading and
 // scoring live in scorecards.mjs.
 
-import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util.mjs';
+import { BADGE_FLOOR, BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES, resolveBaseUrl } from './util.mjs';
 
 /**
  * Map a check group string to a principle number (1-7) or null for bonus groups.
@@ -108,6 +108,13 @@ export function buildLeaderboardBody(leaderboard, methodology) {
     tierCounts[e.tool.tier] = (tierCounts[e.tool.tier] || 0) + 1;
   }
 
+  // Eligible-tool count for the badge callout. Counts only scored tools
+  // at or above BADGE_FLOOR — the same gate the per-tool scorecard pages
+  // use. Lets the callout cite a real number ("24 tools currently qualify")
+  // instead of a vague "tools that qualify."
+  const eligibleCount = leaderboard.filter((e) => e.scorecard && e.score >= BADGE_FLOOR).length;
+  const floorPct = Math.round(BADGE_FLOOR * 100);
+
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
   <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
@@ -143,6 +150,11 @@ export function buildLeaderboardBody(leaderboard, methodology) {
 ${rows}
     </tbody>
   </table>
+</section>
+
+<section class="leaderboard-badge-callout" aria-label="Agent-native badge">
+  <h2>Claim the badge</h2>
+  <p>Tools at or above ${floorPct}% can embed the <a href="/badge">agent-native badge</a> on their README — a live link to their scorecard, not a static stamp. ${eligibleCount} of ${leaderboard.length} listed tools currently qualify.</p>
 </section>
 
 <section class="leaderboard-methodology">
@@ -255,6 +267,67 @@ export function renderAudienceBanner(audience, auditProfile) {
 
   return `<section class="scorecard-audience-banner">
   ${lines.join('\n  ')}
+</section>
+`;
+}
+
+// -------------------------------------------------------------------
+// Embed-snippet block — surface #1 of the badge plan.
+//
+// Above the eligibility floor: copy-paste embed snippet inline, plus a
+// live SVG preview of how it renders.
+// Below the floor: a brief hint pointing at the badge convention page
+// and the "top issues" section that already exists on the page. We do
+// NOT duplicate the failing-checks list here — the existing top-issues
+// section already does that work; this block just routes the reader.
+// -------------------------------------------------------------------
+
+/**
+ * @param {string} toolName
+ * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
+ * @returns {string} `[![agent-native](https://anc.dev/badge/<tool>.svg)](https://anc.dev/score/<tool>)`
+ */
+export function buildEmbedMarkdown(toolName, baseUrl) {
+  const base = resolveBaseUrl(baseUrl);
+  return `[![agent-native](${base}/badge/${toolName}.svg)](${base}/score/${toolName})`;
+}
+
+/**
+ * Render the embed snippet section for an eligible tool's scorecard page.
+ *
+ * @param {object} tool — registry entry
+ * @param {number} pct — rounded percent (0–100)
+ * @returns {string} HTML fragment
+ */
+function renderEligibleEmbed(tool, pct) {
+  const embedMd = buildEmbedMarkdown(tool.name);
+  return `<section class="scorecard-embed scorecard-embed--eligible">
+  <h2>Embed the badge</h2>
+  <p>This score (${pct}%) clears the <a href="/badge">badge floor</a> (${Math.round(BADGE_FLOOR * 100)}%). Copy this into your README:</p>
+  <pre><code>${escHtml(embedMd)}</code></pre>
+  <p class="scorecard-embed__preview">Preview: <img src="/badge/${escHtml(tool.name)}.svg" alt="agent-native badge for ${escHtml(tool.name)}" /></p>
+</section>
+`;
+}
+
+/**
+ * Render the below-floor hint section. No copy-paste snippet, no
+ * shaming — just a route to the convention page and a pointer back to
+ * the top-issues section that already lists what to address.
+ *
+ * @param {number} pct — rounded percent (0–100)
+ * @param {boolean} hasIssues — whether topIssues was non-empty
+ * @returns {string} HTML fragment
+ */
+function renderBelowFloorHint(pct, hasIssues) {
+  const floor = Math.round(BADGE_FLOOR * 100);
+  const gap = floor - pct;
+  const issuesPointer = hasIssues
+    ? ' The top issues above are the place to start.'
+    : ' See the full check results below for the gaps.';
+  return `<section class="scorecard-embed scorecard-embed--below">
+  <h2>Embed the badge</h2>
+  <p>The <a href="/badge">badge floor</a> is ${floor}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.${issuesPointer}</p>
 </section>
 `;
 }
@@ -405,6 +478,12 @@ ${renderCheckRows(bonusChecks)}
 </section>
 `;
 
+  // Embed snippet (above floor) or below-floor hint. Placed after the
+  // detail sections and before the reproduce-locally CTA so the reading
+  // order is: score → details → here's what to do (embed if eligible,
+  // reproduce always).
+  html += score >= BADGE_FLOOR ? renderEligibleEmbed(tool, pct) : renderBelowFloorHint(pct, topIssues.length > 0);
+
   // CTA — reproduce THIS scorecard locally. Includes --audit-profile when
   // the tool was scored under one, so the reproduction matches the
   // committed scorecard's suppression set exactly.
@@ -481,9 +560,32 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     return lines.join('\n');
   }
 
-  lines.push(`**Score:** ${Math.round(score * 100)}% pass rate`);
+  const pct = Math.round(score * 100);
+  const floorPct = Math.round(BADGE_FLOOR * 100);
+  lines.push(`**Score:** ${pct}% pass rate`);
   lines.push(`**Principles:** ${principleScore.met}/${principleScore.total} met`);
   lines.push('');
+
+  // Embed snippet (above floor) or below-floor hint. Mirrors the HTML
+  // surface so an agent fetching the .md twin sees the same convention.
+  if (score >= BADGE_FLOOR) {
+    lines.push('## Embed the badge');
+    lines.push('');
+    lines.push(`This score (${pct}%) clears the [badge floor](/badge) (${floorPct}%). Copy this into your README:`);
+    lines.push('');
+    lines.push('```markdown');
+    lines.push(buildEmbedMarkdown(tool.name));
+    lines.push('```');
+    lines.push('');
+  } else {
+    const gap = floorPct - pct;
+    lines.push('## Embed the badge');
+    lines.push('');
+    lines.push(
+      `The [badge floor](/badge) is ${floorPct}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.`,
+    );
+    lines.push('');
+  }
 
   // Check results table
   lines.push('| Status | Check | Principle | Evidence |');

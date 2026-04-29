@@ -14,10 +14,12 @@ parents:
 > `agentnative-site` on 2026-04-29 (same date as the launch-eve design pass) to consolidate ownership in the
 > launch-coupled hub repo. Three of the four launch-wave surfaces ship from this repo, so the coordinator lives here.**
 >
-> **Status: active (2026-04-29) — launch-coupled.** Surfaces #1–#4 of the badge surface (defined in the Surface layout
-> section below) ship as part of the Show HN launch wave (Thu 2026-04-30 09:00 PT). On-hold triggers from the
-> 2026-04-23 filing are now resolved: the leaderboard has 96 scorecards live on `agentnative-site` `dev`, and the site
-> goes live with launch — both former blockers gone. Surface #5 (CLI hint after passing `anc check`) is tracked
+> **Status: site-side units shipped 2026-04-29 — spec-side and CLI deferred post-launch.** Site-side surfaces #1–#3
+> (per-tool scorecard embed snippet, leaderboard callout, `/badge` convention page) plus the build-time SVG render
+> (`badge-maker`) and the worker `image/svg+xml` content-type wiring landed on `feat/badge-surface` and merge into
+> `dev` ahead of the Show HN launch wave (Thu 2026-04-30 09:00 PT). Surface #4 (spec `docs/badge.md`) is deferred
+> post-launch — the `/badge` page is the canonical author-facing surface for launch, and the spec repo gets a
+> doctrinal mirror once the launch dust settles. Surface #5 (CLI hint after passing `anc check`) remains tracked
 > separately as `agentnative-cli` todo #017 (`017-pending-p1-agent-native-badge-hint-on-passing-check.md`),
 > post-launch.
 >
@@ -35,9 +37,20 @@ parents:
 >   show a copy-paste embed snippet inline. Scorecards below the floor show a brief "your score is X — here's what to
 >   address: [top issues]" block instead. Soft guidance, not public shaming. Aligns with the trust-and-verify posture.
 >
-> **Decisions still TBD (see Open Questions § Deferred to Implementation):** eligibility floor value (the actual
-> percentage cutoff), score-text format on the badge (`91%` vs `91/100` vs `6/7 principles`), color thresholds for
-> green/yellow/red, version-pinning convention in the URL.
+> **Decisions locked during 2026-04-29 implementation (resolving the four formerly TBD items):**
+>
+> - **Eligibility floor: ≥80% pass-rate.** Captures the top quartile of the 96-tool launch corpus (24 tools currently
+>   eligible). Above the 70% median so the badge means "upper segment"; below 90% so the embed snippet appears on a
+>   meaningful portion of pages. Single gate — no second principle-count gate, since 80% pass-rate already implies most
+>   principles are met.
+> - **Score-text format: `XX%`** (rounded percent). Matches the leaderboard's score column. `91/100` and
+>   `6/7 principles met` were the alternatives; the rounded percent reads cleanest at badge size.
+> - **Color thresholds: ≥80% brightgreen, 60–79% yellow, <60% red.** Matches the brightline floor and what readers
+>   intuit from the leaderboard. Below-floor scorecards still get a rendered SVG so a tool watching its own regression
+>   sees the visual color drop.
+> - **Version-pinning: `/badge/<tool>.svg` is always-latest; the badge label carries `agent-native vMAJOR.MINOR`.**
+>   Trust-and-verify means the URL must reflect current state, not a snapshot. Spec version goes in the label text, not
+>   the path.
 
 ## Overview
 
@@ -80,13 +93,18 @@ Item 1 is the spec-side surface (#4 below). Items 2 and 3 are site-side surfaces
 The badge surface is implemented across five surfaces, four of which are launch-coupled. Spec owns surface 4; site owns
 surfaces 1, 2, and 3; CLI owns surface 5.
 
-| #   | Surface                               | Owner repo                            | Launch-wave?         |
-| --- | ------------------------------------- | ------------------------------------- | -------------------- |
-| 1   | Per-tool scorecard page embed snippet | `agentnative-site`                    | yes                  |
-| 2   | Leaderboard callout linking to /badge | `agentnative-site`                    | yes                  |
-| 3   | `/badge` convention page              | `agentnative-site`                    | yes                  |
-| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | yes                  |
-| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch |
+| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                          |
+| --- | ------------------------------------- | ------------------------------------- | -------------------- | ------------------------------- |
+| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29            |
+| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29            |
+| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29            |
+| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | deferred — `/badge` page covers |
+| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | post-launch                     |
+
+> Site-side units U3–U7 (added during the 2026-04-29 implementation) cover surfaces 1–3 plus the build-time SVG render
+> (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 remain in this plan as
+> post-launch follow-up — the `/badge` page (surface #3) carries the doctrinal copy at launch, and the spec repo gets
+> a `docs/badge.md` mirror once the launch wave settles.
 
 This plan tracks U1+U2 (surface 4) explicitly; surfaces 1–3 are site-owned and tracked by additional units (or a
 separate site-side companion plan, depending on how the work is sliced when the launch-eve PR pair is cut). Surface 5 is
@@ -264,6 +282,65 @@ build step.
 
 - `agentnative-spec:scripts/hooks/pre-push` passes (link check + markdownlint + validate-principles — badge convention
   doesn't touch principles but the hook runs anyway).
+
+---
+
+### Site-side units (added 2026-04-29 during implementation)
+
+The five units below ship from this repo and cover surfaces 1–3 of the badge surface. All shipped on
+`feat/badge-surface` ahead of the Show HN launch wave.
+
+- [x] U3. **`badge-maker` dependency + build-time SVG render**
+
+**Goal:** Site build emits `dist/badge/<tool>.svg` for every scored tool via
+[`badge-maker`](https://www.npmjs.com/package/badge-maker) — same library shields.io uses internally, zero runtime
+upstream dependency.
+
+**Files:** `package.json`, `bun.lock`, `src/build/badge.mjs` (new), `src/build/build.mjs`, `src/build/util.mjs` (adds
+`BADGE_FLOOR` and `SPEC_VERSION` constants), `tests/build.test.ts` (color-threshold + label-format tests).
+
+**Verification:** `bun run build` produces 96 SVGs in `dist/badge/`; `bun test` covers `badgeColor`, `badgeFormat`, and
+`renderBadgeSvg`.
+
+- [x] U4. **`/badge` convention page (surface #3)**
+
+**Goal:** Author the doctrinal page CLI authors land on when they want to know what claiming the badge means — floor,
+score format, color bands, version-pinning rule, honesty + regression policy, claim flow.
+
+**Files:** `content/badge.md` (new), `src/build/build.mjs` (wire into `subPages` array + sitemap `extraPaths`).
+
+**Verification:** Page renders at `/badge.html`; markdown twin at `/badge.md`; included in sitemap.
+
+- [x] U5. **Per-tool scorecard embed snippet (surface #1)**
+
+**Goal:** Threshold-gated section on `/score/<tool>`. Above floor: copy-paste embed snippet + live SVG preview. Below
+floor: brief "your score is X — top issues are the place to start" hint pointing at `/badge`.
+
+**Files:** `src/build/scorecards-render.mjs` (`buildEmbedMarkdown`, `renderEligibleEmbed`, `renderBelowFloorHint`,
+markdown-twin parity), `src/styles/site.css`, `tests/build.test.ts`.
+
+**Verification:** Tests cover the 0.79/0.80 brightline, gap-math singular/plural, top-issues vs full-checks pointer
+branches.
+
+- [x] U6. **Leaderboard callout linking to /badge (surface #2)**
+
+**Goal:** Brief callout between the leaderboard table and the methodology section, citing the live eligible/total count
+and routing readers to `/badge`.
+
+**Files:** `src/build/scorecards-render.mjs` (`buildLeaderboardBody`), `src/styles/site.css`, `tests/build.test.ts`.
+
+**Verification:** Tests confirm the callout cites the floor + eligible/total count and excludes unscored entries from
+the eligible numerator.
+
+- [x] U7. **Worker SVG content-type + CORS + cache**
+
+**Goal:** `/badge/*.svg` served with `Content-Type: image/svg+xml; charset=utf-8`, `Access-Control-Allow-Origin: *`, and
+the standard short cache so re-scored tools' badge colors flip within a TTL of the next site build.
+
+**Files:** `src/worker/headers.ts` (add `isSvg` branch), `tests/worker.test.ts`.
+
+**Verification:** Tests cover the production SVG branch, the staging-host noindex composition, and the negative case
+(non-`.svg` paths keep HTML-branch headers).
 
 ---
 
