@@ -17,9 +17,9 @@ parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-laun
 
 # feat: Show HN launch readiness — agentnative-site
 
-## Status snapshot (2026-04-29 PT)
+## Status snapshot (2026-04-29 PT, late evening)
 
-Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~21h out).
+Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~16h out).
 
 - **U1 ✅ shipped** — `scripts/sync-coverage-matrix.sh` rename drift fixed via commit `2467e5c`. Todo `014` is
   `complete`.
@@ -36,9 +36,20 @@ Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~21h out).
 - Pre-cut staging pass: ✅ confirmed on phone (SVG icons render correctly in iOS Safari, theme toggle works, nav links
   resolve). Did not block on the missing-icon regression that PR #46 fixed.
 - Post-cut prod pass: pending — runs Thu morning before 09:00 PT after `release/launch` deploys.
-- **U6 — `release/launch` PR cut + cutover ops:** blocked on upstream chain. Central-tracker step 1 (spec v0.3.0) done;
-  steps 2 (CLI v0.2.0), 3a/3b (skill v0.2.0) still pending. U6 cannot execute until skill v0.2.0 tag is live so
-  `src/data/skill.json` can be re-pinned.
+- **U6 — `release/launch` PR cut + cutover ops:** still blocked, but on a narrower chain. Central tracker as of
+  2026-04-29 evening: step 1 (spec v0.3.0) ✅ done; step 3a (skill v0.2.0 PR-merge) ✅ done at 16:38 PT (squash
+  `2b10c84`); step 3b (skill v0.2.0 tag + GitHub Release) ✅ done at 22:16 UTC (tag `054c249`). **Only step 2 (CLI
+  v0.2.0) remains.** The earlier `src/data/skill.json` re-pin requirement is retired per the central tracker's step-4
+  entry — skill v0.2.0 ships `bin/check-update` (PR #8) for consumer-side staleness detection, replacing per-release SHA
+  pinning.
+- **Launch-coupled side-quest ✅ shipped** — Badge surface for agent-native conformance landed on `dev` 2026-04-29
+  evening. Plan: [`docs/plans/2026-04-23-002-feat-badge-surface-plan.md`](2026-04-23-002-feat-badge-surface-plan.md).
+  PRs: [#49](https://github.com/brettdavies/agentnative-site/pull/49) (build-time SVGs via `badge-maker` + `/badge`
+  convention page + scorecard embed snippet + leaderboard callout),
+  [#50](https://github.com/brettdavies/agentnative-site/pull/50) (dark-mode contrast fix on the leaderboard callout),
+  [#51](https://github.com/brettdavies/agentnative-site/pull/51) (visual-fidelity gates documented in AGENTS.md). Rides
+  the `release/launch` cherry-pick automatically (scope is "all of `dev`"). Surface #4 of the badge plan (spec
+  `docs/badge.md`) deferred post-launch; the `/badge` page is the doctrinal copy at launch.
 - **Gate 9 — issue templates on `main`:** still passive-clear via U6's full-`dev` cherry-pick. Confirmed
   `.github/ISSUE_TEMPLATE/{config.yml,site-bug.yml}` exist on `dev` and not on `main`.
 
@@ -195,6 +206,10 @@ specific must-include items:
   cutover-ops record.
 - `docs/plans/2026-04-23-001-feat-sync-spec-plan.md` — `status: active`. CLI-feeds-site coverage-matrix vendoring loop.
   **Out of scope for this launch.** Stays active through launch.
+- `docs/plans/2026-04-23-002-feat-badge-surface-plan.md` — `status: active`. Cross-repo badge surface; site-side units
+  U3–U7 shipped on `dev` 2026-04-29 evening (PRs #49, #50, #51). Rides the `release/launch` cherry-pick automatically.
+  Surface #4 (spec `docs/badge.md`) and surface #5 (CLI `anc check` post-pass hint, `agentnative-cli` todo #017) are
+  deferred post-launch. Plan stays active through launch and flips to `complete` at the post-launch retro.
 
 ### Release pipeline (existing infrastructure — already in use)
 
@@ -640,6 +655,9 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 - [ ] **Path-filter check:** `git diff main release/launch -- .github/ISSUE_TEMPLATE/` is non-empty (Gate 9).
 - [ ] **Path-filter check:** `git diff main release/launch -- src/data/skill.json src/build/skill.mjs
   src/worker/headers.ts src/worker/index.ts` shows the skill-distribution PR diffs (Units 2–3 of the master plan).
+- [ ] **Path-filter check (badge surface, PRs #49–#51):** `git diff main release/launch -- src/build/badge.mjs
+  content/badge.md` is non-empty AND `git diff main release/launch -- src/worker/headers.ts` includes the SVG
+  content-type branch (`isSvg`). Confirms the badge surface ships in this cut.
 - [ ] **Optional drop:** drop `docs/VOICE.md` hunk from `f594a92` (per user direction — internal style guide).
 - [ ] **Verify no guarded paths leaked:** `git diff main release/launch -- docs/plans/ docs/solutions/
   docs/brainstorms/` → guard-main-docs check should fail-cleanly if anything's wrong; resolve before pushing.
