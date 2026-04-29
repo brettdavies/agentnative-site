@@ -1047,3 +1047,108 @@ describe('renderBadgeSvg — SVG output', () => {
     expect(svg).not.toContain('#4c1');
   });
 });
+
+// -------------------------------------------------------------------
+// Scorecard embed snippet (surface #1 of the badge plan).
+// Above-floor: copy-paste snippet + SVG preview. Below-floor: hint
+// pointing at /badge and the top-issues section.
+// -------------------------------------------------------------------
+
+import { buildEmbedMarkdown } from '../src/build/scorecards-render.mjs';
+
+describe('buildEmbedMarkdown — README embed shape', () => {
+  test('emits standard agent-native markdown link wrapping the SVG', () => {
+    const md = buildEmbedMarkdown('rg');
+    expect(md).toBe('[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)');
+  });
+
+  test('honors PUBLIC_BASE_URL via resolveBaseUrl (explicit override)', () => {
+    const md = buildEmbedMarkdown('rg', 'https://staging.example.com');
+    expect(md).toBe(
+      '[![agent-native](https://staging.example.com/badge/rg.svg)](https://staging.example.com/score/rg)',
+    );
+  });
+});
+
+describe('buildScorecardBody — embed-snippet gating', () => {
+  function tool(name = 'rg') {
+    return {
+      name,
+      binary: name,
+      description: 'fast grep',
+      tier: 'workhorse',
+      language: 'rust',
+      creator: 'BurntSushi',
+      install: `brew install ${name}`,
+      repo: `BurntSushi/${name}`,
+    };
+  }
+
+  function sc(passes: number, fails: number) {
+    const results: any[] = [];
+    for (let i = 0; i < passes; i++) {
+      results.push({
+        id: `p${i}`,
+        label: `pass${i}`,
+        group: 'P1',
+        layer: 'behavioral',
+        status: 'pass',
+        evidence: null,
+      });
+    }
+    for (let i = 0; i < fails; i++) {
+      results.push({
+        id: `f${i}`,
+        label: `fail${i}`,
+        group: 'P2',
+        layer: 'behavioral',
+        status: 'fail',
+        evidence: 'no flag',
+      });
+    }
+    return {
+      schema_version: '1.3',
+      summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
+      results,
+    };
+  }
+
+  test('eligible (score=1.0) renders copy-paste snippet + SVG preview', () => {
+    const html = buildScorecardBody(tool('rg'), sc(10, 0), [], { met: 7, total: 7, details: [] }, 1.0);
+    expect(html).toContain('scorecard-embed--eligible');
+    expect(html).not.toContain('scorecard-embed--below');
+    expect(html).toContain('badge/rg.svg');
+    expect(html).toContain('clears the <a href="/badge">badge floor</a>');
+    // Live preview img so the copyable shape and what it actually looks like sit side-by-side.
+    expect(html).toContain('<img src="/badge/rg.svg"');
+    expect(html).toContain('alt="agent-native badge for rg"');
+  });
+
+  test('eligible at exactly the floor (score=0.80) — brightline check, >= not >', () => {
+    const html = buildScorecardBody(tool('rg'), sc(8, 2), [], { met: 5, total: 7, details: [] }, 0.8);
+    expect(html).toContain('scorecard-embed--eligible');
+    expect(html).not.toContain('scorecard-embed--below');
+  });
+
+  test('one point below the floor (score=0.79) renders the below-floor hint', () => {
+    const sc79 = sc(79, 21);
+    const issues = [{ id: 'f0', label: 'fail0', group: 'P2', status: 'fail', evidence: 'no flag' }];
+    const html = buildScorecardBody(tool('rg'), sc79, issues, { met: 4, total: 7, details: [] }, 0.79);
+    expect(html).toContain('scorecard-embed--below');
+    expect(html).not.toContain('scorecard-embed--eligible');
+    expect(html).not.toContain('<img src="/badge/rg.svg"'); // no preview image below the floor
+    expect(html).toContain('1 point below'); // singular for a 1-point gap (80 - 79 = 1)
+    expect(html).toContain('top issues above are the place to start'); // points at existing issues section
+  });
+
+  test('below-floor with no top issues references the full check list instead', () => {
+    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 4, total: 7, details: [] }, 0.7);
+    expect(html).toContain('See the full check results below for the gaps.');
+    expect(html).not.toContain('top issues above are the place to start');
+  });
+
+  test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
+    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] }, 0.65);
+    expect(html).toContain('15 points below');
+  });
+});

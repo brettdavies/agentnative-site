@@ -1073,6 +1073,39 @@ body:has(.leaderboard-hero) main {
   font-size: inherit;
 }
 
+/* Embed-snippet section — surface #1 of the badge plan. Sits between
+   the detail sections and the reproduce-locally CTA. Eligible variant
+   shows a copy-paste snippet + live SVG preview; below-floor variant
+   shows a brief hint pointing at /badge and the top-issues section. */
+.scorecard-embed {
+  padding: 1.25rem 0;
+  border-top: 1px solid var(--border-subtle, #e5e8eb);
+}
+
+.scorecard-embed h2 {
+  margin-top: 0;
+}
+
+.scorecard-embed p {
+  color: var(--fg-secondary, #6a7278);
+}
+
+.scorecard-embed pre {
+  font-size: 0.88rem;
+}
+
+.scorecard-embed__preview {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.scorecard-embed__preview img {
+  height: 20px;
+  width: auto;
+  vertical-align: middle;
+}
+
 /* CTA section */
 .scorecard-cta {
   padding: 1.25rem 0;
