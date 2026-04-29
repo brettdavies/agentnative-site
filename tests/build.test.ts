@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadInstallData } from '../src/build/install.mjs';
 import { renderMarkdown } from '../src/build/render.mjs';
 import {
   computeLayerScore,
@@ -14,6 +13,7 @@ import {
   loadScorecards,
 } from '../src/build/scorecards.mjs';
 import { buildLeaderboardBody, buildScorecardBody, renderAudienceBanner } from '../src/build/scorecards-render.mjs';
+import { loadSkillData } from '../src/build/skill.mjs';
 import { escHtml, parseFilename, sortedGlob } from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
@@ -860,7 +860,7 @@ describe('audience kebab-case regression guard (H6 Unit 0.5)', () => {
   });
 });
 
-describe('loadInstallData — fail-fast validation', () => {
+describe('loadSkillData — fail-fast validation', () => {
   function validManifest() {
     return {
       schema_version: 1,
@@ -886,17 +886,17 @@ describe('loadInstallData — fail-fast validation', () => {
       },
       update: 'cd <install-dir> && git pull --ff-only',
       uninstall: 'rm -rf <install-dir>',
-      install_page_html: 'https://anc.dev/install',
+      skill_page_html: 'https://anc.dev/skill',
     };
   }
 
   async function writeAndLoad(manifest: unknown): Promise<unknown> {
-    const dir = join(tmpdir(), `loadInstallData-${Date.now()}-${Math.random()}`);
+    const dir = join(tmpdir(), `loadSkillData-${Date.now()}-${Math.random()}`);
     await mkdir(dir, { recursive: true });
-    const path = join(dir, 'install.json');
+    const path = join(dir, 'skill.json');
     await writeFile(path, JSON.stringify(manifest));
     try {
-      return await loadInstallData(path);
+      return await loadSkillData(path);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -950,12 +950,12 @@ describe('loadInstallData — fail-fast validation', () => {
   });
 
   test('invalid JSON rejected', async () => {
-    const dir = join(tmpdir(), `loadInstallData-bad-${Date.now()}`);
+    const dir = join(tmpdir(), `loadSkillData-bad-${Date.now()}`);
     await mkdir(dir, { recursive: true });
-    const path = join(dir, 'install.json');
+    const path = join(dir, 'skill.json');
     await writeFile(path, '{not valid');
     try {
-      await expect(loadInstallData(path)).rejects.toThrow(/invalid JSON/);
+      await expect(loadSkillData(path)).rejects.toThrow(/invalid JSON/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -18,3 +18,6 @@ available as raw markdown at `/p1.md` … `/p7.md` for agent consumption. The en
 For the standard applied at scale, see the [**ANC 100 leaderboard**](/scorecards) — every popular CLI tool, scored
 against the same seven principles. The scoring methodology and per-field schema for the underlying JSON live at
 [`/methodology`](/methodology) and [`/scorecard-schema`](/scorecard-schema).
+
+To install the linter locally, see [/install](/install). To install the agent-native-cli **skill bundle** (the Claude
+Code / Codex / Cursor / OpenCode skill), see [/skill](/skill).

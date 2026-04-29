@@ -409,7 +409,7 @@ ${renderCheckRows(bonusChecks)}
   // the tool was scored under one, so the reproduction matches the
   // committed scorecard's suppression set exactly.
   const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
-  const reproCommand = `brew install brettdavies/tap/agentnative &amp;&amp; anc check --command ${escHtml(tool.binary)}${profileFlag}`;
+  const reproCommand = `anc check --command ${escHtml(tool.binary)}${profileFlag}`;
   const ctaText =
     topIssues.length === 0
       ? `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally:`
@@ -417,9 +417,9 @@ ${renderCheckRows(bonusChecks)}
   html += `<section class="scorecard-cta">
   <p>${ctaText}</p>
   <pre><code>${reproCommand}</code></pre>
-  <p class="scorecard-cta__note">Add <code>--output json</code> to get the same JSON shape committed under
-  <a href="https://github.com/brettdavies/agentnative-site/tree/main/scorecards"><code>scorecards/</code></a>.
-  Cargo install: <code>cargo install agentnative</code>.</p>
+  <p class="scorecard-cta__note"><a href="/install">Install <code>anc</code></a> first if you don't have it.
+  Add <code>--output json</code> to get the same JSON shape committed under
+  <a href="https://github.com/brettdavies/agentnative-site/tree/main/scorecards"><code>scorecards/</code></a>.</p>
 </section>`;
 
   return html;

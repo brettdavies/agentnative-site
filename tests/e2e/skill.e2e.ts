@@ -1,23 +1,23 @@
 // 4-host skill-distribution install verification + bare-clone footgun
-// check. This is the live-network e2e: it fetches /install.json from the
+// check. This is the live-network e2e: it fetches /skill.json from the
 // local Worker, runs every advertised host's clone command into a sandbox
 // HOME, and asserts SKILL.md lands at the expected path with the pinned
 // commit checked out.
 //
-// Isolation: this spec runs only under the `install` Playwright project
+// Isolation: this spec runs only under the `skill` Playwright project
 // (see playwright.config.ts). It is excluded from the default `bun run
 // test:e2e` run so the daily deep-check schedule does not break against
 // the still-private producer repo before the Unit 5 cutover.
 //
 // Pre-cutover usage (producer is private):
 //   ANC_SKILL_URL=git@github.com:brettdavies/agentnative-skill.git \
-//     bun x playwright test --project=install
+//     bun x playwright test --project=skill
 //
 // Post-cutover usage (producer is public — HTTPS works as advertised):
-//   bun x playwright test --project=install
+//   bun x playwright test --project=skill
 //
 // The URL override only swaps the clone source; the destination paths,
-// commit pin, and host names are still drawn from /install.json.
+// commit pin, and host names are still drawn from /skill.json.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
@@ -34,7 +34,7 @@ interface Manifest {
 }
 
 async function fetchManifest(request: import('@playwright/test').APIRequestContext): Promise<Manifest> {
-  const res = await request.get(`${BASE}/install.json`);
+  const res = await request.get(`${BASE}/skill.json`);
   expect(res.status()).toBe(200);
   expect(res.headers()['content-type']).toContain('application/json');
   return (await res.json()) as Manifest;
@@ -114,7 +114,7 @@ test.describe('skill-distribution install — 4-host live clone', () => {
     // agentnative-skill; the skill is named agent-native-cli. A bare
     // `git clone` with no destination produces a directory named after
     // the repo, not the skill — which is why every install command in
-    // /install.json MUST advertise an explicit destination path.
+    // /skill.json MUST advertise an explicit destination path.
     const sandboxHome = mkdtempSync(join(tmpdir(), 'anc-install-bare-'));
     const manifestUrl = 'https://github.com/brettdavies/agentnative-skill.git';
     const url = URL_OVERRIDE ?? manifestUrl;

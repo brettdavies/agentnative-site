@@ -33,13 +33,15 @@ anchors, and semantic HTML. Keep this framing in every decision.
 ## Structure
 
 - `index.html` — single-page surface for the 7 principles, anchor-linked (`#p1-...` through `#p7-...`)
-- `/check` — install and usage for the `anc` CLI
+- `/check` — usage for the `anc` CLI (flags, output shapes, check-ID conventions)
+- `/install` — human-facing install page for the `agentnative` CLI itself (HTML + markdown twin only — no JSON manifest;
+  `brew`, `cargo`, and platform archives, sourced from `content/install.md`)
 - `/about` — attribution, versioning, credits (subtle: the site does not lead with Brett's name)
-- `/install` — human-facing install page for the `agent-native-cli` skill (rendered HTML; mixed-register prose +
+- `/skill` — human-facing install page for the `agent-native-cli` skill bundle (rendered HTML; mixed-register prose +
   per-host clone commands)
-- `/install.json` — canonical machine-primary install manifest. Same data, agent-readable. `Content-Type:
-  application/json`, `X-Robots-Tag: noindex`. Both `/install` and `/install.json` derive from `src/data/install.json` at
-  build time; full surface contract in `docs/DESIGN.md` §3.9
+- `/skill.json` — canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
+  `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill.json` at build time; full surface
+  contract in `docs/DESIGN.md` §3.9
 - `content/*.md` — markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark

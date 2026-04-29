@@ -36,8 +36,8 @@ export default {
     const pathIsMarkdown = pathname.endsWith('.md');
     const pathIsJson = pathname.endsWith('.json');
     // CN rewrite is markdown-only. Skip for `.json` paths so `Accept:
-    // text/markdown` against `/install.json` returns the JSON unchanged
-    // instead of rewriting to a non-existent `/install.json.md` twin.
+    // text/markdown` against `/skill.json` returns the JSON unchanged
+    // instead of rewriting to a non-existent `/skill.json.md` twin.
     const preferMarkdown = !pathIsMarkdown && !pathIsJson && detectPreference(request) === 'markdown';
     const servedMarkdown = pathIsMarkdown || preferMarkdown;
 

@@ -83,3 +83,28 @@ const DEFAULT_BASE = 'https://anc.dev';
 export function resolveBaseUrl(baseUrl) {
   return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
 }
+
+/**
+ * Rewrite site-root-relative markdown links to absolute URLs.
+ *
+ * Source markdown authors site-internal links as `[text](/p3)` so HTML pages
+ * stay portable across hosts (anc.dev, staging, local dev). The `.md` twin —
+ * fetched directly by agents — must self-resolve, so we absolutify those
+ * targets at emit time. Idempotent: links that are already absolute pass
+ * through unchanged.
+ *
+ * Targets: standard links `[text](/path)`, optional reference titles
+ * `[text](/path "title")`, and image links `![alt](/path)`. Skips
+ * protocol-relative `//host/path` and intra-document fragments `(#anchor)`.
+ *
+ * @param {string} markdown
+ * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
+ * @returns {string}
+ */
+export function absolutifyMarkdownLinks(markdown, baseUrl) {
+  const base = resolveBaseUrl(baseUrl);
+  return markdown.replace(/(\!?\])\(\s*(\/[^)\s]*)(\s+"[^"]*")?\s*\)/g, (match, bracket, path, title) => {
+    if (path.startsWith('//')) return match;
+    return `${bracket}(${base}${path}${title ?? ''})`;
+  });
+}

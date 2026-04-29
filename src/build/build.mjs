@@ -33,7 +33,6 @@ import {
   extractTitle,
 } from './content.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
-import { emitInstallJson, emitInstallMarkdown, loadInstallData, renderInstallPage } from './install.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
 import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
@@ -45,7 +44,8 @@ import {
 } from './scorecards-render.mjs';
 import { emitShell } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
-import { escHtml, parseFilename, sortedGlob } from './util.mjs';
+import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
+import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -54,7 +54,7 @@ const DIST_DIR = join(REPO_ROOT, 'dist');
 const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
-const INSTALL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'install.json');
+const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill.json');
 
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',
@@ -140,12 +140,14 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
     }
   }
 
-  // 4. sha256(dist/p<n>.md) === sha256(content/principles/p<n>-*.md).
+  // 4. dist/p<n>.md == absolutifyMarkdownLinks(content/principles/p<n>-*.md).
+  // Twin-source equivalence post-link-rewrite: site-relative links in source
+  // become absolute https://anc.dev/... in the twin, but no other bytes drift.
   for (const { n, sourcePath } of principleSources) {
-    const distBuf = await readFile(join(distDir, `p${n}.md`));
-    const srcBuf = await readFile(sourcePath);
-    if (sha256(distBuf) !== sha256(srcBuf)) {
-      throw new Error(`invariant: dist/p${n}.md bytes do not match source ${sourcePath}`);
+    const distContent = await readFile(join(distDir, `p${n}.md`), 'utf8');
+    const sourceContent = await readFile(sourcePath, 'utf8');
+    if (distContent !== absolutifyMarkdownLinks(sourceContent)) {
+      throw new Error(`invariant: dist/p${n}.md does not match absolutified ${sourcePath}`);
     }
   }
 }
@@ -183,8 +185,10 @@ export async function build() {
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 
-    // 5. Markdown twin — byte-equivalent copy.
-    await copyFile(file, join(DIST_DIR, `p${n}.md`));
+    // 5. Markdown twin — authored bytes with site-relative links absolutified
+    // so `Accept: text/markdown` agents fetching /p<n>.md get a self-contained
+    // document. Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
+    await writeFile(join(DIST_DIR, `p${n}.md`), absolutifyMarkdownLinks(source));
 
     const shortDesc = extractDefinitionParagraph(source);
     principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
@@ -222,11 +226,12 @@ export async function build() {
     ...principles.map((p) => `- [${p.title}](/p${p.n}) — ${p.shortDesc}`),
     '',
   ];
-  await writeFile(join(DIST_DIR, 'index.md'), indexMdLines.join('\n'));
+  await writeFile(join(DIST_DIR, 'index.md'), absolutifyMarkdownLinks(indexMdLines.join('\n')));
 
-  // 7. check.md + about.md.
+  // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
   const subPages = [
     { name: 'check', path: join(CONTENT_DIR, 'check.md') },
+    { name: 'install', path: join(CONTENT_DIR, 'install.md') },
     { name: 'about', path: join(CONTENT_DIR, 'about.md') },
     { name: 'changelog', path: join(CONTENT_DIR, 'changelog.md') },
     { name: 'methodology', path: join(CONTENT_DIR, 'methodology.md') },
@@ -248,7 +253,7 @@ export async function build() {
         themeInitJs: themeInit,
       }),
     );
-    await copyFile(path, join(DIST_DIR, `${name}.md`));
+    await writeFile(join(DIST_DIR, `${name}.md`), absolutifyMarkdownLinks(source));
     subPageData.push({ name, source, title });
   }
 
@@ -264,9 +269,8 @@ export async function build() {
   not authoritative; the per-tool page's evidence list is the ground truth.</p>
   <p>For the full explanation of scoring, audience classification, audit profiles, and how to
   request a re-score, see the <a href="/methodology">methodology page</a>.</p>
-  <p>To reproduce any row locally:</p>
-  <pre><code>brew install brettdavies/tap/agentnative &amp;&amp; anc check &lt;binary&gt;</code></pre>
-  <p>Also installable via <code>cargo install agentnative</code>.</p>`;
+  <p>To reproduce any row locally, <a href="/install">install <code>anc</code></a> and run
+  <code>anc check &lt;binary&gt;</code>.</p>`;
 
   const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
   await writeFile(
@@ -281,7 +285,7 @@ export async function build() {
       extraScripts: ['/js/leaderboard.js'],
     }),
   );
-  await writeFile(join(DIST_DIR, 'scorecards.md'), buildLeaderboardMarkdown(leaderboard));
+  await writeFile(join(DIST_DIR, 'scorecards.md'), absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)));
 
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
   await ensureDir(join(DIST_DIR, 'score'));
@@ -314,7 +318,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version),
+      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version)),
     );
     scorecardPaths.push(`/score/${tool.name}`);
   }
@@ -333,28 +337,28 @@ export async function build() {
       themeInitJs: themeInit,
     }),
   );
-  await writeFile(join(DIST_DIR, 'coverage.md'), coverageMarkdown);
+  await writeFile(join(DIST_DIR, 'coverage.md'), absolutifyMarkdownLinks(coverageMarkdown));
 
-  // 8c. /install.json + /install + /install.md — skill-distribution surface.
+  // 8c. /skill.json + /skill + /skill.md — skill-distribution surface.
   // The same manifest is emitted as canonical JSON, rendered HTML (via the
   // shared unified pipeline), and a markdown twin. Drift is structurally
   // impossible because all three derive from the same data file.
-  const installData = await loadInstallData(INSTALL_DATA_PATH);
-  await emitInstallJson(installData, DIST_DIR);
-  const { markdown: installMarkdown, html: installBodyHtml } = await renderInstallPage(installData);
+  const skillData = await loadSkillData(SKILL_DATA_PATH);
+  await emitSkillJson(skillData, DIST_DIR);
+  const { markdown: skillMarkdown, html: skillBodyHtml } = await renderSkillPage(skillData);
   await writeFile(
-    join(DIST_DIR, 'install.html'),
+    join(DIST_DIR, 'skill.html'),
     emitShell({
-      title: `Install ${installData.name}`,
-      description: installData.description,
-      canonicalPath: '/install',
-      bodyHtml: installBodyHtml,
+      title: `Install ${skillData.name}`,
+      description: skillData.description,
+      canonicalPath: '/skill',
+      bodyHtml: skillBodyHtml,
       themeInitJs: themeInit,
     }),
   );
-  await emitInstallMarkdown(installMarkdown, DIST_DIR);
+  await emitSkillMarkdown(absolutifyMarkdownLinks(skillMarkdown), DIST_DIR);
 
-  // 9. llms.txt + llms-full.txt (includes scorecard + install sections).
+  // 9. llms.txt + llms-full.txt (includes scorecard + skill sections).
   const llmsIndex = buildLlmsIndex({
     introTitle,
     summary: introSummary,
@@ -363,56 +367,61 @@ export async function build() {
     scorecardLinks: [
       { name: 'Leaderboard', path: '/scorecards.md' },
       { name: 'Coverage Matrix', path: '/coverage.md' },
+      ...leaderboard.map((e) => ({ name: e.tool.name, path: `/score/${e.tool.name}.md` })),
     ],
-    installLinks: [
-      { name: 'Install (HTML)', path: '/install.md' },
-      { name: 'Install (canonical JSON)', path: '/install.json' },
+    skillLinks: [
+      { name: 'Skill (HTML)', path: '/skill.md' },
+      { name: 'Skill (canonical JSON)', path: '/skill.json' },
     ],
   });
   await writeFile(join(DIST_DIR, 'llms.txt'), llmsIndex);
 
+  // llms-full.txt embeds each page's markdown body verbatim. Apply the same
+  // .md-twin absolutification policy so site-relative links resolve when an
+  // agent fetches /llms-full.txt directly.
   const llmsFull = buildLlmsFull({
     sections: [
-      { title: introTitle, body: introSource, htmlPath: '/', mdPath: '/index.md' },
+      { title: introTitle, body: absolutifyMarkdownLinks(introSource), htmlPath: '/', mdPath: '/index.md' },
       ...principles.map((p) => ({
         title: p.title,
-        body: p.source,
+        body: absolutifyMarkdownLinks(p.source),
         htmlPath: `/p${p.n}`,
         mdPath: `/p${p.n}.md`,
       })),
       ...subPageData.map((s) => ({
         title: s.title,
-        body: s.source,
+        body: absolutifyMarkdownLinks(s.source),
         htmlPath: `/${s.name}`,
         mdPath: `/${s.name}.md`,
       })),
       {
         title: 'ANC 100 — Agent-Native CLI Leaderboard',
-        body: buildLeaderboardMarkdown(leaderboard),
+        body: absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)),
         htmlPath: '/scorecards',
         mdPath: '/scorecards.md',
       },
       {
         title: 'Spec Coverage Matrix',
-        body: coverageMarkdown,
+        body: absolutifyMarkdownLinks(coverageMarkdown),
         htmlPath: '/coverage',
         mdPath: '/coverage.md',
       },
       {
-        title: `Install ${installData.name}`,
-        body: installMarkdown,
-        htmlPath: '/install',
-        mdPath: '/install.md',
+        title: `Install ${skillData.name}`,
+        body: absolutifyMarkdownLinks(skillMarkdown),
+        htmlPath: '/skill',
+        mdPath: '/skill.md',
       },
     ],
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
 
-  // 10. Sitemap (includes scorecard paths). /install is indexed for humans;
-  // /install.json carries X-Robots-Tag: noindex so it stays out of the sitemap.
+  // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
+  // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
+  // so it stays out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', '/install', ...scorecardPaths],
+    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -424,8 +433,8 @@ export async function build() {
   );
 
   const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
-  // +5: check, about, changelog, methodology, coverage
-  const extraPages = 5;
+  // +6: check, install, about, changelog, methodology, coverage
+  const extraPages = 6;
   return {
     principles: principles.length,
     htmlPages: principles.length + extraPages + scorecardPageCount,

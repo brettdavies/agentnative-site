@@ -38,7 +38,7 @@ import { resolveBaseUrl } from './util.mjs';
  * @param {Array<{ n: number, slug: string, title: string }>} args.principles
  * @param {Array<{ name: string, title: string }>=} args.subPages
  * @param {Array<{ name: string, path: string }>=} args.scorecardLinks
- * @param {Array<{ name: string, path: string }>=} args.installLinks
+ * @param {Array<{ name: string, path: string }>=} args.skillLinks
  * @param {string=} args.baseUrl
  */
 export function buildLlmsIndex({
@@ -47,7 +47,7 @@ export function buildLlmsIndex({
   principles,
   subPages = [],
   scorecardLinks = [],
-  installLinks = [],
+  skillLinks = [],
   baseUrl,
 }) {
   const base = resolveBaseUrl(baseUrl);
@@ -70,19 +70,19 @@ export function buildLlmsIndex({
       lines.push(`- [${s.title}](${base}/${s.name}.md)`);
     }
   }
+  if (skillLinks.length > 0) {
+    lines.push('');
+    lines.push('## Skill');
+    lines.push('');
+    for (const s of skillLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
+    }
+  }
   if (scorecardLinks.length > 0) {
     lines.push('');
     lines.push('## Scorecards');
     lines.push('');
     for (const s of scorecardLinks) {
-      lines.push(`- [${s.name}](${base}${s.path})`);
-    }
-  }
-  if (installLinks.length > 0) {
-    lines.push('');
-    lines.push('## Install');
-    lines.push('');
-    for (const s of installLinks) {
       lines.push(`- [${s.name}](${base}${s.path})`);
     }
   }
