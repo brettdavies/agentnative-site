@@ -696,13 +696,19 @@ body:has(.leaderboard-hero) main {
 /* Badge callout — surface #2 of the badge plan. Sits between the
    leaderboard table and the methodology section so a reader who has
    just scanned the rankings sees the next step (claim the badge) before
-   the longer-form methodology prose. */
+   the longer-form methodology prose.
+
+   Surface uses the canonical `--bg-raised` token (defined for both
+   light and dark in docs/design/foundation.css) — the same token the
+   methodology / scorecard-summary surfaces use. Earlier draft used a
+   fake `--bg-subtle` name that fell back to the light-mode hex literal
+   in dark mode, producing near-white text on near-white background. */
 .leaderboard-badge-callout {
   margin-top: 2rem;
   padding: 1.25rem 1.5rem;
-  border: 1px solid var(--border-subtle, #e5e8eb);
+  border: 1px solid var(--border, #cfd5db);
   border-radius: 8px;
-  background: var(--bg-subtle, #f6f8fa);
+  background: var(--bg-raised, #f4f5f7);
 }
 
 .leaderboard-badge-callout h2 {
