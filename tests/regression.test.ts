@@ -96,10 +96,11 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
     const orderedNumbers = principleLinks.map((l) => l.match(/\/p(\d+)\.md/)?.[1]).map((s) => (s ? Number(s) : 0));
     expect(orderedNumbers).toEqual([1, 2, 3, 4, 5, 6, 7]);
 
-    // Contains ## Pages with check and about sub-pages.
+    // Contains ## Pages with check, install, and about sub-pages.
     expect(llms).toContain('## Pages');
-    const pageLinks = llms.match(/^- \[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
-    expect(pageLinks.length).toBe(2);
+    expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/check\.md\)$/m);
+    expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/install\.md\)$/m);
+    expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/about\.md\)$/m);
 
     // Contains ## Scorecards with at least the leaderboard link.
     expect(llms).toContain('## Scorecards');
@@ -244,6 +245,56 @@ describe('regression #5 — /skill.json (skill-distribution canonical surface)',
     expect(full).toContain('# Install agent-native-cli');
     expect(full).toContain('Source: https://anc.dev/skill');
     expect(full).toContain('Canonical-Markdown: https://anc.dev/skill.md');
+  });
+});
+
+describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSON', () => {
+  test('dist/install.html and dist/install.md exist; dist/install.json does NOT', async () => {
+    const html = await readFile(join(DIST, 'install.html'), 'utf8');
+    const md = await readFile(join(DIST, 'install.md'), 'utf8');
+    expect(html).toContain('<h1');
+    expect(md).toMatch(/^#\s+Install agentnative/);
+    await expect(readFile(join(DIST, 'install.json'), 'utf8')).rejects.toThrow(/ENOENT/);
+  });
+
+  test('install.html includes the brew + cargo install commands', async () => {
+    const html = await readFile(join(DIST, 'install.html'), 'utf8');
+    // Strip tags + decode &#x2F; to recover Shiki-tokenized command text.
+    const text = html.replace(/<[^>]+>/g, '').replace(/&#x2F;/g, '/');
+    expect(text).toContain('brew install brettdavies/tap/agentnative');
+    expect(text).toContain('cargo install agentnative');
+  });
+
+  test('sitemap.xml contains /install (CLI page is human-indexable)', async () => {
+    const sitemap = await readFile(join(DIST, 'sitemap.xml'), 'utf8');
+    expect(sitemap).toContain('/install</loc>');
+  });
+
+  test('primary nav contains the Install link on every page', async () => {
+    // Sample one principle page + the leaderboard page.
+    for (const page of ['p3.html', 'scorecards.html', 'install.html']) {
+      const html = await readFile(join(DIST, page), 'utf8');
+      expect({ page, hasInstallNav: /<a href="\/install">Install<\/a>/.test(html) }).toEqual({
+        page,
+        hasInstallNav: true,
+      });
+    }
+  });
+
+  test('inline brew/cargo copy lives only in content/install.md (no source-tree duplicates)', async () => {
+    // Build-time guard for the dedup goal of Unit 2. Render-stage HTML
+    // duplicates would re-grow if a future edit re-inlines the commands.
+    const repoRoot = join(import.meta.dir, '..');
+    const { execFileSync } = await import('node:child_process');
+    const matches = execFileSync(
+      'grep',
+      ['-rlE', 'brew install brettdavies/tap/agentnative|cargo install agentnative', 'src/', 'content/'],
+      { cwd: repoRoot, encoding: 'utf8' },
+    )
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    expect(matches).toEqual(['content/install.md']);
   });
 });
 

@@ -224,9 +224,10 @@ export async function build() {
   ];
   await writeFile(join(DIST_DIR, 'index.md'), indexMdLines.join('\n'));
 
-  // 7. check.md + about.md.
+  // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
   const subPages = [
     { name: 'check', path: join(CONTENT_DIR, 'check.md') },
+    { name: 'install', path: join(CONTENT_DIR, 'install.md') },
     { name: 'about', path: join(CONTENT_DIR, 'about.md') },
     { name: 'changelog', path: join(CONTENT_DIR, 'changelog.md') },
     { name: 'methodology', path: join(CONTENT_DIR, 'methodology.md') },
@@ -264,9 +265,8 @@ export async function build() {
   not authoritative; the per-tool page's evidence list is the ground truth.</p>
   <p>For the full explanation of scoring, audience classification, audit profiles, and how to
   request a re-score, see the <a href="/methodology">methodology page</a>.</p>
-  <p>To reproduce any row locally:</p>
-  <pre><code>brew install brettdavies/tap/agentnative &amp;&amp; anc check &lt;binary&gt;</code></pre>
-  <p>Also installable via <code>cargo install agentnative</code>.</p>`;
+  <p>To reproduce any row locally, <a href="/install">install <code>anc</code></a> and run
+  <code>anc check &lt;binary&gt;</code>.</p>`;
 
   const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
   await writeFile(
@@ -408,11 +408,12 @@ export async function build() {
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
 
-  // 10. Sitemap (includes scorecard paths). /skill is indexed for humans;
-  // /skill.json carries X-Robots-Tag: noindex so it stays out of the sitemap.
+  // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
+  // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
+  // so it stays out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', '/skill', ...scorecardPaths],
+    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -424,8 +425,8 @@ export async function build() {
   );
 
   const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
-  // +5: check, about, changelog, methodology, coverage
-  const extraPages = 5;
+  // +6: check, install, about, changelog, methodology, coverage
+  const extraPages = 6;
   return {
     principles: principles.length,
     htmlPages: principles.length + extraPages + scorecardPageCount,

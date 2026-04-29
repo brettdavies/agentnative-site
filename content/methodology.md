@@ -130,14 +130,11 @@ the absence of language coverage in the linter, not for any property of the tool
 
 ## Re-running the same checks locally
 
-Every score on the leaderboard is reproducible:
+Every score on the leaderboard is reproducible. [Install `anc`](/install), then run:
 
 ```bash
-brew install brettdavies/tap/agentnative
 anc check <binary> --output json
 ```
-
-Also installable via `cargo install agentnative`.
 
 Pass `--audit-profile <category>` to apply the same suppression set the leaderboard applies. The committed scorecards
 under [`scorecards/`](https://github.com/brettdavies/agentnative-site/tree/main/scorecards) record the exact CLI version

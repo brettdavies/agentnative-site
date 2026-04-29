@@ -5,12 +5,8 @@ you, by check ID, where it passes and where it falls short.
 
 ## Install
 
-```bash
-brew install brettdavies/tap/agentnative
-```
-
-Also installable via `cargo install agentnative`, `cargo binstall agentnative` for a prebuilt binary, or platform
-archives on [GitHub Releases](https://github.com/brettdavies/agentnative-cli/releases).
+See [/install](/install) for `brew`, `cargo`, and platform-archive instructions. Once `anc` is on `$PATH`, the rest of
+this page is what to do with it.
 
 ## Run it
 

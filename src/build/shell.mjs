@@ -145,6 +145,7 @@ ${principles
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="/scorecards">Leaderboard</a>
+        <a href="/install">Install</a>
         <a href="/check">Check your CLI</a>
         <a href="/methodology">Methodology</a>
         <a href="/coverage">Coverage</a>
