@@ -26,6 +26,13 @@ score = pass / (pass + warn + fail)
 (e.g., a flag-parsing check on a tool with no flags). An `error` means the check itself crashed and produced no signal.
 Neither is evidence of a defect, so neither moves the score.
 
+**A note on weighting.** The pass rate weighs MUST violations (`fail`) and SHOULD violations (`warn`) equally in the
+headline number. Per RFC 2119 those are categorically different — a `fail` means non-conformance with the standard; a
+`warn` means a missed default. The headline is a deliberate simplification chosen so a single number is comparable
+across tools; the **principles met** column is where conformance lives. A tool with one `fail` and zero `warn` will
+score higher than a tool with zero `fail` and three `warn`, but only the first tool is non-conformant — read both
+columns together. The per-tool page is the ground truth.
+
 The **principles met** column counts how many of the seven principles (P1–P7) have *all* their checks passing — no
 warnings, no failures. A tool can have a 90% pass rate and still meet only four of seven principles, if the warnings
 cluster inside three principle groups. Both numbers are surfaced because either, alone, hides the shape of the result.
@@ -38,7 +45,9 @@ score. They are language-specific and would create unfair comparisons across too
 `anc` v0.1.3+ classifies each scored tool as one of:
 
 - `agent-optimized` — the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or
-  warn at most once.
+  warn at most once. (One warn allowance reflects the reality that the four signal checks are correlated — a
+  near-conformant tool typically misses on one edge, e.g., honoring `NO_COLOR` but not `NO_COLOR=0`; requiring zero
+  warns would over-penalize otherwise-conformant tools.)
 - `mixed` — two of the four signal checks warn.
 - `human-primary` — three or more of the four signal checks warn.
 - `null` with `audience_reason: "suppressed"` — when the active audit profile suppresses one or more of the four signal

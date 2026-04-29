@@ -17,28 +17,30 @@ catastrophically later.
 
 **MUST:**
 
-- A `--output text|json|jsonl` flag selects the output format. Text is the default for humans; JSON and JSONL are the
-  agent-facing formats. Implementation surfaces an `OutputFormat` enum and an `OutputConfig` struct threaded through
-  every function that produces output.
+- A machine-readable format flag (e.g., `--output text|json`, with `jsonl` where the output is naturally streamed). Text
+  is the default for humans; at least one structured format is required for agent-facing use.
 - Data goes to stdout. Diagnostics, progress indicators, and warnings go to stderr. An agent consuming JSON from stdout
   must never encounter an interleaved progress message.
-- Exit codes are structured and documented:
+- Exit codes are structured and documented. Codes 77 and 78 follow BSD `sysexits.h` (`EX_NOPERM`, `EX_CONFIG`); the
+  broader sysexits range is intentionally not mandated to keep the surface small:
 
-  | Code | Meaning                                      |
-  | ---: | -------------------------------------------- |
-  |    0 | Success                                      |
-  |    1 | General command error                        |
-  |    2 | Usage error (bad arguments)                  |
-  |   77 | Authentication / permission error            |
-  |   78 | Configuration error                          |
+| Code | Meaning                           |
+| ---: | --------------------------------- |
+|    0 | Success                           |
+|    1 | General command error             |
+|    2 | Usage error (bad arguments)       |
+|   77 | Authentication / permission error |
+|   78 | Configuration error               |
 
 - When `--output json` is active, errors are emitted as JSON (to stderr) with at least `error`, `kind`, and `message`
-  fields. Plain-text errors in a JSON run break the agent's parser on the only output it was told to expect.
+  fields. Plain-text errors in a JSON run leave the agent without structured access to the failure — it can detect
+  non-zero exit but cannot route on `kind` or surface `message` programmatically.
 
 **SHOULD:**
 
 - JSON output uses a consistent envelope — a top-level object with predictable keys — across every command so agents can
-  rely on the same shape.
+  rely on the same shape. Passthrough tools whose value is the user's own JSON (`jq`, `dasel`) are exempt; the envelope
+  applies to commands that emit tool-defined data.
 
 **MAY:**
 
@@ -47,8 +49,10 @@ catastrophically later.
 
 ## Evidence
 
+Rust reference implementation:
+
 - `OutputFormat` enum with `Text`, `Json`, `Jsonl` variants deriving `ValueEnum`.
-- `OutputConfig` struct with `format`, `use_color`, and `quiet` fields.
+- `OutputConfig` struct with `format`, `use_color`, and `quiet` fields threaded through every output-producing function.
 - `serde_json` in `Cargo.toml`.
 - No `println!` in `src/` outside the output module — every print goes through `OutputConfig`.
 - Exit-code constants or match arms mapping error variants to distinct numeric codes.
@@ -62,5 +66,5 @@ catastrophically later.
 - `process::exit()` in library code, bypassing structured error propagation.
 - Human-formatted tables as the only output mode with no JSON alternative.
 
-Measured by check IDs `p2-output-json`, `p2-output-format`, `p2-stderr-diagnostics`. Run
-`agentnative check --principle 2 .` against your CLI to see each.
+Measured by check ID `p2-json-output` today, with format-specific and stderr-discipline checks planned. Run `anc check
+--principle 2 .` against your CLI to see current coverage.

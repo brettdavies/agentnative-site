@@ -1,8 +1,8 @@
 # Install agentnative
 
-`agentnative` is the reference linter for the agent-native CLI standard. It scores any CLI tool against the seven
-principles and tells you, by check ID, where it passes and where it falls short. Install it locally, then point it at a
-binary or a project directory.
+`anc` (also installable as `agentnative` — the binary ships under both names) is the reference linter for the
+agent-native CLI standard. It scores any CLI tool against the seven principles and tells you, by check ID, where it
+passes and where it falls short. Install it locally, then point it at a binary or a project directory.
 
 ## Homebrew
 
@@ -10,7 +10,9 @@ binary or a project directory.
 brew install brettdavies/tap/agentnative
 ```
 
-The tap publishes signed bottles for macOS (Intel + Apple Silicon) and Linux (x86_64 + arm64). To update in place:
+The tap publishes prebuilt bottles for Apple Silicon Macs (macOS 14 Sonoma and 15 Sequoia) and x86_64 Linux, with SHA256
+integrity hashes recorded in the formula. Intel Mac and arm64 Linux users compile from source via the same formula. To
+update in place:
 
 ```bash
 brew upgrade brettdavies/tap/agentnative
@@ -22,7 +24,8 @@ brew upgrade brettdavies/tap/agentnative
 cargo install agentnative
 ```
 
-For a prebuilt binary without compiling from source:
+For a prebuilt binary without compiling from source (requires
+[`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall) — skip if you don't already have it):
 
 ```bash
 cargo binstall agentnative

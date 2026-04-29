@@ -15,16 +15,20 @@ trial-and-errors its way into a working call, burning tokens and sometimes landi
 
 ## Requirements
 
+The principle is framework-agnostic — `clap`'s `after_help` is the worked example below; analogs include `cobra`'s
+`Example` (Go), `argparse`'s `epilog` (Python), `docopt`'s usage block, and the `Examples:` convention in `gh` /
+`kubectl`.
+
 **MUST:**
 
 - Every subcommand ships at least one concrete invocation example showing the command with realistic arguments, rendered
   in the section that appears after the flags list. In clap this is the `after_help` attribute.
-- The top-level command ships 2–3 examples covering the primary use cases.
+- The top-level command ships at least one concrete example, and 2–3 when the tool has multiple primary use cases.
 
 **SHOULD:**
 
-- Examples show human and agent invocations side by side — a text-output example followed by its `--output json`
-  equivalent. Readers see the pair; agents see the JSON form.
+- When the CLI exposes a structured-output mode (see [P2](/p2)), examples show human and agent invocations side by side
+  — a text-output example followed by its `--output json` equivalent. Readers see the pair; agents see the JSON form.
 - Short `about` for command-list summaries; `long_about` reserved for detailed descriptions visible with `--help` but
   not `-h`.
 
@@ -48,5 +52,5 @@ trial-and-errors its way into a working call, burning tokens and sometimes landi
 - Examples buried in a README or man page but absent from `--help` output.
 - `after_help` text that describes the flags in prose instead of demonstrating them in code.
 
-Measured by check IDs `p3-help`, `p3-after-help`, `p3-version`. Run `agentnative check --principle 3 .` against
-your CLI to see each.
+Measured by check IDs `p3-help` and `p3-version` today, with `p3-after-help` planned. Run `anc check --principle 3 .`
+against your CLI to see current coverage.
