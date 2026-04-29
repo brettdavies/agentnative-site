@@ -1152,3 +1152,43 @@ describe('buildScorecardBody — embed-snippet gating', () => {
     expect(html).toContain('15 points below');
   });
 });
+
+// -------------------------------------------------------------------
+// Leaderboard badge callout (surface #2 of the badge plan).
+// -------------------------------------------------------------------
+
+describe('buildLeaderboardBody — badge callout', () => {
+  function entry(name: string, score: number, scored = true) {
+    return {
+      tool: { name, tier: 'workhorse', language: 'rust', description: name },
+      scorecard: scored ? ({ summary: { pass: 1, warn: 0, fail: 0 } } as any) : null,
+      score,
+      principleScore: { met: 5, total: 7, details: [] },
+      rank: 1,
+    };
+  }
+
+  test('callout cites the floor and the live eligible/total count', () => {
+    const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3, false)];
+    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    expect(html).toContain('leaderboard-badge-callout');
+    expect(html).toContain('above 80%');
+    // Two of four entries clear 0.80; total counts every leaderboard row
+    // including the unscored one (denominator is registry-wide).
+    expect(html).toContain('2 of 4 listed tools');
+  });
+
+  test('callout links to /badge', () => {
+    const html = buildLeaderboardBody([entry('eza', 1.0)] as any, '<p>m</p>');
+    expect(html).toContain('href="/badge"');
+  });
+
+  test('unscored entries are not counted as eligible even at score=0', () => {
+    // An unscored entry has scorecard === null; computeLeaderboard sets
+    // its score to 0. The callout must not count those as "below floor"
+    // — they're "no signal yet."
+    const lb = [entry('rg', 1.0), entry('unscored', 0, false)];
+    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    expect(html).toContain('1 of 2');
+  });
+});

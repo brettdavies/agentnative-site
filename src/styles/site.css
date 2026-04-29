@@ -693,6 +693,28 @@ body:has(.leaderboard-hero) main {
   color: oklch(45.00% 0.1 70);
 }
 
+/* Badge callout — surface #2 of the badge plan. Sits between the
+   leaderboard table and the methodology section so a reader who has
+   just scanned the rankings sees the next step (claim the badge) before
+   the longer-form methodology prose. */
+.leaderboard-badge-callout {
+  margin-top: 2rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border-subtle, #e5e8eb);
+  border-radius: 8px;
+  background: var(--bg-subtle, #f6f8fa);
+}
+
+.leaderboard-badge-callout h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.05rem;
+}
+
+.leaderboard-badge-callout p {
+  margin: 0;
+  color: var(--fg-secondary, #6a7278);
+}
+
 /* Methodology section */
 .leaderboard-methodology {
   margin-top: 2.5rem;

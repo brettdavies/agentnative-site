@@ -108,6 +108,13 @@ export function buildLeaderboardBody(leaderboard, methodology) {
     tierCounts[e.tool.tier] = (tierCounts[e.tool.tier] || 0) + 1;
   }
 
+  // Eligible-tool count for the badge callout. Counts only scored tools
+  // at or above BADGE_FLOOR — the same gate the per-tool scorecard pages
+  // use. Lets the callout cite a real number ("24 tools currently qualify")
+  // instead of a vague "tools that qualify."
+  const eligibleCount = leaderboard.filter((e) => e.scorecard && e.score >= BADGE_FLOOR).length;
+  const floorPct = Math.round(BADGE_FLOOR * 100);
+
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
   <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
@@ -143,6 +150,11 @@ export function buildLeaderboardBody(leaderboard, methodology) {
 ${rows}
     </tbody>
   </table>
+</section>
+
+<section class="leaderboard-badge-callout" aria-label="Agent-native badge">
+  <h2>Claim the badge</h2>
+  <p>Tools at or above ${floorPct}% can embed the <a href="/badge">agent-native badge</a> on their README — a live link to their scorecard, not a static stamp. ${eligibleCount} of ${leaderboard.length} listed tools currently qualify.</p>
 </section>
 
 <section class="leaderboard-methodology">
