@@ -1,14 +1,48 @@
 ---
 title: "feat: Split /install into /install (CLI) + /skill (skill bundle)"
 type: feat
-status: active
+status: complete
 date: 2026-04-28
+completed: 2026-04-29
+shipped_in:
+  - "PR #44 (commit 8b20047) — merged 2026-04-29"
 related_plans:
   - docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md
   - docs/plans/2026-04-27-001-feat-skill-distribution-site-plan.md
 ---
 
 # feat: Split `/install` into `/install` (CLI) + `/skill` (skill bundle)
+
+## Outcome (2026-04-29)
+
+Status: **complete**. Shipped as a single squash-merge — PR #44 (commit `8b20047`, `refactor(skill): split /install into
+/install (CLI) + /skill (skill bundle)`), merged 2026-04-29 17:12 UTC. All ten acceptance requirements verified against
+the post-merge tree on `dev`:
+
+- **R1 ✓** `dist/install.html` rendered from a new content-driven `content/install.md`. Single canonical install copy:
+  the brew/cargo command lines now live only in `content/install.md` (verified by `grep -rE 'brew install
+  brettdavies/tap/agentnative|cargo install agentnative' src/ content/` returning that one file).
+- **R2 ✓** `dist/install.md` twin emitted via the standard `subPages` pipeline.
+- **R3 ✓** `dist/install.json` does NOT exist post-build. Asset-absent 404 contract upheld.
+- **R4 ✓** `dist/skill.html` emitted; data-driven render unchanged from prior `/install` HTML.
+- **R5 ✓** `dist/skill.json` emitted; `src/data/skill.json` carries `skill_page_html: "https://anc.dev/skill"` and
+  `schema_version: 1`. Field rename landed.
+- **R6 ✓** `dist/skill.md` emitted.
+- **R7 ✓** Worker stays slug-agnostic. `src/worker/headers.ts` and `src/worker/index.ts` doc-comments updated; no
+  branching on `/install` or `/skill` path prefix.
+- **R8 ✓** Doc sweep landed across `README.md` (line 29), `RELEASES.md` (line 221), `docs/DESIGN.md` (line 480 carries
+  `skill_page_html`; §3.9 + §3.10 carry the new vocabulary), and the workflow comments in
+  `.github/workflows/skill-availability.yml`. The remaining `/install.json` references in `RELEASES.md:219` and
+  `docs/DESIGN.md:524,527,529` are intentional cutover/contract documentation, not stale references.
+- **R9 ✓** `bun run lint && bun run build && bun test` green on the post-merge tree (134 tests pass; build emits 110
+  HTML pages + 110 MD pages + the skill triple + the new `install` twin). Pre-push hook gated each commit per repo
+  policy.
+- **R10 ✓** `tests/e2e/skill.e2e.ts` exists; `playwright.config.ts` carries the renamed `skill` project.
+
+Three units merged in PR #44; all checkboxes ticked below.
+
+**Follow-up filed** per the plan's "Deferred to Separate Tasks" callout: `/compound` entry covering both the original
+triple-emit pattern and what made the split clean. Not yet written; track as a P3 chore.
 
 ## Overview
 
@@ -265,7 +299,7 @@ The three units ship as ordered commits on a single feature branch (`feat/split-
 to `dev` via auto-merge per repo memory. Each commit must keep `bun run lint && bun run build && bun test` green so the
 pre-push hook (`scripts/hooks/pre-push`) admits pushes between commits.
 
-- [ ] **Unit 1: Rename skill distribution surface from `/install` to `/skill`**
+- [x] **Unit 1: Rename skill distribution surface from `/install` to `/skill`**
 
 **Goal:** Move the entire skill triple-emit (HTML + JSON + MD) from `/install` to `/skill`. Source files renamed, tests
 flipped, Worker comments refreshed. End state: `/skill.{html,json,md}` serves the skill bundle exactly as today's
@@ -295,8 +329,8 @@ flipped, Worker comments refreshed. End state: `/skill.{html,json,md}` serves th
   reuses the branch" — replace with "any `/<slug>.json` endpoint reuses the branch."
 - Modify: `src/worker/index.ts`. Lines 36–41 doc-comment example flips from `/install.json` to `/skill.json`.
 - Modify: `tests/build.test.ts`. Lines 863–963 (`loadInstallData` validator suite): rename describe block, factory
-  function `validManifest()`, and file path strings from `install.json` to `skill.json`. Field `install_page_html` (line
-  889) → `skill_page_html` with value `https://anc.dev/skill`.
+  function `validManifest()`, and file path strings from `install.json` to `skill.json`. Field `install_page_html` at
+  `tests/build.test.ts:889` renamed to `skill_page_html` with value `https://anc.dev/skill`.
 - Modify: `tests/regression.test.ts`. Lines 124–240 (regression #5): describe heading flips to "regression #5 —
   /skill.json (skill-distribution canonical surface)"; every `install.{json,html,md}` reference flips to
   `skill.{json,html,md}`; sitemap assertion at line 219 (`expect(sitemap).toContain('/install</loc>')`) flips to
@@ -360,7 +394,7 @@ flipped, Worker comments refreshed. End state: `/skill.{html,json,md}` serves th
 
 ---
 
-- [ ] **Unit 2: New `/install` (CLI) page; collapse three duplicate install copies**
+- [x] **Unit 2: New `/install` (CLI) page; collapse three duplicate install copies**
 
 **Goal:** Stand up the CLI install page at `/install` (HTML + MD only — no JSON). Harvest the install copy from
 `content/check.md` to a new `content/install.md` source. Refactor the two inline-duplicated install blocks (in
@@ -459,7 +493,7 @@ building Unit 2 on top of Unit 1's tree avoids merge conflicts in `src/build/bui
 
 ---
 
-- [ ] **Unit 3: Doc sweep + CI workflow comment refresh**
+- [x] **Unit 3: Doc sweep + CI workflow comment refresh**
 
 **Goal:** Flip every prose reference to `/install` (skill) over to `/skill` across README, AGENTS.md, RELEASES.md,
 docs/DESIGN.md, docs/VOICE.md, content/_intro.md, and CI workflow comments. Add new prose for the `/install` (CLI) page
@@ -581,15 +615,16 @@ live site).
 
 - **Related plans:**
 -
-    [`docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md`](./2026-04-24-001-feat-skill-distribution-endpoint-plan.md)
-    — original master plan; deferred `/skill/<name>` to v2.
--
-    [`docs/plans/2026-04-27-001-feat-skill-distribution-site-plan.md`](./2026-04-27-001-feat-skill-distribution-site-plan.md)
-    — Units 2–5 execution plan that shipped via PRs #36–#39.
+
+[`docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md`](./2026-04-24-001-feat-skill-distribution-endpoint-plan.md)
+— original master plan; deferred `/skill/<name>` to v2. -
+[`docs/plans/2026-04-27-001-feat-skill-distribution-site-plan.md`](./2026-04-27-001-feat-skill-distribution-site-plan.md)
+— Units 2–5 execution plan that shipped via PRs #36–#39.
+
 - **Related code:**
 - `src/build/install.mjs`, `src/data/install.json`, `src/build/build.mjs` (step 8c), `src/build/llms.mjs`,
-    `src/worker/headers.ts`, `src/worker/index.ts`, `tests/regression.test.ts`, `tests/build.test.ts`,
-    `tests/worker.test.ts`, `tests/e2e/install.e2e.ts`, `playwright.config.ts`.
+  `src/worker/headers.ts`, `src/worker/index.ts`, `tests/regression.test.ts`, `tests/build.test.ts`,
+  `tests/worker.test.ts`, `tests/e2e/install.e2e.ts`, `playwright.config.ts`.
 - **Related docs:** `README.md`, `AGENTS.md`, `RELEASES.md`, `docs/DESIGN.md` §3.9, `docs/VOICE.md`, `content/check.md`,
   `content/_intro.md`, `.github/workflows/skill-availability.yml`.
 - **Institutional learnings:**
