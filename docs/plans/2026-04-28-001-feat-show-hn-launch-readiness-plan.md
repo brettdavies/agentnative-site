@@ -17,6 +17,30 @@ parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-laun
 
 # feat: Show HN launch readiness — agentnative-site
 
+## Status snapshot (2026-04-29 PT)
+
+Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~21h out).
+
+- **U1 ✅ shipped** — `scripts/sync-coverage-matrix.sh` rename drift fixed via commit `2467e5c`. Todo `014` is
+  `complete`.
+- **U2 ✅ moot — full coverage** — Registry holds 96 entries; `scorecards/` holds 96 JSON files. Effective audit decision
+  is "(a) full batch-scoring already done"; no gap to fill.
+- **U3 ✅ shipped — no fallback rows needed** — `dist/scorecards.html` renders 96 `<tr>` rows from 96 scorecards via
+  `d710ade feat(scoring): full anc100 leaderboard (96/96 clean) via patched docker pipeline (#40)`. The
+  `.leaderboard-row--skipped` class was never written because zero rows are skipped — the U3 contingency design is
+  retired.
+- **U4 — site-copy red-team pass (Gate 11):** in progress this session.
+- **U5 — cold-device smoke (Gate 12):**
+- Pre-cut staging pass: ✅ confirmed on phone (SVG icons render correctly in iOS Safari, theme toggle works, nav links
+  resolve). Did not block on the missing-icon regression that PR #46 fixed.
+- Post-cut prod pass: pending — runs Thu morning before 09:00 PT after `release/launch` deploys.
+- **U6 — `release/launch` PR cut + cutover ops:** blocked on upstream chain. Central-tracker step 1 (spec v0.3.0) done;
+  steps 2 (CLI v0.2.0), 3a/3b (skill v0.2.0) still pending. U6 cannot execute until skill v0.2.0 tag is live so
+  `src/data/skill.json` can be re-pinned (note: file is now `skill.json`, not `install.json` — Pre-launch Release PR
+  Checklist below was written before the PR #44 split and uses the old name in places; the substance carries).
+- **Gate 9 — issue templates on `main`:** still passive-clear via U6's full-`dev` cherry-pick. Confirmed
+  `.github/ISSUE_TEMPLATE/{config.yml,site-bug.yml}` exist on `dev` and not on `main`.
+
 ## Overview
 
 The site repo is the **primary surface** on launch day — `~100% click-through` per the central tracker's ecosystem
@@ -265,7 +289,7 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
 
 ## Implementation Units
 
-- [ ] **U1. Fix `scripts/sync-coverage-matrix.sh` rename drift (P0 todo `014`)**
+- [x] **U1. Fix `scripts/sync-coverage-matrix.sh` rename drift (P0 todo `014`)** — shipped `2467e5c`
 
 **Goal:** Default invocation works on the post-rename layout. `bash scripts/sync-coverage-matrix.sh` (no env vars) syncs
 the coverage matrix from `~/dev/agentnative-cli/coverage/matrix.json` cleanly.
@@ -305,7 +329,7 @@ agentnative-cli)`
 
 ---
 
-- [ ] **U2. Audit anc100 leaderboard coverage and decide fill strategy (Gate 8 — Phase 1)**
+- [x] **U2. Audit anc100 leaderboard coverage and decide fill strategy (Gate 8 — Phase 1)** — moot; coverage is 96/96
 
 **Goal:** Know how many of the 100 registry entries have scorecards today, what the gap looks like (which tools, which
 tiers), and pick the right mix of batch-scoring vs. fallback rows.
@@ -355,7 +379,8 @@ tiers), and pick the right mix of batch-scoring vs. fallback rows.
 
 ---
 
-- [ ] **U3. Render full anc100 leaderboard with fallback rows (Gate 8 — Phase 2)**
+- [x] **U3. Render full anc100 leaderboard with fallback rows (Gate 8 — Phase 2)** — shipped `d710ade` (#40), 96/96 real
+  scores; fallback class never needed
 
 **Goal:** `/scorecards` renders 100 rows. Each row is either a real scored row or a clearly-marked skipped row with a
 one-line reason. No blank rows. The leaderboard reads as a credible full-registry render, not a partial sample.
