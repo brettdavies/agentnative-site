@@ -92,6 +92,39 @@ test.describe('code-copy + anchor-copy', () => {
     await anchor.click();
     await expect(page).toHaveURL(/#p3-progressive-help-discovery$/);
   });
+
+  // Regression guard for #015: heading-anchor chain icon must return after
+  // the "Copied" label fades, so deep-link copy works on every click — not
+  // just the first one per page load.
+  test('heading anchor restores chain svg after Copied flash and supports repeat clicks', async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    test.skip(browserName === 'webkit', 'WebKit does not support clipboard permission grants');
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/p3');
+    const anchor = page.locator('h1 a.anchor').first();
+    await expect(anchor.locator('svg')).toHaveCount(1);
+
+    await anchor.click();
+    await expect(anchor).toHaveAttribute('data-copy-state', 'copied');
+    const firstWrite = await page.evaluate(() => navigator.clipboard.readText());
+    expect(firstWrite).toMatch(/#p3-progressive-help-discovery$/);
+
+    // Wait past the 1500ms COPIED_MS fade plus a small buffer.
+    await expect(anchor).not.toHaveAttribute('data-copy-state', 'copied', { timeout: 3000 });
+    await expect(anchor.locator('svg')).toHaveCount(1);
+
+    // Second click must produce another flash and clipboard write.
+    await page.evaluate(() => navigator.clipboard.writeText(''));
+    await anchor.click();
+    await expect(anchor).toHaveAttribute('data-copy-state', 'copied');
+    const secondWrite = await page.evaluate(() => navigator.clipboard.readText());
+    expect(secondWrite).toMatch(/#p3-progressive-help-discovery$/);
+    await expect(anchor).not.toHaveAttribute('data-copy-state', 'copied', { timeout: 3000 });
+    await expect(anchor.locator('svg')).toHaveCount(1);
+  });
 });
 
 test.describe('principle listing', () => {
