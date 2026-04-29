@@ -32,11 +32,20 @@ async function copyText(text: string): Promise<boolean> {
 
 function flashCopied(button: HTMLElement) {
   const label = button.querySelector<HTMLElement>('[data-copy-label]') ?? button;
-  const original = label.textContent ?? '';
+  // Heading anchors hold an inline SVG icon as their only child — they have
+  // no [data-copy-label] span and no text content. Snapshot innerHTML in that
+  // case so the icon DOM is restored after the fade. Pre-block buttons keep
+  // the textContent path because their label is a real text node.
+  const isIconLabel = label === button && (label.textContent ?? '').trim() === '';
+  const original = isIconLabel ? label.innerHTML : (label.textContent ?? '');
   label.textContent = 'Copied';
   button.setAttribute('data-copy-state', 'copied');
   window.setTimeout(() => {
-    label.textContent = original;
+    if (isIconLabel) {
+      label.innerHTML = original;
+    } else {
+      label.textContent = original;
+    }
     button.removeAttribute('data-copy-state');
   }, COPIED_MS);
 }
