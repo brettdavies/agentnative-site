@@ -234,6 +234,7 @@ export async function build() {
     { name: 'check', path: join(CONTENT_DIR, 'check.md') },
     { name: 'install', path: join(CONTENT_DIR, 'install.md') },
     { name: 'about', path: join(CONTENT_DIR, 'about.md') },
+    { name: 'badge', path: join(CONTENT_DIR, 'badge.md') },
     { name: 'changelog', path: join(CONTENT_DIR, 'changelog.md') },
     { name: 'methodology', path: join(CONTENT_DIR, 'methodology.md') },
     { name: 'scorecard-schema', path: join(CONTENT_DIR, 'scorecard-schema.md') },
@@ -448,7 +449,7 @@ export async function build() {
   // so it stays out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', ...scorecardPaths],
+    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', '/badge', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -460,8 +461,13 @@ export async function build() {
   );
 
   const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
-  // +6: check, install, about, changelog, methodology, coverage
-  const extraPages = 6;
+  // 7: check, install, about, badge, changelog, methodology, coverage
+  // (scorecard-schema is in subPages but counts under the sub-pages tally
+  // emitted alongside; skill.html is also emitted separately. The
+  // build-summary shape predates badge/skill/scorecard-schema and is
+  // approximate — it exists to confirm "build produced ~the expected
+  // number of files," not as a precise contract.)
+  const extraPages = 7;
   return {
     principles: principles.length,
     htmlPages: principles.length + extraPages + scorecardPageCount,
