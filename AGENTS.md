@@ -85,6 +85,47 @@ treatment, and dark/light tokens before any HTML is written.
 Design context consumed by the `/impeccable` and `/typeset` skills (users, brand personality, aesthetic direction,
 design principles): [`.impeccable.md`](.impeccable.md).
 
+## Visual fidelity
+
+Two gates protect against visual regressions slipping past unit tests, which only assert HTML structure — not rendered
+appearance.
+
+### Browser-verify before declaring "done"
+
+Any change that touches CSS, design tokens, layout, color, or component HTML must be verified in an actual browser
+before the unit is reported complete. `bun test` and `bun run build` going green does not count — neither renders the
+page, neither resolves dark-mode token overrides, neither catches "near-white text on near-white background" failure
+modes that surface only under a specific theme.
+
+The verification is mechanical:
+
+1. Open the changed page on staging (or local `bun run dev`) in a browser.
+2. Toggle through both themes (light + dark) using the in-page toggle. Confirm the changed surface reads correctly under
+   each — text is legible against background, borders register as edges, interactive elements stay distinguishable from
+   prose.
+3. Capture a screenshot for the PR description when the change is non-trivial.
+
+This rule exists because of a launch-eve regression: `var(--bg-subtle, ...)` shipped where the canonical token is
+`--bg-raised`. The fallback hex was a sensible light-mode color, so light mode looked plausible; dark mode left
+near-invisible callout text. Tests passed, build was green. Browser-verification would have caught it in 30 seconds. PR
+[#50](https://github.com/brettdavies/agentnative-site/pull/50) is the fix; this gate is the prevention.
+
+The rule scales with risk. A typo in a heading: skip. Any new CSS rule, any token change, any layout-affecting HTML
+edit: verify.
+
+### Visual-regression snapshot tests
+
+Planned, not yet shipped. Playwright will capture a baseline screenshot of each key surface (leaderboard, per-tool
+scorecard pages, `/badge`, `/skill`, the seven principle pages) in both light and dark themes. CI will diff against the
+baseline; non-trivial pixel deltas fail the run.
+
+This protects against the failure mode the browser-verify rule depends on humans catching: an agent or human pushes a
+"non-visual" change that nonetheless shifts the rendered page. Snapshot tests don't require a brain in the loop.
+
+The tooling is heavier than the lint-rule alternatives — baseline images need maintenance, flake budgets need discipline
+— so the rollout is deferred until the design system is stable enough for a baseline to be load-bearing. Until then, the
+agent-side browser-verify rule above is the working gate.
+
 ## Cross-repo context
 
 | Repo / Location                                                                                     | What to read                                                                                                                   | Why                                                                                                                                                                                                                        |
