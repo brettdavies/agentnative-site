@@ -25,6 +25,7 @@ import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/p
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyAssets } from './assets.mjs';
+import { renderBadgeSvg } from './badge.mjs';
 import {
   extractDefinitionParagraph,
   extractDescription,
@@ -288,11 +289,14 @@ export async function build() {
   await writeFile(join(DIST_DIR, 'scorecards.md'), absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)));
 
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
+  // Badge SVGs               → dist/badge/<tool-name>.svg
   await ensureDir(join(DIST_DIR, 'score'));
-  // Drop stale per-tool pages from prior builds. When a tool is removed from
-  // the registry (e.g., aider, plandex, fabric in PR #40), its old html/md
-  // would otherwise linger in dist/ and ship as broken rows linking back to a
-  // tool the leaderboard no longer knows about.
+  await ensureDir(join(DIST_DIR, 'badge'));
+  // Drop stale per-tool pages and badge SVGs from prior builds. When a tool
+  // is removed from the registry (e.g., aider, plandex, fabric in PR #40),
+  // its old html/md/svg would otherwise linger in dist/ and ship as broken
+  // links / orphaned badges referencing a tool the leaderboard no longer
+  // knows about.
   const expectedNames = new Set(leaderboard.map((e) => e.tool.name));
   for (const file of await readdir(join(DIST_DIR, 'score')).catch(() => [])) {
     const m = file.match(/^([a-z0-9-]+)\.(html|md)$/);
@@ -300,7 +304,14 @@ export async function build() {
       await unlink(join(DIST_DIR, 'score', file));
     }
   }
+  for (const file of await readdir(join(DIST_DIR, 'badge')).catch(() => [])) {
+    const m = file.match(/^([a-z0-9-]+)\.svg$/);
+    if (m && !expectedNames.has(m[1])) {
+      await unlink(join(DIST_DIR, 'badge', file));
+    }
+  }
   const scorecardPaths = [];
+  const badgePaths = [];
   for (const entry of leaderboard) {
     const { tool, scorecard, score, principleScore, version } = entry;
     const topIssues = extractTopIssues(scorecard);
@@ -321,6 +332,18 @@ export async function build() {
       absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version)),
     );
     scorecardPaths.push(`/score/${tool.name}`);
+
+    // Badge SVG — emitted for every scored tool, even those below the
+    // eligibility floor. The /score/<tool> page gates the embed snippet
+    // (above-floor only); the SVG itself stays available so a tool's
+    // existing embed continues to render the current score after a
+    // regression. Unscored tools (scorecard === null) skip the SVG —
+    // there's no meaningful score to render.
+    if (scorecard) {
+      const svg = renderBadgeSvg(score);
+      await writeFile(join(DIST_DIR, 'badge', `${tool.name}.svg`), svg);
+      badgePaths.push(`/badge/${tool.name}.svg`);
+    }
   }
 
   // 8b. Coverage matrix page — /coverage.
@@ -445,6 +468,7 @@ export async function build() {
     mdPages: principles.length + extraPages + scorecardPageCount,
     extras: extraPages,
     scorecardPages: scorecardPageCount,
+    badgeSvgs: badgePaths.length,
   };
 }
 

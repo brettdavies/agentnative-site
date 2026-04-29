@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
 import { renderMarkdown } from '../src/build/render.mjs';
 import {
   computeLayerScore,
@@ -14,7 +15,7 @@ import {
 } from '../src/build/scorecards.mjs';
 import { buildLeaderboardBody, buildScorecardBody, renderAudienceBanner } from '../src/build/scorecards-render.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { escHtml, parseFilename, sortedGlob } from '../src/build/util.mjs';
+import { BADGE_FLOOR, escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -959,5 +960,90 @@ describe('loadSkillData — fail-fast validation', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// -------------------------------------------------------------------
+// badge-maker rendering — color thresholds, label format, SVG output
+// -------------------------------------------------------------------
+
+describe('badgeColor — threshold mapping', () => {
+  test('100% → brightgreen', () => {
+    expect(badgeColor(100)).toBe('brightgreen');
+  });
+
+  test('80% (floor) → brightgreen — brightline at the eligibility floor', () => {
+    expect(badgeColor(80)).toBe('brightgreen');
+  });
+
+  test('79% → yellow — one point below floor flips color', () => {
+    expect(badgeColor(79)).toBe('yellow');
+  });
+
+  test('60% → yellow — bottom of mid band', () => {
+    expect(badgeColor(60)).toBe('yellow');
+  });
+
+  test('59% → red', () => {
+    expect(badgeColor(59)).toBe('red');
+  });
+
+  test('0% → red', () => {
+    expect(badgeColor(0)).toBe('red');
+  });
+});
+
+describe('badgeFormat — label, message, color contract', () => {
+  test('label cites major.minor of spec version (patch dropped)', () => {
+    const f = badgeFormat(0.91, '0.3.0');
+    expect(f.label).toBe('agent-native v0.3');
+  });
+
+  test('label drops a non-zero patch component too', () => {
+    const f = badgeFormat(0.91, '1.4.7');
+    expect(f.label).toBe('agent-native v1.4');
+  });
+
+  test('default specVersion equals exported SPEC_VERSION constant', () => {
+    const f = badgeFormat(0.91);
+    const expected = SPEC_VERSION.split('.').slice(0, 2).join('.');
+    expect(f.label).toBe(`agent-native v${expected}`);
+  });
+
+  test('message rounds the 0–1 score to integer percent', () => {
+    expect(badgeFormat(0.916).message).toBe('92%');
+    expect(badgeFormat(0.9149).message).toBe('91%');
+    expect(badgeFormat(1.0).message).toBe('100%');
+    expect(badgeFormat(0).message).toBe('0%');
+  });
+
+  test('color follows badgeColor of the rounded percent — green at floor', () => {
+    expect(badgeFormat(BADGE_FLOOR).color).toBe('brightgreen');
+    expect(badgeFormat(0.79).color).toBe('yellow');
+    expect(badgeFormat(0.59).color).toBe('red');
+  });
+
+  test('style is flat — visually identical to shields.io defaults', () => {
+    expect(badgeFormat(0.91).style).toBe('flat');
+  });
+});
+
+describe('renderBadgeSvg — SVG output', () => {
+  test('emits SVG with declared label and message in title', () => {
+    const svg = renderBadgeSvg(0.91, '0.3.0');
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('agent-native v0.3');
+    expect(svg).toContain('91%');
+    expect(svg).toContain('</svg>');
+  });
+
+  test('100% badge uses brightgreen fill (#4c1)', () => {
+    const svg = renderBadgeSvg(1.0, '0.3.0');
+    expect(svg).toContain('#4c1');
+  });
+
+  test('below-floor badge does NOT use brightgreen — visual signal stays honest on regression', () => {
+    const svg = renderBadgeSvg(0.5, '0.3.0');
+    expect(svg).not.toContain('#4c1');
   });
 });
