@@ -337,10 +337,10 @@ export async function build() {
   const scorecardPaths = [];
   const badgePaths = [];
   for (const entry of leaderboard) {
-    const { tool, scorecard, score, principleScore, version } = entry;
+    const { tool, scorecard, score, principleScore, version, metadata } = entry;
     const topIssues = extractTopIssues(scorecard);
 
-    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score, version);
+    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score, version, metadata);
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.html`),
       emitShell({
@@ -353,7 +353,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version)),
+      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version, metadata)),
     );
     scorecardPaths.push(`/score/${tool.name}`);
 

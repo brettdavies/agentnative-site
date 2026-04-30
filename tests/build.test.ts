@@ -15,7 +15,12 @@ import {
   loadScoredTools,
   runScorecardInvariants,
 } from '../src/build/scorecards.mjs';
-import { buildLeaderboardBody, buildScorecardBody, renderAudienceBanner } from '../src/build/scorecards-render.mjs';
+import {
+  buildLeaderboardBody,
+  buildScorecardBody,
+  buildScorecardMarkdown,
+  renderAudienceBanner,
+} from '../src/build/scorecards-render.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
 import { BADGE_FLOOR, escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
@@ -1550,6 +1555,324 @@ describe('buildScorecardBody — embed-snippet gating', () => {
   test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
     const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] }, 0.65);
     expect(html).toContain('15 points below');
+  });
+});
+
+describe('buildScorecardBody — v0.4 metadata rendering', () => {
+  function tool(name = 'rg') {
+    return {
+      name,
+      binary: name,
+      description: 'fast grep',
+      tier: 'workhorse',
+      language: 'rust',
+      creator: 'BurntSushi',
+      install: `brew install ${name}`,
+      repo: `BurntSushi/${name}`,
+    };
+  }
+
+  function sc(passes = 7, fails = 0) {
+    const results: any[] = [];
+    for (let i = 0; i < passes; i++) {
+      results.push({
+        id: `p${i}`,
+        label: `pass${i}`,
+        group: 'P1',
+        layer: 'behavioral',
+        status: 'pass',
+        evidence: null,
+      });
+    }
+    for (let i = 0; i < fails; i++) {
+      results.push({
+        id: `f${i}`,
+        label: `fail${i}`,
+        group: 'P2',
+        layer: 'behavioral',
+        status: 'fail',
+        evidence: 'no flag',
+      });
+    }
+    return {
+      schema_version: '0.4',
+      audit_profile: null,
+      summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
+      results,
+    };
+  }
+
+  function v04Meta(overrides: Record<string, any> = {}) {
+    return {
+      tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
+      anc: { version: '0.1.0', commit: 'fff3f13' },
+      run: {
+        invocation: 'anc check --command rg --output json',
+        started_at: '2026-04-30T04:18:53.099683344Z',
+        duration_ms: 53,
+        platform: { os: 'linux', arch: 'x86_64' },
+      },
+      target: { kind: 'command', path: null, command: 'rg' },
+      ...overrides,
+    };
+  }
+
+  test('Details block renders all six v0.4 rows in order', () => {
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    // Row order: Version, Audit date, Duration, Platform, Mode, Anc build, Install
+    const versionIdx = html.indexOf('Version scored');
+    const auditIdx = html.indexOf('Audit date');
+    const durationIdx = html.indexOf('Duration<');
+    const platformIdx = html.indexOf('Platform<');
+    const modeIdx = html.indexOf('Mode<');
+    const ancIdx = html.indexOf('Anc build');
+    const installIdx = html.indexOf('Install<');
+    expect(versionIdx).toBeGreaterThan(-1);
+    expect(auditIdx).toBeGreaterThan(versionIdx);
+    expect(durationIdx).toBeGreaterThan(auditIdx);
+    expect(platformIdx).toBeGreaterThan(durationIdx);
+    expect(modeIdx).toBeGreaterThan(platformIdx);
+    expect(ancIdx).toBeGreaterThan(modeIdx);
+    expect(installIdx).toBeGreaterThan(ancIdx);
+  });
+
+  test('Audit date renders the RFC 3339 timestamp as a calm UTC string', () => {
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    expect(html).toContain('<dd>2026-04-30 04:18:53 UTC</dd>');
+  });
+
+  test('Duration humanizes ms / s / m+s correctly', () => {
+    const ms = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({ run: { ...v04Meta().run, duration_ms: 42 } }),
+    );
+    expect(ms).toContain('<dt>Duration</dt><dd>42ms</dd>');
+
+    const seconds = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({ run: { ...v04Meta().run, duration_ms: 12_345 } }),
+    );
+    expect(seconds).toContain('<dt>Duration</dt><dd>12.3s</dd>');
+
+    const longRun = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({ run: { ...v04Meta().run, duration_ms: 145_234 } }),
+    );
+    expect(longRun).toContain('<dt>Duration</dt><dd>2m 25s</dd>');
+  });
+
+  test('Anc build links the commit when SHA is hex-shaped (7-40 chars)', () => {
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    expect(html).toContain('href="https://github.com/brettdavies/agentnative-cli/commit/fff3f13"');
+    expect(html).toContain('<code>fff3f13</code>');
+  });
+
+  test('Anc build skips the commit link when commit is null', () => {
+    const html = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({ anc: { version: '0.1.0', commit: null } }),
+    );
+    expect(html).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(html).not.toContain('agentnative-cli/commit/');
+  });
+
+  test('Anc build skips the commit link when SHA fails the hex allowlist (security)', () => {
+    // Defense against an upstream CLI bug that ever puts non-SHA bytes into anc.commit.
+    const html = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({ anc: { version: '0.1.0', commit: '<script>alert(1)</script>' } }),
+    );
+    expect(html).not.toContain('agentnative-cli/commit/');
+    expect(html).not.toContain('<script>');
+  });
+
+  test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    expect(html).toContain('<pre><code>anc check --command rg --output json</code></pre>');
+  });
+
+  test('reproduce CTA falls back to synthesized form for project-mode runs', () => {
+    // target.kind === "project" → invocation may carry a local filesystem path,
+    // so the renderer must use the synthesized canonical form instead.
+    const html = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({
+        target: { kind: 'project', path: '/home/secret/repo', command: null },
+        run: { ...v04Meta().run, invocation: 'anc check /home/secret/repo' },
+      }),
+    );
+    expect(html).toContain('<pre><code>anc check --command rg</code></pre>');
+    expect(html).not.toContain('/home/secret/repo');
+  });
+
+  test('reproduce CTA escHtmls the invocation defensively (XSS guard)', () => {
+    const html = buildScorecardBody(
+      tool('rg'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      v04Meta({
+        run: { ...v04Meta().run, invocation: 'anc check --command "<rg>" --output json' },
+      }),
+    );
+    expect(html).not.toContain('<rg>');
+    expect(html).toContain('&lt;rg&gt;');
+  });
+
+  test('grandfathered scorecards (null metadata) skip v0.4-only rows but keep Version + Install', () => {
+    // anc-v0.1.3.json's shape: no tool/anc/run/target — metadata block is
+    // {tool: null, anc: null, run: null, target: null}.
+    const grandfatheredMeta = { tool: null, anc: null, run: null, target: null };
+    const html = buildScorecardBody(
+      tool('anc'),
+      sc(),
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '0.1.3',
+      grandfatheredMeta,
+    );
+    expect(html).toContain('<dt>Version scored</dt><dd>0.1.3</dd>');
+    expect(html).toContain('<dt>Install</dt>');
+    expect(html).not.toContain('Audit date');
+    expect(html).not.toContain('Duration<');
+    expect(html).not.toContain('Platform<');
+    expect(html).not.toContain('Mode<');
+    expect(html).not.toContain('Anc build');
+  });
+});
+
+describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
+  test('command-mode invocation lands verbatim in the markdown reproduce block', () => {
+    // Matches the HTML branch — markdown is consumed by /llms-full.txt and
+    // text/markdown content negotiation; same target.kind gate is essential.
+    const md = buildScorecardMarkdown(
+      {
+        name: 'rg',
+        binary: 'rg',
+        description: 'grep',
+        tier: 'workhorse',
+        language: 'rust',
+        install: 'brew install rg',
+      },
+      { schema_version: '0.4', audit_profile: null, summary: { pass: 1, warn: 0, fail: 0 }, results: [] } as any,
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      {
+        tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
+        anc: { version: '0.1.0', commit: 'fff3f13' },
+        run: {
+          invocation: 'anc check --command rg --output json',
+          started_at: '2026-04-30T04:18:53.099683344Z',
+          duration_ms: 53,
+          platform: { os: 'linux', arch: 'x86_64' },
+        },
+        target: { kind: 'command', path: null, command: 'rg' },
+      },
+    );
+    expect(md).toContain('## Reproduce locally');
+    expect(md).toContain('anc check --command rg --output json');
+  });
+
+  test('project-mode invocation falls back to the synthesized form (no path leak)', () => {
+    const md = buildScorecardMarkdown(
+      {
+        name: 'rg',
+        binary: 'rg',
+        description: 'grep',
+        tier: 'workhorse',
+        language: 'rust',
+        install: 'brew install rg',
+      },
+      { schema_version: '0.4', audit_profile: null, summary: { pass: 1, warn: 0, fail: 0 }, results: [] } as any,
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      {
+        tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
+        anc: { version: '0.1.0', commit: 'fff3f13' },
+        run: {
+          invocation: 'anc check /home/secret/repo',
+          started_at: '2026-04-30T04:18:53.099683344Z',
+          duration_ms: 53,
+          platform: { os: 'linux', arch: 'x86_64' },
+        },
+        target: { kind: 'project', path: '/home/secret/repo', command: null },
+      },
+    );
+    expect(md).not.toContain('/home/secret/repo');
+    expect(md).toContain('anc check --command rg');
+  });
+
+  test('mirrors the v0.4 metadata fields the HTML Details block carries', () => {
+    const md = buildScorecardMarkdown(
+      {
+        name: 'rg',
+        binary: 'rg',
+        description: 'grep',
+        tier: 'workhorse',
+        language: 'rust',
+        install: 'brew install rg',
+      },
+      { schema_version: '0.4', audit_profile: null, summary: { pass: 1, warn: 0, fail: 0 }, results: [] } as any,
+      [],
+      { met: 7, total: 7, details: [] },
+      1.0,
+      '15.1.0',
+      {
+        tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
+        anc: { version: '0.1.0', commit: 'fff3f13' },
+        run: {
+          invocation: 'anc check --command rg --output json',
+          started_at: '2026-04-30T04:18:53.099683344Z',
+          duration_ms: 53,
+          platform: { os: 'linux', arch: 'x86_64' },
+        },
+        target: { kind: 'command', path: null, command: 'rg' },
+      },
+    );
+    expect(md).toContain('**Audit date:** 2026-04-30 04:18:53 UTC');
+    expect(md).toContain('**Duration:** 53ms');
+    expect(md).toContain('**Platform:** `linux/x86_64`');
+    expect(md).toContain('**Mode:** command');
+    expect(md).toContain(
+      '**Anc build:** 0.1.0 ([fff3f13](https://github.com/brettdavies/agentnative-cli/commit/fff3f13))',
+    );
   });
 });
 
