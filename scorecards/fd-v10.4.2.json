@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "results": [
     {
       "id": "p3-help",
@@ -125,5 +125,28 @@
   },
   "audience": "agent-optimized",
   "audit_profile": "file-traversal",
-  "spec_version": "0.2.0"
+  "spec_version": "0.3.0",
+  "tool": {
+    "name": "fd",
+    "binary": "fd",
+    "version": "fd 10.4.2"
+  },
+  "anc": {
+    "version": "0.1.0",
+    "commit": "fff3f13"
+  },
+  "run": {
+    "invocation": "anc check --command fd --audit-profile file-traversal --output json",
+    "started_at": "2026-04-30T04:18:52.598735426Z",
+    "duration_ms": 94,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "fd"
+  }
 }

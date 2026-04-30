@@ -29,9 +29,12 @@
 # rerun picks up where it stopped.
 #
 # Usage:
-#   bash scripts/regen-scorecards.sh                # run for real
-#   bash scripts/regen-scorecards.sh --dry-run      # print what would happen
-#   bash scripts/regen-scorecards.sh --only fd,gh   # narrow to specific tools
+#   bash scripts/regen-scorecards.sh                       # run for real
+#   bash scripts/regen-scorecards.sh --dry-run             # print what would happen
+#   bash scripts/regen-scorecards.sh --only fd,gh          # narrow to specific tools
+#   bash scripts/regen-scorecards.sh --exclude anc         # skip specific tools
+#   bash scripts/regen-scorecards.sh --allow-dev-build     # bypass MIN_ANC_VERSION
+#                                                          # (use a locally-built dev anc)
 
 set -euo pipefail
 
@@ -48,6 +51,8 @@ DEFAULT_VERSION_REGEX='[0-9]+\.[0-9]+(\.[0-9]+)?'
 
 DRY_RUN=0
 ONLY=""
+EXCLUDE=""
+ALLOW_DEV_BUILD=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,6 +63,14 @@ while [[ $# -gt 0 ]]; do
     --only)
       ONLY="$2"
       shift 2
+      ;;
+    --exclude)
+      EXCLUDE="$2"
+      shift 2
+      ;;
+    --allow-dev-build)
+      ALLOW_DEV_BUILD=1
+      shift
       ;;
     -h | --help)
       sed -n '2,/^$/p' "$0" | sed 's/^# \?//'
@@ -80,12 +93,15 @@ for cmd in anc yq jaq; do
 done
 
 anc_version="$(anc --version | awk '{print $NF}')"
-oldest="$(printf '%s\n%s\n' "$anc_version" "$MIN_ANC_VERSION" | sort -V | head -n1)"
-if [[ "$oldest" != "$MIN_ANC_VERSION" ]]; then
-  echo "error: anc $anc_version is older than required $MIN_ANC_VERSION" >&2
-  echo "  brew upgrade brettdavies/tap/agentnative" >&2
-  echo "  # or: cargo install --version $MIN_ANC_VERSION agentnative" >&2
-  exit 1
+if [[ $ALLOW_DEV_BUILD -eq 0 ]]; then
+  oldest="$(printf '%s\n%s\n' "$anc_version" "$MIN_ANC_VERSION" | sort -V | head -n1)"
+  if [[ "$oldest" != "$MIN_ANC_VERSION" ]]; then
+    echo "error: anc $anc_version is older than required $MIN_ANC_VERSION" >&2
+    echo "  brew upgrade brettdavies/tap/agentnative" >&2
+    echo "  # or: cargo install --version $MIN_ANC_VERSION agentnative" >&2
+    echo "  # or: pass --allow-dev-build to score with a locally-built dev anc" >&2
+    exit 1
+  fi
 fi
 
 today="$(date -u +%Y-%m-%d)"
@@ -143,6 +159,22 @@ if [[ -n "$ONLY" ]]; then
         filtered+=("$n")
       fi
     done
+  done
+  scored_names=("${filtered[@]}")
+fi
+
+if [[ -n "$EXCLUDE" ]]; then
+  IFS=',' read -ra unwanted <<<"$EXCLUDE"
+  filtered=()
+  for n in "${scored_names[@]}"; do
+    skip=0
+    for u in "${unwanted[@]}"; do
+      if [[ "$n" == "$u" ]]; then
+        skip=1
+        break
+      fi
+    done
+    [[ $skip -eq 0 ]] && filtered+=("$n")
   done
   scored_names=("${filtered[@]}")
 fi
