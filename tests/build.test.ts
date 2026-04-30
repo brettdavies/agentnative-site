@@ -449,6 +449,41 @@ describe('loadRegistry', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("rejects when one tool's name collides with another tool's binary slug (U7 redirect safety)", async () => {
+    // Concrete failure mode: ripgrep emits a redirect at /score/rg → /score/ripgrep.
+    // If the registry later adds `name: rg`, both write to /score/rg.html and the
+    // redirect silently overwrites (or is overwritten by) the canonical page.
+    const dir = join(tmpdir(), `registry-binary-collision-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const registryPath = join(dir, 'registry.yaml');
+    await writeFile(
+      registryPath,
+      `tools:
+  - name: ripgrep
+    repo: BurntSushi/ripgrep
+    binary: rg
+    language: Rust
+    tier: workhorse
+    creator: x
+    install: brew install ripgrep
+    description: x
+  - name: rg
+    repo: x/rg
+    binary: rg
+    language: Rust
+    tier: notable
+    creator: y
+    install: brew install rg
+    description: y
+`,
+    );
+    try {
+      await expect(loadRegistry(registryPath)).rejects.toThrow(/collides with another tool's binary slug/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('loadScoredTools — scorecard-driven discovery + registry editorial join', () => {

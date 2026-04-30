@@ -314,23 +314,37 @@ export async function build() {
 
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
   // Badge SVGs               → dist/badge/<tool-name>.svg
+  // Binary-name redirects    → dist/score/<binary>.html + .md (when
+  //                            registry.binary !== registry.name; U7)
   await ensureDir(join(DIST_DIR, 'score'));
   await ensureDir(join(DIST_DIR, 'badge'));
   // Drop stale per-tool pages and badge SVGs from prior builds. When a tool
   // is removed from the registry (e.g., aider, plandex, fabric in PR #40),
   // its old html/md/svg would otherwise linger in dist/ and ship as broken
   // links / orphaned badges referencing a tool the leaderboard no longer
-  // knows about.
+  // knows about. The allowlist also includes binary slugs for the
+  // name-vs-binary tools (ripgrep/rg, ast-grep/sg, …) so the redirect pages
+  // U7 emits aren't unlinked on every build (P0: without this the reaper
+  // deletes them every time, defeating the redirect entirely).
   const expectedNames = new Set(leaderboard.map((e) => e.tool.name));
+  for (const e of leaderboard) {
+    if (e.tool.binary && e.tool.binary !== e.tool.name) {
+      expectedNames.add(e.tool.binary);
+    }
+  }
   for (const file of await readdir(join(DIST_DIR, 'score')).catch(() => [])) {
     const m = file.match(/^([a-z0-9-]+)\.(html|md)$/);
     if (m && !expectedNames.has(m[1])) {
       await unlink(join(DIST_DIR, 'score', file));
     }
   }
+  // Badge SVGs are emitted for the canonical name only (no binary-slug
+  // SVG). A reader following /score/rg → /score/ripgrep ends up on the
+  // canonical page, where /badge/ripgrep.svg renders correctly.
+  const expectedBadgeNames = new Set(leaderboard.map((e) => e.tool.name));
   for (const file of await readdir(join(DIST_DIR, 'badge')).catch(() => [])) {
     const m = file.match(/^([a-z0-9-]+)\.svg$/);
-    if (m && !expectedNames.has(m[1])) {
+    if (m && !expectedBadgeNames.has(m[1])) {
       await unlink(join(DIST_DIR, 'badge', file));
     }
   }
@@ -367,6 +381,34 @@ export async function build() {
       const svg = renderBadgeSvg(score);
       await writeFile(join(DIST_DIR, 'badge', `${tool.name}.svg`), svg);
       badgePaths.push(`/badge/${tool.name}.svg`);
+    }
+
+    // Binary-name redirect: tools where registry.binary !== registry.name
+    // (e.g., ripgrep/rg, ast-grep/sg, bottom/btm — 11 entries today) get a
+    // second pair of files at /score/<binary>.html + .md that point at the
+    // canonical /score/<name>. Closes the URL fragmentation a reader hits
+    // when guessing the URL from the binary they typed at a shell prompt.
+    if (tool.binary && tool.binary !== tool.name) {
+      const targetPath = `/score/${tool.name}`;
+      const titleSafe = escHtml(tool.name);
+      const redirectHtml = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting to ${titleSafe}</title>
+  <link rel="canonical" href="${targetPath}">
+  <meta http-equiv="refresh" content="0; url=${targetPath}">
+</head>
+<body>
+  <p>Redirecting to <a href="${targetPath}">${titleSafe}</a>. If your browser does not redirect, follow the link.</p>
+</body>
+</html>
+`;
+      await writeFile(join(DIST_DIR, 'score', `${tool.binary}.html`), redirectHtml);
+      await writeFile(
+        join(DIST_DIR, 'score', `${tool.binary}.md`),
+        `See [${targetPath}](${targetPath}).\n`,
+      );
     }
   }
 

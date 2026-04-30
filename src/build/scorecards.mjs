@@ -46,6 +46,19 @@ export async function loadRegistry(registryPath) {
     throw new Error('registry.yaml: expected top-level "tools" array');
   }
 
+  // Binary-name collision guard (U7 redirects): for tools where binary !==
+  // name, the binary slug must not appear as ANY other tool's `name`.
+  // Without this, a future registry addition `name: rg, binary: rg` would
+  // silently overwrite the `/score/rg` redirect page that ripgrep emits, or
+  // vice versa. Build the binary set first so we can detect collisions in
+  // either direction during the per-entry validation loop below.
+  const binaryRedirectSlugs = new Set();
+  for (const t of tools) {
+    if (t.binary && t.name && t.binary !== t.name) {
+      binaryRedirectSlugs.add(t.binary);
+    }
+  }
+
   const seen = new Set();
   for (const t of tools) {
     if (!t.name || typeof t.name !== 'string') {
@@ -61,6 +74,13 @@ export async function loadRegistry(registryPath) {
       throw new Error(`registry.yaml: duplicate name "${t.name}"`);
     }
     seen.add(t.name);
+    if (binaryRedirectSlugs.has(t.name)) {
+      throw new Error(
+        `registry.yaml: name "${t.name}" collides with another tool's binary slug. ` +
+          `The /score/${t.name} URL would be ambiguous between the canonical page and the binary-name redirect. ` +
+          `Rename one of the entries.`,
+      );
+    }
 
     for (const field of ['binary', 'language', 'tier', 'creator', 'description']) {
       if (!t[field]) {
