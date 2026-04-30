@@ -6,23 +6,22 @@
 # banner / suppressed-check rendering / agent-optimized filter all light up
 # with real CLI output instead of falling through the v1.1/v1.2 null path.
 #
-# For each tool with a committed scorecard the script:
-#   1. Reads `binary`, `version`, optional `audit_profile`, optional
-#      `version_extract` from registry.yaml.
+# For each registry entry the script:
+#   1. Reads `binary`, optional `audit_profile`, optional `version_extract`
+#      from registry.yaml. Post-U4 the registry has no `version:` field;
+#      the scorecard filename owns the canonical version anchor.
 #   2. Extracts the *actually-installed* binary version. Default extractor
 #      pulls the first SemVer-shaped token from the first --version line.
 #      Tools that don't yield to the default declare their own
 #      `version_extract` shell snippet in registry.yaml. The extracted
-#      version is the source of truth — the scorecard filename and the
-#      registry's `version` field are derived from it, so the filename can
+#      version determines the scorecard filename, so the filename can
 #      never lie about which release was actually scored.
-#   3. If the extracted version differs from the registry's pinned
-#      `version`, warns and updates registry to the extracted value. The
-#      old `<name>-v<old>.json` file is left on disk to be cleaned up
-#      manually with `trash`.
-#   4. Runs `anc check --command <binary> [--audit-profile <category>]
+#   3. Runs `anc check --command <binary> [--audit-profile <category>]
 #      --output json` and writes to scorecards/<name>-v<extracted>.json.
-#   5. Bumps `scored_at` for that tool to today's UTC date.
+#      Older `<name>-v<old>.json` files are left on disk; the build's
+#      auto-discovery picks the highest-versioned scorecard per slug, so
+#      stale ones are silently superseded. Clean up manually with `trash`
+#      when version drift outpaces what auto-discovery should hold onto.
 #
 # Idempotent — running twice in a row regenerates the same files. Stops on
 # the first failure (`set -euo pipefail`); partial state is left on disk so a
@@ -144,10 +143,14 @@ extract_version() {
   echo "$version"
 }
 
-# --- iterate over tools that have a committed scorecard ------------------
+# --- iterate over every registry entry -----------------------------------
+#
+# Post-U4 the registry no longer carries `version:` per entry — the
+# scorecard filename owns the canonical version anchor. Every registry
+# entry is a regen candidate; --only / --exclude scope the run.
 
 mapfile -t scored_names < <(
-  yq -r '.tools[] | select(.version != null) | .name' "$REGISTRY"
+  yq -r '.tools[].name' "$REGISTRY"
 )
 
 if [[ -n "$ONLY" ]]; then
@@ -183,11 +186,8 @@ echo "regenerating ${#scored_names[@]} scorecards against anc $anc_version"
 [[ $DRY_RUN -eq 1 ]] && echo "(dry-run mode — no files will be written)"
 echo
 
-drift_warnings=()
-
 for name in "${scored_names[@]}"; do
   binary="$(yq -r ".tools[] | select(.name == \"$name\") | .binary" "$REGISTRY")"
-  pinned="$(yq -r ".tools[] | select(.name == \"$name\") | .version" "$REGISTRY")"
   profile="$(yq -r ".tools[] | select(.name == \"$name\") | .audit_profile // \"\"" "$REGISTRY")"
   extractor="$(yq -r ".tools[] | select(.name == \"$name\") | .version_extract // \"\"" "$REGISTRY")"
 
@@ -206,13 +206,7 @@ for name in "${scored_names[@]}"; do
     profile_label=" (audit_profile: $profile)"
   fi
 
-  drift_label=""
-  if [[ "$actual" != "$pinned" ]]; then
-    drift_label=" [drift: registry pinned $pinned]"
-    drift_warnings+=("  $name: pinned=$pinned → actual=$actual; old scorecards/${name}-v${pinned}.json should be removed (\`trash\`)")
-  fi
-
-  echo "  ${name} v${actual} → $(basename "$out")${profile_label}${drift_label}"
+  echo "  ${name} v${actual} → $(basename "$out")${profile_label}"
 
   if [[ $DRY_RUN -eq 1 ]]; then
     echo "    would run: anc check --command $binary $profile_flag --output json"
@@ -228,45 +222,13 @@ for name in "${scored_names[@]}"; do
     echo "error: anc check did not produce valid JSON for $name (file: $out)" >&2
     exit 1
   fi
-
-  # In-place updates: bump scored_at, and bump version if drift detected.
-  # Use awk for targeted edits — `yq -i` strips blank-line separators between
-  # tool entries, destroying the registry's section structure. awk only
-  # rewrites the matching lines inside the named tool's block, leaving every
-  # other byte untouched.
-  new_version=""
-  if [[ "$actual" != "$pinned" ]]; then
-    new_version="$actual"
-  fi
-  awk \
-    -v target="$name" \
-    -v new_scored_at="$today" \
-    -v new_version="$new_version" \
-    '
-      /^  - name:/ { in_target = ($0 == "  - name: " target) }
-      in_target && /^    scored_at:/ {
-        print "    scored_at: \"" new_scored_at "\""
-        next
-      }
-      in_target && new_version != "" && /^    version:/ {
-        print "    version: \"" new_version "\""
-        next
-      }
-      { print }
-    ' "$REGISTRY" >"$REGISTRY.tmp" && mv "$REGISTRY.tmp" "$REGISTRY"
 done
 
 echo
 
-if [[ ${#drift_warnings[@]} -gt 0 ]]; then
-  echo "version drift detected — registry was auto-bumped to match installed binaries:"
-  for w in "${drift_warnings[@]}"; do echo "$w"; done
-  echo
-fi
-
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "dry-run complete. Re-run without --dry-run to write."
 else
-  echo "done. ${#scored_names[@]} scorecards refreshed; scored_at bumped to $today."
+  echo "done. ${#scored_names[@]} scorecards refreshed."
   echo "Next: ./scripts/sync-coverage-matrix.sh && bun test && bun run build"
 fi
