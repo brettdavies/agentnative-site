@@ -146,6 +146,8 @@ const HOST_LABELS = {
   claude_code: 'Claude Code',
   codex: 'Codex',
   cursor: 'Cursor',
+  factory: 'Factory Droid',
+  kiro: 'Kiro',
   opencode: 'OpenCode',
 };
 
