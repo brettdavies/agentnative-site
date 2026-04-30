@@ -1,13 +1,13 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
       "label": "Help flag produces useful output",
       "group": "P3",
       "layer": "behavioral",
-      "status": "fail",
-      "evidence": "--help exited with code 252",
+      "status": "warn",
+      "evidence": "--help output exists but no examples section detected",
       "confidence": "high"
     },
     {
@@ -25,7 +25,7 @@
       "group": "P2",
       "layer": "behavioral",
       "status": "skip",
-      "evidence": "no --output/--format flag detected",
+      "evidence": "no --output/--format flag detected in any subcommand",
       "confidence": "high"
     },
     {
@@ -69,8 +69,8 @@
       "label": "Non-interactive gate flag advertised in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "target satisfies P1 via alternative gate (help-on-bare or stdin-primary)",
+      "status": "warn",
+      "evidence": "no non-interactive flag found in --help; expected one of: --no-interactive, --non-interactive, -p, --print, --no-input, --batch, --headless, -y, --yes, --assume-yes",
       "confidence": "high"
     },
     {
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "target exposes no flags in --help",
+      "status": "warn",
+      "evidence": "16 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "status": "warn",
+      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
       "confidence": "medium"
     },
     {
@@ -104,9 +104,9 @@
   "summary": {
     "total": 11,
     "pass": 5,
-    "warn": 1,
-    "fail": 1,
-    "skip": 4,
+    "warn": 5,
+    "fail": 0,
+    "skip": 1,
     "error": 0
   },
   "coverage_summary": {
@@ -127,18 +127,18 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "aws",
-    "binary": "aws",
-    "version": "aws-cli/2.34.38 Python/3.14.4 Linux/6.8.0-106-generic source/x86_64.debian.13"
+    "name": "opencode",
+    "binary": "opencode",
+    "version": "1.14.30"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command aws --output json",
-    "started_at": "2026-04-30T04:19:05.011168906Z",
-    "duration_ms": 1909,
+    "invocation": "anc check --command opencode --output json",
+    "started_at": "2026-04-30T23:02:03.126913379Z",
+    "duration_ms": 8278,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "aws"
+    "command": "opencode"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 50,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/opencode",
+    "badge_url": "https://anc.dev/badge/opencode.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

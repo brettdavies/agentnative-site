@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -79,7 +79,7 @@
       "group": "P1",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "5 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "evidence": "3 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -127,18 +127,18 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "fly",
-    "binary": "fly",
-    "version": "flyctl version 0.4.41"
+    "name": "terraform",
+    "binary": "terraform",
+    "version": "Terraform v1.15.0"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command fly --output json",
-    "started_at": "2026-04-30T04:18:56.994681661Z",
-    "duration_ms": 175,
+    "invocation": "anc check --command terraform --output json",
+    "started_at": "2026-04-30T23:01:01.220455516Z",
+    "duration_ms": 120,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "fly"
+    "command": "terraform"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 67,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/terraform",
+    "badge_url": "https://anc.dev/badge/terraform.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

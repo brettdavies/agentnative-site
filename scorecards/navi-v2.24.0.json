@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -133,12 +133,12 @@
     "version": "navi 2.24.0"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command navi --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T04:19:39.046789352Z",
+    "started_at": "2026-04-30T23:01:54.576817832Z",
     "duration_ms": 82,
     "platform": {
       "os": "linux",
@@ -149,5 +149,13 @@
     "kind": "command",
     "path": null,
     "command": "navi"
+  },
+  "badge": {
+    "eligible": true,
+    "score_pct": 100,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/navi.svg)](https://anc.dev/score/navi)",
+    "scorecard_url": "https://anc.dev/score/navi",
+    "badge_url": "https://anc.dev/badge/navi.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": "just 1.50.0"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command just --output json",
-    "started_at": "2026-04-30T04:19:08.263995213Z",
-    "duration_ms": 288,
+    "started_at": "2026-04-30T23:01:13.613071518Z",
+    "duration_ms": 289,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "just"
+  },
+  "badge": {
+    "eligible": true,
+    "score_pct": 89,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/just.svg)](https://anc.dev/score/just)",
+    "scorecard_url": "https://anc.dev/score/just",
+    "badge_url": "https://anc.dev/badge/just.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

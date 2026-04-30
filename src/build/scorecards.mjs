@@ -12,6 +12,14 @@ import { PRINCIPLE_GROUPS } from './util.mjs';
 
 const TOOL_NAME_RE = /^[a-z0-9-]+$/;
 
+// Schema version every committed scorecard must declare. The site reads
+// derived fields directly from `scorecard.badge.{score_pct, eligible,
+// embed_markdown}` and assumes their presence. Bumping this constant
+// without regenerating the corpus will fail the build at load. Bump
+// SUPPORTED_SCHEMA_VERSION + run `bash docker/score/build.sh --run` +
+// trash any superseded older-version files in a single PR.
+const SUPPORTED_SCHEMA_VERSION = '0.5';
+
 // Mirrors `ExceptionCategory::to_kebab_str()` in
 // agentnative/src/principles/registry.rs (CLI v0.1.3). Adding a new variant
 // upstream means adding it here too — the CLI flag rejects anything not in
@@ -212,14 +220,24 @@ export async function loadScoredTools(scorecardsDir, registry) {
 
     const raw = await readFile(join(scorecardsDir, filename), 'utf8');
     const scorecard = JSON.parse(raw);
-    // v0.4 metadata blocks. Each may be absent on grandfathered v0.3 / v1.1
-    // scorecards (anc-v0.1.3.json) — null is the documented sentinel for
-    // "this scorecard predates the metadata contract."
+    // Schema invariant: every committed scorecard must be at the supported version.
+    // Non-conforming corpus → fail the build immediately rather than silently render
+    // wrong data via a synthesized fallback. Bump SUPPORTED_SCHEMA_VERSION + regen
+    // the full corpus together (`bash docker/score/build.sh --run`); never one without
+    // the other.
+    if (scorecard.schema_version !== SUPPORTED_SCHEMA_VERSION) {
+      throw new Error(
+        `${filename}: schema_version "${scorecard.schema_version}" not supported. ` +
+          `Site requires schema ${SUPPORTED_SCHEMA_VERSION}. Regenerate via ` +
+          `\`bash docker/score/build.sh --run\` then trash any superseded older-version files.`,
+      );
+    }
+    // v0.4 metadata blocks lifted to top-level fields for direct read access.
     const metadata = {
-      tool: scorecard.tool ?? null,
-      anc: scorecard.anc ?? null,
-      run: scorecard.run ?? null,
-      target: scorecard.target ?? null,
+      tool: scorecard.tool,
+      anc: scorecard.anc,
+      run: scorecard.run,
+      target: scorecard.target,
     };
     tools.push({ tool: registryEntry, scorecard, version, metadata, scorecardFilename: filename });
   }
@@ -350,21 +368,6 @@ export async function runScorecardInvariants(scorecardsDir, registry) {
 // -------------------------------------------------------------------
 
 /**
- * Compute primary score: pass / (pass + warn + fail).
- * Skip and error are excluded from the denominator.
- * If denominator is 0, score is 0.
- *
- * @param {object | null} scorecard
- * @returns {number} 0–1
- */
-export function computeScore(scorecard) {
-  if (!scorecard) return 0;
-  const { pass = 0, warn = 0, fail = 0 } = scorecard.summary;
-  const denom = pass + warn + fail;
-  return denom === 0 ? 0 : pass / denom;
-}
-
-/**
  * Map P1–P7 groups to pass/partial/fail and return "N/7 principles met".
  * CodeQuality and ProjectStructure are excluded from the N/7 count.
  *
@@ -435,25 +438,20 @@ export function extractTopIssues(scorecard, limit = 3) {
 }
 
 /**
- * Sort tools by primary score descending. Unscored tools sort to bottom.
+ * Sort tools by primary score descending. Post-U3 inversion every tool has
+ * a scorecard; the unscored-tools-sort-to-bottom branch is gone with the
+ * pre-inversion code path that allowed null scorecards.
  *
- * @param {Array<{ tool: object, scorecard: object | null }>} tools
- * @returns {Array<{ tool: object, scorecard: object | null, score: number, rank: number, principleScore: object }>}
+ * @param {Array<{ tool: object, scorecard: object }>} tools
+ * @returns {Array<{ tool: object, scorecard: object, rank: number, principleScore: object }>}
  */
 export function computeLeaderboard(tools) {
   const scored = tools.map((entry) => ({
     ...entry,
-    score: computeScore(entry.scorecard),
     principleScore: computePrincipleScore(entry.scorecard),
   }));
 
-  // Scored tools first (descending), then unscored
-  scored.sort((a, b) => {
-    const aScored = a.scorecard !== null;
-    const bScored = b.scorecard !== null;
-    if (aScored !== bScored) return aScored ? -1 : 1;
-    return b.score - a.score;
-  });
+  scored.sort((a, b) => b.scorecard.badge.score_pct - a.scorecard.badge.score_pct);
 
   return scored.map((entry, i) => ({ ...entry, rank: i + 1 }));
 }

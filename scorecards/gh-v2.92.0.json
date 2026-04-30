@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": "gh version 2.92.0 (2026-04-28)"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command gh --output json",
-    "started_at": "2026-04-30T04:18:54.359291931Z",
-    "duration_ms": 121,
+    "started_at": "2026-04-30T23:00:58.555799299Z",
+    "duration_ms": 143,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "gh"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 67,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/gh",
+    "badge_url": "https://anc.dev/badge/gh.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

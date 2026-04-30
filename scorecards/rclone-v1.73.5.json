@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": "rclone v1.73.5"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command rclone --output json",
-    "started_at": "2026-04-30T04:19:10.797389223Z",
-    "duration_ms": 140,
+    "started_at": "2026-04-30T23:01:16.021001551Z",
+    "duration_ms": 173,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "rclone"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 75,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/rclone",
+    "badge_url": "https://anc.dev/badge/rclone.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

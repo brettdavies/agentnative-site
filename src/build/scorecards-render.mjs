@@ -2,7 +2,15 @@
 // per-tool scorecard pages. Template concern only; data loading and
 // scoring live in scorecards.mjs.
 
-import { BADGE_FLOOR, BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES, resolveBaseUrl } from './util.mjs';
+import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util.mjs';
+
+// Display-only mirror of the CLI's badge eligibility floor (80%). All
+// eligibility decisions read `scorecard.badge.eligible` (canonical source
+// per schema 0.5). This constant only feeds human-readable copy ("badge
+// floor is 80%"). If the CLI ever changes the floor, only the displayed
+// number drifts; functional gating stays correct because it reads
+// scorecard.badge.eligible directly.
+const BADGE_FLOOR_DISPLAY_PCT = 80;
 
 /**
  * Map a check group string to a principle number (1-7) or null for bonus groups.
@@ -130,9 +138,10 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   // Post-U3 inversion: every leaderboard entry has a scorecard (registry
   // entries without scorecards are excluded by loadScoredTools). The em-dash
   // "—" / "—/7" cells the pre-inversion code carried for unscored rows are
-  // gone with the unscored row itself.
+  // gone with the unscored row itself. Score read directly from schema 0.5
+  // `badge.score_pct` — the CLI is canonical for the integer.
   const scoreCell = (entry) => {
-    const pct = Math.round(entry.score * 100);
+    const pct = entry.scorecard.badge.score_pct;
     return `<td class="lb-score" data-sort="${pct}">${pct}%</td>`;
   };
 
@@ -162,13 +171,13 @@ export function buildLeaderboardBody(leaderboard, methodology) {
     tierCounts[e.tool.tier] = (tierCounts[e.tool.tier] || 0) + 1;
   }
 
-  // Eligible-tool count for the badge callout. Counts tools at or above
-  // BADGE_FLOOR — the same gate the per-tool scorecard pages use. Lets the
+  // Eligible-tool count for the badge callout. Reads scorecard.badge.eligible
+  // (schema 0.5) — the CLI is canonical for what eligibility means. Lets the
   // callout cite a real number ("24 tools currently qualify") instead of a
   // vague "tools that qualify." Post-U3 every leaderboard entry has a
   // scorecard, so no null guard needed.
-  const eligibleCount = leaderboard.filter((e) => e.score >= BADGE_FLOOR).length;
-  const floorPct = Math.round(BADGE_FLOOR * 100);
+  const eligibleCount = leaderboard.filter((e) => e.scorecard.badge.eligible).length;
+  const floorPct = BADGE_FLOOR_DISPLAY_PCT;
 
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
@@ -339,27 +348,22 @@ export function renderAudienceBanner(audience, auditProfile) {
 // -------------------------------------------------------------------
 
 /**
- * @param {string} toolName
- * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
- * @returns {string} `[![agent-native](https://anc.dev/badge/<tool>.svg)](https://anc.dev/score/<tool>)`
- */
-export function buildEmbedMarkdown(toolName, baseUrl) {
-  const base = resolveBaseUrl(baseUrl);
-  return `[![agent-native](${base}/badge/${toolName}.svg)](${base}/score/${toolName})`;
-}
-
-/**
  * Render the embed snippet section for an eligible tool's scorecard page.
+ * The snippet markdown comes verbatim from `scorecard.badge.embed_markdown`
+ * (schema 0.5) — the CLI is canonical for the URL convention so the embed
+ * a tool author copies from anc.dev matches the embed `anc check` prints
+ * after a passing run.
  *
- * @param {object} tool — registry entry
- * @param {number} pct — rounded percent (0–100)
+ * @param {object} tool — registry entry (for the SVG preview alt text)
+ * @param {object} scorecard — schema 0.5 scorecard
  * @returns {string} HTML fragment
  */
-function renderEligibleEmbed(tool, pct) {
-  const embedMd = buildEmbedMarkdown(tool.name);
+function renderEligibleEmbed(tool, scorecard) {
+  const pct = scorecard.badge.score_pct;
+  const embedMd = scorecard.badge.embed_markdown;
   return `<section class="scorecard-embed scorecard-embed--eligible">
   <h2>Embed the badge</h2>
-  <p>This score (${pct}%) clears the <a href="/badge">badge floor</a> (${Math.round(BADGE_FLOOR * 100)}%). Copy this into your README:</p>
+  <p>This score (${pct}%) clears the <a href="/badge">badge floor</a> (${BADGE_FLOOR_DISPLAY_PCT}%). Copy this into your README:</p>
   <pre><code>${escHtml(embedMd)}</code></pre>
   <p class="scorecard-embed__preview">Preview: <img src="/badge/${escHtml(tool.name)}.svg" alt="agent-native badge for ${escHtml(tool.name)}" /></p>
 </section>
@@ -376,7 +380,7 @@ function renderEligibleEmbed(tool, pct) {
  * @returns {string} HTML fragment
  */
 function renderBelowFloorHint(pct, hasIssues) {
-  const floor = Math.round(BADGE_FLOOR * 100);
+  const floor = BADGE_FLOOR_DISPLAY_PCT;
   const gap = floor - pct;
   const issuesPointer = hasIssues
     ? ' The top issues above are the place to start.'
@@ -392,19 +396,18 @@ function renderBelowFloorHint(pct, hasIssues) {
  * Build a per-tool scorecard page body HTML.
  *
  * @param {object} tool — registry entry
- * @param {object | null} scorecard — parsed JSON
+ * @param {object} scorecard — schema 0.5 parsed JSON
  * @param {Array} topIssues — from extractTopIssues()
  * @param {object} principleScore — from computePrincipleScore()
- * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} HTML body
  */
-export function buildScorecardBody(tool, scorecard, topIssues, principleScore, score, resolvedVersion, metadata) {
-  const pct = Math.round(score * 100);
+export function buildScorecardBody(tool, scorecard, topIssues, principleScore, resolvedVersion, metadata) {
+  const pct = scorecard.badge.score_pct;
   // The filename's <version> segment is the canonical version anchor.
   const version = resolvedVersion ?? null;
-  // metadata is { tool, anc, run, target } from loadScoredTools(). Each block
-  // may be null on grandfathered v0.3/v1.1 scorecards. The renderer
-  // gracefully omits any v0.4-only Details rows whose source data is null.
+  // metadata is { tool, anc, run, target } from loadScoredTools(). Schema 0.5
+  // guarantees these blocks are present (the load-time invariant rejects any
+  // scorecard without them).
   const meta = metadata ?? {};
 
   // Breadcrumb
@@ -553,7 +556,9 @@ ${renderCheckRows(bonusChecks)}
   // detail sections and before the reproduce-locally CTA so the reading
   // order is: score → details → here's what to do (embed if eligible,
   // reproduce always).
-  html += score >= BADGE_FLOOR ? renderEligibleEmbed(tool, pct) : renderBelowFloorHint(pct, topIssues.length > 0);
+  html += scorecard.badge.eligible
+    ? renderEligibleEmbed(tool, scorecard)
+    : renderBelowFloorHint(pct, topIssues.length > 0);
 
   // CTA — reproduce THIS scorecard locally. For command-mode v0.4 scorecards,
   // render `run.invocation` verbatim — it's the literal argv that produced
@@ -605,7 +610,7 @@ export function buildLeaderboardMarkdown(leaderboard) {
 
   for (const entry of leaderboard) {
     // Post-U3: every leaderboard entry has a scorecard.
-    const score = `${Math.round(entry.score * 100)}%`;
+    const score = `${entry.scorecard.badge.score_pct}%`;
     const ps = entry.principleScore;
     const principles = `${ps.met}/${ps.total}`;
     lines.push(
@@ -624,10 +629,9 @@ export function buildLeaderboardMarkdown(leaderboard) {
  * @param {object | null} scorecard
  * @param {Array} topIssues
  * @param {object} principleScore
- * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} markdown
  */
-export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, score, resolvedVersion, metadata) {
+export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, resolvedVersion, metadata) {
   const version = resolvedVersion ?? null;
   const meta = metadata ?? {};
   const lines = [`# ${tool.name}`];
@@ -635,21 +639,21 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   lines.push(tool.description);
   lines.push('');
 
-  const pct = Math.round(score * 100);
-  const floorPct = Math.round(BADGE_FLOOR * 100);
+  const pct = scorecard.badge.score_pct;
+  const floorPct = BADGE_FLOOR_DISPLAY_PCT;
   lines.push(`**Score:** ${pct}% pass rate`);
   lines.push(`**Principles:** ${principleScore.met}/${principleScore.total} met`);
   lines.push('');
 
   // Embed snippet (above floor) or below-floor hint. Mirrors the HTML
   // surface so an agent fetching the .md twin sees the same convention.
-  if (score >= BADGE_FLOOR) {
+  if (scorecard.badge.eligible) {
     lines.push('## Embed the badge');
     lines.push('');
     lines.push(`This score (${pct}%) clears the [badge floor](/badge) (${floorPct}%). Copy this into your README:`);
     lines.push('');
     lines.push('```markdown');
-    lines.push(buildEmbedMarkdown(tool.name));
+    lines.push(scorecard.badge.embed_markdown);
     lines.push('```');
     lines.push('');
   } else {

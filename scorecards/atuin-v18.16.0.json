@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -130,16 +130,16 @@
   "tool": {
     "name": "atuin",
     "binary": "atuin",
-    "version": "atuin 18.15.2 ()"
+    "version": "atuin 18.16.0 ()"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command atuin --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T04:19:38.857289937Z",
-    "duration_ms": 183,
+    "started_at": "2026-04-30T23:01:52.425911295Z",
+    "duration_ms": 2145,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -149,5 +149,13 @@
     "kind": "command",
     "path": null,
     "command": "atuin"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 57,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/atuin",
+    "badge_url": "https://anc.dev/badge/atuin.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

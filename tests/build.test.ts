@@ -9,7 +9,6 @@ import {
   computeLayerScore,
   computeLeaderboard,
   computePrincipleScore,
-  computeScore,
   extractTopIssues,
   loadRegistry,
   loadScoredTools,
@@ -23,7 +22,7 @@ import {
 } from '../src/build/scorecards-render.mjs';
 import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { BADGE_FLOOR, escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
+import { escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -380,12 +379,15 @@ function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}
   return { results, summary };
 }
 
-// v0.4 fixture — a complete scorecard with the four metadata blocks
-// (tool, anc, run, target) as the upstream CLI emits them.
+// Schema 0.5 fixture — complete scorecard with v0.4 metadata blocks (tool,
+// anc, run, target) plus the schema 0.5 `badge` block. Mirrors what the CLI
+// emits today; loadScoredTools' invariant requires schema_version === '0.5'.
+// (Function name retains "V04" as the historical reference for the metadata
+// block additions; the schema bump from 0.4 → 0.5 only added `badge`.)
 function makeV04Scorecard(overrides: Record<string, any> = {}) {
   const base = makeScorecard();
   return {
-    schema_version: '0.4',
+    schema_version: '0.5',
     audience: null,
     audit_profile: null,
     coverage_summary: null,
@@ -400,6 +402,14 @@ function makeV04Scorecard(overrides: Record<string, any> = {}) {
       platform: { os: 'linux', arch: 'x86_64' },
     },
     target: { kind: 'command', path: null, command: 'fixture' },
+    badge: {
+      eligible: true,
+      score_pct: 100,
+      embed_markdown: '[![agent-native](https://anc.dev/badge/fixture.svg)](https://anc.dev/score/fixture)',
+      scorecard_url: 'https://anc.dev/score/fixture',
+      badge_url: 'https://anc.dev/badge/fixture.svg',
+      convention_url: 'https://anc.dev/badge',
+    },
     ...overrides,
   };
 }
@@ -834,38 +844,38 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
     }
   });
 
-  test('emits null metadata blocks for grandfathered v0.3/v1.1 scorecards', async () => {
-    const dir = join(tmpdir(), `scorecards-grandfather-${Date.now()}`);
+  test('rejects scorecards below the supported schema version (no synthesis fallback)', async () => {
+    // Schema 0.5 is the supported floor. The site reads `scorecard.badge.*`
+    // and `scorecard.{tool,anc,run,target}` directly from each scorecard;
+    // a scorecard without these blocks would fail render. The load-time
+    // invariant fails the build immediately rather than silently render
+    // wrong data via a synthesized fallback.
+    const dir = join(tmpdir(), `scorecards-invariant-${Date.now()}`);
     await mkdir(dir, { recursive: true });
-    // v1.1 anc scorecard — no tool/anc/run/target blocks, just the v0.3-era shape.
-    const grandfathered = {
-      schema_version: '1.1',
+    const stale = {
+      schema_version: '0.4',
       audience: null,
       audit_profile: null,
       coverage_summary: null,
       summary: { total: 0, pass: 0, warn: 0, fail: 0, skip: 0, error: 0 },
       results: [],
     };
-    await writeFile(join(dir, 'anc-v0.1.3.json'), JSON.stringify(grandfathered));
+    await writeFile(join(dir, 'fixture-v1.0.0.json'), JSON.stringify(stale));
     try {
       const registry = [
         {
-          name: 'anc',
-          repo: 'brettdavies/agentnative-cli',
-          binary: 'anc',
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
           language: 'Rust',
           tier: 'workhorse',
-          creator: 'Brett',
-          description: 'agent-native CLI linter',
+          creator: 'me',
+          description: 'thing',
         },
       ];
-      const { tools } = await loadScoredTools(dir, registry);
-      const entry: any = tools[0];
-      expect(entry.scorecard).not.toBeNull();
-      expect(entry.metadata.tool).toBeNull();
-      expect(entry.metadata.anc).toBeNull();
-      expect(entry.metadata.run).toBeNull();
-      expect(entry.metadata.target).toBeNull();
+      await expect(loadScoredTools(dir, registry)).rejects.toThrow(
+        /schema_version "0\.4" not supported.*Site requires schema 0\.5/,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1084,27 +1094,6 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
   });
 });
 
-describe('computeScore', () => {
-  test('computes pass / (pass + warn + fail), excluding skip/error', () => {
-    const sc = makeScorecard();
-    const score = computeScore(sc);
-    // 6 pass, 1 warn, 1 fail → 6/8 = 0.75
-    expect(score).toBe(0.75);
-  });
-
-  test('returns 0 for null scorecard', () => {
-    expect(computeScore(null)).toBe(0);
-  });
-
-  test('returns 0 when denominator is 0 (all skip)', () => {
-    const sc = makeScorecard({
-      results: [{ id: 'x', label: 'x', group: 'P1', layer: 'behavioral', status: 'skip', evidence: null }],
-      summary: { total: 1, pass: 0, warn: 0, fail: 0, skip: 1, error: 0 },
-    });
-    expect(computeScore(sc)).toBe(0);
-  });
-});
-
 describe('computePrincipleScore', () => {
   test('maps P1-P7 groups correctly, excludes CodeQuality/ProjectStructure', () => {
     const sc = makeScorecard();
@@ -1149,27 +1138,35 @@ describe('extractTopIssues', () => {
 });
 
 describe('computeLeaderboard', () => {
-  test('sorts tools by descending pass rate, unscored at bottom', () => {
+  // Helper: synthesize the schema 0.5 `badge` block from a target percent
+  // so the leaderboard sort (which reads `scorecard.badge.score_pct`) has
+  // the field it expects. Post-U3 inversion every leaderboard entry has a
+  // scorecard; the unscored-tools-sort-to-bottom branch is gone.
+  function withBadge(name: string, scorePct: number) {
+    return {
+      ...makeScorecard(),
+      badge: {
+        eligible: scorePct >= 80,
+        score_pct: scorePct,
+        embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
+        scorecard_url: `https://anc.dev/score/${name}`,
+        badge_url: `https://anc.dev/badge/${name}.svg`,
+        convention_url: 'https://anc.dev/badge',
+      },
+    };
+  }
+
+  test('sorts tools by descending badge.score_pct', () => {
     const tools = [
-      { tool: { name: 'unscored', tier: 'notable' }, scorecard: null },
-      {
-        tool: { name: 'low', tier: 'workhorse' },
-        scorecard: makeScorecard({
-          summary: { total: 4, pass: 1, warn: 1, fail: 2, skip: 0, error: 0 },
-        }),
-      },
-      {
-        tool: { name: 'high', tier: 'agent' },
-        scorecard: makeScorecard({
-          summary: { total: 4, pass: 4, warn: 0, fail: 0, skip: 0, error: 0 },
-        }),
-      },
+      { tool: { name: 'low', tier: 'workhorse' }, scorecard: withBadge('low', 25) },
+      { tool: { name: 'high', tier: 'agent' }, scorecard: withBadge('high', 100) },
+      { tool: { name: 'mid', tier: 'workhorse' }, scorecard: withBadge('mid', 75) },
     ];
     const lb = computeLeaderboard(tools as any);
     expect(lb[0].tool.name).toBe('high');
     expect(lb[0].rank).toBe(1);
-    expect(lb[1].tool.name).toBe('low');
-    expect(lb[2].tool.name).toBe('unscored');
+    expect(lb[1].tool.name).toBe('mid');
+    expect(lb[2].tool.name).toBe('low');
     expect(lb[2].rank).toBe(3);
   });
 
@@ -1261,7 +1258,7 @@ describe('suppressed-check rendering', () => {
   // audit_profile-suppressed Skip in the same principle group.
   function suppressedScorecard() {
     return {
-      schema_version: '0.3',
+      schema_version: '0.5',
       audience: null,
       audit_profile: 'human-tui',
       results: [
@@ -1291,6 +1288,14 @@ describe('suppressed-check rendering', () => {
         },
       ],
       summary: { total: 3, pass: 1, warn: 0, fail: 0, skip: 2, error: 0 },
+      badge: {
+        eligible: false,
+        score_pct: 100,
+        embed_markdown: '[![agent-native](https://anc.dev/badge/lazygit.svg)](https://anc.dev/score/lazygit)',
+        scorecard_url: 'https://anc.dev/score/lazygit',
+        badge_url: 'https://anc.dev/badge/lazygit.svg',
+        convention_url: 'https://anc.dev/badge',
+      },
     };
   }
 
@@ -1306,14 +1311,14 @@ describe('suppressed-check rendering', () => {
 
   test('audit_profile-suppressed Skip gets check--suppressed class and "N/A by <category>" status', () => {
     const sc = suppressedScorecard();
-    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] }, 1.0);
+    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
     expect(html).toContain('check--suppressed');
     expect(html).toContain('N/A by human-tui');
   });
 
   test('organic Skip retains check--skip without check--suppressed', () => {
     const sc = suppressedScorecard();
-    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] }, 1.0);
+    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
     // The organic skip row's status cell still shows "SKIP" uppercase.
     expect(html).toContain('>SKIP<');
     // And it must NOT carry the suppressed class.
@@ -1324,7 +1329,7 @@ describe('suppressed-check rendering', () => {
 
   test('non-suppression Skip evidence is preserved verbatim', () => {
     const sc = suppressedScorecard();
-    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] }, 1.0);
+    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
     expect(html).toContain('no flags exposed');
   });
 
@@ -1334,7 +1339,7 @@ describe('suppressed-check rendering', () => {
     // "suppressed by audit_profile_human-tui" must NOT be treated as
     // suppression — it's an organic Skip with prose evidence.
     const sc = {
-      schema_version: '0.3',
+      schema_version: '0.5',
       audience: null,
       audit_profile: null,
       results: [
@@ -1349,8 +1354,16 @@ describe('suppressed-check rendering', () => {
         },
       ],
       summary: { total: 1, pass: 0, warn: 0, fail: 0, skip: 1, error: 0 },
+      badge: {
+        eligible: false,
+        score_pct: 0,
+        embed_markdown: '[![agent-native](https://anc.dev/badge/lazygit.svg)](https://anc.dev/score/lazygit)',
+        scorecard_url: 'https://anc.dev/score/lazygit',
+        badge_url: 'https://anc.dev/badge/lazygit.svg',
+        convention_url: 'https://anc.dev/badge',
+      },
     };
-    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] }, 1.0);
+    const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
     expect(html).not.toContain('check--suppressed');
     expect(html).not.toContain('N/A by');
     // The status cell stays as the regular SKIP pill.
@@ -1379,8 +1392,15 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
         audit_profile: auditProfile,
         results: [],
         summary: { pass: 1, warn: 0, fail: 0 },
+        badge: {
+          eligible: true,
+          score_pct: 100,
+          embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
+          scorecard_url: `https://anc.dev/score/${name}`,
+          badge_url: `https://anc.dev/badge/${name}.svg`,
+          convention_url: 'https://anc.dev/badge',
+        },
       },
-      score: 1,
       principleScore: { met: 7, total: 7, details: [] },
       rank: 1,
     };
@@ -1661,7 +1681,9 @@ describe('badgeFormat — label, message, color contract', () => {
   });
 
   test('color follows badgeColor of the rounded percent — green at floor', () => {
-    expect(badgeFormat(BADGE_FLOOR).color).toBe('brightgreen');
+    // 0.8 mirrors the CLI eligibility floor (the rendering boundary that
+    // keeps a tool's badge readable as "passing" once embedded).
+    expect(badgeFormat(0.8).color).toBe('brightgreen');
     expect(badgeFormat(0.79).color).toBe('yellow');
     expect(badgeFormat(0.59).color).toBe('red');
   });
@@ -1696,22 +1718,6 @@ describe('renderBadgeSvg — SVG output', () => {
 // Above-floor: copy-paste snippet + SVG preview. Below-floor: hint
 // pointing at /badge and the top-issues section.
 // -------------------------------------------------------------------
-
-import { buildEmbedMarkdown } from '../src/build/scorecards-render.mjs';
-
-describe('buildEmbedMarkdown — README embed shape', () => {
-  test('emits standard agent-native markdown link wrapping the SVG', () => {
-    const md = buildEmbedMarkdown('rg');
-    expect(md).toBe('[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)');
-  });
-
-  test('honors PUBLIC_BASE_URL via resolveBaseUrl (explicit override)', () => {
-    const md = buildEmbedMarkdown('rg', 'https://staging.example.com');
-    expect(md).toBe(
-      '[![agent-native](https://staging.example.com/badge/rg.svg)](https://staging.example.com/score/rg)',
-    );
-  });
-});
 
 describe('buildScorecardBody — embed-snippet gating', () => {
   function tool(name = 'rg') {
@@ -1749,15 +1755,24 @@ describe('buildScorecardBody — embed-snippet gating', () => {
         evidence: 'no flag',
       });
     }
+    const score_pct = Math.round((passes / (passes + fails)) * 100);
     return {
-      schema_version: '1.3',
+      schema_version: '0.5',
       summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
       results,
+      badge: {
+        eligible: score_pct >= 80,
+        score_pct,
+        embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
+        scorecard_url: 'https://anc.dev/score/rg',
+        badge_url: 'https://anc.dev/badge/rg.svg',
+        convention_url: 'https://anc.dev/badge',
+      },
     };
   }
 
   test('eligible (score=1.0) renders copy-paste snippet + SVG preview', () => {
-    const html = buildScorecardBody(tool('rg'), sc(10, 0), [], { met: 7, total: 7, details: [] }, 1.0);
+    const html = buildScorecardBody(tool('rg'), sc(10, 0), [], { met: 7, total: 7, details: [] });
     expect(html).toContain('scorecard-embed--eligible');
     expect(html).not.toContain('scorecard-embed--below');
     expect(html).toContain('badge/rg.svg');
@@ -1768,7 +1783,7 @@ describe('buildScorecardBody — embed-snippet gating', () => {
   });
 
   test('eligible at exactly the floor (score=0.80) — brightline check, >= not >', () => {
-    const html = buildScorecardBody(tool('rg'), sc(8, 2), [], { met: 5, total: 7, details: [] }, 0.8);
+    const html = buildScorecardBody(tool('rg'), sc(8, 2), [], { met: 5, total: 7, details: [] });
     expect(html).toContain('scorecard-embed--eligible');
     expect(html).not.toContain('scorecard-embed--below');
   });
@@ -1776,7 +1791,7 @@ describe('buildScorecardBody — embed-snippet gating', () => {
   test('one point below the floor (score=0.79) renders the below-floor hint', () => {
     const sc79 = sc(79, 21);
     const issues = [{ id: 'f0', label: 'fail0', group: 'P2', status: 'fail', evidence: 'no flag' }];
-    const html = buildScorecardBody(tool('rg'), sc79, issues, { met: 4, total: 7, details: [] }, 0.79);
+    const html = buildScorecardBody(tool('rg'), sc79, issues, { met: 4, total: 7, details: [] });
     expect(html).toContain('scorecard-embed--below');
     expect(html).not.toContain('scorecard-embed--eligible');
     expect(html).not.toContain('<img src="/badge/rg.svg"'); // no preview image below the floor
@@ -1785,13 +1800,13 @@ describe('buildScorecardBody — embed-snippet gating', () => {
   });
 
   test('below-floor with no top issues references the full check list instead', () => {
-    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 4, total: 7, details: [] }, 0.7);
+    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 4, total: 7, details: [] });
     expect(html).toContain('See the full check results below for the gaps.');
     expect(html).not.toContain('top issues above are the place to start');
   });
 
   test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
-    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] }, 0.65);
+    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] });
     expect(html).toContain('15 points below');
   });
 });
@@ -1832,11 +1847,20 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
         evidence: 'no flag',
       });
     }
+    const score_pct = Math.round((passes / (passes + fails)) * 100);
     return {
-      schema_version: '0.4',
+      schema_version: '0.5',
       audit_profile: null,
       summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
       results,
+      badge: {
+        eligible: score_pct >= 80,
+        score_pct,
+        embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
+        scorecard_url: 'https://anc.dev/score/rg',
+        badge_url: 'https://anc.dev/badge/rg.svg',
+        convention_url: 'https://anc.dev/badge',
+      },
     };
   }
 
@@ -1856,7 +1880,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
   }
 
   test('Details block renders all six v0.4 rows in order', () => {
-    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
     // Row order: Version, Audit date, Duration, Platform, Mode, Anc build, Install
     const versionIdx = html.indexOf('Version scored');
     const auditIdx = html.indexOf('Audit date');
@@ -1875,7 +1899,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
   });
 
   test('Audit date renders the RFC 3339 timestamp as a calm UTC string', () => {
-    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
     expect(html).toContain('<dd>2026-04-30 04:18:53 UTC</dd>');
   });
 
@@ -1885,7 +1909,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({ run: { ...v04Meta().run, duration_ms: 42 } }),
     );
@@ -1896,7 +1919,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({ run: { ...v04Meta().run, duration_ms: 12_345 } }),
     );
@@ -1907,7 +1929,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({ run: { ...v04Meta().run, duration_ms: 145_234 } }),
     );
@@ -1915,7 +1936,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
   });
 
   test('Anc build links the commit when SHA is hex-shaped (7-40 chars)', () => {
-    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
     expect(html).toContain('href="https://github.com/brettdavies/agentnative-cli/commit/fff3f13"');
     expect(html).toContain('<code>fff3f13</code>');
   });
@@ -1926,7 +1947,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({ anc: { version: '0.1.0', commit: null } }),
     );
@@ -1941,7 +1961,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({ anc: { version: '0.1.0', commit: '<script>alert(1)</script>' } }),
     );
@@ -1950,7 +1969,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
   });
 
   test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
-    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, 1.0, '15.1.0', v04Meta());
+    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
     expect(html).toContain('<pre><code>anc check --command rg --output json</code></pre>');
   });
 
@@ -1962,7 +1981,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({
         target: { kind: 'project', path: '/home/secret/repo', command: null },
@@ -1979,7 +1997,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       v04Meta({
         run: { ...v04Meta().run, invocation: 'anc check --command "<rg>" --output json' },
@@ -1998,7 +2015,6 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       sc(),
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '0.1.3',
       grandfatheredMeta,
     );
@@ -2025,10 +2041,22 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         language: 'rust',
         install: 'brew install rg',
       },
-      { schema_version: '0.4', audit_profile: null, summary: { pass: 1, warn: 0, fail: 0 }, results: [] } as any,
+      {
+        schema_version: '0.5',
+        audit_profile: null,
+        summary: { pass: 1, warn: 0, fail: 0 },
+        results: [],
+        badge: {
+          eligible: true,
+          score_pct: 100,
+          embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
+          scorecard_url: 'https://anc.dev/score/rg',
+          badge_url: 'https://anc.dev/badge/rg.svg',
+          convention_url: 'https://anc.dev/badge',
+        },
+      } as any,
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
@@ -2056,10 +2084,22 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         language: 'rust',
         install: 'brew install rg',
       },
-      { schema_version: '0.4', audit_profile: null, summary: { pass: 1, warn: 0, fail: 0 }, results: [] } as any,
+      {
+        schema_version: '0.5',
+        audit_profile: null,
+        summary: { pass: 1, warn: 0, fail: 0 },
+        results: [],
+        badge: {
+          eligible: true,
+          score_pct: 100,
+          embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
+          scorecard_url: 'https://anc.dev/score/rg',
+          badge_url: 'https://anc.dev/badge/rg.svg',
+          convention_url: 'https://anc.dev/badge',
+        },
+      } as any,
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
@@ -2087,10 +2127,22 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         language: 'rust',
         install: 'brew install rg',
       },
-      { schema_version: '0.4', audit_profile: null, summary: { pass: 1, warn: 0, fail: 0 }, results: [] } as any,
+      {
+        schema_version: '0.5',
+        audit_profile: null,
+        summary: { pass: 1, warn: 0, fail: 0 },
+        results: [],
+        badge: {
+          eligible: true,
+          score_pct: 100,
+          embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
+          scorecard_url: 'https://anc.dev/score/rg',
+          badge_url: 'https://anc.dev/badge/rg.svg',
+          convention_url: 'https://anc.dev/badge',
+        },
+      } as any,
       [],
       { met: 7, total: 7, details: [] },
-      1.0,
       '15.1.0',
       {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
@@ -2125,10 +2177,20 @@ describe('buildLeaderboardBody — badge callout', () => {
   // by loadScoredTools). The denominator is the audited corpus, not the
   // registry.
   function entry(name: string, score: number) {
+    const score_pct = Math.round(score * 100);
     return {
       tool: { name, tier: 'workhorse', language: 'rust', description: name },
-      scorecard: { summary: { pass: 1, warn: 0, fail: 0 } } as any,
-      score,
+      scorecard: {
+        summary: { pass: 1, warn: 0, fail: 0 },
+        badge: {
+          eligible: score_pct >= 80,
+          score_pct,
+          embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
+          scorecard_url: `https://anc.dev/score/${name}`,
+          badge_url: `https://anc.dev/badge/${name}.svg`,
+          convention_url: 'https://anc.dev/badge',
+        },
+      } as any,
       principleScore: { met: 5, total: 7, details: [] },
       rank: 1,
     };

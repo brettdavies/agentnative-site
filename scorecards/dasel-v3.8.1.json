@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -15,8 +15,8 @@
       "label": "Version flag works",
       "group": "P3",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "fail",
+      "evidence": "--version exited with code 80",
       "confidence": "high"
     },
     {
@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "skip",
+      "evidence": "no --output/--format flag detected in any subcommand",
       "confidence": "high"
     },
     {
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "target exposes no flags in --help",
+      "status": "warn",
+      "evidence": "1 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -103,9 +103,9 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 6,
+    "pass": 5,
     "warn": 3,
-    "fail": 0,
+    "fail": 1,
     "skip": 2,
     "error": 0
   },
@@ -123,22 +123,22 @@
       "verified": 0
     }
   },
-  "audience": "mixed",
+  "audience": "agent-optimized",
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "deno",
-    "binary": "deno",
-    "version": "deno 2.7.13 (stable, release, x86_64-unknown-linux-gnu)"
+    "name": "dasel",
+    "binary": "dasel",
+    "version": null
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command deno --output json",
-    "started_at": "2026-04-30T04:19:10.127274843Z",
-    "duration_ms": 435,
+    "invocation": "anc check --command dasel --output json",
+    "started_at": "2026-04-30T23:00:58.09179582Z",
+    "duration_ms": 116,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "deno"
+    "command": "dasel"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 56,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/dasel",
+    "badge_url": "https://anc.dev/badge/dasel.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

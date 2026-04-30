@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": "vhs version 0.11.0"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command vhs --output json",
-    "started_at": "2026-04-30T04:19:38.282987392Z",
-    "duration_ms": 195,
+    "started_at": "2026-04-30T23:01:51.724928287Z",
+    "duration_ms": 194,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "vhs"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 70,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/vhs",
+    "badge_url": "https://anc.dev/badge/vhs.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": null
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command cosign --output json",
-    "started_at": "2026-04-30T04:19:11.281923869Z",
-    "duration_ms": 218,
+    "started_at": "2026-04-30T23:01:16.542765649Z",
+    "duration_ms": 219,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "cosign"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 50,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/cosign",
+    "badge_url": "https://anc.dev/badge/cosign.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

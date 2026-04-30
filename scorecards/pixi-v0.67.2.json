@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,12 +132,12 @@
     "version": "pixi 0.67.2"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command pixi --output json",
-    "started_at": "2026-04-30T04:19:10.642601151Z",
+    "started_at": "2026-04-30T23:01:15.865087526Z",
     "duration_ms": 128,
     "platform": {
       "os": "linux",
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "pixi"
+  },
+  "badge": {
+    "eligible": true,
+    "score_pct": 80,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/pixi.svg)](https://anc.dev/score/pixi)",
+    "scorecard_url": "https://anc.dev/score/pixi",
+    "badge_url": "https://anc.dev/badge/pixi.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

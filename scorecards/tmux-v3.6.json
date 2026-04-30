@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -133,12 +133,12 @@
     "version": "tmux 3.6a"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command tmux --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T04:18:52.479935321Z",
+    "started_at": "2026-04-30T23:00:56.650544357Z",
     "duration_ms": 51,
     "platform": {
       "os": "linux",
@@ -149,5 +149,13 @@
     "kind": "command",
     "path": null,
     "command": "tmux"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 40,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/tmux",
+    "badge_url": "https://anc.dev/badge/tmux.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

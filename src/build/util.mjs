@@ -71,16 +71,6 @@ export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);
 
 export const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
 
-// Badge eligibility floor — minimum pass-rate (0–1) a tool must meet to
-// legitimately embed `[![agent-native](.../badge/<tool>.svg)](.../score/<tool>)`
-// in its README. Below the floor, the per-tool scorecard page renders a
-// "what to address" hint instead of the embed snippet (per the badge
-// convention at /badge). The badge SVG is always emitted regardless of
-// floor — a tool watching its own regression should see the visual color
-// drop in the rendered SVG, even if its scorecard page no longer offers
-// the embed snippet.
-export const BADGE_FLOOR = 0.8;
-
 // Spec version cited on the badge label and in the /badge convention prose.
 // The spec sync-plan (docs/plans/2026-04-23-001-feat-sync-spec-plan.md)
 // will replace this with a build-time read from src/data/spec/VERSION when

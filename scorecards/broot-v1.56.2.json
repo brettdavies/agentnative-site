@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -133,12 +133,12 @@
     "version": "broot 1.56.2"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command broot --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T04:19:11.118213134Z",
+    "started_at": "2026-04-30T23:01:16.376517735Z",
     "duration_ms": 41,
     "platform": {
       "os": "linux",
@@ -149,5 +149,13 @@
     "kind": "command",
     "path": null,
     "command": "broot"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 50,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/broot",
+    "badge_url": "https://anc.dev/badge/broot.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }
