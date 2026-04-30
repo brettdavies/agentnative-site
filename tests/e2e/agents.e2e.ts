@@ -31,19 +31,22 @@ test.describe('CN decision table — live Worker', () => {
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     expect(res.headers()['x-robots-tag']).toBe('noindex');
-    // Worker rewrote the asset lookup to /p3.md — body should match source.
-    const expected = await sha256(`${process.cwd()}/content/principles/p3-progressive-help-discovery.md`);
+    // Worker rewrites the asset lookup to /p3.md — body matches the build
+    // artifact (which is the source with site-internal links absolutified
+    // by absolutifyMarkdownLinks; see src/build/util.mjs:123 and the
+    // build-time invariant at src/build/build.mjs:153).
+    const expected = await sha256(`${process.cwd()}/dist/p3.md`);
     const actual = createHash('sha256')
       .update(await res.text())
       .digest('hex');
     expect(actual).toBe(expected);
   });
 
-  test('GET /p3.md returns source bytes unchanged', async ({ request }) => {
+  test('GET /p3.md returns the absolutified markdown twin from dist', async ({ request }) => {
     const res = await request.get(`${BASE}/p3.md`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
-    const expected = await sha256(`${process.cwd()}/content/principles/p3-progressive-help-discovery.md`);
+    const expected = await sha256(`${process.cwd()}/dist/p3.md`);
     const actual = createHash('sha256')
       .update(await res.text())
       .digest('hex');
