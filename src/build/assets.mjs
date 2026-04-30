@@ -67,10 +67,17 @@ export async function copyAssets({ repoRoot, distDir }) {
   // 4. og-image.png.
   await copyBinary(join(repoRoot, 'public/og-image.png'), join(distDir, 'og-image.png'));
 
-  // 5. robots.txt.
+  // 5. Favicon set. SVG is the primary surface (modern browsers); the
+  // 32×32 PNG is a fallback for older Safari, and apple-touch-icon-180
+  // covers iOS Home Screen pinning. See scripts/favicon/generate.ts.
+  await copyBinary(join(repoRoot, 'public/favicon.svg'), join(distDir, 'favicon.svg'));
+  await copyBinary(join(repoRoot, 'public/favicon-32.png'), join(distDir, 'favicon-32.png'));
+  await copyBinary(join(repoRoot, 'public/apple-touch-icon-180.png'), join(distDir, 'apple-touch-icon-180.png'));
+
+  // 6. robots.txt.
   await copyBinary(join(repoRoot, 'public/robots.txt'), join(distDir, 'robots.txt'));
 
-  // 6. Client JS.
+  // 7. Client JS.
   const themeJs = await bundleClient(join(repoRoot, 'src/client/theme.ts'), join(distDir, 'js/theme.js'));
   const clipboardJs = await bundleClient(join(repoRoot, 'src/client/clipboard.ts'), join(distDir, 'js/clipboard.js'));
   const leaderboardJs = await bundleClient(

@@ -15,7 +15,8 @@
     "format": "biome format --write .",
     "deploy": "bun run build && wrangler deploy",
     "deploy:dryrun": "bun run build && wrangler deploy --dry-run",
-    "og": "bun scripts/og/generate.ts"
+    "og": "bun scripts/og/generate.ts",
+    "favicon": "bun scripts/favicon/generate.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
