@@ -367,7 +367,9 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version, metadata)),
+      absolutifyMarkdownLinks(
+        buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version, metadata),
+      ),
     );
     scorecardPaths.push(`/score/${tool.name}`);
 
@@ -405,10 +407,7 @@ export async function build() {
 </html>
 `;
       await writeFile(join(DIST_DIR, 'score', `${tool.binary}.html`), redirectHtml);
-      await writeFile(
-        join(DIST_DIR, 'score', `${tool.binary}.md`),
-        `See [${targetPath}](${targetPath}).\n`,
-      );
+      await writeFile(join(DIST_DIR, 'score', `${tool.binary}.md`), `See [${targetPath}](${targetPath}).\n`);
     }
   }
 
