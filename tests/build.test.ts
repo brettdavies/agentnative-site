@@ -21,6 +21,7 @@ import {
   buildScorecardMarkdown,
   renderAudienceBanner,
 } from '../src/build/scorecards-render.mjs';
+import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
 import { BADGE_FLOOR, escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
@@ -272,6 +273,41 @@ describe('escHtml', () => {
 
   test('coerces non-strings', () => {
     expect(escHtml(42)).toBe('42');
+  });
+});
+
+// -------------------------------------------------------------------
+// emitShell — OG image alt-text wiring (R10)
+// -------------------------------------------------------------------
+
+describe('emitShell — OG image alt text', () => {
+  function shell() {
+    return emitShell({
+      title: 'P1 — Non-interactive by Default',
+      description: 'A principle of the agent-native CLI standard.',
+      canonicalPath: '/p1',
+      bodyHtml: '<article>body</article>',
+      themeInitJs: '/* theme init */',
+    });
+  }
+
+  test('emits og:image:alt with the canonical OG card description', () => {
+    const html = shell();
+    expect(html).toContain('property="og:image:alt"');
+    expect(html).toContain(
+      'content="agent-native CLI standard — anc.dev — seven principles for CLIs that agents can operate"',
+    );
+  });
+
+  test('emits twitter:image:alt with the same description', () => {
+    const html = shell();
+    expect(html).toContain('name="twitter:image:alt"');
+    // Both alt tags share one source-of-truth — same string verbatim.
+    const ogMatch = html.match(/property="og:image:alt"\s+content="([^"]+)"/);
+    const twMatch = html.match(/name="twitter:image:alt"\s+content="([^"]+)"/);
+    expect(ogMatch).not.toBeNull();
+    expect(twMatch).not.toBeNull();
+    expect(ogMatch![1]).toBe(twMatch![1]);
   });
 });
 

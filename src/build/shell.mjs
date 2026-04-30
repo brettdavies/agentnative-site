@@ -10,6 +10,15 @@ import { escHtml, resolveBaseUrl } from './util.mjs';
 const SITE_NAME = 'anc.dev';
 const SITE_TAGLINE = 'The agent-native CLI standard';
 
+// Alt text for the OG card. Single source-of-truth: applies to every
+// page's og:image:alt + twitter:image:alt because the site uses one
+// shared OG image (see docs/DESIGN.md §4.13). The card itself is
+// rendered from docs/design/og.html via scripts/og/generate.ts and
+// shows MUST/SHOULD/MAY-prefixed normative statements; the alt text
+// describes the *content* of that card so screen readers and link-
+// preview crawlers convey what a sighted viewer sees.
+const OG_IMAGE_ALT = 'agent-native CLI standard — anc.dev — seven principles for CLIs that agents can operate';
+
 const AI_SUMMARY_PROMPT =
   'Summarize the agent-native CLI standard from https://anc.dev/llms-full.txt — what are the seven principles and why do they matter for AI agents using CLI tools?';
 
@@ -119,11 +128,13 @@ ${principles
     <meta property="og:image" content="${ogImage}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="${OG_IMAGE_ALT}" />
     <meta property="og:site_name" content="${SITE_NAME}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(title)}" />
     <meta name="twitter:description" content="${esc(description)}" />
     <meta name="twitter:image" content="${ogImage}" />
+    <meta name="twitter:image:alt" content="${OG_IMAGE_ALT}" />
 
     <link rel="icon" href="/og-image.png" type="image/png" />
 
