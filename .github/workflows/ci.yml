@@ -81,8 +81,11 @@ jobs:
         id: warnings
         run: |
           line="$(grep '^WARNINGS_JSON: ' /tmp/build.log | tail -1 | sed 's/^WARNINGS_JSON: //')"
-          # Default to empty-object so downstream jq parses cleanly.
-          echo "json=${line:-{\}}" >> "$GITHUB_OUTPUT"
+          # Default to empty-object so downstream jq parses cleanly. Avoid
+          # bash brace-default `${var:-{\}}` — that form silently appends a
+          # trailing `}` when $var is non-empty, producing invalid JSON.
+          if [ -z "$line" ]; then line='{}'; fi
+          echo "json=$line" >> "$GITHUB_OUTPUT"
 
       - name: Unit + regression tests
         run: bun test
