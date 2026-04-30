@@ -1,11 +1,47 @@
 ---
 title: "feat: Show HN launch readiness — agentnative-site"
 type: feat
-status: completed
+status: active
 date: 2026-04-28
 last-revised: 2026-04-30
-shipped_in: launch posted Thu 2026-04-30 09:00 PT; site cuts (steps 4–6 of the launch wave) completed on the night of 2026-04-29 → morning of 2026-04-30.
+shipped_in: HELD — launch did NOT occur 2026-04-30; relaunch target Mon 2026-05-04 contingent on live-scoring v2 surface (`docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md`) shipping over the weekend.
 parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-launch-inversion-20260427-144756.md
+---
+
+> **CORRECTION (2026-04-30 PM PT) — LAUNCH WAS HELD, NOT SHIPPED.** The Show HN post did not go up Thu 2026-04-30
+> 09:00 PT. Primary blocker: the live-scoring v2 surface is unbuilt
+> (`docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md`, `status: active`, all units `[ ]` unchecked) — the
+> "paste a repo URL → live `anc` scorecard" hook that justifies the post's anc.dev click-through doesn't exist yet.
+> Asset-only landing-page-about-an-opinionated-CLI is too thin a Show HN. The `release/<YYYY-MM-DD>-show-hn-cut` PR was
+> never cut. `main` is still at the v0 scaffold from 2026-04-14 (commit `0128e7e feat: agentnative.dev v0 scaffold`);
+> all 109 commits of launch-week work (96/96 leaderboard, badge surface, `/skill` split, scorecard schema 0.4, brand
+> OG, block-level normative rendering) sit unpromoted on `dev`. Plan flipped back to `status: active`.
+>
+> **Forward plan (locked 2026-04-30 PM PT with user):**
+>
+> - **Today (2026-04-30):** Run brand-OG Unit 5 visual QA via `/design-review` (gating step skipped pre-held-launch),
+>   then `release/2026-04-30-<slug>` cut promoting today's `dev` to `main` — gets anc.dev off the v0 scaffold without
+>   triggering the Show HN post. Spec-sync vendoring (`2026-04-23-001`) folded in if scope holds.
+> - **Weekend (Fri-Sun 2026-05-01 → 2026-05-03):** Build live scoring per `2026-04-28-002`. Target Sun PM `dev` ready.
+> - **Mon 2026-05-04 09:00 PT:** Cut `release/2026-05-04-show-hn-cut` from `dev`, deploy, cold-device verify, post.
+>
+> The blocks BELOW this CORRECTION — labeled "Post-launch update," "Post-launch additive work," "Planning-doc cleanup
+> pass," and "Remaining post-launch follow-up" — describe what was *intended* / *staged on dev*, NOT what *shipped to
+> anc.dev*. Treat all `completed` / `shipped` / `clean` claims in those blocks as point-in-time records of dev-branch
+> state captured pre-mortem ahead of the planned launch, then never corrected when launch was held. The PR #52
+> scorecard schema 0.4 work + the doc-flip commits + brand-OG PRs #54/#56/#57 DID merge to `dev` — that part is
+> accurate; only the "shipped to production" framing is wrong.
+>
+> **Sibling plans incorrectly flipped to `status: completed` in the 2026-04-30 cleanup pass need their own correction
+> pass** — `2026-04-29-002` (scorecard schema 0.4), `2026-04-27-001` (skill-distribution Units 2–5), `2026-04-24-001`
+> (skill-distribution master), `2026-04-23-002` (badge surface). They report dev-state-at-cleanup-time as if it were
+> production-state. Address in a follow-on `docs(plans):` correction commit.
+>
+> **Branch-name convention update:** every `release/launch` token in this plan body has been globally renamed to the
+> CalVer placeholder `release/<YYYY-MM-DD>-show-hn-cut` per `RELEASES.md` § Branches (CalVer date prefix is mandatory
+> for `release/*` branches). When the actual cut happens, substitute the real date (e.g. `release/2026-05-04-show-hn-
+> cut`).
+
 ---
 
 > **Parent:** `~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-launch-inversion-20260427-144756.md`
@@ -13,15 +49,16 @@ parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-laun
 > This per-repo plan inherits gates from the parent and is authoritative for repo-internal execution detail only.
 >
 > **Release version + order:** see central tracker § Release Versions and Order — SoT for v0.3.0 launch wave.
-> Site `release/launch` → `main` deploy is **step 4** of the launch wave (cherry-pick scope includes
+> Site `release/<YYYY-MM-DD>-show-hn-cut` → `main` deploy is **step 4** of the launch wave (cherry-pick scope includes
 > `skill.json` re-pin to skill v0.2.0 commit SHA from step 3b). Cutover ops are **step 5**; cold-device prod smoke
 > is **step 6**. Hard-blocked on steps 1–3b (spec v0.3.0, CLI v0.2.0 + tap, skill v0.2.0). Slip → push launch 24h.
 
 # feat: Show HN launch readiness — agentnative-site
 
-> **Post-launch update (2026-04-30):** Launch shipped Thu 2026-04-30 09:00 PT on schedule. Site cuts (steps 4–6 of the
-> launch wave per the central tracker) completed clean: `release/launch` → `main` deployed to anc.dev, skill-distribution
-> cutover ops ran clean, and the cold-device prod smoke passed before the post went up. Plan flipped `active → completed`.
+> **[HISTORICAL — see CORRECTION above; launch did NOT ship.] Post-launch update (2026-04-30):** Launch shipped Thu
+> 2026-04-30 09:00 PT on schedule. Site cuts (steps 4–6 of the launch wave per the central tracker) completed clean:
+> `release/<YYYY-MM-DD>-show-hn-cut` → `main` deployed to anc.dev, skill-distribution cutover ops ran clean, and the
+> cold-device prod smoke passed before the post went up. Plan flipped `active → completed`.
 >
 > ---
 >
@@ -67,21 +104,21 @@ Today: 2026-04-29 PT. Post lands Thu 2026-04-30 09:00 PT (~16h out).
 - **U5 — cold-device smoke (Gate 12):**
 - Pre-cut staging pass: ✅ confirmed on phone (SVG icons render correctly in iOS Safari, theme toggle works, nav links
   resolve). Did not block on the missing-icon regression that PR #46 fixed.
-- Post-cut prod pass: pending — runs Thu morning before 09:00 PT after `release/launch` deploys.
-- **U6 — `release/launch` PR cut + cutover ops:** still blocked, but on a narrower chain. Central tracker as of
-  2026-04-29 evening: step 1 (spec v0.3.0) ✅ done; step 3a (skill v0.2.0 PR-merge) ✅ done at 16:38 PT (squash
-  `2b10c84`); step 3b (skill v0.2.0 tag + GitHub Release) ✅ done at 22:16 UTC (tag `054c249`). **Only step 2 (CLI
-  v0.2.0) remains.** The earlier `src/data/skill.json` re-pin requirement is retired per the central tracker's step-4
-  entry — skill v0.2.0 ships `bin/check-update` (PR #8) for consumer-side staleness detection, replacing per-release SHA
-  pinning.
+- Post-cut prod pass: pending — runs Thu morning before 09:00 PT after `release/<YYYY-MM-DD>-show-hn-cut` deploys.
+- **U6 — `release/<YYYY-MM-DD>-show-hn-cut` PR cut + cutover ops:** still blocked, but on a narrower chain. Central
+  tracker as of 2026-04-29 evening: step 1 (spec v0.3.0) ✅ done; step 3a (skill v0.2.0 PR-merge) ✅ done at 16:38 PT
+  (squash `2b10c84`); step 3b (skill v0.2.0 tag + GitHub Release) ✅ done at 22:16 UTC (tag `054c249`). **Only step 2
+  (CLI v0.2.0) remains.** The earlier `src/data/skill.json` re-pin requirement is retired per the central tracker's
+  step-4 entry — skill v0.2.0 ships `bin/check-update` (PR #8) for consumer-side staleness detection, replacing
+  per-release SHA pinning.
 - **Launch-coupled side-quest ✅ shipped** — Badge surface for agent-native conformance landed on `dev` 2026-04-29
   evening. Plan: [`docs/plans/2026-04-23-002-feat-badge-surface-plan.md`](2026-04-23-002-feat-badge-surface-plan.md).
   PRs: [#49](https://github.com/brettdavies/agentnative-site/pull/49) (build-time SVGs via `badge-maker` + `/badge`
   convention page + scorecard embed snippet + leaderboard callout),
   [#50](https://github.com/brettdavies/agentnative-site/pull/50) (dark-mode contrast fix on the leaderboard callout),
   [#51](https://github.com/brettdavies/agentnative-site/pull/51) (visual-fidelity gates documented in AGENTS.md). Rides
-  the `release/launch` cherry-pick automatically (scope is "all of `dev`"). Surface #4 of the badge plan (spec
-  `docs/badge.md`) deferred post-launch; the `/badge` page is the doctrinal copy at launch.
+  the `release/<YYYY-MM-DD>-show-hn-cut` cherry-pick automatically (scope is "all of `dev`"). Surface #4 of the badge
+  plan (spec `docs/badge.md`) deferred post-launch; the `/badge` page is the doctrinal copy at launch.
 - **Gate 9 — issue templates on `main`:** still passive-clear via U6's full-`dev` cherry-pick. Confirmed
   `.github/ISSUE_TEMPLATE/{config.yml,site-bug.yml}` exist on `dev` and not on `main`.
 
@@ -92,12 +129,12 @@ table. The post points at `anc.dev`. Everything the site repo owes the launch fa
 `/scorecards` shows a credible full-registry leaderboard, every page works on a phone over cellular, every visible
 string survives an adversarial reading, and all in-repo links resolve on `main` (not just `dev`). This plan stages four
 launch-day gates (G8 + G9 + G11 + G12), one P0 todo (`014` — `sync-coverage-matrix.sh` rename drift), and the
-night-before `release/launch` cherry-pick that pushes everything from `dev` to `main`. It explicitly does NOT execute
-anything — the plan IS the deliverable for this session.
+night-before `release/<YYYY-MM-DD>-show-hn-cut` cherry-pick that pushes everything from `dev` to `main`. It explicitly
+does NOT execute anything — the plan IS the deliverable for this session.
 
 The skill-distribution stretch track (Units 1–5 of `2026-04-24-001`) is **already on `dev` and live on staging** as of
-2026-04-28 PM. It rides the same `release/launch` PR. The only stretch-track work remaining is the cutover ops
-(cache-purge + skill-availability seed) which run AFTER the release lands on `main`.
+2026-04-28 PM. It rides the same `release/<YYYY-MM-DD>-show-hn-cut` PR. The only stretch-track work remaining is the
+cutover ops (cache-purge + skill-availability seed) which run AFTER the release lands on `main`.
 
 ---
 
@@ -122,9 +159,9 @@ cut clean." The substantive remaining items split four ways:
 3. **Gate 9 — `.github/ISSUE_TEMPLATE/` on `dev`, not on `main`.** Confirmed: `.github/ISSUE_TEMPLATE/{config.yml,
    site-bug.yml}` exists on `dev` (committed in `70b38f9`) but `git ls-tree main -- .github/ISSUE_TEMPLATE/` returns
    empty. With `blank_issues_enabled: false` in `config.yml`, a Show HN visitor clicking the issue-template link from
-   the spec repo's CONTRIBUTING.md hits a degraded UI. **Fix is passive** — the night-before `release/launch` PR already
-   includes everything on `dev`, so this gate clears automatically as long as the cherry-pick scope is "all of `dev`."
-   Codified in the Pre-launch release PR checklist below.
+   the spec repo's CONTRIBUTING.md hits a degraded UI. **Fix is passive** — the night-before
+   `release/<YYYY-MM-DD>-show-hn-cut` PR already includes everything on `dev`, so this gate clears automatically as long
+   as the cherry-pick scope is "all of `dev`." Codified in the Pre-launch release PR checklist below.
 
 4. **Gate 11 — site-copy red-team pass.** Adversarial review of every visible string on `/`, `/p1`–`/p7`, `/check`,
    `/about`, `/methodology`, `/scorecards`, `/score/<tool>`, `/install`, plus the OG image text and footer. Spec-side
@@ -163,8 +200,8 @@ Gates **not** owned by this repo: 1, 2, 3, 4, 5, 6, 7, 10. Listed in Cross-refer
   the handoff's Step 6.
 - This plan does **not** subsume `2026-04-24-001-feat-skill-distribution-endpoint-plan.md` (skill distribution master)
   or `2026-04-27-001-feat-skill-distribution-site-plan.md` (site execution Units 2–5). Both stay `active` and ship via
-  the same `release/launch` PR. The central tracker treats skill distribution as the launch-adjacent stretch track —
-  this launch-readiness plan coordinates with it but does not own it.
+  the same `release/<YYYY-MM-DD>-show-hn-cut` PR. The central tracker treats skill distribution as the launch-adjacent
+  stretch track — this launch-readiness plan coordinates with it but does not own it.
 - This plan does **not** subsume `2026-04-23-001-feat-sync-spec-plan.md` (sync-spec.sh vendoring). That plan stays
   `active` and ships post-launch — sync-spec is invisible to Show HN readers (it's an internal CLI-feeds-site sync
   mechanism for the post-launch v0.4.0 cycle).
@@ -178,8 +215,8 @@ Gates **not** owned by this repo: 1, 2, 3, 4, 5, 6, 7, 10. Listed in Cross-refer
 
 - **sync-spec workflow** (`2026-04-23-001`): post-launch. Wires the CLI-spec-vendor → site-coverage-matrix loop for
   v0.4.0+.
-- **Skill-distribution cutover ops (cache-purge + probe seed)**: runs AFTER `release/launch` lands on `main`, not as
-  part of the cut itself. Sequenced in the Pre-launch release PR checklist below.
+- **Skill-distribution cutover ops (cache-purge + probe seed)**: runs AFTER `release/<YYYY-MM-DD>-show-hn-cut` lands on
+  `main`, not as part of the cut itself. Sequenced in the Pre-launch release PR checklist below.
 - **Bundle migration of `~/dev/agent-skills/agent-native-cli/` content into the site repo**: no — handled separately via
   the `agentnative-skill` repo per the master plan (Unit 1 done as of 2026-04-28).
 - **Status-string normalization across `docs/plans/*.md`**: post-launch chore. Not credibility-load-bearing.
@@ -217,11 +254,11 @@ c71a6d2 feat(v0.1.3): ANC 100 leaderboard launch — audience signals + methodol
 [+ 25 earlier commits going back to v0 milestones]
 ```
 
-**The `release/launch` PR's cherry-pick scope is the entire `dev..main` window.** Site-repo precedent is: full
-fast-forward from a `release/*` branch cut from `origin/main`, applying the path-filtered diff from `dev`. There is no
-selective cherry-picking of feature commits — everything that's been merged to `dev` ships together at launch time.
-Plan-only commits (`docs(plans):` etc.) ride along as-is per the carve-out for `docs/plans/**` direct commits. Two
-specific must-include items:
+**The `release/<YYYY-MM-DD>-show-hn-cut` PR's cherry-pick scope is the entire `dev..main` window.** Site-repo precedent
+is: full fast-forward from a `release/*` branch cut from `origin/main`, applying the path-filtered diff from `dev`.
+There is no selective cherry-picking of feature commits — everything that's been merged to `dev` ships together at
+launch time. Plan-only commits (`docs(plans):` etc.) ride along as-is per the carve-out for `docs/plans/**` direct
+commits. Two specific must-include items:
 
 1. **`.github/ISSUE_TEMPLATE/`** (Gate 9) — already on `dev` via `70b38f9`, must reach `main` in this PR.
 2. **Skill-distribution Units 2–5** (PRs #36 + #37 + #38 + #39 plus their dependent commits) — must reach `main` in this
@@ -231,17 +268,18 @@ specific must-include items:
 
 - `docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md` — `status: active`. Implementation Units 1–5
   shipped (checkboxes flipped 2026-04-28 PM in commit `d6dc041`); cutover ops pending. **Coordinated, not subsumed:**
-  the cutover ops (cache-purge + probe seed) run AFTER `release/launch` lands on `main`. Listed in the Pre-launch
-  release PR checklist below.
+  the cutover ops (cache-purge + probe seed) run AFTER `release/<YYYY-MM-DD>-show-hn-cut` lands on `main`. Listed in the
+  Pre-launch release PR checklist below.
 - `docs/plans/2026-04-27-001-feat-skill-distribution-site-plan.md` — `status: active`. Site execution detail for Units
   2–5. Same coordination as above. Mostly-redundant with the master plan once execution is done; kept active for the
   cutover-ops record.
 - `docs/plans/2026-04-23-001-feat-sync-spec-plan.md` — `status: active`. CLI-feeds-site coverage-matrix vendoring loop.
   **Out of scope for this launch.** Stays active through launch.
 - `docs/plans/2026-04-23-002-feat-badge-surface-plan.md` — `status: active`. Cross-repo badge surface; site-side units
-  U3–U7 shipped on `dev` 2026-04-29 evening (PRs #49, #50, #51). Rides the `release/launch` cherry-pick automatically.
-  Surface #4 (spec `docs/badge.md`) and surface #5 (CLI `anc check` post-pass hint, `agentnative-cli` todo #017) are
-  deferred post-launch. Plan stays active through launch and flips to `complete` at the post-launch retro.
+  U3–U7 shipped on `dev` 2026-04-29 evening (PRs #49, #50, #51). Rides the `release/<YYYY-MM-DD>-show-hn-cut`
+  cherry-pick automatically. Surface #4 (spec `docs/badge.md`) and surface #5 (CLI `anc check` post-pass hint,
+  `agentnative-cli` todo #017) are deferred post-launch. Plan stays active through launch and flips to `complete` at the
+  post-launch retro.
 
 ### Release pipeline (existing infrastructure — already in use)
 
@@ -307,8 +345,8 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
 - **Should this plan subsume the skill-distribution plans?** No. They stay independent and ship via the same release PR.
   Coordination is via the Pre-launch release PR checklist below.
 - **Is sync-spec in scope?** No. Its visibility on launch day is zero. Post-launch.
-- **Does the `release/launch` PR cherry-pick selectively?** No — full `dev` to `release/launch` reset, per `RELEASES.md`
-  precedent.
+- **Does the `release/<YYYY-MM-DD>-show-hn-cut` PR cherry-pick selectively?** No — full `dev` to
+  `release/<YYYY-MM-DD>-show-hn-cut` reset, per `RELEASES.md` precedent.
 
 ### Deferred to implementation
 
@@ -326,12 +364,13 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
   parent Q4, then re-superseded 2026-04-29 by a 24h push): **Wednesday 2026-04-29 PT for Thursday 2026-04-30 09:00 AM PT
   post.** Site cuts the same night, ideally after the CLI's `v0.2.0` tag has triggered the homebrew dispatch and the
   formula has updated AND the skill `v0.2.0` tag is published. Tag-cut sequence is: spec `v0.3.0` → CLI `v0.2.0` → skill
-  `v0.2.0` (steps 3a/3b) → site `release/launch` (with `skill.json` re-pinned to skill v0.2.0 SHA) → site main deploy.
-  See central tracker § Release Versions and Order — SoT for v0.3.0 launch wave for the canonical ordered sequence.
-- **Q-SITE5: Skill-distribution cutover-ops sequencing.** Cache-purge runs AFTER `release/launch` merges and the
-  production deploy completes. The skill-availability probe seed run (`gh workflow run skill-availability.yml`) runs
-  AFTER cache-purge confirms `/skill.json` returns the correct headers from `anc.dev`. Codified in the Pre-launch
-  release PR checklist.
+  `v0.2.0` (steps 3a/3b) → site `release/<YYYY-MM-DD>-show-hn-cut` (with `skill.json` re-pinned to skill v0.2.0 SHA) →
+  site main deploy. See central tracker § Release Versions and Order — SoT for v0.3.0 launch wave for the canonical
+  ordered sequence.
+- **Q-SITE5: Skill-distribution cutover-ops sequencing.** Cache-purge runs AFTER `release/<YYYY-MM-DD>-show-hn-cut`
+  merges and the production deploy completes. The skill-availability probe seed run (`gh workflow run
+  skill-availability.yml`) runs AFTER cache-purge confirms `/skill.json` returns the correct headers from `anc.dev`.
+  Codified in the Pre-launch release PR checklist.
 
 ---
 
@@ -560,7 +599,8 @@ works.
 
 **Requirements:** Gate 12.
 
-**Dependencies:** None for staging-side smoke; production-side smoke depends on the `release/launch` PR landing.
+**Dependencies:** None for staging-side smoke; production-side smoke depends on the `release/<YYYY-MM-DD>-show-hn-cut`
+PR landing.
 
 **Files (no edits expected — verification only):**
 
@@ -572,8 +612,8 @@ works.
   `https://agentnative-site-staging.brettdavies.workers.dev/` and walks every link in the homepage hero + footer + at
   least one principle page. Verifies HTTPS, mobile rendering, copy-button taps, theme toggle.
 - **Post-cut production smoke (Thursday 2026-04-30 morning, before 09:00 AM PT post; after Wednesday night
-  `release/launch` merges):** same flow against `https://anc.dev/`. Plus: OG-tag preview via a text/Slack/Twitter share
-  to confirm the OG image and meta tags render.
+  `release/<YYYY-MM-DD>-show-hn-cut` merges):** same flow against `https://anc.dev/`. Plus: OG-tag preview via a
+  text/Slack/Twitter share to confirm the OG image and meta tags render.
 - **Failure handling:** any blocker (HTTPS error, page-load 5xx, broken nav, missing OG tag) blocks the post. Decide
   ship-without-fixing only if the issue is clearly cosmetic and limited in blast radius.
 - **Skill-distribution surfaces (`/skill`, `/skill.json`, `/skill.md`):** included in the smoke pass post-cut. Live
@@ -599,8 +639,9 @@ before 09:00 AM PT for prod) and confirms green. Failures escalate per the failu
 
 - [ ] **U6. Pre-launch release PR cut + post-deploy cutover ops**
 
-**Goal:** Cut `release/launch` from `origin/main`, full diff from `dev`. Squash-merge to `main` after CI green.
-Production deploys to anc.dev. Run skill-distribution cutover ops (cache-purge + probe seed). Verify everything live.
+**Goal:** Cut `release/<YYYY-MM-DD>-show-hn-cut` from `origin/main`, full diff from `dev`. Squash-merge to `main` after
+CI green. Production deploys to anc.dev. Run skill-distribution cutover ops (cache-purge + probe seed). Verify
+everything live.
 
 **Status:** `not-started`
 
@@ -612,7 +653,8 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 
 **Files (modify / create):**
 
-- Branch operation: `git checkout -b release/launch origin/main` then path-filter the dev diff per `RELEASES.md`.
+- Branch operation: `git checkout -b release/<YYYY-MM-DD>-show-hn-cut origin/main` then path-filter the dev diff per
+  `RELEASES.md`.
 - Modify (during cut): `CHANGELOG.md` if the project keeps one — site CHANGELOG generation is not currently wired (no
   `cliff.toml` in the site repo per the CLI plan's cross-repo recon). Skip if no CHANGELOG infrastructure exists.
 - Reference: `RELEASES.md` `## Releasing dev to main` for the full procedure.
@@ -621,14 +663,15 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 
 1. **Pre-flight:** confirm `gh release view --repo brettdavies/agentnative v0.3.0` and `gh release view --repo
    brettdavies/agentnative-cli v0.2.0` both succeed. Confirm `agentnative-skill` is PUBLIC.
-2. **Branch:** `git checkout main && git pull && git checkout -b release/launch`. Apply diff from `dev` per
-   `RELEASES.md` step 3 (`git rev-list main..dev` → cherry-pick selectively, or full reset to dev HEAD per repo
-   precedent).
+2. **Branch:** `git checkout main && git pull && git checkout -b release/<YYYY-MM-DD>-show-hn-cut`. Apply diff from
+   `dev` per `RELEASES.md` step 3 (`git rev-list main..dev` → cherry-pick selectively, or full reset to dev HEAD per
+   repo precedent).
 3. **Verify cherry-pick scope:** confirm `.github/ISSUE_TEMPLATE/{config.yml,site-bug.yml}` is in the diff (Gate 9
    passive clear). Confirm skill-distribution PRs (#36, #37, #38, #39) are in the diff. Optionally drop the
    `docs/VOICE.md` hunk from `f594a92` per the user's earlier "drop from release branch" preference (it's an internal
    style guide).
-4. **Push + open PR:** `gh pr create --base main --head release/launch ...`. Use the canonical PR template.
+4. **Push + open PR:** `gh pr create --base main --head release/<YYYY-MM-DD>-show-hn-cut ...`. Use the canonical PR
+   template.
 5. **Wait for CI green:** ci.yml runs against the release branch.
 6. **Squash-merge:** auto-merge fires. Production deploys to anc.dev via `deploy.yml`.
 7. **Skill-distribution cutover ops** (per the master plan's Unit 5 cutover sequence): a. `gh repo view
@@ -647,7 +690,7 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 
 **Test scenarios:**
 
-- All required CI checks pass on `release/launch`.
+- All required CI checks pass on `release/<YYYY-MM-DD>-show-hn-cut`.
 - Deploy to anc.dev completes within 2 minutes of merge.
 - All cutover-ops smoke checks return expected output.
 - Cold-device verification on production passes.
@@ -667,7 +710,7 @@ to "post the post."
 Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps. Launch-day post lands Thu 2026-04-30
 09:00 AM PT.
 
-### Pre-flight (before branching `release/launch`)
+### Pre-flight (before branching `release/<YYYY-MM-DD>-show-hn-cut`)
 
 - [ ] **Spec `v0.3.0` tag exists and is public:** `gh release view --repo brettdavies/agentnative v0.3.0` succeeds.
 - [ ] **CLI `v0.2.0` tag exists and is public:** `gh release view --repo brettdavies/agentnative-cli v0.2.0` succeeds.
@@ -681,24 +724,25 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 ### Branch + cherry-pick (Wednesday 2026-04-29 PT evening)
 
 - [ ] `git checkout main && git pull --ff-only origin main`
-- [ ] `git checkout -b release/launch`
+- [ ] `git checkout -b release/<YYYY-MM-DD>-show-hn-cut`
 - [ ] Apply diff from `dev` per `RELEASES.md` step 3. Either: (a) full reset (`git reset --hard origin/dev` then
   preserve only the path-filtered diff), or (b) cherry-pick by SHA. Repo precedent leans (a).
-- [ ] **Path-filter check:** `git diff main release/launch -- .github/ISSUE_TEMPLATE/` is non-empty (Gate 9).
-- [ ] **Path-filter check:** `git diff main release/launch -- src/data/skill.json src/build/skill.mjs
+- [ ] **Path-filter check:** `git diff main release/<YYYY-MM-DD>-show-hn-cut -- .github/ISSUE_TEMPLATE/` is non-empty
+  (Gate 9).
+- [ ] **Path-filter check:** `git diff main release/<YYYY-MM-DD>-show-hn-cut -- src/data/skill.json src/build/skill.mjs
   src/worker/headers.ts src/worker/index.ts` shows the skill-distribution PR diffs (Units 2–3 of the master plan).
-- [ ] **Path-filter check (badge surface, PRs #49–#51):** `git diff main release/launch -- src/build/badge.mjs
-  content/badge.md` is non-empty AND `git diff main release/launch -- src/worker/headers.ts` includes the SVG
-  content-type branch (`isSvg`). Confirms the badge surface ships in this cut.
+- [ ] **Path-filter check (badge surface, PRs #49–#51):** `git diff main release/<YYYY-MM-DD>-show-hn-cut --
+  src/build/badge.mjs content/badge.md` is non-empty AND `git diff main release/<YYYY-MM-DD>-show-hn-cut --
+  src/worker/headers.ts` includes the SVG content-type branch (`isSvg`). Confirms the badge surface ships in this cut.
 - [ ] **Optional drop:** drop `docs/VOICE.md` hunk from `f594a92` (per user direction — internal style guide).
-- [ ] **Verify no guarded paths leaked:** `git diff main release/launch -- docs/plans/ docs/solutions/
+- [ ] **Verify no guarded paths leaked:** `git diff main release/<YYYY-MM-DD>-show-hn-cut -- docs/plans/ docs/solutions/
   docs/brainstorms/` → guard-main-docs check should fail-cleanly if anything's wrong; resolve before pushing.
 
 ### PR (Wednesday 2026-04-29 PT evening, after branch is ready)
 
-- [ ] `git push -u origin release/launch`
-- [ ] `gh pr create --base main --head release/launch --title "chore(release): launch — anc.dev v0.x.0" --body "..."`
-  with the canonical PR template populated (Summary + Changelog + Type + Files Modified).
+- [ ] `git push -u origin release/<YYYY-MM-DD>-show-hn-cut`
+- [ ] `gh pr create --base main --head release/<YYYY-MM-DD>-show-hn-cut --title "chore(release): launch — anc.dev
+  v0.x.0" --body "..."` with the canonical PR template populated (Summary + Changelog + Type + Files Modified).
 - [ ] CI runs (`ci.yml` + `guard-docs` + `guard-release-branch`) — wait for all green.
 - [ ] **Auto-merge fires** (squash). Production deploys.
 
@@ -734,7 +778,7 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 | Gate 8 batch-scoring blows up — too many missing scorecards, can't fill in time                                       | Fallback-row-only path (U2 decision option (b)). Trade coverage for credibility — skipped rows with reasons beat blank rows OR "we cherry-picked the working tools."                                                                                                |
 | Adversarial reviewer surfaces a load-bearing finding mid-week (something that requires a data change, not just prose) | Defer to v0.2.0 with a `[later]` note. Don't expand Gate 11 scope. Only ship if truly factually wrong.                                                                                                                                                              |
 | Cold-device verification reveals a Cloudflare cache / DNS / HTTPS issue Wednesday                                     | If reproducible, escalate immediately — Cloudflare's CN headers + custom-domain attach is tested but not invincible. Push the post by 24h if the fix is non-trivial.                                                                                                |
-| `release/launch` PR's CI fails on a guarded-path or stub-check edge case                                              | Read the failure carefully. The stub-check pattern is documented in `RELEASES.md` `### Why the stub` — common failures are: ci.yml's paths-ignore drift, guard-main-docs catching a docs commit. Resolve before merging. Do not bypass via admin.                   |
+| `release/<YYYY-MM-DD>-show-hn-cut` PR's CI fails on a guarded-path or stub-check edge case                            | Read the failure carefully. The stub-check pattern is documented in `RELEASES.md` `### Why the stub` — common failures are: ci.yml's paths-ignore drift, guard-main-docs catching a docs commit. Resolve before merging. Do not bypass via admin.                   |
 | Skill-distribution e2e fails post-cutover (Playwright `--project=skill` red against live anc.dev)                     | Investigate IMMEDIATELY — the skill bundle URLs are user-facing on launch day. If the issue is the producer-repo public flip didn't propagate, retry. If it's a header issue (CN rewrite firing on `.json`), it's a Worker bug — patch and re-deploy before launch. |
 | User cherry-picks `docs/VOICE.md` into the release branch by accident                                                 | Path-filter check in the checklist catches it. If it slips through, that's an accepted outcome (per earlier user direction).                                                                                                                                        |
 
@@ -771,8 +815,8 @@ docs/
     2026-04-28-001-feat-show-hn-launch-readiness-plan.md  # this plan, committed alongside the work
 ```
 
-The `release/launch` PR carries the entire `dev` diff — including the skill-distribution PRs from earlier in the week.
-The above is the NEW scope this plan introduces.
+The `release/<YYYY-MM-DD>-show-hn-cut` PR carries the entire `dev` diff — including the skill-distribution PRs from
+earlier in the week. The above is the NEW scope this plan introduces.
 
 ---
 
