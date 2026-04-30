@@ -119,7 +119,11 @@ jobs:
           set -euo pipefail
 
           # Default to empty object if upstream output was missing.
-          warnings_json="${WARNINGS_JSON:-{}}"
+          # Avoid bash brace-default `${var:-{\}}` — it appends a stray `}`
+          # to non-empty values, which is exactly what made jq parse-fail
+          # on the first attempt.
+          warnings_json="$WARNINGS_JSON"
+          if [ -z "$warnings_json" ]; then warnings_json='{}'; fi
 
           scorecard_orphans="$(echo "$warnings_json" | jq -r '.scorecardOrphans // [] | length')"
           registry_orphans="$(echo "$warnings_json" | jq -r '.registryOrphans // [] | length')"
