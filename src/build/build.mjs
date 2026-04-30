@@ -36,7 +36,13 @@ import {
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
 import { renderMarkdown } from './render.mjs';
-import { computeLeaderboard, extractTopIssues, loadRegistry, loadScorecards } from './scorecards.mjs';
+import {
+  computeLeaderboard,
+  extractTopIssues,
+  loadRegistry,
+  loadScorecards,
+  runScorecardInvariants,
+} from './scorecards.mjs';
 import {
   buildLeaderboardBody,
   buildLeaderboardMarkdown,
@@ -261,6 +267,11 @@ export async function build() {
 
   // 8. Scorecard pages — leaderboard + per-tool pages.
   const registry = await loadRegistry(REGISTRY_PATH);
+  // v0.4 corpus invariants run before rendering: any scorecard below the
+  // schema floor, missing a registry entry, scoring the wrong binary, or
+  // carrying a non-RFC-3339 timestamp aborts the build before producing
+  // bad output.
+  await runScorecardInvariants(SCORECARDS_DIR, registry);
   const toolsWithScorecards = await loadScorecards(SCORECARDS_DIR, registry);
   const leaderboard = computeLeaderboard(toolsWithScorecards);
 

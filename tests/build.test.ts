@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
 import { renderMarkdown } from '../src/build/render.mjs';
 import {
+  compareVersions,
   computeLayerScore,
   computeLeaderboard,
   computePrincipleScore,
@@ -12,6 +13,7 @@ import {
   extractTopIssues,
   loadRegistry,
   loadScorecards,
+  runScorecardInvariants,
 } from '../src/build/scorecards.mjs';
 import { buildLeaderboardBody, buildScorecardBody, renderAudienceBanner } from '../src/build/scorecards-render.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
@@ -225,6 +227,30 @@ function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}
     error: results.filter((r: any) => r.status === 'error').length,
   };
   return { results, summary };
+}
+
+// v0.4 fixture — a complete scorecard with the four metadata blocks
+// (tool, anc, run, target) as the upstream CLI emits them.
+function makeV04Scorecard(overrides: Record<string, any> = {}) {
+  const base = makeScorecard();
+  return {
+    schema_version: '0.4',
+    audience: null,
+    audit_profile: null,
+    coverage_summary: null,
+    summary: base.summary,
+    results: base.results,
+    tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
+    anc: { version: '0.1.0', commit: 'abc1234' },
+    run: {
+      invocation: 'anc check --command fixture --output json',
+      started_at: '2026-04-30T04:00:00.000000000Z',
+      duration_ms: 42,
+      platform: { os: 'linux', arch: 'x86_64' },
+    },
+    target: { kind: 'command', path: null, command: 'fixture' },
+    ...overrides,
+  };
 }
 
 describe('loadRegistry', () => {
@@ -455,6 +481,337 @@ describe('loadScorecards', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('compareVersions', () => {
+  test('orders simple SemVer triples', () => {
+    expect(compareVersions('0.4', '0.3')).toBeGreaterThan(0);
+    expect(compareVersions('0.3', '0.4')).toBeLessThan(0);
+    expect(compareVersions('1.2.3', '1.2.3')).toBe(0);
+  });
+
+  test('handles future schema bumps (floor admits 0.5+)', () => {
+    expect(compareVersions('0.5', '0.4')).toBeGreaterThanOrEqual(0);
+    expect(compareVersions('1.0', '0.4')).toBeGreaterThanOrEqual(0);
+  });
+
+  test('admits the grandfather schema (1.1 > 0.4)', () => {
+    // anc-v0.1.3.json carries schema_version "1.1" — the path-based
+    // grandfather is what protects it from invariant (c)/(d), not the
+    // version comparator.
+    expect(compareVersions('1.1', '0.4')).toBeGreaterThan(0);
+  });
+});
+
+describe('loadScorecards — schema 0.4 metadata', () => {
+  test('attaches tool/anc/run/target blocks for v0.4 scorecards', async () => {
+    const dir = join(tmpdir(), `scorecards-v04-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV04Scorecard()));
+    try {
+      const registry = [
+        {
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+          version: '1.2.3',
+        },
+      ];
+      const result = await loadScorecards(dir, registry);
+      expect(result).toHaveLength(1);
+      const entry: any = result[0];
+      expect(entry.metadata).not.toBeNull();
+      expect(entry.metadata.tool.name).toBe('fixture');
+      expect(entry.metadata.anc.version).toBe('0.1.0');
+      expect(entry.metadata.anc.commit).toBe('abc1234');
+      expect(entry.metadata.run.duration_ms).toBe(42);
+      expect(entry.metadata.run.platform.os).toBe('linux');
+      expect(entry.metadata.target.kind).toBe('command');
+      expect(entry.scorecardFilename).toBe('fixture-v1.2.3.json');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('emits null metadata blocks for grandfathered v0.3/v1.1 scorecards', async () => {
+    const dir = join(tmpdir(), `scorecards-grandfather-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    // v1.1 anc scorecard — no tool/anc/run/target blocks, just the v0.3-era shape.
+    const grandfathered = {
+      schema_version: '1.1',
+      audience: null,
+      audit_profile: null,
+      coverage_summary: null,
+      summary: { total: 0, pass: 0, warn: 0, fail: 0, skip: 0, error: 0 },
+      results: [],
+    };
+    await writeFile(join(dir, 'anc-v0.1.3.json'), JSON.stringify(grandfathered));
+    try {
+      const registry = [
+        {
+          name: 'anc',
+          repo: 'brettdavies/agentnative-cli',
+          binary: 'anc',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'Brett',
+          description: 'agent-native CLI linter',
+          version: '0.1.3',
+        },
+      ];
+      const result = await loadScorecards(dir, registry);
+      const entry: any = result[0];
+      expect(entry.scorecard).not.toBeNull();
+      expect(entry.metadata.tool).toBeNull();
+      expect(entry.metadata.anc).toBeNull();
+      expect(entry.metadata.run).toBeNull();
+      expect(entry.metadata.target).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('emits null metadata for unscored entries (no scorecard on disk)', async () => {
+    const dir = join(tmpdir(), `scorecards-unscored-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    try {
+      const registry = [
+        {
+          name: 'unscored',
+          repo: 'a/b',
+          binary: 'unscored',
+          language: 'Rust',
+          tier: 'notable',
+          creator: 'me',
+          description: 'thing',
+          // no version → no scorecard
+        },
+      ];
+      const result = await loadScorecards(dir, registry);
+      const entry: any = result[0];
+      expect(entry.scorecard).toBeNull();
+      expect(entry.metadata).toBeNull();
+      expect(entry.scorecardFilename).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runScorecardInvariants — v0.4 corpus invariants', () => {
+  // Helper: build a registry array with one entry per provided shape override.
+  function makeRegistry(entries: Array<Record<string, any>>) {
+    return entries.map((overrides) => ({
+      repo: 'a/b',
+      language: 'Rust',
+      tier: 'workhorse',
+      creator: 'me',
+      description: 'thing',
+      ...overrides,
+    }));
+  }
+
+  async function withCorpus(
+    files: Array<{ name: string; content: any }>,
+    fn: (dir: string) => Promise<void>,
+  ): Promise<void> {
+    const dir = join(tmpdir(), `corpus-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(dir, { recursive: true });
+    try {
+      for (const { name, content } of files) {
+        await writeFile(join(dir, name), typeof content === 'string' ? content : JSON.stringify(content));
+      }
+      await fn(dir);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test('passes for a clean v0.4 corpus', async () => {
+    await withCorpus([{ name: 'fixture-v1.2.3.json', content: makeV04Scorecard() }], async (dir) => {
+      const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+      await runScorecardInvariants(dir, registry);
+    });
+  });
+
+  test('passes for a name ≠ binary tool (e.g., ripgrep / rg)', async () => {
+    await withCorpus(
+      [
+        {
+          name: 'ripgrep-v15.1.0.json',
+          content: makeV04Scorecard({
+            tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
+          }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'ripgrep', binary: 'rg' }]);
+        // Filename slug → registry.name lookup; tool.name → registry.binary check.
+        await runScorecardInvariants(dir, registry);
+      },
+    );
+  });
+
+  test('skips invariants (c)/(d)/(e) for grandfathered anc-v0.1.3.json', async () => {
+    const grandfathered = {
+      schema_version: '1.1',
+      audience: null,
+      audit_profile: null,
+      coverage_summary: null,
+      summary: { total: 0, pass: 0, warn: 0, fail: 0, skip: 0, error: 0 },
+      results: [],
+    };
+    await withCorpus([{ name: 'anc-v0.1.3.json', content: grandfathered }], async (dir) => {
+      const registry = makeRegistry([{ name: 'anc', binary: 'anc' }]);
+      await runScorecardInvariants(dir, registry);
+    });
+  });
+
+  test('admits future schema_version bumps (e.g. 0.5)', async () => {
+    await withCorpus(
+      [{ name: 'fixture-v1.2.3.json', content: makeV04Scorecard({ schema_version: '0.5' }) }],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await runScorecardInvariants(dir, registry);
+      },
+    );
+  });
+
+  test('throws when schema_version is below floor "0.4"', async () => {
+    await withCorpus(
+      [{ name: 'fixture-v1.2.3.json', content: makeV04Scorecard({ schema_version: '0.3' }) }],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await expect(runScorecardInvariants(dir, registry)).rejects.toThrow(/below floor "0.4"/);
+      },
+    );
+  });
+
+  test('throws when filename slug has no registry entry', async () => {
+    await withCorpus(
+      [
+        {
+          name: 'orphan-v1.0.0.json',
+          content: makeV04Scorecard({ tool: { name: 'orphan', binary: 'orphan', version: '1.0.0' } }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await expect(runScorecardInvariants(dir, registry)).rejects.toThrow(/no matching registry entry/);
+      },
+    );
+  });
+
+  test('throws when scorecard.tool.name !== registry.binary (mistargeted regen)', async () => {
+    await withCorpus(
+      [
+        {
+          name: 'ripgrep-v15.1.0.json',
+          // CLI scored "rgg" (a typo) but the registry says binary is "rg".
+          content: makeV04Scorecard({ tool: { name: 'rgg', binary: 'rg', version: 'ripgrep 15.1.0' } }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'ripgrep', binary: 'rg' }]);
+        await expect(runScorecardInvariants(dir, registry)).rejects.toThrow(/tool.name.*!==.*binary/);
+      },
+    );
+  });
+
+  test('throws when run.started_at is non-parseable', async () => {
+    await withCorpus(
+      [
+        {
+          name: 'fixture-v1.2.3.json',
+          content: makeV04Scorecard({
+            run: {
+              invocation: 'anc check',
+              started_at: 'not-a-timestamp',
+              duration_ms: 1,
+              platform: { os: 'linux', arch: 'x86_64' },
+            },
+          }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await expect(runScorecardInvariants(dir, registry)).rejects.toThrow(/run.started_at.*not a valid RFC 3339/);
+      },
+    );
+  });
+
+  test('throws on tool.version-vs-filename SemVer drift', async () => {
+    await withCorpus(
+      [
+        {
+          name: 'fixture-v1.2.3.json',
+          content: makeV04Scorecard({
+            tool: { name: 'fixture', binary: 'fixture', version: 'fixture 9.9.9' },
+          }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await expect(runScorecardInvariants(dir, registry)).rejects.toThrow(/does not match filename version/);
+      },
+    );
+  });
+
+  test('skips invariant (e) when tool.version has no SemVer token (CLI raw output)', async () => {
+    // Real CLI behavior in v0.4: tool.version is the raw `--version` first
+    // line, which often lacks a clean SemVer (e.g. eza's marketing line, cf's
+    // ASCII-art logo). Skip the equality check rather than firing on every row.
+    await withCorpus(
+      [
+        {
+          name: 'eza-v0.23.4.json',
+          content: makeV04Scorecard({
+            tool: { name: 'eza', binary: 'eza', version: 'eza - A modern, maintained replacement for ls' },
+          }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'eza', binary: 'eza' }]);
+        await runScorecardInvariants(dir, registry);
+      },
+    );
+  });
+
+  test("admits null tool.version (CLI couldn't parse --version)", async () => {
+    await withCorpus(
+      [
+        {
+          name: 'fixture-v1.2.3.json',
+          content: makeV04Scorecard({
+            tool: { name: 'fixture', binary: 'fixture', version: null },
+          }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await runScorecardInvariants(dir, registry);
+      },
+    );
+  });
+
+  test('admits null anc.commit (build outside a git checkout)', async () => {
+    await withCorpus(
+      [
+        {
+          name: 'fixture-v1.2.3.json',
+          content: makeV04Scorecard({ anc: { version: '0.1.0', commit: null } }),
+        },
+      ],
+      async (dir) => {
+        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
+        await runScorecardInvariants(dir, registry);
+      },
+    );
   });
 });
 

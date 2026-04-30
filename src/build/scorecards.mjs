@@ -110,7 +110,7 @@ export function scorecardFilename(tool) {
 // with a numeric or `pre`/`rc.N`-style suffix) for sorting. Returns >0 if
 // `a > b`, <0 if `a < b`, 0 if equal. Falls back to lexical compare for
 // anything not recognizable as a numeric tuple.
-function compareVersions(a, b) {
+export function compareVersions(a, b) {
   const parse = (v) =>
     v.split('.').map((seg) => {
       const n = Number.parseInt(seg, 10);
@@ -200,12 +200,133 @@ export async function loadScorecards(scorecardsDir, registry) {
 
     if (chosenFile) {
       const raw = await readFile(join(scorecardsDir, chosenFile), 'utf8');
-      result.push({ tool, scorecard: JSON.parse(raw), version: chosenVersion });
+      const scorecard = JSON.parse(raw);
+      // v0.4 metadata blocks. Each may be absent on grandfathered v0.3 / v1.1
+      // scorecards (anc-v0.1.3.json) — null is the documented sentinel for
+      // "this scorecard predates the metadata contract."
+      const metadata = {
+        tool: scorecard.tool ?? null,
+        anc: scorecard.anc ?? null,
+        run: scorecard.run ?? null,
+        target: scorecard.target ?? null,
+      };
+      result.push({ tool, scorecard, version: chosenVersion, metadata, scorecardFilename: chosenFile });
     } else {
-      result.push({ tool, scorecard: null, version: null });
+      result.push({ tool, scorecard: null, version: null, metadata: null, scorecardFilename: null });
     }
   }
   return result;
+}
+
+// -------------------------------------------------------------------
+// Build-time corpus invariants (schema 0.4)
+// -------------------------------------------------------------------
+
+// Path-based grandfather. anc-v0.1.3.json predates the v0.4 metadata
+// contract (it's at schema_version 1.1, an older anc-specific schema with no
+// tool/anc/run/target blocks). Keeping it on the leaderboard is a product
+// decision: anc must always render at the most-recent public version, and
+// regenerating against the current dev-branch CLI would produce a lower
+// version (anc-v0.1.0.json) than the released 0.1.3. The next CLI release
+// (v0.2.1+, post PR #34) replaces this file organically and the grandfather
+// drops out.
+export const GRANDFATHERED_SCORECARDS = new Set(['anc-v0.1.3.json']);
+
+const SCORECARD_FILENAME_RE = /^([a-z0-9-]+)-v([^/]+?)\.json$/;
+const SEMVER_TOKEN_RE = /[0-9]+\.[0-9]+(?:\.[0-9]+)?/;
+
+/**
+ * Run the v0.4 corpus invariants over every scorecard on disk. Throws on
+ * the first violation with the offending filename and the contract that
+ * failed. Designed to fail-fast in `bun run build` so CI catches drift
+ * before merge.
+ *
+ * Invariants:
+ *   (a) schema_version >= "0.4" (compareVersions floor)
+ *   (b) filename slug matches a registry entry (the editorial join)
+ *   (c) scorecard.tool.name === registry[joined].binary (the regen scored
+ *       the right binary; accommodates name ≠ binary tools where filename
+ *       slug = registry name but tool.name = registry binary)
+ *   (d) run.started_at parses as RFC 3339
+ *   (e) when tool.version contains a SemVer token, it must equal the
+ *       filename version (catches parser-asymmetry between the regen
+ *       script's version_extract and the CLI's --version probe)
+ *
+ * Grandfathered files (GRANDFATHERED_SCORECARDS) skip (c), (d), and (e) —
+ * they predate the v0.4 metadata blocks. (a) and (b) still apply: an
+ * orphan grandfather without a registry entry is a structural error
+ * regardless of schema vintage.
+ *
+ * @param {string} scorecardsDir — absolute path to scorecards/
+ * @param {Array<object>} registry — from loadRegistry()
+ */
+export async function runScorecardInvariants(scorecardsDir, registry) {
+  const registryByName = new Map(registry.map((t) => [t.name, t]));
+  let filenames;
+  try {
+    filenames = await readdir(scorecardsDir);
+  } catch {
+    filenames = [];
+  }
+
+  for (const filename of filenames) {
+    const m = filename.match(SCORECARD_FILENAME_RE);
+    if (!m) continue;
+    const [, slug, filenameVersion] = m;
+
+    const registryEntry = registryByName.get(slug);
+    if (!registryEntry) {
+      throw new Error(
+        `invariant: scorecard ${filename} has no matching registry entry (slug "${slug}" is not a registry.tools[].name).`,
+      );
+    }
+
+    const raw = await readFile(join(scorecardsDir, filename), 'utf8');
+    let sc;
+    try {
+      sc = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`invariant: scorecard ${filename} is not valid JSON: ${err.message}`);
+    }
+
+    const grandfathered = GRANDFATHERED_SCORECARDS.has(filename);
+
+    if (!grandfathered) {
+      if (typeof sc.schema_version !== 'string' || compareVersions(sc.schema_version, '0.4') < 0) {
+        throw new Error(
+          `invariant: scorecard ${filename} has schema_version "${sc.schema_version}" — below floor "0.4". ` +
+            `Regenerate with anc PR #34 or later.`,
+        );
+      }
+
+      const toolName = sc.tool?.name;
+      if (toolName !== registryEntry.binary) {
+        throw new Error(
+          `invariant: scorecard ${filename} tool.name "${toolName}" !== registry[${slug}].binary "${registryEntry.binary}". ` +
+            `The regen scored the wrong binary, or the registry's binary field drifted.`,
+        );
+      }
+
+      const startedAt = sc.run?.started_at;
+      if (typeof startedAt !== 'string' || Number.isNaN(new Date(startedAt).getTime())) {
+        throw new Error(
+          `invariant: scorecard ${filename} run.started_at "${startedAt}" is not a valid RFC 3339 timestamp.`,
+        );
+      }
+
+      const toolVersion = sc.tool?.version;
+      if (typeof toolVersion === 'string' && toolVersion.length > 0) {
+        const semver = toolVersion.match(SEMVER_TOKEN_RE);
+        if (semver && semver[0] !== filenameVersion) {
+          throw new Error(
+            `invariant: scorecard ${filename} tool.version "${toolVersion}" extracts SemVer "${semver[0]}" — ` +
+              `does not match filename version "${filenameVersion}". Parser-asymmetry between regen-script ` +
+              `version_extract and CLI internal probe; align both before re-regen.`,
+          );
+        }
+      }
+    }
+  }
 }
 
 // -------------------------------------------------------------------
