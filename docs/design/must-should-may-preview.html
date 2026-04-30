@@ -112,6 +112,25 @@
     .grid section.spec { margin: 0; }
     .grid section.spec h3.local { margin: 0.75rem 0 0.3rem; font-size: var(--text-h4); color: var(--fg-heading); font-weight: 600; }
 
+    /* §4.7 block-level companion (ships post-v0). Mirrors the rules in
+       src/styles/site.css so the preview tracks production. Tuned via
+       /typeset on 2026-04-30: caption-tier label above the requirement
+       body, color via inherited .rfc-must / .rfc-should / .rfc-may. */
+    .normative {
+      margin-block: 1.5rem;
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      background: var(--bg-raised);
+      max-inline-size: var(--measure);
+    }
+    .normative > p:first-child { margin: 0 0 0.5rem; }
+    .normative > :last-child   { margin-block-end: 0; }
+    .normative > p:first-child > strong:first-child {
+      font-size: var(--text-caption);
+      font-weight: 700;
+      letter-spacing: var(--tracking-caps);
+    }
+
     .toggles { display: flex; gap: 0.5rem; }
     .toggles button {
       font: inherit;
@@ -233,6 +252,34 @@ struct Cli {
         </article>
       </section>
     </div>
+
+    <!-- §4.7 block-level companion: shape every principle's `## Requirements`
+         section now uses. Promotes `**KEYWORD:**`-paragraph-followed-by-list
+         into a single semantic <aside class="normative normative--…">. -->
+    <section class="spec">
+      <h2>§4.7 · block-level normative (ships)</h2>
+      <article class="specimen">
+        <aside class="normative normative--must">
+          <p><strong class="rfc-must">MUST:</strong></p>
+          <ul>
+            <li>Run non-interactively when stdin is not a TTY.</li>
+            <li><code>--no-interactive</code> gates every prompt at the entry point.</li>
+          </ul>
+        </aside>
+        <aside class="normative normative--should">
+          <p><strong class="rfc-should">SHOULD:</strong></p>
+          <ul>
+            <li>Auto-detect non-interactive context via TTY detection (<code>IsTerminal</code>).</li>
+          </ul>
+        </aside>
+        <aside class="normative normative--may">
+          <p><strong class="rfc-may">MAY:</strong></p>
+          <ul>
+            <li>Offer rich interactive experiences when a TTY is detected.</li>
+          </ul>
+        </aside>
+      </article>
+    </section>
 
     <footer class="page">
       <p>

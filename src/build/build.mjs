@@ -110,8 +110,10 @@ ${entries}
 async function runInvariantChecks(distDir, principleSlugs, principleSources) {
   // 1. No MUST / SHOULD / MAY bare words inside <code> / <pre> / <a>.
   //    Check every principle page (the index page no longer has inline
-  //    principle content).
-  const codePreATextRe = /<(code|pre|a)[^>]*>([\s\S]*?)<\/\1>/gi;
+  //    principle content). The `\b` after the tag name keeps the regex
+  //    from matching tags whose name merely starts with one of these
+  //    letters (e.g. `<aside>` — added by the normative-block plugin).
+  const codePreATextRe = /<(code|pre|a)\b[^>]*>([\s\S]*?)<\/\1>/gi;
   for (const { n } of principleSources) {
     const html = await readFile(join(distDir, `p${n}.html`), 'utf8');
     for (const match of html.matchAll(codePreATextRe)) {

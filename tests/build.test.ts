@@ -147,6 +147,116 @@ describe('rfc-keywords plugin', () => {
   });
 });
 
+// Block-level normative treatment — promotes `**KEYWORD:**` paragraphs
+// immediately followed by a list into a single `<aside class="normative
+// normative--{must,should,may}">` container. See plan
+// docs/plans/2026-04-29-001-feat-brand-og-and-block-normative-plan.md, Unit 1.
+describe('normative-block plugin', () => {
+  async function render(md: string): Promise<string> {
+    return renderMarkdown(md);
+  }
+
+  function asideMatches(html: string, klass: string): number {
+    const re = new RegExp(`<aside\\b[^>]*class="[^"]*\\b${klass}\\b[^"]*"`, 'g');
+    return (html.match(re) ?? []).length;
+  }
+
+  test('MUST: paragraph followed by list promotes to aside', async () => {
+    const html = await render('**MUST:**\n\n- item one\n- item two\n');
+    expect(asideMatches(html, 'normative--must')).toBe(1);
+    expect(html).toContain('normative--must');
+    // The aside contains the original paragraph (with inline rfc-must) and the list.
+    expect(html).toMatch(/<aside\b[^>]*>\s*<p>/);
+    expect(html).toContain('<strong class="rfc-must">MUST:</strong>');
+    expect(html).toMatch(/<ul>\s*<li>item one<\/li>/);
+  });
+
+  test('SHOULD: paragraph followed by list promotes with should variant', async () => {
+    const html = await render('**SHOULD:**\n\n- consider this\n');
+    expect(asideMatches(html, 'normative--should')).toBe(1);
+    expect(html).toContain('<strong class="rfc-should">SHOULD:</strong>');
+  });
+
+  test('MAY: paragraph followed by list promotes with may variant', async () => {
+    const html = await render('**MAY:**\n\n- optional thing\n');
+    expect(asideMatches(html, 'normative--may')).toBe(1);
+    expect(html).toContain('<strong class="rfc-may">MAY:</strong>');
+  });
+
+  test('mid-paragraph MUST stays inline (no promotion)', async () => {
+    const html = await render('Tools MUST run non-interactively when stdin is not a TTY.');
+    expect(html).not.toContain('<aside');
+    const count = (html.match(/<strong class="rfc-must">MUST<\/strong>/g) ?? []).length;
+    expect(count).toBe(1);
+  });
+
+  test('MUST: paragraph NOT followed by a list stays inline', async () => {
+    const html = await render('**MUST:**\n\nNo list here, just prose.\n');
+    expect(html).not.toContain('<aside');
+    expect(html).toContain('class="rfc-must"');
+  });
+
+  test('MUST NOT: in block carries normative--must class (negation does not change variant)', async () => {
+    const html = await render('**MUST NOT:**\n\n- forbidden item\n');
+    expect(asideMatches(html, 'normative--must')).toBe(1);
+    expect(html).toContain('<strong class="rfc-must">MUST NOT:</strong>');
+  });
+
+  test('keyword without trailing colon does NOT promote', async () => {
+    // `**MUST**\n\n- item` — bold MUST without trailing colon stays inline.
+    const html = await render('**MUST**\n\n- item\n');
+    expect(html).not.toContain('<aside');
+  });
+
+  test('promoted aside contains exactly one strong (no nested-strong regression)', async () => {
+    const html = await render('**MUST:**\n\n- item\n');
+    expect(html).not.toContain('<strong class="rfc-must"><strong>');
+    expect(html).not.toContain('<strong><strong class="rfc-must">');
+    const strongs = (html.match(/<strong\b[^>]*class="rfc-must"[^>]*>/g) ?? []).length;
+    expect(strongs).toBe(1);
+  });
+
+  test('every principle file produces the expected aside count (19 total)', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const expected: Record<string, number> = {
+      'p1-non-interactive-by-default.md': 3,
+      'p2-structured-parseable-output.md': 3,
+      'p3-progressive-help-discovery.md': 3,
+      'p4-fail-fast-actionable-errors.md': 2,
+      'p5-safe-retries-mutation-boundaries.md': 2,
+      'p6-composable-predictable-command-structure.md': 3,
+      'p7-bounded-high-signal-responses.md': 3,
+    };
+    let total = 0;
+    for (const [file, count] of Object.entries(expected)) {
+      const md = await readFile(`content/principles/${file}`, 'utf8');
+      const html = await render(md);
+      const asideCount = (html.match(/<aside\b[^>]*class="[^"]*normative\b/g) ?? []).length;
+      expect(asideCount, `${file} aside count`).toBe(count);
+      total += asideCount;
+    }
+    expect(total).toBe(19);
+  });
+
+  test('markdown source files are not mutated by the render pipeline', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const path = 'content/principles/p1-non-interactive-by-default.md';
+    const before = await readFile(path, 'utf8');
+    await render(before);
+    const after = await readFile(path, 'utf8');
+    expect(after).toBe(before);
+  });
+
+  test('aside badge text contains the literal keyword (color-not-only differentiation, R8)', async () => {
+    const html = await render('**MUST:**\n\n- item\n');
+    // The keyword text MUST appear inside the aside, so a stylesheet-disabled
+    // render still conveys the keyword identity textually.
+    const asideMatch = html.match(/<aside\b[^>]*>([\s\S]*?)<\/aside>/);
+    expect(asideMatch).not.toBeNull();
+    expect(asideMatch![1]).toContain('MUST');
+  });
+});
+
 // -------------------------------------------------------------------
 // escHtml
 // -------------------------------------------------------------------

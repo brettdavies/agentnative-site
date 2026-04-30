@@ -1,9 +1,9 @@
 // Unified render pipeline: markdown → HTML.
 //
 // Steps:
-//   remark-parse → remark-gfm → rfc-keywords → remark-rehype → rehype-slug
-//   → rehype-autolink-headings (append, inline-SVG permalink) → rehype-shiki
-//   (dual-theme, defaultColor: false) → rehype-stringify.
+//   remark-parse → remark-gfm → rfc-keywords → normative-block → remark-rehype
+//   → rehype-slug → rehype-autolink-headings (append, inline-SVG permalink)
+//   → rehype-shiki (dual-theme, defaultColor: false) → rehype-stringify.
 //
 // Pin notes (docs/DESIGN.md §3.4.1 + Pinned scaffolding choices):
 //   - `rehype-autolink-headings` behavior: 'append', class ['anchor'],
@@ -23,6 +23,7 @@ import remarkGfm from 'remark-gfm';
 import remarkParse from 'remark-parse';
 import remarkRehype from 'remark-rehype';
 import { unified } from 'unified';
+import normativeBlock from './plugins/normative-block.mjs';
 import rfcKeywords from './plugins/rfc-keywords.mjs';
 
 // Inline SVG for autolink anchor icons — keeps the build zero-JS and zero-
@@ -80,6 +81,7 @@ export async function renderMarkdown(markdown) {
     .use(remarkParse)
     .use(remarkGfm)
     .use(rfcKeywords)
+    .use(normativeBlock)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeSlug)
     .use(rehypeAutolinkHeadings, autolinkConfig)
