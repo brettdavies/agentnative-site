@@ -1,11 +1,11 @@
 ---
-title: "feat: Adopt scorecard schema 0.4 + invert build pipeline to scorecard-driven display"
+title: "feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join"
 type: feat
 status: active
 date: 2026-04-29
 ---
 
-# feat: Adopt scorecard schema 0.4 + invert build pipeline to scorecard-driven display
+# feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join
 
 ## Overview
 
@@ -22,30 +22,30 @@ the registry shrinks, and the build can flip from registry-iterating-then-lookin
 prompt phrasing "rely on the existence of a scorecard without even checking the registry."
 
 This plan ships both the data refresh (regen all 96 scorecards against a local CLI build of `dev` so v0.2.0's release
-cadence isn't a blocker) and the site-side consumption changes (read v0.4, invert the build, drop redundant registry
-fields, surface new metadata).
+cadence isn't a blocker) and the site-side consumption changes (read v0.4, switch to scorecard-driven discovery, drop
+redundant registry fields, surface new metadata).
 
 ### What v0.4 unlocks beyond the user's stated wins
 
 The user named two specific gains: drop `version` and `scored_at` from the registry. The full unlock surface is broader.
 Each item below is either landed in this plan or explicitly deferred:
 
-| Unlock                                                                          | What it enables                                                                                                                                                                                                                                                                                                                                          | Status in this plan                                                    |
-| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `tool.version` self-reported                                                    | Removes the registry's `version` pin; filename remains the canonical version anchor (`<name>-v<X>.json`); display shows self-reported when present, filename version as fallback                                                                                                                                                                         | Landed (U2 + U4)                                                       |
-| `run.started_at` (RFC 3339)                                                     | Removes the registry's `scored_at` (date-only) field; display gets a real timestamp; sortable                                                                                                                                                                                                                                                            | Landed (U2 + U4)                                                       |
-| `anc.version` + `anc.commit`                                                    | Provenance per scorecard ("scored with `anc v0.2.0` commit `abc1234`") rendered on the per-tool page. The build-time anc-version floor invariant is **deferred** (R5) until v0.2.0 ships and a re-regen tightens it.                                                                                                                                     | Landed-display (U5); floor-invariant deferred                          |
-| `run.invocation`                                                                | Literal argv that produced the score; the per-tool "Reproduce locally" CTA can show the verbatim command instead of constructing one                                                                                                                                                                                                                     | Landed (U5)                                                            |
-| `run.duration_ms`                                                               | How long the run took; surface on per-tool page; potential future: median across the corpus as a friction signal                                                                                                                                                                                                                                         | Landed (U5)                                                            |
-| `run.platform.os` / `run.platform.arch`                                         | Where the scorecard was produced; visibility for platform-specific behavior                                                                                                                                                                                                                                                                              | Landed (U5)                                                            |
-| `target.kind`                                                                   | Disambiguates `command` vs `binary` vs `project` mode runs; future-proofs source-layer scorecards                                                                                                                                                                                                                                                        | Landed (U5) — just the kind label; no per-mode rendering yet           |
-| Pipeline inversion                                                              | Build iterates `scorecards/*.json`; joins to registry for editorial fields; scorecard without registry entry = build warning + excluded from leaderboard; registry entry without scorecard = also excluded; leaderboard renders `Showing N audited tools` subhead                                                                                        | Landed (U3)                                                            |
-| Build-time integrity invariants                                                 | Assert `schema_version >= "0.4"` (floor), filename-derived slug exists in `registry.tools[].name`, `scorecard.tool.name === registry.binary` for the joined entry (catches the 11 name-vs-binary tools correctly), `run.started_at` parses as RFC 3339. Anc-version floor + target.command cross-check + future-date guard explicitly out of scope (R5). | Landed (U2 + U3)                                                       |
-| `audit_profile` derivable from scorecard                                        | Already in scorecard since v0.2; not a v0.4 unlock                                                                                                                                                                                                                                                                                                       | No-op — the registry's `audit_profile` stays as a regen-pipeline input |
-| `version_extract` removable from registry                                       | Not actually replaceable: the regen script needs an external probe to derive the filename version for tools whose `--version` output doesn't yield to the default regex, BEFORE the scorecard exists                                                                                                                                                     | No-op — `version_extract` stays as a regen-pipeline input              |
-| Editorial fields (tier, language, creator, description, install) into scorecard | Would let the registry shrink to a name list; requires upstream CLI schema change                                                                                                                                                                                                                                                                        | Out of scope — flagged for future v0.5+ consideration                  |
-| Source-layer scorecard rendering (`*-src-YYYYMMDD-branch-commit7.json`)         | Future capability; v0.4's `target.kind: "project"` is the placeholder                                                                                                                                                                                                                                                                                    | Out of scope; this plan doesn't render source-layer scorecards         |
-| RSS / "recently scored" feed                                                    | `run.started_at` makes a chronological feed trivially possible                                                                                                                                                                                                                                                                                           | Out of scope; potentially future work                                  |
+| Unlock                                                                          | What it enables                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Status in this plan                                                    |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `tool.version` self-reported                                                    | Removes the registry's `version` pin; filename remains the canonical version anchor (`<name>-v<X>.json`); display shows self-reported when present, filename version as fallback                                                                                                                                                                                                                                                                                                                                                                                                  | Landed (U2 + U4)                                                       |
+| `run.started_at` (RFC 3339)                                                     | Removes the registry's `scored_at` (date-only) field; display gets a real timestamp; sortable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Landed (U2 + U4)                                                       |
+| `anc.version` + `anc.commit`                                                    | Provenance per scorecard ("scored with `anc v0.2.0` commit `abc1234`") rendered on the per-tool page. The build-time anc-version floor invariant is **deferred** (R5) until v0.2.0 ships and a re-regen tightens it.                                                                                                                                                                                                                                                                                                                                                              | Landed-display (U5); floor-invariant deferred                          |
+| `run.invocation`                                                                | Literal argv that produced the score; the per-tool "Reproduce locally" CTA can show the verbatim command instead of constructing one                                                                                                                                                                                                                                                                                                                                                                                                                                              | Landed (U5)                                                            |
+| `run.duration_ms`                                                               | How long the run took; surface on per-tool page; potential future: median across the corpus as a friction signal                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Landed (U5)                                                            |
+| `run.platform.os` / `run.platform.arch`                                         | Where the scorecard was produced; visibility for platform-specific behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Landed (U5)                                                            |
+| `target.kind`                                                                   | Disambiguates `command` vs `binary` vs `project` mode runs; future-proofs source-layer scorecards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Landed (U5) — just the kind label; no per-mode rendering yet           |
+| Scorecard-driven discovery + registry editorial join                            | Build iterates `scorecards/*.json`; joins to registry for editorial fields; both directions of mismatch (scorecard-without-registry, registry-without-scorecard) emit symmetric stderr warnings and exclude the entry from the leaderboard. Leaderboard hero gains a `N audited tools in the corpus` subhead; the `(N)` count is dropped from the `All` tier-filter button (redundant with the new subhead). Refined from doc-review pass 2: earlier framing called this "pipeline inversion" — the registry editorial join remains mandatory, so it's a hybrid not an inversion. | Landed (U3)                                                            |
+| Build-time integrity invariants                                                 | Assert `schema_version >= "0.4"` (floor), filename-derived slug exists in `registry.tools[].name`, `scorecard.tool.name === registry.binary` for the joined entry (catches the 11 name-vs-binary tools correctly), `run.started_at` parses as RFC 3339. Anc-version floor + target.command cross-check + future-date guard explicitly out of scope (R5).                                                                                                                                                                                                                          | Landed (U2 + U3)                                                       |
+| `audit_profile` derivable from scorecard                                        | Already in scorecard since v0.2; not a v0.4 unlock                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | No-op — the registry's `audit_profile` stays as a regen-pipeline input |
+| `version_extract` removable from registry                                       | Not actually replaceable: the regen script needs an external probe to derive the filename version for tools whose `--version` output doesn't yield to the default regex, BEFORE the scorecard exists                                                                                                                                                                                                                                                                                                                                                                              | No-op — `version_extract` stays as a regen-pipeline input              |
+| Editorial fields (tier, language, creator, description, install) into scorecard | Would let the registry shrink to a name list; requires upstream CLI schema change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Out of scope — flagged for future v0.5+ consideration                  |
+| Source-layer scorecard rendering (`*-src-YYYYMMDD-branch-commit7.json`)         | Future capability; v0.4's `target.kind: "project"` is the placeholder                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Out of scope; this plan doesn't render source-layer scorecards         |
+| RSS / "recently scored" feed                                                    | `run.started_at` makes a chronological feed trivially possible                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Out of scope; potentially future work                                  |
 
 ## Problem Frame
 
@@ -57,10 +57,11 @@ what platform, when, with what argv" — they have to cross-reference the regist
 belongs to.
 
 `agentnative-cli` PR #34 closes that gap upstream by making the scorecard self-describing. The site is the largest
-downstream consumer; this plan is the corresponding consumption change. It also takes the opportunity to invert the
-build pipeline so the site renders what scorecards actually exist on disk, rather than what the registry says should be
-scored — eliminating the "unscored row with em-dash" failure mode and turning scorecard-without-registry into a loud
-build warning (with scorecard excluded from the leaderboard) instead of a silent skip.
+downstream consumer; this plan is the corresponding consumption change. It also takes the opportunity to flip the
+iteration direction of the build pipeline so the site renders what scorecards actually exist on disk, rather than what
+the registry says should be scored — eliminating the "unscored row with em-dash" failure mode and turning
+scorecard-without-registry into a loud build warning (with scorecard excluded from the leaderboard) instead of a silent
+skip.
 
 ## Requirements Trace
 
@@ -68,26 +69,31 @@ build warning (with scorecard excluded from the leaderboard) instead of a silent
   `run`, `target`) are read, validated, and either surfaced in the UI or used for build-time invariants.
 - **R2.** `version` and `scored_at` are removed from `registry.yaml`. Display sources move to the scorecard
   (filename-as-canonical for version; `run.started_at` for date).
-- **R3.** Build pipeline inverts: `scorecards/*.json` is the iteration source. `registry.yaml` is joined for editorial
-  fields (tier, language, creator, description, install, repo/url). A scorecard without a registry entry is a build
-  **warning** with the scorecard excluded from the leaderboard (refined from doc-review: softened from hard error to
-  warning + exclusion, decouples regen + editorial flows, supports rename/retire workflows). A registry entry without a
-  scorecard is also excluded from the leaderboard (no fallback-row rendering). The leaderboard renders a `Showing N
-  audited tools` subhead so the new contract — "every visible row is a real audit" — is explicit to readers, and
-  `registry.yaml`'s header documents the contributor flow (editorial PR can land before scorecard PR; build emits a
-  warning until the scorecard arrives).
+- **R3.** Build pipeline shifts to scorecard-driven discovery: `scorecards/*.json` is the iteration source.
+  `registry.yaml` is joined for editorial fields (tier, language, creator, description, install, repo/url). A scorecard
+  without a registry entry is a build **warning** with the scorecard excluded from the leaderboard (refined from
+  doc-review: softened from hard error to warning + exclusion, decouples regen + editorial flows, supports rename/retire
+  workflows). A registry entry without a scorecard is **also a warning** with the entry excluded from the leaderboard
+  (refined from doc-review pass 2: symmetric warnings — both directions emit stderr warnings; the contributor flow
+  expects registry-first PRs as a transient pending state, and the warning is the "don't forget the scorecard" nudge).
+  The leaderboard hero renders an `N audited tools in the corpus` subhead — corpus-descriptor framing, not "showing N"
+  (which would lie when the audience-filter UI hides rows). The `(N)` count is dropped from the `All` tier-filter button
+  since it's redundant with the new hero subhead. `registry.yaml`'s header documents the contributor flow (editorial PR
+  can land before scorecard PR, build warns until the scorecard arrives).
 - **R4.** Per-tool page surfaces the new metadata: `anc.version` + `anc.commit`, `run.started_at`, `run.duration_ms`,
   `run.platform.os` / `arch`, `target.kind`, and `run.invocation` as the verbatim "reproduce locally" command for
   command-mode runs.
 - **R5.** Build-time invariants protect the corpus (refined from doc-review): (a) every committed scorecard has
-  `schema_version` at-or-above `"0.4"` (compared via the existing `compareVersions()` helper); (b) every scorecard's
-  filename-derived slug exists as a `registry.tools[].name` (the editorial join); (c) for the joined registry entry,
-  `scorecard.tool.name === registry.binary` — validates the regen pipeline scored the right binary, accommodates the 11
-  tools where registry name ≠ binary (ripgrep→rg, ast-grep→sg, bottom→btm, etc.); (d) every `run.started_at` parses as
-  RFC 3339. Anc-version floor, `target.command` cross-check, and future-date guard are out of scope for v1 — speculative
-  hardening per scope-guardian; the anc-version floor is non-falsifiable until v0.2.0 ships and a re-regen tightens it.
-  Future-work plan owns those if desired.
-- **R6.** 95 of 96 scorecards in `scorecards/` are regenerated to v0.4 shape (anc itself is deleted, see U1) using a
+  `schema_version` at-or-above `"0.4"` **except `scorecards/anc-v0.1.3.json` which is grandfathered at "0.3" until CLI
+  v0.2.0 ships** (per the user-locked product position: anc must always exist on the leaderboard at the most-recent
+  public version); (b) every scorecard's filename-derived slug exists as a `registry.tools[].name` (the editorial join);
+  (c) for the joined registry entry, `scorecard.tool.name === registry.binary` for v0.4 scorecards (anc-v0.1.3
+  grandfather skips this check too — the v0.3 schema doesn't carry tool.name); (d) every v0.4 scorecard's
+  `run.started_at` parses as RFC 3339 (grandfather skips). Additionally (e): when `tool.version` is non-null, it must
+  equal the filename-derived version (refined from doc-review pass 2 — promoted from a UI display branch to a build-time
+  invariant; if drift happens it's a build error, not a per-page note). Anc-version floor, `target.command` cross-check,
+  and future-date guard are out of scope for v1.
+- **R6.** 95 of 96 scorecards in `scorecards/` are regenerated to v0.4 shape (anc-v0.1.3 grandfathered, see U1) using a
   local build of `~/dev/agentnative-cli` from the `dev` branch (PR #34's merge commit). Site does not block on the
   v0.2.0 release.
 - **R7.** Public-facing schema docs (`content/scorecard-schema.md` → `/scorecard-schema`) describe the new fields,
@@ -168,9 +174,11 @@ build warning (with scorecard excluded from the leaderboard) instead of a silent
   scorecard for `anc` itself.
 - **Filename remains the canonical version anchor.** `tool.version` in the scorecard is best-effort (null when the
   binary's `--version` doesn't parse). The leaderboard's "Score" column and the per-tool URL slug both come from the
-  filename. Display shows `tool.version` when present and the filename version otherwise; if they disagree, both
-  surfaces show the discrepancy (the page footer notes it as `version: 0.5.0 (self-reported); 0.5.1 (filename)` so a
-  reader can spot drift).
+  filename. Display shows `tool.version` when present and the filename version when null. The two are not expected to
+  disagree in steady-state (refined from doc-review pass 2 — the regen probes once per binary and emits both into the
+  same artifact; daylight only opens via parser-asymmetry between the regen script's `version_extract` snippet and the
+  CLI's internal probe, which is a build-time data error, not a runtime display state). When they DO disagree it
+  surfaces as a build invariant violation (R5(e)), not a UI note.
 - **Invariants enforce schema floor + corpus consistency** (refined from doc-review pass 2 — the older bullet named four
   invariants the trim removed). Build-time invariants (in the existing `runInvariantChecks()` mechanism) refuse to ship
   if any committed scorecard is below `schema_version: "0.4"` (floor via `compareVersions()`), if a scorecard's
@@ -182,8 +190,10 @@ build warning (with scorecard excluded from the leaderboard) instead of a silent
   and parses `<name>-v<version>.json`. For each name, it joins to `registry.yaml`. Missing registry entry = build
   **warning** with the scorecard excluded from the leaderboard (refined from doc-review per Q4: softened from hard error
   to warning + exclusion; decouples regen + editorial flows; supports rename/retire workflows). Registry entry without a
-  scorecard = also excluded from the leaderboard. The current "unscored row with em-dash" code path is removed. The
-  leaderboard renders a `Showing N audited tools` subhead so readers see the explicit count and understand the contract.
+  scorecard = **also a warning** with the entry excluded (refined pass 2: symmetric warnings). The current "unscored row
+  with em-dash" code path is removed. The leaderboard hero renders an `N audited tools in the corpus` subhead
+  (corpus-descriptor framing, not "showing N" which would mislead under client-side filtering); the redundant `(N)`
+  count drops from the `All` tier-filter button.
 - **Reproduce-locally CTA uses `run.invocation` verbatim for command-mode scorecards only.** Project-mode invocations
   may include local filesystem paths (`anc check ./local/repo`), which are user/machine-specific and could leak. For
   command-mode (every leaderboard entry today), `run.invocation` is safe and authoritative. The CTA renders
@@ -203,9 +213,9 @@ build warning (with scorecard excluded from the leaderboard) instead of a silent
 - **Does the registry stop existing entirely?** No. Editorial fields (tier, language, creator, description, install,
   repo/url) live there. Regen-pipeline inputs (`audit_profile`, `version_extract`) also live there. What goes away is
   `version` and `scored_at` (now self-described in the scorecard).
-- **Should the build still emit unscored rows?** No. With pipeline inversion, only tools with a real scorecard appear on
-  the leaderboard. (Auto-fix from doc-review: clarifying — launch-readiness U3 confirmed the unscored DATA situation was
-  retired by PR #40, all 96/96 scored. The em-dash CODE PATH itself is still live in
+- **Should the build still emit unscored rows?** No. With scorecard-driven discovery, only tools with a real scorecard
+  appear on the leaderboard. (Auto-fix from doc-review: clarifying — launch-readiness U3 confirmed the unscored DATA
+  situation was retired by PR #40, all 96/96 scored. The em-dash CODE PATH itself is still live in
   `src/build/scorecards-render.mjs:76,85,528,530`; this plan's U3 is what removes that code path.) This plan confirms
   the decision.
 - **Can `audit_profile` be dropped from the registry?** No. The regen pipeline reads it as input to pass
@@ -293,13 +303,16 @@ After registry join:
 
 ## Implementation Units
 
-- [ ] **U1. Regenerate 95 scorecards to v0.4; delete the `anc` scorecard pending a v0.2.0 regen**
+- [ ] **U1. Regenerate 95 scorecards to v0.4; grandfather anc-v0.1.3.json at v0.3 until CLI v0.2.0 ships**
 
-**Goal:** Every file under `scorecards/*.json` carries `schema_version: "0.4"` and the four new metadata blocks. The
-existing `scorecards/anc-v0.1.3.json` (v0.3 shape) is **deleted** as part of this unit; `anc` will not appear on the
-leaderboard until a fresh v0.4 scorecard is committed after CLI v0.2.0 ships (see Risks). Deleting rather than
-regenerating against the dev-branch binary avoids advertising `anc 0.1.0` (a *lower* version than the last released
-`0.1.3`) as a false regression on the public site.
+**Goal:** Every file under `scorecards/*.json` carries `schema_version: "0.4"` *except* `scorecards/anc-v0.1.3.json`,
+which stays at v0.3 (its current state) — the user-locked product position is "anc must always appear on the leaderboard
+at the most-recent public version." Regenerating anc against the dev-branch binary would produce `anc-v0.1.0.json`
+(false regression below the released 0.1.3); deleting it would remove the standard's reference implementation from its
+own audit site. Both unacceptable. The grandfather is intentional and explicitly time-bound: when CLI v0.2.0 publishes
+(central tracker step 2), a follow-up regen of `anc` against the v0.2.0 binary produces `anc-v0.2.0.json` at v0.4
+schema; the new file replaces `anc-v0.1.3.json` and the grandfather exception drops out automatically. U2's schema-floor
+invariant carries a per-file carve-out for this single file.
 
 **Requirements:** R6.
 
@@ -309,7 +322,8 @@ pipeline at it, commit the resulting scorecards).
 **Files:**
 
 - Modify (95 in bulk): `scorecards/*.json` *excluding* `scorecards/anc-v0.1.3.json`.
-- Delete: `scorecards/anc-v0.1.3.json` (`trash scorecards/anc-v0.1.3.json` per the project's no-`rm` convention).
+- **Preserve** (not delete): `scorecards/anc-v0.1.3.json` stays exactly as-is at schema_version 0.3. Grandfathered by
+  U2's invariant carve-out until CLI v0.2.0 ships and a follow-up regen replaces it with v0.4 shape.
 - Modify: `registry.yaml` — temporarily remove the `anc` registry entry OR leave it in place (registry-without-
   scorecard becomes a build warning per Q4's softening, not a fatal error). Confirm at U4 implementation time.
 
@@ -363,11 +377,12 @@ pipeline at it, commit the resulting scorecards).
 
 - 95 scorecards have `schema_version: "0.4"`.
 - All 95 have the four new top-level keys (`tool`, `anc`, `run`, `target`).
-- `scorecards/anc-v0.1.3.json` is no longer present on disk.
+- `scorecards/anc-v0.1.3.json` is unchanged on disk (still `schema_version: "0.3"`); grandfathered by U2's invariant
+  carve-out.
 - Existing per-result fields (`results[]`, `summary`, `coverage_summary`, `audience`, `audit_profile`, `spec_version`)
   are preserved.
-- `git diff --stat scorecards/` shows 96 files changed: 95 modified (the regenerated scorecards) + 1 deleted
-  (`anc-v0.1.3.json`).
+- `git diff --stat scorecards/` shows 95 files changed: 95 modified (the regenerated scorecards). No deletions, no
+  additions. `anc-v0.1.3.json` is unchanged.
 
 ---
 
@@ -445,12 +460,13 @@ production code is in place; the test failure is the "this is what the new invar
 
 ---
 
-- [ ] **U3. Invert the build pipeline — scorecard-driven discovery, registry editorial join**
+- [ ] **U3. Switch the build to scorecard-driven discovery + registry editorial join**
 
-**Goal:** Build iterates `scorecards/*.json` first; joins registry by name for editorial metadata. Scorecard without a
-registry entry is a build **warning** (logged with offending filename + missing name; scorecard excluded from the
-leaderboard). Registry entry without a scorecard is also excluded from the leaderboard. Leaderboard renders a `Showing N
-audited tools` subhead.
+**Goal:** Build iterates `scorecards/*.json` first; joins registry by name for editorial metadata. Symmetric warnings:
+(i) scorecard without a registry entry → stderr warning with offending filename + missing name + scorecard excluded;
+(ii) registry entry without a scorecard → stderr warning with the registry name + entry excluded. Both states surface in
+the build summary count. Leaderboard hero renders an `N audited tools in the corpus` subhead (corpus-descriptor, not
+view-descriptor); the redundant `(N)` drops from the `All` tier-filter button.
 
 **Requirements:** R3.
 
@@ -469,9 +485,11 @@ audited tools` subhead.
 - Modify: `src/build/build.mjs` — remove the `unscored` code path from the per-tool emit loop (registry entries without
   scorecards are no longer iterated). Update the leaderboard computation to handle the always-scored-only assumption.
 - Modify: `src/build/scorecards-render.mjs` — `buildLeaderboardBody()` and `scoreCell()` / `principleCell()` no longer
-  need the `if (!entry.scorecard)` em-dash branches (lines 76, 85, 528, 530); simplify accordingly. Add a `Showing N
-  audited tools` subhead near the leaderboard's existing intro paragraph (refined from doc-review per Q4: surfaces the
-  new "every visible row is a real audit" contract to readers).
+  need the `if (!entry.scorecard)` em-dash branches (lines 76, 85, 528, 530); simplify accordingly. Add a `<p
+  class="leaderboard-hero__meta">N audited tools in the corpus</p>` subhead inside `.leaderboard-hero`, immediately
+  after the lede `<p class="leaderboard-hero__lede">` (refined from doc-review pass 2: corpus- descriptor framing reads
+  correctly under client-side audience-filter; "showing N" would lie when filter hides rows). Drop the
+  `(${leaderboard.length})` count from the `All` tier-filter button label — the new subhead carries it.
 - Modify: `registry.yaml` header comment block — document the new contributor flow (refined from doc-review per Q4): "An
   editorial entry without a paired scorecard is silently excluded from the leaderboard until a scorecard lands. The
   build emits a warning naming any scorecard that lacks a registry entry. The two PRs may land in either order."
@@ -501,10 +519,11 @@ test depends on it before deleting the code.
 - For each scorecard's filename-derived slug, look up the registry entry by name. Missing entry = log a warning with
   filename + missing-name to stderr, accumulate the count for the build summary, and exclude the scorecard from the
   returned set.
-- Registry entries without matching scorecards do NOT appear in the leaderboard. The build summary reports both
-  exclusion counts (scorecards-without-registry + registry-without-scorecards), so `bun run build` output makes the
-  asymmetry visible.
-- The leaderboard's intro paragraph gains a `Showing N audited tools` subhead derived from the joined-set count.
+- Registry entries without matching scorecards also emit a stderr warning naming the registry name + accumulate in the
+  build summary count, then are excluded from the leaderboard (refined from doc-review pass 2: symmetric warnings — both
+  directions surface the same way).
+- The leaderboard hero gains an `<p class="leaderboard-hero__meta">N audited tools in the corpus</p>` subhead derived
+  from the joined-set count (refined pass 2: corpus-descriptor framing, not view-descriptor).
 - The `loadRegistry()` function stays for editorial validation; what changes is who iterates first.
 
 **Patterns to follow:**
@@ -515,13 +534,18 @@ test depends on it before deleting the code.
 
 **Test scenarios:**
 
-- Happy path: 95 scorecards on disk + 95+ registry entries (anc kept editorial, scorecard pending) → 95 leaderboard rows
-- `Showing 95 audited tools` subhead. Build summary reports the registry-without-scorecard exclusion count.
-- Happy path: 95 scorecards + 96 registry entries (one extra editorial-only entry) → 95 leaderboard rows; the extra
-  registry entry is silently excluded; build summary reports it.
-- Warning path: 95 scorecards + 94 registry entries (one scorecard's name absent from registry) → build succeeds with 94
-  leaderboard rows; stderr carries a warning naming the offending filename + missing registry name; build summary
-  includes the warning count.
+- Happy path: 95 scorecards (94 v0.4 + anc-v0.1.3 grandfathered) + 96 registry entries → 95 leaderboard rows
+- `95 audited tools in the corpus` subhead + 1 stderr warning naming the missing-scorecard registry entry (since the
+  96th registry entry has no matched scorecard; in steady-state this would be `anc` if its scorecard is regenerated
+  mid-cycle).
+
+- Happy path: 95 scorecards + 96 registry entries (anc registry entry retained, anc-v0.1.3.json grandfathered as the
+  matched scorecard) → 95 leaderboard rows including anc + `95 audited tools in the corpus` subhead.
+- Warning path symmetric (i): scorecard with no registry entry → stderr warning naming filename + missing registry name;
+  scorecard excluded; leaderboard count drops by one; build summary increments scorecard-without-registry counter.
+- Warning path symmetric (ii): registry entry with no matched scorecard → stderr warning naming registry name; entry
+  excluded; leaderboard count unchanged from canonical (it would have been excluded anyway); build summary increments
+  registry-without-scorecard counter.
 - Edge case: scorecard filename slug normalization — confirm filename-derived name is compared case-sensitively against
   `registry.tools[].name` (both should be `[a-z0-9-]+` per existing convention).
 - Integration: full `bun run build` run against the regenerated corpus emits the same number of `dist/score/<name>.html`
@@ -529,14 +553,16 @@ test depends on it before deleting the code.
 
 **Verification:**
 
-- `bun run build` against U1's regenerated corpus produces 95 leaderboard rows + 95 per-tool pages + a `Showing 95
-  audited tools` subhead.
+- `bun run build` against U1's regenerated corpus produces 95 leaderboard rows + 95 per-tool pages + a `<p
+  class="leaderboard-hero__meta">95 audited tools in the corpus</p>` subhead. The `All` tier-filter button no longer
+  carries `(95)`.
 - A synthetic test (rename one scorecard to a name not in registry) makes the build succeed with one fewer leaderboard
   row + a stderr warning naming the offending filename.
-- Removing a registry entry (without removing its scorecard) makes the build emit the same stderr warning + the
-  scorecard is excluded.
-- Removing a scorecard (without removing its registry entry) makes the build succeed but the leaderboard drops by one
-  row + the build summary reports the registry-without-scorecard exclusion.
+- Removing a registry entry (without removing its scorecard) makes the build emit the same shape of stderr warning
+- the scorecard is excluded.
+
+- Removing a scorecard (without removing its registry entry) makes the build succeed with one fewer leaderboard row + a
+  stderr warning naming the registry entry whose scorecard is missing (refined pass 2: symmetric warnings).
 
 ---
 
@@ -632,14 +658,19 @@ scorecards.
 
 **Approach:**
 
-- "Details" block grows to show: `Anc version` (with `commit` link to the upstream commit if non-null), `Audit date`
-  (now from `run.started_at`, formatted), `Duration` (humanized), `Platform` (os/arch), `Mode` (target.kind), `Install`
-  (unchanged).
+- "Details" block becomes a single `<dl>` with explicit row order (refined from doc-review pass 2 per finding #9): (1)
+  `Version scored` — from filename (canonical anchor); (2) `Audit date` — from `run.started_at`, formatted; (3)
+  `Duration` — humanized from `run.duration_ms`; (4) `Platform` — `${run.platform.os}/${run. platform.arch}`; (5) `Mode`
+  — `target.kind`; (6) `Anc version` — `anc.version` with `commit` link (7-char abbrev) when `anc.commit` is non-null
+  and matches the SHA regex; (7) `Install` — unchanged from registry. Tool-identity rows (1, 2) first, run-context
+  middle (3, 4, 5), provenance (6) last, `Install` closes. Single `<dl>`; reuses existing `.meta-list` styles; no new
+  CSS.
 - Reproduce CTA: when `target.kind === "command"`, render `<pre><code>${escHtml(run.invocation)}</code></pre>` (refined
   from doc-review pass 2 — `escHtml` is mandatory per the existing convention in `scorecards-render.mjs:491`; the
   earlier draft said "directly" which would skip escaping). Otherwise, render the synthesized `anc check --command
-  <tool.name>` form (today's behavior). When the scorecard's `tool.version` and the filename version disagree, render
-  both with a one-line note explaining the discrepancy.
+  <tool.name>` form (today's behavior). The earlier draft of this plan added a discrepancy display for when
+  `tool.version` and filename-version disagree — that's now an R5(e) build invariant instead (refined from doc-review
+  pass 2 per user reasoning: drift only occurs via parser-asymmetry, which is a data error not a runtime UI state).
 - **All new `<dd>` values pass through `escHtml()` before interpolation** (refined from doc-review pass 2 —
   `tool.version`, `anc.version`, `anc.commit`, `run.platform.os`, `run.platform.arch`, `target.kind` are all free-form
   strings the CLI captures and could contain HTML special characters). Matches the existing pattern at
@@ -666,9 +697,10 @@ scorecards.
 - Happy path: `target.kind === "command"` page renders `run.invocation` verbatim in the reproduce CTA.
 - Happy path: `target.kind === "project"` page renders the synthesized `anc check --command <tool.name>` form.
 - Edge case: `anc.commit: null` renders the version without a commit link (no broken link).
-- Edge case: `tool.version: null` falls back to the filename version; the per-tool page does NOT render a discrepancy
-  note.
-- Edge case: `tool.version: "0.5.0"` and filename version `0.5.1` (drift) renders both with the discrepancy note.
+- Edge case: `tool.version: null` falls back to the filename version; the per-tool page renders only the filename
+  version (no discrepancy display — drift is now an R5(e) invariant, not a UI surface).
+- Error path: a fixture with non-null `tool.version: "0.5.0"` paired with filename version `0.5.1` (drift) throws at
+  U2's R5(e) invariant — drift is a build-time data error, not a user-visible note (refined from doc-review pass 2).
 - Edge case: `run.duration_ms: 12_345` renders as `12.3s`; `42` renders as `42ms`; `145_234` renders as `2m 25s`.
 - Integration: a freshly-rendered per-tool page passes the existing scorecard regression tests (no broken selectors, no
   missing classes).
@@ -684,7 +716,7 @@ scorecards.
 1. Run `bun run dev` (or browse staging) and open `/score/eza` in a browser.
 2. Toggle to dark mode via the in-page toggle. Confirm `.meta-list dt` and `.meta-list dd` text is legible against the
    surface — this is where PR #50's regression landed.
-3. Confirm the discrepancy note (when present) is visually distinct from normal `dd` values in both modes.
+3. (Discrepancy display removed per doc-review pass 2 — drift is an R5(e) invariant; no UI to verify.)
 4. Toggle back to light mode; confirm parity.
 5. Capture screenshots of the Details section in each mode (`.context/screenshots/` per the screenshots-location memory
    rule) and attach to the PR description.
@@ -693,19 +725,31 @@ scorecards.
 
 ---
 
-- [ ] **U6. Update `content/scorecard-schema.md` to document v0.4 fields**
+- [ ] **U6. Update v0.4 docs across schema page, CONTRIBUTING.md, and registry header**
 
-**Goal:** The public `/scorecard-schema` docs page describes the v0.4 schema accurately, including the four new metadata
-blocks, null-state semantics, and the publishing-PII review reminder for `run.invocation` / `target.path`.
+**Goal:** Three doc surfaces updated together so contributors arriving from any angle (registry editor, PR reviewer,
+schema-curious reader) see the new contract. The schema page describes the v0.4 fields with null-state semantics and PII
+guidance; CONTRIBUTING.md documents the editorial-PR-can-land-first contributor flow; registry.yaml header carries the
+same flow note (already covered in U3 Files; restated here for completeness).
 
-**Requirements:** R7.
+**Requirements:** R7 + finding #10 (refined from doc-review pass 2: contributor-flow doc reach extended beyond just the
+registry header).
 
 **Dependencies:** U1 (need a real v0.4 scorecard to reference in examples).
 
 **Files:**
 
 - Modify: `content/scorecard-schema.md` — add sections describing `tool`, `anc`, `run`, `target`. Include a
-  representative full-document example block (one of the regenerated scorecards, copy-pasted).
+  representative full-document example block (one of the regenerated scorecards, copy-pasted). **Critical (security):
+  the example must be drawn from a command-mode scorecard — verify `target.kind: "command"` and `target.path: null`
+  before commit; redact `run.invocation` if it embeds anything beyond the canonical `anc check --command <name>
+  [--audit-profile X] [--output json]` shape.** Cross-link to the contributor-flow section in CONTRIBUTING.md.
+- Modify: `CONTRIBUTING.md` — add (or extend) a "Adding a tool" section that documents the editorial-PR / scorecard-PR
+  ordering: "Either order works. Editorial-only PR (registry entry without a scorecard) emits a build warning and the
+  entry is excluded from the leaderboard until the scorecard PR lands. Scorecard-only PR (scorecard without a registry
+  entry) emits the symmetric warning. Both warnings surface as PR-comment annotations per CI."
+- Confirm (already in U3 Files): `registry.yaml` header documents the same contributor flow — restated here so U6's
+  verification can grep all three surfaces and confirm they agree.
 - Test: none — this is prose-only. Verification is reading + rendering.
 
 **Approach:**
@@ -803,6 +847,65 @@ invariant question.
 - `dist/score/` count grows by exactly the number of name-vs-binary mismatches.
 - Manual smoke: visiting `/score/rg` in a browser auto-redirects to `/score/ripgrep`.
 
+---
+
+- [ ] **U8. CI surfaces the warning counts as a PR-comment annotation** *(refined from doc-review pass 2 per Q-CI)*
+
+**Goal:** When U3's symmetric warnings fire (scorecard-without-registry or registry-without-scorecard), CI posts a
+structured PR comment naming the offending entries so reviewers see the integrity drift without grepping logs. Build
+still succeeds (per Q4's softening); the comment is the discoverability layer.
+
+**Requirements:** R3 (warnings exist) + the user-locked "build summary line + PR-comment annotation" answer to finding
+number 7 in doc-review pass 2.
+
+**Dependencies:** U3 (warnings must be emitted in a parseable shape).
+
+**Files:**
+
+- Modify: `src/build/build.mjs` — extend the build summary structure to include `warnings: { scorecardOrphans:
+  [...filenames], registryOrphans: [...names] }` (parseable JSON; not just a count). Print to stdout in a stable format
+  (e.g., `WARNINGS_JSON: {...}` line) at the end of the build summary so CI can `grep` and parse.
+- Create: `.github/workflows/post-warnings-comment.yml` (or extend `ci.yml`) — after `bun run build`, parse the
+  `WARNINGS_JSON` line from the build output, and if non-empty, post a PR comment via `gh pr comment` listing the
+  offending entries. Idempotent (overwrites prior comment from the same workflow run).
+- Test: `tests/build.test.ts` — assert build summary's `warnings` object has the expected shape with both empty and
+  non-empty cases.
+
+**Approach:**
+
+- Build summary's `warnings` object enumerates the orphans, not just counts. Comment template:
+
+  ```text
+  ⚠️ Scorecard / registry drift in this PR:
+  - Scorecards missing a registry entry: foo-v1.0.0.json
+  - Registry entries missing a scorecard: bar
+  Both excluded from the leaderboard. Land the matching PR or remove the orphan to clear.
+  ```
+
+- The CI step is non-blocking: PR check stays green; comment is informational. Reviewer can choose to block on it during
+  their review pass.
+- For an empty warnings object, the workflow does NOT post a comment (no noise on clean PRs).
+
+**Patterns to follow:**
+
+- Existing `.github/workflows/ci.yml` shape; the post-warnings step lands as either a new workflow file or a job in the
+  existing `ci.yml`. Decide at impl time based on whether the comment posting needs `pull_requests: write` permissions
+  that other ci.yml jobs don't already have.
+
+**Test scenarios:**
+
+- Happy path (clean): build emits `WARNINGS_JSON: {"scorecardOrphans":[],"registryOrphans":[]}`; CI step parses it and
+  posts no comment.
+- Warning path: synthetic test renames a scorecard so its slug is missing from registry → build emits the filename in
+  `scorecardOrphans` → CI step posts a comment naming it.
+- Idempotent: re-running the workflow overwrites the prior comment instead of appending.
+
+**Verification:**
+
+- A test PR that intentionally introduces a scorecard-without-registry mismatch produces a visible PR-comment annotation
+  within the CI run; no separate manual review of CI logs needed.
+- Clean PRs receive no comment (no false-positive noise).
+
 ## System-Wide Impact
 
 - **Interaction graph:** Build pipeline (`src/build/`), regen scripts (`scripts/regen-scorecards.sh`,
@@ -828,12 +931,12 @@ invariant question.
 
 ## Risks & Dependencies
 
-| Risk                                                                                                                                                                                      | Mitigation                                                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pipeline inversion silently drops registry entries that lacked scorecards (today they would render as em-dash rows from the live code at `src/build/scorecards-render.mjs:76,85,528,530`) | The unscored DATA situation was already retired by PR #40 (all 96/96 scored), so no rows actually render with em-dashes today, but the code path is still live and U3 is what removes it. If a registry entry without a scorecard is reintroduced post-inversion, the new behavior (exclusion from leaderboard) is the documented intent — the build summary makes the absence visible. |
-| `tool.version` and filename version disagree on a real tool, confusing readers                                                                                                            | U5 renders both with a one-line discrepancy note. Discrepancy is itself signal — the regen pipeline used `version_extract` to derive the filename, but the binary's own `--version` may have changed format between regens. Surfacing the drift is more honest than silently picking one.                                                                                               |
-| Regen on launch-eve interferes with the launch wave                                                                                                                                       | Default timing is post-launch. The user can override by running U1 + U2 + U3 + U4 + U5 + U6 tonight, but the plan's safe path is "after the Show HN window closes." Sequenced explicitly in the Operational Notes below.                                                                                                                                                                |
-| Breaking change downstream — tools that fetch `https://anc.dev/scorecards/<name>-v<version>.json` directly may rely on v0.3 shape                                                         | The scorecard JSON files are committed under `scorecards/` and served as static assets. Once regenerated, every fetch returns v0.4. v0.4 is additive (per upstream PR #34's design); v0.3 consumers feature-detect new keys rather than break. No downstream breakage expected, but worth flagging in the PR description for any external consumers.                                    |
+| Risk                                                                                                                                                                                              | Mitigation                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scorecard-driven discovery silently drops registry entries that lacked scorecards (today they would render as em-dash rows from the live code at `src/build/scorecards-render.mjs:76,85,528,530`) | The unscored DATA situation was already retired by PR #40 (all 96/96 scored), so no rows actually render with em-dashes today, but the code path is still live and U3 is what removes it. After U3 ships with symmetric warnings, a registry entry without a scorecard emits a stderr warning + build-summary line + (per finding #7 fix) PR-comment annotation; the build still passes. |
+| `tool.version` and filename version disagree on a real tool                                                                                                                                       | R5(e) invariant rejects the corpus at build time (refined from doc-review pass 2). Drift can only happen via parser-asymmetry between the regen script's `version_extract` snippet and the CLI's internal probe — that's a data error worth catching at build time, not a UI surface to maintain. The fix when it fires: align the two parsers; the build won't ship until they agree.   |
+| Regen on launch-eve interferes with the launch wave                                                                                                                                               | Default timing is post-launch. The user can override by running U1 + U2 + U3 + U4 + U5 + U6 tonight, but the plan's safe path is "after the Show HN window closes." Sequenced explicitly in the Operational Notes below.                                                                                                                                                                 |
+| Breaking change downstream — tools that fetch `https://anc.dev/scorecards/<name>-v<version>.json` directly may rely on v0.3 shape                                                                 | The scorecard JSON files are committed under `scorecards/` and served as static assets. Once regenerated, every fetch returns v0.4. v0.4 is additive (per upstream PR #34's design); v0.3 consumers feature-detect new keys rather than break. No downstream breakage expected, but worth flagging in the PR description for any external consumers.                                     |
 
 ## Documentation / Operational Notes
 
