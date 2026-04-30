@@ -122,7 +122,7 @@ export function resolveBaseUrl(baseUrl) {
  */
 export function absolutifyMarkdownLinks(markdown, baseUrl) {
   const base = resolveBaseUrl(baseUrl);
-  return markdown.replace(/(\!?\])\(\s*(\/[^)\s]*)(\s+"[^"]*")?\s*\)/g, (match, bracket, path, title) => {
+  return markdown.replace(/(!?\])\(\s*(\/[^)\s]*)(\s+"[^"]*")?\s*\)/g, (match, bracket, path, title) => {
     if (path.startsWith('//')) return match;
     return `${bracket}(${base}${path}${title ?? ''})`;
   });

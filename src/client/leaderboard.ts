@@ -58,7 +58,8 @@ if (table) {
 
   for (const th of headers) {
     th.addEventListener('click', () => {
-      const col = th.dataset.sortCol!;
+      const col = th.dataset.sortCol;
+      if (!col) return; // selector requires data-sort-col, but narrow for the type checker
       if (currentSort === col) {
         ascending = !ascending;
       } else {
@@ -66,7 +67,8 @@ if (table) {
         ascending = col === 'tool'; // tool sorts A-Z by default, others descending
       }
 
-      const tbody = table.querySelector('tbody')!;
+      const tbody = table.querySelector('tbody');
+      if (!tbody) return;
       const sorted = [...tbody.querySelectorAll<HTMLTableRowElement>('tr')];
 
       sorted.sort((a, b) => {

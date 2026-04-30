@@ -20,8 +20,7 @@
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
 // exits non-zero. Regression tests are the verification net.
 
-import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { copyAssets } from './assets.mjs';
@@ -75,10 +74,6 @@ const LOCKED_SLUGS = [
 
 async function ensureDir(dir) {
   await mkdir(dir, { recursive: true });
-}
-
-function sha256(buf) {
-  return createHash('sha256').update(buf).digest('hex');
 }
 
 /**

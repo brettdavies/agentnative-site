@@ -19,7 +19,6 @@
 // Run `bun run build` before these tests (bun test does not auto-build).
 
 import { describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -39,11 +38,6 @@ const LOCKED_SLUGS = [
   'p6-composable-predictable-command-structure',
   'p7-bounded-high-signal-responses',
 ];
-
-async function sha256OfFile(path: string): Promise<string> {
-  const buf = await readFile(path);
-  return createHash('sha256').update(buf).digest('hex');
-}
 
 describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked list)', () => {
   test('homepage links to every principle page', async () => {
