@@ -53,8 +53,15 @@ Engineering docs (`docs/plans/`, `docs/solutions/`, `docs/brainstorms/`) live on
 blocks them from reaching `main`, and the `guard-release-branch.yml` workflow rejects any PR to main whose head isn't
 `release/*`. You MUST use the release-branch cherry-pick pattern:
 
-**Branch naming**: `release/<date>-<slug>` or `release/<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Keep the
-slug short and descriptive.
+**Branch naming** (CalVer, mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). The
+date prefix is the planned merge date, not the cut date — re-naming on slip is allowed but not required. Slug is
+kebab-case, short, descriptive (3-6 words). Bare `release/<slug>` (no date prefix) is no longer permitted; the date
+prefix is what makes release branches sortable and unambiguous when multiple cuts are in flight.
+
+The `guard-release-branch.yml` workflow currently enforces the `release/` prefix only on PRs targeting `main`; the
+CalVer date prefix is convention-enforced via review and this doc. Tightening the workflow regex to require
+`^release/\d{4}-\d{2}-\d{2}-` is a tracked follow-up — until that lands, a PR with a date-less branch name will pass CI
+but should be renamed before merge.
 
 ```bash
 # 1. Branch from main, NOT dev. Branching from dev causes add/add conflicts
