@@ -199,7 +199,7 @@ headings for anchor generation (`rehype-slug`), syntax-highlight with `shiki` at
 convert to HTML with `remark-rehype` + `rehype-stringify`, template into a single shared HTML shell, write
 `dist/*.html`, copy source `.md` files to `dist/*.md`, generate `dist/llms.txt` and `dist/llms-full.txt` from the
 content index, emit `dist/sitemap.xml` and `dist/og-image.png` (copied from `public/og-image.png`; see §3.4.1 and
-`scripts/og/generate.py`). Dependencies are all build-time and pinned.
+`scripts/og/generate.ts`). Dependencies are all build-time and pinned.
 
 The Worker is ~80 lines: static assets from `env.ASSETS`, content-negotiation branch on `url.pathname.endsWith(".md")
 || Accepts(req).type(['text/html', 'text/markdown']) === 'text/markdown'` (proper RFC 7231 q-value parsing via the
@@ -298,7 +298,7 @@ the filename — no separate manifest file, no frontmatter ordering key.
 | all principle files (titles + slugs)                             | `llms.txt`               | llmstxt.org index: project title, one-paragraph summary, H2-delimited "Principles" section listing all seven with their `.md` URLs.                                                                              |
 | `_intro.md` + `principles/p[1-7]-*.md` + `check.md` + `about.md` | `llms-full.txt`          | Concatenation of everything, each section delimited per the A5 format block below (`# <Title>` heading, `Source:` + `Canonical-Markdown:` URL headers, body, `---` separator); single-fetch endpoint for agents. |
 | all URLs                                                         | `sitemap.xml`            | Plain sitemap; no priority hacks.                                                                                                                                                                                |
-| brief in §4.13                                                   | `og-image.png`           | Generated out-of-band via `scripts/og/generate.py`; committed. Not regenerated on every build.                                                                                                                   |
+| brief in §4.13                                                   | `og-image.png`           | Generated out-of-band via `bun run og` (Playwright→Sharp→PNG, see `scripts/og/generate.ts`); committed. Not regenerated on every build.                                                                          |
 
 **Static asset + CSS + JS pipeline (A2, C3):**
 
@@ -1061,18 +1061,35 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 
 ### 4.13 OG image direction (1200×630 brief)
 
-Specification, not a rendered image. Produced out-of-band via `scripts/og/generate.py` (Gemini 3 Pro image generation,
-run manually against the brief below), committed as `public/og-image.png`, and copied byte-for-byte into
-`dist/og-image.png` at build time. Not regenerated on every build.
+Specification, not a rendered image. Produced out-of-band via `bun run og` (TypeScript Playwright generator at
+`scripts/og/generate.ts`), committed as `public/og-image.png`, and copied byte-for-byte into `dist/og-image.png` at
+build time. Not regenerated on every build. The generator is deterministic: same inputs (`docs/design/og.html`,
+`docs/design/og.css`, `docs/design/foundation.css`, the woff2 fonts on disk) produce byte-identical output.
 
-- Background: dark-mode palette (`--bg` + subtle `--bg-code` rectangle bottom-right).
-- Left-anchored headline, ~72pt, `ui-sans-serif` 700, color `--fg-heading`. Line 1: **"agent-native CLI standard"**.
-  Line 2 at ~36pt in `--fg-muted`: **"seven principles for CLIs agents can operate"**.
-- Bottom-left: small version/date mark, ~20pt, `--fg-muted`.
-- Bottom-right: schematic 7-row code block, mono, ~18pt, showing principle slugs as a stylized `llms.txt` excerpt —
-  literal visual proof the site is machine-readable.
-- No logo, no illustration, no gradient, no photography.
-- File: `public/og-image.png`, 1200×630, under 200 KB. `og:image:alt` = headline text verbatim.
+The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` → `/typeset` chain (see
+`docs/design/og-concepts/README.md` for the round-by-round selection rationale). Final form:
+
+- Dark-mode background (`--bg`).
+- Brand row at top, 28pt: `anc.dev` (mono Monaspace Xenon, `--accent`) + 32×1px rule + "the agent-native CLI standard"
+  (sans Uncut Sans, `--fg-muted`).
+- Manifesto block, 60pt (display Uncut Sans), `align-self: end` — sits in the lower half with breathing room above.
+  Three lines, each governed by a color-coded RFC 2119 keyword (700-weight) followed by a 500-weight verb-phrase:
+- **MUST** run without prompting. *(P1's foundational rule, `--must`)*
+- **SHOULD** speak machine-first. *(P2's worldview, `--should`)*
+- **MAY** decorate when a TTY is open. *(P1's safety valve, `--may`)*
+- Foot row, 18pt mono with tabular figures: cite "seven principles for CLIs that agents can operate" + version stamp
+  (sourced verbatim from `src/build/shell.mjs`'s footer literal so the OG and the rendered footer never drift).
+- No logo, no illustration, no gradient, no photography. No side-stripe borders.
+- File: `public/og-image.png`, 1200×630, under 150 KB.
+- `og:image:alt` + `twitter:image:alt` are emitted by `src/build/shell.mjs` (`OG_IMAGE_ALT` constant): "agent-native CLI
+  standard — anc.dev — seven principles for CLIs that agents can operate".
+
+**Future extension — per-page OG cards.** The current model uses one shared `/og-image.png` for every page. The
+generator architecture (`Playwright → Sharp → palette PNG`, deterministic, foundation-token-driven) is reusable for
+per-principle (`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape:
+`bun run og --input docs/design/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v` — the script's existing
+`[data-version]` injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's
+"Deferred to Separate Tasks" alongside favicon decoupling.
 
 ### 4.14 Schema.org / SEO surface
 

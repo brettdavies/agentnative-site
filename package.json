@@ -14,7 +14,8 @@
     "lint": "biome check . && markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#dist\" \"#docs/solutions\" \"#docs/design\" \"#docs/plans\" \"#content\" \"#CHANGELOG.md\" \"#.claude\" \"#.context\" \"#test-results\"",
     "format": "biome format --write .",
     "deploy": "bun run build && wrangler deploy",
-    "deploy:dryrun": "bun run build && wrangler deploy --dry-run"
+    "deploy:dryrun": "bun run build && wrangler deploy --dry-run",
+    "og": "bun scripts/og/generate.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
@@ -25,6 +26,7 @@
     "axe-playwright": "^2.2.2",
     "bun-types": "^1.3.11",
     "markdownlint-cli2": "^0.22.0",
+    "sharp": "^0.34.5",
     "typescript": "^6.0.2",
     "wrangler": "^4.81.0"
   },

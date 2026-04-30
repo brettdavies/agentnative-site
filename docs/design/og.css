@@ -1,0 +1,129 @@
+/* docs/design/og.css
+ * Production OG card stylesheet, consumed by docs/design/og.html and
+ * rendered to public/og-image.png via scripts/og/generate.ts.
+ *
+ * Color tokens come from docs/design/foundation.css (link-loaded by
+ * og.html). This file owns layout, composition, weight, and tracking —
+ * NOT colors. Do not redefine --must / --should / --may / --bg / --fg-*.
+ *
+ * Selected from /design-shotgun round 2 (2026-04-30): variant D1
+ * (telegraphic, all-left-aligned manifesto). Rationale + alternatives
+ * live in docs/design/og-concepts/README.md.
+ */
+
+/* @font-face declarations for the same self-hosted woff2 files the live
+ * site ships. Paths are relative to this file (docs/design/og.css), so
+ * `../../public/fonts/*.woff2` resolves correctly when Chromium loads
+ * the file via `file://` during PNG generation.
+ *
+ * font-display: block — the renderer asserts document.fonts.size >= 2
+ * after document.fonts.ready before screenshotting, so we'd rather
+ * block on the actual font than ship a fallback render. */
+@font-face {
+  font-family: "Uncut Sans";
+  src: url("../../public/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Monaspace Xenon";
+  src: url("../../public/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  width: 1200px;
+  height: 630px;
+  background: var(--bg);
+  color: var(--fg-body);
+  font-family: var(--font-sans);
+  font-feature-settings: var(--ff-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+.card {
+  width: 1200px;
+  height: 630px;
+  box-sizing: border-box;
+  padding: 64px 80px 56px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 32px;
+}
+
+/* Brand row. Mono `anc.dev` in --accent (the site's brand blue) reads
+ * as a brand mark / source citation rather than title text — strongest
+ * at thumbnail scale where social-feed readers need to identify the
+ * source in under a second. The thin horizontal rule between domain
+ * and tagline is a graphic separator, deliberately not an em-dash:
+ * em-dash glyphs in this position read as AI editorial flourish. */
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  font-size: 28px;
+  letter-spacing: 0;
+  color: var(--fg-secondary);
+  line-height: 1.0;
+}
+.brand__domain {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-mono);
+  color: var(--accent);
+  font-weight: 500;
+}
+.brand__rule {
+  flex: 0 0 32px;
+  height: 1px;
+  background: var(--border);
+}
+.brand__tag { color: var(--fg-muted); font-weight: 400; }
+
+/* Manifesto. Three telegraphic statements, each governed by a color-coded
+ * RFC 2119 keyword.
+ *
+ * Verb-phrase weight 500; keyword weight 700. The 200-weight delta lets
+ * the keyword pop without breaking the trio's reading rhythm.
+ *
+ * align-self: end — the manifesto sits near the footer rather than
+ * dead-center in its 1fr row. More air above; the brand at top + breath
+ * + manifesto-near-bottom rhythm reads more confident than centered. */
+.manifesto {
+  align-self: end;
+  font-size: 60px;
+  line-height: 1.18;
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  color: var(--fg-heading);
+}
+.manifesto p { margin: 0 0 12px; }
+.manifesto p:last-child { margin-bottom: 0; }
+.manifesto .kw {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-right: 0.32em;
+}
+.manifesto .kw.must   { color: var(--must); }
+.manifesto .kw.should { color: var(--should); }
+.manifesto .kw.may    { color: var(--may); }
+
+/* Foot. Mono with tabular figures so the version stamp doesn't drift
+ * render-to-render (Monaspace Xenon is monospace by definition; tnum is
+ * belt-and-braces). */
+.foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-mono), var(--ff-tabular);
+  font-size: 18px;
+  color: var(--fg-muted);
+}
+.foot__cite { color: var(--fg-secondary); }
+.foot__version { letter-spacing: 0.02em; }

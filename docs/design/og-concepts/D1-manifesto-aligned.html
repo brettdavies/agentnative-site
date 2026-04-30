@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <title>OG concept D1 — manifesto, telegraphic</title>
+  <meta name="viewport" content="width=1200,initial-scale=1">
+  <meta name="description" content="OG image concept D1: three short normative statements, each governed by a color-coded RFC 2119 keyword. Display weight, no glosses.">
+  <link rel="stylesheet" href="../foundation.css">
+  <style>
+    @font-face {
+      font-family: "Uncut Sans";
+      src: url("../../../public/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "Monaspace Xenon";
+      src: url("../../../public/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: block;
+    }
+
+    html, body { margin: 0; padding: 0; }
+
+    body {
+      width: 1200px;
+      height: 630px;
+      background: var(--bg);
+      color: var(--fg-body);
+      font-family: var(--font-sans);
+      font-feature-settings: var(--ff-sans);
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+
+    .card {
+      width: 1200px;
+      height: 630px;
+      box-sizing: border-box;
+      padding: 64px 80px 56px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 32px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 18px;
+      font-size: 28px;
+      letter-spacing: 0;
+      color: var(--fg-secondary);
+      line-height: 1.0;
+    }
+    .brand__domain {
+      font-family: var(--font-mono);
+      font-feature-settings: var(--ff-mono);
+      color: var(--fg-heading);
+      font-weight: 500;
+    }
+    .brand__rule {
+      flex: 0 0 32px;
+      height: 1px;
+      background: var(--border);
+    }
+    .brand__tag { color: var(--fg-muted); font-weight: 400; }
+
+    /* Manifesto. Three telegraphic statements, each a single declarative
+       clause governed by an RFC 2119 keyword. No glosses, no em-dashes —
+       the lines stand on their own. Display weight carries the
+       fingerprint at thumbnail scale.
+       Verb weight is 500; keyword weight is 700. The 200-weight delta
+       lets the keyword pop without breaking the trio's reading rhythm.
+       Manifesto sits near the footer (align-self: end) rather than
+       dead-center: more air above, more confident vertical posture. */
+    .manifesto {
+      align-self: end;
+      font-size: 60px;
+      line-height: 1.18;
+      font-weight: 500;
+      letter-spacing: -0.018em;
+      color: var(--fg-heading);
+    }
+    .manifesto p { margin: 0 0 12px; }
+    .manifesto p:last-child { margin-bottom: 0; }
+    .manifesto .kw {
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-right: 0.32em;
+    }
+    .manifesto .kw.must   { color: var(--must); }
+    .manifesto .kw.should { color: var(--should); }
+    .manifesto .kw.may    { color: var(--may); }
+
+    .foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-family: var(--font-mono);
+      font-feature-settings: var(--ff-mono), var(--ff-tabular);
+      font-size: 18px;
+      color: var(--fg-muted);
+    }
+    .foot__cite { color: var(--fg-secondary); }
+    .foot__version { letter-spacing: 0.02em; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <span class="brand__domain">anc.dev</span>
+      <span class="brand__rule" aria-hidden="true"></span>
+      <span class="brand__tag">the agent-native CLI standard</span>
+    </div>
+
+    <div class="manifesto">
+      <p><span class="kw must">MUST</span>run without prompting.</p>
+      <p><span class="kw should">SHOULD</span>speak machine-first.</p>
+      <p><span class="kw may">MAY</span>decorate when a TTY is open.</p>
+    </div>
+
+    <div class="foot">
+      <span class="foot__cite">seven principles for CLIs that agents can operate</span>
+      <span class="foot__version" data-version>v0.1.0</span>
+    </div>
+  </div>
+</body>
+</html>
