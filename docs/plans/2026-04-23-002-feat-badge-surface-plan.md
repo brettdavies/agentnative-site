@@ -4,14 +4,25 @@ type: feat
 status: completed
 date: 2026-04-23
 last-revised: 2026-04-30
-shipped_in: site-side units U3–U7 shipped on `feat/badge-surface` (merged 2026-04-29 ahead of Show HN launch). Live at /badge and /badge/<tool>.svg. Surface #5 (CLI post-pass hint) shipped 2026-04-30 in `agentnative-cli` PR #36 with scorecard schema bumped 0.4 → 0.5 (new `badge` block).
+shipped_in: site-side units U3–U7 merged to `dev` 2026-04-29 (PRs #49 + #50 + #51). Live on staging at /badge + /badge/<tool>.svg; NOT YET on `main`/anc.dev — see CORRECTION block below. Surface #5 (CLI post-pass hint + schema 0.5 `badge` block) DID ship in `agentnative-cli` PR #36 (independent repo).
 parents:
   - docs/plans/2026-04-28-001-feat-show-hn-launch-readiness-plan.md
 ---
 
+> **CORRECTION (2026-04-30 PM PT) — DEV/STAGING-LIVE, NOT PRODUCTION-LIVE.** Site-side units U3–U7 (PRs #49, #50, #51)
+> landed on `dev` and the badge surface IS live on the staging Worker. CLI Surface #5 (PR #36 with schema 0.5 `badge`
+> block) DID ship in the CLI repo — that part is genuinely complete. However, the `dev → main` release that would have
+> promoted the site-side badge surface to anc.dev was never cut — Show HN launch was HELD; see
+> [`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`](2026-04-28-001-feat-show-hn-launch-readiness-plan.md)
+> § CORRECTION. The "Post-launch update" block below incorrectly cites `https://anc.dev/badge` and
+> `https://anc.dev/badge/<tool>.svg` as `200 OK`; both return 404 today (anc.dev still serves the v0 scaffold from
+> 2026-04-14). The same surfaces ARE 200 OK on the staging Worker — read every "production" / `anc.dev` claim below
+> as "staging" / `agentnative-site-staging.<subdomain>.workers.dev` until the dev → main release lands.
+
 # feat: Badge surface for agent-native-standard conformance
 
-> **Post-launch update (2026-04-30):** All site-side units (U3–U7) shipped and live in production:
+> **[HISTORICAL — see CORRECTION above; production claims below are wrong.] Post-launch update (2026-04-30):** All
+> site-side units (U3–U7) shipped and live in production:
 >
 > - `https://anc.dev/badge` — convention page (200 OK)
 > - `https://anc.dev/badge/<tool>.svg` — per-tool live-score SVGs (200 OK; 96 SVGs emitted by current build)

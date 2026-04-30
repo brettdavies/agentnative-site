@@ -3,16 +3,31 @@ title: "feat: Site /install + /install.json endpoints + producer cutover (Units 
 type: feat
 status: completed
 date: 2026-04-27
-shipped_in: PRs #36 + #37 + #38 + #39 (Units 2–5; merged 2026-04-28)
+shipped_in: PRs #36 + #37 + #38 + #39 (Units 2–5) merged to `dev` 2026-04-28. NOT YET on `main`/anc.dev — see CORRECTION block below.
 superseded_by: ./2026-04-28-003-feat-split-install-skill-endpoints-plan.md (PR #44 split /install into /install (CLI) + /skill (skill bundle); /install.json retired in favor of /skill.json)
 master_plan: ./2026-04-24-001-feat-skill-distribution-endpoint-plan.md
 related_session: ../../../agentnative-skill/docs/plans/2026-04-27-001-bootstrap-agentnative-skill-plan.md
 origin: master plan Units 2–5, executed in dedicated session
 ---
 
+> **CORRECTION (2026-04-30 PM PT) — DEV-MERGED, NOT PRODUCTION-SHIPPED.** PRs #36–#39 landed on `dev` as claimed, and
+> the skill repo IS public (skill v0.2.0 tag `054c249` published 2026-04-29 22:16 UTC). However, the `dev → main`
+> release that would have promoted this work to anc.dev was never cut — Show HN launch was HELD; see
+> [`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`](2026-04-28-001-feat-show-hn-launch-readiness-plan.md)
+> § CORRECTION. The "Post-shipment update" block below is wrong on two specific claims:
+>
+> 1. "The cutover ops … all completed during the launch sequence" — FALSE. Cache-purge + skill-availability seed run
+>    never executed because the launch was held. They are pending the next dev → main release cut.
+> 2. "current production: `https://anc.dev/skill.json` returns 200" — FALSE. anc.dev still serves the v0 scaffold from
+>    2026-04-14; `/skill.json` is reachable on staging only.
+>
+> The architecture rationale + the dev/staging-side surface split (claims about `/skill` replacing `/install` content)
+> are accurate as descriptions of what's on `dev` and the staging Worker.
+
 # feat: Site /install + /install.json endpoints + producer cutover
 
-> **Post-shipment update (2026-04-30):** Units 2–5 shipped as written through PRs #36–#39. The cutover ops the
+> **[HISTORICAL — see CORRECTION above; cutover ops + production claims are wrong.] Post-shipment update (2026-04-30):**
+> Units 2–5 shipped as written through PRs #36–#39. The cutover ops the
 > "execution_status" line referenced (release/* → main, cache-purge, skill-availability seed run) all completed during
 > the launch sequence (`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`). The skill repo is PUBLIC.
 >

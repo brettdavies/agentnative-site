@@ -4,14 +4,30 @@ type: feat
 status: completed
 date: 2026-04-24
 deepened: 2026-04-27
-shipped_in: Units 1–5 via PRs #36 + #37 + #38 + #39 (merged to dev 2026-04-28); cutover ops completed during the launch sequence (`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`).
+shipped_in: Units 1–5 via PRs #36 + #37 + #38 + #39 merged to `dev` 2026-04-28. Skill-repo public-flip + skill v0.2.0 tag DID ship; site-side cutover ops + dev → main release did NOT — see CORRECTION block below.
 superseded_by: ./2026-04-28-003-feat-split-install-skill-endpoints-plan.md (PR #44 split /install into /install (CLI) + /skill (skill bundle); /install.json retired in favor of /skill.json)
 origin: .context/compound-engineering/todos/001-ready-p2-serve-anc-skill-from-endpoint.md
 ---
 
+> **CORRECTION (2026-04-30 PM PT) — DEV-MERGED, NOT PRODUCTION-SHIPPED.** Units 1–5 landed on `dev` as claimed and the
+> `agentnative-skill` producer repo IS public (skill v0.2.0 tag `054c249` published 2026-04-29 22:16 UTC — that part
+> shipped clean). However, the `dev → main` release that would have carried this work to anc.dev was never cut — Show
+> HN launch was HELD; see
+> [`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`](2026-04-28-001-feat-show-hn-launch-readiness-plan.md)
+> § CORRECTION. The frontmatter line "cutover ops completed during the launch sequence" and the "Post-shipment update"
+> block below are WRONG on the site-side cutover ops:
+>
+> - Skill-repo public-flip ✅ DID happen (independently, on the skill repo).
+> - Skill v0.2.0 tag + GitHub Release ✅ DID happen (`054c249`, 2026-04-29 22:16 UTC).
+> - Site `dev → main` release ❌ never cut. anc.dev still serves the v0 scaffold from 2026-04-14.
+> - Cloudflare cache-purge of `/skill*` ❌ never ran (no production deploy to purge).
+> - `skill-availability.yml` seed run ❌ never executed manually.
+> - Production curl smoke against `https://anc.dev/skill.json` ❌ would return 404 today (path doesn't exist on `main`).
+
 # feat: Publish agent-native-cli skill via dedicated repo and anc.dev install endpoints
 
-> **Post-shipment update (2026-04-30):** Master plan + Units 1–5 shipped through PRs #36–#39 in the 2026-04-28 window.
+> **[HISTORICAL — see CORRECTION above; site-side cutover claims are wrong.] Post-shipment update (2026-04-30):**
+> Master plan + Units 1–5 shipped through PRs #36–#39 in the 2026-04-28 window.
 > The cutover ops the original `execution_status_2026-04-28` line referenced (skill-repo public-flip, dev → main
 > release, cache-purge, skill-availability seed run) all completed during the launch sequence. The `agentnative-skill`
 > producer repo is `PUBLIC`.
