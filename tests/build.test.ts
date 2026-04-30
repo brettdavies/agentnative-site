@@ -578,6 +578,63 @@ describe('loadScoredTools — scorecard-driven discovery + registry editorial jo
   });
 });
 
+describe('loadScoredTools — warnings shape (U8 PR-comment annotation)', () => {
+  test('warnings is JSON-stringifiable with stable keys (clean corpus)', async () => {
+    const dir = join(tmpdir(), `corpus-clean-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV04Scorecard()));
+    try {
+      const registry = [
+        {
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+        },
+      ];
+      const { warnings } = await loadScoredTools(dir, registry);
+      // The CI parser does: jq -r '.scorecardOrphans // [] | length' — so the
+      // shape contract is "always-present arrays with stable key names."
+      const round = JSON.parse(JSON.stringify(warnings));
+      expect(round.scorecardOrphans).toEqual([]);
+      expect(round.registryOrphans).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("warnings carries each side's offending entry by name (drift PR)", async () => {
+    const dir = join(tmpdir(), `corpus-drift-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'orphan-v1.0.0.json'),
+      JSON.stringify(makeV04Scorecard({ tool: { name: 'orphan', binary: 'orphan', version: '1.0.0' } })),
+    );
+    try {
+      const registry = [
+        {
+          name: 'lonely',
+          repo: 'a/b',
+          binary: 'lonely',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+        },
+      ];
+      const { warnings } = await loadScoredTools(dir, registry);
+      // Both sides carry one entry → CI emits a comment naming both.
+      expect(warnings.scorecardOrphans).toEqual(['orphan-v1.0.0.json']);
+      expect(warnings.registryOrphans).toEqual(['lonely']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('compareVersions', () => {
   test('orders simple SemVer triples', () => {
     expect(compareVersions('0.4', '0.3')).toBeGreaterThan(0);
