@@ -4,7 +4,7 @@ type: feat
 status: completed
 date: 2026-04-23
 last-revised: 2026-04-30
-shipped_in: site-side units U3–U7 shipped on `feat/badge-surface` (merged 2026-04-29 ahead of Show HN launch). Live at /badge and /badge/<tool>.svg.
+shipped_in: site-side units U3–U7 shipped on `feat/badge-surface` (merged 2026-04-29 ahead of Show HN launch). Live at /badge and /badge/<tool>.svg. Surface #5 (CLI post-pass hint) shipped 2026-04-30 in `agentnative-cli` PR #36 with scorecard schema bumped 0.4 → 0.5 (new `badge` block).
 parents:
   - docs/plans/2026-04-28-001-feat-show-hn-launch-readiness-plan.md
 ---
@@ -18,17 +18,29 @@ parents:
 > - Per-tool scorecard pages render the embed snippet above the eligibility floor and the gap-hint below
 > - Leaderboard callout at `/scorecards` cites the eligible-vs-total count and links to `/badge`
 >
+> **Surface #5 update (2026-04-30):** CLI post-pass hint shipped in `agentnative-cli` PR
+> [#36](https://github.com/brettdavies/agentnative-cli/pull/36) on `feat/badge-embed-hint`. After a passing
+> `anc check .`, the CLI prints the embed snippet for the running tool. Scorecard `schema_version` bumped `0.4` → `0.5`
+> with a new top-level `badge` block (`eligible`, `score_pct`, `embed_markdown`, `scorecard_url`, `badge_url`,
+> `convention_url`). Eligibility floor (`80`) and base URL (`https://anc.dev`) are duplicated as named consts in the
+> CLI (`BADGE_ELIGIBILITY_FLOOR_PCT`, `BADGE_BASE_URL` in `src/scorecard/mod.rs`); authority remains `content/badge.md`
+> in this repo until the spec convention merges off `agentnative-spec` `feat/badge-claim-convention`.
+>
+> **Site renderer simplification opportunity (post-PR #36 follow-up):** When ingesting a `schema_version >= 0.5`
+> scorecard, `src/build/scorecards-render.mjs` can read `scorecard.badge.embed_markdown` directly instead of calling
+> `buildEmbedMarkdown(tool.name)`, and `scorecard.badge.eligible` instead of `score >= BADGE_FLOOR`. Pre-`0.5`
+> scorecards still need the local computation as a fallback. Not a blocker — it's an additive simplification, no
+> functional change. Filed as a follow-up; pick up when next iterating on `scorecards-render.mjs`.
+>
 > **Out-of-repo work still pending** (intentional — separate repos, separate lifecycles):
 >
 > - **U1 + U2 (spec-side surface #4):** `agentnative-spec/docs/badge.md` and `README.md` cross-references are
 >   not yet created (`gh api repos/brettdavies/agentnative-spec/contents/docs/badge.md` → 404 as of 2026-04-30).
 >   The site `/badge` page is the canonical author-facing surface for now.
-> - **Surface #5 (CLI hint after passing `anc check`):** tracked as `agentnative-cli` todo
->   `017-pending-p1-agent-native-badge-hint-on-passing-check.md`. Will surface in a future CLI release.
 >
-> Status flipped to `completed` because every unit owned by this repo (U3–U7) is shipped. The two pending pieces
-> (U1, U2 in agentnative-spec; surface #5 in agentnative-cli) are tracked in their respective repos' planning
-> surfaces, not here.
+> Status flipped to `completed` because every unit owned by this repo (U3–U7) is shipped, and surface #5 (CLI) shipped
+> on 2026-04-30. The remaining pending piece (U1, U2 in agentnative-spec) is tracked in that repo's planning surfaces,
+> not here.
 
 ---
 
@@ -115,13 +127,13 @@ Item 1 is the spec-side surface (#4 below). Items 2 and 3 are site-side surfaces
 The badge surface is implemented across five surfaces, four of which are launch-coupled. Spec owns surface 4; site owns
 surfaces 1, 2, and 3; CLI owns surface 5.
 
-| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                          |
-| --- | ------------------------------------- | ------------------------------------- | -------------------- | ------------------------------- |
-| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29            |
-| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29            |
-| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29            |
-| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | deferred — `/badge` page covers |
-| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | post-launch                     |
+| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                                        |
+| --- | ------------------------------------- | ------------------------------------- | -------------------- | --------------------------------------------- |
+| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29                          |
+| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29                          |
+| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29                          |
+| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | deferred — `/badge` page covers               |
+| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5) |
 
 > Site-side units U3–U7 (added during the 2026-04-29 implementation) cover surfaces 1–3 plus the build-time SVG render
 > (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 remain in this plan as
@@ -129,10 +141,9 @@ surfaces 1, 2, and 3; CLI owns surface 5.
 > a `docs/badge.md` mirror once the launch wave settles.
 
 This plan tracks U1+U2 (surface 4) explicitly; surfaces 1–3 are site-owned and tracked by additional units (or a
-separate site-side companion plan, depending on how the work is sliced when the launch-eve PR pair is cut). Surface 5 is
-filed at
-`agentnative-cli/.context/compound-engineering/todos/017-pending-p1-agent-native-badge-hint-on-passing-check.md`
-(local-only per project convention; not committed).
+separate site-side companion plan, depending on how the work is sliced when the launch-eve PR pair is cut). Surface 5
+shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cli/pull/36); todo flipped to
+`017-completed-p1-agent-native-badge-hint-on-passing-check.md` (local-only per project convention; not committed).
 
 ## Scope Boundaries
 
