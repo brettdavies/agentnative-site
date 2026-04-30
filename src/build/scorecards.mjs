@@ -46,6 +46,19 @@ export async function loadRegistry(registryPath) {
     throw new Error('registry.yaml: expected top-level "tools" array');
   }
 
+  // Binary-name collision guard (U7 redirects): for tools where binary !==
+  // name, the binary slug must not appear as ANY other tool's `name`.
+  // Without this, a future registry addition `name: rg, binary: rg` would
+  // silently overwrite the `/score/rg` redirect page that ripgrep emits, or
+  // vice versa. Build the binary set first so we can detect collisions in
+  // either direction during the per-entry validation loop below.
+  const binaryRedirectSlugs = new Set();
+  for (const t of tools) {
+    if (t.binary && t.name && t.binary !== t.name) {
+      binaryRedirectSlugs.add(t.binary);
+    }
+  }
+
   const seen = new Set();
   for (const t of tools) {
     if (!t.name || typeof t.name !== 'string') {
@@ -61,6 +74,13 @@ export async function loadRegistry(registryPath) {
       throw new Error(`registry.yaml: duplicate name "${t.name}"`);
     }
     seen.add(t.name);
+    if (binaryRedirectSlugs.has(t.name)) {
+      throw new Error(
+        `registry.yaml: name "${t.name}" collides with another tool's binary slug. ` +
+          `The /score/${t.name} URL would be ambiguous between the canonical page and the binary-name redirect. ` +
+          `Rename one of the entries.`,
+      );
+    }
 
     for (const field of ['binary', 'language', 'tier', 'creator', 'description']) {
       if (!t[field]) {
@@ -86,31 +106,11 @@ export async function loadRegistry(registryPath) {
   return tools;
 }
 
-/**
- * Construct the scorecard filename for a tool when registry pins a version.
- *
- * Convention (documented in registry.yaml header):
- *   Behavioral + project: {name}-v{version}.json
- *   Source checks (future): {name}-src-{YYYYMMDD}-{branch}-{commit7}.json
- *
- * For tools without a `version` field, the loader falls back to auto-discovery
- * (see {@link loadScorecards}) — finding the highest-versioned scorecard on
- * disk for that tool's name. This keeps the registry the inclusion source of
- * truth without requiring a version pin per entry.
- *
- * @param {object} tool — registry entry
- * @returns {string | null}
- */
-export function scorecardFilename(tool) {
-  if (!tool.version) return null;
-  return `${tool.name}-v${tool.version}.json`;
-}
-
 // Compares two SemVer-shaped version strings (`X.Y` or `X.Y.Z`, optionally
 // with a numeric or `pre`/`rc.N`-style suffix) for sorting. Returns >0 if
 // `a > b`, <0 if `a < b`, 0 if equal. Falls back to lexical compare for
 // anything not recognizable as a numeric tuple.
-function compareVersions(a, b) {
+export function compareVersions(a, b) {
   const parse = (v) =>
     v.split('.').map((seg) => {
       const n = Number.parseInt(seg, 10);
@@ -153,59 +153,196 @@ function indexScorecardsByName(filenames) {
 }
 
 /**
- * For each registry entry, locate and read its scorecard.
+ * Discover scorecards on disk and join each to its registry editorial entry.
  *
- * Resolution order:
- *   1. If `tool.version` is set in the registry, use the exact filename
- *      `{name}-v{version}.json`. Mark unscored if that file is missing —
- *      a missing pinned file is a data inconsistency that should surface.
- *   2. Otherwise auto-discover: pick the highest-versioned `{name}-v*.json`
- *      file on disk. The resolved version is returned alongside the
- *      scorecard so the per-tool page can display it without a registry edit.
+ * Iteration is **scorecard-driven** (post-U3 inversion): the build reads
+ * `<name>-v*.json` from the scorecards/ directory, picks the highest version
+ * per slug, and joins to `registry.tools[name=slug]` for editorial fields
+ * (tier, language, creator, description, install, repo/url).
+ *
+ * Both directions of join failure surface as **warnings**, not errors:
+ *
+ *   - **scorecardOrphans** — a `<name>-v*.json` file whose slug has no
+ *     matching registry entry. Excluded from the leaderboard. Supports
+ *     rename/retire flows where the scorecard arrives before (or after)
+ *     the editorial PR.
+ *   - **registryOrphans** — a registry entry with no scorecard for its
+ *     `name` on disk. Excluded from the leaderboard. Supports
+ *     editorial-PR-first contribution flow.
+ *
+ * The orchestrator logs both lists; CI surfaces them as a PR comment (U8).
+ * R5(b)'s structural invariant — "every scorecard's filename slug must
+ * match a registry entry" — is intentionally NOT enforced here; it lives
+ * in `runScorecardInvariants()`. Splitting the contracts lets a contributor
+ * land a scorecard PR + editorial PR in either order without the build
+ * blowing up mid-merge.
  *
  * @param {string} scorecardsDir — absolute path to scorecards/
  * @param {Array<object>} registry — from loadRegistry()
- * @returns {Promise<Array<{ tool: object, scorecard: object | null, version: string | null }>>}
+ * @returns {Promise<{
+ *   tools: Array<{ tool: object, scorecard: object, version: string, metadata: object, scorecardFilename: string }>,
+ *   warnings: { scorecardOrphans: string[], registryOrphans: string[] }
+ * }>}
  */
-export async function loadScorecards(scorecardsDir, registry) {
+export async function loadScoredTools(scorecardsDir, registry) {
+  const registryByName = new Map(registry.map((t) => [t.name, t]));
   let files;
   try {
-    files = new Set(await readdir(scorecardsDir));
+    files = await readdir(scorecardsDir);
   } catch {
-    files = new Set();
+    files = [];
   }
 
+  // indexScorecardsByName already returns a name → [{filename, version}, …]
+  // map sorted highest-version-first per slug. The inverted iteration starts
+  // here: the scorecards on disk are the source of truth for inclusion.
   const byName = indexScorecardsByName(files);
 
-  const result = [];
-  for (const tool of registry) {
-    let chosenFile = null;
-    let chosenVersion = null;
+  const tools = [];
+  const scorecardOrphans = [];
 
-    if (tool.version) {
-      // Explicit pin — exact match only.
-      const filename = scorecardFilename(tool);
-      if (filename && files.has(filename)) {
-        chosenFile = filename;
-        chosenVersion = tool.version;
-      }
-    } else {
-      // Auto-discover the highest-versioned scorecard for this name.
-      const candidates = byName.get(tool.name);
-      if (candidates && candidates.length > 0) {
-        chosenFile = candidates[0].filename;
-        chosenVersion = candidates[0].version;
-      }
+  for (const [slug, candidates] of byName) {
+    if (candidates.length === 0) continue;
+    const { filename, version } = candidates[0];
+    const registryEntry = registryByName.get(slug);
+    if (!registryEntry) {
+      scorecardOrphans.push(filename);
+      continue;
     }
 
-    if (chosenFile) {
-      const raw = await readFile(join(scorecardsDir, chosenFile), 'utf8');
-      result.push({ tool, scorecard: JSON.parse(raw), version: chosenVersion });
-    } else {
-      result.push({ tool, scorecard: null, version: null });
+    const raw = await readFile(join(scorecardsDir, filename), 'utf8');
+    const scorecard = JSON.parse(raw);
+    // v0.4 metadata blocks. Each may be absent on grandfathered v0.3 / v1.1
+    // scorecards (anc-v0.1.3.json) — null is the documented sentinel for
+    // "this scorecard predates the metadata contract."
+    const metadata = {
+      tool: scorecard.tool ?? null,
+      anc: scorecard.anc ?? null,
+      run: scorecard.run ?? null,
+      target: scorecard.target ?? null,
+    };
+    tools.push({ tool: registryEntry, scorecard, version, metadata, scorecardFilename: filename });
+  }
+
+  const registryOrphans = [];
+  for (const entry of registry) {
+    if (!byName.has(entry.name)) {
+      registryOrphans.push(entry.name);
     }
   }
-  return result;
+
+  return { tools, warnings: { scorecardOrphans, registryOrphans } };
+}
+
+// -------------------------------------------------------------------
+// Build-time corpus invariants (schema 0.4)
+// -------------------------------------------------------------------
+
+// Path-based grandfather. anc-v0.1.3.json predates the v0.4 metadata
+// contract (it's at schema_version 1.1, an older anc-specific schema with no
+// tool/anc/run/target blocks). Keeping it on the leaderboard is a product
+// decision: anc must always render at the most-recent public version, and
+// regenerating against the current dev-branch CLI would produce a lower
+// version (anc-v0.1.0.json) than the released 0.1.3. The next CLI release
+// (v0.2.1+, post PR #34) replaces this file organically and the grandfather
+// drops out.
+export const GRANDFATHERED_SCORECARDS = new Set(['anc-v0.1.3.json']);
+
+const SCORECARD_FILENAME_RE = /^([a-z0-9-]+)-v([^/]+?)\.json$/;
+const SEMVER_TOKEN_RE = /[0-9]+\.[0-9]+(?:\.[0-9]+)?/;
+
+/**
+ * Run the v0.4 corpus invariants over every scorecard on disk. Throws on
+ * the first violation with the offending filename and the contract that
+ * failed. Designed to fail-fast in `bun run build` so CI catches drift
+ * before merge.
+ *
+ * Invariants:
+ *   (a) schema_version >= "0.4" (compareVersions floor)
+ *   (b) filename slug matches a registry entry (the editorial join)
+ *   (c) scorecard.tool.name === registry[joined].binary (the regen scored
+ *       the right binary; accommodates name ≠ binary tools where filename
+ *       slug = registry name but tool.name = registry binary)
+ *   (d) run.started_at parses as RFC 3339
+ *   (e) when tool.version contains a SemVer token, it must equal the
+ *       filename version (catches parser-asymmetry between the regen
+ *       script's version_extract and the CLI's --version probe)
+ *
+ * Grandfathered files (GRANDFATHERED_SCORECARDS) skip (c), (d), and (e) —
+ * they predate the v0.4 metadata blocks. (a) and (b) still apply: an
+ * orphan grandfather without a registry entry is a structural error
+ * regardless of schema vintage.
+ *
+ * @param {string} scorecardsDir — absolute path to scorecards/
+ * @param {Array<object>} registry — from loadRegistry()
+ */
+export async function runScorecardInvariants(scorecardsDir, registry) {
+  const registryByName = new Map(registry.map((t) => [t.name, t]));
+  let filenames;
+  try {
+    filenames = await readdir(scorecardsDir);
+  } catch {
+    filenames = [];
+  }
+
+  for (const filename of filenames) {
+    const m = filename.match(SCORECARD_FILENAME_RE);
+    if (!m) continue;
+    const [, slug, filenameVersion] = m;
+
+    const registryEntry = registryByName.get(slug);
+    if (!registryEntry) {
+      throw new Error(
+        `invariant: scorecard ${filename} has no matching registry entry (slug "${slug}" is not a registry.tools[].name).`,
+      );
+    }
+
+    const raw = await readFile(join(scorecardsDir, filename), 'utf8');
+    let sc;
+    try {
+      sc = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`invariant: scorecard ${filename} is not valid JSON: ${err.message}`);
+    }
+
+    const grandfathered = GRANDFATHERED_SCORECARDS.has(filename);
+
+    if (!grandfathered) {
+      if (typeof sc.schema_version !== 'string' || compareVersions(sc.schema_version, '0.4') < 0) {
+        throw new Error(
+          `invariant: scorecard ${filename} has schema_version "${sc.schema_version}" — below floor "0.4". ` +
+            `Regenerate with anc PR #34 or later.`,
+        );
+      }
+
+      const toolName = sc.tool?.name;
+      if (toolName !== registryEntry.binary) {
+        throw new Error(
+          `invariant: scorecard ${filename} tool.name "${toolName}" !== registry[${slug}].binary "${registryEntry.binary}". ` +
+            `The regen scored the wrong binary, or the registry's binary field drifted.`,
+        );
+      }
+
+      const startedAt = sc.run?.started_at;
+      if (typeof startedAt !== 'string' || Number.isNaN(new Date(startedAt).getTime())) {
+        throw new Error(
+          `invariant: scorecard ${filename} run.started_at "${startedAt}" is not a valid RFC 3339 timestamp.`,
+        );
+      }
+
+      const toolVersion = sc.tool?.version;
+      if (typeof toolVersion === 'string' && toolVersion.length > 0) {
+        const semver = toolVersion.match(SEMVER_TOKEN_RE);
+        if (semver && semver[0] !== filenameVersion) {
+          throw new Error(
+            `invariant: scorecard ${filename} tool.version "${toolVersion}" extracts SemVer "${semver[0]}" — ` +
+              `does not match filename version "${filenameVersion}". Parser-asymmetry between regen-script ` +
+              `version_extract and CLI internal probe; align both before re-regen.`,
+          );
+        }
+      }
+    }
+  }
 }
 
 // -------------------------------------------------------------------

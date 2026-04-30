@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "results": [
     {
       "id": "p3-help",
@@ -126,5 +126,28 @@
   "audience": null,
   "audience_reason": "suppressed",
   "audit_profile": "human-tui",
-  "spec_version": "0.2.0"
+  "spec_version": "0.3.0",
+  "tool": {
+    "name": "yazi",
+    "binary": "yazi",
+    "version": "Yazi 26.1.22 (Homebrew 2026-01-22)"
+  },
+  "anc": {
+    "version": "0.1.0",
+    "commit": "fff3f13"
+  },
+  "run": {
+    "invocation": "anc check --command yazi --audit-profile human-tui --output json",
+    "started_at": "2026-04-30T04:19:10.950992482Z",
+    "duration_ms": 41,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "yazi"
+  }
 }

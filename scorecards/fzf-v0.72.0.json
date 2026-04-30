@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "results": [
     {
       "id": "p3-help",
@@ -126,5 +126,28 @@
   "audience": null,
   "audience_reason": "suppressed",
   "audit_profile": "human-tui",
-  "spec_version": "0.2.0"
+  "spec_version": "0.3.0",
+  "tool": {
+    "name": "fzf",
+    "binary": "fzf",
+    "version": "0.72.0 (Homebrew)"
+  },
+  "anc": {
+    "version": "0.1.0",
+    "commit": "fff3f13"
+  },
+  "run": {
+    "invocation": "anc check --command fzf --audit-profile human-tui --output json",
+    "started_at": "2026-04-30T04:18:52.698936565Z",
+    "duration_ms": 41,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "fzf"
+  }
 }

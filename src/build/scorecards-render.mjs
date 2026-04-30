@@ -20,6 +20,61 @@ function groupToPrincipleNum(group) {
 // out downstream site renderers as pinned consumers of this exact string.
 const AUDIT_PROFILE_SUPPRESSION_PREFIX = 'suppressed by audit_profile: ';
 
+// SHA-shape allowlist for `anc.commit`. CLI v0.4 emits a 7-char abbreviation
+// from build.rs; the long-form 40-char SHA is also acceptable. The regex is
+// the security gate before interpolating into a GitHub commit URL — anything
+// outside the hex alphabet falls through to a plain version string with no
+// link, regardless of how the CLI emitted the field.
+const ANC_COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
+const ANC_REPO_URL = 'https://github.com/brettdavies/agentnative-cli';
+
+// Format `run.duration_ms` as a human-readable interval. Granularity matches
+// what's useful at a glance: sub-second runs in ms, multi-second runs in
+// tenths, multi-minute runs in `Xm Ys`.
+function formatDuration(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return null;
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${seconds}s`;
+}
+
+// Format an RFC 3339 timestamp as a calm UTC string for the per-tool page.
+// Returns null on unparseable input — the caller drops the row rather than
+// rendering a misleading "Invalid Date" placeholder.
+function formatStartedAt(rfc3339) {
+  if (typeof rfc3339 !== 'string') return null;
+  const d = new Date(rfc3339);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.toISOString().replace('T', ' ').slice(0, 19)} UTC`;
+}
+
+// Build an HTML fragment for the `Anc build` detail row: version + abbreviated
+// commit link when the SHA passes the allowlist, version-only otherwise.
+function renderAncBuildHtml(anc) {
+  if (!anc || typeof anc.version !== 'string') return null;
+  const versionHtml = escHtml(anc.version);
+  if (typeof anc.commit === 'string' && ANC_COMMIT_SHA_RE.test(anc.commit)) {
+    const abbrev = anc.commit.slice(0, 7);
+    // escHtml on the SHA defensively even after the regex check — same posture
+    // as the existing escHtml-everywhere convention in this module.
+    return `${versionHtml} <a class="anc-build__commit" href="${ANC_REPO_URL}/commit/${escHtml(anc.commit)}"><code>${escHtml(abbrev)}</code></a>`;
+  }
+  return versionHtml;
+}
+
+// Markdown twin of renderAncBuildHtml. No escHtml needed (markdown is the
+// authoring layer); the SHA regex is still the security gate.
+function renderAncBuildMarkdown(anc) {
+  if (!anc || typeof anc.version !== 'string') return null;
+  if (typeof anc.commit === 'string' && ANC_COMMIT_SHA_RE.test(anc.commit)) {
+    const abbrev = anc.commit.slice(0, 7);
+    return `${anc.version} ([${abbrev}](${ANC_REPO_URL}/commit/${anc.commit}))`;
+  }
+  return anc.version;
+}
+
 /**
  * Detect a Skip whose evidence indicates audit_profile suppression and extract
  * the category name. Returns `null` for organic Skips and non-Skip statuses.
@@ -72,17 +127,16 @@ function renderCheckRows(checks) {
 export function buildLeaderboardBody(leaderboard, methodology) {
   const tierBadge = (tier) => `<span class="tier-badge tier-badge--${escHtml(tier)}">${escHtml(tier)}</span>`;
 
+  // Post-U3 inversion: every leaderboard entry has a scorecard (registry
+  // entries without scorecards are excluded by loadScoredTools). The em-dash
+  // "—" / "—/7" cells the pre-inversion code carried for unscored rows are
+  // gone with the unscored row itself.
   const scoreCell = (entry) => {
-    if (!entry.scorecard) return '<td class="lb-score lb-score--none" data-sort="-1">—</td>';
     const pct = Math.round(entry.score * 100);
     return `<td class="lb-score" data-sort="${pct}">${pct}%</td>`;
   };
 
   const principleCell = (entry) => {
-    // Unscored entries get an em-dash, not "0/7" — which would falsely read
-    // as "failed all 7 principles." `data-sort="-1"` matches the score
-    // column's sort behavior so unscored rows cluster at the bottom.
-    if (!entry.scorecard) return '<td class="lb-principles lb-principles--none" data-sort="-1">—/7</td>';
     const ps = entry.principleScore;
     return `<td class="lb-principles" data-sort="${ps.met}">${ps.met}/${ps.total}</td>`;
   };
@@ -108,21 +162,23 @@ export function buildLeaderboardBody(leaderboard, methodology) {
     tierCounts[e.tool.tier] = (tierCounts[e.tool.tier] || 0) + 1;
   }
 
-  // Eligible-tool count for the badge callout. Counts only scored tools
-  // at or above BADGE_FLOOR — the same gate the per-tool scorecard pages
-  // use. Lets the callout cite a real number ("24 tools currently qualify")
-  // instead of a vague "tools that qualify."
-  const eligibleCount = leaderboard.filter((e) => e.scorecard && e.score >= BADGE_FLOOR).length;
+  // Eligible-tool count for the badge callout. Counts tools at or above
+  // BADGE_FLOOR — the same gate the per-tool scorecard pages use. Lets the
+  // callout cite a real number ("24 tools currently qualify") instead of a
+  // vague "tools that qualify." Post-U3 every leaderboard entry has a
+  // scorecard, so no null guard needed.
+  const eligibleCount = leaderboard.filter((e) => e.score >= BADGE_FLOOR).length;
   const floorPct = Math.round(BADGE_FLOOR * 100);
 
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
   <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
+  <p class="leaderboard-hero__meta">${leaderboard.length} audited tools in the corpus.</p>
 </section>
 
 <section class="leaderboard-controls" aria-label="Filters">
   <div class="tier-filters" role="group" aria-label="Filter by tier">
-    <button type="button" class="tier-filter tier-filter--active" data-tier="all">All (${leaderboard.length})</button>
+    <button type="button" class="tier-filter tier-filter--active" data-tier="all">All</button>
     <button type="button" class="tier-filter" data-tier="workhorse">Workhorse (${tierCounts.workhorse || 0})</button>
     <button type="button" class="tier-filter" data-tier="agent">Agent (${tierCounts.agent || 0})</button>
     <button type="button" class="tier-filter" data-tier="notable">Notable (${tierCounts.notable || 0})</button>
@@ -342,11 +398,14 @@ function renderBelowFloorHint(pct, hasIssues) {
  * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} HTML body
  */
-export function buildScorecardBody(tool, scorecard, topIssues, principleScore, score, resolvedVersion) {
+export function buildScorecardBody(tool, scorecard, topIssues, principleScore, score, resolvedVersion, metadata) {
   const pct = Math.round(score * 100);
-  // Prefer the version from the matched scorecard filename when present; fall
-  // back to the registry pin for legacy entries where version is set.
-  const version = resolvedVersion ?? tool.version ?? null;
+  // The filename's <version> segment is the canonical version anchor.
+  const version = resolvedVersion ?? null;
+  // metadata is { tool, anc, run, target } from loadScoredTools(). Each block
+  // may be null on grandfathered v0.3/v1.1 scorecards. The renderer
+  // gracefully omits any v0.4-only Details rows whose source data is null.
+  const meta = metadata ?? {};
 
   // Breadcrumb
   let html = `<nav class="scorecard-breadcrumb" aria-label="Breadcrumb">
@@ -365,13 +424,6 @@ export function buildScorecardBody(tool, scorecard, topIssues, principleScore, s
   </div>
 </header>
 `;
-
-  if (!scorecard) {
-    html += `<section class="scorecard-summary">
-  <p>This tool has not yet been scored. Run <code>anc check --command ${escHtml(tool.binary)}</code> locally to generate a scorecard.</p>
-</section>`;
-    return html;
-  }
 
   // Score summary
   html += `<section class="scorecard-summary">
@@ -467,13 +519,32 @@ ${renderCheckRows(bonusChecks)}
   html += `</section>
 `;
 
-  // Metadata
+  // Details — Tool-identity rows (Version, Audit date) first; run-context
+  // rows (Duration, Platform, Mode) middle; provenance (Anc build) last;
+  // Install closes. Every value runs through escHtml — the CLI captures
+  // tool.version, anc.{version,commit}, run.platform.{os,arch}, target.kind
+  // as free-form strings that could carry HTML special characters.
+  const detailRows = [`<dt>Version scored</dt><dd>${escHtml(version || '—')}</dd>`];
+  const auditDate = formatStartedAt(meta.run?.started_at);
+  if (auditDate) detailRows.push(`<dt>Audit date</dt><dd>${escHtml(auditDate)}</dd>`);
+  const duration = formatDuration(meta.run?.duration_ms);
+  if (duration) detailRows.push(`<dt>Duration</dt><dd>${escHtml(duration)}</dd>`);
+  if (meta.run?.platform?.os && meta.run?.platform?.arch) {
+    detailRows.push(
+      `<dt>Platform</dt><dd><code>${escHtml(meta.run.platform.os)}/${escHtml(meta.run.platform.arch)}</code></dd>`,
+    );
+  }
+  if (meta.target?.kind) {
+    detailRows.push(`<dt>Mode</dt><dd>${escHtml(meta.target.kind)}</dd>`);
+  }
+  const ancBuild = renderAncBuildHtml(meta.anc);
+  if (ancBuild) detailRows.push(`<dt>Anc build</dt><dd>${ancBuild}</dd>`);
+  detailRows.push(`<dt>Install</dt><dd><code>${escHtml(tool.install || '—')}</code></dd>`);
+
   html += `<section class="scorecard-meta">
   <h2>Details</h2>
   <dl class="meta-list">
-    <dt>Version scored</dt><dd>${escHtml(version || '—')}</dd>
-    <dt>Audit date</dt><dd>${escHtml(tool.scored_at || '—')}</dd>
-    <dt>Install</dt><dd><code>${escHtml(tool.install || '—')}</code></dd>
+    ${detailRows.join('\n    ')}
   </dl>
 </section>
 `;
@@ -484,11 +555,19 @@ ${renderCheckRows(bonusChecks)}
   // reproduce always).
   html += score >= BADGE_FLOOR ? renderEligibleEmbed(tool, pct) : renderBelowFloorHint(pct, topIssues.length > 0);
 
-  // CTA — reproduce THIS scorecard locally. Includes --audit-profile when
-  // the tool was scored under one, so the reproduction matches the
-  // committed scorecard's suppression set exactly.
-  const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
-  const reproCommand = `anc check --command ${escHtml(tool.binary)}${profileFlag}`;
+  // CTA — reproduce THIS scorecard locally. For command-mode v0.4 scorecards,
+  // render `run.invocation` verbatim — it's the literal argv that produced
+  // this scorecard, so reproducing it is byte-exact rather than synthesized.
+  // For project-mode runs (target.path may carry local filesystem layout) and
+  // grandfathered scorecards (no run.invocation), fall back to the synthesized
+  // form. escHtml is mandatory: the invocation contains user-controlled argv.
+  let reproCommand;
+  if (meta.target?.kind === 'command' && typeof meta.run?.invocation === 'string') {
+    reproCommand = escHtml(meta.run.invocation);
+  } else {
+    const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
+    reproCommand = `anc check --command ${escHtml(tool.binary)}${profileFlag}`;
+  }
   const ctaText =
     topIssues.length === 0
       ? `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally:`
@@ -525,9 +604,10 @@ export function buildLeaderboardMarkdown(leaderboard) {
   ];
 
   for (const entry of leaderboard) {
-    const score = entry.scorecard ? `${Math.round(entry.score * 100)}%` : '—';
+    // Post-U3: every leaderboard entry has a scorecard.
+    const score = `${Math.round(entry.score * 100)}%`;
     const ps = entry.principleScore;
-    const principles = entry.scorecard ? `${ps.met}/${ps.total}` : '—/7';
+    const principles = `${ps.met}/${ps.total}`;
     lines.push(
       `| ${entry.rank} | [${entry.tool.name}](/score/${entry.tool.name}) | ${entry.tool.tier} | ${entry.tool.language} | ${score} | ${principles} |`,
     );
@@ -547,18 +627,13 @@ export function buildLeaderboardMarkdown(leaderboard) {
  * @param {number} score — pre-computed 0–1 score from computeScore()
  * @returns {string} markdown
  */
-export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, score, resolvedVersion) {
-  const version = resolvedVersion ?? tool.version ?? null;
+export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleScore, score, resolvedVersion, metadata) {
+  const version = resolvedVersion ?? null;
+  const meta = metadata ?? {};
   const lines = [`# ${tool.name}`];
   lines.push('');
   lines.push(tool.description);
   lines.push('');
-
-  if (!scorecard) {
-    lines.push('This tool has not yet been scored.');
-    lines.push('');
-    return lines.join('\n');
-  }
 
   const pct = Math.round(score * 100);
   const floorPct = Math.round(BADGE_FLOOR * 100);
@@ -597,7 +672,9 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   }
   lines.push('');
 
-  // Metadata
+  // Metadata — mirrors the HTML "Details" block for triple-emit parity.
+  // Each v0.4 row is gated on the underlying field being present, so
+  // grandfathered scorecards omit the run-context rows naturally.
   if (tool.repo) {
     lines.push(`**Repo:** [${tool.repo}](https://github.com/${tool.repo})`);
   } else if (tool.url) {
@@ -605,7 +682,38 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   }
   lines.push(`**Language:** ${tool.language}`);
   lines.push(`**Version scored:** ${version || '—'}`);
+  const auditDateMd = formatStartedAt(meta.run?.started_at);
+  if (auditDateMd) lines.push(`**Audit date:** ${auditDateMd}`);
+  const durationMd = formatDuration(meta.run?.duration_ms);
+  if (durationMd) lines.push(`**Duration:** ${durationMd}`);
+  if (meta.run?.platform?.os && meta.run?.platform?.arch) {
+    lines.push(`**Platform:** \`${meta.run.platform.os}/${meta.run.platform.arch}\``);
+  }
+  if (meta.target?.kind) {
+    lines.push(`**Mode:** ${meta.target.kind}`);
+  }
+  const ancBuildMd = renderAncBuildMarkdown(meta.anc);
+  if (ancBuildMd) lines.push(`**Anc build:** ${ancBuildMd}`);
   lines.push(`**Install:** \`${tool.install || '—'}\``);
+
+  // Reproduce CTA — same target.kind === 'command' gate as the HTML branch.
+  // Critical: this markdown is consumed by /llms-full.txt and content-
+  // negotiation `Accept: text/markdown` agents. A project-mode invocation
+  // could embed a local filesystem path, so fall back to the synthesized
+  // form unless we know the invocation is the safe canonical command shape.
+  lines.push('');
+  let reproMd;
+  if (meta.target?.kind === 'command' && typeof meta.run?.invocation === 'string') {
+    reproMd = meta.run.invocation;
+  } else {
+    const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
+    reproMd = `anc check --command ${tool.binary}${profileFlag}`;
+  }
+  lines.push('## Reproduce locally');
+  lines.push('');
+  lines.push('```');
+  lines.push(reproMd);
+  lines.push('```');
   lines.push('');
 
   return lines.join('\n');

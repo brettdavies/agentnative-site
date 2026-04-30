@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "results": [
     {
       "id": "p3-help",
@@ -125,5 +125,28 @@
   },
   "audience": "agent-optimized",
   "audit_profile": null,
-  "spec_version": "0.2.0"
+  "spec_version": "0.3.0",
+  "tool": {
+    "name": "delta",
+    "binary": "delta",
+    "version": "delta 0.19.2"
+  },
+  "anc": {
+    "version": "0.1.0",
+    "commit": "fff3f13"
+  },
+  "run": {
+    "invocation": "anc check --command delta --output json",
+    "started_at": "2026-04-30T04:18:54.805557647Z",
+    "duration_ms": 66,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "delta"
+  }
 }

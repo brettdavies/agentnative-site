@@ -19,17 +19,26 @@
 #                 supplementary homepage). Falls back to this when
 #                 repo is absent.
 #
-# Fields (scored tools only — omit for unscored):
-#   version     — version string scored against
-#   scored_at   — ISO 8601 date of last scoring run
+# Fields (regen-pipeline inputs — optional):
+#   audit_profile   — one of human-tui | file-traversal | posix-utility |
+#                     diagnostic-only. Passed to `anc check
+#                     --audit-profile <profile>` so the category-exempt
+#                     checks are suppressed in the scored output.
+#   version_extract — shell snippet that prints the bare version. Used by
+#                     scripts/regen-scorecards.sh when the default
+#                     `--version` regex doesn't yield a clean SemVer.
 #
 # Scorecard file naming convention:
 #
 #   Behavioral + project checks:
 #     scorecards/{name}-v{version}.json
 #     e.g. scorecards/gh-v2.74.0.json
-#     Keyed to a binary release. The build constructs this filename from
-#     the registry's name + version fields. No version → no scorecard.
+#     Keyed to a binary release. The filename's <version> segment is
+#     the canonical version anchor; the scorecard's tool.version is
+#     informational. Post-U3 the build discovers scorecards on disk
+#     and joins each to its registry entry by <name> for editorial
+#     fields — there is no longer a `version:` field on registry
+#     entries (filename owns it).
 #
 #   Source checks (future — not yet implemented):
 #     scorecards/{name}-src-{YYYYMMDD}-{branch}-{commit7}.json
@@ -37,6 +46,26 @@
 #     Keyed to repo state. CalVer date provides chronological ordering,
 #     branch disambiguates main from feature branches, 7-char SHA pins
 #     to exact commit. Displayed as a separate bonus column per R5.
+#
+# Contributor flow (post-U3):
+#
+#   The editorial PR (registry entry) and the scorecard PR (a real
+#   `<name>-v<version>.json` file) may land in either order. While only
+#   one side has landed, the build emits a stderr warning and excludes
+#   the orphaned side from the leaderboard:
+#
+#     - Registry entry without a scorecard → "registry orphan" warning;
+#       the entry is hidden from the leaderboard until the scorecard PR
+#       lands. This is the expected steady-state for a freshly-added
+#       tool whose binary hasn't been scored yet.
+#     - Scorecard without a registry entry → "scorecard orphan" warning;
+#       the scorecard is excluded from the leaderboard until the
+#       editorial PR adds the matching `<name>` entry.
+#
+#   CI surfaces both warning lists as a PR-comment annotation (U8) so
+#   reviewers see drift without grepping logs. The build still passes
+#   in either orphaned state — softening from a hard error to a warning
+#   decouples the two contribution flows.
 #
 # Tier counts: workhorse ~50, agent ~10, notable ~20.
 # Per-creator cap in notable: 3-4 tools max.
@@ -142,8 +171,6 @@ tools:
     creator: Andrew Gallant
     install: brew install ripgrep
     description: Recursively search directories for a regex pattern
-    version: "15.1.0"
-    scored_at: "2026-04-23"
 
   - name: fd
     repo: sharkdp/fd
@@ -153,8 +180,6 @@ tools:
     creator: David Peter
     install: brew install fd
     description: A simple, fast, and user-friendly alternative to find
-    version: "10.4.2"
-    scored_at: "2026-04-23"
     # Pre-staged for H6 Unit 0: regen will pass `--audit-profile file-traversal`,
     # suppressing checks the file-traversal exception category covers.
     audit_profile: file-traversal
@@ -189,8 +214,6 @@ tools:
     creator: Stephen Dolan
     install: brew install jq
     description: Command-line JSON processor
-    version: "1.8.1"
-    scored_at: "2026-04-23"
 
   - name: xsv
     repo: BurntSushi/xsv
@@ -210,8 +233,6 @@ tools:
     creator: David Peter
     install: brew install bat
     description: A cat clone with syntax highlighting and Git integration
-    version: "0.26.1"
-    scored_at: "2026-04-23"
 
   - name: eza
     repo: eza-community/eza
@@ -233,8 +254,6 @@ tools:
     creator: bootandy
     install: brew install dust
     description: A more intuitive version of du in Rust
-    version: "1.2.4"
-    scored_at: "2026-04-23"
 
   - name: procs
     repo: dalance/procs
@@ -354,8 +373,6 @@ tools:
     creator: GitHub
     install: brew install gh
     description: GitHub's official command-line tool
-    version: "2.92.0"
-    scored_at: "2026-04-28"
 
   - name: lazygit
     repo: jesseduffield/lazygit
@@ -365,8 +382,6 @@ tools:
     creator: Jesse Duffield
     install: brew install lazygit
     description: Simple terminal UI for git commands
-    version: "0.61.1"
-    scored_at: "2026-04-23"
     # Pre-staged for H6 Unit 0: TUI by design — regen passes `--audit-profile
     # human-tui`, suppressing the non-interactive (P1) and SIGPIPE (P6) checks.
     audit_profile: human-tui
@@ -795,8 +810,6 @@ tools:
     creator: Anthropic
     install: bun add -g @anthropic-ai/claude-code
     description: Anthropic's agentic coding tool for the terminal
-    version: "2.1.122"
-    scored_at: "2026-04-28"
 
   - name: codex
     repo: openai/codex
@@ -859,8 +872,6 @@ tools:
     creator: Simon Willison
     install: brew install llm
     description: Access large language models from the command-line
-    version: "0.31"
-    scored_at: "2026-04-28"
 
   - name: datasette
     repo: simonw/datasette
@@ -917,8 +928,6 @@ tools:
     creator: Brett Davies
     install: brew install brettdavies/tap/agentnative
     description: Check CLI tools against the agent-native standard
-    version: "0.1.3"
-    scored_at: "2026-04-23"
 
   - name: bird
     repo: brettdavies/bird
