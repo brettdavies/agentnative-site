@@ -3,10 +3,36 @@ title: "feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION +
 type: feat
 status: active
 date: 2026-04-23
+last-revised: 2026-04-30
 parents:
   - https://github.com/brettdavies/agentnative/blob/dev/docs/plans/2026-04-22-002-post-frontmatter-roadmap.md
 roadmap-item: 5 (spec-repo roadmap 002, item 4)
 ---
+
+> **Status update (2026-04-30):** Plan is still **active** — none of U1, U2, or U3 have shipped on the site side.
+> The Show HN launch (2026-04-30 09:00 PT) cleared without this script in place, confirming the work is not
+> launch-critical. Current state of affairs:
+>
+> - **Site stubs that this plan replaces are still in place:**
+>   - `src/build/util.mjs:91` exports `SPEC_VERSION = '0.3.0'` as a hardcoded constant. The inline comment
+>     explicitly references this plan as the eventual replacement.
+>   - The footer carries a separate stub (per the `project_spec_version_coupling` memory rule). Both should
+>     converge to a single build-time read from `src/data/spec/VERSION` once U1 ships.
+> - **Reference implementation now exists upstream:** `agentnative-cli` shipped its own sync-spec.sh in commit
+>   `fff3f13` ("chore(sync-spec): modernize — remote-first, drop SPEC_REF", PR #33). When this plan executes, the
+>   site script should mirror that remote-first shape rather than the original `SPEC_ROOT` env var design from
+>   2026-04-23 — the cli implementation has already de-risked the pattern.
+> - **Initial pin target moved:** R4 originally specified pinning the first vendored state against v0.2.0
+>   (commit `83bf0fd`). The spec repo is now at v0.3.0 (`gh api repos/brettdavies/agentnative/contents/VERSION`
+>   confirms). When U2 lands, pin against v0.3.0 (or whatever is the current tagged release at that moment) —
+>   the intent of R4 ("pin against a tagged release, not a transient SHA") is unchanged; only the specific tag
+>   moved as time passed.
+> - **No drift cost while the stub matches reality:** the hardcoded `'0.3.0'` happens to match upstream today.
+>   When the spec next bumps a minor and the badge label / `/badge` page need to cite the new version, that's
+>   the natural moment to pull this plan off the shelf — bumping the stub by hand will start to bite, and U1+U2
+>   become the cheap fix.
+>
+> No frontmatter `shipped_in` line because nothing shipped. Status stays `active` until U1+U2+U3 land.
 
 # feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
 
@@ -224,7 +250,7 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 - `git show "$SPEC_REF:VERSION" >src/data/spec/VERSION`
 - `git show "$SPEC_REF:CHANGELOG.md" >src/data/spec/CHANGELOG.md`
 - Enumerate principle files at the ref via `git -C "$SPEC_ROOT" ls-tree --name-only "$SPEC_REF" principles/`, then `git
-    show "$SPEC_REF:<path>" >src/data/spec/principles/<basename>` per match.
+  show "$SPEC_REF:<path>" >src/data/spec/principles/<basename>` per match.
 - `mkdir -p src/data/spec/principles` before extraction so first-run works.
 - `set -euo pipefail`, SCRIPT_DIR + SITE_ROOT resolution per local convention.
 - `chmod +x scripts/sync-spec.sh` after creation.

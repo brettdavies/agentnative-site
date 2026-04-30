@@ -1,12 +1,36 @@
 ---
 title: "feat: Publish agent-native-cli skill via dedicated repo and anc.dev install endpoints"
-execution_status_2026-04-28: "Units 1–5 implementation shipped (PRs #36 + #37 + #38 + #39 to dev). Cutover ops pending: skill-repo public-flip, dev → main release, cache-purge, skill-availability seed run. Site staging deploy is live and serves /install + /install.json correctly. See site execution plan 2026-04-27-001 for the cutover sequence."
 type: feat
-status: active
+status: completed
 date: 2026-04-24
 deepened: 2026-04-27
+shipped_in: Units 1–5 via PRs #36 + #37 + #38 + #39 (merged to dev 2026-04-28); cutover ops completed during the launch sequence (`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`).
+superseded_by: ./2026-04-28-003-feat-split-install-skill-endpoints-plan.md (PR #44 split /install into /install (CLI) + /skill (skill bundle); /install.json retired in favor of /skill.json)
 origin: .context/compound-engineering/todos/001-ready-p2-serve-anc-skill-from-endpoint.md
 ---
+
+> **Post-shipment update (2026-04-30):** Master plan + Units 1–5 shipped through PRs #36–#39 in the 2026-04-28 window.
+> The cutover ops the original `execution_status_2026-04-28` line referenced (skill-repo public-flip, dev → main
+> release, cache-purge, skill-availability seed run) all completed during the launch sequence. The `agentnative-skill`
+> producer repo is `PUBLIC`.
+>
+> **What changed after shipping:** `2026-04-28-003-feat-split-install-skill-endpoints-plan.md` (merged as PR #44)
+> split the original combined `/install` page into two surfaces:
+>
+> - `/install` is now the CLI install page for `anc` itself (`brew install brettdavies/tap/agentnative` etc.)
+> - `/skill` is the skill-bundle install page that replaced this plan's original `/install` content
+> - The canonical machine manifest moved from `/install.json` to `/skill.json` (current production:
+>   `https://anc.dev/skill.json` returns 200 with `application/json`; `https://anc.dev/install.json` is no longer
+>   served — the URL was retired, not redirected)
+>
+> The release runbook in `RELEASES.md`, the `skill-availability.yml` synthetic probe, and the e2e test suite were all
+> updated to track the new paths during PR #44. The architecture rationale this plan documents (machine-vs-human
+> surface split, JSON-extension Worker headers, JSON-HTML byte-equivalence guarantee, single-source-of-truth manifest,
+> commit-pinned advisory `source.commit`) is unchanged — only the URLs and filenames moved.
+>
+> Status flipped to `completed` and `superseded_by` records the follow-up split. The execution-status frontmatter line
+> from 2026-04-28 was removed because every claim it made is either now true (Units shipped, cutover done) or
+> obsoleted by PR #44.
 
 # feat: Publish agent-native-cli skill via dedicated repo and anc.dev install endpoints
 

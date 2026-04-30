@@ -1,8 +1,9 @@
 ---
 title: "feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join"
 type: feat
-status: active
+status: completed
 date: 2026-04-29
+shipped_in: PR #52 (merged 2026-04-30)
 ---
 
 # feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join

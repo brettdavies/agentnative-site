@@ -1,13 +1,28 @@
 ---
 title: "feat: Site /install + /install.json endpoints + producer cutover (Units 2–5 of skill-distribution master plan)"
 type: feat
-status: active
+status: completed
 date: 2026-04-27
-execution_status_2026-04-28: "Units 2–5 implementation SHIPPED to dev and live on staging via PRs #36 + #37 + #38 + #39. Site staging serves /install + /install.json + /install.md with correct headers. Cutover ops pending: release/* → main + cache-purge + skill-availability seed run. Skill repo flipped public mid-execution (precondition #3 obsoleted). Central tracker updated."
+shipped_in: PRs #36 + #37 + #38 + #39 (Units 2–5; merged 2026-04-28)
+superseded_by: ./2026-04-28-003-feat-split-install-skill-endpoints-plan.md (PR #44 split /install into /install (CLI) + /skill (skill bundle); /install.json retired in favor of /skill.json)
 master_plan: ./2026-04-24-001-feat-skill-distribution-endpoint-plan.md
 related_session: ../../../agentnative-skill/docs/plans/2026-04-27-001-bootstrap-agentnative-skill-plan.md
 origin: master plan Units 2–5, executed in dedicated session
 ---
+
+> **Post-shipment update (2026-04-30):** Units 2–5 shipped as written through PRs #36–#39. The cutover ops the
+> "execution_status" line referenced (release/* → main, cache-purge, skill-availability seed run) all completed during
+> the launch sequence (`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`). The skill repo is PUBLIC.
+>
+> **What changed after shipping:** `2026-04-28-003-feat-split-install-skill-endpoints-plan.md` (merged as PR #44) split
+> the original combined `/install` page into two surfaces: `/install` is now the CLI install page for `anc` itself, and
+> `/skill` is the skill-bundle install page that replaced this plan's original `/install` content. The canonical machine
+> manifest moved from `/install.json` to `/skill.json` (current production: `https://anc.dev/skill.json` returns 200;
+> `https://anc.dev/install.json` returns 404). The release runbook in `RELEASES.md`, the `skill-availability.yml`
+> probe, and the e2e test suite were all updated to track the new paths during PR #44.
+>
+> The architecture rationale this plan documents (machine-vs-human surface split, JSON-extension Worker headers,
+> JSON-HTML byte-equivalence guarantee, single-source-of-truth manifest) is unchanged — only the URLs moved.
 
 # feat: Site /install + /install.json endpoints + producer cutover
 

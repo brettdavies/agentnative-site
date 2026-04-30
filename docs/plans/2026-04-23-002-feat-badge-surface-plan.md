@@ -1,12 +1,32 @@
 ---
 title: "feat: Badge surface for agent-native-standard conformance"
 type: feat
-status: active
+status: completed
 date: 2026-04-23
-last-revised: 2026-04-29
+last-revised: 2026-04-30
+shipped_in: site-side units U3–U7 shipped on `feat/badge-surface` (merged 2026-04-29 ahead of Show HN launch). Live at /badge and /badge/<tool>.svg.
 parents:
   - docs/plans/2026-04-28-001-feat-show-hn-launch-readiness-plan.md
 ---
+
+> **Post-launch update (2026-04-30):** All site-side units (U3–U7) shipped and live in production:
+>
+> - `https://anc.dev/badge` — convention page (200 OK)
+> - `https://anc.dev/badge/<tool>.svg` — per-tool live-score SVGs (200 OK; 96 SVGs emitted by current build)
+> - Per-tool scorecard pages render the embed snippet above the eligibility floor and the gap-hint below
+> - Leaderboard callout at `/scorecards` cites the eligible-vs-total count and links to `/badge`
+>
+> **Out-of-repo work still pending** (intentional — separate repos, separate lifecycles):
+>
+> - **U1 + U2 (spec-side surface #4):** `agentnative-spec/docs/badge.md` and `README.md` cross-references are
+>   not yet created (`gh api repos/brettdavies/agentnative-spec/contents/docs/badge.md` → 404 as of 2026-04-30).
+>   The site `/badge` page is the canonical author-facing surface for now.
+> - **Surface #5 (CLI hint after passing `anc check`):** tracked as `agentnative-cli` todo
+>   `017-pending-p1-agent-native-badge-hint-on-passing-check.md`. Will surface in a future CLI release.
+>
+> Status flipped to `completed` because every unit owned by this repo (U3–U7) is shipped. The two pending pieces
+> (U1, U2 in agentnative-spec; surface #5 in agentnative-cli) are tracked in their respective repos' planning
+> surfaces, not here.
 
 # feat: Badge surface for agent-native-standard conformance
 
