@@ -9,6 +9,8 @@ parents:
 roadmap-item: 5 (spec-repo roadmap 002, item 4)
 ---
 
+# feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
+
 > **Implementation status (2026-04-30): UNSTARTED.** Audited dev branch and confirmed:
 >
 > - `scripts/sync-spec.sh` — does not exist
@@ -29,8 +31,6 @@ roadmap-item: 5 (spec-repo roadmap 002, item 4)
 >
 > Status stays `active` (the plan is still valid future work) rather than flipping to `completed` (nothing shipped) or
 > `deferred` (no explicit decision to defer). Touch this block when the plan is picked up.
-
-# feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
 
 ## Overview
 

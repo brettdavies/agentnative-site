@@ -9,6 +9,8 @@ parents:
   - docs/plans/2026-04-28-001-feat-show-hn-launch-readiness-plan.md
 ---
 
+# feat: Badge surface for agent-native-standard conformance
+
 > **Post-launch update (2026-04-30):** All site-side units (U3–U7) shipped and live in production:
 >
 > - `https://anc.dev/badge` — convention page (200 OK)
@@ -28,7 +30,7 @@ parents:
 > (U1, U2 in agentnative-spec; surface #5 in agentnative-cli) are tracked in their respective repos' planning
 > surfaces, not here.
 
-# feat: Badge surface for agent-native-standard conformance
+---
 
 > **Origin: filed 2026-04-23 in `agentnative-spec` as `docs/plans/2026-04-23-001-feat-badge-surface-plan.md`; moved to
 > `agentnative-site` on 2026-04-29 (same date as the launch-eve design pass) to consolidate ownership in the

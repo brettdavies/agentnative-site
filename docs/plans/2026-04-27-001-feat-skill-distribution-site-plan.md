@@ -10,6 +10,8 @@ related_session: ../../../agentnative-skill/docs/plans/2026-04-27-001-bootstrap-
 origin: master plan Units 2–5, executed in dedicated session
 ---
 
+# feat: Site /install + /install.json endpoints + producer cutover
+
 > **Post-shipment update (2026-04-30):** Units 2–5 shipped as written through PRs #36–#39. The cutover ops the
 > "execution_status" line referenced (release/* → main, cache-purge, skill-availability seed run) all completed during
 > the launch sequence (`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`). The skill repo is PUBLIC.
@@ -23,8 +25,6 @@ origin: master plan Units 2–5, executed in dedicated session
 >
 > The architecture rationale this plan documents (machine-vs-human surface split, JSON-extension Worker headers,
 > JSON-HTML byte-equivalence guarantee, single-source-of-truth manifest) is unchanged — only the URLs moved.
-
-# feat: Site /install + /install.json endpoints + producer cutover
 
 ## Session Context
 

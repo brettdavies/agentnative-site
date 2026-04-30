@@ -9,6 +9,8 @@ superseded_by: ./2026-04-28-003-feat-split-install-skill-endpoints-plan.md (PR #
 origin: .context/compound-engineering/todos/001-ready-p2-serve-anc-skill-from-endpoint.md
 ---
 
+# feat: Publish agent-native-cli skill via dedicated repo and anc.dev install endpoints
+
 > **Post-shipment update (2026-04-30):** Master plan + Units 1–5 shipped through PRs #36–#39 in the 2026-04-28 window.
 > The cutover ops the original `execution_status_2026-04-28` line referenced (skill-repo public-flip, dev → main
 > release, cache-purge, skill-availability seed run) all completed during the launch sequence. The `agentnative-skill`
@@ -31,8 +33,6 @@ origin: .context/compound-engineering/todos/001-ready-p2-serve-anc-skill-from-en
 > Status flipped to `completed` and `superseded_by` records the follow-up split. The execution-status frontmatter line
 > from 2026-04-28 was removed because every claim it made is either now true (Units shipped, cutover done) or
 > obsoleted by PR #44.
-
-# feat: Publish agent-native-cli skill via dedicated repo and anc.dev install endpoints
 
 ## Overview
 
