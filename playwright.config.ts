@@ -25,6 +25,10 @@ const BASE_URL = `http://localhost:${PORT}`;
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: /\.e2e\.ts$/,
+  // Failure artifacts (traces, screenshots, error-context) land under
+  // .context/test-results/ — gitignored, organized with the rest of the
+  // local-only ce-work scratch directory.
+  outputDir: './.context/test-results',
   timeout: 30_000,
   expect: { timeout: 5_000 },
   // Tests within a single spec file run in parallel; each test gets a
