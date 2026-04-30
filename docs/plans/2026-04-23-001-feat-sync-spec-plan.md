@@ -9,30 +9,26 @@ parents:
 roadmap-item: 5 (spec-repo roadmap 002, item 4)
 ---
 
-> **Status update (2026-04-30):** Plan is still **active** — none of U1, U2, or U3 have shipped on the site side.
-> The Show HN launch (2026-04-30 09:00 PT) cleared without this script in place, confirming the work is not
-> launch-critical. Current state of affairs:
+> **Implementation status (2026-04-30): UNSTARTED.** Audited dev branch and confirmed:
 >
-> - **Site stubs that this plan replaces are still in place:**
->   - `src/build/util.mjs:91` exports `SPEC_VERSION = '0.3.0'` as a hardcoded constant. The inline comment
->     explicitly references this plan as the eventual replacement.
->   - The footer carries a separate stub (per the `project_spec_version_coupling` memory rule). Both should
->     converge to a single build-time read from `src/data/spec/VERSION` once U1 ships.
-> - **Reference implementation now exists upstream:** `agentnative-cli` shipped its own sync-spec.sh in commit
->   `fff3f13` ("chore(sync-spec): modernize — remote-first, drop SPEC_REF", PR #33). When this plan executes, the
->   site script should mirror that remote-first shape rather than the original `SPEC_ROOT` env var design from
->   2026-04-23 — the cli implementation has already de-risked the pattern.
-> - **Initial pin target moved:** R4 originally specified pinning the first vendored state against v0.2.0
->   (commit `83bf0fd`). The spec repo is now at v0.3.0 (`gh api repos/brettdavies/agentnative/contents/VERSION`
->   confirms). When U2 lands, pin against v0.3.0 (or whatever is the current tagged release at that moment) —
->   the intent of R4 ("pin against a tagged release, not a transient SHA") is unchanged; only the specific tag
->   moved as time passed.
-> - **No drift cost while the stub matches reality:** the hardcoded `'0.3.0'` happens to match upstream today.
->   When the spec next bumps a minor and the badge label / `/badge` page need to cite the new version, that's
->   the natural moment to pull this plan off the shelf — bumping the stub by hand will start to bite, and U1+U2
->   become the cheap fix.
+> - `scripts/sync-spec.sh` — does not exist
+> - `src/data/spec/` — does not exist
+> - `SPEC_VERSION` — still hardcoded as `'0.3.0'` in `src/build/util.mjs:91` (the very thing the plan proposes to source
+>   from a vendored `VERSION` file)
 >
-> No frontmatter `shipped_in` line because nothing shipped. Status stays `active` until U1+U2+U3 land.
+> The plan was filed 2026-04-23, refined twice (rename fix in `6d76ae9`, reference-impl pointer in `8dfeb23`), and then
+> never executed — the launch-readiness plan and its dependencies absorbed the launch-eve cycle, and the absence of
+> vendored spec artifacts didn't block any launch surface. The plan remains a valid follow-up: a single `SPEC_VERSION`
+> hardcode is cheap to maintain manually for now, but the moment the site needs to render principle prose, surface
+> CHANGELOG entries, or cite spec versions in more than one place, the cost of manual sync starts compounding.
+>
+> **What `agentnative-cli` did instead:** `~/dev/agentnative-cli/scripts/sync-spec.sh` is the live reference
+> implementation — it vendors the spec into `src/principles/spec/` and is read by the CLI's `build.rs` to generate the
+> `REQUIREMENTS` slice. The site can adopt the same pattern with minimal adaptation. See the plan body's "External
+> References" section for the link.
+>
+> Status stays `active` (the plan is still valid future work) rather than flipping to `completed` (nothing shipped) or
+> `deferred` (no explicit decision to defer). Touch this block when the plan is picked up.
 
 # feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
 
