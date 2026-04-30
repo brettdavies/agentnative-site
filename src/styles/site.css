@@ -124,6 +124,34 @@ main .anchor-icon {
   color: var(--may, #007980);
 }
 
+/* Block-level normative requirement (docs/DESIGN.md §4.7 block companion to
+ * inline 7b). Wraps a `**KEYWORD:**` paragraph + the immediately-following
+ * list in a single semantic aside. Container reads as a "spec callout":
+ * tonal lift via --bg-raised, soft 8px corners, no side stripe (impeccable's
+ * #1 banned pattern, even with semantic colors). The leading keyword
+ * collapses from "sentence-leading bold word" to "caption-tier label" via
+ * size/weight/tracking — same shift WHATWG/W3C TR specs use for normative
+ * tags above the requirement body. Color stays semantic via the inherited
+ * .rfc-must / .rfc-should / .rfc-may rules. */
+.normative {
+  margin-block: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  max-inline-size: var(--measure);
+}
+.normative > p:first-child {
+  margin: 0 0 0.5rem;
+}
+.normative > :last-child {
+  margin-block-end: 0;
+}
+.normative > p:first-child > strong:first-child {
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: var(--tracking-caps);
+}
+
 /* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6 A7).
  * Scope `span` matching to Shiki's own syntax tokens (which live under
  * `<pre class="shiki"><code>…spans…</code></pre>`). The previous selector
@@ -828,8 +856,8 @@ body:has(.leaderboard-hero) main {
 .scorecard-audience-banner p:last-child {
   margin-bottom: 0;
 }
-.audience-banner__headline {
-  font-size: 0.82rem !important;
+.scorecard-audience-banner .audience-banner__headline {
+  font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--fg-muted, #525960);
@@ -843,8 +871,8 @@ body:has(.leaderboard-hero) main {
 .audience-banner__profile {
   color: var(--fg-body, #1a2026);
 }
-.audience-banner__note {
-  font-size: 0.85rem !important;
+.scorecard-audience-banner .audience-banner__note {
+  font-size: 0.85rem;
   color: var(--fg-muted, #525960);
 }
 .audience-banner__note a {
@@ -1052,14 +1080,14 @@ body:has(.leaderboard-hero) main {
   width: auto;
   padding-right: 0.75rem;
 }
+.check__label {
+  color: var(--fg-body, #1a2026);
+}
 .check--suppressed .check__label {
   font-style: italic;
   color: var(--fg-muted, #525960);
 }
 
-.check__label {
-  color: var(--fg-body, #1a2026);
-}
 .check__evidence {
   color: var(--fg-muted, #525960);
   font-size: 0.82rem;

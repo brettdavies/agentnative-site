@@ -29,16 +29,8 @@ errors at the exit-code layer — this standard adopts `sysexits.h` numbering so
   let cli = Cli::try_parse()?;
   ```
 
-- Error types map to distinct exit codes. At minimum:
-
-| Code | Meaning                 |
-| ---: | ----------------------- |
-|    0 | Success                 |
-|    1 | General command error   |
-|    2 | Usage / argument error  |
-|   77 | Auth / permission error |
-|   78 | Configuration error     |
-
+- Error types map to distinct exit codes — at minimum: `0` (success), `1` (general command error), `2` (usage / argument
+  error), `77` (auth / permission error), `78` (configuration error).
 - Every error message contains **what failed**, **why**, and **what to do next**. Example:
 
   ```text
