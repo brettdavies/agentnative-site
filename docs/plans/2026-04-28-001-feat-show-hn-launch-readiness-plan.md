@@ -1,8 +1,10 @@
 ---
 title: "feat: Show HN launch readiness — agentnative-site"
 type: feat
-status: active
+status: completed
 date: 2026-04-28
+last-revised: 2026-04-30
+shipped_in: launch posted Thu 2026-04-30 09:00 PT; site cuts (steps 4–6 of the launch wave) completed on the night of 2026-04-29 → morning of 2026-04-30.
 parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-launch-inversion-20260427-144756.md
 ---
 
@@ -16,6 +18,36 @@ parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-laun
 > is **step 6**. Hard-blocked on steps 1–3b (spec v0.3.0, CLI v0.2.0 + tap, skill v0.2.0). Slip → push launch 24h.
 
 # feat: Show HN launch readiness — agentnative-site
+
+> **Post-launch update (2026-04-30):** Launch shipped Thu 2026-04-30 09:00 PT on schedule. Site cuts (steps 4–6 of the
+> launch wave per the central tracker) completed clean: `release/launch` → `main` deployed to anc.dev, skill-distribution
+> cutover ops ran clean, and the cold-device prod smoke passed before the post went up. Plan flipped `active → completed`.
+>
+> ---
+>
+> **Post-launch additive work — NOT scoped in the original plan.** PR #52 ("scorecard schema 0.4 + scorecard-driven
+> discovery with registry editorial join") merged to `dev` 2026-04-30 morning (commit `ab6e7e3`, 108 files, +3970/-451).
+> Eight implementation units (U1–U8) inverted the build pipeline to read scorecards-first and join the registry as the
+> editorial layer, regenerated all 95 scorecards to schema 0.4, surfaced v0.4 audit metadata in per-tool Details, added
+> 11 binary-name redirects with collision invariants, and shipped CI annotations for orphan warnings. Authoritative plan:
+> [`2026-04-29-002-feat-scorecard-schema-0.4-pipeline-inversion-plan.md`](2026-04-29-002-feat-scorecard-schema-0.4-pipeline-inversion-plan.md)
+> (`status: completed`).
+>
+> ---
+>
+> **Planning-doc cleanup pass (2026-04-30, dev commits `ac3cf41` + `2afc8b1` + `1c89b1d`):** four sibling plans flipped
+> to `status: completed` with post-shipment update blocks recording what actually shipped vs. the original plan body —
+> `2026-04-29-002` (scorecard schema 0.4 / PR #52), `2026-04-27-001` (skill-distribution Units 2–5 / PRs #36–#39),
+> `2026-04-24-001` (skill-distribution master), `2026-04-23-002` (badge surface / PRs #49–#51). One plan stays `active`:
+> [`2026-04-23-001-feat-sync-spec-plan.md`](2026-04-23-001-feat-sync-spec-plan.md) — annotated as UNSTARTED on `dev`,
+> remains the post-launch v0.4.x track for CLI-feeds-site coverage-matrix vendoring.
+>
+> ---
+>
+> **Remaining post-launch follow-up:** the `dev → main` release covering everything since 2026-04-28 (PR #52 plus the
+> doc-flip commits and any `dev`-only fixes accumulated during launch week) still needs to ship in a `release/*` PR per
+> `RELEASES.md`. No user-visible regression — `main` is at the launch-cut HEAD and serving anc.dev cleanly — but `dev` is
+> the post-launch v0.4.x integration line and should not be left to drift indefinitely.
 
 ## Status snapshot (2026-04-29 PT, late evening)
 
