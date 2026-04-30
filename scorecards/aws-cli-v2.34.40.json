@@ -1,13 +1,13 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
       "label": "Help flag produces useful output",
       "group": "P3",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "fail",
+      "evidence": "--help exited with code 252",
       "confidence": "high"
     },
     {
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "3 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "status": "skip",
+      "evidence": "target exposes no flags in --help",
       "confidence": "medium"
     },
     {
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
       "confidence": "medium"
     },
     {
@@ -103,10 +103,10 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 6,
-    "warn": 3,
-    "fail": 0,
-    "skip": 2,
+    "pass": 5,
+    "warn": 1,
+    "fail": 1,
+    "skip": 4,
     "error": 0
   },
   "coverage_summary": {
@@ -127,18 +127,18 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "terraform",
-    "binary": "terraform",
-    "version": "Terraform v1.14.9"
+    "name": "aws",
+    "binary": "aws",
+    "version": "aws-cli/2.34.40 Python/3.14.4 Linux/6.8.0-106-generic source/x86_64.debian.13"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command terraform --output json",
-    "started_at": "2026-04-30T04:18:56.848354648Z",
-    "duration_ms": 117,
+    "invocation": "anc check --command aws --output json",
+    "started_at": "2026-04-30T23:01:10.619446455Z",
+    "duration_ms": 1669,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "terraform"
+    "command": "aws"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 71,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/aws",
+    "badge_url": "https://anc.dev/badge/aws.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

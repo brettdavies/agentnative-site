@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "14 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "status": "skip",
+      "evidence": "target exposes no flags in --help",
       "confidence": "medium"
     },
     {
@@ -104,9 +104,9 @@
   "summary": {
     "total": 11,
     "pass": 6,
-    "warn": 4,
+    "warn": 3,
     "fail": 0,
-    "skip": 1,
+    "skip": 2,
     "error": 0
   },
   "coverage_summary": {
@@ -127,18 +127,18 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "curl",
-    "binary": "curl",
-    "version": "curl 8.19.0 (x86_64-pc-linux-gnu) libcurl/8.19.0 OpenSSL/3.6.2 zlib/1.3.1.zlib-ng brotli/1.2.0 zstd/1.5.7 libidn2/2.3.8 libssh2/1.11.1 nghttp2/1.69.0 ngtcp2/1.22.1 nghttp3/1.15.0 mit-krb5/1.22.2 OpenLDAP/2.6.13"
+    "name": "deno",
+    "binary": "deno",
+    "version": "deno 2.7.14 (stable, release, x86_64-unknown-linux-gnu)"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command curl --output json",
-    "started_at": "2026-04-30T04:18:51.735528312Z",
-    "duration_ms": 97,
+    "invocation": "anc check --command deno --output json",
+    "started_at": "2026-04-30T23:01:15.343366967Z",
+    "duration_ms": 436,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "curl"
+    "command": "deno"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 67,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/deno",
+    "badge_url": "https://anc.dev/badge/deno.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

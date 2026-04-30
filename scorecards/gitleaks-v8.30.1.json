@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": "gitleaks version 8.30.1"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command gitleaks --output json",
-    "started_at": "2026-04-30T04:18:54.880214269Z",
-    "duration_ms": 54,
+    "started_at": "2026-04-30T23:00:59.119464067Z",
+    "duration_ms": 55,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "gitleaks"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 78,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/gitleaks",
+    "badge_url": "https://anc.dev/badge/gitleaks.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

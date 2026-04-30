@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "status": "warn",
+      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
       "confidence": "medium"
     },
     {
@@ -104,9 +104,9 @@
   "summary": {
     "total": 11,
     "pass": 8,
-    "warn": 1,
+    "warn": 2,
     "fail": 0,
-    "skip": 2,
+    "skip": 1,
     "error": 0
   },
   "coverage_summary": {
@@ -124,5 +124,37 @@
     }
   },
   "audience": "agent-optimized",
-  "audit_profile": null
+  "audit_profile": null,
+  "spec_version": "0.3.0",
+  "tool": {
+    "name": "mise",
+    "binary": "mise",
+    "version": "2026.4.28 linux-x64 (2026-04-30)"
+  },
+  "anc": {
+    "version": "0.2.0",
+    "commit": "06a307c"
+  },
+  "run": {
+    "invocation": "anc check --command mise --output json",
+    "started_at": "2026-04-30T23:01:14.348144272Z",
+    "duration_ms": 100,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "mise"
+  },
+  "badge": {
+    "eligible": true,
+    "score_pct": 80,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/mise.svg)](https://anc.dev/score/mise)",
+    "scorecard_url": "https://anc.dev/score/mise",
+    "badge_url": "https://anc.dev/badge/mise.svg",
+    "convention_url": "https://anc.dev/badge"
+  }
 }

@@ -1,13 +1,13 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
       "label": "Help flag produces useful output",
       "group": "P3",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--help output exists but no examples section detected",
+      "status": "pass",
+      "evidence": null,
       "confidence": "high"
     },
     {
@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no --output/--format flag detected in any subcommand",
+      "status": "warn",
+      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
       "confidence": "high"
     },
     {
@@ -69,8 +69,8 @@
       "label": "Non-interactive gate flag advertised in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "no non-interactive flag found in --help; expected one of: --no-interactive, --non-interactive, -p, --print, --no-input, --batch, --headless, -y, --yes, --assume-yes",
+      "status": "skip",
+      "evidence": "target satisfies P1 via alternative gate (help-on-bare or stdin-primary)",
       "confidence": "high"
     },
     {
@@ -79,7 +79,7 @@
       "group": "P1",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "16 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "evidence": "27 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -103,8 +103,8 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 5,
-    "warn": 5,
+    "pass": 6,
+    "warn": 4,
     "fail": 0,
     "skip": 1,
     "error": 0
@@ -123,22 +123,22 @@
       "verified": 0
     }
   },
-  "audience": "agent-optimized",
+  "audience": "mixed",
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "opencode",
-    "binary": "opencode",
-    "version": "1.14.29"
+    "name": "gemini",
+    "binary": "gemini",
+    "version": "0.40.1"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command opencode --output json",
-    "started_at": "2026-04-30T04:19:47.32493526Z",
-    "duration_ms": 8230,
+    "invocation": "anc check --command gemini --output json",
+    "started_at": "2026-04-30T23:01:55.790183342Z",
+    "duration_ms": 6818,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "opencode"
+    "command": "gemini"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 60,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/gemini",
+    "badge_url": "https://anc.dev/badge/gemini.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

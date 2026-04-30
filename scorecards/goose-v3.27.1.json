@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -132,13 +132,13 @@
     "version": "goose version: v3.27.1"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command goose --output json",
-    "started_at": "2026-04-30T04:19:14.490045657Z",
-    "duration_ms": 414,
+    "started_at": "2026-04-30T23:01:19.807515443Z",
+    "duration_ms": 415,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "goose"
+  },
+  "badge": {
+    "eligible": true,
+    "score_pct": 88,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/goose.svg)](https://anc.dev/score/goose)",
+    "scorecard_url": "https://anc.dev/score/goose",
+    "badge_url": "https://anc.dev/badge/goose.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

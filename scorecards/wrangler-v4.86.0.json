@@ -1,13 +1,13 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
       "label": "Help flag produces useful output",
       "group": "P3",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "--help output exists but no examples section detected",
       "confidence": "high"
     },
     {
@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "skip",
+      "evidence": "no --output/--format flag detected",
       "confidence": "high"
     },
     {
@@ -42,8 +42,8 @@
       "label": "Quiet mode available",
       "group": "P7",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no --quiet/-q flag detected in --help output",
       "confidence": "high"
     },
     {
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "6 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
       "confidence": "medium"
     },
     {
@@ -103,10 +103,10 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 8,
-    "warn": 2,
+    "pass": 5,
+    "warn": 3,
     "fail": 0,
-    "skip": 1,
+    "skip": 3,
     "error": 0
   },
   "coverage_summary": {
@@ -127,18 +127,18 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "mise",
-    "binary": "mise",
-    "version": "2026.4.25 linux-x64 (2026-04-28)"
+    "name": "wrangler",
+    "binary": "wrangler",
+    "version": "4.86.0"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
-    "invocation": "anc check --command mise --output json",
-    "started_at": "2026-04-30T04:19:09.138337943Z",
-    "duration_ms": 100,
+    "invocation": "anc check --command wrangler --output json",
+    "started_at": "2026-04-30T23:01:02.131812807Z",
+    "duration_ms": 3581,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,6 +147,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "mise"
+    "command": "wrangler"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 63,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/wrangler",
+    "badge_url": "https://anc.dev/badge/wrangler.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }

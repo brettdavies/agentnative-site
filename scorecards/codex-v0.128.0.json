@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "results": [
     {
       "id": "p3-help",
@@ -79,7 +79,7 @@
       "group": "P1",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "20 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "evidence": "19 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -129,16 +129,16 @@
   "tool": {
     "name": "codex",
     "binary": "codex",
-    "version": "codex-cli 0.125.0"
+    "version": "codex-cli 0.128.0"
   },
   "anc": {
-    "version": "0.1.0",
-    "commit": "fff3f13"
+    "version": "0.2.0",
+    "commit": "06a307c"
   },
   "run": {
     "invocation": "anc check --command codex --output json",
-    "started_at": "2026-04-30T04:19:13.622866142Z",
-    "duration_ms": 856,
+    "started_at": "2026-04-30T23:01:18.899167552Z",
+    "duration_ms": 897,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -148,5 +148,13 @@
     "kind": "command",
     "path": null,
     "command": "codex"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 67,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/codex",
+    "badge_url": "https://anc.dev/badge/codex.svg",
+    "convention_url": "https://anc.dev/badge"
   }
 }
