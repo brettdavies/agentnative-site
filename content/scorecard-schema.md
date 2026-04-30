@@ -15,20 +15,21 @@ scorecards/<name>-v<version>.json
 ```
 
 Where `<name>` matches the registry's `name` field (URL slug) and `<version>` is the SemVer string captured at scoring
-time. The filename carries the **tool name** and the **version** the score was generated against — neither field is
-duplicated inside the JSON body. Re-deriving them from the filename is the canonical path; no API consumer should expect
-a `name` or `version` key inside the document.
-
-There is also no `generated_at` timestamp inside the JSON. The closest signal is git history on the
-[`scorecards/`](https://github.com/brettdavies/agentnative-site/commits/main/scorecards) directory. Future versions of
-the `anc` CLI may add these fields; today they are filename-only.
+time. The filename's `<version>` segment is the **canonical version anchor** — the site reads it directly off disk and
+displays it as the scored version on every per-tool page. The scorecard's `tool.version` field (added in schema 0.4) is
+informational; when both are present and disagree, the build aborts with an integrity error. The filename never lies.
 
 ## Top-level fields
 
 ```json
 {
-  "schema_version": "...",
+  "schema_version": "0.4",
   "spec_version": "...",
+  "tool":   { "name": "...", "binary": "...", "version": "..." },
+  "anc":    { "version": "...", "commit": "..." },
+  "run":    { "invocation": "...", "started_at": "...", "duration_ms": 0,
+              "platform": { "os": "...", "arch": "..." } },
+  "target": { "kind": "...", "path": null, "command": "..." },
   "audience": "...",
   "audience_reason": null,
   "audit_profile": null,
@@ -42,12 +43,107 @@ the `anc` CLI may add these fields; today they are filename-only.
 | ------------------ | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
 | `schema_version`   | string              | `anc` emitted | Version of the JSON envelope itself. Pre-1.0; bumped when fields are added, removed, or renamed.              |
 | `spec_version`     | string              | `anc` emitted | Version of the [agentnative spec](/principles) the run conformed to. Independent of `schema_version`.         |
+| `tool`             | object              | `anc` emitted | Self-describing identity for the tool that was scored. See [tool](#tool) below. **Added in 0.4.**             |
+| `anc`              | object              | `anc` emitted | Provenance of the `anc` build that produced the scorecard. See [anc](#anc) below. **Added in 0.4.**           |
+| `run`              | object              | `anc` emitted | Run-context: what was invoked, when, on what platform. See [run](#run) below. **Added in 0.4.**               |
+| `target`           | object              | `anc` emitted | What the run was scoring (command vs. binary vs. project). See [target](#target) below. **Added in 0.4.**     |
 | `audience`         | string \| null      | `anc` emitted | One-line audience classification. See [audience signal](/methodology#what-the-audience-signal-is-and-is-not). |
 | `audience_reason`  | string \| null      | `anc` emitted | Set to `"suppressed"` when an active audit profile blanks the audience signal. Otherwise null.                |
 | `audit_profile`    | string \| null      | registry      | Exception category passed to anc via `--audit-profile`. See [audit profiles](/methodology#audit-profiles).    |
 | `summary`          | object              | derived       | Tally of how the runner's checks finished. See [summary](#summary) below.                                     |
 | `coverage_summary` | object              | derived       | Tally of how many spec requirements the run verified. See [coverage_summary](#coverage_summary) below.        |
 | `results`          | array of result obj | `anc` emitted | One entry per behavioral check that ran. See [results](#results) below.                                       |
+
+## `tool`
+
+Self-describing tool identity. Lets a downstream consumer answer "what was scored?" without cross-referencing the
+registry.
+
+```json
+"tool": {
+  "name": "rg",
+  "binary": "rg",
+  "version": "ripgrep 15.1.0"
+}
+```
+
+| Field     | Type           | Meaning                                                                                                                                                                                                                          |
+| --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`    | string         | The literal `--command` argv passed to anc. For tools where the registry name differs from the binary (e.g., registry `ripgrep` → binary `rg`), this is the binary, not the registry slug. The filename slug owns the registry-name side of the join. |
+| `binary`  | string         | Executable name resolved from `$PATH` at scoring time. Usually equals `tool.name` for command-mode runs.                                                                                                                         |
+| `version` | string \| null | Best-effort version string. The CLI dumps the first line of `<binary> --version` here without further parsing — it may carry the marketing string ("eza - A modern, maintained replacement for ls"), the full multi-line block, or `null` when the binary doesn't print anything parseable. **The filename's `<version>` is canonical**; this field is a courtesy. |
+
+**Build-time invariant:** when `tool.version` contains a SemVer-shaped token (`X.Y` or `X.Y.Z`), it must equal the
+filename version. Drift fails the build with a parser-asymmetry error — the regen script's `version_extract` snippet and
+the CLI's internal probe are the only two places that derive a version from the binary, and they must agree.
+
+## `anc`
+
+Provenance for the scorecard: which `anc` build produced it.
+
+```json
+"anc": {
+  "version": "0.2.1",
+  "commit": "fff3f13"
+}
+```
+
+| Field     | Type           | Meaning                                                                                                                                                                                                                                |
+| --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version` | string         | Self-reported version of the `anc` binary that ran the score. Read from `Cargo.toml` at build time.                                                                                                                                    |
+| `commit` | string \| null | Abbreviated git SHA (7-40 hex chars) captured by `build.rs` from the working tree at compile time. `null` for `cargo install`-style builds outside a git checkout. The site links the abbreviation to the upstream commit when present. |
+
+The per-tool page renders `anc.version` plus an abbreviated commit link when the SHA passes the hex allowlist; non-SHA
+strings fall through to a plain version with no link (security gate before URL interpolation).
+
+## `run`
+
+Run-context: the literal invocation, when it ran, how long it took, and what platform it ran on.
+
+```json
+"run": {
+  "invocation": "anc check --command rg --output json",
+  "started_at": "2026-04-30T04:18:53.099683344Z",
+  "duration_ms": 53,
+  "platform": { "os": "linux", "arch": "x86_64" }
+}
+```
+
+| Field             | Type    | Meaning                                                                                                                                                                                       |
+| ----------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invocation`      | string  | The verbatim argv that produced this scorecard, joined with single spaces. The per-tool "Reproduce locally" CTA renders this directly for command-mode runs.                                  |
+| `started_at`      | string  | RFC 3339 timestamp of when the run started. UTC. Validated as parseable by `Date` at build time.                                                                                              |
+| `duration_ms`     | integer | Wall-clock duration of the entire scoring run in milliseconds.                                                                                                                                |
+| `platform.os`     | string  | OS the binary ran on (`linux`, `darwin`, `windows`).                                                                                                                                          |
+| `platform.arch`   | string  | CPU architecture the binary ran on (`x86_64`, `aarch64`, …).                                                                                                                                  |
+
+**Security note — `run.invocation`:** for command-mode runs the invocation is the canonical `anc check --command <name>
+[--audit-profile <X>] [--output json]` shape, which is safe to embed publicly. For project-mode runs (`target.kind:
+"project"`) the invocation may include a local filesystem path (`anc check ./local/repo`); the site falls back to the
+synthesized form for those runs to avoid leaking machine-local paths into HTML, markdown, and `/llms-full.txt`. Mirror
+this gate downstream if you fetch the JSON directly.
+
+## `target`
+
+What the run was scoring: a command, a binary on disk, or a project tree.
+
+```json
+"target": {
+  "kind": "command",
+  "path": null,
+  "command": "rg"
+}
+```
+
+| Field     | Type           | Meaning                                                                                                                                                                                                                                            |
+| --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`    | string         | One of `command`, `binary`, or `project`. Drives whether the per-tool page's reproduce CTA renders `run.invocation` verbatim (`command`) or falls back to the synthesized form (others). Future schema-version source-layer scorecards will use `project`. |
+| `path`    | string \| null | Filesystem path when `kind` is `project` or `binary`; `null` for `command`-mode runs.                                                                                                                                                              |
+| `command` | string \| null | The `--command` argv string when `kind` is `command`; `null` otherwise. For command-mode runs this equals `tool.name`.                                                                                                                             |
+
+**Security note — `target.path`:** when `kind` is `project`, this can carry a local directory path (`/home/me/dev/foo`).
+It is not currently rendered on any per-tool page (every leaderboard entry today is command-mode), but downstream
+consumers reading the JSON should treat it as machine-local.
 
 ## `summary`
 
@@ -140,13 +236,14 @@ Array of one object per check the runner attempted. Order is stable across runs 
 
 ## What is *not* in the scorecard (yet)
 
-The site is transparent about gaps that future schema bumps may fill. Today, the JSON does **not** carry:
+The site is transparent about gaps that future schema bumps may fill. Schema 0.4 closed the
+tool-identity / generated-at gap (see `tool`, `anc`, `run`, `target` above). Still outstanding today:
 
-- **Tool name** — read it from the filename, registry entry, or per-tool page.
-- **Version** — same as above. Filename is the source of truth.
-- **Generated-at timestamp** — git history on `scorecards/<name>-v<version>.json` is the closest signal. Treat the
-  scorecard as "the score for this version of the tool, as of the most recent commit touching this file."
-- **Per-check timing** — execution times are observable from the runner's stdout but not captured in the JSON.
+- **Per-check timing** — `run.duration_ms` is the wall-clock total for the run, not per-check. Individual check timings
+  are observable from the runner's stdout but not captured in the JSON.
+- **Editorial fields inside the scorecard** — tier, language, creator, description, install, repo/url remain in the
+  registry. Migrating them into the scorecard would let the registry shrink to a name list; deferred to a future schema
+  bump.
 
 When the `anc` CLI grows fields for any of the above, the schema page above will be updated and `schema_version` will
 bump.

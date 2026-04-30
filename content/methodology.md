@@ -14,6 +14,21 @@ which tools are in the set.
 Adding a tool means filing a registry entry. Removing a tool means filing a registry deletion. There is no other
 inclusion criterion.
 
+### Contributor flow — registry PR and scorecard PR may land in either order
+
+A tool needs two artifacts to appear on the leaderboard: a registry entry (`registry.yaml`) and a scorecard
+(`scorecards/<name>-v<version>.json`). The build accepts these in either order:
+
+- **Editorial-PR-first.** A registry entry without a matching scorecard is a "registry orphan" — the build emits a
+  warning and excludes the entry from the leaderboard until a scorecard PR lands. This is the expected steady-state for
+  a freshly-nominated tool.
+- **Scorecard-PR-first.** A scorecard whose filename slug has no registry entry is a "scorecard orphan" — the build
+  emits the symmetric warning and excludes the scorecard from the leaderboard until the editorial PR lands.
+
+Both directions surface as a structured CI annotation on the PR (`WARNINGS_JSON: { scorecardOrphans, registryOrphans }`)
+so reviewers see drift without grepping logs. The build still passes in either orphaned state — the warning is the
+nudge, not a blocker. Once both halves land, the tool appears on the leaderboard at the next deploy.
+
 ## How a score is computed
 
 The headline number on each tool's row is a pass rate:
