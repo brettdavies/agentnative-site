@@ -28,8 +28,12 @@
 #   Behavioral + project checks:
 #     scorecards/{name}-v{version}.json
 #     e.g. scorecards/gh-v2.74.0.json
-#     Keyed to a binary release. The build constructs this filename from
-#     the registry's name + version fields. No version → no scorecard.
+#     Keyed to a binary release. The filename's <version> segment is
+#     the canonical version anchor; the scorecard's tool.version is
+#     informational. Post-U3 the build discovers scorecards on disk
+#     and joins each to its registry entry by <name> for editorial
+#     fields — there is no longer a `version:` field on registry
+#     entries (filename owns it).
 #
 #   Source checks (future — not yet implemented):
 #     scorecards/{name}-src-{YYYYMMDD}-{branch}-{commit7}.json
@@ -37,6 +41,26 @@
 #     Keyed to repo state. CalVer date provides chronological ordering,
 #     branch disambiguates main from feature branches, 7-char SHA pins
 #     to exact commit. Displayed as a separate bonus column per R5.
+#
+# Contributor flow (post-U3):
+#
+#   The editorial PR (registry entry) and the scorecard PR (a real
+#   `<name>-v<version>.json` file) may land in either order. While only
+#   one side has landed, the build emits a stderr warning and excludes
+#   the orphaned side from the leaderboard:
+#
+#     - Registry entry without a scorecard → "registry orphan" warning;
+#       the entry is hidden from the leaderboard until the scorecard PR
+#       lands. This is the expected steady-state for a freshly-added
+#       tool whose binary hasn't been scored yet.
+#     - Scorecard without a registry entry → "scorecard orphan" warning;
+#       the scorecard is excluded from the leaderboard until the
+#       editorial PR adds the matching `<name>` entry.
+#
+#   CI surfaces both warning lists as a PR-comment annotation (U8) so
+#   reviewers see drift without grepping logs. The build still passes
+#   in either orphaned state — softening from a hard error to a warning
+#   decouples the two contribution flows.
 #
 # Tier counts: workhorse ~50, agent ~10, notable ~20.
 # Per-creator cap in notable: 3-4 tools max.

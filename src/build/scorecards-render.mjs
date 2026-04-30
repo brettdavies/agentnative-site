@@ -72,17 +72,16 @@ function renderCheckRows(checks) {
 export function buildLeaderboardBody(leaderboard, methodology) {
   const tierBadge = (tier) => `<span class="tier-badge tier-badge--${escHtml(tier)}">${escHtml(tier)}</span>`;
 
+  // Post-U3 inversion: every leaderboard entry has a scorecard (registry
+  // entries without scorecards are excluded by loadScoredTools). The em-dash
+  // "—" / "—/7" cells the pre-inversion code carried for unscored rows are
+  // gone with the unscored row itself.
   const scoreCell = (entry) => {
-    if (!entry.scorecard) return '<td class="lb-score lb-score--none" data-sort="-1">—</td>';
     const pct = Math.round(entry.score * 100);
     return `<td class="lb-score" data-sort="${pct}">${pct}%</td>`;
   };
 
   const principleCell = (entry) => {
-    // Unscored entries get an em-dash, not "0/7" — which would falsely read
-    // as "failed all 7 principles." `data-sort="-1"` matches the score
-    // column's sort behavior so unscored rows cluster at the bottom.
-    if (!entry.scorecard) return '<td class="lb-principles lb-principles--none" data-sort="-1">—/7</td>';
     const ps = entry.principleScore;
     return `<td class="lb-principles" data-sort="${ps.met}">${ps.met}/${ps.total}</td>`;
   };
@@ -108,21 +107,23 @@ export function buildLeaderboardBody(leaderboard, methodology) {
     tierCounts[e.tool.tier] = (tierCounts[e.tool.tier] || 0) + 1;
   }
 
-  // Eligible-tool count for the badge callout. Counts only scored tools
-  // at or above BADGE_FLOOR — the same gate the per-tool scorecard pages
-  // use. Lets the callout cite a real number ("24 tools currently qualify")
-  // instead of a vague "tools that qualify."
-  const eligibleCount = leaderboard.filter((e) => e.scorecard && e.score >= BADGE_FLOOR).length;
+  // Eligible-tool count for the badge callout. Counts tools at or above
+  // BADGE_FLOOR — the same gate the per-tool scorecard pages use. Lets the
+  // callout cite a real number ("24 tools currently qualify") instead of a
+  // vague "tools that qualify." Post-U3 every leaderboard entry has a
+  // scorecard, so no null guard needed.
+  const eligibleCount = leaderboard.filter((e) => e.score >= BADGE_FLOOR).length;
   const floorPct = Math.round(BADGE_FLOOR * 100);
 
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
   <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
+  <p class="leaderboard-hero__meta">${leaderboard.length} audited tools in the corpus.</p>
 </section>
 
 <section class="leaderboard-controls" aria-label="Filters">
   <div class="tier-filters" role="group" aria-label="Filter by tier">
-    <button type="button" class="tier-filter tier-filter--active" data-tier="all">All (${leaderboard.length})</button>
+    <button type="button" class="tier-filter tier-filter--active" data-tier="all">All</button>
     <button type="button" class="tier-filter" data-tier="workhorse">Workhorse (${tierCounts.workhorse || 0})</button>
     <button type="button" class="tier-filter" data-tier="agent">Agent (${tierCounts.agent || 0})</button>
     <button type="button" class="tier-filter" data-tier="notable">Notable (${tierCounts.notable || 0})</button>
@@ -366,13 +367,6 @@ export function buildScorecardBody(tool, scorecard, topIssues, principleScore, s
 </header>
 `;
 
-  if (!scorecard) {
-    html += `<section class="scorecard-summary">
-  <p>This tool has not yet been scored. Run <code>anc check --command ${escHtml(tool.binary)}</code> locally to generate a scorecard.</p>
-</section>`;
-    return html;
-  }
-
   // Score summary
   html += `<section class="scorecard-summary">
   <div class="scorecard-score-badge">
@@ -525,9 +519,10 @@ export function buildLeaderboardMarkdown(leaderboard) {
   ];
 
   for (const entry of leaderboard) {
-    const score = entry.scorecard ? `${Math.round(entry.score * 100)}%` : '—';
+    // Post-U3: every leaderboard entry has a scorecard.
+    const score = `${Math.round(entry.score * 100)}%`;
     const ps = entry.principleScore;
-    const principles = entry.scorecard ? `${ps.met}/${ps.total}` : '—/7';
+    const principles = `${ps.met}/${ps.total}`;
     lines.push(
       `| ${entry.rank} | [${entry.tool.name}](/score/${entry.tool.name}) | ${entry.tool.tier} | ${entry.tool.language} | ${score} | ${principles} |`,
     );
@@ -553,12 +548,6 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   lines.push('');
   lines.push(tool.description);
   lines.push('');
-
-  if (!scorecard) {
-    lines.push('This tool has not yet been scored.');
-    lines.push('');
-    return lines.join('\n');
-  }
 
   const pct = Math.round(score * 100);
   const floorPct = Math.round(BADGE_FLOOR * 100);

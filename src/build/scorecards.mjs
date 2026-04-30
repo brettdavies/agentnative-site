@@ -86,26 +86,6 @@ export async function loadRegistry(registryPath) {
   return tools;
 }
 
-/**
- * Construct the scorecard filename for a tool when registry pins a version.
- *
- * Convention (documented in registry.yaml header):
- *   Behavioral + project: {name}-v{version}.json
- *   Source checks (future): {name}-src-{YYYYMMDD}-{branch}-{commit7}.json
- *
- * For tools without a `version` field, the loader falls back to auto-discovery
- * (see {@link loadScorecards}) — finding the highest-versioned scorecard on
- * disk for that tool's name. This keeps the registry the inclusion source of
- * truth without requiring a version pin per entry.
- *
- * @param {object} tool — registry entry
- * @returns {string | null}
- */
-export function scorecardFilename(tool) {
-  if (!tool.version) return null;
-  return `${tool.name}-v${tool.version}.json`;
-}
-
 // Compares two SemVer-shaped version strings (`X.Y` or `X.Y.Z`, optionally
 // with a numeric or `pre`/`rc.N`-style suffix) for sorting. Returns >0 if
 // `a > b`, <0 if `a < b`, 0 if equal. Falls back to lexical compare for
@@ -153,69 +133,85 @@ function indexScorecardsByName(filenames) {
 }
 
 /**
- * For each registry entry, locate and read its scorecard.
+ * Discover scorecards on disk and join each to its registry editorial entry.
  *
- * Resolution order:
- *   1. If `tool.version` is set in the registry, use the exact filename
- *      `{name}-v{version}.json`. Mark unscored if that file is missing —
- *      a missing pinned file is a data inconsistency that should surface.
- *   2. Otherwise auto-discover: pick the highest-versioned `{name}-v*.json`
- *      file on disk. The resolved version is returned alongside the
- *      scorecard so the per-tool page can display it without a registry edit.
+ * Iteration is **scorecard-driven** (post-U3 inversion): the build reads
+ * `<name>-v*.json` from the scorecards/ directory, picks the highest version
+ * per slug, and joins to `registry.tools[name=slug]` for editorial fields
+ * (tier, language, creator, description, install, repo/url).
+ *
+ * Both directions of join failure surface as **warnings**, not errors:
+ *
+ *   - **scorecardOrphans** — a `<name>-v*.json` file whose slug has no
+ *     matching registry entry. Excluded from the leaderboard. Supports
+ *     rename/retire flows where the scorecard arrives before (or after)
+ *     the editorial PR.
+ *   - **registryOrphans** — a registry entry with no scorecard for its
+ *     `name` on disk. Excluded from the leaderboard. Supports
+ *     editorial-PR-first contribution flow.
+ *
+ * The orchestrator logs both lists; CI surfaces them as a PR comment (U8).
+ * R5(b)'s structural invariant — "every scorecard's filename slug must
+ * match a registry entry" — is intentionally NOT enforced here; it lives
+ * in `runScorecardInvariants()`. Splitting the contracts lets a contributor
+ * land a scorecard PR + editorial PR in either order without the build
+ * blowing up mid-merge.
  *
  * @param {string} scorecardsDir — absolute path to scorecards/
  * @param {Array<object>} registry — from loadRegistry()
- * @returns {Promise<Array<{ tool: object, scorecard: object | null, version: string | null }>>}
+ * @returns {Promise<{
+ *   tools: Array<{ tool: object, scorecard: object, version: string, metadata: object, scorecardFilename: string }>,
+ *   warnings: { scorecardOrphans: string[], registryOrphans: string[] }
+ * }>}
  */
-export async function loadScorecards(scorecardsDir, registry) {
+export async function loadScoredTools(scorecardsDir, registry) {
+  const registryByName = new Map(registry.map((t) => [t.name, t]));
   let files;
   try {
-    files = new Set(await readdir(scorecardsDir));
+    files = await readdir(scorecardsDir);
   } catch {
-    files = new Set();
+    files = [];
   }
 
+  // indexScorecardsByName already returns a name → [{filename, version}, …]
+  // map sorted highest-version-first per slug. The inverted iteration starts
+  // here: the scorecards on disk are the source of truth for inclusion.
   const byName = indexScorecardsByName(files);
 
-  const result = [];
-  for (const tool of registry) {
-    let chosenFile = null;
-    let chosenVersion = null;
+  const tools = [];
+  const scorecardOrphans = [];
 
-    if (tool.version) {
-      // Explicit pin — exact match only.
-      const filename = scorecardFilename(tool);
-      if (filename && files.has(filename)) {
-        chosenFile = filename;
-        chosenVersion = tool.version;
-      }
-    } else {
-      // Auto-discover the highest-versioned scorecard for this name.
-      const candidates = byName.get(tool.name);
-      if (candidates && candidates.length > 0) {
-        chosenFile = candidates[0].filename;
-        chosenVersion = candidates[0].version;
-      }
+  for (const [slug, candidates] of byName) {
+    if (candidates.length === 0) continue;
+    const { filename, version } = candidates[0];
+    const registryEntry = registryByName.get(slug);
+    if (!registryEntry) {
+      scorecardOrphans.push(filename);
+      continue;
     }
 
-    if (chosenFile) {
-      const raw = await readFile(join(scorecardsDir, chosenFile), 'utf8');
-      const scorecard = JSON.parse(raw);
-      // v0.4 metadata blocks. Each may be absent on grandfathered v0.3 / v1.1
-      // scorecards (anc-v0.1.3.json) — null is the documented sentinel for
-      // "this scorecard predates the metadata contract."
-      const metadata = {
-        tool: scorecard.tool ?? null,
-        anc: scorecard.anc ?? null,
-        run: scorecard.run ?? null,
-        target: scorecard.target ?? null,
-      };
-      result.push({ tool, scorecard, version: chosenVersion, metadata, scorecardFilename: chosenFile });
-    } else {
-      result.push({ tool, scorecard: null, version: null, metadata: null, scorecardFilename: null });
+    const raw = await readFile(join(scorecardsDir, filename), 'utf8');
+    const scorecard = JSON.parse(raw);
+    // v0.4 metadata blocks. Each may be absent on grandfathered v0.3 / v1.1
+    // scorecards (anc-v0.1.3.json) — null is the documented sentinel for
+    // "this scorecard predates the metadata contract."
+    const metadata = {
+      tool: scorecard.tool ?? null,
+      anc: scorecard.anc ?? null,
+      run: scorecard.run ?? null,
+      target: scorecard.target ?? null,
+    };
+    tools.push({ tool: registryEntry, scorecard, version, metadata, scorecardFilename: filename });
+  }
+
+  const registryOrphans = [];
+  for (const entry of registry) {
+    if (!byName.has(entry.name)) {
+      registryOrphans.push(entry.name);
     }
   }
-  return result;
+
+  return { tools, warnings: { scorecardOrphans, registryOrphans } };
 }
 
 // -------------------------------------------------------------------

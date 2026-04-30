@@ -40,7 +40,7 @@ import {
   computeLeaderboard,
   extractTopIssues,
   loadRegistry,
-  loadScorecards,
+  loadScoredTools,
   runScorecardInvariants,
 } from './scorecards.mjs';
 import {
@@ -272,7 +272,19 @@ export async function build() {
   // carrying a non-RFC-3339 timestamp aborts the build before producing
   // bad output.
   await runScorecardInvariants(SCORECARDS_DIR, registry);
-  const toolsWithScorecards = await loadScorecards(SCORECARDS_DIR, registry);
+  // Scorecard-driven discovery + registry editorial join (U3 inversion).
+  // Both directions of mismatch are warnings, not errors: a scorecard with
+  // no registry entry → excluded; a registry entry with no scorecard →
+  // excluded. The build emits a stable WARNINGS_JSON line so CI can parse
+  // it (U8 PR-comment annotation).
+  const { tools: toolsWithScorecards, warnings: scorecardWarnings } = await loadScoredTools(SCORECARDS_DIR, registry);
+  for (const filename of scorecardWarnings.scorecardOrphans) {
+    console.warn(`warning: scorecard ${filename} has no matching registry entry — excluded from leaderboard.`);
+  }
+  for (const name of scorecardWarnings.registryOrphans) {
+    console.warn(`warning: registry entry "${name}" has no matching scorecard — excluded from leaderboard.`);
+  }
+  console.log(`WARNINGS_JSON: ${JSON.stringify(scorecardWarnings)}`);
   const leaderboard = computeLeaderboard(toolsWithScorecards);
 
   const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.

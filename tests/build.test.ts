@@ -12,7 +12,7 @@ import {
   computeScore,
   extractTopIssues,
   loadRegistry,
-  loadScorecards,
+  loadScoredTools,
   runScorecardInvariants,
 } from '../src/build/scorecards.mjs';
 import { buildLeaderboardBody, buildScorecardBody, renderAudienceBanner } from '../src/build/scorecards-render.mjs';
@@ -446,12 +446,11 @@ describe('loadRegistry', () => {
   });
 });
 
-describe('loadScorecards', () => {
-  test('reads JSON files and matches to registry entries', async () => {
+describe('loadScoredTools — scorecard-driven discovery + registry editorial join', () => {
+  test('reads JSON files and joins to registry; registry-without-scorecard becomes a registryOrphan', async () => {
     const dir = join(tmpdir(), `scorecards-${Date.now()}`);
     await mkdir(dir, { recursive: true });
-    const sc = makeScorecard();
-    await writeFile(join(dir, 'gh-v2.74.0.json'), JSON.stringify(sc));
+    await writeFile(join(dir, 'gh-v2.74.0.json'), JSON.stringify(makeV04Scorecard()));
     try {
       const registry = [
         {
@@ -462,7 +461,6 @@ describe('loadScorecards', () => {
           tier: 'workhorse',
           creator: 'GitHub',
           description: 'GitHub CLI',
-          version: '2.74.0',
         },
         {
           name: 'rg',
@@ -474,10 +472,66 @@ describe('loadScorecards', () => {
           description: 'grep',
         },
       ];
-      const result = await loadScorecards(dir, registry);
-      expect(result).toHaveLength(2);
-      expect(result[0].scorecard).not.toBeNull();
-      expect(result[1].scorecard).toBeNull(); // rg has no version → unscored
+      const { tools, warnings } = await loadScoredTools(dir, registry);
+      expect(tools).toHaveLength(1);
+      expect(tools[0].tool.name).toBe('gh');
+      expect(tools[0].scorecard).not.toBeNull();
+      expect(warnings.scorecardOrphans).toEqual([]);
+      expect(warnings.registryOrphans).toEqual(['rg']); // no scorecard on disk → orphan
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('scorecard-without-registry becomes a scorecardOrphan, excluded from leaderboard', async () => {
+    const dir = join(tmpdir(), `scorecards-orphan-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'rogue-v1.0.0.json'),
+      JSON.stringify(makeV04Scorecard({ tool: { name: 'rogue', binary: 'rogue', version: '1.0.0' } })),
+    );
+    try {
+      const registry = [
+        {
+          name: 'gh',
+          repo: 'cli/cli',
+          binary: 'gh',
+          language: 'Go',
+          tier: 'workhorse',
+          creator: 'GitHub',
+          description: 'GitHub CLI',
+        },
+      ];
+      const { tools, warnings } = await loadScoredTools(dir, registry);
+      expect(tools).toHaveLength(0); // rogue excluded; gh has no scorecard
+      expect(warnings.scorecardOrphans).toEqual(['rogue-v1.0.0.json']);
+      expect(warnings.registryOrphans).toEqual(['gh']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('picks highest-versioned scorecard per slug when multiple files exist', async () => {
+    const dir = join(tmpdir(), `scorecards-multi-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'gh-v2.74.0.json'), JSON.stringify(makeV04Scorecard()));
+    await writeFile(join(dir, 'gh-v2.92.0.json'), JSON.stringify(makeV04Scorecard()));
+    try {
+      const registry = [
+        {
+          name: 'gh',
+          repo: 'cli/cli',
+          binary: 'gh',
+          language: 'Go',
+          tier: 'workhorse',
+          creator: 'GitHub',
+          description: 'GitHub CLI',
+        },
+      ];
+      const { tools } = await loadScoredTools(dir, registry);
+      expect(tools).toHaveLength(1);
+      expect(tools[0].version).toBe('2.92.0');
+      expect(tools[0].scorecardFilename).toBe('gh-v2.92.0.json');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -504,7 +558,7 @@ describe('compareVersions', () => {
   });
 });
 
-describe('loadScorecards — schema 0.4 metadata', () => {
+describe('loadScoredTools — schema 0.4 metadata', () => {
   test('attaches tool/anc/run/target blocks for v0.4 scorecards', async () => {
     const dir = join(tmpdir(), `scorecards-v04-${Date.now()}`);
     await mkdir(dir, { recursive: true });
@@ -519,12 +573,11 @@ describe('loadScorecards — schema 0.4 metadata', () => {
           tier: 'workhorse',
           creator: 'me',
           description: 'thing',
-          version: '1.2.3',
         },
       ];
-      const result = await loadScorecards(dir, registry);
-      expect(result).toHaveLength(1);
-      const entry: any = result[0];
+      const { tools } = await loadScoredTools(dir, registry);
+      expect(tools).toHaveLength(1);
+      const entry: any = tools[0];
       expect(entry.metadata).not.toBeNull();
       expect(entry.metadata.tool.name).toBe('fixture');
       expect(entry.metadata.anc.version).toBe('0.1.0');
@@ -561,42 +614,15 @@ describe('loadScorecards — schema 0.4 metadata', () => {
           tier: 'workhorse',
           creator: 'Brett',
           description: 'agent-native CLI linter',
-          version: '0.1.3',
         },
       ];
-      const result = await loadScorecards(dir, registry);
-      const entry: any = result[0];
+      const { tools } = await loadScoredTools(dir, registry);
+      const entry: any = tools[0];
       expect(entry.scorecard).not.toBeNull();
       expect(entry.metadata.tool).toBeNull();
       expect(entry.metadata.anc).toBeNull();
       expect(entry.metadata.run).toBeNull();
       expect(entry.metadata.target).toBeNull();
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('emits null metadata for unscored entries (no scorecard on disk)', async () => {
-    const dir = join(tmpdir(), `scorecards-unscored-${Date.now()}`);
-    await mkdir(dir, { recursive: true });
-    try {
-      const registry = [
-        {
-          name: 'unscored',
-          repo: 'a/b',
-          binary: 'unscored',
-          language: 'Rust',
-          tier: 'notable',
-          creator: 'me',
-          description: 'thing',
-          // no version → no scorecard
-        },
-      ];
-      const result = await loadScorecards(dir, registry);
-      const entry: any = result[0];
-      expect(entry.scorecard).toBeNull();
-      expect(entry.metadata).toBeNull();
-      expect(entry.scorecardFilename).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1094,6 +1120,9 @@ describe('suppressed-check rendering', () => {
 // -------------------------------------------------------------------
 
 describe('buildLeaderboardBody — audience filter wiring', () => {
+  // Post-U3: every leaderboard entry has a scorecard. The (audience,
+  // audit_profile) fields may still both be undefined on older scorecard
+  // shapes — the renderer escapes them to empty strings.
   function entry(name: string, audience: string | null, auditProfile: string | null) {
     return {
       tool: {
@@ -1102,15 +1131,12 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
         language: 'Rust',
         description: `${name} tool`,
       },
-      scorecard:
-        audience === null && auditProfile === null
-          ? null
-          : {
-              audience,
-              audit_profile: auditProfile,
-              results: [],
-              summary: { pass: 1, warn: 0, fail: 0 },
-            },
+      scorecard: {
+        audience,
+        audit_profile: auditProfile,
+        results: [],
+        summary: { pass: 1, warn: 0, fail: 0 },
+      },
       score: 1,
       principleScore: { met: 7, total: 7, details: [] },
       rank: 1,
@@ -1124,7 +1150,10 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     expect(html).toContain('data-audit-profile="human-tui"');
   });
 
-  test('emits empty data-audience for unscored / pre-v1.3 rows', () => {
+  test('emits empty data-audience for pre-v1.3 scorecards (audience field absent)', () => {
+    // Post-U3 every leaderboard entry has a scorecard, but `audience` and
+    // `audit_profile` may still be undefined on older scorecard shapes.
+    // The renderer falls back to empty strings for both.
     const lb = [entry('newtool', null, null)];
     const html = buildLeaderboardBody(lb as any, '<p>m</p>');
     expect(html).toContain('data-audience=""');
@@ -1137,6 +1166,20 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     expect(html).toContain('Agent-optimized only');
     // Methodology link in the hero lede.
     expect(html).toContain('href="/methodology"');
+  });
+
+  test('hero carries an "N audited tools in the corpus" subhead (corpus-descriptor framing)', () => {
+    // U3 inversion: the leaderboard hero gains a corpus-descriptor subhead
+    // that's stable under client-side audience-filter toggles. The redundant
+    // (N) from the All tier-filter button is dropped.
+    const lb = [entry('rg', 'agent-optimized', null), entry('lazygit', null, 'human-tui'), entry('eza', null, null)];
+    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    expect(html).toContain('class="leaderboard-hero__meta"');
+    expect(html).toContain('3 audited tools in the corpus');
+    // All button no longer carries the redundant "(N)" count — the new
+    // subhead owns the headcount.
+    expect(html).toContain('data-tier="all">All<');
+    expect(html).not.toContain('data-tier="all">All (3)<');
   });
 });
 
@@ -1515,10 +1558,15 @@ describe('buildScorecardBody — embed-snippet gating', () => {
 // -------------------------------------------------------------------
 
 describe('buildLeaderboardBody — badge callout', () => {
-  function entry(name: string, score: number, scored = true) {
+  // Post-U3: every leaderboard entry has a scorecard. The "unscored entries
+  // not counted as eligible" pre-inversion test moved here as a tautology
+  // — there are no unscored entries to mis-count anymore (they're excluded
+  // by loadScoredTools). The denominator is the audited corpus, not the
+  // registry.
+  function entry(name: string, score: number) {
     return {
       tool: { name, tier: 'workhorse', language: 'rust', description: name },
-      scorecard: scored ? ({ summary: { pass: 1, warn: 0, fail: 0 } } as any) : null,
+      scorecard: { summary: { pass: 1, warn: 0, fail: 0 } } as any,
       score,
       principleScore: { met: 5, total: 7, details: [] },
       rank: 1,
@@ -1526,26 +1574,16 @@ describe('buildLeaderboardBody — badge callout', () => {
   }
 
   test('callout cites the floor and the live eligible/total count', () => {
-    const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3, false)];
+    const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3)];
     const html = buildLeaderboardBody(lb as any, '<p>m</p>');
     expect(html).toContain('leaderboard-badge-callout');
     expect(html).toContain('above 80%');
-    // Two of four entries clear 0.80; total counts every leaderboard row
-    // including the unscored one (denominator is registry-wide).
+    // Two of four entries clear 0.80; denominator is the audited corpus.
     expect(html).toContain('2 of 4 listed tools');
   });
 
   test('callout links to /badge', () => {
     const html = buildLeaderboardBody([entry('eza', 1.0)] as any, '<p>m</p>');
     expect(html).toContain('href="/badge"');
-  });
-
-  test('unscored entries are not counted as eligible even at score=0', () => {
-    // An unscored entry has scorecard === null; computeLeaderboard sets
-    // its score to 0. The callout must not count those as "below floor"
-    // — they're "no signal yet."
-    const lb = [entry('rg', 1.0), entry('unscored', 0, false)];
-    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
-    expect(html).toContain('1 of 2');
   });
 });
