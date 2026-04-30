@@ -348,10 +348,10 @@ export async function build() {
   const scorecardPaths = [];
   const badgePaths = [];
   for (const entry of leaderboard) {
-    const { tool, scorecard, score, principleScore, version, metadata } = entry;
+    const { tool, scorecard, principleScore, version, metadata } = entry;
     const topIssues = extractTopIssues(scorecard);
 
-    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, score, version, metadata);
+    const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, version, metadata);
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.html`),
       emitShell({
@@ -364,9 +364,7 @@ export async function build() {
     );
     await writeFile(
       join(DIST_DIR, 'score', `${tool.name}.md`),
-      absolutifyMarkdownLinks(
-        buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, score, version, metadata),
-      ),
+      absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, version, metadata)),
     );
     scorecardPaths.push(`/score/${tool.name}`);
 
@@ -374,13 +372,11 @@ export async function build() {
     // eligibility floor. The /score/<tool> page gates the embed snippet
     // (above-floor only); the SVG itself stays available so a tool's
     // existing embed continues to render the current score after a
-    // regression. Unscored tools (scorecard === null) skip the SVG —
-    // there's no meaningful score to render.
-    if (scorecard) {
-      const svg = renderBadgeSvg(score);
-      await writeFile(join(DIST_DIR, 'badge', `${tool.name}.svg`), svg);
-      badgePaths.push(`/badge/${tool.name}.svg`);
-    }
+    // regression. Score derived from schema 0.5 `badge.score_pct` (0–100
+    // int) → 0–1 for badge-maker's color thresholds.
+    const svg = renderBadgeSvg(scorecard.badge.score_pct / 100);
+    await writeFile(join(DIST_DIR, 'badge', `${tool.name}.svg`), svg);
+    badgePaths.push(`/badge/${tool.name}.svg`);
 
     // Binary-name redirect: tools where registry.binary !== registry.name
     // (e.g., ripgrep/rg, ast-grep/sg, bottom/btm — 11 entries today) get a
