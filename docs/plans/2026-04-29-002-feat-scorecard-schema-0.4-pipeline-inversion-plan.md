@@ -74,9 +74,10 @@ build error instead of a silent skip.
 - **R4.** Per-tool page surfaces the new metadata: `anc.version` + `anc.commit`, `run.started_at`, `run.duration_ms`,
   `run.platform.os` / `arch`, `target.kind`, and `run.invocation` as the verbatim "reproduce locally" command for
   command-mode runs.
-- **R5.** Build-time invariants protect the corpus: every committed scorecard has `schema_version` equal to `0.4`, every
-  `anc.version` in the corpus is at-or-above a configured floor, every `tool.name` matches its filename slug, every
-  command-mode `target.command` matches `tool.name`, every `run.started_at` parses as RFC 3339 and is not in the future.
+- **R5.** Build-time invariants protect the corpus: every committed scorecard has `schema_version` at-or-above `"0.4"`
+  (compared via the existing `compareVersions()` helper, same pattern as `ANC_VERSION_FLOOR`), every `anc.version` in
+  the corpus is at-or-above a configured floor, every `tool.name` matches its filename slug, every command-mode
+  `target.command` matches `tool.name`, every `run.started_at` parses as RFC 3339 and is not in the future.
 - **R6.** All 96 scorecards in `scorecards/` are regenerated to v0.4 shape using a local build of
   `~/dev/agentnative-cli` from the `dev` branch (PR #34's merge commit). Site does not block on the v0.2.0 release.
 - **R7.** Public-facing schema docs (`content/scorecard-schema.md` → `/scorecard-schema`) describe the new fields,
@@ -184,8 +185,10 @@ build error instead of a silent skip.
   repo/url) live there. Regen-pipeline inputs (`audit_profile`, `version_extract`) also live there. What goes away is
   `version` and `scored_at` (now self-described in the scorecard).
 - **Should the build still emit unscored rows?** No. With pipeline inversion, only tools with a real scorecard appear on
-  the leaderboard. The fallback-row infrastructure was retired in launch-readiness U3 already; this confirms the
-  decision.
+  the leaderboard. (Auto-fix from doc-review: clarifying — launch-readiness U3 confirmed the unscored DATA situation was
+  retired by PR #40, all 96/96 scored. The em-dash CODE PATH itself is still live in
+  `src/build/scorecards-render.mjs:76,85,528,530`; this plan's U3 is what removes that code path.) This plan confirms
+  the decision.
 - **Can `audit_profile` be dropped from the registry?** No. The regen pipeline reads it as input to pass
   `--audit-profile X` when invoking `anc check`. Same shape as today; not a redundancy v0.4 unlocks.
 - **Can `version_extract` be dropped?** No. The regen script needs an external `--version` probe to derive the
@@ -323,7 +326,8 @@ if any committed scorecard violates the v0.4 contract.
 **Files:**
 
 - Modify: `src/build/scorecards.mjs` — extend `loadScorecards()` to attach the new metadata blocks to each entry's
-  return shape; tighten validation to require `schema_version === "0.4"`.
+  return shape; tighten validation to require `compareVersions(schema_version, "0.4") >= 0` (floor, not equality —
+  auto-fix from doc-review: lets future v0.5+ scorecards ship without a stop-the-world site PR).
 - Modify: `src/build/util.mjs` — add `ANC_VERSION_FLOOR` constant (initial value matches whatever the regenerated corpus
   reports; document that it bumps when CLI v0.2.0+ regen lands).
 - Modify: `src/build/build.mjs` — extend `runInvariantChecks()` with the new corpus-level invariants (schema-version
@@ -351,7 +355,9 @@ production code is in place; the test failure is the "this is what the new invar
 - `runInvariantChecks()` in `src/build/build.mjs:108-153` — fail-fast pattern, descriptive error messages naming the
   offending file.
 - `loadRegistry()` in `src/build/scorecards.mjs:41-87` — validation pattern with named errors per failure mode.
-- `compareVersions()` in `src/build/scorecards.mjs:113-134` — version comparison.
+- `compareVersions()` in `src/build/scorecards.mjs:113-134` — version comparison. **Currently module-private (not
+  exported); auto-fix from doc-review:** export it so `runInvariantChecks()` in `build.mjs` can call it, or move it to
+  `util.mjs` alongside `ANC_VERSION_FLOOR`.
 
 **Test scenarios:**
 
@@ -359,9 +365,11 @@ production code is in place; the test failure is the "this is what the new invar
   returns a per-tool object with `metadata.tool.name === "fixture"`, `metadata.anc.version === "0.2.0"`, etc.
 - Edge case: `tool.version: null` parses successfully — null is a documented valid state.
 - Edge case: `anc.commit: null` parses successfully (cargo-install builds outside a git checkout).
+- Edge case: a fixture with `schema_version: "0.5"` parses successfully (floor admits future additive bumps — auto-fix
+  from doc-review).
 - Edge case: `target.path: null` for `kind: "command"` parses; `target.command: null` for `kind: "project"` parses.
-- Error path: a fixture with `schema_version: "0.3"` throws during invariant check with message naming the file and the
-  schema contract.
+- Error path: a fixture with `schema_version: "0.3"` (below floor) throws during invariant check with message naming the
+  file and the schema contract.
 - Error path: a fixture where `tool.name: "rg"` is paired with filename `eza-v0.23.4.json` throws with a
   filename-mismatch error.
 - Error path: a fixture where `anc.version: "0.0.5"` (below floor) throws with an `ANC_VERSION_FLOOR` error.
@@ -393,7 +401,8 @@ registry entry is a build error; registry entry without a scorecard is excluded 
   scorecard-iterating `loadScoredTools()` (or rename appropriately). Returns the joined shape: `{ tool: <registry
   editorial>, scorecard, version, metadata }`. Throws on scorecards-without-registry-entry. Also delete
   `scorecardFilename(tool)` (lines 104-107) — the inverted flow reads filenames off disk directly, so the registry's
-  `version`-to-filename construction has no remaining caller.
+  `version`-to-filename construction has no remaining caller. **Preflight (auto-fix from doc-review):** before deletion,
+  `rg "scorecardFilename" src/ tests/` to confirm zero remaining call sites; remove the export only after verifying.
 - Modify: `src/build/build.mjs` — remove the `unscored` code path from the per-tool emit loop (registry entries without
   scorecards are no longer iterated). Update the leaderboard computation to handle the always-scored-only assumption.
 - Modify: `src/build/scorecards-render.mjs` — `buildLeaderboardBody()` and `scoreCell()` / `principleCell()` no longer
@@ -459,11 +468,20 @@ the registry as the primary source).
 - Modify: `registry.yaml` — remove `version:` and `scored_at:` from every entry; update the header comment block to
   remove "Fields (scored tools only — omit for unscored)" subsection and document that filename + scorecard metadata now
   own those facts.
-- Modify: `scripts/regen-scorecards.sh` — remove the `scored_at` writeback (the awk substitution at lines 211-216) and
-  the `version` writeback when `extracted_version != registry_version`. The filename version comes from
-  `version_extract` (still in the registry as a regen input); after the run, the scorecard self-describes via
-  `tool.version` and `run.started_at`.
-- Modify: `docker/score/score-anc100.sh` — same writeback removals as `regen-scorecards.sh`.
+- Modify: `scripts/regen-scorecards.sh` — three coupled changes (auto-fix from doc-review):
+- Replace the iteration filter at line 134 (`yq -r '.tools[] | select(.version != null) | .name'`) with a selector that
+  no longer depends on the removed `version` field. Options: iterate every tool (`yq -r '.tools[].name'`), or drive the
+  regen list from `scorecards/*.json` filenames since post-inversion the scorecard set is the source of truth. Decide at
+  U4 implementation time.
+- Remove the in-place writeback awk block at lines 209-225 (the entire `awk -v target="$name" -v new_scored_at="$today"
+  -v new_version="$new_version" ...` invocation) — it rewrites `scored_at:` and `version:` lines inside each tool block,
+  both of which are gone post-U4.
+- Remove the `pinned` lookup at line 158 and the `drift_warnings` accumulation; both depend on the registry `version`
+  field.
+- Modify: `docker/score/score-anc100.sh` — review for any `select(.version != null)` filter or registry iteration that
+  depends on the removed field; the docker variant does **not** writeback to the registry, so the awk-removal step from
+  `regen-scorecards.sh` is not applicable here (auto-fix from doc-review: the original plan incorrectly listed parallel
+  writeback removals).
 - Modify: `content/scorecard-schema.md` — docs cross-references to "registry holds `scored_at` / `version`" need
   updating to point at the scorecard fields instead.
 - Test: `tests/build.test.ts` — assert `loadRegistry()` accepts entries without `version` / `scored_at`. (The validation
@@ -631,14 +649,13 @@ blocks, null-state semantics, and the publishing-PII review reminder for `run.in
 
 ## Risks & Dependencies
 
-| Risk                                                                                                                                                                                 | Mitigation                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local CLI build of `dev` produces scorecards with `anc.version: "0.1.0"` (the pre-tag stub), then v0.2.0 release later means `anc.version` ticks up — does the site need a re-regen? | The `ANC_VERSION_FLOOR` constant in `src/build/util.mjs` is set to whatever U1's regen produces. Document in the constant's comment that it bumps when the next regen lands (post-CLI-v0.2.0). No re-regen required for site correctness; the floor invariant just tightens incrementally.                                                           |
-| Pipeline inversion silently drops registry entries that lacked scorecards (today they render as em-dash rows)                                                                        | This was already retired during the launch corpus build (PR #40, all 96/96 scored). The current launch-readiness plan confirms zero unscored rows. If a registry entry without a scorecard is reintroduced, the new behavior (exclusion from leaderboard) is the documented intent — the build summary makes the absence visible.                    |
-| `tool.version` and filename version disagree on a real tool, confusing readers                                                                                                       | U5 renders both with a one-line discrepancy note. Discrepancy is itself signal — the regen pipeline used `version_extract` to derive the filename, but the binary's own `--version` may have changed format between regens. Surfacing the drift is more honest than silently picking one.                                                            |
-| Regen on launch-eve interferes with the launch wave                                                                                                                                  | Default timing is post-launch. The user can override by running U1 + U2 + U3 + U4 + U5 + U6 tonight, but the plan's safe path is "after the Show HN window closes." Sequenced explicitly in the Operational Notes below.                                                                                                                             |
-| Schema-version invariant rejects valid v0.5+ scorecards in the future                                                                                                                | The invariant compares for equality with `"0.4"` (not `>=`). When v0.5 lands upstream, this plan's reader needs to widen — same shape as the pre-launch `0.x` policy. Document in the invariant's source comment.                                                                                                                                    |
-| Breaking change downstream — tools that fetch `https://anc.dev/scorecards/<name>-v<version>.json` directly may rely on v0.3 shape                                                    | The scorecard JSON files are committed under `scorecards/` and served as static assets. Once regenerated, every fetch returns v0.4. v0.4 is additive (per upstream PR #34's design); v0.3 consumers feature-detect new keys rather than break. No downstream breakage expected, but worth flagging in the PR description for any external consumers. |
+| Risk                                                                                                                                                                                      | Mitigation                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local CLI build of `dev` produces scorecards with `anc.version: "0.1.0"` (the pre-tag stub), then v0.2.0 release later means `anc.version` ticks up — does the site need a re-regen?      | The `ANC_VERSION_FLOOR` constant in `src/build/util.mjs` is set to whatever U1's regen produces. Document in the constant's comment that it bumps when the next regen lands (post-CLI-v0.2.0). No re-regen required for site correctness; the floor invariant just tightens incrementally.                                                                                              |
+| Pipeline inversion silently drops registry entries that lacked scorecards (today they would render as em-dash rows from the live code at `src/build/scorecards-render.mjs:76,85,528,530`) | The unscored DATA situation was already retired by PR #40 (all 96/96 scored), so no rows actually render with em-dashes today, but the code path is still live and U3 is what removes it. If a registry entry without a scorecard is reintroduced post-inversion, the new behavior (exclusion from leaderboard) is the documented intent — the build summary makes the absence visible. |
+| `tool.version` and filename version disagree on a real tool, confusing readers                                                                                                            | U5 renders both with a one-line discrepancy note. Discrepancy is itself signal — the regen pipeline used `version_extract` to derive the filename, but the binary's own `--version` may have changed format between regens. Surfacing the drift is more honest than silently picking one.                                                                                               |
+| Regen on launch-eve interferes with the launch wave                                                                                                                                       | Default timing is post-launch. The user can override by running U1 + U2 + U3 + U4 + U5 + U6 tonight, but the plan's safe path is "after the Show HN window closes." Sequenced explicitly in the Operational Notes below.                                                                                                                                                                |
+| Breaking change downstream — tools that fetch `https://anc.dev/scorecards/<name>-v<version>.json` directly may rely on v0.3 shape                                                         | The scorecard JSON files are committed under `scorecards/` and served as static assets. Once regenerated, every fetch returns v0.4. v0.4 is additive (per upstream PR #34's design); v0.3 consumers feature-detect new keys rather than break. No downstream breakage expected, but worth flagging in the PR description for any external consumers.                                    |
 
 ## Documentation / Operational Notes
 
