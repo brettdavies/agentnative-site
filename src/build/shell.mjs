@@ -136,7 +136,9 @@ ${principles
     <meta name="twitter:image" content="${ogImage}" />
     <meta name="twitter:image:alt" content="${OG_IMAGE_ALT}" />
 
-    <link rel="icon" href="/og-image.png" type="image/png" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180.png" sizes="180x180" />
 
     <link rel="preload" href="/fonts/uncut-sans-variable.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/monaspace-xenon-variable.woff2" as="font" type="font/woff2" crossorigin />

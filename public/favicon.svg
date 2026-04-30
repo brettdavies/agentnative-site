@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="anc.dev">
+  <style>
+    .bg { fill: #0058aa; }
+    .fg { stroke: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #6dbdff; }
+      .fg { stroke: #091421; }
+    }
+  </style>
+  <rect class="bg" width="32" height="32" rx="6"/>
+  <g class="fg" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="9,10 15,16 9,22"/>
+    <line x1="17" y1="23" x2="24" y2="23"/>
+  </g>
+</svg>
