@@ -51,26 +51,45 @@ flowchart LR
 
 ### How spec version flows into rendering
 
-After this PR ships, the only place the spec version literal lives in source is `src/data/spec/VERSION`. Read-time
-chain:
+### How spec versions flow into rendering surfaces
+
+The site shows version labels in three places. **Each pulls from a different source by design** — the three sources move
+at different cadences (vendoring, scoring, manual reconciliation), and conflating them into one would lie about at least
+one of those movements.
 
 ```mermaid
 flowchart LR
-    versionFile[src/data/spec/VERSION<br/>vendored, single line]
-    util[src/build/util.mjs<br/>readFileSync at module load<br/>exports SPEC_VERSION]
-    badge[src/build/badge.mjs<br/>badge URL versioning]
-    shell[src/build/shell.mjs<br/>footer: v$&#123;SPEC_VERSION&#125;]
-    og[scripts/og/generate.ts<br/>OG card data-version]
+    vendoredVersion[src/data/spec/VERSION<br/>vendored snapshot]
+    siteVersion[content/principles/VERSION<br/>site reconciliation marker]
+    scorecardJsons[scorecards/&lt;tool&gt;-v&lt;ver&gt;.json<br/>per-tool, embeds spec_version]
 
-    versionFile --> util
-    util --> badge
-    util --> shell
-    util --> og
+    util[src/build/util.mjs<br/>exports SPEC_VERSION + SITE_SPEC_VERSION]
+
+    footer[src/build/shell.mjs<br/>footer: v$&#123;SITE_SPEC_VERSION&#125;]
+    badges[src/build/build.mjs:377<br/>renderBadgeSvg&#40;score, scorecard.spec_version&#41;]
+    og[scripts/og/generate.ts<br/>reads anc-v*.json's spec_version]
+    diff[git diff workflow<br/>operator-only — no rendered surface]
+
+    vendoredVersion --> util
+    siteVersion --> util
+    util -- "SITE_SPEC_VERSION" --> footer
+    scorecardJsons -- "scorecard.spec_version" --> badges
+    scorecardJsons -- "anc-v*.json's spec_version" --> og
+    util -. "SPEC_VERSION (reference only)" .-> diff
 ```
 
-Bumping is a one-line file edit (or, more typically, a re-run of `scripts/sync-spec.sh`); footer + OG card + badge URL
-all flow from it. There is no site-own version (`package.json` is `"0.0.0"` deliberately — see
-`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`).
+| Surface         | Source                                             | Bumped by                                                                                                 |
+| --------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Footer          | `SITE_SPEC_VERSION` ← `content/principles/VERSION` | Manual, by the contributor who reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run.        |
+| Per-tool badges | Each scorecard's `spec_version` field              | Automatic — bumps when the scorecard is regenerated against a newer `anc` build (via `docker/score/`).    |
+| OG card         | `anc`'s self-scorecard's `spec_version`            | Automatic on `bun run og` after `anc`'s scorecard is refreshed.                                           |
+| (no surface)    | `SPEC_VERSION` ← `src/data/spec/VERSION`           | Automatic — `./scripts/sync-spec.sh` overwrites whenever the spec ships a new tag. Reference / diff only. |
+
+Why three sources, not one: vendoring (we got a snapshot), scoring (anc was compiled against this spec), and site
+reconciliation (the prose has been updated to match) are three independent events. Conflating them into one constant
+forces at least one surface to lie about its actual currency. Full rationale in `src/data/spec/README.md` and the
+cross-repo version-model doc at `docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`. There is no
+site-own version (`package.json` is `"0.0.0"` deliberately — the spec version IS the site's "version" by intent).
 
 ## Downstream — data flowing OUT of this repo
 

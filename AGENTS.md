@@ -23,12 +23,19 @@ The scope for v0 is decided and lives in:
   relevant `p<n>-*.md` spec file first. Do not edit the spec to match the site; propagate in the other direction,
   deliberately.
 - `src/data/spec/` — vendored snapshot of `brettdavies/agentnative` (the canonical spec repo) at a pinned tag. Contains
-  `VERSION` (read by `src/build/util.mjs` and exported as `SPEC_VERSION` for the footer + OG card + badge URLs),
-  `CHANGELOG.md`, and `principles/p*-*.md` (machine-readable frontmatter — diff target only, NOT consumed by site
-  rendering). Refreshed via `scripts/sync-spec.sh` (remote-first; auto-picks the latest v* tag). The site copy in
-  `content/principles/` and the vendored spec at `src/data/spec/principles/` coexist intentionally — they serve
-  different audiences (humans vs machines) and their reconciliation is a deliberate editorial act, not a derivation.
-  Workflow detail in [`src/data/spec/README.md`](src/data/spec/README.md); cross-repo version model at
+  `VERSION` (the spec version this snapshot is at; exported as `SPEC_VERSION` from `src/build/util.mjs` — reference /
+  diff target only, NOT used for any user-visible surface), `CHANGELOG.md`, and `principles/p*-*.md` (machine-readable
+  frontmatter — diff target only, NOT consumed by site rendering). Refreshed via `scripts/sync-spec.sh` (remote-first;
+  auto-picks the latest v* tag). The site copy in `content/principles/` and the vendored spec at
+  `src/data/spec/principles/` coexist intentionally — they serve different audiences (humans vs machines) and their
+  reconciliation is a deliberate editorial act, not a derivation.
+- `content/principles/VERSION` — the spec version the site's PROSE has been **reconciled to**. Exported as
+  `SITE_SPEC_VERSION` from `src/build/util.mjs` and rendered in the site footer. Bumped MANUALLY by the contributor who
+  reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run — bumping before reconciliation lies to visitors
+  about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The badge SVGs
+  use a different source (each scorecard's own `spec_version` field), and the OG card uses anc's self-scorecard's
+  `spec_version` — three sources for three different events (vendor / score / reconcile).
+- Workflow detail in [`src/data/spec/README.md`](src/data/spec/README.md); cross-repo version model at
   [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](docs/solutions/best-practices/agentnative-version-model-2026-05-01.md);
   governing pattern at
   [`docs/solutions/best-practices/cross-repo-artifact-consumption-static-sites-2026-04-21.md`](docs/solutions/best-practices/cross-repo-artifact-consumption-static-sites-2026-04-21.md).
