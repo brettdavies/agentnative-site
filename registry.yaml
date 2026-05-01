@@ -1,0 +1,1053 @@
+# ANC 100 — Agent-Native CLI Tool Registry
+#
+# Single source of truth for tool metadata. The build pipeline reads this
+# file to generate the leaderboard and per-tool scorecard pages. Tool names
+# must match /^[a-z0-9-]+$/ — they become URL slugs (/score/<name>).
+#
+# Fields (required):
+#   name        — URL-safe identifier (lowercase, alphanumeric, hyphens)
+#   binary      — executable name resolved from PATH
+#   language    — primary implementation language
+#   tier        — workhorse | agent | notable
+#   creator     — person or org attribution
+#   install     — package manager install command (or distribution note)
+#   description — one-line summary
+#
+# Fields (at least one required — identifies the project):
+#   repo        — GitHub owner/repo (used for scorecard links)
+#   url         — canonical project URL (for non-GitHub tools, or
+#                 supplementary homepage). Falls back to this when
+#                 repo is absent.
+#
+# Fields (regen-pipeline inputs — optional):
+#   audit_profile   — one of human-tui | file-traversal | posix-utility |
+#                     diagnostic-only. Passed to `anc check
+#                     --audit-profile <profile>` so the category-exempt
+#                     checks are suppressed in the scored output.
+#   version_extract — shell snippet that prints the bare version. Used by
+#                     scripts/regen-scorecards.sh when the default
+#                     `--version` regex doesn't yield a clean SemVer.
+#
+# Scorecard file naming convention:
+#
+#   Behavioral + project checks:
+#     scorecards/{name}-v{version}.json
+#     e.g. scorecards/gh-v2.74.0.json
+#     Keyed to a binary release. The filename's <version> segment is
+#     the canonical version anchor; the scorecard's tool.version is
+#     informational. Post-U3 the build discovers scorecards on disk
+#     and joins each to its registry entry by <name> for editorial
+#     fields — there is no longer a `version:` field on registry
+#     entries (filename owns it).
+#
+#   Source checks (future — not yet implemented):
+#     scorecards/{name}-src-{YYYYMMDD}-{branch}-{commit7}.json
+#     e.g. scorecards/ripgrep-src-20260417-main-a1b2c3d.json
+#     Keyed to repo state. CalVer date provides chronological ordering,
+#     branch disambiguates main from feature branches, 7-char SHA pins
+#     to exact commit. Displayed as a separate bonus column per R5.
+#
+# Contributor flow (post-U3):
+#
+#   The editorial PR (registry entry) and the scorecard PR (a real
+#   `<name>-v<version>.json` file) may land in either order. While only
+#   one side has landed, the build emits a stderr warning and excludes
+#   the orphaned side from the leaderboard:
+#
+#     - Registry entry without a scorecard → "registry orphan" warning;
+#       the entry is hidden from the leaderboard until the scorecard PR
+#       lands. This is the expected steady-state for a freshly-added
+#       tool whose binary hasn't been scored yet.
+#     - Scorecard without a registry entry → "scorecard orphan" warning;
+#       the scorecard is excluded from the leaderboard until the
+#       editorial PR adds the matching `<name>` entry.
+#
+#   CI surfaces both warning lists as a PR-comment annotation (U8) so
+#   reviewers see drift without grepping logs. The build still passes
+#   in either orphaned state — softening from a hard error to a warning
+#   decouples the two contribution flows.
+#
+# Tier counts: workhorse ~50, agent ~10, notable ~20.
+# Per-creator cap in notable: 3-4 tools max.
+
+tools:
+
+  # ─────────────────────────────────────────────────────────────────
+  # WORKHORSE — tools agents invoke to do work
+  # ─────────────────────────────────────────────────────────────────
+
+  # System & foundational (non-GitHub or GitHub-mirrored system tools)
+  - name: curl
+    repo: curl/curl
+    url: https://curl.se
+    binary: curl
+    language: C
+    tier: workhorse
+    creator: Daniel Stenberg
+    install: brew install curl
+    description: Command-line tool for transferring data with URLs
+
+  - name: git
+    repo: git/git
+    url: https://git-scm.com
+    binary: git
+    language: C
+    tier: workhorse
+    creator: Linus Torvalds
+    install: brew install git
+    description: Distributed version control system
+
+  - name: make
+    url: https://www.gnu.org/software/make/
+    binary: make
+    language: C
+    tier: workhorse
+    creator: GNU Project
+    install: brew install make
+    description: Build automation tool that reads Makefiles
+
+  - name: ffmpeg
+    repo: FFmpeg/FFmpeg
+    url: https://ffmpeg.org
+    binary: ffmpeg
+    language: C
+    tier: workhorse
+    creator: FFmpeg project
+    install: brew install ffmpeg
+    description: Record, convert, and stream audio and video
+
+  - name: nvidia-smi
+    url: https://developer.nvidia.com/nvidia-smi
+    binary: nvidia-smi
+    language: C
+    tier: workhorse
+    creator: NVIDIA
+    install: included with NVIDIA GPU driver
+    description: NVIDIA GPU monitoring and management interface
+
+  - name: cmake
+    repo: Kitware/CMake
+    url: https://cmake.org
+    binary: cmake
+    language: C++
+    tier: workhorse
+    creator: Kitware
+    install: brew install cmake
+    description: Cross-platform build system generator
+
+  - name: rsync
+    repo: RsyncProject/rsync
+    url: https://rsync.samba.org
+    binary: rsync
+    language: C
+    tier: workhorse
+    creator: Andrew Tridgell
+    install: brew install rsync
+    description: Fast, versatile file copying and synchronization tool
+
+  - name: tmux
+    repo: tmux/tmux
+    url: https://tmux.github.io
+    binary: tmux
+    language: C
+    tier: workhorse
+    creator: Nicholas Marriott
+    install: brew install tmux
+    description: Terminal multiplexer
+    # Interactive TUI by design — running `tmux` with no args attaches an
+    # existing session or starts one. Suppresses P1 non-interactive variants
+    # and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
+    # `tmux --version` is rejected ("tmux: unknown option -- -"); `tmux -V`
+    # emits e.g. `tmux 3.6a`. Strip the alpha suffix (`3.6a` → `3.6`).
+    version_extract: "tmux -V | grep -oE '[0-9]+\\.[0-9]+'"
+
+  # Search & filter
+  - name: ripgrep
+    repo: BurntSushi/ripgrep
+    binary: rg
+    language: Rust
+    tier: workhorse
+    creator: Andrew Gallant
+    install: brew install ripgrep
+    description: Recursively search directories for a regex pattern
+
+  - name: fd
+    repo: sharkdp/fd
+    binary: fd
+    language: Rust
+    tier: workhorse
+    creator: David Peter
+    install: brew install fd
+    description: A simple, fast, and user-friendly alternative to find
+    # Pre-staged for H6 Unit 0: regen will pass `--audit-profile file-traversal`,
+    # suppressing checks the file-traversal exception category covers.
+    audit_profile: file-traversal
+
+  - name: fzf
+    repo: junegunn/fzf
+    binary: fzf
+    language: Go
+    tier: workhorse
+    creator: Junegunn Choi
+    install: brew install fzf
+    description: A command-line fuzzy finder
+    # Interactive TUI by design — invoked with stdin to display a fuzzy-match
+    # picker. Suppresses P1 non-interactive variants and P6 SIGPIPE per the
+    # human-tui exception.
+    audit_profile: human-tui
+
+  - name: ast-grep
+    repo: ast-grep/ast-grep
+    binary: sg
+    language: Rust
+    tier: workhorse
+    creator: Herrington Darkholme
+    install: brew install ast-grep
+    description: Structural search and replace for code using AST patterns
+
+  - name: jq
+    repo: jqlang/jq
+    binary: jq
+    language: C
+    tier: workhorse
+    creator: Stephen Dolan
+    install: brew install jq
+    description: Command-line JSON processor
+
+  - name: xsv
+    repo: BurntSushi/xsv
+    binary: xsv
+    language: Rust
+    tier: workhorse
+    creator: Andrew Gallant
+    install: brew install xsv
+    description: A fast CSV command-line toolkit
+
+  # View & inspect
+  - name: bat
+    repo: sharkdp/bat
+    binary: bat
+    language: Rust
+    tier: workhorse
+    creator: David Peter
+    install: brew install bat
+    description: A cat clone with syntax highlighting and Git integration
+
+  - name: eza
+    repo: eza-community/eza
+    binary: eza
+    language: Rust
+    tier: workhorse
+    creator: eza community
+    install: brew install eza
+    description: A modern alternative to ls
+    # `eza --version` line 1 is the project tagline; the SemVer is on line 2
+    # (e.g. `v0.23.4 [+git]`). Pull the leading SemVer token from line 2.
+    version_extract: "eza --version | sed -n '2p' | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+
+  - name: dust
+    repo: bootandy/dust
+    binary: dust
+    language: Rust
+    tier: workhorse
+    creator: bootandy
+    install: brew install dust
+    description: A more intuitive version of du in Rust
+
+  - name: procs
+    repo: dalance/procs
+    binary: procs
+    language: Rust
+    tier: workhorse
+    creator: dalance
+    install: brew install procs
+    description: A modern replacement for ps written in Rust
+
+  - name: bottom
+    repo: ClementTsang/bottom
+    binary: btm
+    language: Rust
+    tier: workhorse
+    creator: Clement Tsang
+    install: brew install bottom
+    description: A cross-platform graphical process/system monitor
+    # Interactive TUI process/system monitor (htop-class). Suppresses P1
+    # non-interactive variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
+
+  - name: glow
+    repo: charmbracelet/glow
+    binary: glow
+    language: Go
+    tier: workhorse
+    creator: Charm
+    install: brew install glow
+    description: Render markdown on the CLI
+
+  - name: lsd
+    repo: lsd-rs/lsd
+    binary: lsd
+    language: Rust
+    tier: workhorse
+    creator: lsd-rs
+    install: brew install lsd
+    description: The next gen ls command
+
+  - name: bandwhich
+    repo: imsnif/bandwhich
+    binary: bandwhich
+    language: Rust
+    tier: workhorse
+    creator: Aram Drevekenin
+    install: brew install bandwhich
+    description: Terminal bandwidth utilization tool
+    # Interactive TUI network monitor — runs continuously, takes over the
+    # terminal. Suppresses P1 non-interactive variants and P6 SIGPIPE per
+    # the human-tui exception.
+    audit_profile: human-tui
+
+  # Edit & transform
+  - name: sd
+    repo: chmln/sd
+    binary: sd
+    language: Rust
+    tier: workhorse
+    creator: chmln
+    install: brew install sd
+    description: Intuitive find-and-replace CLI (sed alternative)
+
+  - name: miller
+    repo: johnkerl/miller
+    binary: mlr
+    language: Go
+    tier: workhorse
+    creator: John Kerl
+    install: brew install miller
+    description: Like awk, sed, cut, join, and sort for name-indexed data (CSV, JSON, etc.)
+
+  - name: dasel
+    repo: TomWright/dasel
+    binary: dasel
+    language: Go
+    tier: workhorse
+    creator: Tom Wright
+    install: brew install dasel
+    description: Select, put, and delete data from JSON, TOML, YAML, XML, and CSV
+    # `dasel --version` shows usage; `dasel version` emits just the SemVer.
+    version_extract: "dasel version"
+
+  - name: yq
+    repo: mikefarah/yq
+    binary: yq
+    language: Go
+    tier: workhorse
+    creator: Mike Farah
+    install: brew install yq
+    description: Portable command-line YAML, JSON, XML, CSV, TOML, and properties processor
+
+  - name: pandoc
+    repo: jgm/pandoc
+    binary: pandoc
+    language: Haskell
+    tier: workhorse
+    creator: John MacFarlane
+    install: brew install pandoc
+    description: Universal markup converter
+
+  - name: typst
+    repo: typst/typst
+    binary: typst
+    language: Rust
+    tier: workhorse
+    creator: Typst
+    install: brew install typst
+    description: A markup-based typesetting system that is powerful and easy to learn
+
+  # Git & VCS
+  - name: gh
+    repo: cli/cli
+    binary: gh
+    language: Go
+    tier: workhorse
+    creator: GitHub
+    install: brew install gh
+    description: GitHub's official command-line tool
+
+  - name: lazygit
+    repo: jesseduffield/lazygit
+    binary: lazygit
+    language: Go
+    tier: workhorse
+    creator: Jesse Duffield
+    install: brew install lazygit
+    description: Simple terminal UI for git commands
+    # Pre-staged for H6 Unit 0: TUI by design — regen passes `--audit-profile
+    # human-tui`, suppressing the non-interactive (P1) and SIGPIPE (P6) checks.
+    audit_profile: human-tui
+    # `lazygit --version` emits e.g.
+    #   commit=, build date=, build source=Homebrew, version=0.61.1, os=linux, ...
+    # The default extractor would pick the first SemVer it sees, which for this
+    # output happens to be the lazygit version (correct), but we declare the
+    # extractor explicitly so a future format change doesn't silently shift to
+    # the embedded git version.
+    version_extract: 'lazygit --version | grep -oE "version=[0-9.]+" | head -1 | cut -d= -f2'
+
+  - name: git-cliff
+    repo: orhun/git-cliff
+    binary: git-cliff
+    language: Rust
+    tier: workhorse
+    creator: Orhun Parmaksiz
+    install: brew install git-cliff
+    description: A changelog generator that follows Conventional Commit specifications
+
+  - name: delta
+    repo: dandavison/delta
+    binary: delta
+    language: Rust
+    tier: workhorse
+    creator: Dan Davison
+    install: brew install git-delta
+    description: A syntax-highlighting pager for git, diff, grep, and blame output
+
+  - name: gitleaks
+    repo: gitleaks/gitleaks
+    binary: gitleaks
+    language: Go
+    tier: workhorse
+    creator: Zachary Rice
+    install: brew install gitleaks
+    description: Find secrets in code with Gitleaks
+
+  - name: gitui
+    repo: extrawurst/gitui
+    binary: gitui
+    language: Rust
+    tier: workhorse
+    creator: Stephan Dilly
+    install: brew install gitui
+    description: Blazing fast terminal UI for git
+    # Interactive git TUI (parallel to lazygit). Suppresses P1 non-interactive
+    # variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
+
+  - name: jj
+    repo: martinvonz/jj
+    binary: jj
+    language: Rust
+    tier: workhorse
+    creator: Martin von Zweigbergk
+    install: brew install jj
+    description: A Git-compatible VCS that is both simple and powerful
+
+  # Measure & benchmark
+  - name: hyperfine
+    repo: sharkdp/hyperfine
+    binary: hyperfine
+    language: Rust
+    tier: workhorse
+    creator: David Peter
+    install: brew install hyperfine
+    description: A command-line benchmarking tool
+
+  - name: tokei
+    repo: XAMPPRocky/tokei
+    binary: tokei
+    language: Rust
+    tier: workhorse
+    creator: Erin Power
+    install: brew install tokei
+    description: Count your code, quickly
+
+  - name: scc
+    repo: boyter/scc
+    binary: scc
+    language: Go
+    tier: workhorse
+    creator: Ben Boyter
+    install: brew install scc
+    description: Fast accurate code counter with complexity calculations
+
+  # HTTP & network
+  - name: xh
+    repo: ducaale/xh
+    binary: xh
+    language: Rust
+    tier: workhorse
+    creator: ducaale
+    install: brew install xh
+    description: Friendly and fast tool for sending HTTP requests
+
+  - name: miniserve
+    repo: svenstaro/miniserve
+    binary: miniserve
+    language: Rust
+    tier: workhorse
+    creator: Sven-Hendrik Haase
+    install: brew install miniserve
+    description: Serve files over HTTP right now
+
+  # Container & cloud
+  - name: docker
+    repo: docker/cli
+    binary: docker
+    language: Go
+    tier: workhorse
+    creator: Docker
+    install: brew install docker
+    description: The Docker CLI
+
+  - name: kubectl
+    repo: kubernetes/kubectl
+    binary: kubectl
+    language: Go
+    tier: workhorse
+    creator: Kubernetes
+    install: brew install kubectl
+    description: Kubernetes command-line tool
+    # `kubectl --version` is rejected; `kubectl version --client` emits e.g.
+    # `Client Version: v1.36.0`. Pull the first SemVer-shaped token.
+    version_extract: "kubectl version --client 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+
+  - name: helm
+    repo: helm/helm
+    binary: helm
+    language: Go
+    tier: workhorse
+    creator: Helm
+    install: brew install helm
+    description: The Kubernetes package manager
+    # `helm --version` is rejected; `helm version --short` emits e.g.
+    # `v4.1.4+g05fa379`. Drop the leading `v` and the `+gitsha` suffix.
+    version_extract: "helm version --short | sed -E 's/^v([0-9.]+).*/\\1/'"
+
+  - name: terraform
+    repo: hashicorp/terraform
+    binary: terraform
+    language: Go
+    tier: workhorse
+    creator: HashiCorp
+    # `terraform` was removed from homebrew-core after HashiCorp's BUSL
+    # relicense; the canonical install is now via the `hashicorp/tap` tap.
+    install: brew install hashicorp/tap/terraform
+    description: Infrastructure as code, safely and predictably
+
+  - name: flyctl
+    repo: superfly/flyctl
+    binary: fly
+    language: Go
+    tier: workhorse
+    creator: Fly.io
+    install: brew install flyctl
+    description: Command-line tools for Fly.io services
+
+  - name: wrangler
+    repo: cloudflare/workers-sdk
+    binary: wrangler
+    language: TypeScript
+    tier: workhorse
+    creator: Cloudflare
+    install: brew install cloudflare-wrangler
+    description: CLI for Cloudflare Workers
+
+  - name: cf
+    repo: cloudflare/workers-sdk
+    binary: cf
+    language: TypeScript
+    tier: workhorse
+    creator: Cloudflare
+    install: bun add -g cf
+    description: Cloudflare's beta unified CLI (Technical Preview); rebuilt for agent-first ergonomics
+    # `cf --version` opens with an ASCII-art logo, then a banner line like
+    # `        Cloudflare CLI  v0.0.5`. Strip the leading `v` from the first
+    # SemVer-shaped token after the banner.
+    version_extract: "cf --version 2>&1 | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 | tr -d v"
+
+  - name: aws-cli
+    repo: aws/aws-cli
+    binary: aws
+    language: Python
+    tier: workhorse
+    creator: Amazon Web Services
+    install: brew install awscli
+    description: Universal command-line interface for Amazon Web Services
+
+  - name: supabase
+    repo: supabase/cli
+    binary: supabase
+    language: Go
+    tier: workhorse
+    creator: Supabase
+    install: brew install supabase
+    description: Manage Supabase projects from the CLI
+
+  # Dev workflow
+  - name: just
+    repo: casey/just
+    binary: just
+    language: Rust
+    tier: workhorse
+    creator: Casey Rodarmor
+    install: brew install just
+    description: A command runner for project-specific tasks
+
+  - name: watchexec
+    repo: watchexec/watchexec
+    binary: watchexec
+    language: Rust
+    tier: workhorse
+    creator: Watchexec
+    install: brew install watchexec
+    description: Execute commands in response to file modifications
+
+  - name: shellcheck
+    repo: koalaman/shellcheck
+    binary: shellcheck
+    language: Haskell
+    tier: workhorse
+    creator: Vidar Holen
+    install: brew install shellcheck
+    description: Static analysis tool for shell scripts
+    # First line is the project tagline; the SemVer is on the `version:` line.
+    version_extract: "shellcheck --version | awk '/^version:/ {print $2; exit}'"
+
+  - name: actionlint
+    repo: rhysd/actionlint
+    binary: actionlint
+    language: Go
+    tier: workhorse
+    creator: Linda_pp
+    install: brew install actionlint
+    description: Static checker for GitHub Actions workflow files
+
+  - name: act
+    repo: nektos/act
+    binary: act
+    language: Go
+    tier: workhorse
+    creator: nektos
+    install: brew install act
+    description: Run your GitHub Actions locally
+
+  - name: mise
+    repo: jdx/mise
+    binary: mise
+    language: Rust
+    tier: workhorse
+    creator: Jeff Dickey
+    install: brew install mise
+    description: Dev tools, env vars, task runner
+
+  - name: direnv
+    repo: direnv/direnv
+    binary: direnv
+    language: Go
+    tier: workhorse
+    creator: Jonas Pfenniger
+    install: brew install direnv
+    description: Unclutter your .profile with per-directory environment variables
+
+  - name: starship
+    repo: starship/starship
+    binary: starship
+    language: Rust
+    tier: workhorse
+    creator: Starship
+    install: brew install starship
+    description: The minimal, blazing-fast, and infinitely customizable prompt for any shell
+
+  # Language tooling
+  - name: uv
+    repo: astral-sh/uv
+    binary: uv
+    language: Rust
+    tier: workhorse
+    creator: Astral
+    install: brew install uv
+    description: An extremely fast Python package and project manager
+
+  - name: ruff
+    repo: astral-sh/ruff
+    binary: ruff
+    language: Rust
+    tier: workhorse
+    creator: Astral
+    install: brew install ruff
+    description: An extremely fast Python linter and code formatter
+
+  - name: biome
+    repo: biomejs/biome
+    binary: biome
+    language: Rust
+    tier: workhorse
+    creator: Biome
+    install: brew install biome
+    description: Formatter and linter for JavaScript, TypeScript, JSON, and CSS
+
+  - name: bun
+    repo: oven-sh/bun
+    binary: bun
+    language: Zig
+    tier: workhorse
+    creator: Oven
+    install: brew install bun
+    description: Incredibly fast JavaScript runtime, bundler, test runner, and package manager
+
+  - name: deno
+    repo: denoland/deno
+    binary: deno
+    language: Rust
+    tier: workhorse
+    creator: Deno Land
+    install: brew install deno
+    description: A modern runtime for JavaScript and TypeScript
+
+  - name: cargo-binstall
+    repo: cargo-bins/cargo-binstall
+    binary: cargo-binstall
+    language: Rust
+    tier: workhorse
+    creator: cargo-bins
+    install: brew install cargo-binstall
+    description: Binary installation for Rust projects
+    # `cargo-binstall --version` interprets `--version` as flag-needs-value;
+    # `-V` emits just the SemVer.
+    version_extract: "cargo-binstall -V"
+
+  - name: pixi
+    repo: prefix-dev/pixi
+    binary: pixi
+    language: Rust
+    tier: workhorse
+    creator: prefix.dev
+    install: brew install pixi
+    description: Fast cross-platform package manager built on Conda
+
+  # File & navigation
+  - name: rclone
+    repo: rclone/rclone
+    binary: rclone
+    language: Go
+    tier: workhorse
+    creator: Nick Craig-Wood
+    install: brew install rclone
+    description: rsync for cloud storage
+
+  - name: yazi
+    repo: sxyazi/yazi
+    binary: yazi
+    language: Rust
+    tier: workhorse
+    creator: sxyazi
+    install: brew install yazi
+    description: Blazing fast terminal file manager
+    # Interactive TUI file manager — primary mode is full-screen browse.
+    # Suppresses P1 non-interactive variants and P6 SIGPIPE per the
+    # human-tui exception.
+    audit_profile: human-tui
+
+  - name: zoxide
+    repo: ajeetdsouza/zoxide
+    binary: zoxide
+    language: Rust
+    tier: workhorse
+    creator: Ajeet D'Souza
+    install: brew install zoxide
+    description: A smarter cd command
+
+  - name: broot
+    repo: Canop/broot
+    binary: broot
+    language: Rust
+    tier: workhorse
+    creator: Canop
+    install: brew install broot
+    description: A new way to see and navigate directory trees
+    # Interactive TUI directory tree browser. Suppresses P1 non-interactive
+    # variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
+
+  # Security & crypto
+  - name: age
+    repo: FiloSottile/age
+    binary: age
+    language: Go
+    tier: workhorse
+    creator: Filippo Valsorda
+    install: brew install age
+    description: A simple, modern, and secure file encryption tool
+
+  - name: cosign
+    repo: sigstore/cosign
+    binary: cosign
+    language: Go
+    tier: workhorse
+    creator: Sigstore
+    install: brew install cosign
+    description: Code signing and transparency for containers and binaries
+    # `cosign --version` is rejected; `cosign version --json` emits a clean
+    # JSON object with `gitVersion: "vX.Y.Z"`. Drop the leading `v`.
+    version_extract: "cosign version --json | jaq -r .gitVersion | sed 's/^v//'"
+
+  - name: trivy
+    repo: aquasecurity/trivy
+    binary: trivy
+    language: Go
+    tier: workhorse
+    creator: Aqua Security
+    install: brew install trivy
+    description: Find vulnerabilities, misconfigurations, and secrets in containers and code
+
+  # ─────────────────────────────────────────────────────────────────
+  # AGENT — AI coding agents and LLM CLI tools
+  # ─────────────────────────────────────────────────────────────────
+  - name: claude-code
+    repo: anthropics/claude-code
+    binary: claude
+    language: TypeScript
+    tier: agent
+    creator: Anthropic
+    install: bun add -g @anthropic-ai/claude-code
+    description: Anthropic's agentic coding tool for the terminal
+
+  - name: codex
+    repo: openai/codex
+    binary: codex
+    language: Rust
+    tier: agent
+    creator: OpenAI
+    install: bun add -g @openai/codex
+    description: Lightweight coding agent that runs in your terminal
+
+  - name: goose
+    repo: block/goose
+    binary: goose
+    language: Rust
+    tier: agent
+    creator: Block
+    install: brew install goose
+    description: An open-source, extensible AI agent that goes beyond code suggestions
+
+  - name: shell-gpt
+    repo: TheR1D/shell_gpt
+    binary: sgpt
+    language: Python
+    tier: agent
+    creator: TheR1D
+    install: uv tool install shell-gpt
+    description: A command-line productivity tool powered by AI large language models
+
+  - name: mods
+    repo: charmbracelet/mods
+    binary: mods
+    language: Go
+    tier: agent
+    creator: Charm
+    install: brew install mods
+    description: AI on the command line
+
+  - name: ollama
+    repo: ollama/ollama
+    binary: ollama
+    language: Go
+    tier: agent
+    creator: Ollama
+    install: brew install ollama
+    description: Get up and running with large language models locally
+    # `ollama --version` warns about no running daemon, but the second warning
+    # line carries the client SemVer (`Warning: client version is X.Y.Z`).
+    version_extract: "ollama --version 2>&1 | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+
+  # ─────────────────────────────────────────────────────────────────
+  # NOTABLE — tools from prominent builders, capped at 3-4 per creator
+  # ─────────────────────────────────────────────────────────────────
+
+  # Simon Willison (simonw) — 4 tools
+  - name: llm
+    repo: simonw/llm
+    binary: llm
+    language: Python
+    tier: notable
+    creator: Simon Willison
+    install: brew install llm
+    description: Access large language models from the command-line
+
+  - name: datasette
+    repo: simonw/datasette
+    binary: datasette
+    language: Python
+    tier: notable
+    creator: Simon Willison
+    install: uv tool install datasette
+    description: An open-source multi-tool for exploring and publishing data
+
+  - name: sqlite-utils
+    repo: simonw/sqlite-utils
+    binary: sqlite-utils
+    language: Python
+    tier: notable
+    creator: Simon Willison
+    install: uv tool install sqlite-utils
+    description: CLI utility and library for manipulating SQLite databases
+
+  - name: files-to-prompt
+    repo: simonw/files-to-prompt
+    binary: files-to-prompt
+    language: Python
+    tier: notable
+    creator: Simon Willison
+    install: uv tool install files-to-prompt
+    description: Concatenate a directory full of files into a single prompt for LLMs
+
+  # Charm (charmbracelet) — 3 tools (glow + mods above)
+  - name: gum
+    repo: charmbracelet/gum
+    binary: gum
+    language: Go
+    tier: notable
+    creator: Charm
+    install: brew install gum
+    description: A tool for glamorous shell scripts
+
+  - name: vhs
+    repo: charmbracelet/vhs
+    binary: vhs
+    language: Go
+    tier: notable
+    creator: Charm
+    install: brew install vhs
+    description: Your CLI home video recorder
+
+  # Brett Davies (brettdavies) — 3 tools
+  - name: anc
+    repo: brettdavies/agentnative-cli
+    binary: anc
+    language: Rust
+    tier: notable
+    creator: Brett Davies
+    install: brew install brettdavies/tap/agentnative
+    description: Check CLI tools against the agent-native standard
+
+  - name: bird
+    repo: brettdavies/bird
+    binary: bird
+    language: Rust
+    tier: notable
+    creator: Brett Davies
+    install: brew install brettdavies/tap/bird
+    description: Rust CLI for the X (Twitter) API
+
+  - name: xr
+    repo: brettdavies/xurl-rs
+    binary: xr
+    language: Rust
+    tier: notable
+    creator: Brett Davies
+    install: brew install brettdavies/tap/xurl-rs
+    description: Fast, ergonomic CLI for the X (Twitter) API
+
+  # Other notable builders
+  - name: nushell
+    repo: nushell/nushell
+    binary: nu
+    language: Rust
+    tier: notable
+    creator: Nushell
+    install: brew install nushell
+    description: A new type of shell
+
+  - name: atuin
+    repo: atuinsh/atuin
+    binary: atuin
+    language: Rust
+    tier: notable
+    creator: Ellie Huxtable
+    install: brew install atuin
+    description: Magical shell history
+    # Primary entrypoint is an interactive TUI search over shell history.
+    # Subcommands (`atuin import`, `atuin sync`) are non-interactive but the
+    # bare-binary mode and `atuin search` are TUI-first. Suppresses P1
+    # non-interactive variants and P6 SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
+
+  - name: navi
+    repo: denisidoro/navi
+    binary: navi
+    language: Rust
+    tier: notable
+    creator: Denis Isidoro
+    install: brew install navi
+    description: An interactive cheatsheet tool for the command-line
+    # Interactive cheatsheet picker — primary mode shows a TUI list and
+    # filters as you type. Suppresses P1 non-interactive variants and P6
+    # SIGPIPE per the human-tui exception.
+    audit_profile: human-tui
+
+  - name: tealdeer
+    repo: dbrgn/tealdeer
+    binary: tldr
+    language: Rust
+    tier: notable
+    creator: Danilo Bargen
+    install: brew install tealdeer
+    description: A very fast implementation of tldr in Rust
+
+  - name: pastel
+    repo: sharkdp/pastel
+    binary: pastel
+    language: Rust
+    tier: notable
+    creator: David Peter
+    install: brew install pastel
+    description: A command-line tool to generate, analyze, convert, and manipulate colors
+
+  - name: jnv
+    repo: ynqa/jnv
+    binary: jnv
+    language: Rust
+    tier: notable
+    creator: ynqa
+    install: brew install jnv
+    description: Interactive JSON filter using jq
+    # Interactive TUI for live-editing jq filters against a JSON document.
+    # Suppresses P1 non-interactive variants and P6 SIGPIPE per the
+    # human-tui exception.
+    audit_profile: human-tui
+
+  - name: doggo
+    repo: mr-karan/doggo
+    binary: doggo
+    language: Go
+    tier: notable
+    creator: Karan Sharma
+    install: brew install doggo
+    description: Command-line DNS client for humans
+
+  - name: gemini-cli
+    repo: google-gemini/gemini-cli
+    binary: gemini
+    language: TypeScript
+    tier: agent
+    creator: Google
+    install: bun add -g @google/gemini-cli
+    description: Open-source AI agent that brings Gemini directly into the terminal
+
+  - name: opencode
+    repo: anomalyco/opencode
+    binary: opencode
+    language: TypeScript
+    tier: agent
+    creator: Anomaly
+    install: brew install anomalyco/tap/opencode
+    description: Open source coding agent for the terminal
+
+  - name: qmd
+    repo: tobi/qmd
+    binary: qmd
+    language: TypeScript
+    tier: notable
+    creator: Tobi Lütke
+    install: bun add -g @tobilu/qmd
+    description: Local hybrid search (BM25 + vector + LLM rerank) for personal knowledge bases
+

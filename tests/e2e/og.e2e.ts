@@ -17,11 +17,11 @@ test('index has OG + Twitter card meta with 1200×630 image', async ({ page }) =
   expect(await meta('og:type')).toBe('article');
   expect(await meta('og:title')).toBeTruthy();
   expect(await meta('og:description')).toBeTruthy();
-  expect(await meta('og:url')).toContain('agentnative.dev');
+  expect(await meta('og:url')).toContain('anc.dev');
   expect(await meta('og:image')).toContain('/og-image.png');
   expect(await meta('og:image:width')).toBe('1200');
   expect(await meta('og:image:height')).toBe('630');
-  expect(await meta('og:site_name')).toBe('agentnative.dev');
+  expect(await meta('og:site_name')).toBe('anc.dev');
 
   expect(await meta('twitter:card')).toBe('summary_large_image');
   expect(await meta('twitter:title')).toBeTruthy();
@@ -35,7 +35,7 @@ test('JSON-LD TechArticle present and parses', async ({ page }) => {
   const data = JSON.parse(raw ?? '{}');
   expect(data['@type']).toBe('TechArticle');
   expect(data.headline).toBeTruthy();
-  expect(data.url).toContain('agentnative.dev');
+  expect(data.url).toContain('anc.dev');
 });
 
 test('principle pages inherit the same OG shape', async ({ page }) => {

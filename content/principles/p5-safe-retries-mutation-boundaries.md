@@ -2,28 +2,32 @@
 
 ## Definition
 
-Every CLI MUST support `--dry-run` so agents can preview any command before committing it. Write operations MUST clearly
-separate destructive actions from read-only queries. An agent that cannot distinguish a safe read from a dangerous write
-will either avoid the tool or execute mutations blindly — both are failure modes.
+Every CLI with write operations MUST support `--dry-run` so agents can preview a mutation before committing it. Commands
+MUST make the read-vs-write distinction visible from name and `--help` alone, and destructive writes MUST require
+explicit confirmation. An agent that cannot distinguish a safe read from a dangerous write will either avoid the tool or
+execute mutations blindly — both are failure modes.
 
 ## Why Agents Need It
 
-Agents retry failed operations by default. If a write operation is not idempotent, a retry creates duplicates, corrupts
-data, or trips rate limits. When destructive operations require explicit confirmation (`--force`, `--yes`) and support
-preview (`--dry-run`), an agent can safely explore what a command would do before committing to it. Read-only tools are
-inherently safe for retries, but they still benefit from help text that names the mutation contract — "this does not
-modify state" is a better sentence to put in `--help` than to assume.
+Agent harnesses commonly retry failed operations. If a write operation is not idempotent, a retry creates duplicates,
+corrupts data, or trips rate limits. When destructive operations require explicit confirmation (`--force`, `--yes`) and
+support preview (`--dry-run`), an agent can safely explore what a command would do before committing to it. Read-only
+tools are inherently safe for retries, but they still benefit from help text that names the mutation contract — "this
+does not modify state" is a better sentence to put in `--help` than to assume.
 
 ## Requirements
 
 **MUST:**
 
-- Destructive operations (delete, overwrite, bulk modify) require an explicit `--force` or `--yes` flag. Without it, the
-  tool refuses the operation or enters dry-run mode — never mutates silently.
-- The distinction between read and write commands is clear from the command name and help text alone. An agent reading
-  `--help` immediately knows whether a command mutates state.
-- A `--dry-run` flag is present on every write command. When set, the command validates inputs and reports what it would
-  do without executing. Dry-run output respects `--output json` so agents can parse the preview programmatically.
+- *(Applies when: CLI has destructive operations.)* Destructive operations (delete, overwrite, bulk modify) require an
+  explicit `--force` or `--yes` flag. Without it, the tool refuses the operation or enters dry-run mode — never mutates
+  silently.
+- *(Applies when: CLI has both read and write operations.)* The distinction between read and write commands is clear
+  from the command name and help text alone. An agent reading `--help` immediately knows whether a command mutates
+  state.
+- *(Applies when: CLI has write operations.)* A `--dry-run` flag is present on every write command. When set, the
+  command validates inputs and reports what it would do without executing. Dry-run output respects `--output json` so
+  agents can parse the preview programmatically.
 
 **SHOULD:**
 
@@ -45,5 +49,5 @@ modify state" is a better sentence to put in `--help` than to assume.
 - No `--dry-run` option on bulk operations, where a preview prevents costly mistakes.
 - Operations that fail on retry because the first attempt partially succeeded — non-idempotent writes without rollback.
 
-Measured by check IDs `p5-dry-run`, `p5-destructive-guard`. Run `agentnative check --principle 5 .` against your
-CLI to see each.
+Behavioral checks for P5 are planned (`p5-dry-run`, `p5-destructive-guard`) but not yet shipped — `anc check --principle
+5 .` returns no results today. P5 conformance is currently assessed by reading source and `--help`.

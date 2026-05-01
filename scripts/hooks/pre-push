@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pre-push hook — mirrors .github/workflows/ci.yml so a green local push
+# almost always means a green CI run. Saves the round-trip of pushing,
+# watching CI fail on lint or a broken test, and force-pushing a fix.
+#
+# Activate once per clone:
+#   git config core.hooksPath scripts/hooks
+#
+# Steps mirror the CI workflow's build job:
+#   1. lint   — biome check + markdownlint-cli2
+#   2. build  — bun src/build/build.mjs
+#   3. tests  — bun test (unit + regression)
+# (wrangler dry-run is skipped here; it requires worker secrets and is
+# already enforced in CI.)
+#
+# To bypass intentionally (rare): `git push --no-verify`. Don't make this
+# a habit — the hook is here precisely to catch what we lost time to last.
+
+set -euo pipefail
+
+# Skip the hook for branch deletions (`git push origin --delete <branch>`),
+# which arrive with sha=0000... on stdin from the hook protocol.
+deleting_only=true
+while read -r local_ref local_sha _remote_ref remote_sha; do
+  : "$local_ref" "$local_sha" "$_remote_ref" "$remote_sha"
+  if [[ "$local_sha" != "0000000000000000000000000000000000000000" ]]; then
+    deleting_only=false
+  fi
+done
+if $deleting_only; then
+  exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+
+bold '==> bun run lint'
+bun run lint
+
+bold '==> bun run build'
+bun run build
+
+bold '==> bun test'
+bun test
+
+bold '==> pre-push checks passed'

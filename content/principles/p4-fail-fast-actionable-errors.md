@@ -9,9 +9,13 @@ why, and what to do next. An error that says "operation failed" gives an agent n
 
 Agents operate in a retry loop: attempt, observe, decide. When an error is vague or unstructured — a bare stack trace, a
 one-word failure, a mixed-channel splurge — the agent cannot tell whether to retry, re-authenticate, fix configuration,
-or escalate to the user. Distinct exit codes with actionable messages let the agent act correctly on the first read. The
-difference between exit code 77 (re-authenticate) and exit code 78 (fix config) determines whether the agent retries
-OAuth or asks the user to check their config file. Getting that wrong wastes entire conversation turns.
+or escalate to the user. Distinct exit codes — when paired with this standard's published mapping — let the agent act
+correctly without parsing message text. The difference between exit code 77 (re-authenticate) and exit code 78 (fix
+config) determines whether the agent retries OAuth or asks the user to check their config file. Getting that wrong
+wastes entire conversation turns.
+
+Codes 77 and 78 follow BSD `sysexits.h` (`EX_NOPERM`, `EX_CONFIG`); most CLIs today do not distinguish auth from config
+errors at the exit-code layer — this standard adopts `sysexits.h` numbering so agents can disambiguate.
 
 ## Requirements
 
@@ -25,16 +29,8 @@ OAuth or asks the user to check their config file. Getting that wrong wastes ent
   let cli = Cli::try_parse()?;
   ```
 
-- Error types map to distinct exit codes. At minimum:
-
-  | Code | Meaning                       |
-  | ---: | ----------------------------- |
-  |    0 | Success                       |
-  |    1 | General command error         |
-  |    2 | Usage / argument error        |
-  |   77 | Auth / permission error       |
-  |   78 | Configuration error           |
-
+- Error types map to distinct exit codes — at minimum: `0` (success), `1` (general command error), `2` (usage / argument
+  error), `77` (auth / permission error), `78` (configuration error).
 - Every error message contains **what failed**, **why**, and **what to do next**. Example:
 
   ```text
@@ -46,9 +42,10 @@ OAuth or asks the user to check their config file. Getting that wrong wastes ent
 
 - Error types use a structured enum (via `thiserror` in Rust) with variant-to-kind mapping for JSON serialization.
   Agents match on error kinds programmatically rather than parsing message text.
-- Config and auth validation happen before any network call. A three-tier dependency gating pattern (meta-commands,
-  local-only commands, network commands) fails at the earliest possible point.
-- Error output respects `--output json`: JSON-formatted errors go to stderr when JSON output is selected.
+- Locally-verifiable config and auth invariants (file presence, token format, required keys) are checked before any
+  network call. Remote validation is the network call's responsibility and SHOULD use distinct exit codes.
+- Error output respects `--output json`: JSON-formatted errors go to stderr when JSON output is selected, consistent
+  with [P2](/p2)'s stream discipline (stdout for data, stderr for diagnostics).
 
 ## Evidence
 
@@ -62,10 +59,11 @@ OAuth or asks the user to check their config file. Getting that wrong wastes ent
 ## Anti-Patterns
 
 - `Cli::parse()` anywhere in the codebase — it silently prevents JSON error output.
-- `process::exit()` in library code or command handlers. Only `main()` may call it, after all error handling.
+- `process::exit()` in library code or command handlers. Only `main()` (and signal/panic handlers it installs) may call
+  it, after all error handling.
 - A single catch-all error variant that maps everything to exit code 1.
 - Error messages that state the symptom without the cause or fix ("Error: request failed").
 - Panics (`unwrap()`, `expect()`) on recoverable errors in production code paths.
 
-Measured by check IDs `p4-bad-args`, `p4-process-exit`, `p4-unwrap`, `p4-exit-codes`. Run
-`agentnative check --principle 4 .` against your CLI to see each.
+Measured by check ID `p4-bad-args` today, with `p4-process-exit`, `p4-unwrap`, and `p4-exit-codes` planned. Run `anc
+check --principle 4 .` against your CLI to see current coverage.
