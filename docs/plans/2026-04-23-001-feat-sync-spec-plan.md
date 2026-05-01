@@ -1,9 +1,10 @@
 ---
 title: "feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG"
 type: feat
-status: active
+status: completed
 date: 2026-04-23
 last-revised: 2026-05-01
+shipped_in: PR #64 squash-merged to `dev` 2026-05-01 06:58 UTC as commit `bdf0c91`. NOT YET on `main`/anc.dev — pending the next `release/<YYYY-MM-DD>-<slug>` cut.
 parents:
   - https://github.com/brettdavies/agentnative/blob/dev/docs/plans/2026-04-22-002-post-frontmatter-roadmap.md
 roadmap-item: 5 (spec-repo roadmap 002, item 4)
@@ -11,37 +12,41 @@ roadmap-item: 5 (spec-repo roadmap 002, item 4)
 
 # feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
 
-> **Implementation status (2026-05-01): STARTING on `feat/sync-spec` branch.** Pre-execution audit refreshed against
-> dev as of post-launch (PR #60 shipped anc.dev v0.1, PR #63 moved VOICE.md off main):
+> **Implementation status (2026-05-01): SHIPPED to `dev` via PR #64 (`bdf0c91`).** All four units landed; the design
+> shifted mid-execution from "one SPEC_VERSION feeding all surfaces" to a **three-source spec-version model** that
+> separates vendoring (we got a snapshot) from scoring (anc was compiled against this spec) from site reconciliation
+> (the prose has been updated to match). The shipped surface map:
 >
-> - `scripts/sync-spec.sh` — still does not exist.
-> - `src/data/spec/` — still does not exist.
-> - `SPEC_VERSION` — still hardcoded as `'0.3.0'` in `src/build/util.mjs:81` (already consumed by `src/build/badge.mjs`
->   for the badge URL — partially right answer, just a hardcode where it should be a vendored read).
-> - **Footer drift visible on prod**: `src/build/shell.mjs:190` ships a hardcoded `<span>v0.1.0</span>` literal, two
->   minor versions behind the actual spec (`0.3.0`). This was the trigger for picking the plan up: anc.dev/ shows a
->   stale spec version in the footer. The OG card carries the same drift via `scripts/og/generate.ts:38-51`'s regex
->   read from shell.mjs.
-> - **Pin target updated** to `v0.3.0` (spec commit `5cea8bf`, released 2026-04-29) — was `v0.2.0` (`83bf0fd`) when the
->   plan was filed.
-> - **`repository_dispatch:spec-release` is already wired** on the source side: spec's
->   `.github/workflows/publish.yml` fires `spec-release` to `agentnative-cli` AND `agentnative-site` on every tag.
->   Discovered 2026-05-01 during the cross-repo SYNCS-doc audit. Consumer-side handler that auto-PRs a re-vendor is
->   still future work, but the trigger infra is in place.
+> | Surface             | Source                                                 | Constant / file                                                              |
+> | ------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+> | Site footer         | site reconciliation marker                             | `SITE_SPEC_VERSION` ← `content/principles/VERSION` (manual bump)             |
+> | Per-tool badge SVGs | scoring context                                        | each scorecard's own `spec_version` field (passed to `renderBadgeSvg`)       |
+> | OG card             | anc's compiled-in spec                                 | `scripts/og/generate.ts` reads `anc-v*.json`'s `spec_version`                |
+> | (no surface)        | vendored snapshot — reference / diff target only       | `SPEC_VERSION` ← `src/data/spec/VERSION` (auto-bumped by `sync-spec.sh`)     |
 >
-> **Scope expansion (2026-05-01)**: this plan now also wires the footer (and OG card) to read SPEC_VERSION at build
-> time. Originally the plan had `Scope Boundaries: No rendering changes`; that was the right call when the footer
-> happened to coincide with a stale value, but with v0.1.0 visible on prod, the data-vendoring + the consumer-side
-> wiring belong in the same PR. See **Implementation Units** for U4 (NEW).
+> Units shipped (commits on `feat/sync-spec` before squash):
 >
-> **Cross-repo context, captured this session**: the version model is now documented at
-> [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](../solutions/best-practices/agentnative-version-model-2026-05-01.md)
-> — single source of truth for what version means in each of the four agentnative repos. Referenced from each repo's
-> SYNCS doc.
+> - **U1 + U2** (commit `51021f2`) — `scripts/sync-spec.sh` (cli reference impl mirror; remote-first; AGENTS.md
+>   filter; shellcheck-clean) + initial vendored `src/data/spec/{VERSION=0.3.0, CHANGELOG.md, principles/p1..p7.md}`
+>   - `src/data/spec/README.md` + lint exclusion + regression-test fix.
+> - **U3** (commit `11eca00`) — AGENTS.md paragraph + `scripts/SYNCS.md` (mermaid map; docker-image scoring as the
+>   canonical source-of-truth; runtime-distribution section dropped per scope decision).
+> - **U4** (commit `7e5765d`) — `util.mjs` exports `SPEC_VERSION` + `SITE_SPEC_VERSION`; `shell.mjs:190` footer reads
+>   `SITE_SPEC_VERSION`; `build.mjs:377` passes `scorecard.spec_version` per badge call; `scripts/og/generate.ts`
+>   reads anc's self-scorecard's `spec_version` (drops the regex-from-shell.mjs hack); `content/principles/VERSION`
+>   created at `0.3.0`; `tests/build.test.ts` footer-renders-vendored-version assertion; OG image regenerated.
 >
-> **What `agentnative-cli` did**: `~/dev/agentnative-cli/scripts/sync-spec.sh` is the live reference implementation —
-> it vendors the spec into `src/principles/spec/` and is read by the CLI's `build.rs` to generate the `REQUIREMENTS`
-> slice. The site adopts the same pattern with minimal adaptation. See **External References** below.
+> Cross-repo doc updates landed in parallel: `solutions-docs/best-practices/agentnative-version-model-2026-05-01.md`
+> (commits `bf83c71` initial, `47c84b2` mermaid, `7201181` three-source refresh). Sibling SYNCS docs in
+> `agentnative-{spec,cli,skill}` got mermaid additions but stay locally untracked per the do-not-commit directive.
+>
+> **Promotion to `anc.dev`** is pending the next `release/<YYYY-MM-DD>-<slug>` cut per RELEASES.md. Until then,
+> `bdf0c91` is on dev / staging Worker only.
+>
+> **Follow-up captured**: P0 todo `019-pending-p0-remove-skill-sha-pinning.md` (gitignored under
+> `.context/compound-engineering/todos/`) — agentnative-skill PR #11 (commit `3c3ebb6`, 2026-04-29) deprecated
+> SHA-pinning across the skill repo's shipping content; this site repo is the lagging consumer (still validates
+> `source.commit` in `src/build/skill.mjs`).
 
 ## Overview
 
