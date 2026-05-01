@@ -132,12 +132,11 @@
     "version": "watchexec 2.5.1 (2026-03-30) +pid1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command watchexec --output json",
-    "started_at": "2026-04-30T23:01:13.90990815Z",
+    "started_at": "2026-05-01T10:09:13.022514641Z",
     "duration_ms": 54,
     "platform": {
       "os": "linux",

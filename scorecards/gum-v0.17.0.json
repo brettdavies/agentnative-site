@@ -132,12 +132,11 @@
     "version": "gum version 0.17.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command gum --output json",
-    "started_at": "2026-04-30T23:01:51.383225905Z",
+    "started_at": "2026-05-01T10:09:42.673726389Z",
     "duration_ms": 324,
     "platform": {
       "os": "linux",

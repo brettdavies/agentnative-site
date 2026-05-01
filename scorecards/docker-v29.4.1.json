@@ -132,12 +132,11 @@
     "version": "Docker version 29.4.1, build 055a478ea9"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command docker --output json",
-    "started_at": "2026-04-30T23:01:00.296205888Z",
+    "started_at": "2026-05-01T10:09:01.052502751Z",
     "duration_ms": 160,
     "platform": {
       "os": "linux",

@@ -132,12 +132,11 @@
     "version": "bat 0.26.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command bat --output json",
-    "started_at": "2026-04-30T23:00:57.214192546Z",
+    "started_at": "2026-05-01T10:08:58.031703309Z",
     "duration_ms": 54,
     "platform": {
       "os": "linux",

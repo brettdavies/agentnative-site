@@ -132,13 +132,12 @@
     "version": "gh version 2.92.0 (2026-04-28)"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command gh --output json",
-    "started_at": "2026-04-30T23:00:58.555799299Z",
-    "duration_ms": 143,
+    "started_at": "2026-05-01T10:08:59.352899777Z",
+    "duration_ms": 119,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

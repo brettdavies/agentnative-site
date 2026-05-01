@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no --output/--format flag detected",
+      "status": "warn",
+      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
       "confidence": "high"
     },
     {
@@ -104,9 +104,9 @@
   "summary": {
     "total": 11,
     "pass": 8,
-    "warn": 0,
+    "warn": 1,
     "fail": 0,
-    "skip": 3,
+    "skip": 2,
     "error": 0
   },
   "coverage_summary": {
@@ -127,18 +127,17 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "act",
-    "binary": "act",
-    "version": "act version 0.2.87"
+    "name": "anc",
+    "binary": "anc",
+    "version": null
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
-    "invocation": "anc check --command act --output json",
-    "started_at": "2026-04-30T23:01:14.143189506Z",
-    "duration_ms": 76,
+    "invocation": "anc check --command anc --output json",
+    "started_at": "2026-05-01T10:09:43.214467634Z",
+    "duration_ms": 93,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,14 +146,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "act"
+    "command": "anc"
   },
   "badge": {
     "eligible": true,
-    "score_pct": 100,
-    "embed_markdown": "[![agent-native](https://anc.dev/badge/act.svg)](https://anc.dev/score/act)",
-    "scorecard_url": "https://anc.dev/score/act",
-    "badge_url": "https://anc.dev/badge/act.svg",
+    "score_pct": 89,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/anc.svg)](https://anc.dev/score/anc)",
+    "scorecard_url": "https://anc.dev/score/anc",
+    "badge_url": "https://anc.dev/badge/anc.svg",
     "convention_url": "https://anc.dev/badge"
   }
 }

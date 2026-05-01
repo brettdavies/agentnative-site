@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "status": "skip",
+      "evidence": "no --output/--format flag detected",
       "confidence": "high"
     },
     {
@@ -42,8 +42,8 @@
       "label": "Quiet mode available",
       "group": "P7",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "no --quiet/-q flag detected in --help output",
       "confidence": "high"
     },
     {
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "pass",
-      "evidence": null,
+      "status": "warn",
+      "evidence": "4 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "status": "warn",
+      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
       "confidence": "medium"
     },
     {
@@ -103,8 +103,8 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 8,
-    "warn": 1,
+    "pass": 6,
+    "warn": 3,
     "fail": 0,
     "skip": 2,
     "error": 0
@@ -127,18 +127,17 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "anc",
-    "binary": "anc",
-    "version": null
+    "name": "ollama",
+    "binary": "ollama",
+    "version": "ollama version is 0.22.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
-    "invocation": "anc check --command anc --output json",
-    "started_at": "2026-04-30T23:01:51.951099824Z",
-    "duration_ms": 93,
+    "invocation": "anc check --command ollama --output json",
+    "started_at": "2026-05-01T10:09:20.685066005Z",
+    "duration_ms": 563,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,14 +146,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "anc"
+    "command": "ollama"
   },
   "badge": {
-    "eligible": true,
-    "score_pct": 89,
-    "embed_markdown": "[![agent-native](https://anc.dev/badge/anc.svg)](https://anc.dev/score/anc)",
-    "scorecard_url": "https://anc.dev/score/anc",
-    "badge_url": "https://anc.dev/badge/anc.svg",
+    "eligible": false,
+    "score_pct": 67,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/ollama",
+    "badge_url": "https://anc.dev/badge/ollama.svg",
     "convention_url": "https://anc.dev/badge"
   }
 }

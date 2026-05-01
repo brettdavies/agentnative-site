@@ -132,12 +132,11 @@
     "version": "ruff 0.15.12"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command ruff --output json",
-    "started_at": "2026-04-30T23:01:14.858719852Z",
+    "started_at": "2026-05-01T10:09:13.944915194Z",
     "duration_ms": 104,
     "platform": {
       "os": "linux",

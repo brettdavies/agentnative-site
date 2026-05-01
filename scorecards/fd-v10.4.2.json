@@ -132,12 +132,11 @@
     "version": "fd 10.4.2"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command fd --audit-profile file-traversal --output json",
-    "started_at": "2026-04-30T23:00:56.771523113Z",
+    "started_at": "2026-05-01T10:08:57.59222725Z",
     "duration_ms": 94,
     "platform": {
       "os": "linux",

@@ -132,13 +132,12 @@
     "version": "ripgrep 15.1.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command rg --output json",
-    "started_at": "2026-04-30T23:00:56.708445322Z",
-    "duration_ms": 55,
+    "started_at": "2026-05-01T10:08:57.531460539Z",
+    "duration_ms": 54,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

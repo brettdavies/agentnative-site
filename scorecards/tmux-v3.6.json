@@ -133,12 +133,11 @@
     "version": "tmux 3.6a"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command tmux --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:00:56.650544357Z",
+    "started_at": "2026-05-01T10:08:57.474013172Z",
     "duration_ms": 51,
     "platform": {
       "os": "linux",

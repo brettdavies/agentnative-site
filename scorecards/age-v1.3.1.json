@@ -132,13 +132,12 @@
     "version": "v1.3.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command age --output json",
-    "started_at": "2026-04-30T23:01:16.426705448Z",
-    "duration_ms": 94,
+    "started_at": "2026-05-01T10:09:15.44500559Z",
+    "duration_ms": 93,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
