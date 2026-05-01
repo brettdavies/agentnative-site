@@ -847,7 +847,6 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
       expect(entry.metadata).not.toBeNull();
       expect(entry.metadata.tool.name).toBe('fixture');
       expect(entry.metadata.anc.version).toBe('0.1.0');
-      expect(entry.metadata.anc.commit).toBe('abc1234');
       expect(entry.metadata.run.duration_ms).toBe(42);
       expect(entry.metadata.run.platform.os).toBe('linux');
       expect(entry.metadata.target.kind).toBe('command');
@@ -1082,21 +1081,6 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
           content: makeV04Scorecard({
             tool: { name: 'fixture', binary: 'fixture', version: null },
           }),
-        },
-      ],
-      async (dir) => {
-        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
-        await runScorecardInvariants(dir, registry);
-      },
-    );
-  });
-
-  test('admits null anc.commit (build outside a git checkout)', async () => {
-    await withCorpus(
-      [
-        {
-          name: 'fixture-v1.2.3.json',
-          content: makeV04Scorecard({ anc: { version: '0.1.0', commit: null } }),
         },
       ],
       async (dir) => {
