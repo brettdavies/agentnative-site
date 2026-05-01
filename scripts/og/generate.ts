@@ -2,7 +2,7 @@
 /**
  * Deterministic OG image generator for anc.dev.
  *
- * Reads docs/design/og.html (the production source-of-truth for the
+ * Reads scripts/og/og.html (the production source-of-truth for the
  * social card), launches Chromium headless via Playwright at 1200×630
  * deviceScaleFactor 2, screenshots to a 2400×1260 buffer, then resizes
  * + palette-quantizes via Sharp to a ≤150 KB PNG at public/og-image.png.
@@ -25,7 +25,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const OG_HTML = `${REPO_ROOT}/docs/design/og.html`;
+const OG_HTML = `${REPO_ROOT}/scripts/og/og.html`;
 const OG_OUT = `${REPO_ROOT}/public/og-image.png`;
 const SHELL_MJS = `${REPO_ROOT}/src/build/shell.mjs`;
 

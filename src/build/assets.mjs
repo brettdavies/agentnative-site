@@ -41,7 +41,7 @@ async function bundleClient(entryPath, outPath) {
  */
 export async function copyAssets({ repoRoot, distDir }) {
   // 1. foundation.css — byte-for-byte copy (C3 DRY contract).
-  const foundationSrc = join(repoRoot, 'docs/design/foundation.css');
+  const foundationSrc = join(repoRoot, 'src/styles/foundation.css');
   const foundationDest = join(distDir, 'css/foundation.css');
   await copyBinary(foundationSrc, foundationDest);
 

@@ -40,7 +40,7 @@ const PNG_FAVICON = `${REPO_ROOT}/public/favicon-32.png`;
 const PNG_APPLE = `${REPO_ROOT}/public/apple-touch-icon-180.png`;
 const FAVICON_SIZE = 32;
 const APPLE_SIZE = 180;
-// Light-mode `--accent` from docs/design/foundation.css, hex-equivalent of
+// Light-mode `--accent` from src/styles/foundation.css, hex-equivalent of
 // `oklch(46% 0.155 250)`. Kept in sync with public/favicon.svg's `.bg` fill.
 const ACCENT_HEX = '#0058aa';
 
