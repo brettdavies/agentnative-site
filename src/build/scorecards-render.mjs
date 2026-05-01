@@ -715,7 +715,7 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   }
   lines.push('## Reproduce locally');
   lines.push('');
-  lines.push('```');
+  lines.push('```bash');
   lines.push(reproMd);
   lines.push('```');
   lines.push('');
