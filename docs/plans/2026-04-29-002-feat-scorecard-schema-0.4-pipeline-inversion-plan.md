@@ -6,13 +6,13 @@ date: 2026-04-29
 shipped_in: PR #52 merged to `dev` 2026-04-30 morning. NOT YET on `main`/anc.dev — see CORRECTION block below.
 ---
 
+# feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join
+
 > **CORRECTION (2026-04-30 PM PT) — DEV-MERGED, NOT PRODUCTION-SHIPPED.** PR #52 landed on `dev` as claimed; the
 > `dev → main` release that would have promoted it to anc.dev was never cut. Show HN launch was HELD; see
 > [`2026-04-28-001-feat-show-hn-launch-readiness-plan.md`](2026-04-28-001-feat-show-hn-launch-readiness-plan.md)
 > § CORRECTION for the full story. `status: completed` here means the implementation work landed on the `dev` branch
 > as scoped; production deployment is pending the next `release/<YYYY-MM-DD>-<slug>` cut.
-
-# feat: Adopt scorecard schema 0.4 + scorecard-driven discovery with registry editorial join
 
 ## Overview
 
