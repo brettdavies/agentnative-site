@@ -7,12 +7,11 @@ Pre-bakes every tool from `registry.yaml`, then runs `anc check` against each to
 
 ```text
 docker/score/
-├── Dockerfile          # Debian-slim + Linuxbrew + uv + bun + cargo-binstall
+├── Dockerfile          # Debian-slim + Linuxbrew + uv + bun + cargo-binstall + anc
 ├── compose.yml         # Bind-mounts + NVIDIA GPU passthrough
-├── build.sh            # Wrapper: build anc, build image, optionally run
+├── build.sh            # Wrapper: build image, optionally run
 ├── install-tools.sh    # First-stage: install every registry tool
 ├── score-anc100.sh     # Second-stage: iterate registry, write scorecards
-├── anc                 # (gitignored) staged anc binary, written by build.sh
 ├── out/                # (gitignored) per-run logs from inside the container
 ├── setup-host.sh       # One-time: install Docker Engine + nvidia-container-toolkit
 └── README.md           # this file
@@ -22,10 +21,11 @@ docker/score/
 
 - **Docker Engine + Compose v2.** Engine only — NOT Docker Desktop. Install via `bash docker/score/setup-host.sh`
   (Ubuntu) or follow Docker's apt-repo instructions for your distro.
-- **A `~/dev/agentnative-cli/` checkout** with `cargo` available. Override path with `ANC_CLI_ROOT=…`.
 - **For `nvidia-smi` scoring:** NVIDIA driver + `nvidia-container-toolkit` configured against the Docker daemon. The
   setup-host.sh script handles this if a host GPU is detected. Without it, `nvidia-smi` falls back to `install-missing`
   and the other 99 tools still score.
+
+`anc` is brew-installed inside the image from `brettdavies/tap/agentnative` — no local CLI checkout required.
 
 ## One-time host setup
 
@@ -63,8 +63,7 @@ Layer order:
 3. Linuxbrew (the heaviest single layer; cached aggressively).
 4. Other package managers: `uv`, `bun`, `cargo-binstall` — all installed via brew so they're prebuilt + cached.
 5. Tooling for the runner: `yq`, `jaq`.
-6. The `anc` binary, copied in from the build context (built by `build.sh` from
-   `~/dev/agentnative-cli/target/release/anc`).
+6. The `anc` binary, brew-installed from `brettdavies/tap/agentnative` (same install path users get on macOS / Linux).
 7. `install-tools.sh` runs once at image build time, reading the build-time registry baked at `/build/registry.yaml` and
    installing every entry. Failures are logged to `/build/install-log.txt` but do NOT abort the build — tools that fail
    to install simply end up missing from PATH and the runner records them as `install-missing`.
@@ -104,8 +103,9 @@ This image is intentionally a strict subset of the v2 sandbox image. The v2 path
 
 ## Update workflow
 
-1. **CLI changed (new release):** rerun `bash docker/score/build.sh --run`. The `anc` binary gets rebuilt; the install
-   layer is cached; only scoring runs again. Faster than a full image rebuild.
+1. **CLI changed (new release):** rerun `bash docker/score/build.sh --run`. The `anc` brew layer is invalidated when the
+   formula's pinned version moves; brew pulls the new bottle and only scoring runs again. Faster than a full image
+   rebuild.
 2. **Registry changed (added/removed/edited a tool):** rerun the same command. The install layer is invalidated for the
    affected tool; brew re-resolves; scoring re-runs.
 3. **Tool released a new version:** the runner's version-extract logic pulls the actually-installed version at score
