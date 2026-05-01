@@ -26,7 +26,7 @@ informational; when both are present and disagree, the build aborts with an inte
   "schema_version": "0.4",
   "spec_version": "...",
   "tool":   { "name": "...", "binary": "...", "version": "..." },
-  "anc":    { "version": "...", "commit": "..." },
+  "anc":    { "version": "..." },
   "run":    { "invocation": "...", "started_at": "...", "duration_ms": 0,
               "platform": { "os": "...", "arch": "..." } },
   "target": { "kind": "...", "path": null, "command": "..." },
@@ -83,18 +83,15 @@ Provenance for the scorecard: which `anc` build produced it.
 
 ```json
 "anc": {
-  "version": "0.2.1",
-  "commit": "fff3f13"
+  "version": "0.2.1"
 }
 ```
 
-| Field     | Type           | Meaning                                                                                                                                                                                                                                                                                             |
-| --------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version` | string         | Self-reported version of the `anc` binary that ran the score. Read from `Cargo.toml` at build time.                                                                                                                                                                                                 |
-| `commit`  | string \| null | Abbreviated git SHA (7-40 hex chars) captured by `build.rs` from the working tree at compile time. `null` for `cargo install`-style and brew-bottle builds outside a git checkout. Captured but no longer surfaced on the rendered scorecard page; planned for removal in a future schema revision. |
+| Field     | Type   | Meaning                                                                                             |
+| --------- | ------ | --------------------------------------------------------------------------------------------------- |
+| `version` | string | Self-reported version of the `anc` binary that ran the score. Read from `Cargo.toml` at build time. |
 
-The per-tool page renders `anc.version` only. The `commit` field stays in the JSON for back-compat; its removal is
-deferred to a future schema revision.
+The per-tool page renders `anc.version`.
 
 ## `run`
 
