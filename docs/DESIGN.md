@@ -3,29 +3,41 @@
 Status: PROPOSED (revision 2). Authored by `/design-consultation` on 2026-04-13, revised 2026-04-14 after first-round
 feedback. Supersedes the tentative stack and visual placeholders in the CEO plan and AGENT.md where they conflict.
 
-Companion artifacts split by role:
+Companion artifacts split by role. Shipped artifacts (those a release of the site needs to build/render) live with the
+rest of the shipped tree under `src/` and `scripts/`. Show-your-work research artifacts (palette analysis report,
+preview HTML, concept variants) live under `docs/research/design/` on the `dev` branch only — they are intentionally
+gated off `main` by `guard-main-docs.yml` so production stays free of engineering working notes. Research-only paths
+below are referenced by name; check out `dev` to read them locally.
 
-**Generated + hand-authored documents — `docs/design/`** (tracked, reviewer-facing):
+**Shipped — consumed by the site build, present on `main`:**
 
-- [`docs/design/color-analysis.md`](docs/design/color-analysis.md) — show-your-work color report: culori + apca-w3 tool
-  outputs, WCAG and APCA contrast tables, gamut verification, swatch preview. No CSS embedded in the report; the
-  stylesheet is the next entry.
-- [`docs/design/foundation.css`](docs/design/foundation.css) — generated drop-in stylesheet. Contains palette custom
+- [`src/styles/foundation.css`](../src/styles/foundation.css) — generated drop-in stylesheet. Contains palette custom
   properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides), typography tokens
   (`--font-sans`, `--font-mono`, scale), and the shipped 7b inline-keyword rules. `@font-face` declarations are
   deliberately NOT in this file (see §4.3 — they live in the site build so the stylesheet is safe to load from any
-  origin without phantom 404s). Consumed directly by the HTML preview and, later, by the site build.
-- [`docs/design/must-should-may-preview.html`](docs/design/must-should-may-preview.html) — renders the shipped
-  typography + 7b keyword treatment (with a 7a plain-bold baseline alongside for contrast) in both color modes via a
-  three-state theme toggle (system / light / dark). Loads Uncut Sans from Fontshare and Monaspace Xenon from jsdelivr so
-  the fonts render without `/fonts/` self-hosting. Links `foundation.css` directly — no palette or keyword CSS inlined.
-- [`docs/design/README.md`](docs/design/README.md) — explains the subsystem and reproduction steps.
+  origin without phantom 404s). Copied byte-for-byte to `dist/css/foundation.css` by `src/build/assets.mjs`.
+- [`scripts/og/og.html`](../scripts/og/og.html) + [`scripts/og/og.css`](../scripts/og/og.css) — production source-of-
+  truth for the social card. Rendered to `public/og-image.png` by `scripts/og/generate.ts` (Playwright + Sharp, ≤150 KB
+  PNG).
 
-**Generator — `scripts/design/`** (tooling, not shipped):
+**Research / show-your-work — `dev` branch only (referenced by name, no link from `main`):**
 
-- [`scripts/design/generate-palette.mjs`](scripts/design/generate-palette.mjs) — the script that emits both the report
-  and `foundation.css` in `docs/design/`. Run via `cd scripts/design && bun install && bun run generate` (or `bun run
-  scripts/design/generate-palette.mjs` from the repo root).
+- `docs/research/design/color-analysis.md` — show-your-work color report: culori + apca-w3 tool outputs, WCAG and APCA
+  contrast tables, gamut verification, swatch preview. No CSS embedded in the report; the stylesheet is
+  `src/styles/foundation.css` above.
+- `docs/research/design/must-should-may-preview.html` — renders the shipped typography + 7b keyword treatment (with a 7a
+  plain-bold baseline alongside for contrast) in both color modes via a three-state theme toggle (system / light /
+  dark). Loads Uncut Sans from Fontshare and Monaspace Xenon from jsdelivr so the fonts render without `/fonts/`
+  self-hosting. Links `src/styles/foundation.css` directly — no palette or keyword CSS inlined.
+- `docs/research/design/og-concepts/` — OG image concept variants explored before settling on the production card.
+- `docs/research/design/README.md` — explains the research subsystem and reproduction steps.
+
+**Generator — `scripts/design/`** (tooling, not shipped to dist but lives on `main`):
+
+- [`scripts/design/generate-palette.mjs`](../scripts/design/generate-palette.mjs) — the script that emits both
+  artifacts: writes `src/styles/foundation.css` and (on the `dev` branch) `docs/research/design/color-analysis.md`. Run
+  via `cd scripts/design && bun install && bun run generate` (or `bun run scripts/design/generate-palette.mjs` from the
+  repo root).
 
 ## 1. Summary
 
@@ -48,12 +60,12 @@ dark mode (not inverted), Pangram Pangram's Uncut Sans (body + display) paired w
 — both OFL, self-hosted, chosen via the impeccable font-selection procedure to avoid the reflex-defaults (Inter, IBM
 Plex, Fraunces, etc.), code as a first-class visual element, `prefers-color-scheme` *plus* a visible user toggle, sticky
 mini-TOC on desktop.** Palette and contrast work is backed by a reproducible tool run — see
-`docs/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value; the foundation
-stylesheet (palette + typography tokens + keyword rules) lives at `docs/design/foundation.css`. `@font-face`
+`docs/research/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value; the
+foundation stylesheet (palette + typography tokens + keyword rules) lives at `src/styles/foundation.css`. `@font-face`
 declarations live in the site build, not the foundation — see §4.3. MUST / SHOULD / MAY keywords ship option 7b (inline
 color only) — the originally-proposed 7b-plus side-stripe variant was pulled after it hit impeccable's banned-pattern
 list, with block-level alternatives (leading tag, background fill) deferred to live-site iteration. Preview at
-`docs/design/must-should-may-preview.html`.
+`docs/research/design/must-should-may-preview.html`.
 
 **JS posture.** Pragmatic. JS is fine — the total homepage budget is 2 MB. We still reject shipping a framework runtime
 for state the site does not use, we still do syntax highlighting at build time, and we still treat every new dependency
@@ -302,14 +314,14 @@ the filename — no separate manifest file, no frontmatter ordering key.
 
 **Static asset + CSS + JS pipeline (A2, C3):**
 
-| Source                       | Emitted as                                  | Notes                                                                                                                                                                                                                                   |
-| ---------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/design/foundation.css` | `dist/css/foundation.css`                   | Byte-for-byte copy (C3). `cmp -s docs/design/foundation.css dist/css/foundation.css` passes. Source of truth for palette + type tokens + RFC-keyword color rules.                                                                       |
-| templated `site.css`         | `dist/css/site.css`                         | Additive-only: `@font-face` (Uncut Sans + Monaspace Xenon), layout (grid, measure, mini-TOC sticky), code-block chrome, theme-toggle widget, copy-button widget, Shiki dual-theme CSS bridge (§4.6). No overrides of foundation tokens. |
-| `public/fonts/*.woff2`       | `dist/fonts/*.woff2`                        | Self-hosted variable woff2 files per §4.3. Served under `/fonts/`, not `/assets/fonts/`. `@font-face` in `site.css` references `/fonts/…`.                                                                                              |
-| `src/client/theme-init.ts`   | inline `<script>` in `<head>` of every HTML | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint — no dark-mode flash.                                                                           |
-| `src/client/theme.ts`        | `dist/js/theme.js`                          | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                                                                                |
-| `src/client/clipboard.ts`    | `dist/js/clipboard.js`                      | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8.                                                           |
+| Source                      | Emitted as                                  | Notes                                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/styles/foundation.css` | `dist/css/foundation.css`                   | Byte-for-byte copy (C3). `cmp -s src/styles/foundation.css dist/css/foundation.css` passes. Source of truth for palette + type tokens + RFC-keyword color rules.                                                                        |
+| templated `site.css`        | `dist/css/site.css`                         | Additive-only: `@font-face` (Uncut Sans + Monaspace Xenon), layout (grid, measure, mini-TOC sticky), code-block chrome, theme-toggle widget, copy-button widget, Shiki dual-theme CSS bridge (§4.6). No overrides of foundation tokens. |
+| `public/fonts/*.woff2`      | `dist/fonts/*.woff2`                        | Self-hosted variable woff2 files per §4.3. Served under `/fonts/`, not `/assets/fonts/`. `@font-face` in `site.css` references `/fonts/…`.                                                                                              |
+| `src/client/theme-init.ts`  | inline `<script>` in `<head>` of every HTML | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint — no dark-mode flash.                                                                           |
+| `src/client/theme.ts`       | `dist/js/theme.js`                          | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                                                                                |
+| `src/client/clipboard.ts`   | `dist/js/clipboard.js`                      | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8.                                                           |
 
 The HTML shell emits exactly two stylesheet `<link>` tags in `<head>`, in this order:
 
@@ -407,8 +419,9 @@ citation primitives — any rename breaks every inbound link, blog quote, HN com
 merged or split in the upstream `principles/` source, follow the propagation protocol in `principles/AGENTS.md` and
 treat the old slug as a permanent 301 target. Version and date in footer. Deploy on Cloudflare Workers with Static
 Assets. SSG hard. Mobile-first. A11y baseline: skip-link, semantic landmarks, `prefers-reduced-motion`,
-`:focus-visible`, contrast verified in `docs/design/color-analysis.md`. `Link` and `X-Llms-Txt` response headers
-advertising the indexes. `X-Robots-Tag: noindex` on the markdown variant to prevent search-engine double-indexing.
+`:focus-visible`, contrast verified in `docs/research/design/color-analysis.md`. `Link` and `X-Llms-Txt` response
+headers advertising the indexes. `X-Robots-Tag: noindex` on the markdown variant to prevent search-engine
+double-indexing.
 
 ### 3.6 Second-best: Astro without Starlight
 
@@ -544,12 +557,13 @@ agentnative` ever reappears outside `content/install.md`.
 One direction. The CEO plan's stated preference ("simple and traditional with modern web flair, clig.dev >
 12factor.net") is specific enough to commit to a single system.
 
-### 4.1 Palette (summary; full methodology in `docs/design/color-analysis.md`)
+### 4.1 Palette (summary; full methodology in `docs/research/design/color-analysis.md`)
 
 Cool-neutral base, hue 250, one accent in the same hue family, three semantic warm-or-cool accents for MUST / SHOULD /
 MAY. The choice of cool over warm is load-bearing for spec adoption: research summarized below lands decisively on cool
 neutrals for technical documentation. The full ramps, WCAG ratios, APCA Lc values, and gamut-clamping record live in
-`docs/design/color-analysis.md` — all generated by `scripts/design/generate-palette.mjs` using `culori` and `apca-w3`.
+`docs/research/design/color-analysis.md` — all generated by `scripts/design/generate-palette.mjs` using `culori` and
+`apca-w3`.
 
 **Why cool, not warm — color psychology for spec adoption.** Synthesized from 2026 industry sources (see sources
 appendix at end of file). Three findings drive the call:
@@ -568,7 +582,7 @@ appendix at end of file). Three findings drive the call:
 This reverses revision 1's warm-neutral palette. The warm palette would have been distinctive but wrong for a standard
 courting developer adoption.
 
-**Emitted token summary** (full table with OKLCH, hex, and contrast in `docs/design/color-analysis.md`):
+**Emitted token summary** (full table with OKLCH, hex, and contrast in `docs/research/design/color-analysis.md`):
 
 | Role             | Light (hex) | Dark (hex) | Notes                                                                                                                                          |
 | ---------------- | ----------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -618,7 +632,7 @@ defaults (Inter, IBM Plex, Fraunces, Space Grotesk, Instrument Serif, all of whi
 reflex-fonts-to-reject list for). See session notes in [`.impeccable.md`](.impeccable.md) for the 3-word brand voice
 ("opinionated, precise, inviting") that drove the pick.
 
-**Stacks emitted in [`docs/design/foundation.css`](docs/design/foundation.css)** — reproduced here for review; do not
+**Stacks emitted in [`src/styles/foundation.css`](../src/styles/foundation.css)** — reproduced here for review; do not
 hand-edit the CSS, change the generator:
 
 ```css
@@ -671,8 +685,8 @@ require real metric measurement. Before ship: run [Fontaine](https://github.com/
 with `fontkit`) against the shipped woff2 files, compute the overrides, and commit them into the site build's
 `@font-face` block. Do not guess — wrong overrides cause visible shift, worse than the default.
 
-**Preview behavior.** `docs/design/must-should-may-preview.html` loads both families via CDN `<link>` tags so nothing
-needs to be self-hosted for a design review:
+**Preview behavior.** `docs/research/design/must-should-may-preview.html` loads both families via CDN `<link>` tags so
+nothing needs to be self-hosted for a design review:
 
 - Uncut Sans: [Fontshare](https://fontshare.com) (Pangram Pangram's own CDN) serves the full variable font under family
   name `"Uncut Sans"`.
@@ -703,12 +717,12 @@ compares against the committed `scripts/fonts/hashes.txt`. Running `scripts/font
 already-checked-in files re-runs the hash check without re-downloading. CI runs `--verify` so drift against the pinned
 hashes fails the build. Hash bumps are deliberate: refresh the files, regenerate `hashes.txt`, commit both together.
 
-**Preview vs production (C4).** `docs/design/must-should-may-preview.html` loads fonts via CDN (see "Preview behavior"
-above) — fast, zero-local-asset design review. Production self-hosts from `/fonts/` with the checked-in woff2 files. The
-two surfaces are NOT guaranteed byte-identical across versions: Fontshare can push a new Uncut Sans revision at any
-time, and the checked-in production file is pinned by hash. Final visual signoff before the HN launch MUST run against
-the production-hosted fonts (via `bun run dev` against the real `dist/` or the staging workers.dev URL), not the CDN
-preview, because metric drift between vendor revisions can shift leading and break the §4.4 type-scale calibration.
+**Preview vs production (C4).** `docs/research/design/must-should-may-preview.html` loads fonts via CDN (see "Preview
+behavior" above) — fast, zero-local-asset design review. Production self-hosts from `/fonts/` with the checked-in woff2
+files. The two surfaces are NOT guaranteed byte-identical across versions: Fontshare can push a new Uncut Sans revision
+at any time, and the checked-in production file is pinned by hash. Final visual signoff before the HN launch MUST run
+against the production-hosted fonts (via `bun run dev` against the real `dist/` or the staging workers.dev URL), not the
+CDN preview, because metric drift between vendor revisions can shift leading and break the §4.4 type-scale calibration.
 
 ### 4.4 Type scale
 
@@ -742,9 +756,9 @@ more than three weights rendered on one page.
 **Ship-time calibration item.** Uncut Sans has a slightly lower x-height than `system-ui` on macOS and slightly higher
 than Segoe UI on Windows. The 17→18px body range was tuned against system-ui metrics; with Uncut Sans loaded the
 rendered body may read fractionally smaller (x-height-wise, not absolute size). Open
-`docs/design/must-should-may-preview.html` side-by-side with a reference spec (rust-lang.org/book, clig.dev) and eyeball
-whether body wants to bump to `1.125rem` base. If yes: adjust `--text-base` in the generator, re-run, re-verify APCA
-(smaller text raises the contrast bar).
+`docs/research/design/must-should-may-preview.html` side-by-side with a reference spec (rust-lang.org/book, clig.dev)
+and eyeball whether body wants to bump to `1.125rem` base. If yes: adjust `--text-base` in the generator, re-run,
+re-verify APCA (smaller text raises the contrast bar).
 
 Measure: `max-inline-size: var(--measure)` on `<article>`. Paragraphs separated by `0.9em`, no first-line indent.
 
@@ -834,9 +848,9 @@ The shipped CSS (three rules, emitted by `foundation.css`):
 .rfc-may    { color: var(--may);    font-weight: 600; letter-spacing: var(--tracking-rfc); }
 ```
 
-Preview at [`docs/design/must-should-may-preview.html`](docs/design/must-should-may-preview.html) shows 7a (plain bold,
-baseline) vs 7b (inline color) side by side in both color modes. Contrast validated against APCA body minimum (|Lc| ≥
-60) in both modes — see `docs/design/color-analysis.md`.
+Preview at `docs/research/design/must-should-may-preview.html` (dev branch only) shows 7a (plain bold, baseline) vs 7b
+(inline color) side by side in both color modes. Contrast validated against APCA body minimum (|Lc| ≥
+60) in both modes — see `docs/research/design/color-analysis.md`.
 
 **How the build applies the markup.** A small remark plugin runs a single inline pass at render time. It replaces
 bare-word occurrences of `MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY` in prose text nodes with `<strong
@@ -1018,7 +1032,7 @@ Full CSS emitted by `scripts/design/generate-palette.mjs` already includes the t
 Dropping the block into the site's stylesheet is the implementation.
 
 Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-navigable. The preview at
-`docs/design/must-should-may-preview.html` demonstrates the toggle pattern at the page-footer level.
+`docs/research/design/must-should-may-preview.html` demonstrates the toggle pattern at the page-footer level.
 
 ### 4.10 Links, anchors, `:target`
 
@@ -1054,8 +1068,8 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - `:focus-visible` everywhere.
 - `prefers-reduced-motion` honored.
 - Target size ≥ 44×44 CSS pixels on mobile for copy/anchor buttons.
-- Contrast verified in `docs/design/color-analysis.md`. Both WCAG 2.1 AA and APCA body-minimum pass in both modes for
-  all semantic pairs.
+- Contrast verified in `docs/research/design/color-analysis.md`. Both WCAG 2.1 AA and APCA body-minimum pass in both
+  modes for all semantic pairs.
 - CSS-only tabs: `<label for>` associations; tab panels are `<section role="tabpanel" aria-labelledby="...">`.
   `axe-core` run in CI at `/plan-eng-review` time confirms.
 
@@ -1063,11 +1077,11 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 
 Specification, not a rendered image. Produced out-of-band via `bun run og` (TypeScript Playwright generator at
 `scripts/og/generate.ts`), committed as `public/og-image.png`, and copied byte-for-byte into `dist/og-image.png` at
-build time. Not regenerated on every build. The generator is deterministic: same inputs (`docs/design/og.html`,
-`docs/design/og.css`, `docs/design/foundation.css`, the woff2 fonts on disk) produce byte-identical output.
+build time. Not regenerated on every build. The generator is deterministic: same inputs (`scripts/og/og.html`,
+`scripts/og/og.css`, `src/styles/foundation.css`, the woff2 fonts on disk) produce byte-identical output.
 
 The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` → `/typeset` chain (see
-`docs/design/og-concepts/README.md` for the round-by-round selection rationale). Final form:
+`docs/research/design/og-concepts/README.md` (dev branch only) for the round-by-round selection rationale). Final form:
 
 - Dark-mode background (`--bg`).
 - Brand row at top, 28pt: `anc.dev` (mono Monaspace Xenon, `--accent`) + 32×1px rule + "the agent-native CLI standard"
@@ -1087,7 +1101,7 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
 **Future extension — per-page OG cards.** The current model uses one shared `/og-image.png` for every page. The
 generator architecture (`Playwright → Sharp → palette PNG`, deterministic, foundation-token-driven) is reusable for
 per-principle (`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape:
-`bun run og --input docs/design/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v` — the script's existing
+`bun run og --input scripts/og/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v` — the script's existing
 `[data-version]` injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's
 "Deferred to Separate Tasks" alongside favicon decoupling.
 
@@ -1107,11 +1121,11 @@ Revision 1 open questions with current status:
    §4.3. Revisit at first visual polish pass.
 2. **Mini-TOC on desktop** → RESOLVED: ship it (§4.11).
 3. **Warm vs cool neutrals** → RESOLVED via color-psychology research: cool neutrals for spec credibility (§4.1
-   narrative); full palette and contrast in `docs/design/color-analysis.md`.
+   narrative); full palette and contrast in `docs/research/design/color-analysis.md`.
 4. **Colorize MUST / SHOULD / MAY** → RESOLVED: ship option 7b (inline keyword color only). The stronger 7b-plus
    side-stripe variant was rejected per impeccable's `<absolute_bans>` (border-left >1px on callouts is the #1 AI-slop
    pattern). Block-level alternatives — leading RFC tag, background-tint fill — deferred to live-site iteration (§4.7).
-   Preview at `docs/design/must-should-may-preview.html`.
+   Preview at `docs/research/design/must-should-may-preview.html`.
 5. **`llms.txt` link in header** → RESOLVED: ship it, recall if it reads cute (§4.11).
 6. **`og:url` pre-domain purchase** → RESOLVED: stage on `workers.dev` host, swap constant at cutover (§4.14).
 
