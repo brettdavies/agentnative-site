@@ -2085,6 +2085,10 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
     );
     expect(md).toContain('## Reproduce locally');
     expect(md).toContain('anc check --command rg --output json');
+    // The repro fence is tagged `bash` so renderers (Shiki, GitHub markdown,
+    // hosted previews) syntax-highlight the command instead of treating it
+    // as plain text.
+    expect(md).toContain('```bash\nanc check --command rg --output json\n```');
   });
 
   test('project-mode invocation falls back to the synthesized form (no path leak)', () => {
