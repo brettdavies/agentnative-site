@@ -132,13 +132,12 @@
     "version": "4.86.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command wrangler --output json",
-    "started_at": "2026-04-30T23:01:02.131812807Z",
-    "duration_ms": 3581,
+    "started_at": "2026-05-01T10:09:02.861825665Z",
+    "duration_ms": 3402,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

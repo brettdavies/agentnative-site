@@ -132,12 +132,11 @@
     "version": "1.1.5 - 2026-02-24T09:04:51Z"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command doggo --output json",
-    "started_at": "2026-04-30T23:01:55.055729968Z",
+    "started_at": "2026-05-01T10:09:44.316107459Z",
     "duration_ms": 64,
     "platform": {
       "os": "linux",

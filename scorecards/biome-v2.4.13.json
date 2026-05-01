@@ -132,13 +132,12 @@
     "version": "Version: 2.4.13"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command biome --output json",
-    "started_at": "2026-04-30T23:01:14.971383779Z",
-    "duration_ms": 54,
+    "started_at": "2026-05-01T10:09:14.056897358Z",
+    "duration_ms": 55,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

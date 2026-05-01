@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "2 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "status": "pass",
+      "evidence": null,
       "confidence": "medium"
     },
     {
@@ -103,8 +103,8 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 6,
-    "warn": 3,
+    "pass": 7,
+    "warn": 2,
     "fail": 0,
     "skip": 2,
     "error": 0
@@ -127,18 +127,17 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "starship",
-    "binary": "starship",
-    "version": "starship 1.25.0"
+    "name": "claude",
+    "binary": "claude",
+    "version": "2.1.126 (Claude Code)"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
-    "invocation": "anc check --command starship --output json",
-    "started_at": "2026-04-30T23:01:14.515564629Z",
-    "duration_ms": 166,
+    "invocation": "anc check --command claude --output json",
+    "started_at": "2026-05-01T10:09:16.210909425Z",
+    "duration_ms": 1514,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,14 +146,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "starship"
+    "command": "claude"
   },
   "badge": {
     "eligible": false,
-    "score_pct": 67,
+    "score_pct": 78,
     "embed_markdown": null,
-    "scorecard_url": "https://anc.dev/score/starship",
-    "badge_url": "https://anc.dev/badge/starship.svg",
+    "scorecard_url": "https://anc.dev/score/claude",
+    "badge_url": "https://anc.dev/badge/claude.svg",
     "convention_url": "https://anc.dev/badge"
   }
 }

@@ -132,13 +132,12 @@
     "version": "Terraform v1.15.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command terraform --output json",
-    "started_at": "2026-04-30T23:01:01.220455516Z",
-    "duration_ms": 120,
+    "started_at": "2026-05-01T10:09:01.995362703Z",
+    "duration_ms": 118,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

@@ -132,12 +132,11 @@
     "version": null
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command ffmpeg --output json",
-    "started_at": "2026-04-30T23:00:56.170584248Z",
+    "started_at": "2026-05-01T10:08:56.999566825Z",
     "duration_ms": 69,
     "platform": {
       "os": "linux",

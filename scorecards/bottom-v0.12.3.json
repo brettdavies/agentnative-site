@@ -133,12 +133,11 @@
     "version": "bottom 0.12.3"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command btm --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:00:57.597989043Z",
+    "started_at": "2026-05-01T10:08:58.411623761Z",
     "duration_ms": 41,
     "platform": {
       "os": "linux",

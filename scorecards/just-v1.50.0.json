@@ -132,13 +132,12 @@
     "version": "just 1.50.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command just --output json",
-    "started_at": "2026-04-30T23:01:13.613071518Z",
-    "duration_ms": 289,
+    "started_at": "2026-05-01T10:09:12.727412796Z",
+    "duration_ms": 288,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

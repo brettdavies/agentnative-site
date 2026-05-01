@@ -133,12 +133,11 @@
     "version": "0.72.0 (Homebrew)"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command fzf --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:00:56.872591266Z",
+    "started_at": "2026-05-01T10:08:57.692216861Z",
     "duration_ms": 41,
     "platform": {
       "os": "linux",

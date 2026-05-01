@@ -132,12 +132,11 @@
     "version": "lsd 1.2.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command lsd --output json",
-    "started_at": "2026-04-30T23:00:57.788366606Z",
+    "started_at": "2026-05-01T10:08:58.598826113Z",
     "duration_ms": 52,
     "platform": {
       "os": "linux",

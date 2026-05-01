@@ -132,12 +132,11 @@
     "version": "NVIDIA-SMI version  : 570.211.01"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command nvidia-smi --output json",
-    "started_at": "2026-04-30T23:00:56.254832323Z",
+    "started_at": "2026-05-01T10:08:57.082018617Z",
     "duration_ms": 244,
     "platform": {
       "os": "linux",

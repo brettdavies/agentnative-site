@@ -132,13 +132,12 @@
     "version": "deno 2.7.14 (stable, release, x86_64-unknown-linux-gnu)"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command deno --output json",
-    "started_at": "2026-04-30T23:01:15.343366967Z",
-    "duration_ms": 436,
+    "started_at": "2026-05-01T10:09:14.427159211Z",
+    "duration_ms": 434,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

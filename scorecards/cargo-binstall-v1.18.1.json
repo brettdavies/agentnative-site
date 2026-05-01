@@ -132,12 +132,11 @@
     "version": "1.18.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command cargo-binstall --output json",
-    "started_at": "2026-04-30T23:01:15.79103723Z",
+    "started_at": "2026-05-01T10:09:14.868299338Z",
     "duration_ms": 63,
     "platform": {
       "os": "linux",
