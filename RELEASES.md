@@ -210,12 +210,13 @@ Committing the JSON alongside the code means ruleset changes land via the same r
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
 [`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). This site vendors the skill's
-upstream commit SHA in `src/data/skill.json`; the skill repo holds the actual content. Surface contract in
-`docs/DESIGN.md` §3.9.
+manifest (per-host install commands, version, surface metadata) in `src/data/skill.json`; the skill repo holds the
+actual content. Surface contract in `docs/DESIGN.md` §3.9. Update detection at install sites is delegated to the skill
+bundle's `bin/check-update`, which compares the local bundle's `VERSION` against `main` on GitHub.
 
 The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
-branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release REQUIRES the skill
-maintainer to fast-forward `main` to the new tag before the site re-pins.
+branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release requires the skill
+maintainer to fast-forward `main` to the new tag.
 
 ### Skill-release procedure
 
@@ -223,17 +224,18 @@ maintainer to fast-forward `main` to the new tag before the site re-pins.
    `git push origin dev --follow-tags`. Fast-forward `main` to the new tag and push: `git checkout main && git merge
    --ff-only v0.x.y && git push origin main`. The site's bare `git clone --depth 1` lands on `main`, so the fast-forward
    is what makes the new release reachable.
-2. **Re-pin in this repo**: edit `src/data/skill.json` — bump `version`, `source.commit`, and `verify.expected`
-   (`source.commit` and `verify.expected` are the same SHA until v2 schema decouples them). `loadSkillData()` will
-   reject a non-hex / non-lowercase / non-40-char SHA at build time, so a typo fails fast.
+2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill.json` to bump
+   `version` and update any per-host install commands, description, or other surface fields the release modified. If
+   nothing user-facing changed, skip the manifest bump entirely — the skill bundle's `bin/check-update` is what tells
+   installed users a new release exists.
 3. **PR to `dev`**: CI runs the unit + worker tests on the bumped manifest. Squash-merge on green.
 4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
-5. **Cache-purge** `/skill`, `/skill.json`, and `/skill.md` via the Cloudflare cache-purge API. Required for
-   security-relevant pin updates so users don't pick up the old SHA from the 24h `s-maxage` window. Use the API token
-   stored in 1Password (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). First-deploy-after-rename
-   note (cutover from `/install*` → `/skill*`): also purge `/install`, `/install.json`, and `/install.md` once to evict
-   any cached skill content under the old paths. Skip this on subsequent deploys.
-6. **Verify the deployed pin**: `curl -s https://anc.dev/skill.json | jq -r .source.commit` matches the new SHA. The
+5. **Cache-purge** `/skill`, `/skill.json`, and `/skill.md` via the Cloudflare cache-purge API after a manifest bump, so
+   users don't pick up the old shape from the 24h `s-maxage` window. Use the API token stored in 1Password
+   (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). First-deploy-after-rename note (cutover from
+   `/install*` → `/skill*`): also purge `/install`, `/install.json`, and `/install.md` once to evict any cached skill
+   content under the old paths. Skip this on subsequent deploys.
+6. **Verify the deployed manifest**: `curl -s https://anc.dev/skill.json | jq -r .version` matches the new version. The
    Playwright `skill` project (`bun x playwright test --project=skill`) re-runs the live 4-host clone against the
    advertised hosts; run it locally before tagging if anything in the manifest's host commands changed.
 

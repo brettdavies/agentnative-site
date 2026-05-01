@@ -1550,16 +1550,10 @@ describe('loadSkillData — fail-fast validation', () => {
       source: {
         type: 'git',
         url: 'https://github.com/brettdavies/agentnative-skill.git',
-        commit: '47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e',
       },
       install: {
         claude_code:
           'git clone --depth 1 https://github.com/brettdavies/agentnative-skill.git ~/.claude/skills/agent-native-cli',
-      },
-      verify: {
-        command: 'git -C <install-dir> rev-parse HEAD',
-        expected: '47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e',
-        semantics: 'advisory',
       },
       update: 'cd <install-dir> && git pull --ff-only',
       uninstall: 'rm -rf <install-dir>',
@@ -1580,26 +1574,14 @@ describe('loadSkillData — fail-fast validation', () => {
   }
 
   test('happy path: valid manifest loads', async () => {
-    const data = (await writeAndLoad(validManifest())) as { source: { commit: string } };
-    expect(data.source.commit).toBe('47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e');
+    const data = (await writeAndLoad(validManifest())) as { source: { url: string } };
+    expect(data.source.url).toBe('https://github.com/brettdavies/agentnative-skill.git');
   });
 
   test('missing top-level key fails with the key name', async () => {
     const m = validManifest() as Record<string, unknown>;
     delete m.license;
     await expect(writeAndLoad(m)).rejects.toThrow(/missing required key "license"/);
-  });
-
-  test('non-hex commit rejected', async () => {
-    const m = validManifest();
-    m.source.commit = 'NOT-A-SHA';
-    await expect(writeAndLoad(m)).rejects.toThrow(/40-char lowercase hex SHA/);
-  });
-
-  test('uppercase-hex commit rejected (must be lowercase)', async () => {
-    const m = validManifest();
-    m.source.commit = '47A76CCEB8B7B1BC013C19EE18A5E38179B1DD0E';
-    await expect(writeAndLoad(m)).rejects.toThrow(/40-char lowercase hex SHA/);
   });
 
   test('non-semver version rejected', async () => {

@@ -7,7 +7,7 @@ but not built*. Update this file whenever a sync script, workflow, endpoint, or 
 
 Existing top-level docs cover adjacent concerns but none give a single map:
 
-- `RELEASES.md` documents the skill-release procedure (the downstream-facing `/skill.json` re-pin) and the deploy
+- `RELEASES.md` documents the skill-release procedure (the downstream-facing `/skill.json` manifest bump) and the deploy
   pipeline, but treats syncs as one step in a larger runbook.
 - `docs/DESIGN.md` §3.9 / §3.10 cover the `/skill` and `/install` build contracts, not the cross-repo data flow.
 - `AGENTS.md` describes endpoints and content authorship, not sync direction.
@@ -95,9 +95,9 @@ site-own version (`package.json` is `"0.0.0"` deliberately — the spec version 
 
 ### Build-time vendoring by other repos
 
-| Consumer                                                     | Mechanism                                                                          | What's exported               | Trigger / cadence                                                                                   | Drift check                                                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `brettdavies/agentnative-cli` `src/skill_install/skill.json` | CLI's `scripts/sync-skill-fixture.sh` pulls from this repo's `src/data/skill.json` | Skill bundle metadata fixture | When this repo bumps `src/data/skill.json` (skill release re-pin per RELEASES.md §"Skill releases") | CLI's `skill-fixture-drift` GitHub Actions workflow runs the fixture's `--check` equivalent on every PR; CLI side fails if its vendored copy lags this repo. Effectively the inverse of the coverage-matrix arrangement: source-of-truth lives here, drift gate lives there. |
+| Consumer                                                     | Mechanism                                                                          | What's exported               | Trigger / cadence                                                                                          | Drift check                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `brettdavies/agentnative-cli` `src/skill_install/skill.json` | CLI's `scripts/sync-skill-fixture.sh` pulls from this repo's `src/data/skill.json` | Skill bundle metadata fixture | When this repo bumps `src/data/skill.json` (skill release manifest bump per RELEASES.md §"Skill releases") | CLI's `skill-fixture-drift` GitHub Actions workflow runs the fixture's `--check` equivalent on every PR; CLI side fails if its vendored copy lags this repo. Effectively the inverse of the coverage-matrix arrangement: source-of-truth lives here, drift gate lives there. |
 
 ### Deploy-time emission to Cloudflare Workers
 
@@ -128,10 +128,13 @@ The four flows interact, but each is independently triggered:
    for the workflow). Spec's `repository_dispatch:spec-release` event already fires here on tag publish; a consumer-side
    handler that auto-PRs the resync is tracked as follow-up work.
 
-4. **Skill repo cuts a release** → maintainer fast-forwards `agentnative-skill:main` to the new tag → edits this repo's
-   `src/data/skill.json` (`version`, `source.commit`, `verify.expected`) → PR to `dev` → release flow to `main` →
-   `wrangler deploy` updates `/skill.json` on `anc.dev` → Cloudflare cache purge → CLI's next PR exercises
-   `skill-fixture-drift` against the new fixture. Full runbook in `RELEASES.md` §"Skill-release procedure".
+4. **Skill repo cuts a release** → maintainer fast-forwards `agentnative-skill:main` to the new tag → if any user-facing
+   manifest fields changed (per-host install commands, version, description), edits this repo's `src/data/skill.json` to
+   bump `version` plus the changed fields → PR to `dev` → release flow to `main` → `wrangler deploy` updates
+   `/skill.json` on `anc.dev` → Cloudflare cache purge → CLI's next PR exercises `skill-fixture-drift` against the new
+   fixture. If the release didn't change any manifest fields, skip the manifest bump entirely — installed users learn
+   about the new release via the skill bundle's `bin/check-update`, not via a manifest change here. Full runbook in
+   `RELEASES.md` §"Skill-release procedure".
 
 5. **Site code/content change** → push to `dev` (auto-deploys to staging Worker) → PR `dev` → `main` → push to `main`
    (auto-deploys to `anc.dev`).
@@ -145,8 +148,8 @@ The four flows interact, but each is independently triggered:
   and runs `score-anc100.sh` inside the container, writing scorecards back to the host via bind mount. The container is
   the single source of truth for scoring; host-side `regen-scorecards.sh` is deprecated.
 - `src/data/spec/README.md` — what's vendored, why, and the manual reconciliation workflow when spec prose drifts.
-- `RELEASES.md` §"Skill releases" — the downstream re-pin procedure for `src/data/skill.json` end-to-end (commit →
-  cache-purge → live verify).
+- `RELEASES.md` §"Skill releases" — the downstream manifest-bump procedure for `src/data/skill.json` end-to-end
+  (manifest edit → cache-purge → live verify).
 - `docs/DESIGN.md` §3.9 (`/skill` + `/skill.json` build contract) and §3.10 (`/install` HTML-only contract).
 - `AGENTS.md` — repo conventions and the `content/principles/` vs `src/data/spec/principles/` separation rule.
 - `docs/plans/2026-04-23-001-feat-sync-spec-plan.md` (dev branch only, gated off main) — the plan that introduced

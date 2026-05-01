@@ -143,21 +143,12 @@ describe('regression #5 — /skill.json (skill-distribution canonical surface)',
     expect(parsed).toBeDefined();
   });
 
-  test('dist/skill.json source.commit matches src/data/skill.json', async () => {
+  test('dist/skill.json mirrors src/data/skill.json byte-for-byte', async () => {
     const distRaw = await readFile(join(DIST, 'skill.json'), 'utf8');
     const sourceRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'skill.json'), 'utf8');
     const dist = JSON.parse(distRaw);
     const source = JSON.parse(sourceRaw);
-    expect(dist.source.commit).toBe(source.source.commit);
-    // Pin-freshness invariant: verify.expected mirrors source.commit until
-    // a v2 schema decouples them.
-    expect(dist.verify.expected).toBe(dist.source.commit);
-  });
-
-  test('dist/skill.json source.commit is 40-char lowercase hex', async () => {
-    const raw = await readFile(join(DIST, 'skill.json'), 'utf8');
-    const parsed = JSON.parse(raw);
-    expect(parsed.source.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(dist).toEqual(source);
   });
 
   test('dist/skill.json has every required key', async () => {
@@ -173,7 +164,6 @@ describe('regression #5 — /skill.json (skill-distribution canonical surface)',
       'license',
       'source',
       'install',
-      'verify',
       'update',
       'uninstall',
       'skill_page_html',
