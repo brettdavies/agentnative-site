@@ -1930,14 +1930,16 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
     expect(longRun).toContain('<dt>Duration</dt><dd>2m 25s</dd>');
   });
 
-  test('Anc build links the commit when SHA is hex-shaped (7-40 chars)', () => {
-    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
-    expect(html).toContain('href="https://github.com/brettdavies/agentnative-cli/commit/fff3f13"');
-    expect(html).toContain('<code>fff3f13</code>');
-  });
+  test('Anc build renders version-only regardless of commit field shape', () => {
+    // The commit field is captured in the JSON schema but no longer surfaced
+    // on the rendered scorecard. Render is version-only across hex, null,
+    // and malicious-string inputs alike — the field is never interpolated
+    // into HTML, so there is no URL-construction surface to gate.
+    const hex = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
+    expect(hex).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(hex).not.toContain('agentnative-cli/commit/');
 
-  test('Anc build skips the commit link when commit is null', () => {
-    const html = buildScorecardBody(
+    const nullCommit = buildScorecardBody(
       tool('rg'),
       sc(),
       [],
@@ -1945,13 +1947,10 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({ anc: { version: '0.1.0', commit: null } }),
     );
-    expect(html).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
-    expect(html).not.toContain('agentnative-cli/commit/');
-  });
+    expect(nullCommit).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(nullCommit).not.toContain('agentnative-cli/commit/');
 
-  test('Anc build skips the commit link when SHA fails the hex allowlist (security)', () => {
-    // Defense against an upstream CLI bug that ever puts non-SHA bytes into anc.commit.
-    const html = buildScorecardBody(
+    const malicious = buildScorecardBody(
       tool('rg'),
       sc(),
       [],
@@ -1959,8 +1958,9 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({ anc: { version: '0.1.0', commit: '<script>alert(1)</script>' } }),
     );
-    expect(html).not.toContain('agentnative-cli/commit/');
-    expect(html).not.toContain('<script>');
+    expect(malicious).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(malicious).not.toContain('agentnative-cli/commit/');
+    expect(malicious).not.toContain('<script>');
   });
 
   test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
@@ -2159,9 +2159,8 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
     expect(md).toContain('**Duration:** 53ms');
     expect(md).toContain('**Platform:** `linux/x86_64`');
     expect(md).toContain('**Mode:** command');
-    expect(md).toContain(
-      '**Anc build:** 0.1.0 ([fff3f13](https://github.com/brettdavies/agentnative-cli/commit/fff3f13))',
-    );
+    expect(md).toContain('**Anc build:** 0.1.0');
+    expect(md).not.toContain('agentnative-cli/commit/');
   });
 });
 

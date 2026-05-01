@@ -28,14 +28,6 @@ function groupToPrincipleNum(group) {
 // out downstream site renderers as pinned consumers of this exact string.
 const AUDIT_PROFILE_SUPPRESSION_PREFIX = 'suppressed by audit_profile: ';
 
-// SHA-shape allowlist for `anc.commit`. CLI v0.4 emits a 7-char abbreviation
-// from build.rs; the long-form 40-char SHA is also acceptable. The regex is
-// the security gate before interpolating into a GitHub commit URL — anything
-// outside the hex alphabet falls through to a plain version string with no
-// link, regardless of how the CLI emitted the field.
-const ANC_COMMIT_SHA_RE = /^[0-9a-f]{7,40}$/;
-const ANC_REPO_URL = 'https://github.com/brettdavies/agentnative-cli';
-
 // Format `run.duration_ms` as a human-readable interval. Granularity matches
 // what's useful at a glance: sub-second runs in ms, multi-second runs in
 // tenths, multi-minute runs in `Xm Ys`.
@@ -58,28 +50,17 @@ function formatStartedAt(rfc3339) {
   return `${d.toISOString().replace('T', ' ').slice(0, 19)} UTC`;
 }
 
-// Build an HTML fragment for the `Anc build` detail row: version + abbreviated
-// commit link when the SHA passes the allowlist, version-only otherwise.
+// Build an HTML fragment for the `Anc build` detail row: version-only.
+// The `anc.commit` field is captured by the CLI's build.rs but no longer
+// surfaced here — see content/scorecard-schema.md.
 function renderAncBuildHtml(anc) {
   if (!anc || typeof anc.version !== 'string') return null;
-  const versionHtml = escHtml(anc.version);
-  if (typeof anc.commit === 'string' && ANC_COMMIT_SHA_RE.test(anc.commit)) {
-    const abbrev = anc.commit.slice(0, 7);
-    // escHtml on the SHA defensively even after the regex check — same posture
-    // as the existing escHtml-everywhere convention in this module.
-    return `${versionHtml} <a class="anc-build__commit" href="${ANC_REPO_URL}/commit/${escHtml(anc.commit)}"><code>${escHtml(abbrev)}</code></a>`;
-  }
-  return versionHtml;
+  return escHtml(anc.version);
 }
 
-// Markdown twin of renderAncBuildHtml. No escHtml needed (markdown is the
-// authoring layer); the SHA regex is still the security gate.
+// Markdown twin of renderAncBuildHtml.
 function renderAncBuildMarkdown(anc) {
   if (!anc || typeof anc.version !== 'string') return null;
-  if (typeof anc.commit === 'string' && ANC_COMMIT_SHA_RE.test(anc.commit)) {
-    const abbrev = anc.commit.slice(0, 7);
-    return `${anc.version} ([${abbrev}](${ANC_REPO_URL}/commit/${anc.commit}))`;
-  }
   return anc.version;
 }
 
