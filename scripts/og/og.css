@@ -1,18 +1,18 @@
-/* docs/design/og.css
- * Production OG card stylesheet, consumed by docs/design/og.html and
+/* scripts/og/og.css
+ * Production OG card stylesheet, consumed by scripts/og/og.html and
  * rendered to public/og-image.png via scripts/og/generate.ts.
  *
- * Color tokens come from docs/design/foundation.css (link-loaded by
+ * Color tokens come from src/styles/foundation.css (link-loaded by
  * og.html). This file owns layout, composition, weight, and tracking —
  * NOT colors. Do not redefine --must / --should / --may / --bg / --fg-*.
  *
  * Selected from /design-shotgun round 2 (2026-04-30): variant D1
  * (telegraphic, all-left-aligned manifesto). Rationale + alternatives
- * live in docs/design/og-concepts/README.md.
+ * live in docs/research/design/og-concepts/README.md (dev branch only).
  */
 
 /* @font-face declarations for the same self-hosted woff2 files the live
- * site ships. Paths are relative to this file (docs/design/og.css), so
+ * site ships. Paths are relative to this file (scripts/og/og.css), so
  * `../../public/fonts/*.woff2` resolves correctly when Chromium loads
  * the file via `file://` during PNG generation.
  *
