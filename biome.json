@@ -14,7 +14,8 @@
       "wrangler.jsonc",
       "src/**",
       "tests/**",
-      "!src/worker-configuration.d.ts"
+      "!src/worker-configuration.d.ts",
+      "!src/styles/foundation.css"
     ]
   },
   "assist": {

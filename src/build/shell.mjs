@@ -13,7 +13,7 @@ const SITE_TAGLINE = 'The agent-native CLI standard';
 // Alt text for the OG card. Single source-of-truth: applies to every
 // page's og:image:alt + twitter:image:alt because the site uses one
 // shared OG image (see docs/DESIGN.md §4.13). The card itself is
-// rendered from docs/design/og.html via scripts/og/generate.ts and
+// rendered from scripts/og/og.html via scripts/og/generate.ts and
 // shows MUST/SHOULD/MAY-prefixed normative statements; the alt text
 // describes the *content* of that card so screen readers and link-
 // preview crawlers convey what a sighted viewer sees.

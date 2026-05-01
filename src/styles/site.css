@@ -727,7 +727,7 @@ body:has(.leaderboard-hero) main {
    the longer-form methodology prose.
 
    Surface uses the canonical `--bg-raised` token (defined for both
-   light and dark in docs/design/foundation.css) — the same token the
+   light and dark in src/styles/foundation.css) — the same token the
    methodology / scorecard-summary surfaces use. Earlier draft used a
    fake `--bg-subtle` name that fell back to the light-mode hex literal
    in dark mode, producing near-white text on near-white background. */

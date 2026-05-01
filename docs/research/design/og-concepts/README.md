@@ -9,7 +9,7 @@ plan: docs/plans/2026-04-29-001-feat-brand-og-and-block-normative-plan.md
 # OG card concept exploration
 
 History of `/design-shotgun` rounds for the anc.dev OG card. Two rounds ran. **D1 won** (round 2). Production
-source-of-truth lives at `docs/design/og.html` + `docs/design/og.css`.
+source-of-truth lives at `scripts/og/og.html` + `scripts/og/og.css`.
 
 ## Round 1 — A / B / C (rejected)
 
@@ -80,11 +80,11 @@ A/B render artifacts at `.context/screenshots/005-og-finalize/{A,B,C,D}-*.png` (
 ## Files
 
 - `D1-manifesto-aligned.html` — selected concept, kept here for history. The shipped production source is at
-  `docs/design/og.html` + `docs/design/og.css` (built from D1 with the typeset refinements above, then promoted in Unit
+  `scripts/og/og.html` + `scripts/og/og.css` (built from D1 with the typeset refinements above, then promoted in Unit
   3).
 
 ## What ships next
 
-Unit 4 of the plan creates `scripts/og/generate.ts` (Playwright → Sharp → PNG) consuming `docs/design/og.html`, writes
+Unit 4 of the plan creates `scripts/og/generate.ts` (Playwright → Sharp → PNG) consuming `scripts/og/og.html`, writes
 `public/og-image.png`, and wires `og:image:alt` + `twitter:image:alt` into `src/build/shell.mjs`. The Python Gemini
 generator at `scripts/og/generate.py` is deleted in the same unit.
