@@ -6,8 +6,7 @@
 // §"/install.json shape", relocated to /skill.json by 2026-04-28-003):
 //
 //   - skill.json IS the source of truth. The emitter validates and copies;
-//     it does not synthesize fields. verify.expected and source.commit are
-//     hand-co-edited at release time.
+//     it does not synthesize fields.
 //   - dist/skill.json is byte-stable across runs: keys sorted, two-space
 //     indent, trailing newline.
 //   - Per-host commands MUST start with `git clone --depth 1` and terminate
@@ -19,7 +18,6 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { renderMarkdown } from './render.mjs';
 
-const COMMIT_RE = /^[0-9a-f]{40}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const REQUIRED_TOP_LEVEL = [
   'schema_version',
@@ -31,13 +29,11 @@ const REQUIRED_TOP_LEVEL = [
   'license',
   'source',
   'install',
-  'verify',
   'update',
   'uninstall',
   'skill_page_html',
 ];
-const REQUIRED_SOURCE = ['type', 'url', 'commit'];
-const REQUIRED_VERIFY = ['command', 'expected', 'semantics'];
+const REQUIRED_SOURCE = ['type', 'url'];
 
 /**
  * Read + validate src/data/skill.json. Fail-fast on missing/malformed
@@ -69,15 +65,6 @@ export async function loadSkillData(dataPath) {
   for (const key of REQUIRED_SOURCE) {
     if (!data.source[key]) {
       throw new Error(`${dataPath}: missing required key "source.${key}"`);
-    }
-  }
-  if (!COMMIT_RE.test(data.source.commit)) {
-    throw new Error(`${dataPath}: "source.commit" must be a 40-char lowercase hex SHA, got "${data.source.commit}"`);
-  }
-
-  for (const key of REQUIRED_VERIFY) {
-    if (!data.verify[key]) {
-      throw new Error(`${dataPath}: missing required key "verify.${key}"`);
     }
   }
 
@@ -195,7 +182,7 @@ export function buildSkillMarkdown(data) {
   lines.push('## What this does');
   lines.push('');
   lines.push(
-    `Clones \`${data.source.url}\` (pinned at commit \`${data.source.commit}\`) into your host's skills directory. \`.git/\` is preserved so future updates are a \`git pull\`.`,
+    `Clones \`${data.source.url}\` into your host's skills directory. \`.git/\` is preserved so future updates are a \`git pull\`.`,
   );
   lines.push('');
 
@@ -233,20 +220,7 @@ export function buildSkillMarkdown(data) {
   lines.push('## Trust model');
   lines.push('');
   lines.push(
-    "Piping a remote shell script into the local shell is the failure mode this install path rejects. Installation runs `git clone` against a content-addressed commit on a specific repository — the scripts are open-source and visible at the producer repo before they execute on the user's machine. The site advertises a single upstream commit SHA in `/skill.json`; agents that care about provenance can verify it.",
-  );
-  lines.push('');
-
-  lines.push('## Verify');
-  lines.push('');
-  lines.push("After install, confirm the local checkout matches the site's advertised pin:");
-  lines.push('');
-  lines.push('```bash');
-  lines.push(data.verify.command);
-  lines.push('```');
-  lines.push('');
-  lines.push(
-    `Expected: \`${data.verify.expected}\`. ${data.verify.semantics.charAt(0).toUpperCase()}${data.verify.semantics.slice(1)}.`,
+    "Piping a remote shell script into the local shell is the failure mode this install path rejects. Installation runs `git clone` against a specific repository on a specific host — the scripts are open-source and visible at the producer repo before they execute on the user's machine.",
   );
   lines.push('');
 

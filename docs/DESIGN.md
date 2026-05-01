@@ -463,41 +463,37 @@ for the single advertised skill (`agent-native-cli`); per-skill `/skill/<name>` 
 second skill ships, `/skill` becomes an index and per-skill content moves under `/skill/<name>` — the Worker's
 JSON-extension dispatch is already shape-agnostic, so no Worker code change is anticipated for that transition.
 
-**Source repo coupling.** This site vendors a single string — the upstream commit SHA — committed at site build time
-into `src/data/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
+**Source repo coupling.** This site vendors the skill manifest's per-host install commands and metadata at site build
+time into `src/data/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
 `docs/solutions/architecture-patterns/cross-repo-artifact-sync-commit-over-fetch-20260420.md`. The skill repo
 (`brettdavies/agentnative-skill`) holds `main` as the published-release pointer and `dev` as the integration branch; the
 install command's bare `git clone --depth 1` lands on the skill repo's default branch (`main`), which the skill
-maintainer fast-forwards to each new release tag.
+maintainer fast-forwards to each new release tag. Update detection is delegated to the skill bundle's
+`bin/check-update`, which compares the local bundle's `VERSION` against `main` on GitHub.
 
 **`/skill.json` shape (v1):**
 
-| Key                | Type                       | Notes                                                                                               |
-| ------------------ | -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `schema_version`   | integer                    | `1`. Bump on incompatible structural change.                                                        |
-| `type`             | string                     | `"agent-skill"`.                                                                                    |
-| `name`             | string                     | `"agent-native-cli"`. Slug, kebab-case.                                                             |
-| `version`          | string                     | Semver. Bumped per skill release.                                                                   |
-| `description`      | string                     | One sentence.                                                                                       |
-| `principles_url`   | string                     | `https://anc.dev/p1`.                                                                               |
-| `license`          | string                     | `"MIT"`.                                                                                            |
-| `source.type`      | string                     | `"git"`.                                                                                            |
-| `source.url`       | string                     | `https://github.com/brettdavies/agentnative-skill.git`.                                             |
-| `source.commit`    | string (40-char lower hex) | The pinned commit. Validated at build time.                                                         |
-| `install`          | object                     | Per-host map: `claude_code`, `codex`, `cursor`, `opencode` → `git clone --depth 1 …` command.       |
-| `verify.command`   | string                     | `git -C <install-dir> rev-parse HEAD`. Agent substitutes `<install-dir>`.                           |
-| `verify.expected`  | string                     | Same SHA as `source.commit` until v2 schema decouples them. Mismatch = upstream moved past the pin. |
-| `verify.semantics` | string                     | Free-form description of what mismatch means.                                                       |
-| `update`           | string                     | `cd <install-dir> && git pull --ff-only`.                                                           |
-| `uninstall`        | string                     | `rm -rf <install-dir>`.                                                                             |
-| `skill_page_html`  | string                     | `https://anc.dev/skill`.                                                                            |
+| Key               | Type    | Notes                                                                                         |
+| ----------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `schema_version`  | integer | `1`. Bump on incompatible structural change.                                                  |
+| `type`            | string  | `"agent-skill"`.                                                                              |
+| `name`            | string  | `"agent-native-cli"`. Slug, kebab-case.                                                       |
+| `version`         | string  | Semver. Bumped per skill release.                                                             |
+| `description`     | string  | One sentence.                                                                                 |
+| `principles_url`  | string  | `https://anc.dev/p1`.                                                                         |
+| `license`         | string  | `"MIT"`.                                                                                      |
+| `source.type`     | string  | `"git"`.                                                                                      |
+| `source.url`      | string  | `https://github.com/brettdavies/agentnative-skill.git`.                                       |
+| `install`         | object  | Per-host map: `claude_code`, `codex`, `cursor`, `opencode` → `git clone --depth 1 …` command. |
+| `update`          | string  | `cd <install-dir> && git pull --ff-only`.                                                     |
+| `uninstall`       | string  | `rm -rf <install-dir>`.                                                                       |
+| `skill_page_html` | string  | `https://anc.dev/skill`.                                                                      |
 
-**Build-emitter validation (`src/build/skill.mjs`).** `loadSkillData()` is fail-fast: missing required keys, non-hex or
-non-lowercase `source.commit`, non-semver `version`, empty `install` map, install commands not starting with `git clone
---depth 1`, and bare-clone commands (no explicit destination path) all reject the build at startup. The
-explicit-destination invariant is non-optional defense for the repo-name asymmetry: the skill repo is named
-`agentnative-skill` but the skill itself is named `agent-native-cli`; a bare `git clone` lands on the repo name and
-breaks every host's skill-discovery convention.
+**Build-emitter validation (`src/build/skill.mjs`).** `loadSkillData()` is fail-fast: missing required keys, non-semver
+`version`, empty `install` map, install commands not starting with `git clone --depth 1`, and bare-clone commands (no
+explicit destination path) all reject the build at startup. The explicit-destination invariant is non-optional defense
+for the repo-name asymmetry: the skill repo is named `agentnative-skill` but the skill itself is named
+`agent-native-cli`; a bare `git clone` lands on the repo name and breaks every host's skill-discovery convention.
 
 **Header contract (`src/worker/headers.ts`).** The Worker's HTML/markdown branches are joined by a JSON-extension branch
 detected by URL ending in `.json` (extension, not prefix — any `/<slug>.json` endpoint reuses the branch, so the v2
@@ -524,9 +520,10 @@ twin.
 `/skill` enters `sitemap.xml` and `llms.txt` (under a `## Skill` section); `/skill.json` enters `llms.txt` but NOT the
 sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
 
-**Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version`,
-`source.commit`, and `verify.expected` in `src/data/skill.json` (cache-purge `/skill`, `/skill.json`, and `/skill.md`
-against the Cloudflare cache-purge API after deploy).
+**Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version` in
+`src/data/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and `/skill.md`
+against the Cloudflare cache-purge API after deploy). Update detection at install sites is handled by the skill bundle's
+`bin/check-update`, not by a manifest field.
 
 ### 3.10 CLI install — `/install`
 
