@@ -3,7 +3,7 @@ title: "feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION +
 type: feat
 status: active
 date: 2026-04-23
-last-revised: 2026-04-30
+last-revised: 2026-05-01
 parents:
   - https://github.com/brettdavies/agentnative/blob/dev/docs/plans/2026-04-22-002-post-frontmatter-roadmap.md
 roadmap-item: 5 (spec-repo roadmap 002, item 4)
@@ -11,26 +11,37 @@ roadmap-item: 5 (spec-repo roadmap 002, item 4)
 
 # feat: sync-spec.sh — commit-a-copy vendoring of principles + VERSION + CHANGELOG
 
-> **Implementation status (2026-04-30): UNSTARTED.** Audited dev branch and confirmed:
+> **Implementation status (2026-05-01): STARTING on `feat/sync-spec` branch.** Pre-execution audit refreshed against
+> dev as of post-launch (PR #60 shipped anc.dev v0.1, PR #63 moved VOICE.md off main):
 >
-> - `scripts/sync-spec.sh` — does not exist
-> - `src/data/spec/` — does not exist
-> - `SPEC_VERSION` — still hardcoded as `'0.3.0'` in `src/build/util.mjs:91` (the very thing the plan proposes to source
->   from a vendored `VERSION` file)
+> - `scripts/sync-spec.sh` — still does not exist.
+> - `src/data/spec/` — still does not exist.
+> - `SPEC_VERSION` — still hardcoded as `'0.3.0'` in `src/build/util.mjs:81` (already consumed by `src/build/badge.mjs`
+>   for the badge URL — partially right answer, just a hardcode where it should be a vendored read).
+> - **Footer drift visible on prod**: `src/build/shell.mjs:190` ships a hardcoded `<span>v0.1.0</span>` literal, two
+>   minor versions behind the actual spec (`0.3.0`). This was the trigger for picking the plan up: anc.dev/ shows a
+>   stale spec version in the footer. The OG card carries the same drift via `scripts/og/generate.ts:38-51`'s regex
+>   read from shell.mjs.
+> - **Pin target updated** to `v0.3.0` (spec commit `5cea8bf`, released 2026-04-29) — was `v0.2.0` (`83bf0fd`) when the
+>   plan was filed.
+> - **`repository_dispatch:spec-release` is already wired** on the source side: spec's
+>   `.github/workflows/publish.yml` fires `spec-release` to `agentnative-cli` AND `agentnative-site` on every tag.
+>   Discovered 2026-05-01 during the cross-repo SYNCS-doc audit. Consumer-side handler that auto-PRs a re-vendor is
+>   still future work, but the trigger infra is in place.
 >
-> The plan was filed 2026-04-23, refined twice (rename fix in `6d76ae9`, reference-impl pointer in `8dfeb23`), and then
-> never executed — the launch-readiness plan and its dependencies absorbed the launch-eve cycle, and the absence of
-> vendored spec artifacts didn't block any launch surface. The plan remains a valid follow-up: a single `SPEC_VERSION`
-> hardcode is cheap to maintain manually for now, but the moment the site needs to render principle prose, surface
-> CHANGELOG entries, or cite spec versions in more than one place, the cost of manual sync starts compounding.
+> **Scope expansion (2026-05-01)**: this plan now also wires the footer (and OG card) to read SPEC_VERSION at build
+> time. Originally the plan had `Scope Boundaries: No rendering changes`; that was the right call when the footer
+> happened to coincide with a stale value, but with v0.1.0 visible on prod, the data-vendoring + the consumer-side
+> wiring belong in the same PR. See **Implementation Units** for U4 (NEW).
 >
-> **What `agentnative-cli` did instead:** `~/dev/agentnative-cli/scripts/sync-spec.sh` is the live reference
-> implementation — it vendors the spec into `src/principles/spec/` and is read by the CLI's `build.rs` to generate the
-> `REQUIREMENTS` slice. The site can adopt the same pattern with minimal adaptation. See the plan body's "External
-> References" section for the link.
+> **Cross-repo context, captured this session**: the version model is now documented at
+> [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](../solutions/best-practices/agentnative-version-model-2026-05-01.md)
+> — single source of truth for what version means in each of the four agentnative repos. Referenced from each repo's
+> SYNCS doc.
 >
-> Status stays `active` (the plan is still valid future work) rather than flipping to `completed` (nothing shipped) or
-> `deferred` (no explicit decision to defer). Touch this block when the plan is picked up.
+> **What `agentnative-cli` did**: `~/dev/agentnative-cli/scripts/sync-spec.sh` is the live reference implementation —
+> it vendors the spec into `src/principles/spec/` and is read by the CLI's `build.rs` to generate the `REQUIREMENTS`
+> slice. The site adopts the same pattern with minimal adaptation. See **External References** below.
 
 ## Overview
 
@@ -68,34 +79,53 @@ settled commit-a-copy over build-time fetch over cross-repo symlinks. No design 
 
 ## Requirements Trace
 
-- R1. A single script `scripts/sync-spec.sh` copies the three artifacts from a configurable `SPEC_ROOT` into this repo.
+- R1. A single script `scripts/sync-spec.sh` copies the three artifacts from `agentnative-spec` into this repo.
+  Remote-first with local-checkout fallback (mirrors cli's reference impl); accepts `SPEC_REMOTE_URL` and `SPEC_ROOT`
+  env vars.
 - R2. Destination is `src/data/spec/` (parallel to `src/data/coverage-matrix.json`); vendored files are committed.
 - R3. `content/principles/` is untouched — the site's human-written principle copy remains the SoT for rendered pages.
-- R4. The initial commit pins against the v0.2.0 tag (commit `83bf0fd`) so the first vendored state is a real release,
-  not a transient SHA.
+- R4. The initial commit pins against the **v0.3.0 tag (spec commit `5cea8bf`)** so the first vendored state is a real
+  release, not a transient SHA. (Was v0.2.0 / `83bf0fd` when the plan was filed; spec has shipped two minor releases
+  since.)
 - R5. Operational guidance is documented alongside the existing `sync-coverage-matrix.sh` — same voice, same header
-  comment pattern, same `SPEC_ROOT` env var with sensible default.
+  comment pattern, env vars (`SPEC_REMOTE_URL`, `SPEC_ROOT`, `SPEC_REF`) with sensible defaults. Integrates with the
+  existing `scripts/SYNCS.md` (untracked from the 2026-05-01 cross-repo sync-doc audit) by adding a row to the upstream
+  table; doesn't create a parallel doc.
 - R6. No CI enforcement of freshness on the site side — the spec repo's own `scripts/hooks/pre-push` already keeps the
   vendored sources honest; consumer-side drift is inspected via `git diff` after `sync-spec.sh` runs (matches the
   existing `sync-coverage-matrix.sh` operational model).
+- **R7 (NEW 2026-05-01).** `src/build/util.mjs` reads `SPEC_VERSION` from vendored `src/data/spec/VERSION` at module
+  load (replaces the hardcoded `'0.3.0'`). Site footer (`src/build/shell.mjs:190`) renders `v${SPEC_VERSION}` (replaces
+  hardcoded `<span>v0.1.0</span>`). OG generator (`scripts/og/generate.ts`) imports `SPEC_VERSION` from util.mjs
+  (replaces the regex-grep-from-shell.mjs pattern). Net effect: prod footer + OG card auto-track the vendored spec
+  version; the only place the spec version literal still lives in source is `src/data/spec/VERSION` itself.
 
 ## Scope Boundaries
 
-- No rendering changes. The vendored artifacts land at `src/data/spec/` but this plan doesn't wire them into any page or
-  endpoint. Consuming them (in `/about`, `/llms.txt`, `/llms-full.txt`, or elsewhere) is separate follow-up work.
+- **In scope as of 2026-05-01**: footer + OG card wiring (U4) — the visible-on-prod symptom that motivates picking up
+  this plan. Originally deferred when the plan was filed; promoted in because shipping the data without wiring the
+  most-visible consumer leaves a launch-day footer drift unfixed.
 - No change to `content/principles/*.md` — still human-written, still authoritative for the rendered principle pages.
-- No CI automation / GitHub Actions workflow to auto-run the sync. Manual invocation matches `sync-coverage-matrix.sh`.
+  The site's manual principle copy and the vendored spec copy coexist intentionally per the plan's original design.
+- No change to `/about` page or `/llms.txt` preamble — those have other version surfaces that may benefit from the
+  vendored read but aren't blocking and aren't visible-on-prod stale.
+- No CI automation / GitHub Actions workflow to auto-run the sync. Spec's `repository_dispatch:spec-release` event
+  already fires (verified in spec's `.github/workflows/publish.yml` 2026-05-01); wiring a consumer-side handler that
+  auto-PRs the re-vendor is separate follow-up work.
 - No migration of `/changelog` page away from its current hand-written `content/changelog.md`. Whether to replace that
   with a vendored read of `src/data/spec/CHANGELOG.md` is a separate design decision.
 
 ### Deferred to Follow-Up Work
 
-- Wiring the vendored `VERSION` into the site footer / `/about` / `/llms.txt`: separate follow-up.
 - Regenerating `/llms-full.txt` from `src/data/spec/principles/*.md` at build time: separate follow-up.
+- Wiring `/about` page version display to vendored `SPEC_VERSION`: separate follow-up if `/about` ever surfaces a spec
+  version (currently doesn't).
 - Replacing `content/changelog.md` with a vendored read of `src/data/spec/CHANGELOG.md`: separate follow-up if ever
   chosen; current manual approach is not blocked.
-- A GitHub Action that opens a PR when the spec publishes a new release (drift-detection automation): only if manual
-  sync proves insufficient.
+- **Consumer-side `spec-release` handler** that opens a PR when spec publishes a new tag: source-side dispatch is
+  already firing (per spec's `publish.yml`); a `.github/workflows/spec-release-handler.yml` in this repo would
+  `repository_dispatch`-listen, run `sync-spec.sh`, and open a PR with the vendored diff. Worth doing once manual
+  re-vendor friction shows up; not worth doing pre-emptively.
 
 ---
 
@@ -193,23 +223,30 @@ prescribes feature-detection over version gating for reading the artifacts.
 
 ```text
 agentnative-site/
+├── AGENTS.md                         (MODIFIED — U3 paragraph)
 ├── scripts/
-│   ├── sync-coverage-matrix.sh     (existing, unchanged)
-│   └── sync-spec.sh                (NEW — this plan)
-└── src/
-    └── data/
-        ├── coverage-matrix.json    (existing, unchanged)
-        └── spec/                   (NEW — this plan)
-            ├── VERSION
-            ├── CHANGELOG.md
-            └── principles/
-                ├── p1-non-interactive-by-default.md
-                ├── p2-structured-parseable-output.md
-                ├── p3-progressive-help-discovery.md
-                ├── p4-fail-fast-actionable-errors.md
-                ├── p5-safe-retries-mutation-boundaries.md
-                ├── p6-composable-predictable-command-structure.md
-                └── p7-bounded-high-signal-responses.md
+│   ├── sync-coverage-matrix.sh       (existing, unchanged)
+│   ├── sync-spec.sh                  (NEW — U1)
+│   └── SYNCS.md                      (TRACKED — was untracked from 2026-05-01 audit; U3 adds sync-spec row)
+├── src/
+│   ├── build/
+│   │   ├── util.mjs                  (MODIFIED — U4: SPEC_VERSION reads vendored file)
+│   │   └── shell.mjs                 (MODIFIED — U4: footer renders v${SPEC_VERSION})
+│   └── data/
+│       ├── coverage-matrix.json      (existing, unchanged)
+│       └── spec/                     (NEW — U2)
+│           ├── VERSION
+│           ├── CHANGELOG.md
+│           └── principles/
+│               ├── p1-non-interactive-by-default.md
+│               ├── p2-structured-parseable-output.md
+│               ├── p3-progressive-help-discovery.md
+│               ├── p4-fail-fast-actionable-errors.md
+│               ├── p5-safe-retries-mutation-boundaries.md
+│               ├── p6-composable-predictable-command-structure.md
+│               └── p7-bounded-high-signal-responses.md
+├── scripts/og/generate.ts            (MODIFIED — U4: imports SPEC_VERSION from util.mjs, drops shell.mjs regex)
+└── public/og-image.png               (REGENERATED — U4: card now shows v0.3.0)
 ```
 
 ---
@@ -234,19 +271,29 @@ agentnative-site/
 problem one step downstream and has been run in anger. Treat `sync-coverage-matrix.sh` as the secondary reference for
 this repo's local stylistic conventions (header comment voice, repo-root resolution).
 
-- Env vars: `SPEC_ROOT` (default `$HOME/dev/agentnative-spec`) and `SPEC_REF` (default `v0.2.0`). The default for
-  `SPEC_REF` is the same v0.2.0 tag this plan pins against; future syncs override it: `SPEC_REF=v0.2.1 ./sync-spec.sh`.
-- Validation gates (mirror the CLI script):
-- `SPEC_ROOT` is a git repo (else: print path + remediation, exit 1).
-- `SPEC_REF` resolves to a commit (else: suggest `git fetch --tags`, exit 1).
-- `principles/` exists at `SPEC_REF` (else: error citing the ref, exit 1).
-- Resolved-SHA echo: `git -C "$SPEC_ROOT" rev-parse --short=7 "$SPEC_REF^{commit}"` printed before extraction so the
-  operator sees the exact vendored content.
+- Env vars (mirrors cli's reference impl):
+- `SPEC_REMOTE_URL` (default `https://github.com/brettdavies/agentnative.git`) — remote URL queried first. Lets the
+  script work on a machine without a local spec checkout.
+- `SPEC_ROOT` (default `$HOME/dev/agentnative-spec`) — local checkout used as fallback when the remote is unreachable.
+- `SPEC_REF` (default `v0.3.0`) — tag or SHA to vendor. Future syncs override: `SPEC_REF=v0.3.1 ./scripts/sync-spec.sh`.
+- Resolution flow (remote-first with offline fallback):
+- Try `git ls-remote --tags "$SPEC_REMOTE_URL" "$SPEC_REF"`; if reachable, shallow-clone into a temp dir at that ref and
+  run extraction from there.
+- If the remote is unreachable, fall back to `SPEC_ROOT` and run extraction from the local object store via `git show`.
+- Cleanup hook (`trap`) removes the temp clone on exit.
+- Validation gates:
+- (Remote mode) `git ls-remote` succeeds, ref exists.
+- (Local mode) `SPEC_ROOT` is a git repo (else: print path + remediation, exit 1).
+- (Both) `SPEC_REF` resolves to a commit (else: suggest `git fetch --tags`, exit 1).
+- (Both) `principles/` exists at `SPEC_REF` (else: error citing the ref, exit 1).
+- Resolved-SHA echo: `git rev-parse --short=7 "$SPEC_REF^{commit}"` printed before extraction so the operator sees the
+  exact vendored content. Mode (remote vs local) printed alongside.
 - Extraction (three artifacts, all via `git show`):
 - `git show "$SPEC_REF:VERSION" >src/data/spec/VERSION`
 - `git show "$SPEC_REF:CHANGELOG.md" >src/data/spec/CHANGELOG.md`
-- Enumerate principle files at the ref via `git -C "$SPEC_ROOT" ls-tree --name-only "$SPEC_REF" principles/`, then `git
-  show "$SPEC_REF:<path>" >src/data/spec/principles/<basename>` per match.
+- Enumerate principle files at the ref via `git ls-tree --name-only "$SPEC_REF" principles/`, **filter to `p*.md` only**
+  (skips `principles/AGENTS.md` which is spec-side design context, not consumed by the site), then `git show
+  "$SPEC_REF:<path>" >src/data/spec/principles/<basename>` per match.
 - `mkdir -p src/data/spec/principles` before extraction so first-run works.
 - `set -euo pipefail`, SCRIPT_DIR + SITE_ROOT resolution per local convention.
 - `chmod +x scripts/sync-spec.sh` after creation.
@@ -258,9 +305,13 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 **Test scenarios:**
 
-- Happy path: with `SPEC_ROOT=$HOME/dev/agentnative-spec` at tag `v0.2.0`, running the script creates
-  `src/data/spec/VERSION` containing `0.2.0`, `src/data/spec/CHANGELOG.md` matching the spec repo's file byte-for-byte,
-  and seven `src/data/spec/principles/p*.md` files matching the spec principles byte-for-byte.
+- Happy path (remote-first): with default `SPEC_REMOTE_URL` reachable, running the script with `SPEC_REF=v0.3.0` creates
+  `src/data/spec/VERSION` containing `0.3.0`, `src/data/spec/CHANGELOG.md` matching the spec repo's file byte-for-byte
+  at v0.3.0, and seven `src/data/spec/principles/p*.md` files matching the spec principles byte-for-byte.
+  `principles/AGENTS.md` from the spec repo is NOT vendored (filter applies).
+- Happy path (local fallback): with `SPEC_REMOTE_URL=http://0.0.0.0:1` (unreachable) and
+  `SPEC_ROOT=$HOME/dev/agentnative-spec` at tag `v0.3.0`, the script falls back to the local checkout and produces the
+  same output tree.
 - Edge case: if `src/data/spec/principles/` already exists with stale files (e.g., from a prior sync), the script
   overwrites them with `cp` — no stale files should linger. Verified by: creating a dummy file there, running the
   script, confirming only the real principles files remain (or accepting that `cp` won't clean up orphans — see below).
@@ -275,17 +326,19 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 **Verification:**
 
-- `./scripts/sync-spec.sh` runs clean on a machine with the spec repo checked out at v0.2.0; produces the expected file
-  tree under `src/data/spec/`.
+- `./scripts/sync-spec.sh` runs clean against the default remote at `SPEC_REF=v0.3.0`; produces the expected file tree
+  under `src/data/spec/`.
+- `./scripts/sync-spec.sh` also runs clean in offline mode (remote unreachable) when `SPEC_ROOT` points at a local
+  checkout with v0.3.0 fetched.
 - `git diff src/data/spec/` after sync shows only the initial addition (no unrelated changes).
 - `shellcheck scripts/sync-spec.sh` passes (matching whatever shellcheck discipline this repo applies to
   `sync-coverage-matrix.sh`).
 
 ---
 
-- [ ] U2. **Initial commit of vendored artifacts at v0.2.0**
+- [ ] U2. **Initial commit of vendored artifacts at v0.3.0**
 
-**Goal:** Run the script against the v0.2.0 checkout of the spec repo and commit the resulting vendored state.
+**Goal:** Run the script against the v0.3.0 spec ref and commit the resulting vendored state.
 
 **Requirements:** R4
 
@@ -305,12 +358,11 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 **Approach:**
 
-- In a clean `~/dev/agentnative-spec` clone, `git checkout v0.2.0`.
-- From this repo, run `./scripts/sync-spec.sh`.
-- Commit the resulting tree with message citing the tag + commit SHA: `feat: vendor spec v0.2.0 via sync-spec.sh
-  (spec@83bf0fd)`.
+- From this repo, run `./scripts/sync-spec.sh` with default `SPEC_REF=v0.3.0`. The script handles ref resolution itself;
+  no need to pre-checkout the spec repo to a tag.
+- Commit the resulting tree with message: `feat(spec): vendor spec v0.3.0 via sync-spec.sh (spec@5cea8bf)`.
 - PR body's `## Changelog` section notes: "Added: `src/data/spec/` — vendored spec artifacts from agentnative-spec
-  v0.2.0. See `scripts/sync-spec.sh` for resync instructions."
+  v0.3.0 (`spec@5cea8bf`). See `scripts/sync-spec.sh` for resync instructions."
 
 **Patterns to follow:**
 
@@ -319,24 +371,24 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 **Test scenarios:**
 
-- Happy path: `VERSION` reads `0.2.0`, `CHANGELOG.md`'s latest entry is `## [0.2.0] - 2026-04-23`, principles
-  frontmatter matches the spec repo byte-for-byte.
-- Integration: markdown-linting pre-push hook in this repo (if any exists) passes on the vendored files. If this repo's
-  markdownlint config is stricter than the spec repo's, vendored files could fail; in that case, add an exclusion rather
-  than editing vendored content.
+- Happy path: `VERSION` reads `0.3.0`, `CHANGELOG.md`'s latest entry corresponds to v0.3.0, principles frontmatter
+  matches the spec repo byte-for-byte at v0.3.0.
+- Integration: `bun run lint` (markdownlint-cli2) passes on the vendored files. If this repo's markdownlint config is
+  stricter than the spec repo's, vendored files could fail; in that case, add an exclusion for `src/data/spec/` rather
+  than editing vendored content. (Same pattern as `docs/research/` and `docs/plans/` exclusions in `package.json`.)
 
 **Verification:**
 
 - `git log --oneline src/data/spec/` shows a single initial commit.
-- `cat src/data/spec/VERSION` outputs `0.2.0`.
-- `diff -r src/data/spec/principles/ ~/dev/agentnative-spec/principles/` (with spec repo at v0.2.0) reports no
-  differences.
+- `cat src/data/spec/VERSION` outputs `0.3.0`.
+- `diff -r src/data/spec/principles/ <(ls ~/dev/agentnative-spec/principles/p*.md)` accounting for the
+  `principles/AGENTS.md` filter — vendored set is exactly the 7 `p*.md` files, nothing else.
 
 ---
 
 - [ ] U3. **Document the sync workflow**
 
-**Goal:** Readers of this repo know when and how to resync.
+**Goal:** Readers of this repo know when and how to resync; cross-repo version model is discoverable.
 
 **Requirements:** R5
 
@@ -344,15 +396,18 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 **Files:**
 
-- Modify: `scripts/sync-spec.sh` header comment — expand the "when to run" block beyond the one-liner pattern from
-  `sync-coverage-matrix.sh` to explicitly call out the three artifacts and the spec-side release-notification workflow.
+- Modify: `scripts/sync-spec.sh` header comment — same shape as cli's reference impl; explicitly call out the three
+  artifacts and the spec-side release-notification workflow.
+- Modify: `scripts/SYNCS.md` (currently untracked from the 2026-05-01 cross-repo sync-doc audit; to be committed as part
+  of this PR) — add a row for `sync-spec.sh` in the Upstream table; update the SPEC_VERSION drift-check column now that
+  the hardcode is gone; cross-link the version-model solution doc.
 - Modify: `AGENTS.md` — the existing block about `content/principles/` being manually-authored gets a sibling paragraph
   pointing at `src/data/spec/` as the vendored, machine-readable mirror used for build-time derivatives. Clarifies that
-  the two paths coexist intentionally.
+  the two paths coexist intentionally and points at the version-model doc.
 
 **Approach:**
 
-- Header comment template (mirrors `sync-coverage-matrix.sh`'s):
+- Header comment template (mirrors cli's `sync-spec.sh`):
 
   ```bash
   # Sync the spec artifacts (principles + VERSION + CHANGELOG) from the agentnative-spec repo.
@@ -361,49 +416,171 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
   # Generated by:   human authorship (principles/*.md frontmatter + prose), spec repo's release
   #                 workflow (VERSION bump + CHANGELOG regeneration via cliff.toml).
   #
-  # Run this after agentnative-spec cuts a new tag. The spec repo's scripts/hooks/pre-push
-  # enforces source-side correctness (frontmatter schema, ID uniqueness, relative link integrity).
+  # Resolves SPEC_REF (default v0.3.0) against SPEC_REMOTE_URL first, then falls back to a
+  # local checkout at SPEC_ROOT. Extracts via `git show <ref>:<path>` so neither the remote
+  # nor the local checkout's working tree is perturbed.
+  #
+  # Resync cadence: rerun after every new agentnative-spec tag. The spec repo's
+  # repository_dispatch:spec-release event already fires to this repo on tag publish — a
+  # consumer-side handler that auto-PRs the resync is tracked as follow-up work.
   ```
 
-- AGENTS.md paragraph: short. 3-4 sentences. "As of 2026-04-23 the site vendors three spec artifacts at `src/data/spec/`
+- `scripts/SYNCS.md` row addition (Upstream table):
+
+  ```markdown
+  | brettdavies/agentnative-spec @ pinned tag | `scripts/sync-spec.sh` (manual; remote-first with local fallback) | `principles/p*-*.md` + `VERSION` + `CHANGELOG.md` → `src/data/spec/` | On spec release; consumed by `src/build/util.mjs` (SPEC_VERSION) and the footer/OG card | Site fails fast at build time if `src/data/spec/VERSION` is missing |
+  ```
+
+  Also: update the existing row that mentions hardcoded SPEC_VERSION (Upstream `agentnative-spec PLANNED` → flip to
+  shipped, point at the new vendored read).
+
+- AGENTS.md paragraph: short. 3-4 sentences. "As of 2026-05-01 the site vendors three spec artifacts at `src/data/spec/`
   via `scripts/sync-spec.sh`. This is a build-time data mirror, not a content mirror — `content/principles/` is still
   human-written site copy, and the two evolve independently. When the spec cuts a new tag, rerun `sync-spec.sh` and open
-  a PR. See `docs/solutions/best-practices/cross-repo-artifact-consumption-static-sites-2026-04-21.md` for the governing
-  pattern."
+  a PR. See
+  [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](https://github.com/brettdavies/solutions-docs/blob/main/best-practices/agentnative-version-model-2026-05-01.md)
+  for the cross-repo version model and
+  [`cross-repo-artifact-consumption-static-sites-2026-04-21.md`](https://github.com/brettdavies/solutions-docs/blob/main/best-practices/cross-repo-artifact-consumption-static-sites-2026-04-21.md)
+  for the governing vendoring pattern."
 
 **Patterns to follow:**
 
 - Existing AGENTS.md voice: direct, named paths, cross-references to authoritative docs.
-- Spec repo's CONTRIBUTING.md structure (header comment → prose → examples) for the header comment.
+- cli's `scripts/sync-spec.sh` header comment shape (already serves as the working reference).
+- Existing `scripts/SYNCS.md` table format (don't reinvent — add a row, don't reshape the doc).
 
 **Test scenarios:**
 
 - Happy path: a reader opening this repo cold can find `sync-spec.sh`, read its header, and understand what it vendors
-  and when to rerun it. Secondary confirmation: the AGENTS.md paragraph resolves the "why is there both
-  `content/principles/` and `src/data/spec/principles/`" question without requiring further reading.
-- Test expectation: none (prose-only unit). Verification is a readability pass.
+  and when to rerun it.
+- Secondary: the AGENTS.md paragraph resolves the "why is there both `content/principles/` and
+  `src/data/spec/principles/`" question without requiring further reading; pointer to the version-model doc resolves "is
+  the site versioned?" before it gets asked.
+- `scripts/SYNCS.md` is the single map a reviewer reaches for to see what flows in and out of this repo.
 
 **Verification:**
 
 - Another agent or collaborator opening this repo fresh can answer "what does `sync-spec.sh` do, why does it exist, and
   when do I run it?" without asking.
+- Same agent can answer "does the site have its own version?" by following the AGENTS.md → version-model-doc link chain.
+
+---
+
+- [ ] U4. **Wire `SPEC_VERSION` to vendored read; fix footer + OG card staleness**
+
+**Goal:** Eliminate the v0.1.0-on-prod footer drift by making `SPEC_VERSION` read from the vendored `VERSION` file and
+threading it through the footer + OG card. Source-of-truth for the site's spec version is now exactly one file:
+`src/data/spec/VERSION`.
+
+**Requirements:** R7
+
+**Dependencies:** U2 (vendored file must exist before util.mjs reads it)
+
+**Files:**
+
+- Modify: `src/build/util.mjs:81` — replace hardcoded `export const SPEC_VERSION = '0.3.0';` with a build-time read of
+  `src/data/spec/VERSION` (fail-fast if the file is missing — surface a clear error pointing at `sync-spec.sh`).
+- Modify: `src/build/shell.mjs` — import `SPEC_VERSION` from util.mjs; replace `<span>v0.1.0</span>` at line 190 with
+  `<span>v${SPEC_VERSION}</span>`.
+- Modify: `scripts/og/generate.ts` — replace the `readVersion()` regex-from-shell.mjs pattern (lines 38-51) with a
+  direct `import { SPEC_VERSION } from '../../src/build/util.mjs'`. Removes a brittle regex that breaks the moment
+  shell.mjs's literal becomes a template.
+- Regenerate: `public/og-image.png` — the version literal on the card changes from `v0.1.0` to `v0.3.0`. Run `bun run
+  og` after the wiring lands; commit the new PNG.
+
+**Approach:**
+
+- **util.mjs read pattern**: at module load (top-level), read `src/data/spec/VERSION` synchronously via `readFileSync`.
+  Throw a clear error if the file is missing — directs the operator to run `./scripts/sync-spec.sh`. Trim whitespace.
+  Export `SPEC_VERSION` as a string constant exactly as the previous hardcode did, so existing consumers
+  (`src/build/badge.mjs:13`) need no change.
+
+  ```js
+  // src/build/util.mjs (replaces line 81)
+  import { readFileSync } from 'node:fs';
+  import { join, dirname } from 'node:path';
+  import { fileURLToPath } from 'node:url';
+
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const SPEC_VERSION_PATH = join(__dirname, '..', 'data', 'spec', 'VERSION');
+  let _specVersion;
+  try {
+    _specVersion = readFileSync(SPEC_VERSION_PATH, 'utf8').trim();
+  } catch (err) {
+    throw new Error(
+      `Could not read ${SPEC_VERSION_PATH}: ${err.message}\n` +
+      `Run ./scripts/sync-spec.sh to vendor the spec, then retry.`
+    );
+  }
+  export const SPEC_VERSION = _specVersion;
+  ```
+
+- **shell.mjs footer change**: import `SPEC_VERSION` at the top of the module (alongside other imports). Replace the
+  literal in the footer template string. No other shell.mjs changes — the OG card alt text and JSON-LD don't reference
+  the version.
+
+- **OG generator refactor**: `scripts/og/generate.ts` currently reads shell.mjs source via `readFile` + regex match.
+  Replace with a direct import of `SPEC_VERSION` from util.mjs. Drop the `readVersion()` function and `SHELL_MJS`
+  constant entirely. The OG HTML's `data-version` injection still happens (Playwright `page.evaluate`); only the source
+  of the version string changes.
+
+  Note: util.mjs is `.mjs` — TypeScript can import it via `.mjs` extension; ensure `tsconfig.json`'s
+  `allowImportingTsExtensions` / `moduleResolution` settings tolerate this. If they don't, fall back to reading
+  `src/data/spec/VERSION` directly from the OG generator (same source, separate read — acceptable since both code
+  paths fail fast on missing file).
+
+- **OG image regen**: after the wiring change, the rendered card displays `v0.3.0`. Run `bun run og` and commit the new
+  `public/og-image.png`. The build's deterministic-output guarantee means re-running the generator on the same vendored
+  VERSION yields byte-identical output.
+
+**Patterns to follow:**
+
+- `src/build/badge.mjs:13` — already imports `SPEC_VERSION` from util.mjs and consumes it for badge URLs. Same pattern,
+  applied to two more consumers.
+- `src/build/assets.mjs` — fail-fast file-read pattern with operator-friendly error message (the foundation.css
+  byte-equivalence check is the closest precedent).
+
+**Test scenarios:**
+
+- Happy path: `bun run build` succeeds; emitted homepage HTML contains `<span>v0.3.0</span>` in the footer (not
+  `v0.1.0`); emitted OG card shows `v0.3.0`; `tests/build.test.ts` updated to assert footer renders the vendored
+  version.
+- Error path: if `src/data/spec/VERSION` is deleted, `bun run build` fails fast with the operator-friendly error
+  pointing at `sync-spec.sh`. Add a regression test that mocks the missing file and asserts the error message.
+- Integration: `bun run og` produces a card containing `v0.3.0`; sha256 of the resulting PNG is recorded in the commit
+  so future regressions are visible.
+- Update existing tests that may have asserted `v0.1.0` literally — search `tests/` for the string.
+
+**Verification:**
+
+- `curl -s https://anc.dev/ | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+'` returns `v0.3.0` (post-deploy).
+- `curl -s -o /tmp/og.png https://anc.dev/og-image.png && file /tmp/og.png` shows expected PNG; visual inspection shows
+  v0.3.0.
+- Bumping `src/data/spec/VERSION` to a hypothetical `0.3.1` (without re-running sync-spec.sh) and rebuilding shows the
+  footer flips to `v0.3.1` — confirms the file is the source of truth, not any cached constant.
 
 ---
 
 ## System-Wide Impact
 
-- **Interaction graph:** None at ship time. Future consumers of `src/data/spec/` (build scripts, `/llms-full.txt`
-  generation, footer rendering) will form the interaction graph when they land as follow-up work.
+- **Interaction graph (after U4):** `src/data/spec/VERSION` → `src/build/util.mjs` (read at module load) →
+  `src/build/badge.mjs` (badge URLs, already wired) + `src/build/shell.mjs` (footer, NEW) + `scripts/og/generate.ts` (OG
+  card injection, NEW). Future consumers (`/llms-full.txt` regen, `/about` version display) will extend this graph
+  through the same util.mjs entry point.
 - **API surface parity:** The shields.io badge endpoint (spec roadmap 002, item 2) and the coupled-release protocol in
   `brettdavies/agentnative:CONTRIBUTING.md` both assume the site can cite a spec version. This plan makes that citation
-  mechanical rather than manual.
-- **Integration coverage:** No automated integration test — this is a one-off script, not a live integration.
-  `sync-coverage-matrix.sh` doesn't have tests either; the operational model is "run, diff, PR, review."
+  mechanical rather than manual; after U4, the citation is also visible-on-prod (footer + OG card).
+- **Integration coverage:** No automated integration test for the script itself — this is a one-off vendoring tool, not
+  a live integration. `sync-coverage-matrix.sh` doesn't have tests either; operational model is "run, diff, PR, review."
+  U4's wiring DOES get test coverage in `tests/build.test.ts` (footer renders vendored version) and
+  `tests/regression.test.ts` (missing-VERSION-file fail-fast).
 - **Unchanged invariants:**
 - `content/principles/*.md` — still human-written, still the SoT for rendered principle pages.
 - `content/changelog.md` — still hand-written (replacement is follow-up work, out of scope here).
 - `scripts/sync-coverage-matrix.sh` — untouched.
 - Cloudflare Worker routing, CommonMark rendering, llms.txt endpoints — untouched.
+- `SUPPORTED_SCHEMA_VERSION` in `src/build/scorecards.mjs:21` — untouched. That's a separate version concept (CLI's
+  scorecard schema) and lives at its own cadence.
 
 ---
 
@@ -422,21 +599,39 @@ this repo's local stylistic conventions (header comment voice, repo-root resolut
 
 - When this plan lands, strike item 4 in
   [agentnative-spec roadmap 002](https://github.com/brettdavies/agentnative/blob/dev/docs/plans/2026-04-22-002-post-frontmatter-roadmap.md)
-  (mark shipped with PR link + vendored spec version).
-- Any future follow-up that consumes `src/data/spec/` (footer, llms-full.txt regen, etc.) files its own plan here and
-  cross-references this one.
-- If the spec repo ever changes `principles/` layout (sub-folders, additional files), reconsider U1's simple glob —
-  that's a revisit trigger, not a failure to anticipate now.
+  (mark shipped with PR link + vendored spec version `0.3.0`).
+- The spec repo's `repository_dispatch:spec-release` event already fires to this repo on tag publish (verified
+  2026-05-01 in spec's `.github/workflows/publish.yml`). Follow-up work to add a consumer-side handler that auto-PRs the
+  resync is tracked under "Deferred to Follow-Up Work" above.
+- Any future follow-up that consumes `src/data/spec/` (e.g., `/llms-full.txt` regen, `/about` version surface) files its
+  own plan here and cross-references this one.
+- If the spec repo ever changes `principles/` layout (sub-folders, additional non-`p*.md` files), reconsider U1's
+  `p*.md`-only filter — that's a revisit trigger, not a failure to anticipate now.
 
 ## Sources & References
 
 - **Parent roadmap (spec repo):**
   [`2026-04-22-002-post-frontmatter-roadmap.md`](https://github.com/brettdavies/agentnative/blob/dev/docs/plans/2026-04-22-002-post-frontmatter-roadmap.md),
   item 4
+- **Cross-repo version model (canonical, single source of truth):**
+  [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](../../docs/solutions/best-practices/agentnative-version-model-2026-05-01.md)
+  — what version means in each of the four agentnative repos, why the site has no own version, where each version is
+  read or displayed.
 - Pattern source (cross-repo):
   [`docs/solutions/best-practices/cross-repo-artifact-consumption-static-sites-2026-04-21.md`](../../docs/solutions/best-practices/cross-repo-artifact-consumption-static-sites-2026-04-21.md)
-- Pattern source (this repo): `scripts/sync-coverage-matrix.sh`, `src/data/coverage-matrix.json`, `AGENTS.md`
-- Target tag: `v0.2.0` (commit `83bf0fd`) in `brettdavies/agentnative`
-- Related repos: `brettdavies/agentnative` (upstream), `brettdavies/agentnative-cli` (sibling commit-a-copy consumer —
-  see its own plan at
-  [`agentnative-cli/docs/plans/2026-04-23-001-feat-spec-vendor-plan.md`](https://github.com/brettdavies/agentnative-cli/blob/dev/docs/plans/2026-04-23-001-feat-spec-vendor-plan.md))
+- Pattern source (this repo): `scripts/sync-coverage-matrix.sh`, `src/data/coverage-matrix.json`, `AGENTS.md`,
+  `scripts/SYNCS.md` (untracked from 2026-05-01 sync-doc audit; commits as part of this PR via U3).
+- **Target tag**: `v0.3.0` (spec commit `5cea8bf`, released 2026-04-29) in `brettdavies/agentnative`. Was v0.2.0 /
+  `83bf0fd` when this plan was filed; spec has shipped two minor releases since.
+- **Reference impl (cli, shipped)**: `~/dev/agentnative-cli/scripts/sync-spec.sh` plus its plan at
+  [`agentnative-cli/docs/plans/2026-04-23-001-feat-spec-vendor-plan.md`](https://github.com/brettdavies/agentnative-cli/blob/dev/docs/plans/2026-04-23-001-feat-spec-vendor-plan.md)
+  (status: completed). Site's sync-spec.sh adopts cli's shape directly.
+- **Reference impl (skill, shipped)**: `~/dev/agentnative-skill/scripts/sync-spec.sh` — near-identical mirror of cli's,
+  only `DEST_DIR` differs.
+- **Cross-repo SYNCS docs (written 2026-05-01, untracked)**:
+- `~/dev/agentnative-spec/docs/syncs.md`
+- `~/dev/agentnative-cli/scripts/SYNCS.md`
+- `~/dev/agentnative-skill/docs/SYNCS.md`
+- `~/dev/agentnative-site/scripts/SYNCS.md`
+- Related repos: `brettdavies/agentnative` (upstream spec), `brettdavies/agentnative-cli` (sibling vendoring consumer),
+  `brettdavies/agentnative-skill` (sibling vendoring consumer).
