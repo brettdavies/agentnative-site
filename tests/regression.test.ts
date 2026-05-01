@@ -298,11 +298,21 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
   test('inline brew/cargo copy lives only in content/install.md (no source-tree duplicates)', async () => {
     // Build-time guard for the dedup goal of Unit 2. Render-stage HTML
     // duplicates would re-grow if a future edit re-inlines the commands.
+    // Vendored spec content (src/data/spec/) is excluded — it's a verbatim
+    // mirror of agentnative-spec, may legitimately mention install commands
+    // in CHANGELOG entries, and is not a duplicate this test is guarding
+    // against.
     const repoRoot = join(import.meta.dir, '..');
     const { execFileSync } = await import('node:child_process');
     const matches = execFileSync(
       'grep',
-      ['-rlE', 'brew install brettdavies/tap/agentnative|cargo install agentnative', 'src/', 'content/'],
+      [
+        '-rlE',
+        '--exclude-dir=spec',
+        'brew install brettdavies/tap/agentnative|cargo install agentnative',
+        'src/',
+        'content/',
+      ],
       { cwd: repoRoot, encoding: 'utf8' },
     )
       .trim()
