@@ -374,7 +374,10 @@ export async function build() {
     // existing embed continues to render the current score after a
     // regression. Score derived from schema 0.5 `badge.score_pct` (0–100
     // int) → 0–1 for badge-maker's color thresholds.
-    const svg = renderBadgeSvg(scorecard.badge.score_pct / 100);
+    // spec_version is per-scorecard (the spec the CLI was compiled against
+    // when it produced this scorecard) — pass it explicitly so the badge
+    // label tracks the actual scoring context, not a global default.
+    const svg = renderBadgeSvg(scorecard.badge.score_pct / 100, scorecard.spec_version);
     await writeFile(join(DIST_DIR, 'badge', `${tool.name}.svg`), svg);
     badgePaths.push(`/badge/${tool.name}.svg`);
 

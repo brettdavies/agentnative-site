@@ -1,8 +1,10 @@
 // Small build helpers: sorted principle glob, filename parsing, HTML escaping.
 // Kept separate from build.mjs so tests/build.test.ts can import directly.
 
+import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PRINCIPLE_FILENAME_RE = /^p(\d+)-([a-z0-9-]+)\.md$/;
 
@@ -71,14 +73,58 @@ export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);
 
 export const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
 
-// Spec version cited on the badge label and in the /badge convention prose.
-// The spec sync-plan (docs/plans/2026-04-23-001-feat-sync-spec-plan.md)
-// will replace this with a build-time read from src/data/spec/VERSION when
-// it lands. Until then, this is a manually-tracked copy of the
-// agentnative-spec VERSION file. The shell footer carries a separate stub
-// (v0.1.0) tracked by the same plan; both should converge to the real
-// version once the sync script is wired.
-export const SPEC_VERSION = '0.3.0';
+// =====================================================================
+// Spec version constants — three distinct concepts, three distinct files.
+// =====================================================================
+//
+// 1. SPEC_VERSION  — the spec version we last *vendored* (src/data/spec/VERSION).
+//    Updated by `./scripts/sync-spec.sh`. Kept around as a reference / diff
+//    target. NOT used for any user-visible surface — the moment of vendoring
+//    and the moment of site reconciliation are different events.
+//
+// 2. SITE_SPEC_VERSION — the spec version this site's principle prose has
+//    been *reconciled to* (content/principles/VERSION). Bumped MANUALLY by
+//    the contributor who reconciles content/principles/p*-*.md after a
+//    sync-spec.sh run. Always ≤ SPEC_VERSION; lag during the manual
+//    reconciliation window is honest (footer correctly says the site hasn't
+//    caught up yet). USED BY: site footer.
+//
+// 3. (Per-scorecard `spec_version` field) — what `anc` was compiled against
+//    when it produced that scorecard. NOT a global constant; lives in each
+//    scorecards/<name>-v<ver>.json. USED BY: per-tool badge SVGs (passed
+//    explicitly into renderBadgeSvg) and the OG card (reads anc's own
+//    self-scorecard's spec_version).
+//
+// Both files are read at module load, fail-fast on missing.
+// =====================================================================
+
+const SPEC_VERSION_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'spec', 'VERSION');
+const SITE_SPEC_VERSION_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'content',
+  'principles',
+  'VERSION',
+);
+
+function readVersionFile(path, remediation) {
+  try {
+    return readFileSync(path, 'utf8').trim();
+  } catch (err) {
+    throw new Error(`Could not read ${path}: ${err.message}\n${remediation}`);
+  }
+}
+
+export const SPEC_VERSION = readVersionFile(
+  SPEC_VERSION_PATH,
+  'Run ./scripts/sync-spec.sh to vendor the latest spec, then retry.',
+);
+
+export const SITE_SPEC_VERSION = readVersionFile(
+  SITE_SPEC_VERSION_PATH,
+  'Create content/principles/VERSION with the spec version this site is reconciled to (one-line semver).',
+);
 
 const DEFAULT_BASE = 'https://anc.dev';
 

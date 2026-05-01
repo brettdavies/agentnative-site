@@ -22,7 +22,7 @@ import {
 } from '../src/build/scorecards-render.mjs';
 import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
+import { escHtml, parseFilename, SITE_SPEC_VERSION, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -307,6 +307,19 @@ describe('emitShell — OG image alt text', () => {
     expect(ogMatch).not.toBeNull();
     expect(twMatch).not.toBeNull();
     expect(ogMatch![1]).toBe(twMatch![1]);
+  });
+
+  test('footer renders v${SITE_SPEC_VERSION} from content/principles/VERSION (not a hardcoded literal)', () => {
+    // Regression guard against the v0.1.0 footer drift that shipped with
+    // anc.dev v0.1 — the footer must always read SITE_SPEC_VERSION from
+    // content/principles/VERSION (the version the site's PROSE has been
+    // reconciled to), never the vendored snapshot version (which can be
+    // ahead during the manual reconciliation window) and never a hardcoded
+    // literal.
+    const html = shell();
+    expect(html).toContain(`<span>v${SITE_SPEC_VERSION}</span>`);
+    // Negative assertion: the prior stub literal must never come back.
+    expect(html).not.toContain('<span>v0.1.0</span>');
   });
 });
 
