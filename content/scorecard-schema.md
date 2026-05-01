@@ -67,10 +67,10 @@ registry.
 }
 ```
 
-| Field     | Type           | Meaning                                                                                                                                                                                                                          |
-| --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`    | string         | The literal `--command` argv passed to anc. For tools where the registry name differs from the binary (e.g., registry `ripgrep` → binary `rg`), this is the binary, not the registry slug. The filename slug owns the registry-name side of the join. |
-| `binary`  | string         | Executable name resolved from `$PATH` at scoring time. Usually equals `tool.name` for command-mode runs.                                                                                                                         |
+| Field     | Type           | Meaning                                                                                                                                                                                                                                                                                                                                                            |
+| --------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`    | string         | The literal `--command` argv passed to anc. For tools where the registry name differs from the binary (e.g., registry `ripgrep` → binary `rg`), this is the binary, not the registry slug. The filename slug owns the registry-name side of the join.                                                                                                              |
+| `binary`  | string         | Executable name resolved from `$PATH` at scoring time. Usually equals `tool.name` for command-mode runs.                                                                                                                                                                                                                                                           |
 | `version` | string \| null | Best-effort version string. The CLI dumps the first line of `<binary> --version` here without further parsing — it may carry the marketing string ("eza - A modern, maintained replacement for ls"), the full multi-line block, or `null` when the binary doesn't print anything parseable. **The filename's `<version>` is canonical**; this field is a courtesy. |
 
 **Build-time invariant:** when `tool.version` contains a SemVer-shaped token (`X.Y` or `X.Y.Z`), it must equal the
@@ -88,13 +88,13 @@ Provenance for the scorecard: which `anc` build produced it.
 }
 ```
 
-| Field     | Type           | Meaning                                                                                                                                                                                                                                |
-| --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version` | string         | Self-reported version of the `anc` binary that ran the score. Read from `Cargo.toml` at build time.                                                                                                                                    |
-| `commit` | string \| null | Abbreviated git SHA (7-40 hex chars) captured by `build.rs` from the working tree at compile time. `null` for `cargo install`-style builds outside a git checkout. The site links the abbreviation to the upstream commit when present. |
+| Field     | Type           | Meaning                                                                                                                                                                                                                                                                                             |
+| --------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version` | string         | Self-reported version of the `anc` binary that ran the score. Read from `Cargo.toml` at build time.                                                                                                                                                                                                 |
+| `commit`  | string \| null | Abbreviated git SHA (7-40 hex chars) captured by `build.rs` from the working tree at compile time. `null` for `cargo install`-style and brew-bottle builds outside a git checkout. Captured but no longer surfaced on the rendered scorecard page; planned for removal in a future schema revision. |
 
-The per-tool page renders `anc.version` plus an abbreviated commit link when the SHA passes the hex allowlist; non-SHA
-strings fall through to a plain version with no link (security gate before URL interpolation).
+The per-tool page renders `anc.version` only. The `commit` field stays in the JSON for back-compat; its removal is
+deferred to a future schema revision.
 
 ## `run`
 
@@ -109,13 +109,13 @@ Run-context: the literal invocation, when it ran, how long it took, and what pla
 }
 ```
 
-| Field             | Type    | Meaning                                                                                                                                                                                       |
-| ----------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invocation`      | string  | The verbatim argv that produced this scorecard, joined with single spaces. The per-tool "Reproduce locally" CTA renders this directly for command-mode runs.                                  |
-| `started_at`      | string  | RFC 3339 timestamp of when the run started. UTC. Validated as parseable by `Date` at build time.                                                                                              |
-| `duration_ms`     | integer | Wall-clock duration of the entire scoring run in milliseconds.                                                                                                                                |
-| `platform.os`     | string  | OS the binary ran on (`linux`, `darwin`, `windows`).                                                                                                                                          |
-| `platform.arch`   | string  | CPU architecture the binary ran on (`x86_64`, `aarch64`, …).                                                                                                                                  |
+| Field           | Type    | Meaning                                                                                                                                                      |
+| --------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `invocation`    | string  | The verbatim argv that produced this scorecard, joined with single spaces. The per-tool "Reproduce locally" CTA renders this directly for command-mode runs. |
+| `started_at`    | string  | RFC 3339 timestamp of when the run started. UTC. Validated as parseable by `Date` at build time.                                                             |
+| `duration_ms`   | integer | Wall-clock duration of the entire scoring run in milliseconds.                                                                                               |
+| `platform.os`   | string  | OS the binary ran on (`linux`, `darwin`, `windows`).                                                                                                         |
+| `platform.arch` | string  | CPU architecture the binary ran on (`x86_64`, `aarch64`, …).                                                                                                 |
 
 **Security note — `run.invocation`:** for command-mode runs the invocation is the canonical `anc check --command <name>
 [--audit-profile <X>] [--output json]` shape, which is safe to embed publicly. For project-mode runs (`target.kind:
@@ -135,11 +135,11 @@ What the run was scoring: a command, a binary on disk, or a project tree.
 }
 ```
 
-| Field     | Type           | Meaning                                                                                                                                                                                                                                            |
-| --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Field     | Type           | Meaning                                                                                                                                                                                                                                                    |
+| --------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kind`    | string         | One of `command`, `binary`, or `project`. Drives whether the per-tool page's reproduce CTA renders `run.invocation` verbatim (`command`) or falls back to the synthesized form (others). Future schema-version source-layer scorecards will use `project`. |
-| `path`    | string \| null | Filesystem path when `kind` is `project` or `binary`; `null` for `command`-mode runs.                                                                                                                                                              |
-| `command` | string \| null | The `--command` argv string when `kind` is `command`; `null` otherwise. For command-mode runs this equals `tool.name`.                                                                                                                             |
+| `path`    | string \| null | Filesystem path when `kind` is `project` or `binary`; `null` for `command`-mode runs.                                                                                                                                                                      |
+| `command` | string \| null | The `--command` argv string when `kind` is `command`; `null` otherwise. For command-mode runs this equals `tool.name`.                                                                                                                                     |
 
 **Security note — `target.path`:** when `kind` is `project`, this can carry a local directory path (`/home/me/dev/foo`).
 It is not currently rendered on any per-tool page (every leaderboard entry today is command-mode), but downstream
@@ -236,8 +236,8 @@ Array of one object per check the runner attempted. Order is stable across runs 
 
 ## What is *not* in the scorecard (yet)
 
-The site is transparent about gaps that future schema bumps may fill. Schema 0.4 closed the
-tool-identity / generated-at gap (see `tool`, `anc`, `run`, `target` above). Still outstanding today:
+The site is transparent about gaps that future schema bumps may fill. Schema 0.4 closed the tool-identity / generated-at
+gap (see `tool`, `anc`, `run`, `target` above). Still outstanding today:
 
 - **Per-check timing** — `run.duration_ms` is the wall-clock total for the run, not per-check. Individual check timings
   are observable from the runner's stdout but not captured in the JSON.
