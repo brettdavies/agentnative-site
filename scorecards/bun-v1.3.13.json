@@ -132,13 +132,12 @@
     "version": "1.3.13"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command bun --output json",
-    "started_at": "2026-04-30T23:01:15.03276085Z",
-    "duration_ms": 299,
+    "started_at": "2026-05-01T10:09:14.117573398Z",
+    "duration_ms": 298,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

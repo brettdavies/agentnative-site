@@ -133,12 +133,11 @@
     "version": "gitui 0.28.1-nightly 2026-03-24 ()"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command gitui --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:00:59.182293815Z",
+    "started_at": "2026-05-01T10:08:59.943077186Z",
     "duration_ms": 41,
     "platform": {
       "os": "linux",

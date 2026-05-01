@@ -133,13 +133,12 @@
     "version": "commit=, build date=, build source=Homebrew, version=0.61.1, os=linux, arch=amd64, git version=2.54.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command lazygit --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:00:58.71305818Z",
-    "duration_ms": 215,
+    "started_at": "2026-05-01T10:08:59.482160137Z",
+    "duration_ms": 214,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

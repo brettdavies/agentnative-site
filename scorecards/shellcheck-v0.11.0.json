@@ -132,13 +132,12 @@
     "version": "ShellCheck - shell script analysis tool"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command shellcheck --output json",
-    "started_at": "2026-04-30T23:01:13.976121593Z",
-    "duration_ms": 94,
+    "started_at": "2026-05-01T10:09:13.083007629Z",
+    "duration_ms": 93,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

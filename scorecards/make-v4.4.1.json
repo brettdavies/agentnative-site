@@ -132,12 +132,11 @@
     "version": "GNU Make 4.4.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command make --output json",
-    "started_at": "2026-04-30T23:00:56.061271106Z",
+    "started_at": "2026-05-01T10:08:56.890763193Z",
     "duration_ms": 93,
     "platform": {
       "os": "linux",

@@ -132,13 +132,12 @@
     "version": "glow version 2.1.2"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command glow --output json",
-    "started_at": "2026-04-30T23:00:57.667679314Z",
-    "duration_ms": 114,
+    "started_at": "2026-05-01T10:08:58.480203451Z",
+    "duration_ms": 113,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

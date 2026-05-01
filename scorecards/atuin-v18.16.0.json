@@ -133,13 +133,12 @@
     "version": "atuin 18.16.0 ()"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command atuin --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:01:52.425911295Z",
-    "duration_ms": 2145,
+    "started_at": "2026-05-01T10:09:43.587218972Z",
+    "duration_ms": 244,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

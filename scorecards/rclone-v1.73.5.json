@@ -132,13 +132,12 @@
     "version": "rclone v1.73.5"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command rclone --output json",
-    "started_at": "2026-04-30T23:01:16.021001551Z",
-    "duration_ms": 173,
+    "started_at": "2026-05-01T10:09:15.094898063Z",
+    "duration_ms": 121,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

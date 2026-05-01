@@ -133,12 +133,11 @@
     "version": "jnv 0.7.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command jnv --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:01:55.007198824Z",
+    "started_at": "2026-05-01T10:09:44.267538803Z",
     "duration_ms": 41,
     "platform": {
       "os": "linux",

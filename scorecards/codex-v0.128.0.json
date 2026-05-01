@@ -132,13 +132,12 @@
     "version": "codex-cli 0.128.0"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command codex --output json",
-    "started_at": "2026-04-30T23:01:18.899167552Z",
-    "duration_ms": 897,
+    "started_at": "2026-05-01T10:09:17.800252242Z",
+    "duration_ms": 804,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

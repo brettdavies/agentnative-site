@@ -132,12 +132,11 @@
     "version": "typst 0.14.2 (unknown hash)"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command typst --output json",
-    "started_at": "2026-04-30T23:00:58.424178101Z",
+    "started_at": "2026-05-01T10:08:59.224514175Z",
     "duration_ms": 105,
     "platform": {
       "os": "linux",

@@ -132,12 +132,11 @@
     "version": "rsync  version 3.4.2  protocol version 32"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command rsync --output json",
-    "started_at": "2026-04-30T23:00:56.570319675Z",
+    "started_at": "2026-05-01T10:08:57.394957564Z",
     "duration_ms": 73,
     "platform": {
       "os": "linux",

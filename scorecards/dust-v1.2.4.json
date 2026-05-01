@@ -132,12 +132,11 @@
     "version": "Dust 1.2.4"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command dust --output json",
-    "started_at": "2026-04-30T23:00:57.338359455Z",
+    "started_at": "2026-05-01T10:08:58.152112779Z",
     "duration_ms": 93,
     "platform": {
       "os": "linux",

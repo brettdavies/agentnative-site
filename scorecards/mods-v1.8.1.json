@@ -132,13 +132,12 @@
     "version": "mods version 1.8.1 (Homebre)"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command mods --output json",
-    "started_at": "2026-04-30T23:01:21.642822721Z",
-    "duration_ms": 236,
+    "started_at": "2026-05-01T10:09:20.426052739Z",
+    "duration_ms": 245,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
