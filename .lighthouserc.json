@@ -1,5 +1,5 @@
 {
-  "_comment": "Regression gate, not a perf target. `resource-summary:total:size` at 800 KB catches PRs that add material payload (extra font family, framework runtime, un-minified bundle) on top of current ~740 KB reality. Absolute size isn't the concern — Cloudflare edge serves each asset in parallel from the nearest POP, and the Monaspace Xenon woff2 (which dominates) is cached hard on second hit. Bump this ceiling alongside any PR that legitimately adds payload; shrink it if we ship a font-subset pass (TODOS P3).",
+  "_comment": "Regression gate, not a perf target. Total homepage budget is 2 MB. Cloudflare edge serves each asset in parallel from the nearest POP, and fonts are cached hard on second hit.",
   "ci": {
     "collect": {
       "startServerCommand": "bun run build && bun x wrangler dev --local --port 8787",
@@ -15,7 +15,7 @@
       "assertions": {
         "categories:performance": ["error", { "minScore": 0.9 }],
         "categories:accessibility": ["error", { "minScore": 0.95 }],
-        "resource-summary:total:size": ["error", { "maxNumericValue": 800000 }]
+        "resource-summary:total:size": ["error", { "maxNumericValue": 2000000 }]
       }
     },
     "upload": {

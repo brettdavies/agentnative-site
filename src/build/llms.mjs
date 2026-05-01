@@ -8,6 +8,13 @@
 //   - [P1 — Non-Interactive by Default](/p1.md)
 //   ...
 //
+//   ## Pages
+//   - [Check your CLI](/check.md)
+//   - [About this standard](/about.md)
+//
+//   ## Scorecards
+//   - [Leaderboard](/scorecards.md)
+//
 // llms-full.txt layout (A5 format): each section is
 //   # <Title>
 //
@@ -20,19 +27,7 @@
 //
 // Sections shipped in llms-full: _intro, p1..p7, check, about.
 
-const DEFAULT_BASE = 'https://agentnative.dev';
-
-/**
- * Extract the first `# Heading` from a markdown string, trimmed.
- * Falls back to a stable placeholder if no H1 is present.
- */
-export function extractTitle(markdown) {
-  for (const line of markdown.split('\n')) {
-    const match = line.match(/^#\s+(.+?)\s*$/);
-    if (match) return match[1].trim();
-  }
-  return 'Untitled';
-}
+import { resolveBaseUrl } from './util.mjs';
 
 /**
  * Build the short llms.txt index.
@@ -41,10 +36,21 @@ export function extractTitle(markdown) {
  * @param {string} args.introTitle Title for the H1 (taken from _intro.md).
  * @param {string} args.summary Short paragraph summary (from _intro.md).
  * @param {Array<{ n: number, slug: string, title: string }>} args.principles
+ * @param {Array<{ name: string, title: string }>=} args.subPages
+ * @param {Array<{ name: string, path: string }>=} args.scorecardLinks
+ * @param {Array<{ name: string, path: string }>=} args.skillLinks
  * @param {string=} args.baseUrl
  */
-export function buildLlmsIndex({ introTitle, summary, principles, baseUrl }) {
-  const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+export function buildLlmsIndex({
+  introTitle,
+  summary,
+  principles,
+  subPages = [],
+  scorecardLinks = [],
+  skillLinks = [],
+  baseUrl,
+}) {
+  const base = resolveBaseUrl(baseUrl);
 
   const lines = [];
   lines.push(`# ${introTitle}`);
@@ -55,6 +61,30 @@ export function buildLlmsIndex({ introTitle, summary, principles, baseUrl }) {
   lines.push('');
   for (const p of principles) {
     lines.push(`- [${p.title}](${base}/p${p.n}.md)`);
+  }
+  if (subPages.length > 0) {
+    lines.push('');
+    lines.push('## Pages');
+    lines.push('');
+    for (const s of subPages) {
+      lines.push(`- [${s.title}](${base}/${s.name}.md)`);
+    }
+  }
+  if (skillLinks.length > 0) {
+    lines.push('');
+    lines.push('## Skill');
+    lines.push('');
+    for (const s of skillLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
+    }
+  }
+  if (scorecardLinks.length > 0) {
+    lines.push('');
+    lines.push('## Scorecards');
+    lines.push('');
+    for (const s of scorecardLinks) {
+      lines.push(`- [${s.name}](${base}${s.path})`);
+    }
   }
   lines.push('');
   return lines.join('\n');
@@ -68,7 +98,7 @@ export function buildLlmsIndex({ introTitle, summary, principles, baseUrl }) {
  * @param {string=} args.baseUrl
  */
 export function buildLlmsFull({ sections, baseUrl }) {
-  const base = (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+  const base = resolveBaseUrl(baseUrl);
 
   const chunks = sections.map((s) => {
     const source = base + s.htmlPath;
@@ -88,23 +118,4 @@ export function buildLlmsFull({ sections, baseUrl }) {
   });
 
   return chunks.join('\n');
-}
-
-/**
- * Extract a one-paragraph summary from _intro.md — the first non-empty
- * paragraph after the H1. Used as the llms.txt `>` line.
- */
-export function extractIntroSummary(introMarkdown) {
-  const lines = introMarkdown.split('\n');
-  let i = 0;
-  while (i < lines.length && !lines[i].match(/^#\s+/)) i++;
-  i++; // past H1
-  while (i < lines.length && lines[i].trim() === '') i++;
-
-  const buf = [];
-  while (i < lines.length && lines[i].trim() !== '') {
-    buf.push(lines[i].trim());
-    i++;
-  }
-  return buf.join(' ');
 }

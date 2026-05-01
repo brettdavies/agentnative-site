@@ -12,6 +12,27 @@
 //                          Cache-Control: public, max-age=300, s-maxage=86400,
 //                                         stale-while-revalidate=60
 //
+//   JSON responses (.json) Content-Type: application/json; charset=utf-8
+//                          Access-Control-Allow-Origin: *
+//                          X-Robots-Tag: noindex
+//                          Cache-Control: public, max-age=300, s-maxage=86400,
+//                                         stale-while-revalidate=60
+//                          (No Link rel=alternate, no X-Llms-Txt — JSON has
+//                          no markdown twin. Detected by URL extension so any
+//                          /<slug>.json endpoint reuses the branch.)
+//
+//   SVG responses (.svg)   Content-Type: image/svg+xml; charset=utf-8
+//                          Access-Control-Allow-Origin: *
+//                          Cache-Control: public, max-age=300, s-maxage=86400,
+//                                         stale-while-revalidate=60
+//                          CORS is the functional requirement: the badge
+//                          surface (/badge/<tool>.svg) is meant to be
+//                          embedded in third-party READMEs cross-origin.
+//                          Short cache so a re-scored tool's badge color
+//                          flips within a TTL of the next site build,
+//                          rather than serving a stale year-old SVG from
+//                          edge caches.
+//
 //   Hashed assets          Cache-Control: public, max-age=31536000, immutable
 //   (/fonts/*, /og-image.png)
 //
@@ -45,6 +66,14 @@ function isHashedAsset(pathname: string): boolean {
   return pathname.startsWith('/fonts/') || pathname === '/og-image.png';
 }
 
+function isJson(pathname: string): boolean {
+  return pathname.endsWith('.json');
+}
+
+function isSvg(pathname: string): boolean {
+  return pathname.endsWith('.svg');
+}
+
 /**
  * Clone the response and replace its header set with the project's policy.
  * We clone so upstream 304 / redirect status codes flow through unchanged.
@@ -56,6 +85,15 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   if (opts.servedMarkdown) {
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
     headers.set('X-Robots-Tag', 'noindex');
+    headers.set('Cache-Control', SHORT_CACHE);
+  } else if (isJson(opts.pathname)) {
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    headers.set('Access-Control-Allow-Origin', '*');
+    headers.set('X-Robots-Tag', 'noindex');
+    headers.set('Cache-Control', SHORT_CACHE);
+  } else if (isSvg(opts.pathname)) {
+    headers.set('Content-Type', 'image/svg+xml; charset=utf-8');
+    headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Cache-Control', SHORT_CACHE);
   } else if (isHashedAsset(opts.pathname)) {
     headers.set('Cache-Control', IMMUTABLE_CACHE);

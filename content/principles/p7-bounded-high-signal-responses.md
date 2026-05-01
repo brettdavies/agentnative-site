@@ -3,15 +3,17 @@
 ## Definition
 
 CLI tools MUST provide mechanisms to control output volume. Agent context windows are finite and expensive — a tool that
-dumps 10,000 lines of unfiltered output wastes tokens and may exceed the context limit entirely, breaking the
-conversation that invoked it.
+dumps tens of thousands of lines of unfiltered output wastes tokens on every request and can exceed smaller context
+windows entirely, breaking the conversation that invoked it. "High-signal" here means the bytes that survive `--quiet`
+are the ones the caller asked for — data and errors — not progress, decoration, or chatter.
 
 ## Why Agents Need It
 
-Every token of CLI output an agent consumes has a cost — both monetary (API tokens) and cognitive (context window
-capacity). Unbounded output forces the agent to either truncate (losing potentially important data) or consume the full
-response (wasting context on noise). Bounded output with `--quiet`, `--verbose`, and `--limit` flags gives the agent
-precise control over how much data arrives, keeping responses high-signal and inside budget.
+Unbounded CLI output is expensive for any agent — token cost and context-window capacity for LLM agents, parse cost and
+memory pressure for scripts, schedulers, and other automation. Either way, the agent ends up truncating (losing
+potentially important data) or consuming the full response (wasting cycles on noise). Bounded output with `--quiet`,
+`--verbose`, and `--limit` flags gives the agent precise control over how much data arrives, keeping responses
+high-signal and inside budget.
 
 ## Requirements
 
@@ -29,9 +31,9 @@ precise control over how much data arrives, keeping responses high-signal and in
   }
   ```
 
-- List operations clamp to a sensible default maximum. A `list` without `--limit` does not return more than a
-  configurable ceiling (e.g., 100 items). If more items exist, the output indicates truncation — `"truncated": true` in
-  JSON, a stderr note in text mode.
+- *(Applies when: CLI has list-style commands.)* List operations clamp to a sensible default maximum. A `list` without
+  `--limit` does not return more than a configurable ceiling (e.g., 100 items). If more items exist, the output
+  indicates truncation — `"truncated": true` in JSON, a stderr note in text mode.
 
 **SHOULD:**
 
@@ -46,7 +48,8 @@ precise control over how much data arrives, keeping responses high-signal and in
 
 ## Evidence
 
-- `--quiet` flag with a falsey-value parser and env-var binding.
+- A `--quiet` flag that respects both CLI and environment-variable input, with explicit override semantics (e.g.,
+  `--quiet=false` beats `QUIET=1`).
 - A diagnostic macro (or equivalent gate) that short-circuits when `quiet` is true.
 - `--limit` or `--max-results` on every list / search command.
 - Pagination clamping logic (e.g., `min(requested, MAX_RESULTS)`).
@@ -62,5 +65,5 @@ precise control over how much data arrives, keeping responses high-signal and in
 - Progress bars or spinners that write to stderr in non-TTY contexts, adding noise to agent logs.
 - No `--timeout` on network operations. A stalled request blocks the agent indefinitely.
 
-Measured by check IDs `p7-quiet`, `p7-limit`, `p7-timeout`. Run `agentnative check --principle 7 .` against
-your CLI to see each.
+Measured by check ID `p7-quiet` today, with `p7-limit` and `p7-timeout` planned. Run `anc check --principle 7 .` against
+your CLI to see current coverage.

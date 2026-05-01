@@ -14,7 +14,8 @@
       "wrangler.jsonc",
       "src/**",
       "tests/**",
-      "!src/worker-configuration.d.ts"
+      "!src/worker-configuration.d.ts",
+      "!src/styles/foundation.css"
     ]
   },
   "assist": {
@@ -31,6 +32,24 @@
       "recommended": true
     }
   },
+  "overrides": [
+    {
+      "includes": ["tests/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          },
+          "style": {
+            "noNonNullAssertion": "off"
+          },
+          "complexity": {
+            "useLiteralKeys": "off"
+          }
+        }
+      }
+    }
+  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

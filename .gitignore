@@ -20,3 +20,10 @@ dist/
 test-results/
 playwright-report/
 
+.gstack/
+.aider*
+
+# Docker batch-scorer staging area — the anc binary is built per-run from
+# the local CLI checkout (not committed); per-run logs land in out/.
+/docker/score/anc
+/docker/score/out/

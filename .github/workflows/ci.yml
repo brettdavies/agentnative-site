@@ -16,6 +16,17 @@ on:
     branches:
       - main
       - dev
+    # Skip the heavy pipeline when a PR only touches docs that aren't
+    # ingested at build time. A companion workflow (ci-stub.yml) mirrors
+    # this list with a `paths:` filter and emits the required
+    # `lint · build · test · wrangler` check name as a no-op success so
+    # the dev/main ruleset gate is still satisfied. The two lists MUST
+    # stay in sync — drift creates gaps (no check) or harmless overlap
+    # (both workflows fire; both pass). See deploy.yml for the matching
+    # filter on the push trigger.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -35,6 +46,12 @@ jobs:
     name: lint · build · test · wrangler
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      # Surfaces the build's WARNINGS_JSON line (scorecard/registry orphan
+      # counts) so the downstream annotate-warnings job can post a PR
+      # comment. Defaults to "{}" when the line isn't present (e.g. on a
+      # main-branch push that bypasses the loadScoredTools warning path).
+      warnings: ${{ steps.warnings.outputs.json }}
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -58,10 +75,95 @@ jobs:
         run: bun run lint
 
       - name: Build
-        run: bun run build
+        run: bun run build | tee /tmp/build.log
+
+      - name: Capture build warnings
+        id: warnings
+        run: |
+          line="$(grep '^WARNINGS_JSON: ' /tmp/build.log | tail -1 | sed 's/^WARNINGS_JSON: //')"
+          # Default to empty-object so downstream jq parses cleanly. Avoid
+          # bash brace-default `${var:-{\}}` — that form silently appends a
+          # trailing `}` when $var is non-empty, producing invalid JSON.
+          if [ -z "$line" ]; then line='{}'; fi
+          echo "json=$line" >> "$GITHUB_OUTPUT"
 
       - name: Unit + regression tests
         run: bun test
 
       - name: Wrangler config + bundle dry-run
         run: bun x wrangler deploy --dry-run
+
+  annotate-warnings:
+    # Surfaces scorecard/registry orphan counts (U8) as a PR comment so
+    # reviewers see drift without grepping CI logs. Build still passes
+    # — the comment is informational, the warning itself is the gate.
+    name: annotate scorecard/registry warnings
+    needs: gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Post or update PR annotation
+        env:
+          WARNINGS_JSON: ${{ needs.gate.outputs.warnings }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          MARKER: '<!-- ANC-SCORECARD-WARNINGS -->'
+        run: |
+          set -euo pipefail
+
+          # Default to empty object if upstream output was missing.
+          # Avoid bash brace-default `${var:-{\}}` — it appends a stray `}`
+          # to non-empty values, which is exactly what made jq parse-fail
+          # on the first attempt.
+          warnings_json="$WARNINGS_JSON"
+          if [ -z "$warnings_json" ]; then warnings_json='{}'; fi
+
+          scorecard_orphans="$(echo "$warnings_json" | jq -r '.scorecardOrphans // [] | length')"
+          registry_orphans="$(echo "$warnings_json" | jq -r '.registryOrphans // [] | length')"
+
+          # Find any prior annotation comment from a previous run on this PR.
+          existing_ids="$(
+            gh api "repos/$REPO/issues/$PR_NUMBER/comments" \
+              --jq ".[] | select(.body | contains(\"$MARKER\")) | .id"
+          )"
+
+          # Clean PR — drop any stale comment from a previous run and exit.
+          if [ "$scorecard_orphans" = "0" ] && [ "$registry_orphans" = "0" ]; then
+            for id in $existing_ids; do
+              gh api -X DELETE "repos/$REPO/issues/comments/$id"
+            done
+            echo "no orphans; clean PR."
+            exit 0
+          fi
+
+          # Build the comment body. Bullets only when the side has entries.
+          {
+            echo "$MARKER"
+            echo
+            echo "⚠️ **Scorecard / registry drift in this PR**"
+            echo
+            if [ "$scorecard_orphans" -gt 0 ]; then
+              echo "**Scorecards missing a registry entry** (excluded from leaderboard until the editorial PR lands):"
+              echo "$warnings_json" | jq -r '.scorecardOrphans[] | "- `" + . + "`"'
+              echo
+            fi
+            if [ "$registry_orphans" -gt 0 ]; then
+              echo "**Registry entries missing a scorecard** (excluded until the scorecard PR lands):"
+              echo "$warnings_json" | jq -r '.registryOrphans[] | "- `" + . + "`"'
+              echo
+            fi
+            echo "Both directions are warnings, not errors — the build still passes. Land the matching PR or remove the orphan to clear."
+          } > /tmp/comment.md
+
+          # Idempotent: replace any prior comment from a previous run, then post fresh.
+          for id in $existing_ids; do
+            gh api -X DELETE "repos/$REPO/issues/comments/$id"
+          done
+          gh pr comment "$PR_NUMBER" --body-file /tmp/comment.md

@@ -1,0 +1,160 @@
+{
+  "schema_version": "0.5",
+  "results": [
+    {
+      "id": "p3-help",
+      "label": "Help flag produces useful output",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high"
+    },
+    {
+      "id": "p3-version",
+      "label": "Version flag works",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high"
+    },
+    {
+      "id": "p2-json-output",
+      "label": "Structured output support",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
+      "confidence": "high"
+    },
+    {
+      "id": "p4-bad-args",
+      "label": "Rejects invalid arguments",
+      "group": "P4",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high"
+    },
+    {
+      "id": "p7-quiet",
+      "label": "Quiet mode available",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no --quiet/-q flag detected in --help output",
+      "confidence": "high"
+    },
+    {
+      "id": "p6-sigpipe",
+      "label": "Handles SIGPIPE gracefully",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high"
+    },
+    {
+      "id": "p1-non-interactive",
+      "label": "Non-interactive by default",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high"
+    },
+    {
+      "id": "p1-flag-existence",
+      "label": "Non-interactive gate flag advertised in --help",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "target satisfies P1 via alternative gate (help-on-bare or stdin-primary)",
+      "confidence": "high"
+    },
+    {
+      "id": "p1-env-hints",
+      "label": "Flags advertise env-var bindings in --help",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "19 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "confidence": "medium"
+    },
+    {
+      "id": "p6-no-pager-behavioral",
+      "label": "Pager-using CLI ships --no-pager escape hatch",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
+      "confidence": "medium"
+    },
+    {
+      "id": "p6-no-color-behavioral",
+      "label": "Respects NO_COLOR",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high"
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "pass": 6,
+    "warn": 3,
+    "fail": 0,
+    "skip": 2,
+    "error": 0
+  },
+  "coverage_summary": {
+    "must": {
+      "total": 23,
+      "verified": 9
+    },
+    "should": {
+      "total": 16,
+      "verified": 0
+    },
+    "may": {
+      "total": 7,
+      "verified": 0
+    }
+  },
+  "audience": "mixed",
+  "audit_profile": null,
+  "spec_version": "0.3.0",
+  "tool": {
+    "name": "codex",
+    "binary": "codex",
+    "version": "codex-cli 0.128.0"
+  },
+  "anc": {
+    "version": "0.2.0",
+    "commit": "06a307c"
+  },
+  "run": {
+    "invocation": "anc check --command codex --output json",
+    "started_at": "2026-04-30T23:01:18.899167552Z",
+    "duration_ms": 897,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "codex"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 67,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/codex",
+    "badge_url": "https://anc.dev/badge/codex.svg",
+    "convention_url": "https://anc.dev/badge"
+  }
+}

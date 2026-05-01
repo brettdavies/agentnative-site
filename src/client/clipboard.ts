@@ -32,11 +32,20 @@ async function copyText(text: string): Promise<boolean> {
 
 function flashCopied(button: HTMLElement) {
   const label = button.querySelector<HTMLElement>('[data-copy-label]') ?? button;
-  const original = label.textContent ?? '';
+  // Heading anchors hold an inline SVG icon as their only child — they have
+  // no [data-copy-label] span and no text content. Snapshot innerHTML in that
+  // case so the icon DOM is restored after the fade. Pre-block buttons keep
+  // the textContent path because their label is a real text node.
+  const isIconLabel = label === button && (label.textContent ?? '').trim() === '';
+  const original = isIconLabel ? label.innerHTML : (label.textContent ?? '');
   label.textContent = 'Copied';
   button.setAttribute('data-copy-state', 'copied');
   window.setTimeout(() => {
-    label.textContent = original;
+    if (isIconLabel) {
+      label.innerHTML = original;
+    } else {
+      label.textContent = original;
+    }
     button.removeAttribute('data-copy-state');
   }, COPIED_MS);
 }
@@ -45,6 +54,21 @@ function attachPreButtons() {
   const pres = document.querySelectorAll<HTMLPreElement>('main pre');
   for (const pre of pres) {
     if (pre.dataset.copyAttached === 'true') continue;
+
+    // Wrap the pre in a positioning container BEFORE attaching the copy
+    // button. The pre keeps `overflow-x: auto` for its code; the button
+    // anchors against the wrapper, which is non-scrolling. Otherwise an
+    // `position: absolute` button inside an overflowing pre moves WITH the
+    // scrolled content (since absolute children of a scrolling container
+    // resolve `right: 0` against the scrolled content box, not the visible
+    // padding box).
+    const parent = pre.parentNode;
+    if (!parent) continue;
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    parent.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'copy-button';
@@ -54,7 +78,7 @@ function attachPreButtons() {
       const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
       if (await copyText(code)) flashCopied(btn);
     });
-    pre.prepend(btn);
+    wrap.appendChild(btn);
     pre.dataset.copyAttached = 'true';
   }
 }

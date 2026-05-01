@@ -31,19 +31,22 @@ test.describe('CN decision table — live Worker', () => {
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     expect(res.headers()['x-robots-tag']).toBe('noindex');
-    // Worker rewrote the asset lookup to /p3.md — body should match source.
-    const expected = await sha256(`${process.cwd()}/content/principles/p3-progressive-help-discovery.md`);
+    // Worker rewrites the asset lookup to /p3.md — body matches the build
+    // artifact (which is the source with site-internal links absolutified
+    // by absolutifyMarkdownLinks; see src/build/util.mjs:123 and the
+    // build-time invariant at src/build/build.mjs:153).
+    const expected = await sha256(`${process.cwd()}/dist/p3.md`);
     const actual = createHash('sha256')
       .update(await res.text())
       .digest('hex');
     expect(actual).toBe(expected);
   });
 
-  test('GET /p3.md returns source bytes unchanged', async ({ request }) => {
+  test('GET /p3.md returns the absolutified markdown twin from dist', async ({ request }) => {
     const res = await request.get(`${BASE}/p3.md`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
-    const expected = await sha256(`${process.cwd()}/content/principles/p3-progressive-help-discovery.md`);
+    const expected = await sha256(`${process.cwd()}/dist/p3.md`);
     const actual = createHash('sha256')
       .update(await res.text())
       .digest('hex');
@@ -70,7 +73,7 @@ test.describe('CN decision table — live Worker', () => {
 });
 
 test.describe('llms.txt + llms-full.txt — live', () => {
-  test('/llms.txt is the llmstxt.org shape', async ({ request }) => {
+  test('/llms.txt is the llmstxt.org shape with principles and pages', async ({ request }) => {
     const res = await request.get(`${BASE}/llms.txt`);
     expect(res.status()).toBe(200);
     const body = await res.text();
@@ -79,6 +82,13 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toContain('## Principles');
     const bullets = body.match(/^-\s+\[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
     expect(bullets.length).toBe(7);
+    // Sub-pages (check, about) present under ## Pages.
+    expect(body).toContain('## Pages');
+    const pageLinks = body.match(/^-\s+\[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
+    expect(pageLinks.length).toBe(2);
+
+    // Scorecards section with at least the leaderboard link.
+    expect(body).toContain('## Scorecards');
   });
 
   test('/llms-full.txt is served in a single fetch with A5 delimiters', async ({ request }) => {
