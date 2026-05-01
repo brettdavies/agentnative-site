@@ -91,14 +91,15 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
 RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
     brew install yq jaq
 
-# ---- The anc binary (glibc, built from CLI dev RC) -------------------------
-# Staged into the build context by docker/score/build.sh (which runs
-# `cargo build --release` in ~/dev/agentnative-cli first, then copies the
-# binary to docker/score/anc). The build context is the repo root, so the
-# file path is docker/score/anc.
-COPY --chown=runner:runner docker/score/anc /home/runner/.local/bin/anc
-RUN chmod +x /home/runner/.local/bin/anc \
-    && /home/runner/.local/bin/anc --version
+# ---- The anc binary (glibc, brew-installed from the published tap) ---------
+# Same install path users get on macOS / Linux. The fully-qualified
+# brettdavies/tap/agentnative spec auto-taps the formula (mirrors the
+# oven-sh/bun/bun pattern above). The brewed binary lives in
+# /home/linuxbrew/.linuxbrew/bin and resolves to a release tag's bottle —
+# no local cargo build, no operator-state coupling, no wrong-SHA risk.
+RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
+    brew install brettdavies/tap/agentnative \
+    && anc --version
 # uv tool install drops binaries in ~/.local/bin; bun add -g drops them in
 # ~/.bun/bin; cargo-binstall in ~/.cargo/bin. All three need to be on PATH so
 # the post-install `command -v <binary>` check (in install-tools.sh) and the
