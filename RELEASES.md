@@ -255,6 +255,21 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 Committing the JSON alongside the code means ruleset changes land via the same review process as workflow changes — a
 `chore(ci): tighten protect-main` release goes through dev → release/* → main like anything else.
 
+### Status-check context pitfall
+
+The `required_status_checks[].context` strings in `protect-main.json` must match exactly what GitHub publishes for each
+check:
+
+- **Inline job** (with `name:` field): published as just `<job-name>` (no workflow-name prefix).
+- **Reusable-workflow caller** (`uses: .../foo.yml@ref`): published as `<caller-job-id> / <reusable-job-id-or-name>`.
+
+Mixing these produces a stuck-but-green PR: all actual checks report green, but the ruleset waits forever on a context
+that will never appear. Confirm the real contexts after a first CI run with:
+
+```bash
+gh api repos/brettdavies/agentnative-site/commits/<sha>/check-runs --jq '.check_runs[].name'
+```
+
 ## Skill releases
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
