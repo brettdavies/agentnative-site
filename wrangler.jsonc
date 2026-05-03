@@ -9,6 +9,13 @@
   // public repo. See RELEASES.md § Secrets.
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Project-scoped opt-out of wrangler telemetry. Belt-and-suspenders with
+  // the user-level `WRANGLER_SEND_METRICS=false` env var (see dotfiles
+  // config/shell/telemetry.sh) and the per-machine `wrangler telemetry
+  // disable` setting. This one travels with the repo so CI runs and any
+  // contributor's local wrangler invocations stay opted out regardless of
+  // their shell environment.
+  "send_metrics": false,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
