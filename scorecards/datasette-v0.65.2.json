@@ -132,13 +132,12 @@
     "version": "datasette, version 0.65.2"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command datasette --output json",
-    "started_at": "2026-04-30T23:01:37.018259881Z",
-    "duration_ms": 8647,
+    "started_at": "2026-05-01T10:09:31.168775544Z",
+    "duration_ms": 8528,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

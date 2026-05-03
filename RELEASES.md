@@ -75,10 +75,59 @@ git log --oneline dev --not origin/main
 # 3. Cherry-pick the ones you want to ship. Docs commits stay on dev.
 git cherry-pick <sha1> <sha2> ...
 
-# 4. Verify no guarded paths leaked through:
-git diff origin/main --stat
-# If anything under docs/plans/, docs/solutions/, or docs/brainstorms/
-# shows up, you cherry-picked a docs commit by mistake — reset and redo.
+# 4. Triple-diff verification — belt-and-suspenders sweep that catches both
+#    directions of drift before the release tag goes out:
+#
+#    A. main → release  (what users will see; the intended ship surface)
+#    B. release → dev   (should be empty for non-doc paths until the
+#                        bump/CHANGELOG commits land, and even then should
+#                        only list those release-prep files — anything else
+#                        is a missed cherry-pick)
+#    C. dev → main      (sanity: phantom commits dev "appears ahead" on
+#                        because cherry-pick rewrites SHAs post-squash)
+git diff origin/main..HEAD --stat                                                # A
+git diff HEAD..origin/dev --name-only | grep -v '^docs/' || echo "(none)"        # B
+git diff origin/dev..origin/main --stat | tail -5                                # C
+#
+# Re-confirm no guarded paths leaked (this caught the original miss class):
+git diff origin/main..HEAD --name-only \
+  | grep -E '^(docs/plans|docs/brainstorms|docs/ideation|docs/reviews|docs/solutions|\.context)' \
+  && echo "LEAKED — reset and redo" || echo "(clean — no guarded paths)"
+#
+# Patch-id cherry check — catches commits on dev that have NO patch-id
+# equivalent on release. The file-level diff in B misses this class when
+# the same content happens to land via a different commit.
+#
+# IMPORTANT: in a squash-merge workflow this output is noisy. Every '+'
+# line needs human triage — it does NOT auto-block the release. Expected
+# sources of '+' lines that are NOT real misses:
+#
+#   1. Historical commits squash-merged in prior releases. The squash
+#      commit on main has a different patch-id than the dev commits it
+#      consolidates, so old commits show as '+' forever. Anything older
+#      than the previous release tag is almost always this.
+#   2. Cherry-picks where conflict resolution stripped guarded paths
+#      (docs/plans, docs/brainstorms, etc.) or otherwise altered the
+#      tree. Same source-code intent, different patch-id.
+#   3. Intentionally skipped commits — docs-only commits, release-prep
+#      backports, revert-and-redo prep steps.
+#
+# A real miss looks like: a recent feat/fix/chore commit on dev whose
+# *file content* is not yet on main. To triage a '+' line:
+#
+#   git show <sha> --stat                       # what did it touch?
+#   git diff origin/main..HEAD -- <those-files> # already on release?
+#
+# If every touched file is guarded (docs/plans/, docs/brainstorms/, etc.)
+# OR the content is already on main via a prior squash, it's a false
+# positive — no action. Otherwise cherry-pick the commit and re-run the
+# triple-diff.
+git cherry HEAD origin/dev | grep '^+' || echo "(none — release is patch-equivalent through dev)"
+#
+# If B lists any non-docs path you didn't expect, fetch dev, identify the
+# commit (`git log dev --not origin/main`), cherry-pick it, re-run the
+# triple-diff. Missed cherry-picks have shipped to main on this and sibling
+# repos before — this step is the cheap way to catch them.
 
 # 5. Push and open the PR:
 git push -u origin release/<slug>
@@ -206,16 +255,32 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 Committing the JSON alongside the code means ruleset changes land via the same review process as workflow changes — a
 `chore(ci): tighten protect-main` release goes through dev → release/* → main like anything else.
 
+### Status-check context pitfall
+
+The `required_status_checks[].context` strings in `protect-main.json` must match exactly what GitHub publishes for each
+check:
+
+- **Inline job** (with `name:` field): published as just `<job-name>` (no workflow-name prefix).
+- **Reusable-workflow caller** (`uses: .../foo.yml@ref`): published as `<caller-job-id> / <reusable-job-id-or-name>`.
+
+Mixing these produces a stuck-but-green PR: all actual checks report green, but the ruleset waits forever on a context
+that will never appear. Confirm the real contexts after a first CI run with:
+
+```bash
+gh api repos/brettdavies/agentnative-site/commits/<sha>/check-runs --jq '.check_runs[].name'
+```
+
 ## Skill releases
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
 [`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). This site vendors the skill's
-upstream commit SHA in `src/data/skill.json`; the skill repo holds the actual content. Surface contract in
-`docs/DESIGN.md` §3.9.
+manifest (per-host install commands, version, surface metadata) in `src/data/skill.json`; the skill repo holds the
+actual content. Surface contract in `docs/DESIGN.md` §3.9. Update detection at install sites is delegated to the skill
+bundle's `bin/check-update`, which compares the local bundle's `VERSION` against `main` on GitHub.
 
 The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
-branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release REQUIRES the skill
-maintainer to fast-forward `main` to the new tag before the site re-pins.
+branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release requires the skill
+maintainer to fast-forward `main` to the new tag.
 
 ### Skill-release procedure
 
@@ -223,17 +288,18 @@ maintainer to fast-forward `main` to the new tag before the site re-pins.
    `git push origin dev --follow-tags`. Fast-forward `main` to the new tag and push: `git checkout main && git merge
    --ff-only v0.x.y && git push origin main`. The site's bare `git clone --depth 1` lands on `main`, so the fast-forward
    is what makes the new release reachable.
-2. **Re-pin in this repo**: edit `src/data/skill.json` — bump `version`, `source.commit`, and `verify.expected`
-   (`source.commit` and `verify.expected` are the same SHA until v2 schema decouples them). `loadSkillData()` will
-   reject a non-hex / non-lowercase / non-40-char SHA at build time, so a typo fails fast.
+2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill.json` to bump
+   `version` and update any per-host install commands, description, or other surface fields the release modified. If
+   nothing user-facing changed, skip the manifest bump entirely — the skill bundle's `bin/check-update` is what tells
+   installed users a new release exists.
 3. **PR to `dev`**: CI runs the unit + worker tests on the bumped manifest. Squash-merge on green.
 4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
-5. **Cache-purge** `/skill`, `/skill.json`, and `/skill.md` via the Cloudflare cache-purge API. Required for
-   security-relevant pin updates so users don't pick up the old SHA from the 24h `s-maxage` window. Use the API token
-   stored in 1Password (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). First-deploy-after-rename
-   note (cutover from `/install*` → `/skill*`): also purge `/install`, `/install.json`, and `/install.md` once to evict
-   any cached skill content under the old paths. Skip this on subsequent deploys.
-6. **Verify the deployed pin**: `curl -s https://anc.dev/skill.json | jq -r .source.commit` matches the new SHA. The
+5. **Cache-purge** `/skill`, `/skill.json`, and `/skill.md` via the Cloudflare cache-purge API after a manifest bump, so
+   users don't pick up the old shape from the 24h `s-maxage` window. Use the API token stored in 1Password
+   (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). First-deploy-after-rename note (cutover from
+   `/install*` → `/skill*`): also purge `/install`, `/install.json`, and `/install.md` once to evict any cached skill
+   content under the old paths. Skip this on subsequent deploys.
+6. **Verify the deployed manifest**: `curl -s https://anc.dev/skill.json | jq -r .version` matches the new version. The
    Playwright `skill` project (`bun x playwright test --project=skill`) re-runs the live 4-host clone against the
    advertised hosts; run it locally before tagging if anything in the manifest's host commands changed.
 

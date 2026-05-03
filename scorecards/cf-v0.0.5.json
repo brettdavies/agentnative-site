@@ -132,13 +132,12 @@
     "version": "▄▄▄▄▄▄▄▄▄▄▄"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command cf --output json",
-    "started_at": "2026-04-30T23:01:06.016665708Z",
-    "duration_ms": 1780,
+    "started_at": "2026-05-01T10:09:06.543481738Z",
+    "duration_ms": 1678,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

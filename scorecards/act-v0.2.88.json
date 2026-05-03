@@ -42,8 +42,8 @@
       "label": "Quiet mode available",
       "group": "P7",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "no --quiet/-q flag detected in --help output",
+      "status": "pass",
+      "evidence": null,
       "confidence": "high"
     },
     {
@@ -78,8 +78,8 @@
       "label": "Flags advertise env-var bindings in --help",
       "group": "P1",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "4 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "status": "pass",
+      "evidence": null,
       "confidence": "medium"
     },
     {
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
       "confidence": "medium"
     },
     {
@@ -103,10 +103,10 @@
   ],
   "summary": {
     "total": 11,
-    "pass": 6,
-    "warn": 3,
+    "pass": 8,
+    "warn": 0,
     "fail": 0,
-    "skip": 2,
+    "skip": 3,
     "error": 0
   },
   "coverage_summary": {
@@ -127,18 +127,17 @@
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "ollama",
-    "binary": "ollama",
-    "version": "ollama version is 0.22.0"
+    "name": "act",
+    "binary": "act",
+    "version": "act version 0.2.88"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
-    "invocation": "anc check --command ollama --output json",
-    "started_at": "2026-04-30T23:01:21.897709096Z",
-    "duration_ms": 563,
+    "invocation": "anc check --command act --output json",
+    "started_at": "2026-05-01T10:09:13.24557317Z",
+    "duration_ms": 76,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,14 +146,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "ollama"
+    "command": "act"
   },
   "badge": {
-    "eligible": false,
-    "score_pct": 67,
-    "embed_markdown": null,
-    "scorecard_url": "https://anc.dev/score/ollama",
-    "badge_url": "https://anc.dev/badge/ollama.svg",
+    "eligible": true,
+    "score_pct": 100,
+    "embed_markdown": "[![agent-native](https://anc.dev/badge/act.svg)](https://anc.dev/score/act)",
+    "scorecard_url": "https://anc.dev/score/act",
+    "badge_url": "https://anc.dev/badge/act.svg",
     "convention_url": "https://anc.dev/badge"
   }
 }

@@ -132,12 +132,11 @@
     "version": "cmake version 4.3.2"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command cmake --output json",
-    "started_at": "2026-04-30T23:00:56.509362077Z",
+    "started_at": "2026-05-01T10:08:57.334520377Z",
     "duration_ms": 54,
     "platform": {
       "os": "linux",

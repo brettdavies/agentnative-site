@@ -22,7 +22,7 @@ import {
 } from '../src/build/scorecards-render.mjs';
 import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { escHtml, parseFilename, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
+import { escHtml, parseFilename, SITE_SPEC_VERSION, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -307,6 +307,19 @@ describe('emitShell — OG image alt text', () => {
     expect(ogMatch).not.toBeNull();
     expect(twMatch).not.toBeNull();
     expect(ogMatch![1]).toBe(twMatch![1]);
+  });
+
+  test('footer renders v${SITE_SPEC_VERSION} from content/principles/VERSION (not a hardcoded literal)', () => {
+    // Regression guard against the v0.1.0 footer drift that shipped with
+    // anc.dev v0.1 — the footer must always read SITE_SPEC_VERSION from
+    // content/principles/VERSION (the version the site's PROSE has been
+    // reconciled to), never the vendored snapshot version (which can be
+    // ahead during the manual reconciliation window) and never a hardcoded
+    // literal.
+    const html = shell();
+    expect(html).toContain(`<span>v${SITE_SPEC_VERSION}</span>`);
+    // Negative assertion: the prior stub literal must never come back.
+    expect(html).not.toContain('<span>v0.1.0</span>');
   });
 });
 
@@ -834,7 +847,6 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
       expect(entry.metadata).not.toBeNull();
       expect(entry.metadata.tool.name).toBe('fixture');
       expect(entry.metadata.anc.version).toBe('0.1.0');
-      expect(entry.metadata.anc.commit).toBe('abc1234');
       expect(entry.metadata.run.duration_ms).toBe(42);
       expect(entry.metadata.run.platform.os).toBe('linux');
       expect(entry.metadata.target.kind).toBe('command');
@@ -1069,21 +1081,6 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
           content: makeV04Scorecard({
             tool: { name: 'fixture', binary: 'fixture', version: null },
           }),
-        },
-      ],
-      async (dir) => {
-        const registry = makeRegistry([{ name: 'fixture', binary: 'fixture' }]);
-        await runScorecardInvariants(dir, registry);
-      },
-    );
-  });
-
-  test('admits null anc.commit (build outside a git checkout)', async () => {
-    await withCorpus(
-      [
-        {
-          name: 'fixture-v1.2.3.json',
-          content: makeV04Scorecard({ anc: { version: '0.1.0', commit: null } }),
         },
       ],
       async (dir) => {
@@ -1537,16 +1534,10 @@ describe('loadSkillData — fail-fast validation', () => {
       source: {
         type: 'git',
         url: 'https://github.com/brettdavies/agentnative-skill.git',
-        commit: '47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e',
       },
       install: {
         claude_code:
           'git clone --depth 1 https://github.com/brettdavies/agentnative-skill.git ~/.claude/skills/agent-native-cli',
-      },
-      verify: {
-        command: 'git -C <install-dir> rev-parse HEAD',
-        expected: '47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e',
-        semantics: 'advisory',
       },
       update: 'cd <install-dir> && git pull --ff-only',
       uninstall: 'rm -rf <install-dir>',
@@ -1567,26 +1558,14 @@ describe('loadSkillData — fail-fast validation', () => {
   }
 
   test('happy path: valid manifest loads', async () => {
-    const data = (await writeAndLoad(validManifest())) as { source: { commit: string } };
-    expect(data.source.commit).toBe('47a76cceb8b7b1bc013c19ee18a5e38179b1dd0e');
+    const data = (await writeAndLoad(validManifest())) as { source: { url: string } };
+    expect(data.source.url).toBe('https://github.com/brettdavies/agentnative-skill.git');
   });
 
   test('missing top-level key fails with the key name', async () => {
     const m = validManifest() as Record<string, unknown>;
     delete m.license;
     await expect(writeAndLoad(m)).rejects.toThrow(/missing required key "license"/);
-  });
-
-  test('non-hex commit rejected', async () => {
-    const m = validManifest();
-    m.source.commit = 'NOT-A-SHA';
-    await expect(writeAndLoad(m)).rejects.toThrow(/40-char lowercase hex SHA/);
-  });
-
-  test('uppercase-hex commit rejected (must be lowercase)', async () => {
-    const m = validManifest();
-    m.source.commit = '47A76CCEB8B7B1BC013C19EE18A5E38179B1DD0E';
-    await expect(writeAndLoad(m)).rejects.toThrow(/40-char lowercase hex SHA/);
   });
 
   test('non-semver version rejected', async () => {
@@ -1935,14 +1914,16 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
     expect(longRun).toContain('<dt>Duration</dt><dd>2m 25s</dd>');
   });
 
-  test('Anc build links the commit when SHA is hex-shaped (7-40 chars)', () => {
-    const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
-    expect(html).toContain('href="https://github.com/brettdavies/agentnative-cli/commit/fff3f13"');
-    expect(html).toContain('<code>fff3f13</code>');
-  });
+  test('Anc build renders version-only regardless of commit field shape', () => {
+    // The commit field is captured in the JSON schema but no longer surfaced
+    // on the rendered scorecard. Render is version-only across hex, null,
+    // and malicious-string inputs alike — the field is never interpolated
+    // into HTML, so there is no URL-construction surface to gate.
+    const hex = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
+    expect(hex).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(hex).not.toContain('agentnative-cli/commit/');
 
-  test('Anc build skips the commit link when commit is null', () => {
-    const html = buildScorecardBody(
+    const nullCommit = buildScorecardBody(
       tool('rg'),
       sc(),
       [],
@@ -1950,13 +1931,10 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({ anc: { version: '0.1.0', commit: null } }),
     );
-    expect(html).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
-    expect(html).not.toContain('agentnative-cli/commit/');
-  });
+    expect(nullCommit).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(nullCommit).not.toContain('agentnative-cli/commit/');
 
-  test('Anc build skips the commit link when SHA fails the hex allowlist (security)', () => {
-    // Defense against an upstream CLI bug that ever puts non-SHA bytes into anc.commit.
-    const html = buildScorecardBody(
+    const malicious = buildScorecardBody(
       tool('rg'),
       sc(),
       [],
@@ -1964,8 +1942,9 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({ anc: { version: '0.1.0', commit: '<script>alert(1)</script>' } }),
     );
-    expect(html).not.toContain('agentnative-cli/commit/');
-    expect(html).not.toContain('<script>');
+    expect(malicious).toContain('<dt>Anc build</dt><dd>0.1.0</dd>');
+    expect(malicious).not.toContain('agentnative-cli/commit/');
+    expect(malicious).not.toContain('<script>');
   });
 
   test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
@@ -2072,6 +2051,10 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
     );
     expect(md).toContain('## Reproduce locally');
     expect(md).toContain('anc check --command rg --output json');
+    // The repro fence is tagged `bash` so renderers (Shiki, GitHub markdown,
+    // hosted previews) syntax-highlight the command instead of treating it
+    // as plain text.
+    expect(md).toContain('```bash\nanc check --command rg --output json\n```');
   });
 
   test('project-mode invocation falls back to the synthesized form (no path leak)', () => {
@@ -2160,9 +2143,8 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
     expect(md).toContain('**Duration:** 53ms');
     expect(md).toContain('**Platform:** `linux/x86_64`');
     expect(md).toContain('**Mode:** command');
-    expect(md).toContain(
-      '**Anc build:** 0.1.0 ([fff3f13](https://github.com/brettdavies/agentnative-cli/commit/fff3f13))',
-    );
+    expect(md).toContain('**Anc build:** 0.1.0');
+    expect(md).not.toContain('agentnative-cli/commit/');
   });
 });
 

@@ -24,8 +24,8 @@
       "label": "Structured output support",
       "group": "P2",
       "layer": "behavioral",
-      "status": "skip",
-      "evidence": "no --output/--format flag detected",
+      "status": "warn",
+      "evidence": "--output/--format flag detected but could not validate JSON via safe probes (--help/--version override output flags in most CLIs)",
       "confidence": "high"
     },
     {
@@ -79,7 +79,7 @@
       "group": "P1",
       "layer": "behavioral",
       "status": "warn",
-      "evidence": "5 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "evidence": "2 flag(s) found in --help but no `[env: NAME]` bindings advertised",
       "confidence": "medium"
     },
     {
@@ -87,8 +87,8 @@
       "label": "Pager-using CLI ships --no-pager escape hatch",
       "group": "P6",
       "layer": "behavioral",
-      "status": "warn",
-      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "status": "skip",
+      "evidence": "no pager signal (less/more/$PAGER/--pager) in --help",
       "confidence": "medium"
     },
     {
@@ -123,22 +123,21 @@
       "verified": 0
     }
   },
-  "audience": "agent-optimized",
+  "audience": "mixed",
   "audit_profile": null,
   "spec_version": "0.3.0",
   "tool": {
-    "name": "fly",
-    "binary": "fly",
-    "version": "flyctl version 0.4.44"
+    "name": "starship",
+    "binary": "starship",
+    "version": "starship 1.25.1"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
-    "invocation": "anc check --command fly --output json",
-    "started_at": "2026-04-30T23:01:01.370955785Z",
-    "duration_ms": 175,
+    "invocation": "anc check --command starship --output json",
+    "started_at": "2026-05-01T10:09:13.604925831Z",
+    "duration_ms": 165,
     "platform": {
       "os": "linux",
       "arch": "x86_64"
@@ -147,14 +146,14 @@
   "target": {
     "kind": "command",
     "path": null,
-    "command": "fly"
+    "command": "starship"
   },
   "badge": {
     "eligible": false,
     "score_pct": 67,
     "embed_markdown": null,
-    "scorecard_url": "https://anc.dev/score/fly",
-    "badge_url": "https://anc.dev/badge/fly.svg",
+    "scorecard_url": "https://anc.dev/score/starship",
+    "badge_url": "https://anc.dev/badge/starship.svg",
     "convention_url": "https://anc.dev/badge"
   }
 }

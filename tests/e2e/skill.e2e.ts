@@ -1,8 +1,8 @@
 // 4-host skill-distribution install verification + bare-clone footgun
 // check. This is the live-network e2e: it fetches /skill.json from the
 // local Worker, runs every advertised host's clone command into a sandbox
-// HOME, and asserts SKILL.md lands at the expected path with the pinned
-// commit checked out.
+// HOME, and asserts SKILL.md lands at the expected path on the skill
+// repo's default branch.
 //
 // Isolation: this spec runs only under the `skill` Playwright project
 // (see playwright.config.ts). It is excluded from the default `bun run
@@ -16,8 +16,8 @@
 // Post-cutover usage (producer is public — HTTPS works as advertised):
 //   bun x playwright test --project=skill
 //
-// The URL override only swaps the clone source; the destination paths,
-// commit pin, and host names are still drawn from /skill.json.
+// The URL override only swaps the clone source; the destination paths and
+// host names are still drawn from /skill.json.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
@@ -29,7 +29,7 @@ const BASE = 'http://localhost:8787';
 const URL_OVERRIDE = process.env.ANC_SKILL_URL;
 
 interface Manifest {
-  source: { url: string; commit: string };
+  source: { url: string };
   install: Record<string, string>;
 }
 
@@ -73,7 +73,7 @@ function runInSandbox(command: string, sandboxHome: string): void {
 }
 
 test.describe('skill-distribution install — 4-host live clone', () => {
-  test('every advertised host clones, lands SKILL.md, and pins commit', async ({ request }) => {
+  test('every advertised host clones and lands SKILL.md', async ({ request }) => {
     const manifest = await fetchManifest(request);
     expect(Object.keys(manifest.install).length).toBeGreaterThanOrEqual(1);
 
@@ -88,21 +88,6 @@ test.describe('skill-distribution install — 4-host live clone', () => {
         // canonical entry point.
         const skillPath = join(dest, 'SKILL.md');
         expect({ host, exists: statSync(skillPath).isFile() }).toEqual({ host, exists: true });
-
-        // Pin freshness: the local checkout's HEAD must match source.commit.
-        const head = execFileSync('git', ['-C', dest, 'rev-parse', 'HEAD']).toString().trim();
-        expect({ host, head }).toEqual({ host, head: manifest.source.commit });
-
-        // Pin freshness: the skill repo's default-branch HEAD must equal the
-        // pin. This is the actual invariant — if upstream has moved past the
-        // pin, the install is stale and the next site release is overdue.
-        // (`git ls-remote --exit-code <commit>` would NOT work — ls-remote
-        // resolves ref names, not SHAs.)
-        const remoteHead = execFileSync('git', ['-C', dest, 'ls-remote', 'origin', 'HEAD'])
-          .toString()
-          .trim()
-          .split(/\s+/)[0];
-        expect({ host, remoteHead }).toEqual({ host, remoteHead: manifest.source.commit });
       } finally {
         rmSync(sandboxHome, { recursive: true, force: true });
       }

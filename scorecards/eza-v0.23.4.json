@@ -132,12 +132,11 @@
     "version": "eza - A modern, maintained replacement for ls"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command eza --output json",
-    "started_at": "2026-04-30T23:00:57.27575311Z",
+    "started_at": "2026-05-01T10:08:58.092645572Z",
     "duration_ms": 53,
     "platform": {
       "os": "linux",

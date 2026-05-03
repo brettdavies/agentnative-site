@@ -132,13 +132,12 @@
     "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command yq --output json",
-    "started_at": "2026-04-30T23:00:58.215718726Z",
-    "duration_ms": 95,
+    "started_at": "2026-05-01T10:08:59.019259718Z",
+    "duration_ms": 94,
     "platform": {
       "os": "linux",
       "arch": "x86_64"

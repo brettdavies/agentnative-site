@@ -20,14 +20,14 @@
 
 import { chromium } from 'playwright';
 import sharp from 'sharp';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OG_HTML = `${REPO_ROOT}/scripts/og/og.html`;
 const OG_OUT = `${REPO_ROOT}/public/og-image.png`;
-const SHELL_MJS = `${REPO_ROOT}/src/build/shell.mjs`;
+const SCORECARDS_DIR = `${REPO_ROOT}/scorecards`;
 
 const OG_W = 1200;
 const OG_H = 630;
@@ -35,23 +35,34 @@ const SCALE = 2;
 const SIZE_BUDGET_KB = 150;
 
 /**
- * Read the version literal from src/build/shell.mjs. The footer ships
- * a `v0.1.0` literal at line ~177 (`<span>v0.1.0</span>`); the OG card
- * displays the same version string so the social card and the rendered
- * footer never drift. When the spec-VERSION sync work lands, both will
- * read from a shared source automatically.
+ * Read the spec_version from anc's own self-scorecard. The OG card sells
+ * the standard via the CLI that scores it, so the version label tracks
+ * what `anc` was compiled against — not what the site's content has been
+ * reconciled to (footer's role, see SITE_SPEC_VERSION) and not what we
+ * last vendored (SPEC_VERSION). Matches the per-scorecard spec_version
+ * each badge SVG uses (build.mjs:377).
  */
-async function readVersion(): Promise<string> {
-  const src = await readFile(SHELL_MJS, 'utf8');
-  const match = src.match(/<span>(v\d+\.\d+\.\d+(?:[-+][\w.]+)?)<\/span>/);
-  if (!match) {
-    throw new Error(`could not find version literal in ${SHELL_MJS}`);
+async function readAncSpecVersion(): Promise<string> {
+  const entries = await readdir(SCORECARDS_DIR);
+  const ancScorecards = entries
+    .filter((name) => /^anc-v[\d.]+\.json$/.test(name))
+    .sort()
+    .reverse(); // highest version first
+  if (ancScorecards.length === 0) {
+    throw new Error(`No anc scorecard found in ${SCORECARDS_DIR}/anc-v*.json`);
   }
-  return match[1];
+  const sourceFile = `${SCORECARDS_DIR}/${ancScorecards[0]}`;
+  const json = JSON.parse(await readFile(sourceFile, 'utf8'));
+  if (typeof json.spec_version !== 'string') {
+    throw new Error(`${sourceFile} has no spec_version field`);
+  }
+  process.stderr.write(`OG version source: ${ancScorecards[0]} → spec_version=${json.spec_version}\n`);
+  return json.spec_version;
 }
 
 async function main(): Promise<number> {
-  const version = await readVersion();
+  const specVersion = await readAncSpecVersion();
+  const version = `v${specVersion}`;
   process.stderr.write(`reading og.html, injecting version=${version}\n`);
 
   const browser = await chromium.launch();

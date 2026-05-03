@@ -133,12 +133,11 @@
     "version": "broot 1.56.2"
   },
   "anc": {
-    "version": "0.2.0",
-    "commit": "06a307c"
+    "version": "0.3.0"
   },
   "run": {
     "invocation": "anc check --command broot --audit-profile human-tui --output json",
-    "started_at": "2026-04-30T23:01:16.376517735Z",
+    "started_at": "2026-05-01T10:09:15.396632926Z",
     "duration_ms": 41,
     "platform": {
       "os": "linux",

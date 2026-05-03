@@ -5,7 +5,7 @@
 // Inputs are plain data (no filesystem). assets.mjs reads the inline
 // theme-init script from disk and passes it in.
 
-import { escHtml, resolveBaseUrl } from './util.mjs';
+import { escHtml, resolveBaseUrl, SITE_SPEC_VERSION } from './util.mjs';
 
 const SITE_NAME = 'anc.dev';
 const SITE_TAGLINE = 'The agent-native CLI standard';
@@ -187,7 +187,7 @@ ${AI_PROVIDERS.map(
       <p class="site-footer__meta">
         <span>${SITE_NAME}</span>
         <span> · </span>
-        <span>v0.1.0</span>
+        <span>v${SITE_SPEC_VERSION}</span>
         <span> · </span>
         <a href="/changelog">Changelog</a>
         <span> · </span>
