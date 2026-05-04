@@ -13,9 +13,9 @@ After cloning, point git at the repo's hook directory once:
 git config core.hooksPath scripts/hooks
 ```
 
-This enables `scripts/hooks/pre-push`, which runs `bun run lint`, `bun run build`, and `bun test` before every push —
-the same gates CI enforces. Bypass intentionally with `git push --no-verify` if you really need to (rare; the hook
-exists to catch what we've lost time to before).
+This enables `scripts/hooks/pre-push`, which runs `bun run lint`, `bun run build`, `bun test`, and `wrangler deploy
+--dry-run` before every push — the same gates CI enforces. Bypass intentionally with `git push --no-verify` if you
+really need to (rare; the hook exists to catch what we've lost time to before).
 
 ## Deployment
 
