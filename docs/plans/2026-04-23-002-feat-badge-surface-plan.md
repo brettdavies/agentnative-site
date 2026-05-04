@@ -59,14 +59,17 @@ parents:
 > `agentnative-site` on 2026-04-29 (same date as the launch-eve design pass) to consolidate ownership in the
 > launch-coupled hub repo. Three of the four launch-wave surfaces ship from this repo, so the coordinator lives here.**
 >
-> **Status: all five surfaces shipped.** Site-side surfaces #1–#3 (per-tool scorecard embed snippet, leaderboard
-> callout, `/badge` convention page) plus the build-time SVG render (`badge-maker`) and the worker `image/svg+xml`
-> content-type wiring landed on `feat/badge-surface` and merged into `dev` ahead of the Show HN launch wave (Thu
-> 2026-04-30 09:00 PT). Surface #5 (CLI post-pass hint) shipped 2026-04-30 in
-> [agentnative-cli PR #36](https://github.com/brettdavies/agentnative-cli/pull/36). Surface #4 (spec `docs/badge.md`
-> doctrinal convention) shipped 2026-05-04 in
-> [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18) — completes U1+U2 with the four
-> formerly-TBD product decisions transcribed verbatim from the locked-decisions block below.
+> **Status: all five surfaces merged into their owning repos' `dev` branches; site U3–U7 live on staging Worker.
+> Production releases pending — Show HN was held, so neither site `dev → main` nor spec `dev → main` has been cut
+> yet, and `anc.dev` plus the next spec tag still serve pre-badge content.** Site-side surfaces #1–#3 plus the
+> build-time SVG render (`badge-maker`) and the worker `image/svg+xml` content-type wiring landed on
+> `feat/badge-surface` and merged into this repo's `dev` ahead of the Show HN launch wave (Thu 2026-04-30 09:00 PT).
+> Surface #5 (CLI post-pass hint) shipped 2026-04-30 in
+> [agentnative-cli PR #36](https://github.com/brettdavies/agentnative-cli/pull/36) — independent repo, already on
+> `agentnative-cli` `dev`. Surface #4 (spec `docs/badge.md` doctrinal convention) shipped 2026-05-04 in
+> [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18) onto spec `dev`; promotion to spec
+> `main` still pending. Completes U1+U2 with the four formerly-TBD product decisions transcribed verbatim from the
+> locked-decisions block below.
 >
 > **Decisions confirmed during the 2026-04-29 design pass:**
 >
@@ -138,13 +141,13 @@ Item 1 is the spec-side surface (#4 below). Items 2 and 3 are site-side surfaces
 The badge surface is implemented across five surfaces, four of which are launch-coupled. Spec owns surface 4; site owns
 surfaces 1, 2, and 3; CLI owns surface 5.
 
-| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                                         |
-| --- | ------------------------------------- | ------------------------------------- | -------------------- | ---------------------------------------------- |
-| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29                           |
-| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29                           |
-| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29                           |
-| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | ✅ shipped 2026-05-04 (agentnative-spec PR #18) |
-| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5)  |
+| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                                        |
+| --- | ------------------------------------- | ------------------------------------- | -------------------- | --------------------------------------------- |
+| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29                          |
+| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29                          |
+| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29                          |
+| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | ✅ merged to spec `dev` 2026-05-04 (PR #18)    |
+| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5) |
 
 > Site-side units U3–U7 (added during the 2026-04-29 implementation) cover surfaces 1–3 plus the build-time SVG render
 > (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 shipped 2026-05-04 in
