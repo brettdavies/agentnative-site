@@ -728,8 +728,21 @@ token injection, NO source-only fallback — those are v2 artifacts the rewrite 
 
 ## Dependencies & Prerequisites
 
-**HARD BLOCKER (cross-repo):** This plan does NOT execute until the upstream `agentnative-cli` repo publishes a release
-that includes the `x86_64-unknown-linux-musl` target.
+**HARD BLOCKER (cross-repo) — SATISFIED 2026-05-04 by `agentnative-cli` v0.3.1.** Release ships
+`agentnative-x86_64-unknown-linux-musl.tar.gz` (plus aarch64 musl as a bonus) with `sha256sum.txt` populated. Verified
+locally: `file` reports `static-pie linked, stripped`; `ldd` reports `statically linked`; `anc --version` returns `anc
+0.3.1`. Static linkage means the binary drops cleanly into any minimal Linux environment including Alpine — no container
+smoke-test was required to confirm runtime compatibility.
+
+**Verification artifacts:**
+
+- Release: `gh release view v0.3.1 --repo brettdavies/agentnative-cli` (10 archives including both linux musl arches).
+- Local probe: `agentnative-x86_64-unknown-linux-musl/anc --version` returned `anc 0.3.1`.
+- `cargo install` / `cargo binstall` validation deferred — U2's image bakes the binary directly via `curl` + tarball
+  extract; binstall path is exercised by U6's install probes against unknown tools.
+
+**Original blocker text (preserved for context):** This plan does NOT execute until the upstream `agentnative-cli` repo
+publishes a release that includes the `x86_64-unknown-linux-musl` target.
 
 - Required upstream change: add `x86_64-unknown-linux-musl` to the `build` job matrix in
   `agentnative-cli/.github/workflows/release.yml` (currently 5 targets: gnu-linux x2, darwin x2, msvc-windows).
@@ -781,6 +794,26 @@ Soft prerequisites (do not block U1, but block deployment):
 
 ## Pre-Implementation Validation
 
+**Status: PASSED 2026-05-04.** 76.0% tight hit rate against 50 trending CLI repos (≥70% threshold →
+`pass-ship-as-written`). Per-language: Rust 92% / Python 50% / Go 85% / JS 75%. Two findings absorbed back into the
+plan:
+
+- **F1 → U4 spec change.** The literal U4 step-3 predicates admit cross-registry name collisions (e.g. `cobra` on
+  crates.io is an unrelated Python-Haskell joke crate, not `spf13/cobra`). U4 now requires per-registry repository-field
+  match plus, where available, a binary-target check. Without this tightening the chain produces *wrong-answer*
+  failures, not just *missed-opportunity* bounces (R9 violation). Plus a new step 0.5 — explicit `discovery-hints.yaml`
+  lookup — to absorb known false-negatives where ecosystem metadata is incomplete (Aider, OpenHands, Sherlock).
+- **F4 → U6 + U8 spec change.** The original "no_installable_binary" bounce class is too coarse. U6 returns a
+  three-class error envelope (`chain_no_resolve` / `chain_resolved_install_failed` /
+  `chain_resolved_no_binary_produced`); U8 surfaces distinct CTA copy per class.
+
+Evidence: [docs/research/2026-05-04-discovery-chain-hit-rate.md](../research/2026-05-04-discovery-chain-hit-rate.md).
+Reproducer: `bun scripts/measure-discovery-hit-rate.mjs`.
+
+---
+
+**Original gate text (preserved for context):**
+
 **Discovery-chain hit-rate measurement (gates U2 image build).** Before U2 starts, validate that the install-binary-only
 constraint (R8) doesn't bounce out the bulk of HN-typical traffic. The plan's "missed-opportunity, never wrong-answer"
 framing for bounce-outs is only acceptable if the bounce rate is low enough that the share-loop survives. HN audience
@@ -820,11 +853,18 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-- U1. **Build-time registry index emission**
+- U1. **Build-time registry-index + discovery-hints index emission**
 
-**Goal:** Emit `dist/registry-index.json` at build time — a precomputed, dual-keyed map (slug → entry, owner/repo →
-entry) so the Worker can do O(1) lookups whether the input was a slug or a GitHub URL. Pure build-step change; no CF
-dependencies; lands first because it unblocks U5 + U6.
+**Goal:** Emit two precomputed JSON indexes at build time:
+
+1. `dist/registry-index.json` — dual-keyed map (slug → entry, owner/repo → entry) of every committed-scorecard tool, so
+   the Worker can do O(1) lookups whether the input was a slug or a GitHub URL.
+2. `dist/discovery-hints-index.json` — owner/repo → install-spec map for tools the discovery chain would otherwise
+   bounce due to incomplete or non-canonical ecosystem metadata (e.g. brew formula whose `homepage` doesn't reference
+   the GitHub repo). Consumed by U4's step 0.5 (between registry-fast-path and step 2). Pre-Implementation Validation
+   gate finding F1.
+
+Pure build-step change; no CF dependencies; lands first because it unblocks U4 + U5 + U6.
 
 **Requirements:** R2, R3.
 
@@ -833,9 +873,11 @@ dependencies; lands first because it unblocks U5 + U6.
 **Files:**
 
 - Create: `src/build/registry-index.mjs`
+- Create: `discovery-hints.yaml` (seeded from gate findings; lives at repo root next to `registry.yaml`)
 - Modify: `src/build/build.mjs` (insert step after `loadRegistry` near the sub-page loop)
 - Test: `tests/registry-index.test.ts`
-- Modify: `tests/regression.test.ts` (add structural assertion on `dist/registry-index.json`)
+- Test: `tests/discovery-hints-index.test.ts`
+- Modify: `tests/regression.test.ts` (add structural assertions on both `dist/*-index.json` files)
 
 **Approach:**
 
@@ -853,6 +895,27 @@ dependencies; lands first because it unblocks U5 + U6.
 - Include `audit_profile` so the live path can pass it to `anc check --audit-profile <category>`.
 - Tools with neither `repo:` nor `url:` → entry skipped, build warning emitted (not a failure).
 - Tools with same `owner/repo` (fork) → second wins, build warning.
+- Read `discovery-hints.yaml` (top-level `hints:` array) and emit `dist/discovery-hints-index.json` with shape:
+
+  ```json
+  {
+    "by_owner_repo": {
+      "Aider-AI/aider": { "pm": "pip", "package": "aider-chat", "binary": "aider", "note": "..." }
+    }
+  }
+  ```
+
+- Hints whose `owner_repo` collides with a `registry.yaml` entry → registry wins (committed scorecards take precedence);
+  build warning emitted so the redundant hint can be pruned.
+- Hints with unknown `pm` (not in U4's parse-install table) → build error (typo guard).
+
+**Seed hints (from gate F1 false-negatives):**
+
+- `Aider-AI/aider` → `{pm: pip, package: aider-chat, binary: aider}` (brew homepage routes to aider.chat, not github)
+- `OpenHands/OpenHands` → `{pm: pip, package: openhands-ai, binary: openhands}` (pypi `home_page` is null)
+- `sherlock-project/sherlock` → `{pm: brew, package: sherlock, binary: sherlock}` (brew homepage doesn't reference the
+  repo)
+- Headroom for 2-3 more as production telemetry surfaces them.
 
 **Patterns to follow:**
 
@@ -866,11 +929,16 @@ dependencies; lands first because it unblocks U5 + U6.
 - Edge case: tool with neither `repo:` nor `url:` → entry skipped, build warning, no crash.
 - Edge case: two tools with same `owner/repo` → build warning, second wins.
 - Edge case: `audit_profile` field round-trips into the index.
-- Integration: `dist/registry-index.json` exists after `bun run build`; regression test asserts top-level `by_slug` +
-  `by_owner_repo` keys exist and have at least 50 entries.
+- Happy path (hints): `discovery-hints.yaml` with M entries → `discovery-hints-index.json` has M entries by
+  `owner_repo`.
+- Edge case (hints): hint whose `owner_repo` is also in `registry.yaml` → build warning, hint dropped, registry wins.
+- Edge case (hints): hint with `pm: yum` (not in parse-install table) → build error.
+- Integration: `dist/registry-index.json` AND `dist/discovery-hints-index.json` exist after `bun run build`; regression
+  test asserts `by_slug` + `by_owner_repo` keys on registry index with ≥50 entries, and `by_owner_repo` on hints index
+  with ≥3 entries.
 
-**Verification:** `bun run build` produces `dist/registry-index.json` with the dual-keyed shape; regression test passes;
-no warnings on the current registry (signals all tools have parseable identifiers).
+**Verification:** `bun run build` produces both index files with the documented shapes; regression test passes; no
+warnings on the current registry + hints; collision case caught by warning, not crash.
 
 ---
 
@@ -998,17 +1066,18 @@ chain (R3) for URL inputs.
 
 **Requirements:** R1, R3.
 
-**Dependencies:** U1 (registry-index for slug + owner/repo lookup).
+**Dependencies:** U1 (registry-index AND discovery-hints-index for slug + owner/repo lookup).
 
 **Files:**
 
 - Create: `src/worker/score/validate.ts` — shape: `validateInput(raw: string): ValidatedInput | InputError`
 - Create: `src/worker/score/parse-install.ts` — install-command parser table
 - Create: `src/worker/score/discover-binary.ts` — GitHub URL 4-step discovery
-- Create: `src/worker/score/registry-lookup.ts` — registry-index hit-test
+- Create: `src/worker/score/registry-lookup.ts` — registry-index + discovery-hints hit-test
 - Test: `tests/score-validate.test.ts`
 - Test: `tests/score-parse-install.test.ts`
 - Test: `tests/score-discover-binary.test.ts`
+- Test: `tests/score-registry-lookup.test.ts`
 
 **Execution note:** Test-first for the parser tables — these are pure functions with deterministic table-driven
 behavior; tests are the spec.
@@ -1037,26 +1106,44 @@ behavior; tests are the spec.
 
 1. **Direct binary URL.** If pasted URL ends in `.tar.gz`/`.tar.xz`/`.zip`/`.exe` OR HEAD returns a binary Content-Type
    → `{pm: "direct", url, binary: deriveFromUrl}`.
+
+   **Step 0.5 — discovery-hints lookup (NEW per gate F1).** Before step 2, check `dist/discovery-hints-index.json` for
+   an `owner/repo` match. Hit → return the hint's `{pm, package, binary}` directly; the install command is well-known
+   (we curated it) and short-circuits the live-discovery chain. Miss → fall through to step 2. This absorbs known
+   false-negatives (Aider, OpenHands, Sherlock) where ecosystem metadata is incomplete or non-canonical.
+
 2. **GitHub Releases API.** `GET https://api.github.com/repos/<owner>/<repo>/releases/latest`. Find an asset matching
    `<repo>` ± platform suffix (`-x86_64-unknown-linux-musl`, `-linux-x86_64`, `-amd64-linux`, etc.). If found → `{pm:
    "direct", url: asset.browser_download_url, binary: <repo>}`.
-3. **Common distribution lookup.** Parallel-fetch:
+3. **Common distribution lookup.** Parallel-fetch (each predicate REQUIRES repository-field match against
+   `https://github.com/<owner>/<repo>` — case-insensitive substring — to prevent cross-registry name collisions per gate
+   F1; without this U4 produces *wrong-answer* failures, not just *missed-opportunity* bounces, and violates R9):
 
-- `https://formulae.brew.sh/api/formula/<repo>.json` (200 → brew install path)
-- `https://crates.io/api/v1/crates/<repo>` (200 + has binary target → cargo binstall path)
-- `https://registry.npmjs.org/<repo>` (200 + has bin field → npm path)
-- `https://pypi.org/pypi/<repo>/json` (200 + has wheel → pip path)
-- `https://proxy.golang.org/<owner>/<repo>/@latest` (200 → go install path; less reliable, lower priority) First hit
-  wins (by registry priority: brew → cargo → npm → pip → go).
+- `https://formulae.brew.sh/api/formula/<repo>.json` — 200 AND `formula.homepage` or `formula.urls.stable.url`
+  references the GitHub repo → brew install path.
+- `https://crates.io/api/v1/crates/<repo>` — 200 AND `crate.repository` references the GitHub repo AND
+  `crates.io/api/v1/crates/<repo>/<max_stable_version>` returns non-empty `version.bin_names` → cargo binstall path.
+- `https://registry.npmjs.org/<repo>/latest` — 200 AND `package.bin` is non-empty AND `package.repository.url`
+  references the GitHub repo → npm path.
+- `https://pypi.org/pypi/<repo>/json` — 200 AND `info.urls` includes a `bdist_wheel` entry AND `info.home_page` or any
+  value in `info.project_urls` references the GitHub repo → pip path.
+- `https://proxy.golang.org/<owner>/<repo>/@latest` — 200 → go install path. (Path is `<owner>/<repo>`-keyed by
+  construction; no extra match needed.)
+
+  First hit wins (by registry priority: brew → cargo → npm → pip → go).
 
 1. **README parse.** `GET https://raw.githubusercontent.com/<owner>/<repo>/HEAD/README.md` (try `main`, then `master`,
    then default-branch via API). Find first fenced code block whose first non-comment line matches one of the
    install-command shapes above AND whose package name matches `<repo>` (case-insensitive, hyphen/underscore
    normalized). If found → delegate to `parse-install.ts`.
-2. None of 1-4 → `{error: "no_installable_binary"}` → 404 with R9's CTA.
+2. None of 0.5-4 → `{error: "chain_no_resolve"}` → 404 with R9's CTA. (Renamed from `no_installable_binary` per gate F4
+   — distinguishes chain-time exhaustion from install-time failures emitted by U6.)
 
-- `registry-lookup.ts`: takes a `ValidatedInput` and checks both `by_slug` and `by_owner_repo`. Returns the registry
-  entry if hit (triggers R2 fast-path); else null (proceeds to U6 sandbox path).
+- `registry-lookup.ts`: takes a `ValidatedInput` and checks `registry-index.by_slug`, `registry-index.by_owner_repo`,
+  AND `discovery-hints-index.by_owner_repo`. Returns the registry entry if hit (triggers R2 fast-path), the hint if hit
+  (triggers U6 sandbox path with the hint's `{pm, package, binary}` pre-resolved); else null (proceeds to U4 live
+  discovery). Order matters: registry-fast-path > hint > live discovery. Committed scorecards always win over hints
+  (avoids drift); hints always win over live discovery (we curated them because live discovery was wrong).
 
 **Patterns to follow:**
 
@@ -1083,9 +1170,20 @@ behavior; tests are the spec.
 - **Error path (RFC1918 / localhost / cloud-metadata):** rejected.
 - **Error path (homoglyph host `gіthub.com` Cyrillic 'і'):** rejected by ASCII-only host check.
 - **Error path (unparseable install command):** `"yum install foo"` → `{error: "unparseable_install_command"}`.
-- **Error path (GitHub URL, all 4 discovery steps miss):** `{error: "no_installable_binary"}` with R9 CTA.
+- **Error path (GitHub URL, all discovery steps miss):** `{error: "chain_no_resolve"}` with R9 CTA.
+- **Happy path (hint hit):** input `https://github.com/Aider-AI/aider` → step 0.5 finds hint → returns `{pm: "pip",
+  package: "aider-chat", binary: "aider"}` without firing steps 2-4.
+- **Edge case (hint miss + chain hit):** input `https://github.com/<unknown-but-cargo-binstallable>` → step 0.5 miss →
+  step 3 fires.
+- **Edge case (hint with cross-registry name collision target):** hint for `spf13/cobra` → returns the hint's payload,
+  never queries crates.io. Validates that hints fully short-circuit step 3 (proves hints fix F1's wrong-answer class).
 - **Integration:** `discover-binary.ts` mocked via `vi.mock(globalThis.fetch)` returning canned responses for each step;
   assert the correct step fires and the chain short-circuits on the first hit.
+- **Integration (F1 tightening — repository-field match):** mock crates.io `<repo>` returning a 200 whose
+  `crate.repository` does NOT include the input GitHub repo (the `cobra` collision case) → step-3-crates rejects, chain
+  continues to step 4.
+- **Integration (F1 tightening — bin-target check):** mock crates.io `<repo>/<version>` returning empty `bin_names` (the
+  library-only `ratatui` case) → step-3-crates rejects, chain continues.
 
 **Verification:** All test scenarios pass. Validation matrix is exhaustive (every input shape from R1 has a test).
 Discovery chain short-circuits correctly. Bounce-out errors carry R9's CTA shape.
@@ -1212,7 +1310,10 @@ container per design Premise #6.
 - `go install <module>@latest`
 - `direct`: `curl -fsSL <url> | tar xz -C /usr/local/bin/` (or unzip for `.zip`)
 
-1. Verify binary on `PATH`: `which <binary>` returns 0; if not, fail with `install_did_not_provide_binary`.
+1. Verify binary on `PATH`: `which <binary>` returns 0; if not, fail with `chain_resolved_no_binary_produced` (per gate
+   F4 — distinguishes "install succeeded but produced no runnable binary" from "install command itself failed"). Common
+   failure mode: the chain resolved to a library-only pypi package (e.g. Click ships wheels but no `console_scripts`
+   entry).
 2. `sandbox.setOutboundHandler("noHttp")` — Phase 2.
 3. `sandbox.exec("anc --version")` → capture `anc_version` (parse the stdout).
 4. Look up registry entry by tool name to get `audit_profile` if known; else omit.
@@ -1242,9 +1343,11 @@ container per design Premise #6.
   scored.
 - **Edge case (`audit_profile` from registry):** known tool → `anc check --audit-profile human-tui ...` invoked.
 - **Edge case (install fails — package not found):** sandbox returns non-zero from install; DO returns `{error:
-  "install_failed", details}`; Worker returns 502 to user.
+  "chain_resolved_install_failed", details}`; Worker returns 502 to user. (Renamed from `install_failed` per gate F4 for
+  symmetry with `chain_resolved_no_binary_produced` and `chain_no_resolve`.)
 - **Edge case (binary not on PATH after install):** detected by `which` check; DO returns `{error:
-  "install_did_not_provide_binary"}`; Worker returns 502.
+  "chain_resolved_no_binary_produced"}`; Worker returns 502. (Renamed from `install_did_not_provide_binary` per gate F4.
+  The `pallets/click` failure mode — wheel installs cleanly but no `console_scripts` entry.)
 - **Error path (anc check exits non-zero):** preserve and forward the parsed error JSON if available.
 - **Error path (60 s timeout):** DO returns `{error: "timeout"}`; Worker returns 504.
 - **Error path (`setOutboundHandler` call fails):** DO returns 500; user-visible error message scrubs internals.
@@ -1357,6 +1460,18 @@ implementation uses the existing per-tool scorecard page header/score/issues blo
   `buildScoreBadge`, the existing top-issues block — and SKIPS `<section class="scorecard-checks">` and `<section
   class="scorecard-meta">`. Below the top-3 issues block, append a CTA card: "Run `anc check .` locally for source +
   project checks (`brew install agentnative` or `cargo install agentnative`)."
+- **Bounce-state CTA copy (gate F4 — three classes, distinct messaging).** When `/api/score` returns a 4xx with one of
+  the three bounce error tags, render a class-specific CTA panel instead of the score body. Each class deserves
+  different framing because the user's correctness model is different in each case:
+
+| Error tag                           | Headline                                        | Sub-copy                                                                                                                                                               |
+| ----------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chain_no_resolve`                  | "We couldn't find a pre-built binary for that." | "anc only scores tools with a published binary release. Run `anc check .` locally for source + project depth: `brew install agentnative`."                             |
+| `chain_resolved_install_failed`     | "Found an install path, but it didn't run."     | Show the install command we tried and its non-zero exit excerpt (truncated). "Try `anc check .` locally — it has more flexible install options."                       |
+| `chain_resolved_no_binary_produced` | "That looks like a library, not a CLI."         | "We installed it, but no command-line entry point appeared on PATH. anc only scores binaries. If this is wrong, paste the actual binary name as `<command>` to retry." |
+
+  All three keep the install-anc-locally CTA as a secondary surface; they differ in headline + diagnostic copy.
+
 - `/score.md` is a static markdown twin describing the form (not interactive); points agents to `/api/score` as the
   actual API endpoint. Includes the JSON response schema example and `Accept` header documentation.
 - `spec-version-gen.mjs` emits:
@@ -1390,7 +1505,12 @@ implementation uses the existing per-tool scorecard page header/score/issues blo
 - **Edge case:** paste an invalid input → form shows inline error from `/api/score` 400 response.
 - **Edge case:** paste a non-GitHub URL → inline error.
 - **Edge case:** 429 response → form shows "Try again in 60s" message with countdown.
-- **Edge case:** GitHub URL discovery chain miss → 404 with R9 CTA inline (not just a generic error).
+- **Edge case (bounce: `chain_no_resolve`):** mocked 404 with that error tag → form renders the "couldn't find a
+  pre-built binary" headline + R9 CTA, not a generic error.
+- **Edge case (bounce: `chain_resolved_install_failed`):** mocked 502 with that error tag → form renders the "install
+  path didn't run" headline AND the install command + truncated stderr excerpt from the response details.
+- **Edge case (bounce: `chain_resolved_no_binary_produced`):** mocked 502 with that error tag → form renders the "looks
+  like a library, not a CLI" headline + retry-with-explicit-command affordance.
 - **Integration:** `/score.md` markdown twin is in sitemap, renders agent-friendly description with API schema.
 - **Integration (live sandbox project, opt-in):** paste a real unknown tool with installable binary → progress timeline
   animates → summary renders within 60 s.
