@@ -1,7 +1,7 @@
 ---
 title: Brew-install anc in scoring image and strip commit-SHA render
 type: fix
-status: active
+status: completed
 date: 2026-05-01
 ---
 
@@ -213,10 +213,10 @@ the docker build + smoke-test below.
 - In `tests/build.test.ts`:
 - Delete the `'Anc build links the commit when SHA is hex-shaped (7-40 chars)'` test (line 1933).
 - Reframe the `'Anc build skips the commit link when commit is null'` test as `'Anc build renders version-only
-    regardless of commit field shape'`. Cover happy + null + bad-shape inputs in a single concise test, asserting
-    `<dt>Anc build</dt><dd>0.1.0</dd>` and the absence of `agentnative-cli/commit/`.
+  regardless of commit field shape'`. Cover happy + null + bad-shape inputs in a single concise test, asserting `<dt>Anc
+  build</dt><dd>0.1.0</dd>` and the absence of `agentnative-cli/commit/`.
 - Delete the standalone `'Anc build skips the commit link when SHA fails the hex allowlist (security)'` test (line 1952)
-    — its assertions are absorbed into the reframed test above.
+  — its assertions are absorbed into the reframed test above.
 
 **Patterns to follow:**
 
