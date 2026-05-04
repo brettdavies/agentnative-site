@@ -352,3 +352,38 @@ describe('regression #4 — scorecard pages', () => {
     expect(sitemap).toMatch(/\/score\/[a-z0-9-]+<\/loc>/);
   });
 });
+
+describe('regression #7 — live-scoring build indexes (plan U1)', () => {
+  test('dist/registry-index.json has by_slug + by_owner_repo with the expected scale', async () => {
+    const raw = await readFile(join(DIST, 'registry-index.json'), 'utf8');
+    const idx = JSON.parse(raw);
+    expect(idx).toHaveProperty('by_slug');
+    expect(idx).toHaveProperty('by_owner_repo');
+    expect(Object.keys(idx.by_slug).length).toBeGreaterThanOrEqual(50);
+    expect(Object.keys(idx.by_owner_repo).length).toBeGreaterThanOrEqual(50);
+    // Sanity-check projection shape on a known entry.
+    const ripgrep = idx.by_slug.ripgrep;
+    expect(ripgrep).toBeDefined();
+    expect(ripgrep.binary).toBe('rg');
+    expect(ripgrep.repo).toBe('BurntSushi/ripgrep');
+    expect(idx.by_owner_repo['BurntSushi/ripgrep']).toEqual(ripgrep);
+  });
+
+  test('dist/discovery-hints-index.json has by_owner_repo with at least the seed entries', async () => {
+    const raw = await readFile(join(DIST, 'discovery-hints-index.json'), 'utf8');
+    const idx = JSON.parse(raw);
+    expect(idx).toHaveProperty('by_owner_repo');
+    expect(Object.keys(idx.by_owner_repo).length).toBeGreaterThanOrEqual(3);
+    // Seed hints from gate F1 false-negatives (docs/research/2026-05-04-discovery-chain-hit-rate.md).
+    expect(idx.by_owner_repo['Aider-AI/aider']).toBeDefined();
+    expect(idx.by_owner_repo['Aider-AI/aider'].pm).toBe('pip');
+    expect(idx.by_owner_repo['Aider-AI/aider'].binary).toBe('aider');
+  });
+
+  test('hint owner_repo keys never collide with registry by_owner_repo keys (registry-wins drift guard)', async () => {
+    const reg = JSON.parse(await readFile(join(DIST, 'registry-index.json'), 'utf8'));
+    const hints = JSON.parse(await readFile(join(DIST, 'discovery-hints-index.json'), 'utf8'));
+    const overlap = Object.keys(hints.by_owner_repo).filter((k) => k in reg.by_owner_repo);
+    expect(overlap).toEqual([]);
+  });
+});

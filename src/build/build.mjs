@@ -34,6 +34,7 @@ import {
 } from './content.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
+import { emitBuildIndexes } from './registry-index.mjs';
 import { renderMarkdown } from './render.mjs';
 import {
   computeLeaderboard,
@@ -58,6 +59,7 @@ const CONTENT_DIR = join(REPO_ROOT, 'content');
 const PRINCIPLES_DIR = join(CONTENT_DIR, 'principles');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
+const HINTS_PATH = join(REPO_ROOT, 'discovery-hints.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
 const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill.json');
@@ -264,6 +266,17 @@ export async function build() {
 
   // 8. Scorecard pages — leaderboard + per-tool pages.
   const registry = await loadRegistry(REGISTRY_PATH);
+
+  // 8a. Build-time indexes for the live-scoring path (plan U1):
+  //     - dist/registry-index.json (powers U4's registry-fast-path)
+  //     - dist/discovery-hints-index.json (powers U4's step 0.5 — F1)
+  const { warnings: indexWarnings } = await emitBuildIndexes({
+    registry,
+    hintsPath: HINTS_PATH,
+    distDir: DIST_DIR,
+  });
+  for (const w of indexWarnings) console.warn(`warning: ${w}`);
+
   // v0.4 corpus invariants run before rendering: any scorecard below the
   // schema floor, missing a registry entry, scoring the wrong binary, or
   // carrying a non-RFC-3339 timestamp aborts the build before producing
