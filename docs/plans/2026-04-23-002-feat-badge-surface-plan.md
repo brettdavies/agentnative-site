@@ -59,14 +59,14 @@ parents:
 > `agentnative-site` on 2026-04-29 (same date as the launch-eve design pass) to consolidate ownership in the
 > launch-coupled hub repo. Three of the four launch-wave surfaces ship from this repo, so the coordinator lives here.**
 >
-> **Status: site-side units shipped 2026-04-29 — spec-side and CLI deferred post-launch.** Site-side surfaces #1–#3
-> (per-tool scorecard embed snippet, leaderboard callout, `/badge` convention page) plus the build-time SVG render
-> (`badge-maker`) and the worker `image/svg+xml` content-type wiring landed on `feat/badge-surface` and merge into
-> `dev` ahead of the Show HN launch wave (Thu 2026-04-30 09:00 PT). Surface #4 (spec `docs/badge.md`) is deferred
-> post-launch — the `/badge` page is the canonical author-facing surface for launch, and the spec repo gets a
-> doctrinal mirror once the launch dust settles. Surface #5 (CLI hint after passing `anc check`) remains tracked
-> separately as `agentnative-cli` todo #017 (`017-pending-p1-agent-native-badge-hint-on-passing-check.md`),
-> post-launch.
+> **Status: all five surfaces shipped.** Site-side surfaces #1–#3 (per-tool scorecard embed snippet, leaderboard
+> callout, `/badge` convention page) plus the build-time SVG render (`badge-maker`) and the worker `image/svg+xml`
+> content-type wiring landed on `feat/badge-surface` and merged into `dev` ahead of the Show HN launch wave (Thu
+> 2026-04-30 09:00 PT). Surface #5 (CLI post-pass hint) shipped 2026-04-30 in
+> [agentnative-cli PR #36](https://github.com/brettdavies/agentnative-cli/pull/36). Surface #4 (spec `docs/badge.md`
+> doctrinal convention) shipped 2026-05-04 in
+> [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18) — completes U1+U2 with the four
+> formerly-TBD product decisions transcribed verbatim from the locked-decisions block below.
 >
 > **Decisions confirmed during the 2026-04-29 design pass:**
 >
@@ -138,18 +138,18 @@ Item 1 is the spec-side surface (#4 below). Items 2 and 3 are site-side surfaces
 The badge surface is implemented across five surfaces, four of which are launch-coupled. Spec owns surface 4; site owns
 surfaces 1, 2, and 3; CLI owns surface 5.
 
-| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                                        |
-| --- | ------------------------------------- | ------------------------------------- | -------------------- | --------------------------------------------- |
-| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29                          |
-| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29                          |
-| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29                          |
-| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | deferred — `/badge` page covers               |
-| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5) |
+| #   | Surface                               | Owner repo                            | Launch-wave?         | Status                                         |
+| --- | ------------------------------------- | ------------------------------------- | -------------------- | ---------------------------------------------- |
+| 1   | Per-tool scorecard page embed snippet | `agentnative-site` (this plan, U5)    | yes                  | ✅ shipped 2026-04-29                           |
+| 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29                           |
+| 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29                           |
+| 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | ✅ shipped 2026-05-04 (agentnative-spec PR #18) |
+| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5)  |
 
 > Site-side units U3–U7 (added during the 2026-04-29 implementation) cover surfaces 1–3 plus the build-time SVG render
-> (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 remain in this plan as
-> post-launch follow-up — the `/badge` page (surface #3) carries the doctrinal copy at launch, and the spec repo gets
-> a `docs/badge.md` mirror once the launch wave settles.
+> (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 shipped 2026-05-04 in
+> [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18) — `docs/badge.md` is now the
+> authoritative doctrinal text; the `/badge` page (surface #3) cross-links to it.
 
 This plan tracks U1+U2 (surface 4) explicitly; surfaces 1–3 are site-owned and tracked by additional units (or a
 separate site-side companion plan, depending on how the work is sliced when the launch-eve PR pair is cut). Surface 5
@@ -210,8 +210,8 @@ shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cl
 
 ### Resolved During Planning (2026-04-23 + 2026-04-29)
 
-- Does the badge require a minimum score? — **Yes.** Floor value still TBD (see Deferred), but the presence of a
-  threshold is non-negotiable.
+- Does the badge require a minimum score? — **Yes.** Floor locked 2026-04-29 at ≥80% pass-rate (single gate); see
+  locked-decisions block in the Status section above.
 - Does the spec own the render? — **No.** Spec owns the contract; site owns the SVG render via `badge-maker` at build
   time.
 - What model does the badge follow — universal sticker, per-tool static-text, or per-tool live-score? — **Per-tool
@@ -225,16 +225,16 @@ shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cl
 
 ### Deferred to Implementation
 
-- **Eligibility floor value** (the actual percentage cutoff that lets a tool legitimately embed the badge) — TBD. Draft
-  in U1, pressure-test before publishing.
-- **Score-text format** on the badge — `91%` vs `91/100` vs `6/7 principles met` vs some hybrid. Decide during U1 based
-  on what reads cleanest at badge size and aligns with the leaderboard's own score presentation.
-- **Color thresholds** for the badge — where green / yellow / red cut. Public commitment; should match the
-  scorecard-page styling so a reader sees the same color story across surfaces.
-- **Version-pinning convention in the URL or JSON** — `/badge/<tool>.svg` (always-latest) vs
-  `/badge/<tool>/<spec-version>.svg` (pinned). The SoT contract argues for visible spec_version somewhere; URL is
-  loudest, badge label text is quieter, scorecard JSON is invisible-but-citable.
-- Whether to require a minimum `anc` CLI version scored against — likely yes, but exact floor is a U1 call.
+- ✅ **Eligibility floor value** — resolved 2026-04-29: ≥80% pass-rate, single gate. See locked-decisions block above.
+- ✅ **Score-text format** — resolved 2026-04-29: `XX%` rounded percent. See locked-decisions block above.
+- ✅ **Color thresholds** — resolved 2026-04-29: ≥80% brightgreen, 60–79% yellow, <60% red. See locked-decisions block
+  above.
+- ✅ **Version-pinning convention** — resolved 2026-04-29: `/badge/<tool>.svg` always-latest; spec version surfaces in
+  the badge label (`agent-native vMAJOR.MINOR`), not the URL path. See locked-decisions block above.
+- Whether to require a minimum `anc` CLI version scored against — **still open.** Not resolved by spec-side U1; the
+  shipped `docs/badge.md` says "any reader can re-run the linter locally with `anc check .` against the cited spec
+  version" without specifying a floor. Filed as a future follow-up if a sufficiently old `anc` produces materially
+  different scores against the same spec version.
 
 ---
 
@@ -244,7 +244,8 @@ shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cl
 > not from this repo. Site-side surfaces 1–3 will be added as additional units (or a sibling plan) when the launch-eve
 > PR pair is cut.
 
-- [ ] U1. **Draft badge-claim convention** *(ships from `agentnative-spec`)*
+- [x] U1. **Draft badge-claim convention** *(shipped 2026-05-04 in
+  [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18))*
 
 **Goal:** Produce the prose that defines what claiming the badge means.
 
@@ -291,7 +292,8 @@ build step.
 
 ---
 
-- [ ] U2. **Wire references into top-level docs** *(ships from `agentnative-spec`)*
+- [x] U2. **Wire references into top-level docs** *(shipped 2026-05-04 in
+  [agentnative-spec PR #18](https://github.com/brettdavies/agentnative/pull/18))*
 
 **Goal:** Make the convention discoverable from the spec repo's entry points.
 
