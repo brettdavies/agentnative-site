@@ -7,11 +7,11 @@
 #   git config core.hooksPath scripts/hooks
 #
 # Steps mirror the CI workflow's build job:
-#   1. lint   — biome check + markdownlint-cli2
-#   2. build  — bun src/build/build.mjs
-#   3. tests  — bun test (unit + regression)
-# (wrangler dry-run is skipped here; it requires worker secrets and is
-# already enforced in CI.)
+#   1. lint     — biome check + markdownlint-cli2
+#   2. build    — bun src/build/build.mjs
+#   3. tests    — bun test (unit + regression)
+#   4. wrangler — wrangler deploy --dry-run (config + bundle validation,
+#                 no secrets required for --dry-run)
 #
 # To bypass intentionally (rare): `git push --no-verify`. Don't make this
 # a habit — the hook is here precisely to catch what we lost time to last.
@@ -43,5 +43,8 @@ bun run build
 
 bold '==> bun test'
 bun test
+
+bold '==> bun x wrangler deploy --dry-run'
+bun x wrangler deploy --dry-run
 
 bold '==> pre-push checks passed'
