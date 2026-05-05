@@ -588,62 +588,75 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
 
 ## Output Structure
 
+`[shipped]` lives on dev now, `[pending]` not yet started, `[mod]` an existing file modified on ship.
+
 ```text
 docker/
-  sandbox/                          # NEW — v3 image (Alpine + musl, no toolchains)
-    Dockerfile                      # FROM cf-sandbox:0.8.x-musl + apk install + anc bottle
-    README.md                       # build + push instructions, registry pin, troubleshooting
+  sandbox/                          # [shipped] — v3 image (Alpine + musl, no toolchains)
+    Dockerfile                      # [shipped] — cloudflare/sandbox:0.9.2-musl + apk install + anc bottle
+    README.md                       # [shipped] — build + push, SHA-pin bump, what's NOT in the image
+discovery-hints.yaml                # [shipped] — owner/repo -> {pm, package, binary} for U4 step 0.5
+registry.yaml                       # [mod] (existing) — single-source tools data; consumed by U1 + U4
 src/
   build/
-    registry-index.mjs              # NEW — emits dist/registry-index.json (dual-keyed)
-    score-page.mjs                  # NEW — emits dist/score.html form + dist/score.md twin
+    registry-index.mjs              # [shipped] — emits dist/registry-index.json + dist/discovery-hints-index.json
+    build.mjs                       # [mod] — calls emitBuildIndexes after loadRegistry
+    score-page.mjs                  # [pending] U8 — emits dist/score.html form + dist/score.md twin
   client/
-    live-score.ts                   # NEW — form submit + fetch + 2s theater + progress polling
+    live-score.ts                   # [pending] U8 — form submit + fetch + 2s theater + progress polling
   worker/
-    index.ts                        # MODIFIED — adds /api/score path-prefix branch
-    spec-version.gen.ts             # NEW (build-emitted) — SPEC_VERSION + SITE_SPEC_VERSION constants
-    score/                          # NEW — Worker-side score handler module
-      handler.ts                    # /api/score route entry; URL validate + rate limit + cache + DO route
-      validate.ts                   # Input validation (slug / install-command / GitHub URL)
-      parse-install.ts              # Install-command parser (brew/cargo/bun/uv/pip/npm/go/yarn/pnpm)
-      discover-binary.ts            # GitHub URL → binary discovery chain (4 steps)
-      registry-lookup.ts            # registry-index.json hit-test (slug + owner/repo)
-      cache.ts                      # R2 read/write keyed by scores/{slug}/{anc-v}/{tool-v}.json
-      do.ts                         # Sandbox DO class (extends Sandbox); singleton session
-      sandbox-exec.ts               # Two-phase egress + install + anc check + result parsing
-      response-shape.ts             # Adds spec_version + anc_version + checker_url; validates triad
-      content-negotiation.ts        # /api/score.md vs /api/score.json branching (extends accept.ts)
-      summary-render.ts             # buildScoreSummaryBody (header + score + top-3 + CTA, no check tables)
+    index.ts                        # [pending] U5 — adds /api/score path-prefix branch
+    spec-version.gen.ts             # [pending] U8 (build-emitted) — SPEC_VERSION + SITE_SPEC_VERSION constants
+    score/                          # [shipped] — Worker-side score handler module
+      validate.ts                   # [shipped] — input classification (slug / install-command / GitHub URL)
+      parse-install.ts              # [shipped] — install-command parser (brew/cargo/bun/uv/pip/npm/go/yarn/pnpm)
+      discover-binary.ts            # [shipped] — 4-step discovery chain with F1-tightened step 3
+      registry-lookup.ts            # [shipped] — registry-index + discovery-hints hit-test
+      handler.ts                    # [pending] U5 — /api/score route entry; URL validate + rate limit + cache + DO
+      cache.ts                      # [pending] U7 — R2 read/write keyed by scores/{slug}/{anc-v}/{tool-v}.json
+      do.ts                         # [pending] U6 (stub at U3) — Sandbox DO class (extends Sandbox)
+      sandbox-exec.ts               # [pending] U6 — two-phase egress + install + anc check + result parsing
+      response-shape.ts             # [pending] U5 — spec_version + anc_version + checker_url triad
+      content-negotiation.ts        # [pending] U5 — /api/score.md vs /api/score.json branching
+      summary-render.ts             # [pending] U8 — buildScoreSummaryBody (header + score + top-3 + CTA)
 dist/
-  registry-index.json               # NEW — emitted artifact (gitignored)
-  score.html                        # NEW — paste-input form page with install-anc CTA
-  score.md                          # NEW — markdown twin of /score
+  registry-index.json               # [shipped] — emitted artifact (gitignored), 96 slugs / 93 owner/repos
+  discovery-hints-index.json        # [shipped] — emitted artifact (gitignored), 3 seed hints
+  score.html                        # [pending] U8 — paste-input form page with install-anc CTA
+  score.md                          # [pending] U8 — markdown twin of /score
   js/
-    live-score.js                   # NEW — bundled output of src/client/live-score.ts
+    live-score.js                   # [pending] U8 — bundled output of src/client/live-score.ts
 tests/
-  worker.test.ts                    # MODIFIED — adds /api/score branch tests, extends CN preference list
-  score-handler.test.ts             # NEW — unit tests for handler.ts
-  score-validate.test.ts            # NEW — input validation matrix
-  score-parse-install.test.ts       # NEW — install-command parser table
-  score-discover-binary.test.ts     # NEW — GitHub URL discovery chain (mocked GitHub API)
-  score-cache.test.ts               # NEW — R2 cache read/write
-  score-response-shape.test.ts      # NEW — spec_version/anc_version/checker_url triad enforcement
-  registry-index.test.ts            # NEW — build-time emission test
-  score-contract.test.ts            # NEW — cross-validates /api/score JSON ↔ committed scorecards
+  worker.test.ts                    # [pending] U5 (modify) — adds /api/score branch tests, extends CN preferences
+  registry-index.test.ts            # [shipped] — build-time emission unit tests (22 tests)
+  regression.test.ts                # [mod] — adds regression #7 for live-scoring indexes (3 tests)
+  dockerfile-sandbox.test.ts        # [shipped] — static shape assertions on docker/sandbox/Dockerfile (12 tests)
+  score-validate.test.ts            # [shipped] — input validation matrix (21 tests)
+  score-parse-install.test.ts       # [shipped] — install-command parser table (33 tests)
+  score-discover-binary.test.ts     # [shipped] — GitHub URL discovery chain with mocked fetcher (18 tests)
+  score-registry-lookup.test.ts     # [shipped] — registry+hints lookup ordering + case-insensitive (10 tests)
+  score-handler.test.ts             # [pending] U5 — handler.ts unit tests
+  score-cache.test.ts               # [pending] U7 — R2 cache read/write
+  score-response-shape.test.ts      # [pending] U5 — spec_version/anc_version/checker_url triad enforcement
+  score-contract.test.ts            # [pending] U9 — cross-validates /api/score JSON ↔ committed scorecards
   e2e/
-    score.e2e.ts                    # NEW — Playwright form-submit happy path (chromium project, mocked API)
-    score-live.e2e.ts               # NEW — opt-in live sandbox project (excluded from default suite)
+    score.e2e.ts                    # [pending] U8 — Playwright form-submit happy path (chromium, mocked API)
+    score-live.e2e.ts               # [pending] U9 — opt-in live sandbox project (excluded from default suite)
 docs/
   plans/
     2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md  # this file (rewrite)
+  research/
+    2026-05-04-discovery-chain-hit-rate.md  # [shipped] — Pre-Implementation Validation gate write-up
   runbooks/
-    live-scoring-monitoring.md      # NEW — cost-watch, alert thresholds, common failures
-wrangler.jsonc                      # MODIFIED — adds containers, durable_objects, migrations,
+    live-scoring-monitoring.md      # [pending] U9 — cost-watch, alert thresholds, common failures
+scripts/
+  measure-discovery-hit-rate.mjs    # [shipped] — gate reproducer (local-only, not deployed)
+wrangler.jsonc                      # [pending] U3 — adds containers, durable_objects, migrations,
                                     #   r2_buckets, ratelimits bindings (mirror in env.staging)
 .github/workflows/
-  deploy.yml                        # MODIFIED — adds docker build + push step before wrangler deploy
-RELEASES.md                         # MODIFIED — adds v3 release procedure (image + migration + smoke)
-README.md                           # MODIFIED — mentions /score in the user-facing surface map
+  deploy.yml                        # [pending] U3 — adds docker build + push step before wrangler deploy
+RELEASES.md                         # [pending] U9 — adds v3 release procedure (image + migration + smoke)
+README.md                           # [pending] U8 — mentions /score in the user-facing surface map
 ```
 
 ---
@@ -794,9 +807,9 @@ Soft prerequisites (do not block U1, but block deployment):
 
 ## Pre-Implementation Validation
 
-**Status: PASSED 2026-05-04.** 76.0% tight hit rate against 50 trending CLI repos (≥70% threshold →
-`pass-ship-as-written`). Per-language: Rust 92% / Python 50% / Go 85% / JS 75%. Two findings absorbed back into the
-plan:
+**Status: PASSED 2026-05-04** ([PR #77](https://github.com/brettdavies/agentnative-site/pull/77), commit `078d233`)**.**
+76.0% tight hit rate against 50 trending CLI repos (≥70% threshold → `pass-ship-as-written`). Per-language: Rust 92% /
+Python 50% / Go 85% / JS 75%. Two findings absorbed back into the plan:
 
 - **F1 → U4 spec change.** The literal U4 step-3 predicates admit cross-registry name collisions (e.g. `cobra` on
   crates.io is an unrelated Python-Haskell joke crate, not `spf13/cobra`). U4 now requires per-registry repository-field
@@ -853,7 +866,28 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-- U1. **Build-time registry-index + discovery-hints index emission**
+### Shipping Progress (last updated 2026-05-04)
+
+| Unit | Status    | Shipping refs                                                                        |
+| ---- | --------- | ------------------------------------------------------------------------------------ |
+| U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd` |
+| U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` |
+| U3   | [pending] | needs U2 image pushed to docker.io to capture digest for `wrangler.jsonc`            |
+| U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca` |
+| U5   | [pending] | depends on U3 (bindings) + U4 (parser, shipped)                                      |
+| U6   | [pending] | depends on U2 (image, shipped) + U3 + U4 (shipped) + U5                              |
+| U7   | [pending] | depends on U3 + U6                                                                   |
+| U8   | [pending] | depends on U5                                                                        |
+| U9   | [pending] | cross-cutting; depends on U1-U8                                                      |
+
+**Phase 1 (foundation: data + image + parser) is complete.** Phase 2 (Worker DO + sandbox install + R2 cache) starts at
+U3. The Pre-Implementation Validation gate ([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead
+of Phase 1 and conditioned the U1, U4, U6, U8 specs via the F1 + F4 findings (see plan amend commit `08a9a24`).
+
+---
+
+- [x] U1. **Build-time registry-index + discovery-hints index emission** — shipped 2026-05-04
+  ([#78](https://github.com/brettdavies/agentnative-site/pull/78), `82b74dd`)
 
 **Goal:** Emit two precomputed JSON indexes at build time:
 
@@ -942,7 +976,10 @@ warnings on the current registry + hints; collision case caught by warning, not 
 
 ---
 
-- U2. **v3 sandbox image (Alpine + musl, no toolchains, anc bottle baked in)**
+- [x] U2. **v3 sandbox image (Alpine + musl, no toolchains, anc bottle baked in)** — shipped 2026-05-04
+  ([#79](https://github.com/brettdavies/agentnative-site/pull/79), `bf14daf`). Pinned to
+  `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` (the `0.8.x` reference below is plan-time placeholder; the actual
+  digest is in `docker/sandbox/Dockerfile`).
 
 **Goal:** Build `docker/sandbox/Dockerfile` as a strict-minimal Alpine + musl image carrying CF Sandbox 0.8.x-musl,
 package managers (apk, cargo-binstall, pip, npm, go runtime, brew if compatible), and a pre-built musl `anc` binary
@@ -1058,7 +1095,9 @@ bindings; first prod deploy is its own milestone PR with the migration explicitl
 
 ---
 
-- U4. **Input parser + GitHub URL discovery chain**
+- [x] U4. **Input parser + GitHub URL discovery chain** — shipped 2026-05-04
+  ([#80](https://github.com/brettdavies/agentnative-site/pull/80), `5ac59ca`). 91 new tests; F1 tightening landed as a
+  hard requirement on every step-3 predicate.
 
 **Goal:** Classify the user's input into one of four kinds (registry-slug, install-command, github-url, unknown), parse
 each into a structured `{package_manager, package_name, binary_name, repo?}` shape, and run the GitHub URL discovery
@@ -1625,22 +1664,22 @@ staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
 
 ## Risk Analysis & Mitigation
 
-| Risk                                                                                  | Likelihood | Impact             | Mitigation                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------- | ---------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Upstream musl release slips or doesn't pass review                                    | Med        | High (blocks plan) | Cross-repo plan filed first as Dependencies & Prerequisites with pre-addressed review concerns (artifact size, release-time delta, MSVC sibling matrix, runtime behavior). If rejected or stalls beyond bandwidth, **v3 PAUSES and returns to /plan-ceo-review** — compile-in-our-CI is NOT a silent fallback (reverses Premise #2). |
-| First-ever DO + Containers + R2 + migrations bindings — one-way gate                  | High       | High               | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                   |
-| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                    | Med        | Med                | Size assertion in `tests/dockerfile-sandbox.test.ts`. Per-build size delta in CI. Custom instance type as escape hatch (`{ vcpu: 1, memory_mib: 1024, disk_mb: 4096 }`). Brew if compatible adds the most weight; consider dropping if the cost/benefit is wrong.                                                                    |
-| HN spike >10× expected → cost overrun                                                 | Low        | Med                | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                  |
-| Cloudflare changes Sandbox SDK API mid-flight                                         | Low        | Med                | Pin `@cloudflare/sandbox@0.8.x` exact version; mirror Docker tag SHA-digest; review CF changelog before each version bump.                                                                                                                                                                                                           |
-| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)                | Low        | Med                | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                      |
-| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                      | Med        | Med                | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                    |
-| README parse heuristic misses installable tools (false-negative)                      | Med        | Low                | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                        |
-| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                   | Low        | Med                | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                 |
-| Two-phase egress race: `noHttp` not applied before `anc check` execs                  | Low        | Critical           | Sequential `await` between the two calls. Integration test asserts the order via stubbed handler call log.                                                                                                                                                                                                                           |
-| User pastes a private repo → 404 surface unhelpful                                    | Med        | Low                | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                        |
-| Discovery chain timeouts cascade and block the whole request                          | Low        | Med                | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                   |
-| Worker bundle size (Sandbox SDK + handler code) breaches 1 MiB Worker free-tier limit | Low        | Med                | Measure bundle size in CI (already part of build); if >900 KiB, switch to Workers paid plan ($5/mo) which raises the limit to 10 MiB.                                                                                                                                                                                                |
-| `audit_profile` from registry doesn't apply when scoring an unknown tool              | High       | Low                | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                   |
+| Risk                                                                                  | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**      | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke. |
+| First-ever DO + Containers + R2 + migrations bindings — one-way gate                  | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                     |
+| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                    | Med        | Med      | Size assertion in `tests/dockerfile-sandbox.test.ts`. Per-build size delta in CI. Custom instance type as escape hatch (`{ vcpu: 1, memory_mib: 1024, disk_mb: 4096 }`). Brew if compatible adds the most weight; consider dropping if the cost/benefit is wrong.                                                                      |
+| HN spike >10× expected → cost overrun                                                 | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                    |
+| Cloudflare changes Sandbox SDK API mid-flight                                         | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                       |
+| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)                | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                        |
+| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                      | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                      |
+| README parse heuristic misses installable tools (false-negative)                      | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                          |
+| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                   | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                   |
+| Two-phase egress race: `noHttp` not applied before `anc check` execs                  | Low        | Critical | Sequential `await` between the two calls. Integration test asserts the order via stubbed handler call log.                                                                                                                                                                                                                             |
+| User pastes a private repo → 404 surface unhelpful                                    | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                          |
+| Discovery chain timeouts cascade and block the whole request                          | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                     |
+| Worker bundle size (Sandbox SDK + handler code) breaches 1 MiB Worker free-tier limit | Low        | Med      | Measure bundle size in CI (already part of build); if >900 KiB, switch to Workers paid plan ($5/mo) which raises the limit to 10 MiB.                                                                                                                                                                                                  |
+| `audit_profile` from registry doesn't apply when scoring an unknown tool              | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                     |
 
 ---
 
