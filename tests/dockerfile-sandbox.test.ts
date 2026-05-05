@@ -79,7 +79,9 @@ describe('docker/sandbox/Dockerfile — package manager coverage', () => {
   test('cargo-binstall is installed (cargo-bins/cargo-binstall release)', async () => {
     const df = await loadDockerfile();
     expect(df).toContain('cargo-bins/cargo-binstall/releases/download/');
-    expect(df).toMatch(/cargo-binstall --version/);
+    // cargo-binstall uses `-V` for binary version (its `--version` is reserved
+    // for specifying the package version to install — different semantic).
+    expect(df).toMatch(/cargo-binstall -V/);
   });
 
   test('all four U4-supported pms have a runtime in the image: cargo-binstall, pip, npm, go', async () => {

@@ -77,7 +77,7 @@ RUN set -eux; \
     echo '15432865784b4aea8749673e7faf0f2939207f73f58c6aca4ba1b6b1e536df6a  /tmp/cb.tgz' | sha256sum -c -; \
     tar xzf /tmp/cb.tgz -C /usr/local/bin/ cargo-binstall; \
     rm /tmp/cb.tgz; \
-    cargo-binstall --version
+    cargo-binstall -V
 
 # `anc` musl bottle from agentnative-cli v0.3.1. Pinned URL + sha256
 # from the release's sha256sum.txt.

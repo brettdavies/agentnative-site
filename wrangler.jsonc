@@ -27,6 +27,50 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
+  // Live-scoring path (plan U3-U7) — first-ever stateful bindings on
+  // this Worker: DO + Container + R2 + rate-limit. The migrations entry
+  // below is a one-way gate: `new_sqlite_classes` MUST be used (not the
+  // legacy `new_classes`) so the DO is created with SQLite-backed
+  // storage. Reverting needs a follow-up migration with
+  // `deleted_classes`; documented in RELEASES.md once U9 lands.
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      // Image pinned by digest, not tag. Tags can be force-moved
+      // upstream; digests can't. Bump procedure: rebuild + push, then
+      // replace this digest + the trailing version comment.
+      "image": "docker.io/brettdavies/anc-sandbox@sha256:f4cc85fa6e39ab5a7901bbf7f291228e04e36fe126f0ca994c793800b8288ad4", // v3-rc1 (2026-05-04)
+      "instance_type": "basic",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "SCORE"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SCORE_CACHE",
+      "bucket_name": "anc-score-cache"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SCORE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 10, "period": 60 }
+    }
+  ],
   // Production (top-level): anc.dev custom domain, no .workers.dev URL.
   // Deployed via `wrangler deploy` (no --env flag) on push to main.
   // Cloudflare auto-provisions SSL cert + DNS CNAME for the custom domain.
@@ -36,9 +80,59 @@
   // workers.dev only — no custom domain. The staging-noindex guard in
   // src/worker/headers.ts adds X-Robots-Tag: noindex on *.workers.dev.
   // Deploy with: wrangler deploy --env staging
+  //
+  // Wrangler env semantics: SOME keys inherit from top-level, others
+  // (durable_objects, containers, migrations, ratelimits, r2_buckets)
+  // do NOT — wrangler warns when they're missing under an env. Mirror
+  // every live-scoring binding under env.staging explicitly. The
+  // staging Worker name (agentnative-site-staging) namespaces the DO
+  // instances away from prod automatically; the R2 bucket name + the
+  // rate-limit namespace_id need explicit staging suffixes.
   "env": {
     "staging": {
-      "workers_dev": true
+      // Explicit name needed under env.staging because the containers
+      // app-name derivation (worker-name + class-name) doesn't follow
+      // wrangler's automatic `<top>-<env>` env-suffix convention for
+      // containers. With this set, the staging container is named
+      // `agentnative-site-staging-sandbox` and is distinct from prod's
+      // `agentnative-site-sandbox`.
+      "name": "agentnative-site-staging",
+      "workers_dev": true,
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          "image": "docker.io/brettdavies/anc-sandbox@sha256:f4cc85fa6e39ab5a7901bbf7f291228e04e36fe126f0ca994c793800b8288ad4", // v3-rc1 (2026-05-04)
+          "instance_type": "basic",
+          "max_instances": 3
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "class_name": "Sandbox",
+            "name": "SCORE"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["Sandbox"]
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "SCORE_CACHE",
+          "bucket_name": "anc-score-cache-staging"
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "SCORE_LIMITER",
+          "namespace_id": "1002",
+          "simple": { "limit": 10, "period": 60 }
+        }
+      ]
     }
   }
   // Smart Placement intentionally NOT set: this is a static-asset + CN
