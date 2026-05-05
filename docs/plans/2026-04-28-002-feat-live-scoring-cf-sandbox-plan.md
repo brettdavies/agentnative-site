@@ -103,12 +103,15 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
 - **R7. Security.** (a) URL validation at the Worker boundary: HTTPS-only; for GitHub URL input, host allowlist of
   `github.com` / `api.github.com` / `raw.githubusercontent.com`; reject `http://`, `file://`, `ftp://`, RFC1918,
   link-local, IPv6 ULA, cloud-metadata IPs; ASCII-only host check (homoglyph SSRF). (b) Two-phase egress inside the
-  sandbox: `setOutboundByHost` to the resolved install host(s) during install → `setOutboundHandler("noHttp")` before
-  `anc check` runs. TLS interception is on by default per-instance (CF Sandbox SDK 0.8.x).
+  sandbox: `setOutboundBy{Host,Hosts}` to the resolved install host(s) during install referencing a registered
+  `allowedInstall` SubWorker handler → `setOutboundHandler("noHttp")` referencing a registered `noHttp` SubWorker
+  handler before `anc check` runs (handlers are USER-DEFINED on the DO subclass, not built-in SDK verbs; see
+  K-decision). TLS interception is on by default per-instance (CF Sandbox SDK 0.9.x).
 - **R8. No toolchains in the sandbox image.** `anc` is downloaded as a pre-built musl binary from
   `github.com/brettdavies/agentnative-cli/releases/...` at image build time. The image carries package managers (apk,
-  cargo-binstall, pip, npm, go runtime, brew if compatible) but NOT compilers. Tools that require source compilation
-  MUST bounce out with R9's CTA.
+  cargo-binstall, pip, npm, go) but NOT compilers other than what apk's go package transitively ships (the Alpine `go`
+  package is the full toolchain — Alpine doesn't split runtime/toolchain; see `go install` K-decision for the
+  reconciliation). Tools that require source compilation MUST bounce out with R9's CTA.
 - **R9. Install-anc-locally CTA is primary.** The web result is summary + top-3 issues + a one-line install command
   (`brew install agentnative` or `cargo install agentnative`) + a "run `anc check .` in your project" snippet. Full
   scorecard depth (source checks, project checks, all checks) lives in local `anc` only. The web is the demo, not the
@@ -208,8 +211,10 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
 
 [docs/solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md](../solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md)
 — THE foundational v3 doc. Alpine + musl, ~100-200 MB, `basic` instance, install via apk / cargo binstall / pip wheel /
-npm — never toolchains. Two-phase egress (`allowHosts` → `noHttp`). Bump tag from `0.7.4-musl` to the chosen
-`0.8.x-musl` SHA-pinned digest; verify the `libstdc++` copy is still required on 0.8.x. -
+npm. The doc's "never toolchains" framing was relaxed during U2 (Alpine's `go` package ships the full toolchain — see
+`go install` K-decision reconciliation). Two-phase egress (`allowedInstall` → `noHttp`) — both are user-defined
+SubWorker handler names per SDK 0.9.x. Image now ships `cloudflare/sandbox:0.9.2-musl` SHA-pinned; the `libstdc++` copy
+was empirically confirmed redundant 2026-05-05 (apk's `libstdc++-14.2.0-r4` provides it transitively). -
 [docs/solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md](../solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md)
 — registry-known = theater (cached JSON + cosmetic 2-3 s spinner) is the source of v3's R2 framing, not v3's invention.
 Two-path split: known → static, unknown → container, R2-cached on `(input, version)`. 95%+ cached = ~$0; 90/10 = ~$2/mo;
@@ -274,10 +279,8 @@ after the Container build step is added.
 [2026-04-13 Sandbox GA + outbound + TLS changelog](https://developers.cloudflare.com/changelog/post/2026-04-13-sandbox-outbound-workers-tls-auth/)
 
 - [2026-03-26 Outbound Workers changelog](https://developers.cloudflare.com/changelog/post/2026-03-26-outbound-workers/)
--
-
-[2026-03-24 Docker Hub direct images changelog](https://developers.cloudflare.com/changelog/post/2026-03-24-docker-hub-images/)
-
+- [Container image management](https://developers.cloudflare.com/containers/platform-details/image-management/) — CF
+  managed registry, inline build via `image: "./Dockerfile"`, `wrangler containers push` for CI workflows
 - [2025-11-21 active-CPU pricing](https://developers.cloudflare.com/changelog/post/2025-11-21-new-cpu-pricing/)
 - [GitHub REST API — Releases](https://docs.github.com/en/rest/releases/releases)
 - [Homebrew formulae JSON API](https://formulae.brew.sh/docs/api/)
@@ -295,34 +298,54 @@ after the Container build step is added.
 
 ## Key Technical Decisions
 
-- **Image base: Alpine + musl, ~100-300 MB, `basic` instance type singleton.** Restores design Premise #2 + #6. Reverses
-  v2's silent re-glibc to Debian-trixie-slim. Cost ceiling holds: ~$0.25-0.75/day during HN spike, ~$22/mo absolute
-  worst case (24/7 awake, which won't happen with `sleepAfter`). The 8 GB-disk `standard-1` premise that v2 carried is
-  wrong for this workload.
+- **Image base: Alpine + musl, 221 MB compressed (measured 2026-05-05), `basic` instance type pool of 3.** Restores
+  design Premise #2 + #6. Reverses v2's silent re-glibc to Debian-trixie-slim. The earlier "100-300 MB" estimate was
+  optimistic-correct (P1 backlog "likely 400-600 MB" was overestimated and is now resolved). Cost ceiling re-derived
+  against current pricing (see DO+Containers pairing K-decision below for the awake-idle correction): ~$0.25-0.75/day
+  active during HN spike with rate-limit; up to ~$21/mo passive when 3 instances are awake-idle (memory + disk billed)
+  and ~$0 when sleeping. The 8 GB-disk `standard-1` premise that v2 carried is wrong for this workload.
 - **`anc` binary: pre-built musl bottle, downloaded at image build time from the upstream `x86_64-unknown-linux-musl`
   release artifact.** Hard prerequisite (see Dependencies & Prerequisites). The Dockerfile's anc-install layer pins to a
   SHA-resolved release URL, never a moving tag. We do NOT compile `anc` inside our pipeline — keeps single source of
   truth at agentnative-cli.
-- **Sandbox SDK pin: `@cloudflare/sandbox@0.8.x` (≥0.8.9), musl variant tag (`:0.8.x-musl`).** Runtime outbound handlers
-  require 0.8.9+. Mirror the SDK npm version EXACTLY in the Dockerfile `COPY
-  --from=docker.io/cloudflare/sandbox:0.8.x-musl ...` line — the SDK warns on mismatch. Verify on 0.8.x whether the
-  `libstdc++.so.6` copy from the cf-sandbox-secure-cli-execution learning is still required (was true on 0.7.4-musl).
+- **Sandbox SDK pin: `@cloudflare/sandbox@0.9.x`, musl variant tag (`:0.9.x-musl`).** Shipped Dockerfile pins
+  `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` (digest, not tag — bump procedure documented in
+  `docker/sandbox/README.md`). Mirror the SDK npm version EXACTLY in the worker bundle's `@cloudflare/sandbox`
+  dependency — the SDK warns on mismatch. Note: the `0.9.2-musl` tag exists on Docker Hub but is NOT documented on CF's
+  Sandbox Dockerfile-reference page; an undocumented variant could be deprecated without notice — capture as a Risk row.
+  **`libstdc++.so.6` resolved (2026-05-05):** apk's `libstdc++-14.2.0-r4` (transitive dep of `nodejs`/`go`) provides it
+  on Alpine 3.21; the explicit `COPY --from=sandbox-base /usr/lib/libstdc++.so.6` at Dockerfile line 47 is redundant and
+  can be dropped (saves ~2.79 MB uncompressed; verified by building a no-stdcxx variant and resolving `ldd /sandbox`
+  cleanly).
 - **DO + Containers pairing: SQLite-backed DO (`new_sqlite_classes`).** Mandatory for Container DOs; key-value backend
-  not supported. **Pool of 3 instances** via `getRandom(env.SCORE, 3)` (NOT a singleton). Default sized for HN-spike
-  concurrency: per-instance throughput is ~1-2 req/min sustained (cold start 1-3s + install 10-30s + score 5-15s,
-  sequential `exec()` per instance), so 3 instances yield ~3-6 req/min sustained. The "12-30 req/min" figure that
-  earlier drafts carried was wrong (silently assumed parallelism that the singleton design didn't have). During U6
-  implementation, measure actual install + score timings on `basic` and adjust the pool size if measured throughput is
-  materially below estimate. Cost stays bounded: idle instances cost storage only ($0.50/mo each), active CPU is the
-  dominant line item and is capped by `SCORE_LIMITER`.
+  not supported. Worker version rollback is constrained: `wrangler rollback` only works among versions on the SAME side
+  of a DO migration boundary. Once migration v1 (`new_sqlite_classes: ["Sandbox"]`) ships, you can roll back to any
+  post-v1 version but NOT to a pre-v1 version. Cross-migration rollback requires a follow-up migration with
+  `deleted_classes`, which is the documented recipe in the runbook. **Pool of 3 instances** via `getRandom(env.SCORE,
+  3)` (NOT a singleton). Local measurement (2026-05-05, dev hardware): ripgrep install + score = 3 s total (cargo-
+  binstall 3 s, anc check <1 s). On CF Containers `basic` (1/4 vCPU, network egress different from local) project
+  conservative ~5x slowdown → ~15 s per request, so per-instance throughput is ~4 req/min sustained, 3 instances yield
+  ~12 req/min sustained. The earlier estimate of "1-2 req/min per instance, 10-30 s install, 5-15 s score" was
+  pessimistic. Larger packages (npm with many deps, pip with no wheel) will trend slower; rerun the measurement on CF
+  `basic` during U6 with at least one cargo-binstall, one pip-wheel, and one npm tool to validate before shipping. Cost
+  framing (corrected 2026-05-05 against current Containers pricing): a `basic` instance has TWO idle states —
+  **sleeping** (~$0.50/mo each, only storage billed) and **awake-idle** (~$7/mo each, memory + disk both billed while
+  warm). The 3-instance pool's idle cost ranges from ~$0 (all asleep) to ~$21/mo (all awake-idle). The earlier "$22/mo
+  absolute worst case" framing happens to match all-awake-idle, NOT "24/7 awake under load" — clarify in RELEASES.md
+  cost notes. Active CPU is the dominant line item under load and is capped by `SCORE_LIMITER`.
 - **R2 cache key: `scores/{tool-slug}/{anc-version}/{tool-version-or-sha7}.json`.** Includes `anc-version` per the
   versioned-scorecard pattern so `anc` upgrades auto-invalidate. Refuse to cache (and refuse to read from cache) if
   `anc_version` or `tool_version` is missing — fail-fast, no half-state.
-- **Two-phase egress (non-negotiable per R7).** Phase 1: `setOutboundByHost(<install-host>, "allowedInstall")` — the
-  install host is whichever the resolver picked (`formulae.brew.sh`, `crates.io` + `static.crates.io`,
-  `registry.npmjs.org`, `pypi.org` + `files.pythonhosted.org`, `proxy.golang.org`, or `github.com` for direct binary
-  downloads). Phase 2: `setOutboundHandler("noHttp")` before `anc check` runs. TLS interception is on by default; no
-  explicit configuration needed.
+- **Two-phase egress (non-negotiable per R7).** `noHttp` and `allowedInstall` are USER-DEFINED handler names, NOT
+  built-in SDK verbs (per https://developers.cloudflare.com/sandbox/guides/outbound-traffic/). Both must be registered
+  on the Sandbox DO subclass via `outboundHandlers = { allowedInstall: <SubWorker>, noHttp: <SubWorker> }` before
+  `setOutboundBy*` / `setOutboundHandler` calls work — see U6 architecture sub-task. Phase 1: for a single host,
+  `setOutboundByHost(host, "allowedInstall")`; for multiple hosts (e.g. `crates.io` + `static.crates.io`),
+  `setOutboundByHosts(hostList, "allowedInstall")` (plural). Install host is whichever the resolver picked
+  (`formulae.brew.sh`, `crates.io` + `static.crates.io`, `registry.npmjs.org`, `pypi.org` + `files.pythonhosted.org`,
+  `proxy.golang.org`, or `github.com` for direct binary downloads). Phase 2: `setOutboundHandler("noHttp")` before `anc
+  check` runs — switches the global default handler to `noHttp` (which the SubWorker should implement as a 403
+  response). TLS interception is on by default; no explicit configuration needed for that piece.
 - **Per-package-manager script-execution audit (security baseline).** Phase 1 egress is open to install hosts; any
   install-time code execution during Phase 1 inherits that egress. Audit per package manager so no install path silently
   grants arbitrary egress to attacker-controlled code:
@@ -339,11 +362,20 @@ after the Container build step is added.
   `--ignore-scripts`** when invoking from sandbox. Update U6 install table accordingly.
 - **`uv tool install`:** uv installs Python packages into isolated venvs; wheels are preferred and sdist execution
   requires explicit opt-in. Default behavior is safe; document the implicit assumption.
-- **`go install`:** downloads source and compiles. We do NOT ship a Go toolchain in the image. `go install` is therefore
-  unreachable from the sandbox; if the resolver picks the `go install` path, the install fails fast with `go: command
-  not found` → bounce out with R9 CTA. Document this as an explicit non-support: `go install` is recognized by the
-  parser for input classification (so we know the user's intent) but always fails to install → bounce-out. Same as
-  compilation-only Rust crates.
+- **`go install`:** downloads source and compiles. **Reconciled with shipped reality (2026-05-05):** Dockerfile line 67
+  ships `apk add go`, which is the FULL Alpine Go toolchain (Alpine doesn't split runtime/toolchain), so `go install
+  <module>@latest` WILL succeed by compiling the module from source inside the sandbox. The earlier framing of "no
+  toolchain → fails fast / bounce out" was wrong; this row needs the security implications spelled out explicitly. With
+  Phase 1 egress open to `proxy.golang.org` AND the toolchain available, `go install` runs attacker-controlled Go source
+  code through `gc` with the same egress as the install host — equivalent in blast-radius to npm `install` scripts
+  before `--ignore-scripts`. **Decision deferred to U6 implementation:** either (a) accept the risk and rely on sandbox
+  isolation as the only mitigation (consistent with how `pip install`'s sdist execution is treated when wheels aren't
+  available — except we BLOCK that with `--only-binary`, while we currently don't block `go install`'s compilation); (b)
+  drop `go` from the apk install line and bounce out any go-resolved input (smaller image, simpler security story, loses
+  Go-tool coverage in live scoring); (c) keep the toolchain but front `go install` with a Worker-side reject on the
+  orchestrator path (parser admits `go install` for classification only, U6's install table refuses to invoke it). Pick
+  before U6 codes the install table. Image-size impact of removing the Go toolchain: roughly ~150 MB uncompressed in the
+  apk layer, ~50 MB compressed — would shrink the 221 MB total image to ~170 MB compressed if dropped.
 - **`brew install`:** brew runs install + post-install scripts during formula installation. Scripts execute with Phase 1
   egress. **Mitigated by dropping brew from the sandbox image entirely** (per Finding F3, Linuxbrew requires glibc and
   is not viable on Alpine/musl). Brew-only tools bounce out with R9 CTA. The install-table entry for `brew install
@@ -389,9 +421,23 @@ after the Container build step is added.
   architectural line: Worker enforces SSRF, sandbox enforces egress (two-phase egress, `noHttp` before `anc check`).
 - Test scenario added to U5 (response-shape) and U4 (discover-binary): "Worker rejects discovery fetch that redirects to
   an RFC1918 address with a documented error code, never follows."
-- **Container image registry: Docker Hub direct (since 2026-03-24).** `image: "docker.io/<ns>/<repo>:<tag>"` in
-  `wrangler.jsonc` — no push-to-CF-registry round-trip. Build + push runs in `.github/workflows/deploy.yml` before
-  `wrangler deploy`. Image lives at `docker.io/brettdavies/anc-sandbox:<tag>`.
+- **Container image registry: Cloudflare managed registry via inline build (Way 1).** `image:
+  "./docker/sandbox/Dockerfile"` in `wrangler.jsonc` — `wrangler deploy` builds the image and pushes to
+  `registry.cloudflare.com` (R2-backed, account-scoped) using the existing `CF_API_TOKEN`. No Docker Hub credentials, no
+  Docker Hub pull-rate-limit exposure at sandbox cold-start. The account ID stays out of `wrangler.jsonc` (per
+  `account-id-out-of-public-repo-2026-04-14`) because wrangler resolves it from auth at deploy time, not from a literal
+  URI in config. Image immutability shifts from a `@sha256:` literal in config to a Worker-version-bound image push;
+  rollback strategy is constrained by DO migrations (see Risk Analysis row "DO migration blocks `wrangler rollback`").
+  CI caching strategy is pending empirical validation: `cloudflare/wrangler-action`'s docker invocation isn't publicly
+  documented, so it's unknown whether it honors a buildx layer cache (`docker/setup-buildx-action` + `cache-from/to:
+  type=gha`) or only plain `docker build`. U3 includes a sub-task to measure first-deploy and warm-rebuild times and
+  pick the matching cache backend. Worst case (no cache): every deploy pays the full image build (~5-8 min on
+  first-ever; faster on subsequent if Docker daemon layer cache survives between runs); best case (layer cache hits):
+  site-only deploys pay ~30-60 s for cache validation, image-source-changed deploys ~2-4 min for partial rebuild + push.
+  The decoupled-workflow alternative (separate image-build pipeline pushing to CF registry, deploy referencing
+  `registry.cloudflare.com/<account-id>/...:<tag>`) was rejected because the literal account ID in `wrangler.jsonc`
+  violates the existing rule; the templated-config workaround (Way 2) is deferred as YAGNI until measured wall-clock
+  cost actually bites.
 - **Registry-index emission at build time.** `src/build/registry-index.mjs` emits `dist/registry-index.json`. Includes
   BOTH a tool-slug index (`{ "ripgrep": { ... } }`) and a `owner/repo` index (`{ "BurntSushi/ripgrep": { ... } }`) so
   the Worker can do an O(1) lookup whether the input was a slug or a URL. `audit_profile` is included so the live path
@@ -421,7 +467,11 @@ after the Container build step is added.
   limits bite in production.
 - **Rate limit primitive (binding vs DO):** Workers Rate Limiting binding for v3. Upgrade later if needed.
 - **R2 cache key shape:** `scores/{tool-slug}/{anc-version}/{tool-version-or-sha7}.json`. Includes `anc-version`.
-- **Container image registry:** Docker Hub direct (post-2026-03-24 capability).
+- **Container image registry:** Cloudflare managed registry via inline build (`image: "./docker/sandbox/Dockerfile"`).
+  Reverses the earlier "Docker Hub direct" call after a wall-clock + auth-surface comparison: Way 1 (build inline during
+  `wrangler deploy` with BuildKit layer cache) was selected over Docker Hub direct AND over the decoupled CF-registry
+  workflow (rejected because the registry URI exposes account ID in `wrangler.jsonc`). Cost: ~30-60 s of
+  cache-validation overhead on site-only deploys.
 - **Registry-fast-path detection:** precomputed `dist/registry-index.json` at build time, dual-keyed (slug +
   owner/repo).
 - **Web result shape:** summary + top-3 issues + install-anc-locally CTA. Full check tables + meta deferred to local
@@ -491,11 +541,12 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
 
 #### Feasibility / engineering (P1, 5 items)
 
-- **Image size budget likely 400-600 MB, not 100-300 MB** (feasibility, adversarial). Realistic Alpine + apk packages +
-  cargo-binstall + pip + npm + go runtime is closer to 350-500 MB compressed. The "100-300 MB" claim in the REWRITE NOTE
-  is aspirational, not measured. Build U2 first, measure, then either (a) drop heaviest contributor (Go runtime — ~150
-  MB, used only for the `go install` discovery path which we now know fails fast in the sandbox per the script-execution
-  audit) or (b) raise the threshold honestly.
+- **Image size budget — RESOLVED 2026-05-05.** Measured 221 MB compressed via `docker save | gzip | wc -c` against the
+  shipped `docker/sandbox/Dockerfile` (cloudflare/sandbox:0.9.2-musl + apk install + cargo-binstall + anc bottle). P1
+  pessimism (400-600 MB) was wrong; original "100-300 MB" claim correct. Image fits the `basic` instance disk (4 GB)
+  with ~12x headroom. The "drop Go toolchain" lever is still available (~50 MB compressed savings) but is now decoupled
+  from a size constraint and must be evaluated on its security+coverage tradeoffs alone (see go install K-decision
+  reconciliation).
 - **Polling architecture POST-holds-connection vs 202+poll undefined** (feasibility, design). Plan describes both
   shapes. POST returning 200 with full scorecard means the connection holds for 30-60s; client polling `?session=`
   during that hold doesn't make sense unless POST returns 202 immediately with a session ID. Pick one model in U5/U8:
@@ -593,8 +644,17 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
 ```text
 docker/
   sandbox/                          # [shipped] — v3 image (Alpine + musl, no toolchains)
+                                    #   Used by: CF runtime live-scoring of user-pasted tools (this plan).
+                                    #   NOT used for batch-scoring the registry (that's docker/score/).
     Dockerfile                      # [shipped] — cloudflare/sandbox:0.9.2-musl + apk install + anc bottle
-    README.md                       # [shipped] — build + push, SHA-pin bump, what's NOT in the image
+    README.md                       # [shipped/mod] U3 — local-build recipe + Dockerfile SHA-pin
+                                    #   discipline + what's NOT in the image; production push moves
+                                    #   inline to `wrangler deploy` per U3 (CF managed registry)
+  score/                            # [shipped, pre-existing] — out of scope for THIS plan
+                                    #   Debian/glibc batch-scoring image used by scripts/regen-scorecards.sh
+                                    #   to produce dist/scorecards/*.json from registry.yaml.
+                                    #   Orthogonal to docker/sandbox/ (different OS, different purpose, much
+                                    #   larger). Documented here for inventory completeness; do not merge.
 discovery-hints.yaml                # [shipped] — owner/repo -> {pm, package, binary} for U4 step 0.5
 registry.yaml                       # [mod] (existing) — single-source tools data; consumed by U1 + U4
 src/
@@ -654,7 +714,10 @@ scripts/
 wrangler.jsonc                      # [pending] U3 — adds containers, durable_objects, migrations,
                                     #   r2_buckets, ratelimits bindings (mirror in env.staging)
 .github/workflows/
-  deploy.yml                        # [pending] U3 — adds docker build + push step before wrangler deploy
+  deploy.yml                        # [pending] U3 — image build runs inside `wrangler deploy` via
+                                    #   `image: "./docker/sandbox/Dockerfile"` (no separate push step,
+                                    #   no Docker Hub credentials); cache backend (buildx + type=gha
+                                    #   vs none) picked by the U3 caching-measurement sub-task
 RELEASES.md                         # [pending] U9 — adds v3 release procedure (image + migration + smoke)
 README.md                           # [pending] U8 — mentions /score in the user-facing surface map
 ```
@@ -801,7 +864,8 @@ Soft prerequisites (do not block U1, but block deployment):
   the `CLOUDFLARE_API_TOKEN` used by `deploy.yml`. Mint via 1Password per
   `cloudflare-api-token-headless-wrangler-1password-2026-04-13`.
 - R2 bucket created: `anc-score-cache` (prod) + `anc-score-cache-staging` (staging).
-- Docker Hub repo created: `docker.io/brettdavies/anc-sandbox` with push access for the deploy workflow.
+- CF managed registry will be auto-provisioned by `wrangler deploy` on first deploy of the Sandbox container; no Docker
+  Hub repo needed (image lives at `registry.cloudflare.com/<account>/...` after first deploy).
 
 ---
 
@@ -866,13 +930,13 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-### Shipping Progress (last updated 2026-05-04)
+### Shipping Progress (last updated 2026-05-05)
 
 | Unit | Status    | Shipping refs                                                                        |
 | ---- | --------- | ------------------------------------------------------------------------------------ |
 | U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd` |
 | U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` |
-| U3   | [pending] | needs U2 image pushed to docker.io to capture digest for `wrangler.jsonc`            |
+| U3   | [pending] | image build moves inline (`image: ./docker/sandbox/Dockerfile`); no docker.io push   |
 | U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca` |
 | U5   | [pending] | depends on U3 (bindings) + U4 (parser, shipped)                                      |
 | U6   | [pending] | depends on U2 (image, shipped) + U3 + U4 (shipped) + U5                              |
@@ -981,9 +1045,11 @@ warnings on the current registry + hints; collision case caught by warning, not 
   `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` (the `0.8.x` reference below is plan-time placeholder; the actual
   digest is in `docker/sandbox/Dockerfile`).
 
-**Goal:** Build `docker/sandbox/Dockerfile` as a strict-minimal Alpine + musl image carrying CF Sandbox 0.8.x-musl,
-package managers (apk, cargo-binstall, pip, npm, go runtime, brew if compatible), and a pre-built musl `anc` binary
-downloaded from the agentnative-cli release. NO compilers, NO toolchains. Image budget: ~100-300 MB.
+**Goal:** Build `docker/sandbox/Dockerfile` as a strict-minimal Alpine + musl image carrying CF Sandbox 0.9.x-musl,
+package managers (apk, cargo-binstall, pip, npm, go), and a pre-built musl `anc` binary downloaded from the
+agentnative-cli release. NO compilers other than what apk's go package transitively ships (see `go install` K-decision).
+Brew is intentionally omitted (Linuxbrew requires glibc, non-viable on Alpine). Image budget: ≤350 MB compressed;
+**measured 221 MB compressed at v3-rc1 (2026-05-05)**.
 
 **Requirements:** R4, R8, R12 (image must fit `basic` instance type and stay under cost ceiling).
 
@@ -993,8 +1059,10 @@ downloaded from the agentnative-cli release. NO compilers, NO toolchains. Image 
 
 - Create: `docker/sandbox/Dockerfile`
 - Create: `docker/sandbox/README.md`
-- Test: `tests/dockerfile-sandbox.test.ts` (asserts image-size assertion via `docker image inspect` ≤350 MB; optional in
-  CI behind a docker-available guard)
+- Test: `tests/dockerfile-sandbox.test.ts` — plan-time intent was "asserts image-size assertion via `docker image
+  inspect` ≤350 MB; optional in CI behind a docker-available guard." Shipped reality: only static-text assertions on
+  Dockerfile shape (no docker daemon usage, no size check). Captured as a Risk-row gap; fold into RELEASES.md or a CI
+  guard before re-litigating.
 
 **Approach:**
 
@@ -1035,7 +1103,8 @@ downloaded from the agentnative-cli release. NO compilers, NO toolchains. Image 
 - Integration: image runs in `wrangler dev --local` mode; `sandbox.exec("anc --version")` returns the baked-in version.
 
 **Verification:** Image builds, fits `basic` instance type (1 GiB RAM / 4 GB disk), runs `anc --version` via the Sandbox
-SDK. README documents the build-and-push workflow and the SHA-pin recipe.
+SDK. README documents the local-build workflow and the Dockerfile SHA-pin recipe (production push moves to `wrangler
+deploy` per U3).
 
 ---
 
@@ -1046,30 +1115,56 @@ dry-run gate must pass before push.
 
 **Requirements:** R4, R5, R6. Foundational for U5-U7.
 
-**Dependencies:** U2 (image must exist for `containers[].image` to reference).
+**Dependencies:** U2 (Dockerfile must exist for `containers[].image` to reference; `wrangler deploy` builds it inline on
+each deploy).
 
 **Files:**
 
 - Modify: `wrangler.jsonc` (top-level + `env.staging` parallel bindings)
 - Modify: `src/worker-configuration.d.ts` (regenerated via `bun run types`)
 - Modify: `package.json` (verify `bun run types` runs `wrangler types`)
+- Modify: `.github/workflows/deploy.yml` (cache backend for the inline image build TBD per the caching-measurement
+  sub-task below; do NOT pre-commit to `docker/setup-buildx-action` + `actions/cache@v4` until measurements show that
+  pattern actually pays off given `cloudflare/wrangler-action`'s docker invocation)
+- Modify: `docker/sandbox/README.md` (mark the explicit `docker push` recipe as "optional, for local image testing";
+  production ships via `wrangler deploy` against the CF managed registry)
 - Test: regression check that `wrangler deploy --dry-run` succeeds (already covered by pre-push hook)
 
 **Approach:**
 
 - Add to top-level `wrangler.jsonc`:
-- `containers: [{ class_name: "Sandbox", image: "docker.io/brettdavies/anc-sandbox:<sha-pinned-tag>", instance_type:
-  "basic", max_instances: 3 }]`
+- `containers: [{ class_name: "Sandbox", image: "./docker/sandbox/Dockerfile", instance_type: "basic", max_instances: 3
+  }]` — `image:` is a Dockerfile path, NOT a registry URI. `wrangler deploy` builds the image and pushes to the
+  Cloudflare managed registry (R2-backed, account-scoped) as part of deploy, authenticated via `CF_API_TOKEN`. Avoids
+  putting the account ID in `wrangler.jsonc` (per `account-id-out-of-public-repo-2026-04-14`); avoids Docker Hub
+  credentials and Docker Hub pull-rate-limit exposure at sandbox cold-start.
 - `durable_objects: { bindings: [{ class_name: "Sandbox", name: "SCORE" }] }`
 - `migrations: [{ tag: "v1", new_sqlite_classes: ["Sandbox"] }]` — must be `new_sqlite_classes`, not legacy
   `new_classes`. This is the ONE-WAY gate.
 - `r2_buckets: [{ binding: "SCORE_CACHE", bucket_name: "anc-score-cache" }]`
 - `ratelimits: [{ name: "SCORE_LIMITER", namespace_id: "1001", simple: { limit: 10, period: 60 } }]`
 - Mirror all bindings in `env.staging` with staging-suffixed names: `anc-score-cache-staging`, distinct DO namespace,
-  distinct ratelimit namespace.
+  distinct ratelimit namespace. The staging `image:` value is the SAME Dockerfile path; the staging Worker name
+  (`agentnative-site-staging`) is what namespaces the resulting CF-registry image distinct from prod. Verify at
+  implementation time that prod and staging produce distinct image tags by inspecting `wrangler containers images list`
+  after the first staging+prod deploys.
 - Stub the `Sandbox` DO class export in `src/worker/score/do.ts` BEFORE this unit so the dry-run passes; full
   implementation is U6.
-- `image:` accepts `docker.io/...` directly (post-2026-03-24 capability).
+- `.github/workflows/deploy.yml` adjustments (mirror in both the `staging` and `production` jobs):
+- The existing `paths-ignore: ['docs/**', '*.md']` filter already keeps doc-only changes from triggering deploys. Do NOT
+  add a `paths:` allowlist that would gate the deploy job by source area — image-source changes (`docker/sandbox/**`)
+  and Worker-source changes both must trigger the same deploy job, since either kind of change produces a new Worker
+  version.
+- Do NOT add `docker login` / `docker push` / Docker Hub credential steps. Wrangler authenticates to the CF managed
+  registry using the existing `CF_API_TOKEN`; there is no separate registry to log into and no separate push step.
+- **Caching-measurement sub-task (gates any caching-specific wiring).** Before adding `docker/setup-buildx-action`,
+  `actions/cache@v4`, `cache-from/to: type=gha`, or any other cache backend to `deploy.yml`, run two no-op deploys
+  back-to-back (a) with no caching configured, then (b) with a candidate caching strategy added. Capture wall-clock per
+  step (specifically the `wrangler deploy` step that does the image build + push) from the GH Actions run logs. Pick the
+  strategy if it materially shortens the second deploy; skip it if it doesn't (the alternative is "every deploy pays the
+  full image-build cost," which is acceptable for the current low deploy frequency). The `cloudflare/wrangler-action`
+  action wraps `wrangler deploy`'s image-build invocation in a way that isn't publicly documented; the measurement is
+  the only reliable signal. Record the chosen approach in `RELEASES.md` Operational Notes so the rationale survives.
 
 **Patterns to follow:**
 
@@ -1088,10 +1183,15 @@ dry-run gate must pass before push.
   `SCORE_LIMITER` on `Env`.
 - Edge case: staging deploy succeeds; staging Worker's bindings are distinct from prod (different DO namespace ID,
   different R2 bucket name).
-- Integration: rolling back the migration is documented in `RELEASES.md` (follow-up migration with `deleted_classes`).
+- Integration: rollback path documented in `RELEASES.md` — note that `wrangler rollback` only works among
+  post-migration-v1 versions; cross-migration rollback requires a follow-up migration with `deleted_classes`.
+- Measurement: capture wall-clock for two consecutive `wrangler deploy` runs against staging (no source change between
+  them) to establish baseline image-build cost. Record in the U3 PR body so the caching-measurement sub-task has a
+  concrete number to optimize against.
 
 **Verification:** Pre-push wrangler dry-run passes locally; staging deploy succeeds; type generation includes all new
-bindings; first prod deploy is its own milestone PR with the migration explicitly reviewed.
+bindings; first prod deploy is its own milestone PR with the migration explicitly reviewed; baseline deploy wall-clock
+recorded.
 
 ---
 
@@ -1331,29 +1431,45 @@ container per design Premise #6.
 
 **Approach:**
 
-- `do.ts`: Sandbox DO class extends the Sandbox base class. Implements `score(installSpec)` RPC method. Singleton ID:
-  `getRandom(env.SCORE, 3, { sleepAfter: "5m" })` (3-instance pool; CF Containers picks an available instance per
-  request).
+- `do.ts`: Sandbox DO class extends the Sandbox base class. Singleton ID: `getRandom(env.SCORE, 3, { sleepAfter: "5m"
+  })` (3-instance pool; CF Containers picks an available instance per request). Registers two named outbound handlers
+  via the `outboundHandlers = { allowedInstall: <SubWorker>, noHttp: <SubWorker> }` SDK pattern. **`noHttp` and
+  `allowedInstall` are USER-DEFINED handler keys, not built-in SDK verbs** (per
+  https://developers.cloudflare.com/sandbox/guides/outbound-traffic/) — each maps to a sub-Worker binding declared in
+  `wrangler.jsonc`. Architecture sub-task within U6 (must resolve before code lands): decide whether the two handlers
+  are (a) two separate sub-Workers; (b) one sub-Worker with a routing param; or (c) inline handler functions on the DO
+  class itself if the SDK exposes that path. The cited doc shows the binding-based pattern; verify against
+  `@cloudflare/sandbox@0.9.x` source whether inline handlers are also supported. Capture decision in `RELEASES.md`
+  Operational Notes once chosen. Implements `score(installSpec)` RPC method.
 - `sandbox-exec.ts` orchestrates:
 
 1. Determine `installHosts` from `installSpec.pm` (e.g., `brew` → `["formulae.brew.sh", "ghcr.io", "github.com"]`;
    `cargo-binstall` → `["crates.io", "static.crates.io", "github.com"]`; `direct` → host of the URL).
-2. `sandbox.setOutboundByHost(installHosts, "allowedInstall")` — Phase 1.
+2. Phase 1 egress: for a single host, `sandbox.setOutboundByHost(host, "allowedInstall")`; for multiple hosts (e.g.
+   `crates.io` + `static.crates.io`), `sandbox.setOutboundByHosts(hostList, "allowedInstall")` (plural method, per SDK
+   0.9.x). Pick by `installHosts.length`. Both forms reference the user-defined `allowedInstall` handler registered in
+   `do.ts`.
 3. Run install command, captured by `installSpec.pm` (table in code):
 
-- `brew install <pkg>` (if brew is available in the image)
+- `brew install <pkg>` (NOT supported in the current image — Linuxbrew on Alpine/musl is non-viable; surfaces as
+  bounce-out at install time)
 - `cargo binstall --no-confirm <pkg>`
 - `pip install <pkg>` (wheels only — `--only-binary=:all:`; refuses sdist execution)
 - `npm install -g --ignore-scripts <pkg>` (skips preinstall/install/postinstall script execution; required to keep Phase
-  1 egress from being abused by lifecycle scripts before `noHttp` fires)
-- `go install <module>@latest`
+  1 egress from being abused by lifecycle scripts before the Phase 2 handler fires)
+- `go install <module>@latest` — image ships the full Go toolchain (`apk add go`), so this WILL compile from source.
+  Phase 1 egress is open to `proxy.golang.org` during compilation; the security audit row for `go install` MUST treat
+  this as "compiles attacker-controlled code, mitigated only by sandbox isolation," not as "fails fast / bounce out."
+  See K-decisions section reconciliation.
 - `direct`: `curl -fsSL <url> | tar xz -C /usr/local/bin/` (or unzip for `.zip`)
 
 1. Verify binary on `PATH`: `which <binary>` returns 0; if not, fail with `chain_resolved_no_binary_produced` (per gate
    F4 — distinguishes "install succeeded but produced no runnable binary" from "install command itself failed"). Common
    failure mode: the chain resolved to a library-only pypi package (e.g. Click ships wheels but no `console_scripts`
    entry).
-2. `sandbox.setOutboundHandler("noHttp")` — Phase 2.
+2. Phase 2 egress: `sandbox.setOutboundHandler("noHttp")` — routes all subsequent requests to the user-defined `noHttp`
+   handler (which the DO class registered to return 403 for any HTTP egress). Same caveat as Phase 1: `noHttp` is a
+   user-defined name, not a built-in SDK verb.
 3. `sandbox.exec("anc --version")` → capture `anc_version` (parse the stdout).
 4. Look up registry entry by tool name to get `audit_profile` if known; else omit.
 5. `sandbox.exec("anc check --command <binary> --output json [--audit-profile <p>]")` → parse JSON.
@@ -1576,9 +1692,10 @@ mention. Operational readiness for the v3 deploy.
   build)
 - Create: `tests/score-contract.test.ts` (cross-validates `/api/score` JSON ↔ committed `scorecards/*.json` ↔
   `dist/registry-index.json`)
-- Modify: `.github/workflows/deploy.yml` (add docker build + push step before `wrangler deploy`; add post-deploy smoke
-  step against staging)
-- Modify: `RELEASES.md` (v3 release procedure: image build + push, deploy migration, smoke, rollback)
+- Modify: `.github/workflows/deploy.yml` (add post-deploy smoke step against staging; image build + push happens inside
+  `wrangler deploy` per U3, so no separate registry step here)
+- Modify: `RELEASES.md` (v3 release procedure: image rebuild via `wrangler deploy` against CF managed registry, deploy
+  migration, smoke, rollback)
 - Create: `docs/runbooks/live-scoring-monitoring.md` (cost-watch checklist, alert thresholds, common failures)
 - Modify: `README.md` (mention `/score` in user-facing surface map)
 - Modify: `docs/brainstorms/live-scoring-spike.md` (Status block — supersession note pointing back here)
@@ -1593,7 +1710,9 @@ mention. Operational readiness for the v3 deploy.
 - **CI smoke:** post-deploy step in `.github/workflows/deploy.yml` hits staging `/api/score` for a pinned known-tool
   slug; fails the deploy if 200 + valid triad doesn't return.
 - **RELEASES.md additions:**
-- Image build + push step (Docker Hub, SHA-pinned in `wrangler.jsonc`).
+- Image rebuild step (CF managed registry; happens inside `wrangler deploy` against `image:
+  "./docker/sandbox/Dockerfile"`; immutability is per-Worker-version via `wrangler rollback`, not via a `@sha256:`
+  literal in `wrangler.jsonc`).
 - Migration v1 (one-way gate). Document rollback (follow-up migration with `deleted_classes`).
 - Smoke test post-deploy.
 - Triple-diff already in the runbook (per PR #69).
@@ -1604,7 +1723,15 @@ mention. Operational readiness for the v3 deploy.
   (best-effort, alert if sustained), discovery chain false-negative (README parse missed an obvious install — capture
   for v3.1 LLM upgrade evidence).
 - Alert: 5xx rate >1% over 10 min → page (whatever paging we wire up).
-- Manual rollback: redeploy previous image tag in `wrangler.jsonc`; DO migrations are sticky so the DO class stays.
+- Manual rollback (intra-migration): `wrangler rollback` to a previous Worker version on the SAME side of the DO
+  migration boundary as the current version. Each version references its own prior image push in the CF managed
+  registry, so the rollback also reverts the image binding. Constraint: per CF docs, `wrangler rollback` cannot cross a
+  DO migration. Once `migrations[v1]` (`new_sqlite_classes: ["Sandbox"]`) ships, rollback only works among post-v1
+  versions.
+- Manual rollback (cross-migration / undo of v3 itself): apply a follow-up migration with `deleted_classes: ["Sandbox"]`
+  and deploy a new Worker version that no longer references the Sandbox DO. This is the documented recipe and the ONLY
+  way to revert past migration v1. Rehearse on staging before the first prod cut. DO durable storage attached to deleted
+  classes is destroyed; capture cost-of-loss in the runbook (R2 cache survives because it's a separate binding).
 - **CHANGELOG:** filled via PR template's `## Changelog` section per global CLAUDE.md. Include user-facing bullet: "Live
   scoring at `/score` — paste a tool name, install command, or GitHub URL; get a summary scorecard. Run `anc` locally
   for source + project depth."
@@ -1664,30 +1791,34 @@ staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
 
 ## Risk Analysis & Mitigation
 
-| Risk                                                                                  | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**      | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke. |
-| First-ever DO + Containers + R2 + migrations bindings — one-way gate                  | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                     |
-| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                    | Med        | Med      | Size assertion in `tests/dockerfile-sandbox.test.ts`. Per-build size delta in CI. Custom instance type as escape hatch (`{ vcpu: 1, memory_mib: 1024, disk_mb: 4096 }`). Brew if compatible adds the most weight; consider dropping if the cost/benefit is wrong.                                                                      |
-| HN spike >10× expected → cost overrun                                                 | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                    |
-| Cloudflare changes Sandbox SDK API mid-flight                                         | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                       |
-| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)                | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                        |
-| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                      | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                      |
-| README parse heuristic misses installable tools (false-negative)                      | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                          |
-| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                   | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                   |
-| Two-phase egress race: `noHttp` not applied before `anc check` execs                  | Low        | Critical | Sequential `await` between the two calls. Integration test asserts the order via stubbed handler call log.                                                                                                                                                                                                                             |
-| User pastes a private repo → 404 surface unhelpful                                    | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                          |
-| Discovery chain timeouts cascade and block the whole request                          | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                     |
-| Worker bundle size (Sandbox SDK + handler code) breaches 1 MiB Worker free-tier limit | Low        | Med      | Measure bundle size in CI (already part of build); if >900 KiB, switch to Workers paid plan ($5/mo) which raises the limit to 10 MiB.                                                                                                                                                                                                  |
-| `audit_profile` from registry doesn't apply when scoring an unknown tool              | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                     |
+| Risk                                                                                  | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**      | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke.                                                                                                                                                                         |
+| First-ever DO + Containers + R2 + migrations bindings — one-way gate                  | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                                                                                                                                                                                             |
+| DO migration v1 blocks cross-migration `wrangler rollback`                            | Med        | High     | Per CF docs (workers/configuration/versions-and-deployments/rollbacks/), `wrangler rollback` only works among versions on the SAME side of a DO migration boundary. Once `new_sqlite_classes: ["Sandbox"]` ships, you can roll back to any post-v1 version but NOT to a pre-v1 version. Recovery story: a follow-up migration with `deleted_classes: ["Sandbox"]` is the documented recipe. Rehearse on staging before the first prod cut; capture the procedure verbatim in RELEASES.md.                      |
+| Sandbox SubWorker handlers (`allowedInstall`, `noHttp`) require sub-Worker bindings   | Med        | High     | `outboundHandlers = { allowedInstall: <SubWorker>, noHttp: <SubWorker> }` per the SDK pattern means each named handler maps to a deployed sub-Worker, NOT an inline function (verify against `@cloudflare/sandbox@0.9.x` source whether inline is also supported). Plan-side mitigation: U6 architecture sub-task locks the choice (separate sub-Workers vs one with a routing param vs inline if supported) before code lands. `wrangler.jsonc` may need additional service bindings.                         |
+| `cloudflare/sandbox:0.9.2-musl` is undocumented on CF's Sandbox Dockerfile-reference  | Low        | Med      | The musl variant exists on Docker Hub but is not listed on the CF docs page; could be deprecated without notice. Mitigation: digest-pin (already done at Dockerfile line 33), watch for SDK npm updates that drop musl support, plan a glibc fallback if/when the musl tag stops shipping (Debian-trixie-slim image, ~2x size, would cost the `basic` instance disk headroom but still fit). Capture the variant pin date in `docker/sandbox/README.md` so a future maintainer can audit upstream.             |
+| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                    | Low        | Med      | Measured 221 MB compressed at v3-rc1 (2026-05-05) — 12x disk headroom on `basic`. NOTE: `tests/dockerfile-sandbox.test.ts` has NO automated size assertion despite earlier plan claim; add a manual measurement step to RELEASES.md or a docker-available CI guard before this risk re-emerges. Brew already dropped (Linuxbrew/musl incompatibility); Go toolchain is the next-largest contributor (~50 MB compressed) and a candidate for removal if `go install` is rejected per the security K-decision.   |
+| HN spike >10× expected → cost overrun                                                 | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                                                                                                                                                                                            |
+| Cloudflare changes Sandbox SDK API mid-flight                                         | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                                                                                                                                                                                               |
+| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)                | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                                |
+| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                      | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                                                                                                                                                                                              |
+| README parse heuristic misses installable tools (false-negative)                      | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                                                                                                                                                                                                  |
+| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                   | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                                                                                                                                                                                           |
+| Two-phase egress race: `noHttp` not applied before `anc check` execs                  | Low        | Critical | Sequential `await` between the two calls. Integration test asserts the order via stubbed handler call log. Pre-condition: `outboundHandlers` map MUST be registered on the DO subclass at construction; both `allowedInstall` and `noHttp` SubWorkers must exist and be bound in `wrangler.jsonc` before deploy — without registration, `setOutboundBy*`/`setOutboundHandler` calls reference an unknown handler name and the egress policy silently degrades to "no handler routed = default network access." |
+| User pastes a private repo → 404 surface unhelpful                                    | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Discovery chain timeouts cascade and block the whole request                          | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                                                                                                                                                                                             |
+| Worker bundle size (Sandbox SDK + handler code) breaches 1 MiB Worker free-tier limit | Low        | Med      | Measure bundle size in CI (already part of build); if >900 KiB, switch to Workers paid plan ($5/mo) which raises the limit to 10 MiB.                                                                                                                                                                                                                                                                                                                                                                          |
+| `audit_profile` from registry doesn't apply when scoring an unknown tool              | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                                                                                                                                                                                             |
 
 ---
 
 ## Documentation / Operational Notes
 
-- **RELEASES.md (U9).** Add v3 release procedure: image build + push step, migration apply, smoke test, rollback steps.
-  The first v3 deploy is its own PR (no other changes bundled) so the migration is reviewable. Triple-diff recipe (added
-  in PR #69) extends to cover the new image-tag SHA pin in `wrangler.jsonc`.
+- **RELEASES.md (U9).** Add v3 release procedure: image rebuild via `wrangler deploy` (CF managed registry), migration
+  apply, smoke test, rollback steps. The first v3 deploy is its own PR (no other changes bundled) so the migration is
+  reviewable. Triple-diff recipe (added in PR #69) extends to cover the Dockerfile path under `containers[].image`
+  rather than a `@sha256:` literal.
 - **Monitoring runbook (`docs/runbooks/live-scoring-monitoring.md`).** First-30-day cost-watch:
 - Daily: R2 storage (free tier 10 GB), DO requests, Container vCPU-seconds, GitHub API calls (anonymous limit headroom).
 - Weekly: total spend rollup vs R12 ceiling.
@@ -1703,9 +1834,10 @@ staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
   build step is added per
   [docs/solutions/best-practices/workflow-dispatch-on-deploy-for-recovery-2026-04-14.md](../solutions/best-practices/workflow-dispatch-on-deploy-for-recovery-2026-04-14.md).
 - **Compound-engineering follow-up (post-ship).** File solutions docs for the gaps the learnings researchers flagged:
-  (a) CF Sandbox 0.8.x outbound-handler shape + TLS interception defaults; (b) Workers Rate Limiting binding choice
-  (Option A vs DO counter); (c) README install-block parsing heuristic specifics + miss-rate data; (d) GitHub Releases
-  binary-discovery shape; (e) CF Sandbox cold-start measurements + `basic` vs `standard-1` sizing rationale.
+  (a) CF Sandbox 0.9.x outbound-handler shape (user-defined SubWorker pattern) + TLS interception defaults; (b) Workers
+  Rate Limiting binding choice (Option A vs DO counter); (c) README install-block parsing heuristic specifics +
+  miss-rate data; (d) GitHub Releases binary-discovery shape; (e) CF Sandbox cold-start measurements + `basic` vs
+  `standard-1` sizing rationale; (f) `wrangler rollback` + DO-migration boundary recovery procedure rehearsal record.
 
 ---
 
@@ -1759,10 +1891,8 @@ Paths are repo-relative under `docs/solutions/`.
 [2026-04-13 Sandbox GA + outbound + TLS changelog](https://developers.cloudflare.com/changelog/post/2026-04-13-sandbox-outbound-workers-tls-auth/)
 
 - [2026-03-26 Outbound Workers changelog](https://developers.cloudflare.com/changelog/post/2026-03-26-outbound-workers/)
--
-
-[2026-03-24 Docker Hub direct images changelog](https://developers.cloudflare.com/changelog/post/2026-03-24-docker-hub-images/)
-
+- [Container image management](https://developers.cloudflare.com/containers/platform-details/image-management/) — CF
+  managed registry, inline build via `image: "./Dockerfile"`, `wrangler containers push` for CI workflows
 - [2025-11-21 active-CPU pricing](https://developers.cloudflare.com/changelog/post/2025-11-21-new-cpu-pricing/)
 - [GitHub REST API — Releases](https://docs.github.com/en/rest/releases/releases)
 - [Homebrew formulae JSON API](https://formulae.brew.sh/docs/api/)
