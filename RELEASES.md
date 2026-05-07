@@ -46,7 +46,10 @@ gh pr create --base dev --title "feat(scope): what changed"
 
 - **Commit style**: [Conventional Commits](https://www.conventionalcommits.org/).
 - **PR body**: follow the repo's PR template. The `## Changelog` section is the source of truth for user-facing release
-  notes.
+  notes. PR bodies remain editable post-merge — typos and oversights can be fixed by editing the PR on GitHub later. If
+  a generated `CHANGELOG.md` flow lands here (deferred until needed; the upstream `agentnative-spec` runs one via
+  `scripts/generate-changelog.sh` + `cliff.toml` and re-fetches PR bodies via the GitHub API on each run), the same
+  edited bodies become its source.
 - **PR body prose scrub**: `gh pr create` and `gh pr edit` send body text directly to GitHub; no local pre-push hook
   sees it. Save the body to `/tmp/`, run Vale + LanguageTool + unslop, fix findings, then submit via `--body-file`. See
   [§ Prose scrubbing](#prose-scrubbing).
@@ -152,31 +155,33 @@ on both sides with different content. Always branch from `origin/main` and cherr
 
 ## Prose scrubbing
 
-Three release-flow artifacts live outside any automated prose check and need a manual scrub before they ship:
+Pre-push covers `*.md` files in the repo via Vale + LanguageTool (see U4 of
+[`docs/plans/2026-05-07-001-feat-prose-check-site-plan.md`](./docs/plans/2026-05-07-001-feat-prose-check-site-plan.md)).
+Three release-flow artifacts live outside that net and need a manual scrub before they ship:
 
-- **PR bodies.** `gh pr create` and `gh pr edit` send body text directly to GitHub; nothing local intercepts it.
+- **PR bodies.** `gh pr create` and `gh pr edit` send body text directly to GitHub; pre-push has no reach there.
 - **Release-PR bodies.** The `release/*` PR to `main` carries contributor-authored wrap-up text composed after the
   cherry-picks land, and the same out-of-repo gap applies.
 - **Any future generated changelog.** This repo does not yet generate a `CHANGELOG.md`, but if one is added later it
   inherits whatever prose its upstream PR bodies carry — same scrub procedure applies.
 
-The site repo does not yet vendor Vale or LanguageTool rule packs locally; the procedure below points Vale at the spec
-repo's checkout (`~/dev/agentnative-spec/.vale.ini`) until U0-U4 of
-[`docs/plans/2026-05-07-001-feat-prose-check-site-plan.md`](./docs/plans/2026-05-07-001-feat-prose-check-site-plan.md)
-land local copies. The canonical description of the rule packs and the orchestrator's blocking-category whitelist lives
-in the spec at
+**Scrub before submit.** Author and clean PR bodies in `/tmp/` first, then submit via `--body-file` once. This avoids
+the round-trip of "submit, scrub, edit, scrub again" — every fix lands locally and the public PR sees only clean text.
+The auto-format hook skips `/tmp/` paths so the body keeps its authored shape and no soft-wrapping is injected.
+
+The site vendors Vale rule packs locally (brand pack + site channel + `write-good` + `proselint`) via
+`scripts/sync-prose-tooling.sh`; the procedure below uses the local `.vale.ini` directly. The canonical description of
+the rule packs and the orchestrator's blocking-category whitelist lives in the spec at
 [`~/dev/agentnative-spec/docs/architecture/voice-enforcement.md`](https://github.com/brettdavies/agentnative/blob/dev/docs/architecture/voice-enforcement.md).
 
-The scrub procedure:
-
 ```bash
-# 1. Save the artifact to /tmp/. The auto-format hook skips /tmp paths, so the
-#    body keeps its authored shape and no soft-wrapping is injected.
-gh pr view <num> --json body --jq .body > /tmp/body.md         # for PR body edits
+# 1. Author or fetch the artifact in /tmp/.
+$EDITOR /tmp/body.md                                           # author from scratch (gh pr create)
+gh pr view <num> --json body --jq .body > /tmp/body.md         # fetch existing (gh pr edit)
 # cp CHANGELOG.md /tmp/body.md                                 # for changelog scrub (when one exists)
 
-# 2. Vale (against the spec's rule packs — until vendored locally, point at the spec checkout).
-vale --no-global --config ~/dev/agentnative-spec/.vale.ini --output=line --minAlertLevel=error /tmp/body.md
+# 2. Vale (local rule packs at error tier).
+vale --no-global --output=line --minAlertLevel=error /tmp/body.md
 
 # 3. LanguageTool (blocking categories: TYPOS|GRAMMAR|CONFUSED_WORDS, mirrors the orchestrator's whitelist).
 curl -sS -X POST "${LANGUAGETOOL_URL:-http://pool.tail42ba87.ts.net:8081}/v2/check" \
@@ -186,15 +191,16 @@ curl -sS -X POST "${LANGUAGETOOL_URL:-http://pool.tail42ba87.ts.net:8081}/v2/che
 # 4. unslop (em-dash density and AI-unique structural patterns Vale + LT do not catch).
 ~/.claude/skills/unslop/scripts/score.py /tmp/body.md
 
-# 5. Apply fixes per finding. Re-run until 0 blocking and unslop score is 0.
+# 5. Apply fixes in /tmp/body.md. Re-run 2-4 until 0 blocking and unslop score is 0.
 
-# 6. Apply the cleaned version:
-gh pr edit <num> --body-file /tmp/body.md     # for PR body edits
+# 6. Submit the cleaned version once.
+gh pr create --base <base> --title "..." --body-file /tmp/body.md      # new PR
+gh pr edit <num> --body-file /tmp/body.md                              # existing PR
 # (regenerate CHANGELOG.md per the repo's existing changelog flow, once one exists)
 ```
 
-For a generated-changelog finding (future), fix the upstream PR body and regenerate. Hand-editing the generated artifact
-directly produces drift the next regeneration overwrites.
+For a future generated-changelog finding, fix the upstream PR body (which the regeneration script re-fetches every run)
+and regenerate. Hand-editing the generated artifact directly produces drift the next regeneration overwrites.
 
 ## Deploy
 
