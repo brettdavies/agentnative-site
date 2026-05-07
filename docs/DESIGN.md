@@ -240,8 +240,8 @@ max-age=31536000, immutable`.
 
 **Why this wins for this site, specifically.**
 
-- **Nine pages.** Everything a framework gives for free (sidebar nav, search indexing, component library, multi-version
-  switcher) is either unused or faintly in the way.
+- **Nine pages.** Everything a framework provides by default (sidebar nav, search indexing, component library,
+  multi-version switcher) is either unused or faintly in the way.
 - **Content-negotiation semantics stay in one file we own.** Even with Starlight's plugin ecosystem, `Accept:
   text/markdown` on the same URL is not a plugin — it is a Worker concern. If the Worker exists regardless, the
   framework's incremental value for this site is reduced to "it generates the HTML shell" — which we can do in ~40 lines
@@ -323,7 +323,7 @@ the filename — no separate manifest file, no frontmatter ordering key.
 | `src/client/theme.ts`       | `dist/js/theme.js`                          | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                                                                                |
 | `src/client/clipboard.ts`   | `dist/js/clipboard.js`                      | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8.                                                           |
 
-The HTML shell emits exactly two stylesheet `<link>` tags in `<head>`, in this order:
+The HTML shell emits exactly two `<link rel="stylesheet">` tags in `<head>`, in this order:
 
 ```html
 <link rel="stylesheet" href="/css/foundation.css">

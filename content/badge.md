@@ -9,9 +9,9 @@ when a tool's score changes.
 
 ## What the badge looks like
 
-The badge is rendered at build time and served as a static SVG. There is no shields.io endpoint, no third-party render
-dependency, and no account to register — the renderer is [`badge-maker`](https://www.npmjs.com/package/badge-maker), the
-same library shields.io uses internally. Visually identical output, fully self-hosted.
+The badge is rendered at build time and served as a static SVG. The site does not use shields.io, has no third-party
+render dependency, and requires no account — the renderer is [`badge-maker`](https://www.npmjs.com/package/badge-maker),
+the same library shields.io uses internally. Visually identical output, fully self-hosted.
 
 For a tool named `<tool>`:
 

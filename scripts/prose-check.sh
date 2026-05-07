@@ -99,7 +99,23 @@ LT_BLOCKING_CATEGORIES='^(TYPOS|GRAMMAR|CONFUSED_WORDS)$'
 #                          "JSON output" as the head noun and demands a
 #                          singular verb when the actual subject ("Agents")
 #                          is plural.
-LT_DENY_RULES_DEFAULT='^(MD_BASEFORM|MUST_HAVE_TO|HAVE_PART_AGREEMENT|PREPOSITION_VERB|THIS_NNS|NON_STANDARD_WORD|POSSESSIVE_APOSTROPHE|A_INSTALL|IS_AND_ARE|SINGULAR_NOUN_ADV_AGREEMENT)$'
+#
+# === SITE-LOCAL DENYLIST EXTENSIONS ====================================
+# Three additional rules that misfire on agentnative-site domain jargon:
+#
+#   IN_PRINCIPAL       LT confuses "principle" (P1-P7 noun, the contract
+#                      term) with "principal" (chief). Site corpus uses
+#                      "principle" extensively (principle groups, principle
+#                      source files, etc.).
+#   CONTRACT_CONTACT   LT suggests "contact" when "contract" is meant.
+#                      Site uses "surface contract" / "build contract" as
+#                      the canonical phrase for a contract between the
+#                      build, the Worker, and the consumer.
+#   TO_DO_HYPHEN       Site references CE-todo filenames inline ("the
+#                      upstream todo at ..."); LT asks for "to-do"
+#                      hyphenation that would mismatch the artifact name.
+# ========================================================================
+LT_DENY_RULES_DEFAULT='^(MD_BASEFORM|MUST_HAVE_TO|HAVE_PART_AGREEMENT|PREPOSITION_VERB|THIS_NNS|NON_STANDARD_WORD|POSSESSIVE_APOSTROPHE|A_INSTALL|IS_AND_ARE|SINGULAR_NOUN_ADV_AGREEMENT|IN_PRINCIPAL|CONTRACT_CONTACT|TO_DO_HYPHEN)$'
 LT_DENY_RULES="${LT_DENY_RULES:-$LT_DENY_RULES_DEFAULT}"
 
 CHANGED_ONLY=0
@@ -129,12 +145,15 @@ done
 #     `find -not -name 'AGENTS.md'` which matches basename anywhere.
 #
 # === SITE-LOCAL DIVERGENCE FROM agentnative-spec@v0.4.0 ====================
-# The block below patches in two consumer-side carveouts that the upstream
+# The block below patches in consumer-side carveouts that the upstream
 # orchestrator does not yet support natively:
 #   1. Nested `*/node_modules/*` — the upstream `./node_modules/*` only
 #      catches top-level; this repo has `scripts/design/node_modules/`.
 #   2. `src/data/spec/` and `content/principles/` — vendored from spec, lints
 #      upstream, double-linting wastes findings.
+#   3. `dist/` — build output (gitignored). Generated artifacts are not
+#      authored prose; they re-derive from content/* on each build.
+#   4. `.claude/` — vendored Claude tooling docs, not site-authored content.
 # These edits are restored after each `bash scripts/sync-prose-tooling.sh` run
 # until upstream lands the `--exclude PATTERN` flag tracked at
 # `agentnative-spec/.context/compound-engineering/todos/010-pending-p0-prose-check-consumer-exclusion-config.md`.
@@ -143,7 +162,7 @@ done
 if (( CHANGED_ONLY )); then
   mapfile -t MD_FILES < <(
     git diff --name-only --diff-filter=ACM "$PROSE_CHECK_BASE"...HEAD -- '*.md' \
-      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|content/principles/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
+      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|content/principles/|dist/|\.claude/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
       | sort -u
   )
 else
@@ -152,6 +171,8 @@ else
       -not -path '*/node_modules/*' \
       -not -path './.git/*' \
       -not -path './.context/*' \
+      -not -path './.claude/*' \
+      -not -path './dist/*' \
       -not -path './scripts/__fixtures__/*' \
       -not -path './docs/brainstorms/*' \
       -not -path './docs/plans/*' \
