@@ -117,6 +117,7 @@ glassmorphism
 glibc
 gz
 gzipped
+heredoc
 href
 hsla
 html_handling
@@ -167,6 +168,7 @@ rclone
 reflex_fonts_to_reject
 reflows
 regen
+renderers
 rerank
 resync
 rgba
