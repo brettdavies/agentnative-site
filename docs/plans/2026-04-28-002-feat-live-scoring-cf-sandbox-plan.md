@@ -103,10 +103,13 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
 - **R7. Security.** (a) URL validation at the Worker boundary: HTTPS-only; for GitHub URL input, host allowlist of
   `github.com` / `api.github.com` / `raw.githubusercontent.com`; reject `http://`, `file://`, `ftp://`, RFC1918,
   link-local, IPv6 ULA, cloud-metadata IPs; ASCII-only host check (homoglyph SSRF). (b) Two-phase egress inside the
-  sandbox: `setOutboundBy{Host,Hosts}` to the resolved install host(s) during install referencing a registered
-  `allowedInstall` SubWorker handler → `setOutboundHandler("noHttp")` referencing a registered `noHttp` SubWorker
-  handler before `anc check` runs (handlers are USER-DEFINED on the DO subclass, not built-in SDK verbs; see
-  K-decision). TLS interception is on by default per-instance (CF Sandbox SDK 0.9.x).
+  sandbox via the SDK 0.9.x `outboundHandlers` mechanism. Phase 1: `setOutboundHandler("allowedInstall", {
+  allowedHostnames: hosts })` — runs the inline `allowedInstall` async function (declared on the Sandbox DO class as a
+  static `outboundHandlers` map), which checks `ctx.params.allowedHostnames` and either passes through via `fetch(req)`
+  or returns 403. Phase 2: `setOutboundHandler("noHttp")` before `anc check` runs — runs the inline `noHttp` async
+  function, which returns 403 for every request. Handlers are inline functions in the same Worker bundle, NOT separate
+  sub-Workers (no service bindings needed in `wrangler.jsonc`). TLS interception is on by default per-instance (CF
+  Sandbox SDK 0.9.x).
 - **R8. No toolchains in the sandbox image.** `anc` is downloaded as a pre-built musl binary from
   `github.com/brettdavies/agentnative-cli/releases/...` at image build time. The image carries package managers (apk,
   cargo-binstall, pip, npm, go) but NOT compilers other than what apk's go package transitively ships (the Alpine `go`
@@ -212,8 +215,9 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
 [docs/solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md](../solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md)
 — THE foundational v3 doc. Alpine + musl, ~100-200 MB, `basic` instance, install via apk / cargo binstall / pip wheel /
 npm. The doc's "never toolchains" framing was relaxed during U2 (Alpine's `go` package ships the full toolchain — see
-`go install` K-decision reconciliation). Two-phase egress (`allowedInstall` → `noHttp`) — both are user-defined
-SubWorker handler names per SDK 0.9.x. Image now ships `cloudflare/sandbox:0.9.2-musl` SHA-pinned; the `libstdc++` copy
+`go install` K-decision reconciliation). Two-phase egress (`allowedInstall` → `noHttp`) — both are user-defined inline
+async functions on the Sandbox DO class's static `outboundHandlers` map per SDK 0.9.x (NOT separate Workers — the
+earlier "SubWorker" framing was wrong). Image now ships `cloudflare/sandbox:0.9.2-musl` SHA-pinned; the `libstdc++` copy
 was empirically confirmed redundant 2026-05-05 (apk's `libstdc++-14.2.0-r4` provides it transitively). -
 [docs/solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md](../solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md)
 — registry-known = theater (cached JSON + cosmetic 2-3 s spinner) is the source of v3's R2 framing, not v3's invention.
@@ -336,16 +340,42 @@ after the Container build step is added.
 - **R2 cache key: `scores/{tool-slug}/{anc-version}/{tool-version-or-sha7}.json`.** Includes `anc-version` per the
   versioned-scorecard pattern so `anc` upgrades auto-invalidate. Refuse to cache (and refuse to read from cache) if
   `anc_version` or `tool_version` is missing — fail-fast, no half-state.
-- **Two-phase egress (non-negotiable per R7).** `noHttp` and `allowedInstall` are USER-DEFINED handler names, NOT
-  built-in SDK verbs (per https://developers.cloudflare.com/sandbox/guides/outbound-traffic/). Both must be registered
-  on the Sandbox DO subclass via `outboundHandlers = { allowedInstall: <SubWorker>, noHttp: <SubWorker> }` before
-  `setOutboundBy*` / `setOutboundHandler` calls work — see U6 architecture sub-task. Phase 1: for a single host,
-  `setOutboundByHost(host, "allowedInstall")`; for multiple hosts (e.g. `crates.io` + `static.crates.io`),
-  `setOutboundByHosts(hostList, "allowedInstall")` (plural). Install host is whichever the resolver picked
-  (`formulae.brew.sh`, `crates.io` + `static.crates.io`, `registry.npmjs.org`, `pypi.org` + `files.pythonhosted.org`,
-  `proxy.golang.org`, or `github.com` for direct binary downloads). Phase 2: `setOutboundHandler("noHttp")` before `anc
-  check` runs — switches the global default handler to `noHttp` (which the SubWorker should implement as a 403
-  response). TLS interception is on by default; no explicit configuration needed for that piece.
+- **Two-phase egress (non-negotiable per R7) — Pattern Y: named handlers with per-request logging.** `noHttp` and
+  `allowedInstall` are USER-DEFINED handler names declared as INLINE async functions on the Sandbox DO class's static
+  `outboundHandlers` map (per https://developers.cloudflare.com/sandbox/guides/outbound-traffic/) — NOT separate
+  Workers, NOT service bindings. They run in the Workers runtime alongside the DO, in the same bundle. Per-request
+  egress logging is the reason for choosing Y over the simpler `setAllowedHosts([])` primitive (Pattern X): handlers see
+  the URL/headers of each outbound request, so attempted-but-blocked egress is observable as security signal. Decided
+  2026-05-05.
+
+  ```ts
+  export class Sandbox extends BaseSandbox {}
+  Sandbox.outboundHandlers = {
+    allowedInstall: async (req, env, ctx) => {
+      const url = new URL(req.url);
+      console.log({ phase: "install", host: url.hostname, allowed: ctx.params.allowedHostnames.includes(url.hostname) });
+      if (ctx.params.allowedHostnames.includes(url.hostname)) return fetch(req);
+      return new Response(null, { status: 403 });
+    },
+    noHttp: async (req) => {
+      console.log({ phase: "noHttp", host: new URL(req.url).hostname, blocked: true });
+      return new Response(null, { status: 403 });
+    },
+  };
+  ```
+
+  Per-request invocation in `sandbox-exec.ts`:
+
+  ```ts
+  await sandbox.setOutboundHandler("allowedInstall", { allowedHostnames: hosts });
+  await sandbox.exec(installCmd);
+  await sandbox.setOutboundHandler("noHttp");
+  await sandbox.exec("anc check ...");
+  ```
+
+  Install hosts are whichever the resolver picked (`formulae.brew.sh`, `crates.io` + `static.crates.io`,
+  `registry.npmjs.org`, `pypi.org` + `files.pythonhosted.org`, `proxy.golang.org`, or `github.com` for direct binary
+  downloads). TLS interception is on by default; no explicit configuration needed.
 - **Per-package-manager script-execution audit (security baseline).** Phase 1 egress is open to install hosts; any
   install-time code execution during Phase 1 inherits that egress. Audit per package manager so no install path silently
   grants arbitrary egress to attacker-controlled code:
@@ -1343,13 +1373,22 @@ rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Sha
 - Modify: `src/worker/index.ts`
 - Create: `src/worker/score/handler.ts`
 - Create: `src/worker/score/content-negotiation.ts`
-- Create: `src/worker/score/response-shape.ts`
+- Create: `src/worker/score/response-shape.ts` (also owns `ScoreError` discriminated union; see Approach)
 - Create: `src/worker/spec-version.gen.ts` (build-emitted; placeholder file lands in U5, build wiring lands in U8)
+- Modify: `src/worker/score/registry-lookup.ts`, `src/worker/score/validate.ts`, `src/worker/score/parse-install.ts`,
+  `src/worker/score/discover-binary.ts` (U4 shipped code) — migrate hand-rolled error returns to import + return
+  `ScoreError` from `response-shape.ts`. Mechanical change; tests should keep passing because the on-the-wire shape
+  stays compatible (codes unchanged, just typed).
 - Modify: `src/worker/headers.ts` (extend JSON branch to match `/api/` paths if needed)
-- Modify: `src/worker/accept.ts` (extend preference list to `['text/html', 'application/json', 'text/markdown']`)
-- Test: `tests/worker.test.ts` (extend with `/api/score` describe block)
+- Modify: `src/worker/accept.ts` (extend preference list to `['text/html', 'application/json', 'text/markdown']`; use
+  the existing `accepts` package or a proper q-value parser per `accept-header-q-value` learning, NOT substring
+  matching)
+- Test: `tests/worker.test.ts` (extend with `/api/score` describe block; MUST include q-value test: `Accept:
+  text/markdown;q=0.1, application/json;q=0.9` resolves to JSON, not markdown — guards against substring matching
+  regression per `accept-header-q-value` learning)
 - Test: `tests/score-handler.test.ts`
-- Test: `tests/score-response-shape.test.ts`
+- Test: `tests/score-response-shape.test.ts` (MUST exercise every variant of `ScoreError` discriminated union;
+  TypeScript exhaustiveness check via `assertNever` on the union ensures no code path can return an unknown error shape)
 
 **Approach:**
 
@@ -1377,6 +1416,27 @@ rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Sha
 - `response-shape.ts`: `shapeScoreResponse(scorecard, env): Response` — adds `spec_version` (from `SPEC_VERSION` build
   constant for live; from cached scorecard for cache hits), `anc_version` (from cache or live exec), `checker_url`
   (constant `https://anc.dev/score`). Asserts all three present; throws (→ 500) if any missing.
+- `response-shape.ts` also owns the **`ScoreError` discriminated union** — single source of truth for every error code
+  the `/api/score` endpoint can return. U4, U5, U6 import this type; nobody hand-rolls error response shapes. The U9
+  contract test enforces runtime conformance. Decided 2026-05-07.
+
+  ```ts
+  export type ScoreError =
+    | { code: "invalid_url"; details: string; cta_text: string }
+    | { code: "unparseable_install_command"; details: string; cta_text: string }
+    | { code: "chain_no_resolve"; cta_text: string }
+    | { code: "discovery_redirect_loop"; cta_text: string }
+    | { code: "rate_limited"; retry_after: number; cta_text: string }
+    | { code: "install_unsupported"; pm: "brew" | "go-compile-only"; cta_text: string }
+    | { code: "chain_resolved_install_failed"; details: string; cta_text: string }
+    | { code: "chain_resolved_no_binary_produced"; details: string; cta_text: string }
+    | { code: "timeout"; phase: "install" | "score"; cta_text: string };
+
+  export type ScoreErrorResponse = { error: ScoreError; spec_version: string; checker_url: string };
+  ```
+
+  HTTP status mapping is handled in `handler.ts`: 400 for input errors, 404 for chain_no_resolve, 429 for
+  rate_limited, 502 for install/binary failures, 504 for timeout, 500 for triad-missing.
 - Headers inline:
 - Live JSON response: `Cache-Control: no-store`, `application/json; charset=utf-8`, `Access-Control-Allow-Origin: *`,
   `X-Robots-Tag: noindex`.
@@ -1427,20 +1487,24 @@ container per design Premise #6.
 
 - Create: `src/worker/score/do.ts` (Sandbox DO class extending the SDK base)
 - Create: `src/worker/score/sandbox-exec.ts` (orchestration)
-- Test: `tests/score-do.test.ts` (unit tests with stubbed `Container` + `getSandbox`)
+- Test: `tests/score-do.test.ts` (unit tests with stubbed `Container` + `getSandbox`). MUST include: (a) static
+  `Sandbox.outboundHandlers` map has both `allowedInstall` and `noHttp` keys before any `setOutboundHandler` call —
+  catches misnamed-key regressions silently degrading egress policy; (b) order assertion via stubbed handler call log —
+  `setOutboundHandler("allowedInstall", {...})` fires BEFORE `exec(installCmd)` AND `setOutboundHandler("noHttp")` fires
+  BEFORE `exec("anc check ...")`; (c) per-request log lines emitted by handlers match expected `{phase, host,
+  allowed|blocked}` shape (the per-request observability that justified Pattern Y).
 
 **Approach:**
 
 - `do.ts`: Sandbox DO class extends the Sandbox base class. Singleton ID: `getRandom(env.SCORE, 3, { sleepAfter: "5m"
-  })` (3-instance pool; CF Containers picks an available instance per request). Registers two named outbound handlers
-  via the `outboundHandlers = { allowedInstall: <SubWorker>, noHttp: <SubWorker> }` SDK pattern. **`noHttp` and
-  `allowedInstall` are USER-DEFINED handler keys, not built-in SDK verbs** (per
-  https://developers.cloudflare.com/sandbox/guides/outbound-traffic/) — each maps to a sub-Worker binding declared in
-  `wrangler.jsonc`. Architecture sub-task within U6 (must resolve before code lands): decide whether the two handlers
-  are (a) two separate sub-Workers; (b) one sub-Worker with a routing param; or (c) inline handler functions on the DO
-  class itself if the SDK exposes that path. The cited doc shows the binding-based pattern; verify against
-  `@cloudflare/sandbox@0.9.x` source whether inline handlers are also supported. Capture decision in `RELEASES.md`
-  Operational Notes once chosen. Implements `score(installSpec)` RPC method.
+  })` (3-instance pool; CF Containers picks an available instance per request). Declares two inline async handlers as a
+  static `outboundHandlers` map (Pattern Y, decided 2026-05-05; see K-decision two-phase egress for the X/Y/Z comparison
+  and the code shape):
+- `allowedInstall(req, env, ctx)` — checks `ctx.params.allowedHostnames`, passes through via `fetch(req)` or returns
+  403; logs every request with `{phase, host, allowed}` for security observability.
+- `noHttp(req)` — returns 403 for every request; logs `{phase: "noHttp", host, blocked: true}`. These are inline
+  functions in the same Worker bundle, NOT separate Workers and NOT service bindings — no `wrangler.jsonc` change needed
+  beyond the existing DO + Container + R2 + ratelimits. Implements `score(installSpec)` RPC method.
 - `sandbox-exec.ts` orchestrates:
 
 1. Determine `installHosts` from `installSpec.pm` (e.g., `brew` → `["formulae.brew.sh", "ghcr.io", "github.com"]`;
@@ -1714,6 +1778,14 @@ mention. Operational readiness for the v3 deploy.
   "./docker/sandbox/Dockerfile"`; immutability is per-Worker-version via `wrangler rollback`, not via a `@sha256:`
   literal in `wrangler.jsonc`).
 - Migration v1 (one-way gate). Document rollback (follow-up migration with `deleted_classes`).
+- **Cross-migration rollback rehearsal (REQUIRED before first prod cut).** On staging only, before the first prod deploy
+  of v3: (1) deploy migration v1 (`new_sqlite_classes: ["Sandbox"]`); (2) verify `/api/score` works; (3) apply a
+  follow-up migration with `deleted_classes: ["Sandbox"]` and deploy a Worker version that doesn't reference the Sandbox
+  DO; (4) verify the Worker still serves non-sandbox routes (`/`, `/scorecards`, `/principles/*`); (5) re-deploy with
+  the Sandbox DO restored (new migration `new_sqlite_classes` with a different tag, e.g. `v2`); (6) verify `/api/score`
+  works again. Capture the staging deploy IDs + DO instance counts at each step in `RELEASES.md` as evidence. Without
+  this rehearsal we are flying blind on cross-migration recovery — see Risk Analysis row "DO migration v1 blocks
+  cross-migration `wrangler rollback`."
 - Smoke test post-deploy.
 - Triple-diff already in the runbook (per PR #69).
 - **Runbook contents:**
@@ -1791,25 +1863,25 @@ staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
 
 ## Risk Analysis & Mitigation
 
-| Risk                                                                                  | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------- | ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**      | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke.                                                                                                                                                                         |
-| First-ever DO + Containers + R2 + migrations bindings — one-way gate                  | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                                                                                                                                                                                             |
-| DO migration v1 blocks cross-migration `wrangler rollback`                            | Med        | High     | Per CF docs (workers/configuration/versions-and-deployments/rollbacks/), `wrangler rollback` only works among versions on the SAME side of a DO migration boundary. Once `new_sqlite_classes: ["Sandbox"]` ships, you can roll back to any post-v1 version but NOT to a pre-v1 version. Recovery story: a follow-up migration with `deleted_classes: ["Sandbox"]` is the documented recipe. Rehearse on staging before the first prod cut; capture the procedure verbatim in RELEASES.md.                      |
-| Sandbox SubWorker handlers (`allowedInstall`, `noHttp`) require sub-Worker bindings   | Med        | High     | `outboundHandlers = { allowedInstall: <SubWorker>, noHttp: <SubWorker> }` per the SDK pattern means each named handler maps to a deployed sub-Worker, NOT an inline function (verify against `@cloudflare/sandbox@0.9.x` source whether inline is also supported). Plan-side mitigation: U6 architecture sub-task locks the choice (separate sub-Workers vs one with a routing param vs inline if supported) before code lands. `wrangler.jsonc` may need additional service bindings.                         |
-| `cloudflare/sandbox:0.9.2-musl` is undocumented on CF's Sandbox Dockerfile-reference  | Low        | Med      | The musl variant exists on Docker Hub but is not listed on the CF docs page; could be deprecated without notice. Mitigation: digest-pin (already done at Dockerfile line 33), watch for SDK npm updates that drop musl support, plan a glibc fallback if/when the musl tag stops shipping (Debian-trixie-slim image, ~2x size, would cost the `basic` instance disk headroom but still fit). Capture the variant pin date in `docker/sandbox/README.md` so a future maintainer can audit upstream.             |
-| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                    | Low        | Med      | Measured 221 MB compressed at v3-rc1 (2026-05-05) — 12x disk headroom on `basic`. NOTE: `tests/dockerfile-sandbox.test.ts` has NO automated size assertion despite earlier plan claim; add a manual measurement step to RELEASES.md or a docker-available CI guard before this risk re-emerges. Brew already dropped (Linuxbrew/musl incompatibility); Go toolchain is the next-largest contributor (~50 MB compressed) and a candidate for removal if `go install` is rejected per the security K-decision.   |
-| HN spike >10× expected → cost overrun                                                 | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                                                                                                                                                                                            |
-| Cloudflare changes Sandbox SDK API mid-flight                                         | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                                                                                                                                                                                               |
-| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)                | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                                |
-| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                      | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                                                                                                                                                                                              |
-| README parse heuristic misses installable tools (false-negative)                      | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                                                                                                                                                                                                  |
-| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                   | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                                                                                                                                                                                           |
-| Two-phase egress race: `noHttp` not applied before `anc check` execs                  | Low        | Critical | Sequential `await` between the two calls. Integration test asserts the order via stubbed handler call log. Pre-condition: `outboundHandlers` map MUST be registered on the DO subclass at construction; both `allowedInstall` and `noHttp` SubWorkers must exist and be bound in `wrangler.jsonc` before deploy — without registration, `setOutboundBy*`/`setOutboundHandler` calls reference an unknown handler name and the egress policy silently degrades to "no handler routed = default network access." |
-| User pastes a private repo → 404 surface unhelpful                                    | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Discovery chain timeouts cascade and block the whole request                          | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                                                                                                                                                                                             |
-| Worker bundle size (Sandbox SDK + handler code) breaches 1 MiB Worker free-tier limit | Low        | Med      | Measure bundle size in CI (already part of build); if >900 KiB, switch to Workers paid plan ($5/mo) which raises the limit to 10 MiB.                                                                                                                                                                                                                                                                                                                                                                          |
-| `audit_profile` from registry doesn't apply when scoring an unknown tool              | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                                                                                                                                                                                             |
+| Risk                                                                                 | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------ | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**     | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke.                                                                                                                                                                       |
+| First-ever DO + Containers + R2 + migrations bindings — one-way gate                 | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                                                                                                                                                                                           |
+| DO migration v1 blocks cross-migration `wrangler rollback`                           | Med        | High     | Per CF docs (workers/configuration/versions-and-deployments/rollbacks/), `wrangler rollback` only works among versions on the SAME side of a DO migration boundary. Once `new_sqlite_classes: ["Sandbox"]` ships, you can roll back to any post-v1 version but NOT to a pre-v1 version. Recovery story: a follow-up migration with `deleted_classes: ["Sandbox"]` is the documented recipe. Rehearse on staging before the first prod cut; capture the procedure verbatim in RELEASES.md.                    |
+| `outboundHandlers` map missing or misnamed at runtime                                | Low        | High     | The `allowedInstall` and `noHttp` handlers are inline async functions on the Sandbox DO class's static `outboundHandlers` map (Pattern Y, K-decision). If the map isn't declared, or a name is misspelled, `setOutboundHandler("name")` references a non-existent handler and the egress policy degrades silently. Mitigation: U6 unit test that asserts both keys exist on the class before `score()` runs; integration test asserts handler invocation logs match expected per-phase pattern.              |
+| `cloudflare/sandbox:0.9.2-musl` is undocumented on CF's Sandbox Dockerfile-reference | Low        | Med      | The musl variant exists on Docker Hub but is not listed on the CF docs page; could be deprecated without notice. Mitigation: digest-pin (already done at Dockerfile line 33), watch for SDK npm updates that drop musl support, plan a glibc fallback if/when the musl tag stops shipping (Debian-trixie-slim image, ~2x size, would cost the `basic` instance disk headroom but still fit). Capture the variant pin date in `docker/sandbox/README.md` so a future maintainer can audit upstream.           |
+| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                   | Low        | Med      | Measured 221 MB compressed at v3-rc1 (2026-05-05) — 12x disk headroom on `basic`. NOTE: `tests/dockerfile-sandbox.test.ts` has NO automated size assertion despite earlier plan claim; add a manual measurement step to RELEASES.md or a docker-available CI guard before this risk re-emerges. Brew already dropped (Linuxbrew/musl incompatibility); Go toolchain is the next-largest contributor (~50 MB compressed) and a candidate for removal if `go install` is rejected per the security K-decision. |
+| HN spike >10× expected → cost overrun                                                | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                                                                                                                                                                                          |
+| Cloudflare changes Sandbox SDK API mid-flight                                        | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                                                                                                                                                                                             |
+| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)               | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                              |
+| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                     | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                                                                                                                                                                                            |
+| README parse heuristic misses installable tools (false-negative)                     | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                                                                                                                                                                                                |
+| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                  | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                                                                                                                                                                                         |
+| Two-phase egress race: `noHttp` not applied before `anc check` execs                 | Low        | Critical | Sequential `await` between the two `setOutboundHandler` calls. Integration test asserts the order by capturing the per-request `console.log` lines emitted by `allowedInstall` and `noHttp` handlers (the per-request observability is the reason for picking Pattern Y over Pattern X — see two-phase egress K-decision). Separate Risk row covers handler-map registration. Separate P1 backlog item covers in-flight TCP-stream kill semantics between phases.                                            |
+| User pastes a private repo → 404 surface unhelpful                                   | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Discovery chain timeouts cascade and block the whole request                         | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                                                                                                                                                                                           |
+| Worker bundle size growth                                                            | Low        | Low      | Pre-push `wrangler deploy --dry-run` already prints the upload size on every push. Current bundle: 237 KiB / 28 KiB gzipped (measured 2026-05-05, before U5-U8). Realistic projection after live-scoring code + Workers-side `@cloudflare/sandbox` helpers: ~487 KiB. Headroom: 2x on free tier (1 MiB), 21x on paid (10 MiB). Any 5x regression would be obvious in commit output; no CI gate needed unless trend changes. If a single unit ever pushes total over 800 KiB, treat as a refactor smell.      |
+| `audit_profile` from registry doesn't apply when scoring an unknown tool             | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                                                                                                                                                                                           |
 
 ---
 
@@ -1834,10 +1906,12 @@ staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
   build step is added per
   [docs/solutions/best-practices/workflow-dispatch-on-deploy-for-recovery-2026-04-14.md](../solutions/best-practices/workflow-dispatch-on-deploy-for-recovery-2026-04-14.md).
 - **Compound-engineering follow-up (post-ship).** File solutions docs for the gaps the learnings researchers flagged:
-  (a) CF Sandbox 0.9.x outbound-handler shape (user-defined SubWorker pattern) + TLS interception defaults; (b) Workers
-  Rate Limiting binding choice (Option A vs DO counter); (c) README install-block parsing heuristic specifics +
-  miss-rate data; (d) GitHub Releases binary-discovery shape; (e) CF Sandbox cold-start measurements + `basic` vs
-  `standard-1` sizing rationale; (f) `wrangler rollback` + DO-migration boundary recovery procedure rehearsal record.
+  (a) CF Sandbox 0.9.x outbound-handler shape (inline async functions on the Sandbox class via `outboundHandlers` static
+  map, NOT separate sub-Workers — Pattern Y from K-decisions) + TLS interception defaults + per-request egress logging
+  recipe; (b) Workers Rate Limiting binding choice (Option A vs DO counter); (c) README install-block parsing heuristic
+  specifics + miss-rate data; (d) GitHub Releases binary-discovery shape; (e) CF Sandbox cold-start measurements +
+  `basic` vs `standard-1` sizing rationale; (f) `wrangler rollback` + DO-migration boundary recovery procedure rehearsal
+  record.
 
 ---
 
@@ -1910,3 +1984,19 @@ Paths are repo-relative under `docs/solutions/`.
   [docs/plans/2026-04-27-001-feat-skill-distribution-site-plan.md](2026-04-27-001-feat-skill-distribution-site-plan.md)
   (parallel pattern `/skill` adopted here for `/score`)
 - Upstream musl release (cross-repo, blocks this plan): TBD plan in `agentnative-cli/docs/plans/`
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | n/a |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | n/a |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | ISSUES OPEN | 4 issues, 1 critical gap (P1 backlog) |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | n/a |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | n/a |
+
+- **UNRESOLVED:** 3 deferred decisions (go install X/Y/Z, in-flight TCP kill, CI cache backend) — each owned by the
+  implementation unit that uses it; not blockers.
+- **VERDICT:** ENG REVIEW LANDED with explicit deferrals. Architecture (Y handlers), code quality (ScoreError
+  union), test specs (outboundHandlers shape, q-value parsing, rollback rehearsal), and performance (bundle size
+  reality-grounded) all locked. Ready to implement when feature work resumes.
