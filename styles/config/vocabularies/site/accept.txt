@@ -87,6 +87,7 @@ codeblock
 coverage_summary
 culori
 cutover
+denylist
 darosoft
 dasel
 datasette
@@ -162,6 +163,7 @@ pandoc
 perp
 pixi
 procs
+proselint
 px
 qmd
 rclone
@@ -169,6 +171,7 @@ reflex_fonts_to_reject
 reflows
 regen
 renderers
+rescoped
 rerank
 resync
 rgba
