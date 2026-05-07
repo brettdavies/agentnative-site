@@ -122,20 +122,34 @@ done
 # --- File enumeration ---
 # Exclusion regex has two anchored alternatives:
 #   - path-prefix group: matches paths under docs/{brainstorms,plans,research,solutions},
-#     styles/{proselint,write-good,.vale-config}, scripts/__fixtures__/
+#     styles/{proselint,write-good,.vale-config}, scripts/__fixtures__/, src/data/spec/,
+#     content/principles/
 #   - basename group: matches AGENTS.md / CHANGELOG.md anywhere in the tree
 #     (line start OR after a slash), to keep parity with full-scan mode's
 #     `find -not -name 'AGENTS.md'` which matches basename anywhere.
+#
+# === SITE-LOCAL DIVERGENCE FROM agentnative-spec@v0.4.0 ====================
+# The block below patches in two consumer-side carveouts that the upstream
+# orchestrator does not yet support natively:
+#   1. Nested `*/node_modules/*` — the upstream `./node_modules/*` only
+#      catches top-level; this repo has `scripts/design/node_modules/`.
+#   2. `src/data/spec/` and `content/principles/` — vendored from spec, lints
+#      upstream, double-linting wastes findings.
+# These edits are restored after each `bash scripts/sync-prose-tooling.sh` run
+# until upstream lands the `--exclude PATTERN` flag tracked at
+# `agentnative-spec/.context/compound-engineering/todos/010-pending-p0-prose-check-consumer-exclusion-config.md`.
+# Re-apply after sync; `git diff scripts/prose-check.sh` surfaces the regression.
+# ==========================================================================
 if (( CHANGED_ONLY )); then
   mapfile -t MD_FILES < <(
     git diff --name-only --diff-filter=ACM "$PROSE_CHECK_BASE"...HEAD -- '*.md' \
-      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/)|(^|/)(AGENTS|CHANGELOG)\.md$' \
+      | grep -v -E '^(docs/(brainstorms|plans|research|solutions)/|styles/(proselint|write-good|\.vale-config)/|scripts/__fixtures__/|src/data/spec/|content/principles/)|(^|/)(AGENTS|CHANGELOG)\.md$|(^|/)node_modules/' \
       | sort -u
   )
 else
   mapfile -t MD_FILES < <(
     find . -type f -name '*.md' \
-      -not -path './node_modules/*' \
+      -not -path '*/node_modules/*' \
       -not -path './.git/*' \
       -not -path './.context/*' \
       -not -path './scripts/__fixtures__/*' \
@@ -143,6 +157,8 @@ else
       -not -path './docs/plans/*' \
       -not -path './docs/research/*' \
       -not -path './docs/solutions/*' \
+      -not -path './src/data/spec/*' \
+      -not -path './content/principles/*' \
       -not -path './styles/proselint/*' \
       -not -path './styles/write-good/*' \
       -not -path './styles/.vale-config/*' \

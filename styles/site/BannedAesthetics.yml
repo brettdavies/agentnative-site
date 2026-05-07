@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Source: .impeccable.md § Aesthetic Direction — banned visual patterns.
+extends: existence
+message: "Banned aesthetic pattern '%s' — anti-reference per the site's design context. Choose a different pattern or describe the underlying need without the loaded label."
+link: https://github.com/brettdavies/agentnative-site/blob/main/styles/site/README.md
+level: warning
+ignorecase: true
+tokens:
+  - "glassmorphism"
+  - "sparkline"
+  - "card grid"
+  - "hero section"
+  - "gradient text"
+  - "neon accent"
+  - "icon-headed"
