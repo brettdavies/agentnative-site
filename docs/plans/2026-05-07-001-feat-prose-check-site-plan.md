@@ -1,8 +1,10 @@
 ---
 title: "feat: site-side prose-check enforcement (Vale + LanguageTool)"
 type: feat
-status: active
+status: completed
 date: 2026-05-07
+last-revised: 2026-05-07
+shipped_in: PR #82 squash-merged to `dev` 2026-05-07 20:53 UTC as commit `a039943`. NOT YET on `main`/anc.dev — pending the next `release/<YYYY-MM-DD>-<slug>` cut.
 related:
   - ~/dev/agentnative-spec/docs/plans/2026-05-06-001-feat-prose-check-stack-plan.md
   - ~/dev/agentnative-spec/docs/plans/2026-05-06-002-feat-languagetool-pool-deployment-plan.md
@@ -14,6 +16,51 @@ related:
 ---
 
 # feat: site-side prose-check enforcement (Vale + LanguageTool)
+
+> **Implementation status (2026-05-07): SHIPPED to `dev` via PR #82 (`a039943`).** All five units landed (U0 added
+> mid-flight when the manual-copy framing was replaced by a dedicated `sync-prose-tooling.sh` parallel to
+> `sync-spec.sh`). Plus the deployment-layer CSS-grep check (`scripts/check-banned-fonts.sh`, option C from the U1
+> scope discussion) ships alongside the prose-layer stack. Pre-push runs seven stages end-to-end with 0 prose-check
+> blocking on the cleaned corpus.
+>
+> **Units shipped (commits on `feat/prose-check` before squash):**
+>
+> - **U0** (`6959f76`) — `scripts/sync-prose-tooling.sh` (parallel to `sync-spec.sh`) plus initial vendor of the v1
+>   manifest from `agentnative-spec` v0.4.0: `BRAND.md`, `styles/brand/*.yml`, `styles/brand/README.md`,
+>   `styles/config/vocabularies/brand/{accept,reject}.txt`, `scripts/prose-check.sh`,
+>   `scripts/generate-pack-readme.mjs`. `scripts/SYNCS.md` updated with the new sync vehicle row, mermaid edge,
+>   orchestration trigger, and reference entry.
+> - **U1** (`872e5f7`) — `.vale.ini` composing brand + site + write-good + proselint; two site-channel rules
+>   (`site.BannedFonts`, `site.BannedAesthetics`); site vocab seed; `.gitignore` additions for vale-sync baseline
+>   packs; SITE-LOCAL DIVERGENCE patches to the vendored `scripts/prose-check.sh` (nested `*/node_modules/*` matching;
+>   `src/data/spec/` and `content/principles/` exclusions; documentation pointer at the upstream todo).
+> - **CSS-grep** (`0333b67`) — `scripts/check-banned-fonts.sh` reading tokens from `styles/site/BannedFonts.yml` via
+>   `yq` (single SoT downstream; same YAML drives the prose-layer rule, the auto-generated README, and now the
+>   deployment-layer scan).
+> - **U2** (`7d2d9b7`) — `scripts/test-prose-check.mjs` (adapted from spec; site-specific `CASES`); five fixture
+>   cases under `scripts/__fixtures__/prose-check/`. 5/5 OK on first run.
+> - **U3** (`a7e5dc6`) — `.impeccable.md` trimmed from 165 to 109 lines (inherits from vendored `BRAND.md`); site
+>   vocab expanded from 10 to 213 entries; per-file Vale disables for `.impeccable.md` (BannedAesthetics) and
+>   `docs/DESIGN.md` (BannedFonts) with the rationale-doc precedent; orchestrator scope tightened with `dist/` and
+>   `.claude/` carveouts and three additional LT denylist rules (`IN_PRINCIPAL`, `CONTRACT_CONTACT`,
+>   `TO_DO_HYPHEN`); corpus prose drift fixes across `content/`, `docs/DESIGN.md`, `docker/sandbox/README.md`. Drove
+>   prose-check from 705 blocking to 0.
+> - **U4** (`5b6883e`) — `scripts/hooks/pre-push` extended with three new stages (pack-README drift, banned-font
+>   deployment scan, prose-check). `package.json` `lint` script's `markdownlint-cli2` ignore list extended for the
+>   vale-sync baseline pack dirs.
+>
+> **Adjacent docs commits on the same branch:**
+>
+> - `af13d15` — plan amendment introducing U0 and the sync-prose-tooling.sh manifest.
+> - `54e51b0` — `RELEASES.md` PR-body prose-scrub procedure (60-line addition).
+> - `50f6bf6` — `RELEASES.md` cleaner scrub framing pulled from spec; switched scrub procedure to local `.vale.ini`.
+> - `a79dc24` — `RELEASES.md` PR body section copied from `agentnative-cli/RELEASES.md`.
+> - vocab follow-up (`denylist`, `proselint`, `rescoped`) surfaced during the PR-body scrub.
+>
+> **Upstream tracked work** (not blocking site U4 activation; the SITE-LOCAL DIVERGENCE patch is the bridge):
+> `agentnative-spec/.context/compound-engineering/todos/010-pending-p0-prose-check-consumer-exclusion-config.md`
+> covers Phase 1 (`--exclude PATTERN` CLI flag for the orchestrator) and Phase 2 (`.proseignore` unified SoT
+> consumed by the orchestrator, Vale, and `markdownlint-cli2`).
 
 Site-side parallel of the prose-check stack that shipped on `agentnative-spec/docs/v0.3.1`. Stands up Vale rule packs
 (universal `brand` vendored from spec via a dedicated sync script + a fresh site-channel `site` pack) plus the
