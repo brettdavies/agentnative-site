@@ -16,9 +16,9 @@ related:
 # feat: site-side prose-check enforcement (Vale + LanguageTool)
 
 Site-side parallel of the prose-check stack that shipped on `agentnative-spec/docs/v0.3.1`. Stands up Vale rule packs
-(universal `brand` copied verbatim from spec + a fresh site-channel `site` pack) plus the `write-good` and `proselint`
-baseline; integrates the orchestrator into the existing site pre-push hook; LanguageTool runs over Tailscale when
-reachable, gracefully skipped when not.
+(universal `brand` vendored from spec via a dedicated sync script + a fresh site-channel `site` pack) plus the
+`write-good` and `proselint` baseline; integrates the orchestrator into the existing site pre-push hook; LanguageTool
+runs over Tailscale when reachable, gracefully skipped when not.
 
 ## Spec-side context (already shipped)
 
@@ -41,16 +41,18 @@ decisions this plan inherits without re-litigating:
 
 Bring v1 prose-check enforcement to `agentnative-site`:
 
-- Copy spec's `brand/` rule pack verbatim into `agentnative-site/styles/brand/` (one-time manual sync; consumer
-  `sync-spec.sh` extension is the deferred follow-up tracked in the spec plan).
-- Author a fresh `agentnative-site/styles/site/` channel pack derived from the existing site `.impeccable.md`.
+- Stand up `scripts/sync-prose-tooling.sh` (parallel to `sync-spec.sh`) to vendor brand pack YAMLs + released README,
+  brand vocab, orchestrator + generator scripts, and `BRAND.md` from spec at the latest v* tag. Separate sync clock from
+  `sync-spec.sh` because prose tooling and the principles contract release on different cadences.
+- Author a fresh `agentnative-site/styles/site/` channel pack derived from the existing site `.impeccable.md`, plus a
+  site-additive vocab.
 - Compose `agentnative-site/.vale.ini` parallel to spec's, swapping `spec` for `site` in `BasedOnStyles`.
-- Copy `scripts/prose-check.sh` and `scripts/generate-pack-readme.mjs` from spec; copy and adapt
-  `scripts/test-prose-check.mjs`.
+- Author site-local `scripts/test-prose-check.mjs` and fixtures. Orchestrator + generator arrive vendored.
 - Wire the prose-check stages into `agentnative-site/scripts/hooks/pre-push` after the existing pipeline (lint, build,
   test, wrangler dry-run).
-- Strip visual-system literals from `agentnative-site/.impeccable.md` per the layered SoT pattern; resolve the existing
-  TODO at the top of that file.
+- Strip visual-system literals from `agentnative-site/.impeccable.md` per the layered SoT pattern; point at vendored
+  `BRAND.md` (universal) plus auto-generated `styles/site/README.md` (channel); resolve the existing TODO at the top of
+  that file.
 
 ## Requirements
 
@@ -67,17 +69,19 @@ cross-plan traceability.
   `proselint` baseline.
 - R10-site. Vale error-tier and category-whitelisted LT findings block; warning-tier annotates but does not block.
   Inherits the orchestrator's category whitelist (`TYPOS|GRAMMAR|CONFUSED_WORDS`) and per-rule denylist.
-- R11-site. Brand pack is committed verbatim from spec at v1 (manual sync). Consumer `sync-spec.sh` extension is the
-  deferred follow-up tracked in the spec plan.
+- R11-site. Brand pack, vocab, orchestrator, generator, and `BRAND.md` arrive verbatim via
+  `scripts/sync-prose-tooling.sh` — a dedicated sync vehicle parallel to `sync-spec.sh`. Separate sync clock from the
+  principles/contract sync because prose tooling and the contract release on different cadences.
 
 ## Scope boundaries
 
 ### Deferred to follow-up
 
-- Consumer `sync-spec.sh` extension to auto-pull `styles/brand/` from spec at vendoring time. Tracked in the spec plan's
-  deferred-follow-up list. Until that lands, the manual copy in U1 is the contract.
 - Re-promotion of the demoted LT categories (`PUNCTUATION | TYPOGRAPHY | CASING | COMPOUNDING`) to blocking. Pending the
   markdown preprocessor follow-up tracked in the spec voice-enforcement doc § Deferred follow-ups.
+- `repository_dispatch:spec-release` consumer-side handler that auto-PRs a re-sync after each spec tag. Site contributor
+  reruns `scripts/sync-prose-tooling.sh` manually for v1; auto-PR is the same deferred follow-up named in
+  `sync-spec.sh`'s header comment.
 
 ### Outside this product's identity
 
@@ -86,39 +90,77 @@ cross-plan traceability.
 
 ## Implementation Units
 
-- U1. **Vale config + brand-pack copy + site channel pack**
+- U0. **Author `sync-prose-tooling.sh`; vendor brand pack + vocab + scripts + BRAND.md**
 
-**Goal:** Stand up Vale enforcement in the site repo: pack composition, vocabulary scaffold, gitignore additions.
+**Goal:** Stand up the consumer-side sync vehicle for the prose-tooling artifacts shipped on spec. Parallel script to
+`sync-spec.sh` — separate sync clock, because prose tooling has a different release cadence from the principles/contract
+that `anc` lints against. Run the script once to populate the site with the v1 manifest.
 
-**Dependencies:** None. (The spec rev to copy from is captured in the U1 commit message for traceability.)
+**Dependencies:** None. (Spec's prose-tooling stack already shipped at v0.3.1; this unit consumes it.)
+
+**Files (under `agentnative-site/`):**
+
+- Create: `scripts/sync-prose-tooling.sh` — mirrors `sync-spec.sh`'s tag-resolution + remote-first + local-fallback
+  pattern. Vendors the manifest below from spec's latest v* tag. Reports the resolved tag + short SHA on stdout.
+- After running the script, the working tree gains:
+- `BRAND.md` — universal voice/identity SoT, link target from the trimmed `.impeccable.md` (U3).
+- `styles/brand/{MarketingRegister,HedgeWords,FillerAdjectives}.yml` — universal rule pack YAMLs.
+- `styles/brand/README.md` — released companion README. Already-generated artifact; not regenerated downstream
+  (downstream regeneration would invite tooling-version drift across consumers).
+- `styles/config/vocabularies/brand/{accept,reject}.txt` — universal vocab.
+- `scripts/prose-check.sh` — repo-agnostic orchestrator.
+- `scripts/generate-pack-readme.mjs` — repo-agnostic generator (used to produce site's own `styles/site/README.md` from
+  site-authored YAMLs; brand README is vendored, not regenerated).
+- Modify: `scripts/SYNCS.md` — document the new sync script alongside the existing `sync-spec.sh` entry.
+
+**Approach:**
+
+- Mirror `sync-spec.sh`'s structure: `SPEC_REMOTE_URL` / `SPEC_ROOT` env vars, remote `git ls-remote --tags` first,
+  local fallback, atomic `git show $TAG:<path>` extraction. No working-tree perturbation on either side.
+- Vendor brand `*.yml` AND its `README.md` from the same tag — sync-script atomicity is the integrity guarantee, no
+  downstream re-generation needed (matches the `principles/` + `VERSION` + `CHANGELOG.md` pattern in `sync-spec.sh`).
+- `git show` does not preserve the executable bit; `chmod +x scripts/prose-check.sh` after extracting the orchestrator.
+
+**Verification:**
+
+- `bash scripts/sync-prose-tooling.sh` exits 0 and reports the resolved spec tag.
+- Re-running produces no `git diff` (idempotent at a fixed spec tag).
+- `git status` shows only the vendored files; nothing in `src/data/spec/` is touched (`sync-spec.sh`'s territory).
+
+---
+
+- U1. **Vale config + site channel pack + site vocabulary**
+
+**Goal:** Compose Vale for the site channel using the brand pack vendored in U0 plus a fresh site channel pack and a
+site-additive vocabulary.
+
+**Dependencies:** U0 (brand pack + vocab vendored).
 
 **Files (all under `agentnative-site/`):**
 
 - Create: `.vale.ini` — composes `Vale, brand, site, write-good, proselint`; same severity overrides as spec (`brand.*`
   and `site.*` rules at `error`; `write-good.Passive` and `write-good.TooWordy` at `warning`; `write-good.E-Prime`,
   `write-good.ThereIs`, `proselint.But`, `proselint.Annotations`, `proselint.Typography`, `Vale.Terms` disabled); same
-  exclusion blocks (`docs/{brainstorms,plans,research}/`, `AGENTS.md`, `CHANGELOG.md`); `Vocab = brand` activates the
-  accept-list. Pin the same `Packages` URLs as spec (`write-good@v0.4.1`, `proselint@v0.3.4`).
-- Create: `styles/brand/{MarketingRegister,HedgeWords,FillerAdjectives}.yml` — verbatim from spec.
+  exclusion blocks (`docs/{brainstorms,plans,research}/`, `AGENTS.md`, `CHANGELOG.md`); `Vocab = brand, site` activates
+  both accept-lists. Pin the same `Packages` URLs as spec (`write-good@v0.4.1`, `proselint@v0.3.4`).
 - Create: `styles/site/*.yml` — channel-specific rules derived from `.impeccable.md` (final list decided at
   implementation time; likely candidates below).
-- Create: `styles/config/vocabularies/brand/{accept,reject}.txt` — copy from spec to start; site adds its own technical
-  terms as Vale.Spelling fires during the U3 dry run.
+- Create: `styles/config/vocabularies/site/{accept,reject}.txt` — site-additive vocab. Brand vocab arrives via U0
+  vendoring; the site vocab carries site-only technical terms (font names actually used in the design, code-block
+  language tags, etc.) as Vale.Spelling fires during the U3 dry run.
 - Modify: `.gitignore` — add `styles/proselint/`, `styles/write-good/`, `styles/.vale-config/`.
 
 **Approach:**
 
-- Manual copy via `git -C ../agentnative-spec show HEAD:<path> > <local>`. Capture the spec rev (HEAD SHA) in the U1
-  commit message for future drift detection. Do not modify the spec checkout's working tree.
-- Likely site channel rules to consider (full list decided at implementation time by reading current `.impeccable.md`
-  against the rule-extension catalog in
-  [`~/dev/agentnative-spec/docs/architecture/voice-enforcement.md`](~/dev/agentnative-spec/docs/architecture/voice-enforcement.md)):
+- Author the site channel pack iteratively against `.impeccable.md` and the rule-extension catalog in
+  [`~/dev/agentnative-spec/docs/architecture/voice-enforcement.md`](~/dev/agentnative-spec/docs/architecture/voice-enforcement.md).
+- Likely site channel rules to consider:
 - **Banned font names:** `Inter`, `Plex`, `Fraunces`, `Lora`, `DM Sans`, `Space Grotesk`, `Instrument Serif`, `Outfit`,
-    `Plus Jakarta Sans` (per the existing "second-favorite font reflex" ban).
+  `Plus Jakarta Sans` (per the existing "second-favorite font reflex" ban).
 - **Banned aesthetic terms:** `hero section`, `glassmorphism`, `card grid`, `sparkline` (context-bounded; some appear
-    legitimately in code or research notes).
+  legitimately in code or research notes).
 - **Required terms / preferred forms:** `OKLCH` preferred over hex when discussing palette values.
-- After authoring: `mkdir -p styles && vale sync` materializes the gitignored baseline packs.
+- After authoring: `vale sync` materializes the gitignored baseline packs.
 
 **Verification:**
 
@@ -128,32 +170,28 @@ cross-plan traceability.
 
 ---
 
-- U2. **Copy orchestrator + generator from spec; install fixtures and test runner**
+- U2. **Site test runner + fixtures**
 
-**Goal:** Bring the executable scripts that wrap Vale and LT and the fixture test runner.
+**Goal:** Author the site's prose-check fixture tests. Orchestrator + generator arrive vendored via U0.
 
-**Dependencies:** U1 (`.vale.ini` and rule packs must exist for Vale to invoke meaningfully).
+**Dependencies:** U0 (orchestrator + generator vendored), U1 (rule packs in place for Vale to invoke).
 
 **Files (all under `agentnative-site/`):**
 
-- Create: `scripts/prose-check.sh` — verbatim from `~/dev/agentnative-spec/scripts/prose-check.sh` at the spec rev
-  captured in the U1 commit message. The script's behavior is repo-agnostic (file enumeration via `find`, Vale
-  invocation, LT probe + parallelization, severity split, exit code).
-- Create: `scripts/generate-pack-readme.mjs` — verbatim from `~/dev/agentnative-spec/scripts/generate-pack-readme.mjs`.
-  The generator iterates `DEFAULT_PACKS = ["brand", "spec"]` by default; site invocation uses `bun
-  scripts/generate-pack-readme.mjs brand site` to target the right packs.
-- Create: `scripts/test-prose-check.mjs` — copy from spec and adapt the `CASES` array to match the site's rule names
-  (the brand cases stay; the spec.*cases get replaced with site.* cases for whatever rules U1 lands).
+- Create: `scripts/test-prose-check.mjs` — adapted from `agentnative-spec/scripts/test-prose-check.mjs`. The `CASES`
+  array carries the brand cases (still meaningful — site lints against the same brand pack) and replaces `spec.*` cases
+  with `site.*` cases for whatever rules U1 lands.
 - Create: `scripts/__fixtures__/prose-check/<case>/case.md` — one fixture per site rule.
 
 **Approach:**
 
-- `git -C ../agentnative-spec show HEAD:<path>` to read out of the spec checkout. Same spec rev as U1.
-- Generator targets: site invocation list is `brand site` rather than `brand spec`. Either pass it explicitly or amend
-  `DEFAULT_PACKS` in the site's copy. (Recommend explicit args at invocation; keeps the script verbatim.)
-- The orchestrator's `find` exclude list may need a site-specific addition for `content/principles/` (vendored from spec
-  — its own pre-push catches drift; double-checking is wasted work). Decision deferred to U2 implementation time after
-  surveying the site's `*.md` corpus.
+- Read the spec's runner verbatim to understand the contract; copy + adapt only the `CASES` array.
+- Generator invocation in pre-push (U4) targets `site` only — brand README is vendored, not regenerated, so passing
+  `brand` to `--check` would either no-op or false-fail depending on the generator's tolerance for vendored output.
+- The orchestrator's `find` exclude list lives in the vendored `prose-check.sh`. Site-specific exclusions (e.g.,
+  `content/principles/`, vendored from spec — its own pre-push catches drift) get raised as upstream additions to spec
+  rather than forking the vendored script. Decision deferred to U2 implementation time after surveying the site's `*.md`
+  corpus.
 
 **Verification:**
 
@@ -167,25 +205,28 @@ cross-plan traceability.
 
 **Goal:** Resolve the existing TODO at the top of `agentnative-site/.impeccable.md` ("trim to inherit shared identity
 from agentnative-spec/BRAND.md"). Restructure to keep site-channel-only content (visual system, palette, fonts) local
-and inherit universal voice from spec's BRAND.md by reference. Clean any pre-existing prose drift the orchestrator
-surfaces.
+and inherit universal voice from the vendored `BRAND.md` by reference. Clean any pre-existing prose drift the
+orchestrator surfaces.
 
-**Dependencies:** U1, U2 (rule packs and orchestrator must be running for verification).
+**Dependencies:** U0 (BRAND.md vendored), U1, U2 (rule packs + orchestrator + fixture runner must be in place for
+verification).
 
 **Files (under `agentnative-site/`):**
 
 - Modify: `.impeccable.md` — strip literal banned-phrase enumerations from any inherited universal bullets; restructure
-  to point at `styles/brand/README.md` (universal) and `styles/site/README.md` (site channel). Mirror the pattern from
-  spec's U3 — keep section headers, remove literal lists, add link to per-pack README. Visual-system content (palette,
-  typography, code-block treatment, OG image) stays site-local.
+  to point at `BRAND.md` (universal voice, vendored from spec in U0) and `styles/site/README.md` (site-channel rules,
+  generated from `styles/site/*.yml`). Mirror the pattern from spec's trimmed `.impeccable.md` — keep section headers,
+  remove literal lists, link to BRAND.md plus the per-pack README. Visual-system content (palette, typography,
+  code-block treatment, OG image) stays site-local.
 - Modify: site corpus markdown files (`README.md`, `content/*`, `docs/*`, others) for any blocking findings the
   orchestrator surfaces. Mostly: lowercase RFC keywords → uppercase or rephrase, banned font names → category
   descriptions, marketing register → spec voice. Mirrors the pattern from spec's U3 prose cleanup.
 
 **Approach:**
 
-- Mirror spec's U3 approach: separate the narrative identity (rationale, voice anchors) from the literal contract (rule
-  pack YAML). Keep section headers; remove literal enumerations; add link to per-pack README.
+- Mirror spec's `.impeccable.md` trim: open with "Channel-specific design context for the **site channel** of
+  agentnative. Inherits the shared identity, voice anchor, audiences, and universal anti-patterns from
+  [`BRAND.md`](BRAND.md). Read that first." Visual-system sections follow.
 - For site-specific concerns (visual-system terminology, palette, fonts): keep in `agentnative-site/.impeccable.md`
   rather than promoting to spec BRAND.md. Visual system is site-channel-only.
 - Run `bash scripts/prose-check.sh --vale-only` first to scope Vale-tier cleanup. Then full `bash
@@ -196,7 +237,8 @@ surfaces.
 - `bash scripts/prose-check.sh` reports `0 blocking` against the cleaned site working tree.
 - `agentnative-site/.impeccable.md` no longer contains the inherited literal phrase lists; the TODO at the top is
   resolved.
-- `bun scripts/generate-pack-readme.mjs brand site --check` exits 0 (no drift between rule packs and READMEs).
+- `bun scripts/generate-pack-readme.mjs site --check` exits 0 (no drift between site rule pack and its README; brand
+  pack is vendored, not regenerated).
 
 ---
 
@@ -214,7 +256,7 @@ drift).
 
   ```bash
   bold '==> Pack-README drift check'
-  bun scripts/generate-pack-readme.mjs brand site --check </dev/null
+  bun scripts/generate-pack-readme.mjs site --check </dev/null
 
   bold '==> prose-check'
   bash scripts/prose-check.sh </dev/null
@@ -243,7 +285,7 @@ drift).
 
 | Risk | Likelihood | Impact | Mitigation |
 | - | - | - | - |
-| Site brand pack drifts from spec because manual copy at v1 has no integrity check | Med | Med | Capture spec HEAD SHA in U1's commit message. Future fix: `sync-spec.sh` extension (deferred follow-up in spec plan). v1 mitigation: short delta-window between this site PR and the spec ship. |
+| Vendored prose-tooling artifacts go stale relative to spec because consumer-side auto-PR on `repository_dispatch:spec-release` is not yet wired | Med | Low | `scripts/sync-prose-tooling.sh` is idempotent and self-reports the resolved spec tag; maintainer reruns after each spec release. Tracked as a deferred follow-up alongside the same handler for `sync-spec.sh`. |
 | Site channel rules over- or under-fit current `.impeccable.md` | Med | Low | First-pass dry run informs the rule list. Iterate via `.vale.ini` comments and pack updates after observation. The spec voice-enforcement doc names this as expected v1 behavior. |
 | Site corpus has more pre-existing prose drift than spec did | Med | Low | Expected; the first-run pass IS the cleanup. Spec saw 80 Vale-tier blockers + 18 LT blockers initially; site may differ. Rewriting is the loop. |
 | Pre-push throughput regresses for site (heavier corpus including Astro content) | Low | Med | Default to full scope; rely on `--changed-only` for fast iteration. If pre-push exceeds a usable budget, narrow scope or short-circuit `--changed-only` by default in the hook. |
@@ -260,8 +302,10 @@ End-to-end success criteria (acceptance examples carried from spec plan):
 - AE3 site-side: `rg -i 'vale|prose-check|languagetool' .github/workflows/` returns zero matches in the site repo.
 - AE4 site-side: a file under `agentnative-site/docs/brainstorms/` (or `docs/plans/`, `docs/research/`) with a banned
   phrase is excluded by the orchestrator's `find` and does not flag.
-- AE5 (manual-copy level for v1): `styles/brand/*.yml` is byte-identical to the spec rev recorded in U1's commit
-  message. Re-verified at the automated level once the consumer `sync-spec.sh` extension lands.
+- AE5 (sync-script integrity): `bash scripts/sync-prose-tooling.sh` is idempotent — running it twice in a row produces
+  no `git diff` against a fixed spec tag. Vendored artifacts (`BRAND.md`, `styles/brand/*.yml`,
+  `styles/brand/README.md`, `styles/config/vocabularies/brand/{accept,reject}.txt`, `scripts/prose-check.sh`,
+  `scripts/generate-pack-readme.mjs`) are byte-identical to the spec tag the script resolved.
 
 ## Sources & References
 

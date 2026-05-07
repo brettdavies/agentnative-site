@@ -61,8 +61,8 @@ score. They are language-specific and would create unfair comparisons across too
 
 - `agent-optimized` — the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or
   warn at most once. (One warn allowance reflects the reality that the four signal checks are correlated — a
-  near-conformant tool typically misses on one edge, e.g., honoring `NO_COLOR` but not `NO_COLOR=0`; requiring zero
-  warns would over-penalize otherwise-conformant tools.)
+  near-conformant tool may miss on one edge, e.g., honoring `NO_COLOR` but not `NO_COLOR=0`; requiring zero warns would
+  over-penalize otherwise-conformant tools.)
 - `mixed` — two of the four signal checks warn.
 - `human-primary` — three or more of the four signal checks warn.
 - `null` with `audience_reason: "suppressed"` — when the active audit profile suppresses one or more of the four signal
@@ -70,7 +70,7 @@ score. They are language-specific and would create unfair comparisons across too
   can see *why* the field is empty rather than guessing.
 
 The classifier is **informational, not authoritative**. It is a one-line summary derived from a fixed set of four
-behavioral checks. The per-check evidence on the same page is the ground truth. A tool labeled `human-primary` may still
+behavioral checks. The per-check evidence shown alongside is the ground truth. A tool labeled `human-primary` may still
 be safe to use from an agent in narrow, well-bounded ways. A tool labeled `agent-optimized` may still surprise an agent
 on a check the classifier does not look at.
 
