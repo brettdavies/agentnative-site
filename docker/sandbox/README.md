@@ -84,7 +84,7 @@ curl -fsSL "https://hub.docker.com/v2/repositories/cloudflare/sandbox/tags/<tag>
 - **C/C++/Rust toolchains.** `apk add build-base gcc rust` would balloon the image past the size budget AND violate
   Premise #2 (install-from-binary only). The `cargo install` (compile) path is intentionally absent — cargo-binstall's
   job is precompiled-only.
-- **Specific source-only packages.** Anything that requires a compile during `pip install` (no wheel published) will
+- **Specific source-only packages.** Anything that requires compilation during `pip install` (no wheel published) will
   fail at install-time. U6 `pip install --only-binary=:all:` makes that explicit.
 
 ## Two-phase egress

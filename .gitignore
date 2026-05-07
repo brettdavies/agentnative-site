@@ -27,3 +27,10 @@ playwright-report/
 # the local CLI checkout (not committed); per-run logs land in out/.
 /docker/score/anc
 /docker/score/out/
+
+# Vale baseline packs — downloaded by `vale sync` from the URLs in .vale.ini's
+# Packages directive. The brand and site packs are committed; these are
+# fetched per-machine.
+/styles/proselint/
+/styles/write-good/
+/styles/.vale-config/
