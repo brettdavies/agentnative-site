@@ -91,6 +91,10 @@ What that means in practice for files in this directory:
 - The Definition's **first sentence names the failure mode**, not the artifact. "A CLI tool that blocks on an
   interactive prompt is invisible to an agent — the agent hangs, the user sees nothing, and the operation times out
   silently." NOT "A non-interactive CLI is one that does not block on prompts."
+- The Definition's **first paragraph is also the homepage card** at `/` and the bullet at `/index.md` (auto-pulled by
+  `extractDefinitionParagraph` in [`src/build/content.mjs`](../../src/build/content.mjs)). Budget 2-3 sentences. P5 and
+  P7 sit at the upper end (~3 sentences, ~80 words); anything longer makes the card visually dominate the index. Content
+  that needs more elaboration belongs in Why, not in Definition.
 - **No narrative analogies** in Definition or Requirements. Analogies belong on the homepage that brought the reader
   here.
 - **RFC-keyword blocks** (`**MUST:**` / `**SHOULD:**` / `**MAY:**`) appear immediately after the Why section. No warm-up
