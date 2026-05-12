@@ -79,6 +79,28 @@ What DOES cross over: the substance of every MUST/SHOULD/MAY, the evidence list,
 adds a MUST, the website adds the corresponding paragraph. If the spec rewords a summary materially (not just
 punctuation), the website's matching paragraph is reworded too.
 
+## Voice (delta from the homepage)
+
+A principle page is **Register 1b** in [`docs/research/VOICE.md`](../../docs/research/VOICE.md). The reader is no longer
+cold — they clicked from the homepage because they want the contract for one principle, so the page IS the contract.
+That separates this surface from the homepage (`content/_intro.md`, Register 1a, where the lede earns the click via
+concrete narrative).
+
+What that means in practice for files in this directory:
+
+- The Definition's **first sentence names the failure mode**, not the artifact. "A CLI tool that blocks on an
+  interactive prompt is invisible to an agent — the agent hangs, the user sees nothing, and the operation times out
+  silently." NOT "A non-interactive CLI is one that does not block on prompts."
+- **No narrative analogies** in Definition or Requirements. Analogies belong on the homepage that brought the reader
+  here.
+- **RFC-keyword blocks** (`**MUST:**` / `**SHOULD:**` / `**MAY:**`) appear immediately after the Why section. No warm-up
+  paragraph between Why and Requirements.
+- **Code samples carry weight a paragraph cannot.** A six-line Rust block beats three sentences of prose describing the
+  same pattern. The principle pages are the only site surface where code blocks are load-bearing for the argument.
+- **Closes** with one short line citing the check IDs that measure the principle today and an `anc check --principle
+  <n>` invocation a reader can copy. Use the spec's actual requirement IDs (`p<n>-must-...`, `p<n>-should-...`), not
+  paraphrased shorthand.
+
 ## Why three version files, not one
 
 The site's footer reads `SITE_SPEC_VERSION` from [`VERSION`](VERSION) here — that's the spec version this directory's
