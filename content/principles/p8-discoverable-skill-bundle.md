@@ -2,19 +2,17 @@
 
 ## Definition
 
-Without a skill bundle, every agent invocation of a CLI begins the same way: pull `--help`, parse the flag surface,
-infer the idioms, try a command, parse the error, try again. The cost lands on every subsequent call too — the agent has
-no place to durably register what it learned. A skill bundle is a structured markdown file (canonical names: `AGENTS.md`
-or `SKILL.md`) shipped with the CLI and discoverable through filesystem convention rather than through `--help`. The
-agent loads it once and recognizes the tool's idioms thereafter.
+Without a skill bundle, every fresh agent invocation begins the same way: pull `--help`, infer the idioms, try a
+command, parse the error, try again. A skill bundle (canonical names `AGENTS.md` or `SKILL.md`) collapses that loop —
+agent-discoverable through filesystem convention rather than through `--help`, loaded once, recognized thereafter.
 
 ## Why Agents Need It
 
 `--help` describes what is *possible* (the flag and subcommand surface); a skill bundle describes what to *do* (workflow
 knowledge, common compositions, recovery patterns). Workflow knowledge does not fit in `after_help` examples. The bundle
 is also where conventions that span multiple subcommands live — exit-code tables, output-channel discipline, retry
-semantics — context that `--help` for a single subcommand cannot carry on its own. Without one, the agent re-learns the
-tool from scratch on every fresh session.
+semantics — context that `--help` for a single subcommand cannot carry on its own. Without one, the agent has nowhere to
+durably register what it learned, and re-pays the discovery cost on every fresh session.
 
 ## Requirements
 
