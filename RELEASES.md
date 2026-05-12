@@ -270,7 +270,7 @@ changed.
 
 The filter is symmetric across `dev` and `main`. In practice the `main` side is mostly theoretical:
 `guard-main-docs.yml` already blocks `docs/plans|solutions|brainstorms|reviews/**` from reaching `main` via PR, and the
-remaining ignored paths (root `*.md`, `docs/DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would
+remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would
 redeploy a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level
 filter for a job-level changed-files check.
 
@@ -367,7 +367,7 @@ gh api repos/brettdavies/agentnative-site/commits/<sha>/check-runs --jq '.check_
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
 [`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). This site vendors the skill's
 manifest (per-host install commands, version, surface metadata) in `src/data/skill.json`; the skill repo holds the
-actual content. Surface contract in `docs/DESIGN.md` §3.9. Update detection at install sites is delegated to the skill
+actual content. Surface contract in `DESIGN.md` §3.9. Update detection at install sites is delegated to the skill
 bundle's `bin/check-update`, which compares the local bundle's `VERSION` against `main` on GitHub.
 
 The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
@@ -406,5 +406,5 @@ the skill repo public, run `gh workflow run skill-availability.yml` once to seed
 ## Related docs
 
 - [`AGENT.md`](./AGENT.md) — onboarding, repo conventions, tool-site sequencing
-- [`docs/DESIGN.md`](./docs/DESIGN.md) — design system and build contract
+- [`DESIGN.md`](./DESIGN.md) — design system and build contract
 - [`docs/TODOS.md`](./docs/TODOS.md) — deferred work (not in v0 scope)

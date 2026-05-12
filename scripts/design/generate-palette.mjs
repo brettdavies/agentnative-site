@@ -161,7 +161,7 @@ dark.may = mk(80, 0.1, HUE_MAY);
 // ban on border-left callouts. If a future block treatment (leading tag
 // or full-background fill) ships, the wash ramps can be re-derived from
 // light["must" / "should" / "may"] at L=94 / C~0.04 for light mode and
-// L=22 / C~0.04 for dark mode. See docs/DESIGN.md §4.7 deferred variants.)
+// L=22 / C~0.04 for dark mode. See DESIGN.md §4.7 deferred variants.)
 
 // -------- Report --------
 
@@ -177,7 +177,7 @@ p(
 );
 
 p(
-  "\nThis is the show-your-work artifact behind docs/DESIGN.md §4.1 and §4.2. The ",
+  "\nThis is the show-your-work artifact behind DESIGN.md §4.1 and §4.2. The ",
   "palette is designed, verified, and documented here so a reviewer can ",
   "reproduce or challenge each value.\n"
 );
@@ -421,7 +421,7 @@ const cssTokenBlock = (palette, selector, comment) => {
 
 const typographyRules = `
 /* ================================================================== */
-/* Typography tokens — docs/DESIGN.md §4.3 / §4.4.                          */
+/* Typography tokens — DESIGN.md §4.3 / §4.4.                          */
 /* Body + display: Pangram Pangram's Uncut Sans (OFL).                 */
 /* Code: GitHub Next's Monaspace Xenon (OFL).                          */
 /* Neither appears in impeccable's reflex-fonts-to-reject list.        */
@@ -433,7 +433,7 @@ const typographyRules = `
 /*   - the preview HTML (via CDN <link> tags for Fontshare + jsdelivr) */
 /* Keeping @font-face out of foundation.css means this file is safe to */
 /* load from any origin without phantom 404s against missing paths.    */
-/* Reference @font-face template lives in docs/DESIGN.md §4.3.              */
+/* Reference @font-face template lives in DESIGN.md §4.3.              */
 /* ================================================================== */
 
 :root {
@@ -477,13 +477,13 @@ const typographyRules = `
 
 const staticRules = `
 /* ================================================================== */
-/* RFC-keyword treatment — option 7b (docs/DESIGN.md §4.7).                 */
+/* RFC-keyword treatment — option 7b (DESIGN.md §4.7).                 */
 /* Inline keyword color only. The side-stripe and background-wash      */
 /* callout variants were rejected because border-left >1px on a        */
 /* card/callout is the #1 banned AI-slop pattern per impeccable's      */
 /* <absolute_bans>, even for semantic colors. Alternative block-level  */
 /* treatments (leading RFC tag, full background tint) are deferred     */
-/* to live-site iteration — see docs/DESIGN.md §4.7.                        */
+/* to live-site iteration — see DESIGN.md §4.7.                        */
 /* ================================================================== */
 
 .rfc-must   { color: var(--must);   font-weight: 600; letter-spacing: var(--tracking-rfc); }
@@ -509,7 +509,7 @@ const foundationCss = `/* src/styles/foundation.css
  *   :root[data-theme="light"]                          -> light via explicit toggle
  *
  * Why the :not() inside the media query: a user who picks light via the UI
- * must win over an OS preference of dark. See docs/DESIGN.md §4.9.
+ * must win over an OS preference of dark. See DESIGN.md §4.9.
  */
 
 ${cssTokenBlock(light, ":root", "light mode default")}
@@ -537,7 +537,7 @@ p(
   "`:root[data-theme=\"light\"]`; typography tokens and `@font-face` for ",
   "Uncut Sans + Monaspace Xenon; and the shipped 7b inline-keyword rules ",
   "(`.rfc-must`, `.rfc-should`, `.rfc-may`). Block-level MUST/SHOULD/MAY ",
-  "callout variants are deferred per docs/DESIGN.md §4.7.\n"
+  "callout variants are deferred per DESIGN.md §4.7.\n"
 );
 
 p(hr);

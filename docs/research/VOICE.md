@@ -12,8 +12,9 @@ Structure adapted from
 
 Pair with:
 
-- [`.impeccable.md`](../.impeccable.md) — users, brand personality, anti-references.
-- [`docs/DESIGN.md`](DESIGN.md) — typography, palette, layout.
+- [`PRODUCT.md`](../../PRODUCT.md) — users, brand personality, anti-references (channel delta on top of
+  [`BRAND.md`](../../BRAND.md)).
+- [`DESIGN.md`](../../DESIGN.md) — typography, palette, layout.
 - Voice anchor: `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md`. The
   letter is first-person; the spec site is third-person. Everything else — concrete-before-abstract, numbers-not-
   adjectives, "the code speaks for itself" close — transfers.
@@ -193,7 +194,7 @@ better calibration. Each entry names the surface, the draft, the send, and the l
 - **Delta**: "austere" and "self-evident" read as permission to be boring. "Opinionated" carries a POV the reader can
   engage with; "inviting" prevents drift into dry-RFC. Same authority intent, different engagement vector.
 - **Lesson**: A spec voice that defaults to minimal reads as uncommitted, not confident. "Restraint is not austerity"
-  (Design Principle 3 in `.impeccable.md`) is the tight formulation.
+  (Design Principle 3 in `PRODUCT.md`) is the tight formulation.
 
 ### Example 2 — `/check` install stanza framing (session 2026-04-14)
 

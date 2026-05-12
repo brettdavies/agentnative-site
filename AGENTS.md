@@ -58,7 +58,7 @@ anchors, and semantic HTML. Keep this framing in every decision.
   per-host clone commands)
 - `/skill.json` — canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
   `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill.json` at build time; full surface
-  contract in `docs/DESIGN.md` §3.9
+  contract in `DESIGN.md` §3.9
 - `content/*.md` — markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
@@ -96,11 +96,11 @@ narrative, attribution rules) is load-bearing.
 - Mobile-first; a11y baseline (skip-link, semantic landmarks, `>= 4.5:1` contrast, `:focus-visible`,
   `prefers-reduced-motion`)
 
-The design-survey step produces a `docs/DESIGN.md` in the repo with palette, type stack, spacing scale, code-block
-treatment, and dark/light tokens before any HTML is written.
+The design-survey step produces a `DESIGN.md` in the repo with palette, type stack, spacing scale, code-block treatment,
+and dark/light tokens before any HTML is written.
 
 Design context consumed by the `/impeccable` and `/typeset` skills (users, brand personality, aesthetic direction,
-design principles): [`.impeccable.md`](.impeccable.md).
+design principles): [`PRODUCT.md`](PRODUCT.md).
 
 ## Visual fidelity
 
@@ -158,7 +158,7 @@ agent-side browser-verify rule above is the working gate.
 | `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md`                               | Shared research index for both this site and the `agentnative` CLI linter                                                      | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties.                                |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md`                             | Canonical spec for P1-P7 (one file per principle, pressure-testable)                                                           | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md`          | Build & distribution plan                                                                                                      | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified.                                                                            |
-| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md`          | Eng review                                                                                                                     | Architecture + code quality + test coverage review for M1. §12 lists all docs/DESIGN.md edits. Decisions resolved; no blockers.                                                                                            |
+| `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md`          | Eng review                                                                                                                     | Architecture + code quality + test coverage review for M1. §12 lists all DESIGN.md edits. Decisions resolved; no blockers.                                                                                                 |
 | `docs/plans/2026-04-17-001-feat-registry-leaderboard-scorecard-pages-plan.md`                       | Registry + leaderboard plan                                                                                                    | Plan 1 scope: tool registry, pre-computed scorecards, `/scorecards` leaderboard, `/score/<tool>` pages. Plan 2 (live scoring via CF Sandbox) is separate.                                                                  |
 
 ## Related repos
@@ -208,6 +208,6 @@ The production domain (candidates: agentnative.dev / .io / .org) is **Brett's pu
    authoritative spec that the site's `content/principles/` copy is written from (manually, not auto-derived).
 3. Run a reference-site survey for visual design (clig.dev, 12factor.net, htmx.org, rust-lang.org book, json-schema.org,
    fly.io docs, matklad.github.io — pick 3-4 that embody "simple, traditional, modern flair" and extract tokens).
-   Produce `docs/DESIGN.md` before writing any HTML.
+   Produce `DESIGN.md` before writing any HTML.
 4. Scaffold the markdown sources in `content/` first, then the Worker + HTML renderer, then wire deploy.
 5. Check in with Brett before attaching the production domain.
