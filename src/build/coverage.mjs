@@ -159,7 +159,7 @@ export function buildCoverageBody(matrix) {
   html += `<section class="coverage-methodology">
   <h2>About this matrix</h2>
   <p>This matrix is generated from the <a href="https://github.com/brettdavies/agentnative">agentnative</a> principle
-  registry — a flat list of every MUST, SHOULD, and MAY across the seven principles, each mapped to the check IDs
+  registry — a flat list of every MUST, SHOULD, and MAY across the eight principles, each mapped to the check IDs
   that verify it. Requirements with no verifiers are marked <strong>UNCOVERED</strong>: the spec requires them but
   <code>anc</code> does not yet test for them.</p>
   <p>"Covered" means a check exists that targets this requirement. "Verified" (on <a href="/scorecards">scorecard pages</a>)

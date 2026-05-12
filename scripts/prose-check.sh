@@ -103,7 +103,7 @@ LT_BLOCKING_CATEGORIES='^(TYPOS|GRAMMAR|CONFUSED_WORDS)$'
 # === SITE-LOCAL DENYLIST EXTENSIONS ====================================
 # Three additional rules that misfire on agentnative-site domain jargon:
 #
-#   IN_PRINCIPAL       LT confuses "principle" (P1-P7 noun, the contract
+#   IN_PRINCIPAL       LT confuses "principle" (P1-P8 noun, the contract
 #                      term) with "principal" (chief). Site corpus uses
 #                      "principle" extensively (principle groups, principle
 #                      source files, etc.).

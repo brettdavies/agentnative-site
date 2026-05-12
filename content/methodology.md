@@ -48,8 +48,8 @@ across tools; the **principles met** column is where conformance lives. A tool w
 score higher than a tool with zero `fail` and three `warn`, but only the first tool is non-conformant — read both
 columns together. The per-tool page is the ground truth.
 
-The **principles met** column counts how many of the seven principles (P1–P7) have *all* their checks passing — no
-warnings, no failures. A tool can have a 90% pass rate and still meet only four of seven principles, if the warnings
+The **principles met** column counts how many of the eight principles (P1–P8) have *all* their checks passing — no
+warnings, no failures. A tool can have a 90% pass rate and still meet only four of eight principles, if the warnings
 cluster inside three principle groups. Both numbers are surfaced because either, alone, hides the shape of the result.
 
 Bonus checks — `CodeQuality` and `ProjectStructure` — are listed on each tool's page but not blended into the primary

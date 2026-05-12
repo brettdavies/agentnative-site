@@ -72,6 +72,7 @@ const LOCKED_SLUGS = [
   'p5-safe-retries-mutation-boundaries',
   'p6-composable-predictable-command-structure',
   'p7-bounded-high-signal-responses',
+  'p8-discoverable-skill-bundle',
 ];
 
 async function ensureDir(dir) {
@@ -80,7 +81,7 @@ async function ensureDir(dir) {
 
 /**
  * Build the homepage body HTML — hero section (title + lede) followed by
- * the seven-principle listing with links to individual pages.
+ * the principle listing with links to individual pages.
  */
 function buildHomepageBody(introTitle, introLede, principles) {
   const entries = principles
@@ -102,7 +103,7 @@ function buildHomepageBody(introTitle, introLede, principles) {
   <h1 class="hero__title">${escHtml(introTitle)}</h1>
   <p class="hero__lede">${escHtml(introLede)}</p>
 </section>
-<section class="principles-index" aria-label="The seven principles">
+<section class="principles-index" aria-label="The eight principles">
   <ol class="principles-index__list">
 ${entries}
   </ol>
@@ -299,7 +300,7 @@ export async function build() {
 
   const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.
   The <strong>score</strong> column is the pass rate <code>pass / (pass + warn + fail)</code>;
-  the <strong>principles met</strong> column counts how many of the seven principles have every
+  the <strong>principles met</strong> column counts how many of the eight principles have every
   check passing. The <strong>audience</strong> classification — when present — is informational,
   not authoritative; the per-tool page's evidence list is the ground truth.</p>
   <p>For the full explanation of scoring, audience classification, audit profiles, and how to
