@@ -59,11 +59,7 @@ gh pr create --base dev --title "feat(scope): what changed"
 Every PR — feature, fix, docs, release — uses `.github/pull_request_template.md` verbatim. Six sections, no inventions:
 `## Summary`, `## Changelog`, `## Type of Change`, `## Related Issues/Stories`, `## Files Modified`, `## Testing`.
 
-- **Summary** is the NEW user-facing substance the PR ships. What is changing for the consumer that was not already
-  there. One short paragraph fits. Do NOT recap the workflow (cherry-pick / regenerate / pre-push gate / CI behavior is
-  documented in this file and `.github/`). Do NOT paste triple-diff output, pre-push gate results, or CI check status
-  into the body. Those are author verification artifacts that stay local; anomalies get fixed before push, not
-  audit-trailed in the body.
+- **No explainer prose anywhere in the body.** Every section is user-facing substance only — what is changing for the consumer that was not already there. `## Summary` is one short paragraph. Do NOT recap the workflow (cherry-pick / regenerate / pre-push gate / CI behavior is documented in this file and `.github/`). Do NOT paste triple-diff output, pre-push gate results, CI check status, exclusion rationale, or other verification artifacts into the body. Those stay local; anomalies get fixed before push, not audit-trailed in the body.
 - **Changelog** subsections (`### Added` / `### Changed` / `### Fixed` / `### Documentation`) hold the user-facing
   entries. The template's RULES (in the HTML comment at the top of the section) are literal: 1-5 bullets, delete empty
   subsections entirely, each bullet starts with a verb. Prose-only edits leave the section empty or omit it.
