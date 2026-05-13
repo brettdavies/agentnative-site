@@ -1,4 +1,4 @@
-# PRODUCT.md — agentnative-site channel
+# PRODUCT.md: agentnative-site channel
 
 Channel-specific product + design context for the **site channel** of agentnative. Loaded by `/impeccable` (the
 `load-context.mjs` script renames legacy `.impeccable.md` to this filename) and read by humans editing the site.
