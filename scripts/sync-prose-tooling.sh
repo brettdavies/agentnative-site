@@ -22,8 +22,17 @@
 #   styles/brand/*.yml                                  (universal rule pack)
 #   styles/brand/README.md                              (released companion)
 #   styles/config/vocabularies/brand/{accept,reject}.txt  (universal vocab)
-#   scripts/prose-check.sh                              (orchestrator)
 #   scripts/generate-pack-readme.mjs                    (generator)
+#
+# Not vendored (consumer-owned as of 2026-05-13):
+#
+#   scripts/prose-check.sh                              (orchestrator)
+#     Un-vendored because the upstream copy kept clobbering this repo's
+#     SITE-LOCAL DIVERGENCE block (consumer-specific path exclusions and
+#     LT denylist additions) on every sync. Universal pipeline changes
+#     now require coordinated PRs across all four channel repos
+#     (spec / site / cli / skill). See the script's header for context
+#     and the long-term sidecar-config migration tracked upstream.
 #
 # The brand README is a *released artifact*, not regenerated downstream:
 # sync-script atomicity is the integrity guarantee, and downstream
@@ -110,7 +119,6 @@ required_paths=(
     "styles/brand"
     "styles/brand/README.md"
     "styles/config/vocabularies/brand"
-    "scripts/prose-check.sh"
     "scripts/generate-pack-readme.mjs"
 )
 for path in "${required_paths[@]}"; do
@@ -129,12 +137,12 @@ mkdir -p \
 
 git -C "$spec_source" show "$spec_ref:BRAND.md" >"$REPO_ROOT/BRAND.md"
 git -C "$spec_source" show "$spec_ref:styles/brand/README.md" >"$REPO_ROOT/styles/brand/README.md"
-git -C "$spec_source" show "$spec_ref:scripts/prose-check.sh" >"$REPO_ROOT/scripts/prose-check.sh"
 git -C "$spec_source" show "$spec_ref:scripts/generate-pack-readme.mjs" \
     >"$REPO_ROOT/scripts/generate-pack-readme.mjs"
 
-# git show drops the executable bit; restore it for the orchestrator.
-chmod +x "$REPO_ROOT/scripts/prose-check.sh"
+# scripts/prose-check.sh is consumer-owned (un-vendored 2026-05-13); see
+# its header for context. Universal pipeline changes require coordinated
+# PRs across spec / site / cli / skill.
 
 # === Extract: brand rule pack YAMLs ====================================
 yaml_count=0
@@ -176,6 +184,7 @@ echo "pulled from main @ $resolved_sha"
 echo "wrote BRAND.md to repo root"
 echo "wrote $yaml_count brand rule pack YAML(s) + README.md to styles/brand/"
 echo "wrote $vocab_count brand vocab file(s) to styles/config/vocabularies/brand/"
-echo "wrote scripts/prose-check.sh (executable) + scripts/generate-pack-readme.mjs"
+echo "wrote scripts/generate-pack-readme.mjs"
+echo "skipped scripts/prose-check.sh (consumer-owned, un-vendored 2026-05-13)"
 echo
 echo "next: review \`git diff\` for unexpected changes, then commit."
