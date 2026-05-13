@@ -18,7 +18,7 @@
 # the rule pack itself (styles/site/BannedFonts.yml — its tokens ARE the
 # list), the auto-generated styles/site/README.md (which prints the list),
 # and prose-policy artifacts the prose-check stack already covers
-# (BRAND.md, .impeccable.md, *.md anywhere — Vale handles those at the
+# (BRAND.md, PRODUCT.md, *.md anywhere — Vale handles those at the
 # prose layer).
 #
 # Usage:
