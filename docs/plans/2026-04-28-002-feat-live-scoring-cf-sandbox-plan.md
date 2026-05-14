@@ -50,33 +50,45 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
 ### Blocker discovered post-shipment
 
 Docker Hub deprecated. The `wrangler.jsonc` `containers[].image` field still points at
-`docker.io/brettdavies/anc-sandbox@sha256:...`. Before any further live-scoring work proceeds, U3-followup must:
-
-1. Replace the `docker.io` digest pin with an inline `image: ./docker/sandbox/Dockerfile` reference.
-2. Wire `wrangler deploy`'s container build into `.github/workflows/deploy.yml`.
-3. Verify the Cloudflare managed registry build works end-to-end on the staging environment first.
-4. Re-pin the `image:` field to whatever shape CF managed registry produces (digest pin under CF's hostname, or whatever
-   the convention is).
+`docker.io/brettdavies/anc-sandbox@sha256:...`. The U3-followup spike (2026-05-14) resolved the migration shape: build
+locally on Brett's machine using `wrangler containers build -p -t <git-sha>`, push happens during build, then pin
+`wrangler.jsonc` (both env blocks) at `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>` and run `wrangler deploy
+--env staging` then `--env production` with no rebuild on deploy. This local-build-once + shared-tag-pin pattern
+preserves the SHA-pinning ergonomic Docker Hub gave us, decouples build from deploy, and avoids the multi-env double
+build that arises from `containers` being a non-inheritable binding (per spike 01,
+<https://developers.cloudflare.com/containers/platform-details/image-management/>). GHA fallback via
+`cloudflare/wrangler-action@v3.14.1` (the version in the current `deploy.yml`) stays available for the rare case Brett
+is offline; expect a ~60-130s cold build on `ubuntu-latest` with no native layer cache (per spike 02). U3-followup is no
+longer a research blocker; it is implementation work with a known shape (see U3 spec body below).
 
 ### Pending (in execution order for the next session)
 
-1. **U3-followup** — Docker Hub to CF managed registry migration (per blocker above). Unblocks U6's container reality.
-2. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Unblocks any
-   user-facing wiring.
+1. **U3-followup** — local-build-once + shared-tag-pin migration off Docker Hub (shape resolved by spike 01; see U3 spec
+   body). Unblocks U6's container reality.
+2. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Includes the
+   `SCORE_LIMITER` rekey from per-IP to `session-cookie + tool-arg-hash` (see Cost ceiling and abuse mitigation
+   section). Unblocks any user-facing wiring.
 3. **U6** — replace DO stub with real `@cloudflare/sandbox`-extending DO; two-phase egress (`allowedInstall` then
    `noHttp`); `sandbox-exec.ts` orchestrator with per-PM install matrix and `anc check --command --output json`.
    Highest-risk single unit.
 4. **U7** — R2 cache (read on hit, write on miss; key shape `scores/{slug}/{anc-v}/{tool-v}.json`).
-5. **U8** — `/score` page + markdown twin + paste-input form + client-side polling + summary + top-3 + install-anc CTA +
-   build-emitted `spec-version.gen.ts`.
+5. **U8** — paste-input form on the homepage (`/`, NOT a dedicated `/score` subpage), Turnstile invisible mode +
+   lazy-load on form interaction, CSP update for `challenges.cloudflare.com`, client-side polling, summary + top-3 +
+   install-anc CTA, build-emitted `spec-version.gen.ts`. No markdown twin (live-scoring is HTML-only; agents have `anc
+   check` locally). Result-presentation shape (inline / modal / shareable subpage) is an open U8 question.
 6. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
 
 U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should land alongside U6 / U8.
 
 ### Risks to design against during U5-U8
 
-- **Cost.** Container `basic` x pool size + R2 storage + DO requests. Unbounded if abused. Per-IP rate limit (10/60s) is
-  trivially bypassable with rotating IPs. Add a global daily cap or budget circuit-breaker before public rollout.
+- **Cost ceiling has no native auto-cap on Cloudflare.** Per spike 04 (citing
+  <https://developers.cloudflare.com/changelog/post/2026-04-13-billable-usage-dashboard-and-budget-alerts/>), the April
+  2026 Budget Alerts + Billable Usage dashboard are email-only — there is no "Cloudflare disables your Worker when it
+  crosses $X" primitive. Minimum viable defense for v3 launch (see Cost ceiling and abuse mitigation section below):
+  Turnstile invisible mode + lazy-load on the homepage form, rekey `SCORE_LIMITER` from per-IP to `session-cookie +
+  tool-arg-hash`, in-Worker KV `scoring_disabled` kill switch, and Cloudflare Budget Alert. A true hard daily cap (DO +
+  alarm + cost-budget counter) is deferred to v3.1.
 - **Abuse.** Anonymous + unauthenticated GitHub API path means the discovery chain hits `api.github.com` at the unauth
   60/hr/IP ceiling: IP exhaustion is shared across users. Consider a server-side GitHub PAT for discovery, or
   token-the-user.
@@ -85,6 +97,12 @@ U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should
 - **Failure modes.** No `installSpec` for unsupported PMs (e.g., brew on Alpine): bounce-out is the design but the
   bounce-out UX isn't built. Sandbox cold-start, container crash, network timeout, two-phase egress misconfig are all
   unobservable today.
+- **Rollback fragility (per spike 03).** Two new constraints land in the Risk Analysis section: (1) any DO migration
+  permanently strands earlier versions from `wrangler rollback` (cite
+  <https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/> Bindings section); (2)
+  deleting a container image from the CF managed registry silently breaks rollback for any version that referenced it
+  (cite <https://developers.cloudflare.com/containers/platform-details/limits/> footnote). Discipline: never delete
+  shipped-version images, treat DO migrations as one-way walls.
 
 ### Branch baseline for next session
 
@@ -548,6 +566,43 @@ after the Container build step is added.
 
 ## Open Questions
 
+### Resolved by U3-followup spike (2026-05-14)
+
+These were P0/P1 open questions before the four-subagent spike on 2026-05-14. The spike outputs (Q1-Q4) and the
+follow-up Q1 + Q4.1 + Q4.2 user clarifications resolved them; the answers are now woven into the plan body. The spike
+files have been deleted; this plan is the source of truth.
+
+- **Q1 — Container deploy semantics for the inline Dockerfile.** Resolved by spike 01 (citing
+  <https://developers.cloudflare.com/containers/platform-details/image-management/>,
+  <https://developers.cloudflare.com/workers/wrangler/configuration/#containers>,
+  <https://developers.cloudflare.com/workers/wrangler/commands/containers/>). `wrangler deploy` builds locally via
+  `docker build` (NOT Cloudflare-side); destination is `registry.cloudflare.com/<acct>/<image>:<tag>` authenticated via
+  `CF_API_TOKEN`; build context defaults to the Dockerfile's parent directory; `containers` is non-inheritable per-env.
+  Final shape per Q1 follow-up: build locally with `wrangler containers build -p -t <git-sha>`, then pin both env blocks
+  at the resulting tag and deploy with no rebuild. See U3-followup spec body for the complete procedure +
+  experimental-verification list.
+- **Q2 — wrangler-action + container build cache.** Resolved by spike 02 (sources include the
+  `cloudflare/wrangler-action` src trace + `cloudflare/workers-sdk` packages/containers-shared/src/build.ts). wrangler
+  shells out to plain `docker build` with no `--cache-from/--cache-to` flags; layering `docker/setup-buildx-action` +
+  `actions/cache` does NOT help because wrangler doesn't consume the cache they would populate. GHA cold builds are
+  ~60-130s on `ubuntu-latest`; push-side dedup IS automatic (`"Image already exists remotely, skipping push"` log line
+  is the canary). "Measure before optimizing" applies; current decision is no caching wiring on the GHA fallback path.
+- **Q3 — Rollback recipe + image versioning.** Resolved by spike 03 (citing
+  <https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/>,
+  <https://developers.cloudflare.com/containers/platform-details/limits/>,
+  <https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/>). Two hard constraints
+  documented as new Risk Analysis rows: (1) DO migrations are one-way walls — `wrangler rollback` cannot cross them; (2)
+  deleting a container image silently breaks rollback for any version that referenced it. Image-retention discipline
+  (never delete shipped-version images; quarterly manual prune review) added to U3-followup + RELEASES.md guidance.
+- **Q4 — Cost ceiling and abuse mitigation.** Resolved by spike 04 (citing
+  <https://developers.cloudflare.com/changelog/post/2026-04-13-billable-usage-dashboard-and-budget-alerts/>,
+  <https://developers.cloudflare.com/turnstile/>,
+  <https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/>). No native auto hard-cap exists; Budget
+  Alerts are email-only; the Workers ratelimit binding is per-POP. The "Cost ceiling and abuse mitigation" section
+  codifies the four-step MVP defense (Turnstile invisible mode + lazy-load on the homepage form, rekey `SCORE_LIMITER`
+  from per-IP to `session-cookie + tool-arg-hash`, in-Worker KV `scoring_disabled` kill switch, Cloudflare Budget
+  Alert). True hard daily cap (DO + alarm + cost-budget counter) deferred to v3.1.
+
 ### Resolved During Planning
 
 - **Image base (Alpine vs Debian):** Alpine + musl per design. Reversal of v2's silent re-glibc.
@@ -558,11 +613,14 @@ after the Container build step is added.
   limits bite in production.
 - **Rate limit primitive (binding vs DO):** Workers Rate Limiting binding for v3. Upgrade later if needed.
 - **R2 cache key shape:** `scores/{tool-slug}/{anc-version}/{tool-version-or-sha7}.json`. Includes `anc-version`.
-- **Container image registry:** Cloudflare managed registry via inline build (`image: "./docker/sandbox/Dockerfile"`).
-  Reverses the earlier "Docker Hub direct" call after a wall-clock + auth-surface comparison: Way 1 (build inline during
-  `wrangler deploy` with BuildKit layer cache) was selected over Docker Hub direct AND over the decoupled CF-registry
-  workflow (rejected because the registry URI exposes account ID in `wrangler.jsonc`). Cost: ~30-60 s of
-  cache-validation overhead on site-only deploys.
+- **Container image registry:** Cloudflare managed registry. The original "inline build during `wrangler deploy`" shape
+  was superseded post-shipment by the U3-followup local-build-once + shared-tag-pin pattern (resolved by spike 01,
+  2026-05-14): build locally with `wrangler containers build -p -t <git-sha>`, pin both env blocks at the resulting
+  `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>` URI, deploy with no rebuild. Decouples build from deploy,
+  preserves SHA-pinning ergonomic, avoids the multi-env double-build that arises from `containers` being a
+  non-inheritable binding. The literal account ID in `image:` is acceptable because Wrangler resolves it at push time,
+  not from the committed config (the auth-time generation distinguishes this from a literal account ID committed
+  alongside config). See U3-followup unit spec for full procedure.
 - **Registry-fast-path detection:** precomputed `dist/registry-index.json` at build time, dual-keyed (slug +
   owner/repo).
 - **Web result shape:** summary + top-3 issues + install-anc-locally CTA. Full check tables + meta deferred to local
@@ -678,10 +736,9 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
   `npm`/`yarn`/`pnpm`, `go install`. Registry is 86 brew + 5 bun + 4 uv + 1 misc. Realistic minimum viable parser: brew,
   bun, uv, pip (wheels). Cut others to v3.1 unless they appear in user-pasted input data. Reduces U4 surface ~40%. Apply
   during U4 implementation as a default-cut decision; bring back individually if measurement shows user need.
-- **`dist/score.md` static form twin serves no v3 goal** (scope-guardian). `/api/score.md` (the API JSON-as-markdown
-  response) IS load-bearing for agent-native parity. The static page describing the form (`dist/score.md`) just says
-  "this is a form, submit to /api/score" — information already conveyed by `/api/score.md`. Cut from U8; defer to v3.1
-  if specific need surfaces.
+- **`dist/score.md` static form twin serves no v3 goal** (scope-guardian) — **RESOLVED 2026-05-14 by U8 scope change.**
+  Live-scoring is now embedded on the homepage (`/`), not a dedicated `/score` page. The markdown twin (`/index.md`)
+  carries no form references by design, so there is no `dist/score.md` artifact to ship. Resolution per Q4.1 follow-up.
 - **`summary-render.ts` placement contradiction** (scope-guardian). U8 declares it in `src/worker/score/` (Worker
   bundle) but says "reused by client via shared module" — separate bundle, no cross-import. Resolve in U8 implementation
   start: either (a) place in `src/shared/` so both bundles import; (b) Worker renders HTML server-side, client just
@@ -1210,12 +1267,9 @@ deploy` per U3).
   ([#81](https://github.com/brettdavies/agentnative-site/pull/81), `09fe91f`). Bindings (`containers`, DO `SCORE`, R2
   `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) live on prod + staging. The DO at `src/worker/score/do.ts` is a stub
   returning `{error: 'sandbox_stub_until_u6'}` (real DO lands in U6). The container `image:` field still pins
-  `docker.io/brettdavies/anc-sandbox@sha256:...`. **U3-followup blocker:** Docker Hub was deprecated post-shipment;
-  before any further live-scoring work proceeds, U3-followup must (1) replace the `docker.io` digest pin with inline
-  `image: ./docker/sandbox/Dockerfile`, (2) wire `wrangler deploy`'s container build into
-  `.github/workflows/deploy.yml`, (3) verify the Cloudflare managed registry build end-to-end on staging first, then (4)
-  re-pin `image:` to whatever shape CF managed registry produces. The unit specification below remains the work spec for
-  U3-followup.
+  `docker.io/brettdavies/anc-sandbox@sha256:...`. **U3-followup (shape resolved by spike 01, 2026-05-14):** the
+  migration off Docker Hub uses a local-build-once + shared-tag-pin pattern. See the dedicated U3-followup subsection
+  below the original U3 spec for the exact procedure, acceptance criteria, and experimental-verification list.
 
 **Goal:** Add the first DO + Containers + R2 + ratelimits bindings the Worker has ever shipped. Pre-push wrangler
 dry-run gate must pass before push.
@@ -1299,6 +1353,147 @@ each deploy).
 **Verification:** Pre-push wrangler dry-run passes locally; staging deploy succeeds; type generation includes all new
 bindings; first prod deploy is its own milestone PR with the migration explicitly reviewed; baseline deploy wall-clock
 recorded.
+
+---
+
+- U3-followup. **Docker Hub to CF managed registry migration (local-build-once + shared-tag-pin)** — shape resolved by
+  spike 01 (2026-05-14); awaiting implementation.
+
+**Goal:** Replace the deprecated Docker Hub digest pin (`docker.io/brettdavies/anc-sandbox@sha256:...`) with a
+Cloudflare-managed-registry tag pin produced by a single local build, then deploy both env blocks against that one tag
+with no rebuild on deploy. Decouples build from deploy and preserves the SHA-pinning ergonomic Docker Hub gave us.
+
+**Requirements:** R4 (image must be pullable by CF runtime), R12 (no per-deploy build cost on the typical site-only PR).
+
+**Dependencies:** U2 (`docker/sandbox/Dockerfile` exists and builds), U3 (env blocks exist for both prod + staging).
+
+**Files:**
+
+- Modify: `wrangler.jsonc` — top-level `containers[].image` AND `env.staging.containers[].image` both point at the same
+  fully-qualified registry tag (`registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>`).
+- Modify: `docker/sandbox/README.md` — document the local-build-once recipe; the prior "ships via `wrangler deploy`"
+  copy is wrong post-migration.
+- Modify: `RELEASES.md` — release procedure now includes the build + tag-pin commit + deploy steps as separate
+  operations (build is no longer implicit in deploy).
+- Optional: `.dockerignore` at the build-context root (`docker/sandbox/.dockerignore` for the default context, or repo
+  root if `image_build_context: "."` is later adopted) — verify experimentally on first staging deploy whether the layer
+  payload includes any unexpected files (per spike 01, `.dockerignore` semantics for Wrangler's docker shell-out are not
+  explicitly documented; standard Docker context rules should apply).
+- No `.github/workflows/deploy.yml` change is required for the primary path — `wrangler deploy` against a
+  fully-qualified registry URI does NOT trigger a rebuild (per spike 01); the GHA fallback path continues to work for
+  the rare offline-Brett case via `cloudflare/wrangler-action@v3.14.1` (the version currently in `deploy.yml`).
+
+**Approach:**
+
+Primary path (local build, recommended):
+
+1. From a clean working tree, capture the git SHA: `GIT_SHA=$(git rev-parse --short HEAD)`.
+2. Build + push in one command (Wrangler shells out to local `docker build`, then pushes to `registry.cloudflare.com`):
+
+   ```bash
+   wrangler containers build -p -t "$GIT_SHA" docker/sandbox/
+   ```
+
+   `-p` is push; `-t <tag>` sets the tag. Build context defaults to the Dockerfile's parent directory
+   (`docker/sandbox/`); override with `image_build_context: "."` only if the Dockerfile needs files from elsewhere in
+   the repo. Wrangler builds locally via `docker build` (not on the CF side); Docker / Colima must be running. Per
+   spike 01, the registry destination is `registry.cloudflare.com/<ACCOUNT_ID>/anc-sandbox:<GIT_SHA>`; auth uses the
+   existing `CF_API_TOKEN`. Account ID does NOT land in `wrangler.jsonc` because Wrangler resolves it from auth at
+   push time.
+3. Pin both env blocks in `wrangler.jsonc` to the new tag:
+
+   ```jsonc
+   {
+     "containers": [{
+       "class_name": "Sandbox",
+       "image": "registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>",
+       "instance_type": "basic",
+       "max_instances": 3
+     }],
+     "env": {
+       "staging": {
+         "containers": [{
+           "class_name": "Sandbox",
+           "image": "registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>",
+           "instance_type": "basic",
+           "max_instances": 3
+         }]
+       }
+     }
+   }
+   ```
+
+   `containers` is non-inheritable per
+   [wrangler environments](https://developers.cloudflare.com/workers/wrangler/environments/), so each env block needs
+   its own copy. Pointing both at the same tag avoids the multi-env double-build that arises when both env blocks point
+   at the same Dockerfile path.
+4. Deploy to staging first, then production; neither deploy rebuilds because `image:` is a fully-qualified URI:
+
+   ```bash
+   wrangler deploy --env staging
+   wrangler deploy --env production
+   ```
+
+5. Smoke staging via the U9 contract test before promoting to prod.
+
+GHA fallback path (offline-Brett case): set `image: ./docker/sandbox/Dockerfile` temporarily in `wrangler.jsonc` and let
+`cloudflare/wrangler-action@v3.14.1` build inline on `ubuntu-latest`. Per spike 02, expect a ~60-130s cold build
+dominated by the `apk add` line and the base-image pull, with no native GHA-side layer cache (wrangler shells out to
+plain `docker build` without `--cache-from/--cache-to`; layering `docker/setup-buildx-action` + `actions/cache` does NOT
+help because wrangler doesn't consume that cache). The push step IS deduplicated automatically by registry-side manifest
+inspect (`"Image already exists remotely, skipping push"` log line is the canary). "Measure before optimizing" applies:
+cold-build is acceptable for the rare fallback.
+
+Experimental verification list (run during the first staging deploy, capture results in the PR body):
+
+- **`.dockerignore` semantics.** Add a sentinel file `docker/sandbox/.ignored-sentinel.txt` with `RUN ls -la
+  /tmp/ctx-check 2>/dev/null || true` in the Dockerfile, build, confirm the sentinel is excluded by `.dockerignore` AND
+  not present in the resulting layer (`docker history` or `RUN ls`). Per spike 01, this rule is not Wrangler-documented;
+  the standard Docker BuildKit contract should hold but verify on first run.
+- **Multi-env image-share verification.** After both staging + prod deploys against the same tag, run `wrangler
+  containers images list --json` and confirm one image record is shared by both Worker apps (or accept whatever
+  per-env-app namespacing CF imposes; document the actual shape). Per spike 01, container apps default to per-env names
+  but the underlying image bytes should dedup at the registry layer.
+- **Recorded image reference shape per Worker version.** After the first deploy, run `wrangler deployments list --json`
+  and inspect the version metadata to confirm the bound image reference is `name:tag` form (mutable) rather than
+  content-addressable `@sha256:` form. Per spike 01 + spike 03 this is undocumented; the rollback-fragility risk in the
+  Risk Analysis section assumes name-tag binding (deletion of an image breaks rollback per the Containers Limits
+  footnote).
+- **No-op deploy fast path.** Per spike 02: a redeploy of the same tag should hit `"Image already exists remotely,
+  skipping push"`. If it doesn't, the build is leaking nondeterminism and should be fixed before relying on registry
+  dedup.
+
+Image-retention discipline (per spike 03): never delete images from the CF managed registry that backed shipped
+versions. The 50 GB account-wide cap will eventually force a prune; that prune is a quarterly manual exercise paired
+with explicit "what versions become unrollback-able" review. Pair every git release tag with the registry image URI in
+RELEASES.md so the inventory survives.
+
+**Patterns to follow:**
+
+- Spike 01 findings (resolved Q1.1-Q1.6) — single source of truth for build mechanics.
+- Spike 02 findings (resolved Q2.1-Q2.6) — wrangler-action invocation shape, no-op deploy fast path.
+-
+
+[docs/solutions/best-practices/account-id-out-of-public-repo-2026-04-14.md](../solutions/best-practices/account-id-out-of-public-repo-2026-04-14.md)
+— account ID stays out of `wrangler.jsonc`; Wrangler resolves it from auth at push time, so the literal in `image:` is
+acceptable because it is generated at push time, not committed alongside config.
+
+**Test scenarios:**
+
+- Happy path (primary): `wrangler containers build -p -t <git-sha> docker/sandbox/` succeeds against a working CF API
+  token; the resulting tag is visible via `wrangler containers images list`.
+- Happy path (deploy): `wrangler deploy --env staging` against the new tag completes without a rebuild step in the log
+  output; same for `--env production`.
+- Edge case (fallback): with `image: ./docker/sandbox/Dockerfile`, GHA `cloudflare/wrangler-action@v3.14.1` deploy
+  succeeds within the ~60-130s cold-build envelope; `"Image already exists remotely, skipping push"` appears on the
+  second consecutive run if no source changed.
+- Edge case (multi-env identity): after first deploy of both envs, `wrangler containers images list --json` shows
+  exactly the expected image footprint (do not silently consume 2x the 50 GB cap).
+- Regression: pre-push `wrangler deploy --dry-run` continues to pass for both env blocks.
+
+**Verification:** Both staging + production deploys complete without rebuild against the same git-SHA tag; the
+no-op-deploy fast path fires on a redeploy; the four experimental-verification items above are answered and recorded in
+the PR body and (where load-bearing) in RELEASES.md.
 
 ---
 
@@ -1451,7 +1646,15 @@ rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Sha
 - Create: `src/worker/score/handler.ts`
 - Create: `src/worker/score/content-negotiation.ts`
 - Create: `src/worker/score/response-shape.ts` (also owns `ScoreError` discriminated union; see Approach)
+- Create: `src/worker/score/turnstile.ts` (siteverify wrapper; reads `env.TURNSTILE_SECRET`)
+- Create: `src/worker/score/session.ts` (signed `__Host-anc-session` cookie issue/parse; HMAC via
+  `env.SESSION_HMAC_SECRET`)
+- Create: `src/worker/score/kill-switch.ts` (KV lookup of `scoring_disabled`; cached in-memory per Worker invocation)
 - Create: `src/worker/spec-version.gen.ts` (build-emitted; placeholder file lands in U5, build wiring lands in U8)
+- Modify: `wrangler.jsonc` — add `kv_namespaces: [{ binding: "SCORE_KV", id: "<id>" }]` (prod + staging) for the
+  `scoring_disabled` flag. Add ratelimit namespace for the per-IP coarse fallback. Add `TURNSTILE_SECRET` and
+  `SESSION_HMAC_SECRET` as `wrangler secret put` entries (NOT in the committed config) — both are operator-managed via
+  1Password per the secrets policy.
 - Modify: `src/worker/score/registry-lookup.ts`, `src/worker/score/validate.ts`, `src/worker/score/parse-install.ts`,
   `src/worker/score/discover-binary.ts` (U4 shipped code) — migrate hand-rolled error returns to import + return
   `ScoreError` from `response-shape.ts`. Mechanical change; tests should keep passing because the on-the-wire shape
@@ -1481,12 +1684,21 @@ rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Sha
 1. Validate input (U4).
 2. Registry-lookup (U4). Hit → fetch committed scorecard via `env.ASSETS`, shape response, return (theater handled
    client-side; no server-side delay).
-3. Rate-limit check via `env.SCORE_LIMITER.limit({key: ipAddress})`. Miss → 429 with `Retry-After`, `X-Max-Assessments`,
-   `X-Current-Assessments`. IP from `request.headers.get("CF-Connecting-IP")` (fallback `x-forwarded-for`, sentinel if
-   missing).
-4. R2 cache lookup (U7). Hit → shape response, return.
-5. R2 miss → DO route (U6).
-6. Always: `?fromCache=false` query param skips R2 read but does not skip R2 write.
+3. **In-Worker KV `scoring_disabled` kill-switch check.** Read `env.SCORE_KV.get("scoring_disabled")`. If truthy, return
+   503 with `Retry-After: 3600`. Cheap, fast, operator-flippable in seconds via `wrangler kv:key put`. Per the Cost
+   ceiling and abuse mitigation section.
+4. **Turnstile siteverify** (per Q4.1 follow-up + spike 04). The U8 form sends a `turnstile_token` in the request body.
+   POST it to `https://challenges.cloudflare.com/turnstile/v0/siteverify` with the secret key from
+   `env.TURNSTILE_SECRET`; 400 with `{error: "turnstile_failed"}` on failure. On success, set a signed session cookie
+   (`__Host-anc-session`, HttpOnly, Secure, SameSite=Lax, ~1h TTL) bound to the verified Turnstile result.
+5. **Rate-limit check (rekeyed per Q4.2 follow-up + spike 04).** Compute the limiter key as
+   `<session-cookie>:<sha256(input)>` (NOT raw IP). Call `env.SCORE_LIMITER.limit({key})`. Miss → 429 with
+   `Retry-After`, `X-Max-Assessments`, `X-Current-Assessments`. Effect: same-tool requests inside one session don't burn
+   budget (cache-friendly); new sessions require a Turnstile solve. Keep a coarse per-IP fallback ratelimit (e.g.
+   30/60s) in a separate ratelimit namespace as a safety net for sessions that swap cookies.
+6. R2 cache lookup (U7). Hit → shape response, return.
+7. R2 miss → DO route (U6).
+8. Always: `?fromCache=false` query param skips R2 read but does not skip R2 write.
 
 - `content-negotiation.ts` extends `accept.ts`. New helper: `detectScorePreference(request)` returns `'json' |
   'markdown'`. JSON is default; markdown when `Accept: text/markdown` OR `.md` suffix.
@@ -1713,46 +1925,89 @@ Key shape includes `anc-version`. Refusal-to-cache-half-state is enforced.
 
 ---
 
-- U8. **Site UX: `/score` form + theater + summary+top-3 render + install-anc CTA**
+- U8. **Homepage live-scoring form + Turnstile + summary+top-3 render + install-anc CTA**
 
-**Goal:** A user-facing page at `/score` with input, theater spinner, summary + top-3 issues result render, and
-prominent install-anc-locally CTA. Markdown twin at `/score.md`. Build also emits `src/worker/spec-version.gen.ts`
-constants.
+**Goal:** A live-scoring paste-input form embedded on the homepage (`/`, NOT a dedicated `/score` subpage) with
+invisible Turnstile gate, theater spinner, summary + top-3 issues result render, and prominent install-anc-locally CTA.
+Build also emits `src/worker/spec-version.gen.ts` constants. No markdown twin: live-scoring is HTML-only because agents
+already have `anc check` locally and don't need a Worker round-trip; `/index.md` stays silent on the feature.
 
-**Requirements:** R1 (input), R9 (CTA primary), R10 (markdown twin).
+**Scope change (2026-05-14, per Q4.1 follow-up):** the form lives on the homepage rather than a dedicated `/score` page.
+This pulls the live demo into the highest-traffic surface and removes one layer of navigation from the share loop. Two
+consequences ripple: (1) Turnstile must use invisible mode + lazy-load on form interaction so visitors who never engage
+the form don't pay a script-load cost; (2) result presentation is an open design question (see below).
+
+**Requirements:** R1 (input), R9 (CTA primary). R10 (markdown twin) is no longer in scope for this feature surface.
 
 **Dependencies:** U5 (`/api/score` exists and returns scorecards), U4 (validation surfaces error shapes for inline
 errors).
 
 **Files:**
 
-- Create: `src/build/score-page.mjs`
+- Modify: `src/build/build.mjs` (homepage now renders the form section in addition to the existing hero + 8 principle
+  cards; add spec-version-gen.mjs call)
 - Create: `src/build/spec-version-gen.mjs` (emits `src/worker/spec-version.gen.ts`)
-- Create: `src/client/live-score.ts` (form submit + fetch + theater + render)
+- Create: `src/client/live-score.ts` (form submit + fetch + theater + render; lazy-loads the Turnstile script on first
+  form interaction — focus / click / paste on the input)
 - Create: `src/worker/score/summary-render.ts` (server-side `buildScoreSummaryBody`; reused by client via shared module)
-- Modify: `src/build/build.mjs` (add `/score` to sub-page emission; call spec-version-gen.mjs)
-- Modify: `dist/sitemap.xml` builder (add `/score`)
-- Modify: `content/score.md` (NEW — agent-friendly description for the markdown twin, points to `/api/score`)
-- Test: `tests/e2e/score.e2e.ts` (Playwright, chromium project)
-- Test: `tests/e2e/score-live.e2e.ts` (opt-in live sandbox project, excluded from default suite)
+- Modify: `src/build/shell.mjs` (or wherever the CSP `<meta http-equiv="Content-Security-Policy">` / response-header CSP
+  is set) — extend `script-src`, `frame-src`, and `connect-src` to allow `challenges.cloudflare.com`
+- Modify: homepage source (e.g., `content/index.md` or whatever drives `/`) — add the form section markup; placement on
+  the page is a design decision deferred to implementation (likely between hero lede and the 8 principle cards, or below
+  the cards)
+- Test: `tests/e2e/homepage-score.e2e.ts` (Playwright, chromium project; supersedes the prior `tests/e2e/score.e2e.ts`)
+- Test: `tests/e2e/homepage-score-live.e2e.ts` (opt-in live sandbox project, excluded from default suite)
 
-**Execution note:** Defer wireframe-level layout decisions to `/design-review` after the basic page renders. Initial
-implementation uses the existing per-tool scorecard page header/score/issues blocks.
+**Execution note:** Defer wireframe-level layout decisions to `/design-review` after the basic form renders. Initial
+implementation reuses the existing per-tool scorecard page header/score/issues blocks for the result.
 
 **Approach:**
 
-- `/score` HTML: single text input + submit. Examples shown below the input as clickable chips: `ripgrep`, `brew install
-  bat`, `https://github.com/cli/cli`. Below input: hidden progress timeline (4 steps: validate → resolve → install →
-  score) that fills in for live runs. Below: result area (summary + top-3 + CTA).
-- Above the input on first paint: PRIMARY CTA banner — "Install `anc` and run it in your project for source + project
-  depth: `brew install agentnative` or `cargo install agentnative`. The web demo below shows binary/behavioral checks
-  only." This is the headline message; the form is below it. R9 framing.
-- Client JS: on submit, `Promise.all([fetch('/api/score', {method:'POST', body:{input}}), new Promise(r => setTimeout(r,
-  2000))])`. Minimum 2 s spinner per the cached-theater pattern.
-- For live runs: progress polling. DO writes session state to R2 under `sessions/{sessionId}.json`. Client polls
-  `/api/score?session=<id>` every 2 s. Initial implementation: client-side fake-progress timer is acceptable while real
+- **Form placement on `/`.** Single text input + submit, embedded as a new section on the homepage. Two candidate
+  positions (decision deferred to implementation + design review): (a) between the hero lede and the 8 principle cards —
+  pulls the demo above the fold; or (b) below the cards — preserves the principle-first reading order. Either way, the
+  form is content-page-embedded, not a standalone subpage. Examples shown below the input as clickable chips: `ripgrep`,
+  `brew install bat`, `https://github.com/cli/cli`. Below input: hidden progress timeline (4 steps: validate → resolve →
+  install → score) that fills in for live runs. Below: result area (see "Result presentation" below).
+- **CTA framing.** Adjacent to (or above) the form, render the install-anc CTA: "Install `anc` and run it in your
+  project for source + project depth: `brew install agentnative` or `cargo install agentnative`. The web demo shows
+  binary/behavioral checks only." R9 framing. Exact placement is a design decision; the install-anc-locally framing must
+  remain primary, not buried below the form.
+- **Turnstile integration (invisible mode + lazy-load, per spike 04 + Q4.1 follow-up).** Use Cloudflare Turnstile in
+  Invisible mode (no visible widget; JS API only) — appropriate for an embedded form on a content page. Do NOT load the
+  Turnstile script (`https://challenges.cloudflare.com/turnstile/v0/api.js`) on every homepage visit. Lazy-load on first
+  form interaction (focus / click / paste on the input). Visitors who scroll past the form never load Turnstile at all.
+  On submit, render the invisible widget, await its token, send the token in the `/api/score` request body (Worker-side
+  `siteverify` happens in U5). Free tier covers 1M challenges/month per <https://developers.cloudflare.com/turnstile/>.
+- **CSP update (REQUIRED).** Wherever CSP is set (`src/build/shell.mjs` or Worker response headers — verify during
+  implementation), extend it to allow Turnstile:
+
+  ```text
+  script-src 'self' challenges.cloudflare.com;
+  frame-src challenges.cloudflare.com;
+  connect-src 'self' challenges.cloudflare.com;
+  ```
+
+  Without these, the lazy-loaded script + the widget iframe + the siteverify XHR all break. Add a Playwright
+  regression that asserts the homepage CSP header / meta contains `challenges.cloudflare.com` in all three directives.
+- **Client JS.** On submit, `Promise.all([fetch('/api/score', {method:'POST', body:{input, turnstile_token}}), new
+  Promise(r => setTimeout(r, 2000))])`. Minimum 2s spinner per the cached-theater pattern.
+- **For live runs: progress polling.** DO writes session state to R2 under `sessions/{sessionId}.json`. Client polls
+  `/api/score?session=<id>` every 2s. Initial implementation: client-side fake-progress timer is acceptable while real
   polling is wired up.
-- `summary-render.ts`: new function `buildScoreSummaryBody(scorecard, topIssues)` reuses `buildScorecardHeader`,
+- **Result presentation (OPEN U8 question).** Three candidate shapes; decision deferred to implementation + design
+  review. Each has a different trade-off for share-ability vs. embedded-form simplicity:
+
+1. **Inline replacement of the form area.** Result renders in place of the form; user clicks "Score another" to reset.
+   Simplest; preserves homepage scrolling; result is not directly URL-shareable.
+2. **Modal overlay.** Result opens as a modal on top of the homepage; closing returns to the form. Slightly more
+   theatrical; result still not URL-shareable; introduces modal accessibility surface (focus trap, ESC dismiss).
+3. **Redirect to `/score/<session-id>` for shareable result URLs.** Reintroduces a subpage (only for results, NOT the
+   form). Result is URL-shareable, which directly serves the viral-share goal of v3. Trade-off: extra route to build +
+   cache-bust strategy + open question of how long results live. Pick during U8 implementation; the answer determines
+   whether `summary-render.ts` is invoked from a Worker route (option 3) or from the client only (options 1, 2).
+
+- **`summary-render.ts`:** new function `buildScoreSummaryBody(scorecard, topIssues)` reuses `buildScorecardHeader`,
   `buildScoreBadge`, the existing top-issues block — and SKIPS `<section class="scorecard-checks">` and `<section
   class="scorecard-meta">`. Below the top-3 issues block, append a CTA card: "Run `anc check .` locally for source +
   project checks (`brew install agentnative` or `cargo install agentnative`)."
@@ -1768,9 +2023,10 @@ implementation uses the existing per-tool scorecard page header/score/issues blo
 
   All three keep the install-anc-locally CTA as a secondary surface; they differ in headline + diagnostic copy.
 
-- `/score.md` is a static markdown twin describing the form (not interactive); points agents to `/api/score` as the
-  actual API endpoint. Includes the JSON response schema example and `Accept` header documentation.
-- `spec-version-gen.mjs` emits:
+- **Markdown twin policy.** `/index.md` (the homepage's markdown twin) carries no form, no JS, no Turnstile reference,
+  and no API documentation for `/api/score`. Live-scoring is HTML-only by design. Agents pasting `/api/score` URLs is a
+  non-goal; agents are expected to run `anc check` locally. The markdown homepage stays silent on the feature.
+- **`spec-version-gen.mjs`** emits:
 
   ```ts
   // GENERATED — do not edit. Regenerated by src/build/spec-version-gen.mjs.
@@ -1782,37 +2038,49 @@ implementation uses the existing per-tool scorecard page header/score/issues blo
 
 **Patterns to follow:**
 
-- `src/build/skill.mjs` + `src/data/skill.json` — single-source data → HTML + MD + JSON precedent.
+- `src/build/skill.mjs` + `src/data/skill.json` — single-source data → HTML + JSON precedent (no markdown twin parallel
+  here, by design).
 - `src/build/build.mjs:280` — `extraScripts: ['/js/live-score.js']` pattern for client JS injection.
 -
 
 [docs/solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md](../solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md)
-— 2 s minimum theater.
+— 2s minimum theater.
 
 - `src/build/scorecards-render.mjs:buildScorecardBody` for the header/score/issues blocks (extract shared helpers if
   needed; do not duplicate).
+- Spike 04 (Q4.1, Q4.4) for the Turnstile invisible-mode + lazy-load rationale and the CSP allowlist shape.
 
 **Test scenarios:**
 
-- **Happy path (Playwright chromium):** paste a registry slug → form spinner shows for ≥2 s → summary renders with top-3
-  issues → CTA banner visible.
+- **Happy path (Playwright chromium):** load `/`, focus the form input → Turnstile script lazy-loads (asserted via
+  network log) → paste a registry slug, submit → form spinner shows for ≥2s → summary renders with top-3 issues →
+  install-anc CTA visible.
+- **Happy path (no form interaction):** load `/`, scroll past the form without focusing it → assert the Turnstile script
+  was NOT loaded (network log confirms zero requests to `challenges.cloudflare.com`).
 - **Happy path:** paste a parseable install command → same flow.
 - **Happy path:** paste a GitHub URL for a registry-known tool → registry hit → cached scorecard.
 - **Edge case:** paste an invalid input → form shows inline error from `/api/score` 400 response.
 - **Edge case:** paste a non-GitHub URL → inline error.
 - **Edge case:** 429 response → form shows "Try again in 60s" message with countdown.
+- **Edge case (Turnstile):** Turnstile token verification fails server-side → form shows "Verification failed, please
+  try again" without leaking siteverify internals.
+- **Edge case (CSP regression):** assert the homepage response includes `challenges.cloudflare.com` in `script-src`,
+  `frame-src`, AND `connect-src`. Missing any of the three breaks Turnstile silently (script blocks, iframe blocks, or
+  XHR blocks); regression test catches drift.
 - **Edge case (bounce: `chain_no_resolve`):** mocked 404 with that error tag → form renders the "couldn't find a
   pre-built binary" headline + R9 CTA, not a generic error.
 - **Edge case (bounce: `chain_resolved_install_failed`):** mocked 502 with that error tag → form renders the "install
   path didn't run" headline AND the install command + truncated stderr excerpt from the response details.
 - **Edge case (bounce: `chain_resolved_no_binary_produced`):** mocked 502 with that error tag → form renders the "looks
   like a library, not a CLI" headline + retry-with-explicit-command affordance.
-- **Integration:** `/score.md` markdown twin is in sitemap, renders agent-friendly description with API schema.
+- **Integration:** `/index.md` markdown twin contains no form / Turnstile / `/api/score` references (regression — guards
+  against accidental introduction).
 - **Integration (live sandbox project, opt-in):** paste a real unknown tool with installable binary → progress timeline
-  animates → summary renders within 60 s.
+  animates → summary renders within 60s.
 
-**Verification:** Default Playwright suite (chromium) covers form happy path + error paths with mocked `/api/score`. The
-opt-in `score-live` project covers a real sandbox round-trip (excluded from default suite, runs manually + nightly).
+**Verification:** Default Playwright suite (chromium) covers form happy path + error paths with mocked `/api/score`,
+plus the lazy-load + CSP + markdown-twin-silence regressions. The opt-in `homepage-score-live` project covers a real
+sandbox round-trip (excluded from default suite, runs manually + nightly).
 
 ---
 
@@ -1938,27 +2206,83 @@ staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
 
 ---
 
+## Cost ceiling and abuse mitigation
+
+**Background (per spike 04, 2026-05-14).** Cloudflare offers no native automatic hard cap. April 2026's Billable Usage
+dashboard + Budget Alerts (cite
+<https://developers.cloudflare.com/changelog/post/2026-04-13-billable-usage-dashboard-and-budget-alerts/>) are
+**email-only**: an alert fires when projected monthly spend crosses a configured dollar threshold, but Cloudflare does
+not auto-disable, auto-throttle, or auto-cap on breach. There is no per-binding spend cap. Latency to alert is daily.
+The Workers `ratelimit` binding is per-Cloudflare-location (per
+<https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/>), so a distributed botnet hits the cap
+separately at every POP. The current `SCORE_LIMITER` config of 10 req/60s/IP is therefore actually 10 req/60s/IP per POP
+and is trivially bypassed with rotating IPs.
+
+**Minimum viable defense for v3 launch (the bare floor).** Four layers, in order. Each is independently shippable; the
+combination eliminates the rotating-IP bypass class and gives the operator a sub-minute kill switch. None require
+Enterprise upgrades or custom Cloudflare contracts.
+
+1. **Cloudflare Turnstile (Invisible mode + lazy-load).** Free CAPTCHA-alternative; 1M challenges/month on the free tier
+   (cite <https://developers.cloudflare.com/turnstile/>). Lazy-load the widget script
+   (`https://challenges.cloudflare.com/turnstile/v0/api.js`) on first form interaction (focus / click / paste on the
+   homepage form input — see U8). Visitors who never engage the form pay zero cost. ~20 lines of code: widget on the
+   form (U8), `siteverify` POST in the Worker (U5). The single highest-leverage change: eliminates headless / no-JS
+   attackers entirely.
+2. **Rekey `SCORE_LIMITER` from per-IP to `session-cookie + tool-arg-hash` (per Q4.2 follow-up).** After Turnstile
+   passes, set a signed session cookie (`__Host-anc-session`, HttpOnly, Secure, SameSite=Lax, ~1h TTL). Compute the
+   limiter key as `<session-cookie>:<sha256(input)>`. Effect: 10 distinct score requests per session per minute;
+   same-tool requests in a session don't burn budget (cache-friendly); new sessions require a Turnstile solve. Keep a
+   coarse per-IP fallback ratelimit (e.g. 30/60s) in a separate ratelimit namespace as a safety net for sessions that
+   swap cookies. Implementation: U5 step 5.
+3. **In-Worker KV `scoring_disabled` kill switch.** New `SCORE_KV` namespace (added to U5's wrangler.jsonc Files list).
+   Worker reads `env.SCORE_KV.get("scoring_disabled")` first thing in `/api/score`; returns 503 with `Retry-After: 3600`
+   if truthy. Operator flips via `wrangler kv:key put scoring_disabled true` (seconds to flip and reverse, vs minutes
+   for a `wrangler deploy --max-instances=0` redeploy). Documented runbook: alert email arrives → engineer flips KV flag
+   → investigates → flips back when safe. Implementation: U5 step 3.
+4. **Cloudflare Budget Alert.** Account-level dollar threshold set via Notifications → Add → Budget Alert. Email-only
+   (no auto hard-cap exists), with daily latency, but better than nothing. Operator paged → flips the kill-switch above.
+   Implementation: dashboard click; document in U9 runbook.
+
+**Bundle cost.** ~zero added monthly cost (Turnstile free, KV reads are free up to 100k/day, Budget Alerts are free).
+Approximately one day of work across U5 + U8.
+
+**What this defense does NOT add: a true hard daily cap.** The remaining attack surface is "operator manually intervenes
+on alert." Document this plainly in the launch announcement: spend control is human-in-the-loop, not algorithmic. A true
+hard cap (single-purpose Durable Object + alarm + cost-budget counter the Worker consults before invoking the container)
+is **deferred to v3.1**, per spike 04 item #3.
+
+**Operational visibility (per spike 04 Q4.6, partially deferred to v3.1).** Workers Analytics Engine writes (one data
+point per `/api/score` with cache-hit / Turnstile-outcome / container-active-seconds / session-hash dimensions) plus a
+nightly cron-Worker projecting monthly spend from the AE table together form the right early-warning signal between
+alert emails. Wire as a v3.1 follow-up unit; v3 launch ships with native Workers Logs + the Billable Usage dashboard
+only.
+
+---
+
 ## Risk Analysis & Mitigation
 
-| Risk                                                                                 | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------ | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**     | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke.                                                                                                                                                                       |
-| First-ever DO + Containers + R2 + migrations bindings — one-way gate                 | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                                                                                                                                                                                           |
-| DO migration v1 blocks cross-migration `wrangler rollback`                           | Med        | High     | Per CF docs (workers/configuration/versions-and-deployments/rollbacks/), `wrangler rollback` only works among versions on the SAME side of a DO migration boundary. Once `new_sqlite_classes: ["Sandbox"]` ships, you can roll back to any post-v1 version but NOT to a pre-v1 version. Recovery story: a follow-up migration with `deleted_classes: ["Sandbox"]` is the documented recipe. Rehearse on staging before the first prod cut; capture the procedure verbatim in RELEASES.md.                    |
-| `outboundHandlers` map missing or misnamed at runtime                                | Low        | High     | The `allowedInstall` and `noHttp` handlers are inline async functions on the Sandbox DO class's static `outboundHandlers` map (Pattern Y, K-decision). If the map isn't declared, or a name is misspelled, `setOutboundHandler("name")` references a non-existent handler and the egress policy degrades silently. Mitigation: U6 unit test that asserts both keys exist on the class before `score()` runs; integration test asserts handler invocation logs match expected per-phase pattern.              |
-| `cloudflare/sandbox:0.9.2-musl` is undocumented on CF's Sandbox Dockerfile-reference | Low        | Med      | The musl variant exists on Docker Hub but is not listed on the CF docs page; could be deprecated without notice. Mitigation: digest-pin (already done at Dockerfile line 33), watch for SDK npm updates that drop musl support, plan a glibc fallback if/when the musl tag stops shipping (Debian-trixie-slim image, ~2x size, would cost the `basic` instance disk headroom but still fit). Capture the variant pin date in `docker/sandbox/README.md` so a future maintainer can audit upstream.           |
-| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                   | Low        | Med      | Measured 221 MB compressed at v3-rc1 (2026-05-05) — 12x disk headroom on `basic`. NOTE: `tests/dockerfile-sandbox.test.ts` has NO automated size assertion despite earlier plan claim; add a manual measurement step to RELEASES.md or a docker-available CI guard before this risk re-emerges. Brew already dropped (Linuxbrew/musl incompatibility); Go toolchain is the next-largest contributor (~50 MB compressed) and a candidate for removal if `go install` is rejected per the security K-decision. |
-| HN spike >10× expected → cost overrun                                                | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (10 req/60s/IP). Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. Kill-switch (set `max_instances: 0`) documented in U9 runbook for breach scenarios.                                                                                                                                                                                                          |
-| Cloudflare changes Sandbox SDK API mid-flight                                        | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                                                                                                                                                                                             |
-| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)               | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                              |
-| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                     | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                                                                                                                                                                                            |
-| README parse heuristic misses installable tools (false-negative)                     | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                                                                                                                                                                                                |
-| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                  | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                                                                                                                                                                                         |
-| Two-phase egress race: `noHttp` not applied before `anc check` execs                 | Low        | Critical | Sequential `await` between the two `setOutboundHandler` calls. Integration test asserts the order by capturing the per-request `console.log` lines emitted by `allowedInstall` and `noHttp` handlers (the per-request observability is the reason for picking Pattern Y over Pattern X — see two-phase egress K-decision). Separate Risk row covers handler-map registration. Separate P1 backlog item covers in-flight TCP-stream kill semantics between phases.                                            |
-| User pastes a private repo → 404 surface unhelpful                                   | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Discovery chain timeouts cascade and block the whole request                         | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                                                                                                                                                                                           |
-| Worker bundle size growth                                                            | Low        | Low      | Pre-push `wrangler deploy --dry-run` already prints the upload size on every push. Current bundle: 237 KiB / 28 KiB gzipped (measured 2026-05-05, before U5-U8). Realistic projection after live-scoring code + Workers-side `@cloudflare/sandbox` helpers: ~487 KiB. Headroom: 2x on free tier (1 MiB), 21x on paid (10 MiB). Any 5x regression would be obvious in commit output; no CI gate needed unless trend changes. If a single unit ever pushes total over 800 KiB, treat as a refactor smell.      |
-| `audit_profile` from registry doesn't apply when scoring an unknown tool             | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                                                                                                                                                                                           |
+| Risk                                                                                 | Likelihood | Impact   | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------ | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~Upstream musl release slips or doesn't pass review~~ — **RESOLVED 2026-05-04**     | —          | —        | `agentnative-cli` v0.3.1 ships `agentnative-x86_64-unknown-linux-musl.tar.gz` (and aarch64 musl as a bonus). Static-pie linkage verified locally; end-to-end smoke test landed in U2 image build ([#79](https://github.com/brettdavies/agentnative-site/pull/79)) where `RUN ... anc --version` would fail the build if linkage broke.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| First-ever DO + Containers + R2 + migrations bindings — one-way gate                 | High       | High     | Stage as a pre-launch dry-run on staging; verify rollback procedure (`deleted_classes` follow-up migration) before prod deploy. First v3 deploy is its own milestone PR; no other changes bundled.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| DO migration v1 blocks cross-migration `wrangler rollback`                           | Med        | High     | Per CF docs (workers/configuration/versions-and-deployments/rollbacks/), `wrangler rollback` only works among versions on the SAME side of a DO migration boundary. Once `new_sqlite_classes: ["Sandbox"]` ships, you can roll back to any post-v1 version but NOT to a pre-v1 version. Recovery story: a follow-up migration with `deleted_classes: ["Sandbox"]` is the documented recipe. Rehearse on staging before the first prod cut; capture the procedure verbatim in RELEASES.md.                                                                                                                                                                                                                                                       |
+| `outboundHandlers` map missing or misnamed at runtime                                | Low        | High     | The `allowedInstall` and `noHttp` handlers are inline async functions on the Sandbox DO class's static `outboundHandlers` map (Pattern Y, K-decision). If the map isn't declared, or a name is misspelled, `setOutboundHandler("name")` references a non-existent handler and the egress policy degrades silently. Mitigation: U6 unit test that asserts both keys exist on the class before `score()` runs; integration test asserts handler invocation logs match expected per-phase pattern.                                                                                                                                                                                                                                                 |
+| `cloudflare/sandbox:0.9.2-musl` is undocumented on CF's Sandbox Dockerfile-reference | Low        | Med      | The musl variant exists on Docker Hub but is not listed on the CF docs page; could be deprecated without notice. Mitigation: digest-pin (already done at Dockerfile line 33), watch for SDK npm updates that drop musl support, plan a glibc fallback if/when the musl tag stops shipping (Debian-trixie-slim image, ~2x size, would cost the `basic` instance disk headroom but still fit). Capture the variant pin date in `docker/sandbox/README.md` so a future maintainer can audit upstream.                                                                                                                                                                                                                                              |
+| Image size creeps past 350 MB → cost premium / `basic` doesn't fit                   | Low        | Med      | Measured 221 MB compressed at v3-rc1 (2026-05-05) — 12x disk headroom on `basic`. NOTE: `tests/dockerfile-sandbox.test.ts` has NO automated size assertion despite earlier plan claim; add a manual measurement step to RELEASES.md or a docker-available CI guard before this risk re-emerges. Brew already dropped (Linuxbrew/musl incompatibility); Go toolchain is the next-largest contributor (~50 MB compressed) and a candidate for removal if `go install` is rejected per the security K-decision.                                                                                                                                                                                                                                    |
+| HN spike >10× expected → cost overrun                                                | Low        | Med      | `max_instances: 3` pool + `SCORE_LIMITER` (now keyed on `session-cookie + tool-arg-hash`, gated by Turnstile per Cost ceiling section) + in-Worker KV `scoring_disabled` kill switch. Per-IP rekey defeats the rotating-IP bypass. Surplus traffic gets queued or 429'd. Cost ceiling: 3 instances × `basic` × 4 h spike ≈ $1.50-3 raw + active-CPU bounded by limiter, well under R12. KV-flag kill-switch documented in U9 runbook is faster than `max_instances: 0` redeploy for breach scenarios. NO native auto hard-cap exists (see Cost ceiling section); operator-in-the-loop response model.                                                                                                                                           |
+| Cost ceiling has no native auto-cap on Cloudflare                                    | Med        | High     | Per spike 04 (cite <https://developers.cloudflare.com/changelog/post/2026-04-13-billable-usage-dashboard-and-budget-alerts/>): April 2026 Budget Alerts + Billable Usage dashboard are email-only; no auto-disable / auto-throttle / auto-cap exists. MVP defense (Turnstile invisible mode + lazy-load + session+tool-arg-hash ratelimit + KV `scoring_disabled` kill switch + Cloudflare Budget Alert) reduces but does not eliminate exposure between alert email and operator action. v3.1 needs a true hard cap (single-purpose DO + alarm + cost-budget counter). Documented plainly in launch announcement.                                                                                                                              |
+| Image deletion silently breaks rollback                                              | Med        | High     | Per spike 03 + Containers Limits footnote (<https://developers.cloudflare.com/containers/platform-details/limits/>): "Delete container images with `wrangler containers delete` to free up space. If you delete a container image and then roll back your Worker to a previous version, this version may no longer work." Account-wide image cap is 50 GB with no auto-GC. Pruning to stay under cap silently severs rollback paths. Discipline: never delete images that backed shipped versions; inventory via `wrangler containers images list` quarterly; pair every git release tag with the registry image URI in RELEASES.md. Pruning is a quarterly manual exercise paired with explicit "what versions become unrollback-able" review. |
+| Multi-env image identity (containers is non-inheritable)                             | Low        | Med      | Per spike 01: default `containers` config is non-inheritable per-env (cite <https://developers.cloudflare.com/workers/wrangler/environments/>); without the prebuild-once + shared-tag-pin pattern, prod and staging produce two distinct container apps with two builds and double the registry footprint. The U3-followup primary path explicitly uses the shared-tag-pin pattern (`wrangler containers build -p -t <git-sha>` once, both env blocks pin the resulting `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>` URI). Verify on first staging+prod deploy via `wrangler containers images list` that exactly the expected image footprint exists.                                                                               |
+| Cloudflare changes Sandbox SDK API mid-flight                                        | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)               | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                     | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| README parse heuristic misses installable tools (false-negative)                     | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                  | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Two-phase egress race: `noHttp` not applied before `anc check` execs                 | Low        | Critical | Sequential `await` between the two `setOutboundHandler` calls. Integration test asserts the order by capturing the per-request `console.log` lines emitted by `allowedInstall` and `noHttp` handlers (the per-request observability is the reason for picking Pattern Y over Pattern X — see two-phase egress K-decision). Separate Risk row covers handler-map registration. Separate P1 backlog item covers in-flight TCP-stream kill semantics between phases.                                                                                                                                                                                                                                                                               |
+| User pastes a private repo → 404 surface unhelpful                                   | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Discovery chain timeouts cascade and block the whole request                         | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Worker bundle size growth                                                            | Low        | Low      | Pre-push `wrangler deploy --dry-run` already prints the upload size on every push. Current bundle: 237 KiB / 28 KiB gzipped (measured 2026-05-05, before U5-U8). Realistic projection after live-scoring code + Workers-side `@cloudflare/sandbox` helpers: ~487 KiB. Headroom: 2x on free tier (1 MiB), 21x on paid (10 MiB). Any 5x regression would be obvious in commit output; no CI gate needed unless trend changes. If a single unit ever pushes total over 800 KiB, treat as a refactor smell.                                                                                                                                                                                                                                         |
+| `audit_profile` from registry doesn't apply when scoring an unknown tool             | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ---
 
