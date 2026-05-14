@@ -33,6 +33,67 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
 
 ---
 
+## Current state — 2026-05-14
+
+### Shipped to dev (foundation phase complete, ~45% to rollout)
+
+- U1 — build-time `registry-index` + `discovery-hints-index` (PR
+  [#78](https://github.com/brettdavies/agentnative-site/pull/78), commit `82b74dd`)
+- U2 — Alpine + musl sandbox image source at `docker/sandbox/Dockerfile` (PR
+  [#79](https://github.com/brettdavies/agentnative-site/pull/79), commit `bf14daf`)
+- U3 partial — wrangler bindings live on prod + staging; DO is a stub; image still on Docker Hub digest (PR
+  [#81](https://github.com/brettdavies/agentnative-site/pull/81), commit `09fe91f`)
+- U4 — input parser + GitHub URL discovery chain (PR [#80](https://github.com/brettdavies/agentnative-site/pull/80),
+  commit `5ac59ca`)
+- discovery-hit-rate gate (PR [#77](https://github.com/brettdavies/agentnative-site/pull/77), commit `078d233`)
+
+### Blocker discovered post-shipment
+
+Docker Hub deprecated. The `wrangler.jsonc` `containers[].image` field still points at
+`docker.io/brettdavies/anc-sandbox@sha256:...`. Before any further live-scoring work proceeds, U3-followup must:
+
+1. Replace the `docker.io` digest pin with an inline `image: ./docker/sandbox/Dockerfile` reference.
+2. Wire `wrangler deploy`'s container build into `.github/workflows/deploy.yml`.
+3. Verify the Cloudflare managed registry build works end-to-end on the staging environment first.
+4. Re-pin the `image:` field to whatever shape CF managed registry produces (digest pin under CF's hostname, or whatever
+   the convention is).
+
+### Pending (in execution order for the next session)
+
+1. **U3-followup** — Docker Hub to CF managed registry migration (per blocker above). Unblocks U6's container reality.
+2. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Unblocks any
+   user-facing wiring.
+3. **U6** — replace DO stub with real `@cloudflare/sandbox`-extending DO; two-phase egress (`allowedInstall` then
+   `noHttp`); `sandbox-exec.ts` orchestrator with per-PM install matrix and `anc check --command --output json`.
+   Highest-risk single unit.
+4. **U7** — R2 cache (read on hit, write on miss; key shape `scores/{slug}/{anc-v}/{tool-v}.json`).
+5. **U8** — `/score` page + markdown twin + paste-input form + client-side polling + summary + top-3 + install-anc CTA +
+   build-emitted `spec-version.gen.ts`.
+6. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
+
+U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should land alongside U6 / U8.
+
+### Risks to design against during U5-U8
+
+- **Cost.** Container `basic` x pool size + R2 storage + DO requests. Unbounded if abused. Per-IP rate limit (10/60s) is
+  trivially bypassable with rotating IPs. Add a global daily cap or budget circuit-breaker before public rollout.
+- **Abuse.** Anonymous + unauthenticated GitHub API path means the discovery chain hits `api.github.com` at the unauth
+  60/hr/IP ceiling: IP exhaustion is shared across users. Consider a server-side GitHub PAT for discovery, or
+  token-the-user.
+- **Correctness.** Plan currently assumes `anc check --command <binary> --output json` matches local `anc check` output.
+  PATH composition inside the container is also deferred. Specify both as part of U6 acceptance criteria.
+- **Failure modes.** No `installSpec` for unsupported PMs (e.g., brew on Alpine): bounce-out is the design but the
+  bounce-out UX isn't built. Sandbox cold-start, container crash, network timeout, two-phase egress misconfig are all
+  unobservable today.
+
+### Branch baseline for next session
+
+Continue from `dev` directly. The five live-scoring feature branches (`feat/u1-build-indexes`, `feat/u2-sandbox-image`,
+`feat/u3-bindings`, `feat/u4-input-parser`, `feat/discovery-hit-rate-gate`) were merged via squash and have been deleted
+locally; their content is on dev. New work branches off `dev`.
+
+---
+
 ## Problem Frame
 
 The agent-native standard is abstract without evidence. The `anc` linter is invisible without a public surface. The
@@ -960,23 +1021,29 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-### Shipping Progress (last updated 2026-05-05)
+### Shipping Progress (last updated 2026-05-14)
 
-| Unit | Status    | Shipping refs                                                                        |
-| ---- | --------- | ------------------------------------------------------------------------------------ |
-| U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd` |
-| U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` |
-| U3   | [pending] | image build moves inline (`image: ./docker/sandbox/Dockerfile`); no docker.io push   |
-| U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca` |
-| U5   | [pending] | depends on U3 (bindings) + U4 (parser, shipped)                                      |
-| U6   | [pending] | depends on U2 (image, shipped) + U3 + U4 (shipped) + U5                              |
-| U7   | [pending] | depends on U3 + U6                                                                   |
-| U8   | [pending] | depends on U5                                                                        |
-| U9   | [pending] | cross-cutting; depends on U1-U8                                                      |
+| Unit | Status    | Shipping refs                                                                                        |
+| ---- | --------- | ---------------------------------------------------------------------------------------------------- |
+| U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd`                 |
+| U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` (see U3-fu)     |
+| U3   | [partial] | PR [#81](https://github.com/brettdavies/agentnative-site/pull/81) — commit `09fe91f` (bindings only) |
+| U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca`                 |
+| U5   | [pending] | depends on U3 (bindings shipped) + U4 (parser, shipped)                                              |
+| U6   | [pending] | depends on U2 (image, shipped) + U3-followup + U4 (shipped) + U5                                     |
+| U7   | [pending] | depends on U3-followup + U6                                                                          |
+| U8   | [pending] | depends on U5                                                                                        |
+| U9   | [pending] | cross-cutting; depends on U1-U8                                                                      |
 
-**Phase 1 (foundation: data + image + parser) is complete.** Phase 2 (Worker DO + sandbox install + R2 cache) starts at
-U3. The Pre-Implementation Validation gate ([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead
-of Phase 1 and conditioned the U1, U4, U6, U8 specs via the F1 + F4 findings (see plan amend commit `08a9a24`).
+**Phase 1 (foundation: data + image + parser) is complete.** U3 partially landed in PR #81: wrangler bindings
+(`containers`, DO `SCORE`, R2 `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) are live on prod + staging; the DO at
+`src/worker/score/do.ts` is a stub returning `{error: 'sandbox_stub_until_u6'}`; the container `image:` field still pins
+`docker.io/brettdavies/anc-sandbox@sha256:...`. The Docker Hub registry was deprecated post-shipment, so a U3-followup
+unit must migrate `image:` to inline `./docker/sandbox/Dockerfile` and wire the Cloudflare managed registry build into
+`.github/workflows/deploy.yml`. Phase 2 (sandbox install + R2 cache + UX) follows — see "Current state — 2026-05-14"
+near the top of this document for the rollout-order summary. The Pre-Implementation Validation gate
+([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of Phase 1 and conditioned the U1, U4, U6,
+U8 specs via the F1 + F4 findings (see plan amend commit `08a9a24`).
 
 ---
 
@@ -1073,7 +1140,8 @@ warnings on the current registry + hints; collision case caught by warning, not 
 - [x] U2. **v3 sandbox image (Alpine + musl, no toolchains, anc bottle baked in)** — shipped 2026-05-04
   ([#79](https://github.com/brettdavies/agentnative-site/pull/79), `bf14daf`). Pinned to
   `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` (the `0.8.x` reference below is plan-time placeholder; the actual
-  digest is in `docker/sandbox/Dockerfile`).
+  digest is in `docker/sandbox/Dockerfile`). **Note (2026-05-14):** image source is ready; the image-publication path
+  now requires migration to the Cloudflare managed registry per U3-followup (Docker Hub deprecated post-shipment).
 
 **Goal:** Build `docker/sandbox/Dockerfile` as a strict-minimal Alpine + musl image carrying CF Sandbox 0.9.x-musl,
 package managers (apk, cargo-binstall, pip, npm, go), and a pre-built musl `anc` binary downloaded from the
@@ -1138,7 +1206,16 @@ deploy` per U3).
 
 ---
 
-- U3. **wrangler.jsonc — DO + Containers + R2 + ratelimits bindings**
+- [~] U3. **wrangler.jsonc — DO + Containers + R2 + ratelimits bindings** — [partial] shipped 2026-05-09
+  ([#81](https://github.com/brettdavies/agentnative-site/pull/81), `09fe91f`). Bindings (`containers`, DO `SCORE`, R2
+  `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) live on prod + staging. The DO at `src/worker/score/do.ts` is a stub
+  returning `{error: 'sandbox_stub_until_u6'}` (real DO lands in U6). The container `image:` field still pins
+  `docker.io/brettdavies/anc-sandbox@sha256:...`. **U3-followup blocker:** Docker Hub was deprecated post-shipment;
+  before any further live-scoring work proceeds, U3-followup must (1) replace the `docker.io` digest pin with inline
+  `image: ./docker/sandbox/Dockerfile`, (2) wire `wrangler deploy`'s container build into
+  `.github/workflows/deploy.yml`, (3) verify the Cloudflare managed registry build end-to-end on staging first, then (4)
+  re-pin `image:` to whatever shape CF managed registry produces. The unit specification below remains the work spec for
+  U3-followup.
 
 **Goal:** Add the first DO + Containers + R2 + ratelimits bindings the Worker has ever shipped. Pre-push wrangler
 dry-run gate must pass before push.
@@ -1987,16 +2064,16 @@ Paths are repo-relative under `docs/solutions/`.
 
 ## GSTACK REVIEW REPORT
 
-| Review | Trigger | Why | Runs | Status | Findings |
-|--------|---------|-----|------|--------|----------|
-| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | n/a |
-| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | n/a |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | ISSUES OPEN | 4 issues, 1 critical gap (P1 backlog) |
-| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | n/a |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | n/a |
+| Review        | Trigger               | Why                             | Runs | Status      | Findings                              |
+| ------------- | --------------------- | ------------------------------- | ---- | ----------- | ------------------------------------- |
+| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —           | n/a                                   |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —           | n/a                                   |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 1    | ISSUES OPEN | 4 issues, 1 critical gap (P1 backlog) |
+| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —           | n/a                                   |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | —           | n/a                                   |
 
 - **UNRESOLVED:** 3 deferred decisions (go install X/Y/Z, in-flight TCP kill, CI cache backend) — each owned by the
   implementation unit that uses it; not blockers.
-- **VERDICT:** ENG REVIEW LANDED with explicit deferrals. Architecture (Y handlers), code quality (ScoreError
-  union), test specs (outboundHandlers shape, q-value parsing, rollback rehearsal), and performance (bundle size
+- **VERDICT:** ENG REVIEW LANDED with explicit deferrals. Architecture (Y handlers), code quality (ScoreError union),
+  test specs (outboundHandlers shape, q-value parsing, rollback rehearsal), and performance (bundle size
   reality-grounded) all locked. Ready to implement when feature work resumes.
