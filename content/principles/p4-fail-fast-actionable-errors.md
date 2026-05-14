@@ -31,7 +31,8 @@ errors at the exit-code layer — this standard adopts `sysexits.h` numbering so
 
 - Error types map to distinct exit codes — at minimum: `0` (success), `1` (general command error), `2` (usage / argument
   error), `77` (auth / permission error), `78` (configuration error).
-- Every error message contains **what failed**, **why**, and **what to do next**. Example:
+- Every error message names **the failure**, **the cause**, and **a concrete remediation** — a command to run or a value
+  to set, not a hint to consult documentation. Example:
 
   ```text
   Authentication failed: token expired (expires_at: 2026-03-25T00:00:00Z).
@@ -46,6 +47,9 @@ errors at the exit-code layer — this standard adopts `sysexits.h` numbering so
   network call. Remote validation is the network call's responsibility and SHOULD use distinct exit codes.
 - Error output respects `--output json`: JSON-formatted errors go to stderr when JSON output is selected, consistent
   with [P2](/p2)'s stream discipline (stdout for data, stderr for diagnostics).
+- *(Applies when: rejecting input against an enum or a fixed-allowed-values set.)* The error message includes the valid
+  set. `unknown command 'lst' (valid: list, get, create, update, delete)` is more useful than `unknown command 'lst'` —
+  the agent learns the surface from the failure instead of going back to `--help`.
 
 ## Evidence
 

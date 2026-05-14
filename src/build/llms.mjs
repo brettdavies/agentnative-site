@@ -25,7 +25,7 @@
 //
 //   ---
 //
-// Sections shipped in llms-full: _intro, p1..p7, check, about.
+// Sections shipped in llms-full: _intro, p1..p8, check, about.
 
 import { resolveBaseUrl } from './util.mjs';
 

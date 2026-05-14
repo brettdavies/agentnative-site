@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
 #
+# === CONSUMER-OWNED (un-vendored 2026-05-13) ===========================
+# This script is no longer vendored from agentnative-spec via
+# scripts/sync-prose-tooling.sh. The vendored upstream kept clobbering
+# the SITE-LOCAL DIVERGENCE block below (consumer-specific path
+# exclusions and LT denylist additions) on every sync.
+#
+# Universal changes to the prose-check pipeline (new check stage, LT
+# URL change, severity routing) now need coordinated PRs across all
+# four channel repos:
+#   - agentnative-spec      (origin / SoT)
+#   - agentnative-site      (this repo)
+#   - agentnative-cli
+#   - agentnative-skill
+#
+# Long-term fix tracked at agentnative-spec/.context/compound-engineering/todos/
+# (sidecar-config migration; once shipped, vendoring can resume with
+# universal logic vendored and consumer config in a sidecar file).
+# === END CONSUMER-OWNED ================================================
+#
 # Pre-push prose-check orchestrator.
 #
 # Walks the in-scope *.md set, runs Vale (custom Brand+Spec packs +
@@ -103,7 +122,7 @@ LT_BLOCKING_CATEGORIES='^(TYPOS|GRAMMAR|CONFUSED_WORDS)$'
 # === SITE-LOCAL DENYLIST EXTENSIONS ====================================
 # Three additional rules that misfire on agentnative-site domain jargon:
 #
-#   IN_PRINCIPAL       LT confuses "principle" (P1-P7 noun, the contract
+#   IN_PRINCIPAL       LT confuses "principle" (P1-P8 noun, the contract
 #                      term) with "principal" (chief). Site corpus uses
 #                      "principle" extensively (principle groups, principle
 #                      source files, etc.).

@@ -11,14 +11,13 @@ below are referenced by name; check out `dev` to read them locally.
 
 **Shipped — consumed by the site build, present on `main`:**
 
-- [`src/styles/foundation.css`](../src/styles/foundation.css) — generated drop-in stylesheet. Contains palette custom
+- [`src/styles/foundation.css`](src/styles/foundation.css) — generated drop-in stylesheet. Contains palette custom
   properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides), typography tokens
   (`--font-sans`, `--font-mono`, scale), and the shipped 7b inline-keyword rules. `@font-face` declarations are
   deliberately NOT in this file (see §4.3 — they live in the site build so the stylesheet is safe to load from any
   origin without phantom 404s). Copied byte-for-byte to `dist/css/foundation.css` by `src/build/assets.mjs`.
-- [`scripts/og/og.html`](../scripts/og/og.html) + [`scripts/og/og.css`](../scripts/og/og.css) — production source-of-
-  truth for the social card. Rendered to `public/og-image.png` by `scripts/og/generate.ts` (Playwright + Sharp, ≤150 KB
-  PNG).
+- [`scripts/og/og.html`](scripts/og/og.html) + [`scripts/og/og.css`](scripts/og/og.css) — production source-of- truth
+  for the social card. Rendered to `public/og-image.png` by `scripts/og/generate.ts` (Playwright + Sharp, ≤150 KB PNG).
 
 **Research / show-your-work — `dev` branch only (referenced by name, no link from `main`):**
 
@@ -34,10 +33,10 @@ below are referenced by name; check out `dev` to read them locally.
 
 **Generator — `scripts/design/`** (tooling, not shipped to dist but lives on `main`):
 
-- [`scripts/design/generate-palette.mjs`](../scripts/design/generate-palette.mjs) — the script that emits both
-  artifacts: writes `src/styles/foundation.css` and (on the `dev` branch) `docs/research/design/color-analysis.md`. Run
-  via `cd scripts/design && bun install && bun run generate` (or `bun run scripts/design/generate-palette.mjs` from the
-  repo root).
+- [`scripts/design/generate-palette.mjs`](scripts/design/generate-palette.mjs) — the script that emits both artifacts:
+  writes `src/styles/foundation.css` and (on the `dev` branch) `docs/research/design/color-analysis.md`. Run via `cd
+  scripts/design && bun install && bun run generate` (or `bun run scripts/design/generate-palette.mjs` from the repo
+  root).
 
 ## 1. Summary
 
@@ -626,10 +625,10 @@ reviewer sees the *why* alongside the numbers.
 [Monaspace Xenon](https://monaspace.githubnext.com/) for code.** Both OFL. Chosen via the full font-selection procedure
 in [impeccable's typography reference](.claude/skills/impeccable/reference/typography.md) — not from the training-data
 defaults (Inter, IBM Plex, Fraunces, Space Grotesk, Instrument Serif, all of which impeccable ships a
-reflex-fonts-to-reject list for). See session notes in [`.impeccable.md`](.impeccable.md) for the 3-word brand voice
+reflex-fonts-to-reject list for). See session notes in [`PRODUCT.md`](PRODUCT.md) for the 3-word brand voice
 ("opinionated, precise, inviting") that drove the pick.
 
-**Stacks emitted in [`src/styles/foundation.css`](../src/styles/foundation.css)** — reproduced here for review; do not
+**Stacks emitted in [`src/styles/foundation.css`](src/styles/foundation.css)** — reproduced here for review; do not
 hand-edit the CSS, change the generator:
 
 ```css
