@@ -20,14 +20,14 @@
 
 import { chromium } from 'playwright';
 import sharp from 'sharp';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OG_HTML = `${REPO_ROOT}/scripts/og/og.html`;
 const OG_OUT = `${REPO_ROOT}/public/og-image.png`;
-const SCORECARDS_DIR = `${REPO_ROOT}/scorecards`;
+const SITE_SPEC_VERSION_PATH = `${REPO_ROOT}/content/principles/VERSION`;
 
 const OG_W = 1200;
 const OG_H = 630;
@@ -35,33 +35,34 @@ const SCALE = 2;
 const SIZE_BUDGET_KB = 150;
 
 /**
- * Read the spec_version from anc's own self-scorecard. The OG card sells
- * the standard via the CLI that scores it, so the version label tracks
- * what `anc` was compiled against — not what the site's content has been
- * reconciled to (footer's role, see SITE_SPEC_VERSION) and not what we
- * last vendored (SPEC_VERSION). Matches the per-scorecard spec_version
- * each badge SVG uses (build.mjs:377).
+ * Read the spec version the site's principle prose has been reconciled to
+ * (content/principles/VERSION, the same source build/util.mjs exports as
+ * SITE_SPEC_VERSION and the footer renders). The OG card is a public-facing
+ * social-share surface; tying its version label to the site's reconciled
+ * content keeps the social signal honest about what visitors will actually
+ * see when they click through.
+ *
+ * Previously read from the anc self-scorecard's spec_version, but that
+ * coupled OG releases to anc binary releases and made the social card
+ * lag spec releases until anc shipped a matching binary. Per-tool badges
+ * (build.mjs:377) still use each scorecard's own spec_version — the OG is
+ * the only surface that needed decoupling.
  */
-async function readAncSpecVersion(): Promise<string> {
-  const entries = await readdir(SCORECARDS_DIR);
-  const ancScorecards = entries
-    .filter((name) => /^anc-v[\d.]+\.json$/.test(name))
-    .sort()
-    .reverse(); // highest version first
-  if (ancScorecards.length === 0) {
-    throw new Error(`No anc scorecard found in ${SCORECARDS_DIR}/anc-v*.json`);
+async function readSiteSpecVersion(): Promise<string> {
+  const raw = await readFile(SITE_SPEC_VERSION_PATH, 'utf8');
+  const v = raw.trim();
+  if (!v) {
+    throw new Error(`${SITE_SPEC_VERSION_PATH} is empty`);
   }
-  const sourceFile = `${SCORECARDS_DIR}/${ancScorecards[0]}`;
-  const json = JSON.parse(await readFile(sourceFile, 'utf8'));
-  if (typeof json.spec_version !== 'string') {
-    throw new Error(`${sourceFile} has no spec_version field`);
+  if (!/^\d+\.\d+\.\d+$/.test(v)) {
+    throw new Error(`${SITE_SPEC_VERSION_PATH} contains non-semver value: ${v}`);
   }
-  process.stderr.write(`OG version source: ${ancScorecards[0]} → spec_version=${json.spec_version}\n`);
-  return json.spec_version;
+  process.stderr.write(`OG version source: content/principles/VERSION → ${v}\n`);
+  return v;
 }
 
 async function main(): Promise<number> {
-  const specVersion = await readAncSpecVersion();
+  const specVersion = await readSiteSpecVersion();
   const version = `v${specVersion}`;
   process.stderr.write(`reading og.html, injecting version=${version}\n`);
 
