@@ -1,12 +1,12 @@
 # site Vale rule pack
 
 Auto-generated reference for the rules enforced by `styles/site/*.yml`. Each rule's narrative rationale lives in
-`BRAND.md` (universal) or `.impeccable.md` (channel). The rule pack is the executable contract for the literal phrases /
+`BRAND.md` (universal) or `PRODUCT.md` (channel). The rule pack is the executable contract for the literal phrases /
 regex; this README is the human-readable companion.
 
 ## site.BannedAesthetics
 
-*Source: .impeccable.md § Aesthetic Direction — banned visual patterns.*
+*Source: PRODUCT.md § Aesthetic Direction — banned visual patterns.*
 
 **Message:** Banned aesthetic pattern `<matched text>` — anti-reference per the site's design context. Choose a
 different pattern or describe the underlying need without the loaded label.
@@ -27,7 +27,7 @@ different pattern or describe the underlying need without the loaded label.
 
 ## site.BannedFonts
 
-*Source: .impeccable.md § Aesthetic Direction — second-favorite font reflex.*
+*Source: PRODUCT.md § Aesthetic Direction — second-favorite font reflex.*
 
 **Message:** Banned font name `<matched text>` — second-favorite font reflex per the impeccable font-selection
 procedure. Cite by category, not by name.

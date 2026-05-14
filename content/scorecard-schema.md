@@ -216,7 +216,7 @@ Array of one object per check the runner attempted. Order is stable across runs 
 | ------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`         | string         | Stable identifier (e.g., `p3-help`, `p1-non-interactive`). Citeable in commits and PRs.                                                                  |
 | `label`      | string         | Human-readable name for the check.                                                                                                                       |
-| `group`      | string         | Principle group this check belongs to: `P1`–`P7`. Drives the **principles met** column on the leaderboard.                                               |
+| `group`      | string         | Principle group this check belongs to: `P1`–`P8`. Drives the **principles met** column on the leaderboard.                                               |
 | `layer`      | string         | `behavioral`, `project`, or `source`. See [layers](/methodology#layers-behavioral-project-source) on methodology.                                        |
 | `status`     | string         | `pass`, `warn`, `fail`, `skip`, or `error`. Definitions match the [`summary` table](#summary) above.                                                     |
 | `evidence`   | string \| null | Short explanation when status is `skip`, `warn`, or `fail`. Often references the suppressing audit profile or the input that triggered the check.        |

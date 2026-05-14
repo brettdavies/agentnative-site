@@ -12,8 +12,9 @@ Structure adapted from
 
 Pair with:
 
-- [`.impeccable.md`](../.impeccable.md) — users, brand personality, anti-references.
-- [`docs/DESIGN.md`](DESIGN.md) — typography, palette, layout.
+- [`PRODUCT.md`](../../PRODUCT.md) — users, brand personality, anti-references (channel delta on top of
+  [`BRAND.md`](../../BRAND.md)).
+- [`DESIGN.md`](../../DESIGN.md) — typography, palette, layout.
 - Voice anchor: `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md`. The
   letter is first-person; the spec site is third-person. Everything else — concrete-before-abstract, numbers-not-
   adjectives, "the code speaks for itself" close — transfers.
@@ -76,12 +77,30 @@ AI drafts reliably ship with these patterns. Delete them on sight.
 
 ## Audience Adaptation
 
-### Register 1: Developers arriving cold (most of `/` and `/about`)
+### Register 1: Developers arriving cold
 
-Assumes the reader came from a link, knows how to read RFC-flavored docs, wants to decide in <60 seconds whether the
-standard is serious. Third-person throughout. Confident verdicts. Concrete failure modes in the first line of each
-section. Never explains what RFC 2119 is *before* quoting it — explain only on `/about`, where a reader going deep might
-reasonably ask.
+Two sub-registers split by surface depth. Both are third-person, both confident, both ban marketing voice. The split
+exists because the homepage and a principle page are doing different jobs: the homepage earns the click into the
+technical content; the principle page IS the technical content. Conflating their voices either dries out the homepage
+into a dry-RFC failure mode (no reader makes it to a principle page) or softens the principle page into prose-vibes
+where a contract belongs.
+
+#### Register 1a: Site lede (`/`, `/about`, `/install` opener, `/check` opener)
+
+The reader arrived from a link and is deciding, in seconds, whether the standard is serious. Lead with concrete reality
+that names what the reader already knows — git, the cloud, a TUI that hangs forever — before naming the thing the spec
+does about it. Accessible analogies are allowed; one-sentence concrete openings are encouraged (`_intro.md`'s
+"Compilers, databases, git, the cloud, the shell." is the calibration). Avoid opening with a `**MUST:**` block, a
+frontmatter dump, or RFC-keyword annotations. The lede page may pivot into RFC-flavored content lower on the page; what
+it MUST NOT do is open there. RFC 2119 is named, never explained — explain only on `/about`.
+
+#### Register 1b: Principle page (`/p<n>`)
+
+The reader is no longer cold; they clicked from the homepage to a principle page because they want the contract for that
+principle. Open with the failure mode — what breaks for the agent when the requirement is unmet — in the first sentence
+of the Definition. RFC-keyword blocks (`**MUST:**`, `**SHOULD:**`, `**MAY:**`) appear immediately after the Why section.
+Code samples carry weight a paragraph cannot. The five-section shape is locked (see Surface-Specific Notes below). No
+narrative analogies in the Definition or Requirements — analogies belong on the lede that brought the reader here.
 
 ### Register 2: Developers running the tool (`/check`)
 
@@ -104,13 +123,26 @@ Code fences name the language.
 
 ## Surface-Specific Notes
 
+### Homepage (`content/_intro.md`)
+
+Register 1a. Opens with one or two short, concrete sentences naming things the reader already operates daily — the
+calibration is the current opener: "CLI tools are how AI agents touch everything else. Compilers, databases, git, the
+cloud, the shell." Pivots into RFC-flavored content within the first half-screen, but the lede earns the click. Cites
+the count of principles, the per-principle URL pattern (`/p1` through `/p<N>`), the markdown twin pattern (`/p<n>.md`),
+and the linter — in that order. The principle-count cross-reference is a maintenance touchpoint after every spec MINOR
+that adds a principle (see [`content/principles/README.md`](../../content/principles/README.md)).
+
 ### Principle page (`content/principles/p<n>-...md`)
 
-Five-section shape, locked by
+Register 1b. Five-section shape, locked by
 [`principles/AGENTS.md`](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md): Definition, Why
-Agents Need It, Requirements, Evidence, Anti-Patterns. No intro paragraph above the Definition — the anchor text is the
-summary. Link-text convention for templates: the path itself (`templates/output-format.rs`) or the flag
-(`--no-interactive`), never "this pattern" or "the reference."
+Agents Need It, Requirements, Evidence, Anti-Patterns (Scope optional, between Requirements and Evidence, when the
+applicability boundary needs naming). No intro paragraph above the Definition — the anchor text is the summary. The
+Definition's first sentence names the failure mode, not the artifact ("A CLI tool that blocks on an interactive prompt
+is invisible to an agent — the agent hangs…" beats "A non-interactive CLI is one that…"). Link-text convention for
+templates: the path itself (`templates/output-format.rs`) or the flag (`--no-interactive`), never "this pattern" or "the
+reference." Closes with one line citing the check IDs that measure this principle today and an `anc check --principle
+<n>` invocation a reader can copy.
 
 ### `/check`
 
@@ -162,7 +194,7 @@ better calibration. Each entry names the surface, the draft, the send, and the l
 - **Delta**: "austere" and "self-evident" read as permission to be boring. "Opinionated" carries a POV the reader can
   engage with; "inviting" prevents drift into dry-RFC. Same authority intent, different engagement vector.
 - **Lesson**: A spec voice that defaults to minimal reads as uncommitted, not confident. "Restraint is not austerity"
-  (Design Principle 3 in `.impeccable.md`) is the tight formulation.
+  (Design Principle 3 in `PRODUCT.md`) is the tight formulation.
 
 ### Example 2 — `/check` install stanza framing (session 2026-04-14)
 

@@ -17,10 +17,10 @@ const SITE_TAGLINE = 'The agent-native CLI standard';
 // shows MUST/SHOULD/MAY-prefixed normative statements; the alt text
 // describes the *content* of that card so screen readers and link-
 // preview crawlers convey what a sighted viewer sees.
-const OG_IMAGE_ALT = 'agent-native CLI standard — anc.dev — seven principles for CLIs that agents can operate';
+const OG_IMAGE_ALT = 'agent-native CLI standard — anc.dev — a standard for CLIs that agents can operate';
 
 const AI_SUMMARY_PROMPT =
-  'Summarize the agent-native CLI standard from https://anc.dev/llms-full.txt — what are the seven principles and why do they matter for AI agents using CLI tools?';
+  'Summarize the agent-native CLI standard from https://anc.dev/llms-full.txt — what are the eight principles and why do they matter for AI agents using CLI tools?';
 
 const AI_PROVIDERS = [
   {

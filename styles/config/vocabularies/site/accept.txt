@@ -137,6 +137,7 @@ jsonl
 keyframe
 landingpageflow
 lazygit
+lede
 letterform
 linuxbrew
 llm

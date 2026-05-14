@@ -162,7 +162,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
 
   return `<section class="leaderboard-hero">
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
-  <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">seven principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
+  <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">eight principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
   <p class="leaderboard-hero__meta">${leaderboard.length} audited tools in the corpus.</p>
 </section>
 
@@ -583,7 +583,7 @@ export function buildLeaderboardMarkdown(leaderboard) {
   const lines = [
     '# ANC 100 — Agent-Native CLI Leaderboard',
     '',
-    'Automated agent-readiness scores for real CLI tools, scored against the [seven principles](/).',
+    'Automated agent-readiness scores for real CLI tools, scored against the [eight principles](/).',
     '',
     '| # | Tool | Tier | Lang | Score | Principles |',
     '|---|------|------|------|-------|------------|',

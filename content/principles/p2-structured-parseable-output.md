@@ -17,8 +17,8 @@ catastrophically later.
 
 **MUST:**
 
-- A machine-readable format flag (e.g., `--output text|json`, with `jsonl` where the output is naturally streamed). Text
-  is the default for humans; at least one structured format is required for agent-facing use.
+- A machine-readable format flag (`--output text|json|jsonl`). `text` is the default human-facing form; `json` and
+  `jsonl` are the canonical machine-readable values, and at least one of them is required.
 - Data goes to stdout. Diagnostics, progress indicators, and warnings go to stderr. An agent consuming JSON from stdout
   must never encounter an interleaved progress message.
 - Exit codes are structured and documented. Codes 77 and 78 follow BSD `sysexits.h` (`EX_NOPERM`, `EX_CONFIG`); the
@@ -35,12 +35,21 @@ catastrophically later.
 - When `--output json` is active, errors are emitted as JSON (to stderr) with at least `error`, `kind`, and `message`
   fields. Plain-text errors in a JSON run leave the agent without structured access to the failure — it can detect
   non-zero exit but cannot route on `kind` or surface `message` programmatically.
+- *(Applies when: CLI emits structured output.)* The output schema is runtime-discoverable via a `schema` subcommand or
+  a `--schema` flag, returned with a documented format identifier (canonical recommendation: JSON Schema 2020-12). An
+  agent that finds the tool through filesystem discovery should be able to ask the tool what shape its output takes
+  without external documentation.
 
 **SHOULD:**
 
 - JSON output uses a consistent envelope — a top-level object with predictable keys — across every command so agents can
   rely on the same shape. Passthrough tools whose value is the user's own JSON (`jq`, `dasel`) are exempt; the envelope
   applies to commands that emit tool-defined data.
+- *(Applies when: CLI emits structured output.)* The same schema is also exported to a stable file path (e.g.,
+  `schema/<command>.json` in the release artifact). Runtime discovery covers ad-hoc inspection; the file path lets CI
+  and static-analysis consumers pin the schema without invoking the tool.
+- `--json` and `--jsonl` are accepted as aliases for `--output json` and `--output jsonl`. The canonical enum stays
+  authoritative; the short forms are a convenience for the common case.
 
 **MAY:**
 

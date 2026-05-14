@@ -1,7 +1,7 @@
 // CRITICAL regression tests (ce-work prompt). These gate every PR —
 // if any goes red, the site ships with a broken citation primitive.
 //
-//   1. Anchor-slug snapshot against docs/DESIGN.md §3.5's seven LOCKED slugs.
+//   1. Anchor-slug snapshot against docs/DESIGN.md §3.5's eight LOCKED slugs.
 //      Renaming ANY of these breaks every inbound link, HN comment, blog
 //      quote, or agent citation in perpetuity.
 //
@@ -37,12 +37,13 @@ const LOCKED_SLUGS = [
   'p5-safe-retries-mutation-boundaries',
   'p6-composable-predictable-command-structure',
   'p7-bounded-high-signal-responses',
+  'p8-discoverable-skill-bundle',
 ];
 
 describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked list)', () => {
   test('homepage links to every principle page', async () => {
     const html = await readFile(join(DIST, 'index.html'), 'utf8');
-    for (let n = 1; n <= 7; n++) {
+    for (let n = 1; n <= 8; n++) {
       expect(html).toContain(`href="/p${n}"`);
     }
   });
@@ -57,7 +58,7 @@ describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked li
   });
 
   test('no stray draft slugs in principle pages', async () => {
-    for (let n = 1; n <= 7; n++) {
+    for (let n = 1; n <= 8; n++) {
       const html = await readFile(join(DIST, `p${n}.html`), 'utf8');
       // Tier keywords in slug would indicate drift (§3.5 forbids this).
       expect(html).not.toMatch(/id="p\d+-(must|should|may)-/i);
@@ -68,7 +69,7 @@ describe('regression #1 — anchor slug snapshot (docs/DESIGN.md §3.5 locked li
 });
 
 describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
-  test('has H1, blockquote summary, ## Principles with 7 .md bullets, ## Pages, and ## Scorecards', async () => {
+  test('has H1, blockquote summary, ## Principles with 8 .md bullets, ## Pages, and ## Scorecards', async () => {
     const llms = await readFile(join(DIST, 'llms.txt'), 'utf8');
     const lines = llms.split('\n');
 
@@ -82,13 +83,13 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
     // Contains the literal `## Principles` H2.
     expect(llms).toContain('## Principles');
 
-    // Contains exactly seven `- [...](.../p<n>.md)` bullets.
+    // Contains exactly eight `- [...](.../p<n>.md)` bullets.
     const principleLinks = llms.match(/^- \[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
-    expect(principleLinks.length).toBe(7);
+    expect(principleLinks.length).toBe(8);
 
-    // Bullets are in p1..p7 order.
+    // Bullets are in p1..p8 order.
     const orderedNumbers = principleLinks.map((l) => l.match(/\/p(\d+)\.md/)?.[1]).map((s) => (s ? Number(s) : 0));
-    expect(orderedNumbers).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(orderedNumbers).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 
     // Contains ## Pages with check, install, and about sub-pages.
     expect(llms).toContain('## Pages');

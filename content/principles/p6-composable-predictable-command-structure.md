@@ -44,6 +44,10 @@ tool a building block rather than a dead end.
   execution indefinitely.
 - *(Applies when: CLI uses subcommands.)* Agentic flags (`--output`, `--quiet`, `--no-interactive`, `--timeout`) are
   `global = true` so they propagate to every subcommand automatically.
+- *(Applies when: CLI runs long-running operations.)* SIGTERM is handled gracefully: in-flight writes flush or roll
+  back, locks release, and the process exits non-zero within a bounded shutdown window. The next invocation succeeds
+  without manual cleanup. Agents commonly cancel a long-running call when their own deadline expires; a tool that leaves
+  half-written state behind on SIGTERM forces the agent to clean up before retrying.
 
 **SHOULD:**
 
@@ -61,6 +65,10 @@ tool a building block rather than a dead end.
 **MAY:**
 
 - A `--color auto|always|never` flag for explicit color control beyond TTY auto-detection.
+- *(Applies when: CLI uses subcommands.)* Subcommand verbs follow community-standard names — `get`, `list`, `create`,
+  `update`, `delete` — and flag spellings follow widely-used canonical forms — `--force`, `--yes`, `--limit`, `--quiet`,
+  `--verbose`. Names that match what every other CLI calls the same operation reduce the surface an agent has to
+  memorize.
 
 ## Evidence
 

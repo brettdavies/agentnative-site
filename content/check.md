@@ -1,7 +1,7 @@
 # Check your CLI
 
 `anc` (also installable as `agentnative` — they're aliases for the same binary) is the reference linter for this
-standard. It scores any CLI tool against the seven principles and tells you, by check ID, where it passes and where it
+standard. It scores any CLI tool against the eight principles and tells you, by check ID, where it passes and where it
 falls short.
 
 ## Install
@@ -72,7 +72,7 @@ will surprise them. Nothing here is a vanity metric — the checks map one-to-on
 ## See how widely-used CLIs score
 
 The [**ANC 100 leaderboard**](/scorecards) is what running `anc check` produces at scale: every popular CLI tool, scored
-against the same seven principles, with full per-check evidence under `/score/<name>`. The scoring rules are documented
+against the same eight principles, with full per-check evidence under `/score/<name>`. The scoring rules are documented
 on the [methodology page](/methodology); the underlying JSON schema is enumerated at
 [/scorecard-schema](/scorecard-schema).
 
