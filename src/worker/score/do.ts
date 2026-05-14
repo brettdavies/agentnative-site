@@ -19,7 +19,7 @@
 // the binding early (e.g. a misrouted handler, a leaked staging URL).
 
 export class Sandbox {
-  // biome-ignore lint/correctness/noUnusedVariables: stub signature mirrors the runtime DO contract that U6 will fill in
+  // biome-ignore lint/complexity/noUselessConstructor: stub signature mirrors the runtime DO contract that U6 will fill in
   constructor(_state: DurableObjectState, _env: unknown) {}
 
   async score(): Promise<{ error: string }> {

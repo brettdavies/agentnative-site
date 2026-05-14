@@ -59,7 +59,11 @@ gh pr create --base dev --title "feat(scope): what changed"
 Every PR — feature, fix, docs, release — uses `.github/pull_request_template.md` verbatim. Six sections, no inventions:
 `## Summary`, `## Changelog`, `## Type of Change`, `## Related Issues/Stories`, `## Files Modified`, `## Testing`.
 
-- **No explainer prose anywhere in the body.** Every section is user-facing substance only — what is changing for the consumer that was not already there. `## Summary` is one short paragraph. Do NOT recap the workflow (cherry-pick / regenerate / pre-push gate / CI behavior is documented in this file and `.github/`). Do NOT paste triple-diff output, pre-push gate results, CI check status, exclusion rationale, or other verification artifacts into the body. Those stay local; anomalies get fixed before push, not audit-trailed in the body.
+- **No explainer prose anywhere in the body.** Every section is user-facing substance only: what is changing for the
+  consumer that was not already there. `## Summary` is one short paragraph. Do NOT recap the workflow (cherry-pick,
+  regenerate, pre-push gate, CI behavior is documented in this file and `.github/`). Do NOT paste triple-diff output,
+  pre-push gate results, CI check status, exclusion rationale, or other verification artifacts into the body. Those stay
+  local; anomalies get fixed before push, not audit-trailed in the body.
 - **Changelog** subsections (`### Added` / `### Changed` / `### Fixed` / `### Documentation`) hold the user-facing
   entries. The template's RULES (in the HTML comment at the top of the section) are literal: 1-5 bullets, delete empty
   subsections entirely, each bullet starts with a verb. Prose-only edits leave the section empty or omit it.
@@ -270,9 +274,9 @@ changed.
 
 The filter is symmetric across `dev` and `main`. In practice the `main` side is mostly theoretical:
 `guard-main-docs.yml` already blocks `docs/plans|solutions|brainstorms|reviews/**` from reaching `main` via PR, and the
-remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would
-redeploy a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level
-filter for a job-level changed-files check.
+remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would redeploy
+a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level filter for a
+job-level changed-files check.
 
 ## CI
 
