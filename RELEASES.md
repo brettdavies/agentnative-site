@@ -278,6 +278,101 @@ remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change
 a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level filter for a
 job-level changed-files check.
 
+### Sandbox image releases (live-scoring)
+
+The live-scoring path uses a Cloudflare Containers binding that pins an Alpine + musl sandbox image
+(`docker/sandbox/Dockerfile`). The image lives in the Cloudflare managed registry at
+`registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled from deploy: a Worker code-only deploy
+never rebuilds the image, and an image-only release never reships Worker code unintentionally.
+
+`wrangler.jsonc` holds TWO independent image pins:
+
+- `containers[0].image` (top-level) is the PRODUCTION pin. The `agentnative-site` Worker on `anc.dev` deploys from this
+  tag. Advances only at release time.
+- `env.staging.containers[0].image` is the STAGING pin. The `agentnative-site-staging` Worker on
+  `agentnative-site-staging.brettdavies.workers.dev` deploys from this tag. Advances independently during development.
+
+The two pins may legitimately differ. Each env block owns its own container application with its own version history.
+The pins describe what staging and prod each run, not a shared constraint.
+
+#### Default workflow: staging soak then promote
+
+Most image changes go through a staging-soak cycle before reaching production. This protects prod from any sandbox
+regression that only surfaces under real install traffic.
+
+**Image bump (feat PR to dev):**
+
+```bash
+# from a clean working tree on dev
+GIT_SHA=$(git rev-parse --short HEAD)
+bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
+```
+
+The command runs `docker build` locally and pushes to the CF registry, authenticated via `CLOUDFLARE_API_TOKEN`. Output
+ends with a `<git-sha>: digest: sha256:... size: ...` line confirming the push.
+
+Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Leave the top-level (prod) pin
+alone. Commit the Dockerfile change + the staging-pin update together. PR to `dev`.
+
+CI on a dev-targeting PR verifies the new staging tag exists in the registry; the prod pin keeps pointing at the
+last-released tag, which also still exists (image-retention discipline). The CI guard accepts the divergence.
+
+After merge to dev, CI deploys `agentnative-site-staging` to the new image. Soak: observability, integration tests, real
+traffic on the staging.workers.dev URL.
+
+**Promotion (release PR to main):**
+
+When the image is ready to ship, cut a release branch from `main` and cherry-pick the dev commits as usual. Add one
+promotion commit that bumps the top-level `containers[0].image` to match `env.staging.containers[0].image`. Open the PR
+to `main`. CI on a main-targeting PR enforces TWO invariants:
+
+- both pins exist in the CF managed registry, AND
+- both pins point at the same tag (released state)
+
+Merge. CI deploys `agentnative-site` to the promoted image, and the site at `anc.dev` is now on the new sandbox.
+
+#### Shortcut: lockstep bumps (low-risk changes only)
+
+For image changes that don't need a soak (base-image security patch, dependency-only update with no behavior delta),
+update BOTH pins in the same feat PR. The dev-targeting PR has equal pins from the start; the eventual release PR
+carries equal pins; staging and prod deploy the new image in lockstep.
+
+The CI guard accepts this because both pins exist in the registry on every PR.
+
+Use the soak-then-promote default for any change that touches sandbox behavior: package manager additions, runtime
+version bumps, `anc` upgrades, `cargo-binstall` upgrades, anything in `docker/sandbox/Dockerfile` past the base-image
+FROM line.
+
+#### Deploy never rebuilds
+
+`wrangler deploy --env staging` (and `wrangler deploy` on main) against the fully-qualified registry URI does NOT
+trigger a rebuild. The image was already published during the local `wrangler containers build -p` step.
+
+#### Image-retention discipline
+
+NEVER delete a tag from the CF managed registry that backed a shipped Worker version. Deletion silently breaks `wrangler
+rollback` for any version that referenced the image, per
+[Containers Limits](https://developers.cloudflare.com/containers/platform-details/limits/). The 50 GB account-wide cap
+is a quarterly prune review, not a routine cleanup. When a release tag ships, record the pair `<git-tag> <-> <registry
+URI>` in the release commit body so the inventory survives.
+
+Retention is what makes soak-then-promote safe: while a new image is soaking on staging, the prod pin still references
+the previous release's tag, and that tag must remain in the registry for prod to keep serving.
+
+#### DO migrations are one-way walls
+
+The first Worker version that applied `migrations[].new_sqlite_classes: ["Sandbox"]` (`v1`) cannot be rolled back across
+that boundary via `wrangler rollback`, per
+[Versions and deployments / Rollbacks](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/).
+Treat DO-migration commits as milestone releases that get an explicit reviewer note.
+
+#### GHA fallback
+
+If a local build is impossible, set `image:` to a Dockerfile path (`./docker/sandbox/Dockerfile`) and let
+`cloudflare/wrangler-action` build inline on `ubuntu-latest` (~60-130s cold per deploy; no GHA-side layer cache; push is
+auto-skipped when the existing tag still matches). This is a fallback, not the primary path; the local-build-once flow
+above is what the deploy workflow assumes.
+
 ## CI
 
 Two workflows gate pull requests:
