@@ -127,6 +127,27 @@
       // `agentnative-site-sandbox`.
       "name": "agentnative-site-staging",
       "workers_dev": true,
+      // CRITICAL: explicitly override `routes` to an empty array. Per the
+      // wrangler config docs, `routes` is an INHERITABLE key — if absent
+      // here, env.staging silently inherits the top-level
+      // `routes: [{ pattern: "anc.dev", custom_domain: true }]`. That
+      // inheritance is what produced the routing-drift bug observed since
+      // 2026-04-30: every `wrangler deploy --env staging` was re-attaching
+      // anc.dev to the staging Worker because env.staging was inheriting
+      // the prod route. Explicit empty array breaks the inheritance.
+      // Removing this line will reintroduce the bug. See the CHANGELOG /
+      // PR description for the full investigation.
+      "routes": [],
+      // PROPHYLACTIC: same inheritance footgun as `routes` above. `triggers`
+      // (cron) is an INHERITABLE key. If a future change adds cron schedules
+      // at the top level (e.g., a daily registry refresh on the production
+      // Worker), env.staging would silently inherit them and double-fire
+      // every scheduled invocation. We don't currently have any crons, but
+      // setting `triggers.crons` to an empty array here makes the staging
+      // override explicit, so a future cron addition forces a deliberate
+      // decision about whether to mirror to staging. Same audit pattern
+      // applied to all inheritable keys at top-level.
+      "triggers": { "crons": [] },
       "containers": [
         {
           "class_name": "Sandbox",
