@@ -242,41 +242,15 @@ and regenerate. Hand-editing the generated artifact directly produces drift the 
 
 ## Deploy
 
-`.github/workflows/deploy.yml` runs on pushes to `dev` or `main`, targeting separate Workers via two independent
-wrangler configs:
+`.github/workflows/deploy.yml` runs on pushes to `dev` or `main`, targeting separate Workers via wrangler environments:
 
-| Branch | Worker                     | Domain                                             | Wrangler command                                  |
-| ------ | -------------------------- | -------------------------------------------------- | ------------------------------------------------- |
-| `dev`  | `agentnative-site-staging` | `agentnative-site-staging.<subdomain>.workers.dev` | `wrangler deploy --config wrangler.staging.jsonc` |
-| `main` | `agentnative-site`         | `anc.dev` (custom domain, `workers_dev: false`)    | `wrangler deploy`                                 |
+| Branch | Worker                     | Domain                                             | Wrangler command                |
+| ------ | -------------------------- | -------------------------------------------------- | ------------------------------- |
+| `dev`  | `agentnative-site-staging` | `agentnative-site-staging.<subdomain>.workers.dev` | `wrangler deploy --env staging` |
+| `main` | `agentnative-site`         | `anc.dev` (custom domain, `workers_dev: false`)    | `wrangler deploy`               |
 
 The staging-host guard in `src/worker/headers.ts` adds `X-Robots-Tag: noindex` on any response served from a
 `.workers.dev` host. Production at `anc.dev` gets full indexing.
-
-Every response also carries an `X-Build-Env` header (`production`, `staging`, or `development` when running tests),
-which doubles as a quick "which Worker is this?" diagnostic and as the source-level mechanism that keeps the two
-compiled Worker scripts at distinct etags — see the next section.
-
-### Why two separate wrangler configs (not a single multi-env file)
-
-Standard Workers Assets is keyed in a way that lets one Worker's asset uploads shadow another Worker's served content
-when the two compiled Worker scripts have identical bytes. Reproduction and discussion at
-[cloudflare/workers-sdk#13925](https://github.com/cloudflare/workers-sdk/issues/13925).
-
-To preserve real isolation between staging and production assets, this repo deploys from **two top-level wrangler
-configs** rather than the more common single-config multi-env shape:
-
-- `wrangler.jsonc` deploys the `agentnative-site` (production) Worker.
-- `wrangler.staging.jsonc` deploys the `agentnative-site-staging` Worker.
-
-Each config carries its own `define` block that substitutes `__BUILD_ENV__` (referenced in `src/worker/index.ts`) with a
-literal string at deploy time (`"production"` vs `"staging"`). That single-character divergence is enough to give the
-two compiled scripts distinct etags, which keeps their asset namespaces physically separate per CF's deduplication
-keying. Without the substitution, staging deploys could silently override production-served asset content.
-
-Keep both configs in sync for anything that isn't a deliberate per-env divergence (compatibility flags, observability,
-asset settings, etc.). The sandbox image pin is the one canonical exception: it's deliberately split between
-soak-then-promote envs (see "Sandbox image releases" below).
 
 Manual deploys use `workflow_dispatch` with an explicit environment picker:
 
@@ -311,15 +285,15 @@ The live-scoring path uses a Cloudflare Containers binding that pins an Alpine +
 `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled from deploy: a Worker code-only deploy
 never rebuilds the image, and an image-only release never reships Worker code unintentionally.
 
-The two pins live in separate wrangler configs:
+`wrangler.jsonc` holds TWO independent image pins:
 
-- `wrangler.jsonc` → `containers[0].image` is the PRODUCTION pin. The `agentnative-site` Worker on `anc.dev` deploys
-  from this tag. Advances only at release time.
-- `wrangler.staging.jsonc` → `containers[0].image` is the STAGING pin. The `agentnative-site-staging` Worker on
+- `containers[0].image` (top-level) is the PRODUCTION pin. The `agentnative-site` Worker on `anc.dev` deploys from this
+  tag. Advances only at release time.
+- `env.staging.containers[0].image` is the STAGING pin. The `agentnative-site-staging` Worker on
   `agentnative-site-staging.brettdavies.workers.dev` deploys from this tag. Advances independently during development.
 
-The two pins may legitimately differ. Each config owns its own container application with its own version history. The
-pins describe what staging and prod each run, not a shared constraint.
+The two pins may legitimately differ. Each env block owns its own container application with its own version history.
+The pins describe what staging and prod each run, not a shared constraint.
 
 #### Default workflow: staging soak then promote
 
@@ -337,8 +311,8 @@ bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 The command runs `docker build` locally and pushes to the CF registry, authenticated via `CLOUDFLARE_API_TOKEN`. Output
 ends with a `<git-sha>: digest: sha256:... size: ...` line confirming the push.
 
-Update **only `containers[0].image` in `wrangler.staging.jsonc`** with the new tag. Leave the production pin (in
-`wrangler.jsonc`) alone. Commit the Dockerfile change + the staging-pin update together. PR to `dev`.
+Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Leave the top-level (prod) pin
+alone. Commit the Dockerfile change + the staging-pin update together. PR to `dev`.
 
 CI on a dev-targeting PR verifies the new staging tag exists in the registry; the prod pin keeps pointing at the
 last-released tag, which also still exists (image-retention discipline). The CI guard accepts the divergence.
@@ -349,8 +323,8 @@ traffic on the staging.workers.dev URL.
 **Promotion (release PR to main):**
 
 When the image is ready to ship, cut a release branch from `main` and cherry-pick the dev commits as usual. Add one
-promotion commit that bumps `containers[0].image` in `wrangler.jsonc` to match `wrangler.staging.jsonc`'s pin. Open the
-PR to `main`. CI on a main-targeting PR enforces TWO invariants:
+promotion commit that bumps the top-level `containers[0].image` to match `env.staging.containers[0].image`. Open the PR
+to `main`. CI on a main-targeting PR enforces TWO invariants:
 
 - both pins exist in the CF managed registry, AND
 - both pins point at the same tag (released state)
@@ -371,8 +345,8 @@ FROM line.
 
 #### Deploy never rebuilds
 
-`wrangler deploy --config wrangler.staging.jsonc` (and `wrangler deploy` on main) against the fully-qualified registry
-URI does NOT trigger a rebuild. The image was already published during the local `wrangler containers build -p` step.
+`wrangler deploy --env staging` (and `wrangler deploy` on main) against the fully-qualified registry URI does NOT
+trigger a rebuild. The image was already published during the local `wrangler containers build -p` step.
 
 #### Image-retention discipline
 

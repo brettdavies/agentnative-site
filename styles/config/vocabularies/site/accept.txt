@@ -227,10 +227,3 @@ yazi
 yq
 zoomable
 zoxide
-configs
-etag
-etags
-deduplication
-namespaces
-envs
-CF's
