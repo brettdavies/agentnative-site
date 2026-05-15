@@ -1842,6 +1842,14 @@ container per design Premise #6.
   `setOutboundHandler("allowedInstall", {...})` fires BEFORE `exec(installCmd)` AND `setOutboundHandler("noHttp")` fires
   BEFORE `exec("anc check ...")`; (c) per-request log lines emitted by handlers match expected `{phase, host,
   allowed|blocked}` shape (the per-request observability that justified Pattern Y).
+- Modify: `tests/score-handler.test.ts` — tighten the DO mock to exercise the real
+  `env.SCORE.idFromName(name).fetch(...)` chain rather than returning a fixed envelope from a hand-rolled `.fetch()`
+  stub. Driven by the 2026-05-15 staging incident (PR [#94](https://github.com/brettdavies/agentnative-site/pull/94)):
+  the U5-era stub in this file returned JSON directly from a `.fetch()` mock that bypassed the binding-boundary check,
+  masking the fact that the real DO at `src/worker/score/do.ts` had no `fetch()` method. Production Workers DO requires
+  `fetch()` for HTTP-shaped invocations and threw `Handler does not export a fetch() function` (CF error 1101) on first
+  POST to staging. U6 replaces the stub with the real `@cloudflare/sandbox`-extending class, so the mock must mirror the
+  real binding shape (id → stub → fetch) or the same drift can recur silently.
 
 **Approach:**
 
