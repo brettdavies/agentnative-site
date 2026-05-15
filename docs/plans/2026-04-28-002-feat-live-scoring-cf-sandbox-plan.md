@@ -41,16 +41,18 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
   [#78](https://github.com/brettdavies/agentnative-site/pull/78), commit `82b74dd`)
 - U2 — Alpine + musl sandbox image source at `docker/sandbox/Dockerfile` (PR
   [#79](https://github.com/brettdavies/agentnative-site/pull/79), commit `bf14daf`)
-- U3 — wrangler bindings live on staging; DO is a stub returning `{error: 'sandbox_stub_until_u6'}` (PR
-  [#81](https://github.com/brettdavies/agentnative-site/pull/81), commit `09fe91f`). Production-Worker side pending the
-  routing-drift fix (see "Discovered post-U3 shipment" below).
+- U3 — wrangler bindings live on staging AND production; DO is a stub returning `{error: 'sandbox_stub_until_u6'}` (PR
+  [#81](https://github.com/brettdavies/agentnative-site/pull/81), commit `09fe91f`). Production-Worker side shipped
+  2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`); DO
+  migration v1 applied to the named-prod side on that deploy.
 - U4 — input parser + GitHub URL discovery chain (PR [#80](https://github.com/brettdavies/agentnative-site/pull/80),
   commit `5ac59ca`)
-- U3-followup (staging side) — sandbox image migration off Docker Hub to the Cloudflare managed registry, with the
-  default workflow reframed to staging-leads-prod (PR [#84](https://github.com/brettdavies/agentnative-site/pull/84),
-  open). The staging container app `agentnative-site-staging-sandbox-staging` (id
-  `a0309fd2-9622-4dd8-a6a8-faf95292f08e`) is live on `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1`, version v2,
-  6/6 healthy. Production deploy bundled into the routing-drift release PR.
+- U3-followup — sandbox image migration off Docker Hub to the Cloudflare managed registry, with the default workflow
+  reframed to staging-leads-prod (PR [#84](https://github.com/brettdavies/agentnative-site/pull/84), merged 2026-05-14).
+  Staging container app `agentnative-site-staging-sandbox-staging` (id `a0309fd2-9622-4dd8-a6a8-faf95292f08e`) is live
+  on `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1`, version v2, 6/6 healthy. Production-Worker container app
+  shipped 2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) on the same image pin
+  (lockstep); CI main-targeting pin-equality guard exercised cleanly on PR #85's first run.
 - discovery-hit-rate gate (PR [#77](https://github.com/brettdavies/agentnative-site/pull/77), commit `078d233`)
 
 ### Discovered post-U3 shipment (2026-05-14 audit)
@@ -64,16 +66,22 @@ containers build -p` and pins both env blocks to `registry.cloudflare.com/<acct>
 rebuilds. GHA fallback via `cloudflare/wrangler-action@v3.14.1` stays available for the rare offline-Brett case
 (~60-130s cold build per deploy; no GHA-side layer cache; push auto-skipped when the existing tag still matches).
 
-**Routing drift — OPEN.** The CF audit revealed that `anc.dev` is currently bound to the **staging** Worker
-(`agentnative-site-staging`), not the named-production Worker (`agentnative-site`). The committed `wrangler.jsonc`
-top-level block declares `routes: [{ pattern: "anc.dev", custom_domain: true }]`, which would attach the domain to the
-production Worker on deploy — but the production Worker has not deployed since 2026-05-03 (predates U3 bindings). All
-real `anc.dev` traffic terminates on the staging-named Worker. The named-production Worker is currently orphan infra.
-Likely cause: a manual dashboard attachment during the v0.1 launch on 2026-04-30 that never reverted; git history does
-not record the change. Fix sequence (next session, separate release PR): bring `agentnative-site` current with all dev
-work + U3-followup image pin + create the prod R2 bucket `anc-score-cache`, manually detach `anc.dev` from staging via
-CF API, deploy to main → wrangler reattaches the domain on the named-prod Worker, verify, clean up the orphan DO
-namespace on staging as a documented quarterly action.
+**Routing drift — RESOLVED via release PR #85 (2026-05-15).** Release PR
+[#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`) brought the named-production Worker
+current with 11 dev-side PRs since #73 plus the docs/research cleanup commit, and `deploy.yml` created a fresh Custom
+Domain binding for `anc.dev` against `agentnative-site` per the top-level `routes:` field. R2 bucket `anc-score-cache`
+was created out-of-band beforehand. DO migration v1 (`new_sqlite_classes: ["Sandbox"]`) applied cleanly to the
+named-prod side for the first time (one-way wall — production now cannot `wrangler rollback` across v1). Verified
+post-deploy: `curl https://anc.dev/` returns 200 with no `x-robots-tag`; `curl
+https://agentnative-site-staging.brettdavies.workers.dev/` returns 200 with `x-robots-tag: noindex`; CF API confirms one
+record `hostname=anc.dev, service=agentnative-site, environment=production, enabled=true`. Surprise finding during
+execution: the staging binding had already cleared between the prior session's audit and the start of the release
+session (DELETE on the cited record id returned `Origin '8721a2ad...' not found`), so the planned mid-merge detach was a
+no-op. CF derives custom-domain record ids deterministically from `(account, zone, hostname)`, so the new prod binding
+reused the same id as the prior staging binding — the id in the audit was not stale, just reusable. Follow-ups: clean up
+the orphan DO namespace on staging (`a4fb92ed020241cb802c1d5176a39608`) as a documented quarterly action, and PR
+`docs/research/` into the `brettdavies/.github` reusable `guard-main-docs.yml` so that path is blocked from `main` like
+`docs/plans/`/`docs/solutions/`/`docs/brainstorms/`/`docs/reviews/` already are.
 
 **Default image workflow reframed — staging-leads-prod.** The original U3-followup spec said "pin both env blocks to the
 same tag (shared-tag-pin)" with a rationale of "avoids the multi-env double-build". That rationale was a leftover from
@@ -87,24 +95,18 @@ when `base_ref == main`.
 
 ### Pending (in execution order for the next session)
 
-1. **Routing-drift fix + named-prod promotion** — release PR from `main` that cherry-picks dev work (U3 + U4 +
-   discovery-hit-rate-gate) plus U3-followup, AND swaps `anc.dev` custom domain from `agentnative-site-staging` to
-   `agentnative-site`. Custom-domain swap is manual (detach via CF API immediately before merge, deploy reattaches via
-   top-level wrangler.jsonc `routes`) per ops decision 2026-05-14. R2 bucket `anc-score-cache` must be created before
-   the prod deploy. DO migration v1 lands on the named-prod Worker on this deploy (one-way wall). Bundles U3-followup's
-   production deploy; closes the "production side" of U3-followup verification.
-2. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Includes the
+1. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Includes the
    `SCORE_LIMITER` rekey from per-IP to `session-cookie + tool-arg-hash` (see Cost ceiling and abuse mitigation
    section). Unblocks any user-facing wiring.
-3. **U6** — replace DO stub with real `@cloudflare/sandbox`-extending DO; two-phase egress (`allowedInstall` then
+2. **U6** — replace DO stub with real `@cloudflare/sandbox`-extending DO; two-phase egress (`allowedInstall` then
    `noHttp`); `sandbox-exec.ts` orchestrator with per-PM install matrix and `anc check --command --output json`.
    Highest-risk single unit.
-4. **U7** — R2 cache (read on hit, write on miss; key shape `scores/{slug}/{anc-v}/{tool-v}.json`).
-5. **U8** — paste-input form on the homepage (`/`, NOT a dedicated `/score` subpage), Turnstile invisible mode +
+3. **U7** — R2 cache (read on hit, write on miss; key shape `scores/{slug}/{anc-v}/{tool-v}.json`).
+4. **U8** — paste-input form on the homepage (`/`, NOT a dedicated `/score` subpage), Turnstile invisible mode +
    lazy-load on form interaction, CSP update for `challenges.cloudflare.com`, client-side polling, summary + top-3 +
    install-anc CTA, build-emitted `spec-version.gen.ts`. No markdown twin (live-scoring is HTML-only; agents have `anc
    check` locally). Result-presentation shape (inline / modal / shareable subpage) is an open U8 question.
-6. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
+5. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
 
 U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should land alongside U6 / U8.
 
@@ -134,15 +136,13 @@ U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should
 
 ### Branch baseline for next session
 
-Continue from `dev` (after PR [#84](https://github.com/brettdavies/agentnative-site/pull/84) merges). U3-followup landed
-on `feat/u3-followup` with four commits — image migration + prose-check denylist + CI pinned-image guard + split-pin
-workflow rework. Post-merge, that branch can be deleted locally. The earlier live-scoring feature branches
-(`feat/u1-build-indexes`, `feat/u2-sandbox-image`, `feat/u3-bindings`, `feat/u4-input-parser`,
-`feat/discovery-hit-rate-gate`) were merged via squash and have been deleted locally; their content is on dev.
+Continue from `dev` (post release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) merge, 2026-05-15).
+`main` is now current with all post-#73 dev work and the production-side U3 + U3-followup deploy. The earlier
+live-scoring feature branches (`feat/u1-build-indexes`, `feat/u2-sandbox-image`, `feat/u3-bindings`,
+`feat/u4-input-parser`, `feat/discovery-hit-rate-gate`, `feat/u3-followup`) were squash-merged and have been deleted
+locally; their content is on dev and main.
 
-Next-session work begins with the routing-drift fix release PR (item 1 under Pending above), which also closes the
-production-side verification of U3-followup. New feature work (U5 onward) branches off `dev` after that release lands on
-main.
+Next-session work begins with U5 (item 1 under Pending above). New feature branches off `dev`.
 
 ---
 
@@ -1307,8 +1307,9 @@ deploy` per U3).
   [#84](https://github.com/brettdavies/agentnative-site/pull/84)) and now pins
   `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1` on the staging block. See the dedicated U3-followup subsection
   below for the local-build-once + staging-leads-prod workflow and the (now-shipped) experimental verifications. The
-  named-production Worker's full U3 + U3-followup deploy lands in the routing-drift release PR described under "Pending"
-  above.
+  named-production Worker's full U3 + U3-followup deploy shipped 2026-05-15 via release PR
+  [#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`); DO migration v1 applied to the
+  named-prod side on that deploy.
 
 **Goal:** Add the first DO + Containers + R2 + ratelimits bindings the Worker has ever shipped. Pre-push wrangler
 dry-run gate must pass before push.
@@ -1396,8 +1397,8 @@ recorded.
 ---
 
 - U3-followup. **Docker Hub to CF managed registry migration (local-build-once + staging-leads-prod)** — staging side
-  shipped 2026-05-14 via PR [#84](https://github.com/brettdavies/agentnative-site/pull/84) (open); production side
-  bundled into the routing-drift release PR.
+  shipped 2026-05-14 via PR [#84](https://github.com/brettdavies/agentnative-site/pull/84); production side shipped
+  2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) (merge SHA `e79b7ce`).
 
 > **Post-implementation note (2026-05-14).** Original spec said "shared-tag-pin" (both env blocks always equal). The
 > rationale ("avoids the multi-env double-build") came from the inline-Dockerfile-path pattern; with registry URIs,
