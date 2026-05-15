@@ -1,0 +1,25 @@
+# Build-context exclusions for the live-scoring sandbox image.
+#
+# The current Dockerfile uses only multi-stage `COPY --from=` (no copy
+# from the build context), so this file is forward-looking: any future
+# Dockerfile change that introduces `COPY <ctx> ...` benefits from these
+# exclusions. The sentinel below also acts as a regression probe — if
+# `.dockerignore` ever stops being read by the builder, the sentinel
+# will leak into the context and a follow-up audit can catch it.
+#
+# Verification per the U3-followup plan: build with `--progress=plain`
+# and observe the "transferring context" line. The byte count should
+# omit the sentinel + any matched glob below.
+
+# Sentinel: must always be excluded from the context. Do not remove.
+.ignored-sentinel.txt
+
+# Standard housekeeping — even if nothing in the Dockerfile copies them
+# yet, future contributors should not accidentally bake editor state or
+# OS junk into a layer.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/

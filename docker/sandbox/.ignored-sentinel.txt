@@ -1,0 +1,3 @@
+SENTINEL: docker/sandbox/.dockerignore must exclude this file from the
+build context. If you find this string in a deployed image layer, the
+.dockerignore rules have stopped working and need a fix.
