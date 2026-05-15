@@ -1827,6 +1827,15 @@ container per design Premise #6.
 
 - Create: `src/worker/score/do.ts` (Sandbox DO class extending the SDK base)
 - Create: `src/worker/score/sandbox-exec.ts` (orchestration)
+- Modify: `docker/sandbox/Dockerfile` — add `EXPOSE` directive(s) for any port the Sandbox container will listen on at
+  runtime (the install + score flow may need none today, but wrangler 4.x's `dev --local` requires at least one EXPOSE
+  for any container binding, otherwise local dev errors with `The container "Sandbox" does not expose any ports`). Pick
+  the actual ports the implementation uses; if none, declare a placeholder (e.g. `EXPOSE 8080`) so deep-check's
+  `wrangler dev` based webServer can start. Port 3000 is reserved for the internal Bun server per the Sandbox SDK docs —
+  do not use it. Background: this gap was surfaced today (2026-05-15) by the deep-check failure investigation after the
+  routes-inheritance fix landed; the container existed only as a stub returning `{error: 'sandbox_stub_until_u6'}` so no
+  ports were needed for runtime, but `wrangler dev` checks the Dockerfile statically. Rebuilding + repinning the image
+  as part of this unit is the natural moment to absorb the ceremony.
 - Test: `tests/score-do.test.ts` (unit tests with stubbed `Container` + `getSandbox`). MUST include: (a) static
   `Sandbox.outboundHandlers` map has both `allowedInstall` and `noHttp` keys before any `setOutboundHandler` call —
   catches misnamed-key regressions silently degrading egress policy; (b) order assertion via stubbed handler call log —
@@ -1915,9 +1924,15 @@ container per design Premise #6.
 - **Integration:** stdout/stderr captured by `sandbox.exec` does not contain any host name from outside `installHosts ∪
   {"localhost"}` after Phase 2 — defense in depth assertion.
 - **Integration:** response includes `anc_version` populated from the running binary (not from a constant).
+- **Integration (CI):** `.github/workflows/deep-check.yml` runs to green after this unit lands. Both jobs (`e2e` and
+  `lhci`) start `wrangler dev --local` as the test webServer; the Dockerfile must have at least one EXPOSE directive for
+  `wrangler dev` to accept the container binding. Pre-U6 state of this workflow has been red since 2026-05-15 with `The
+  container "Sandbox" does not expose any ports`; that error must be gone in the U6 deploy verification.
 
 **Verification:** Two-phase egress is provably enforced (test asserts the second handler call is `noHttp` BEFORE `anc
-check` is exec'd). Timeout is honored. `anc_version` is captured live, never hard-coded.
+check` is exec'd). Timeout is honored. `anc_version` is captured live, never hard-coded. `deep-check.yml` is green on
+the U6 merge SHA (proves the Dockerfile EXPOSE is correct and `wrangler dev --local` works with the new container config
+end to end).
 
 ---
 
