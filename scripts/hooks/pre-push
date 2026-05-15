@@ -58,8 +58,11 @@ bun run build
 bold '==> bun test'
 bun test
 
-bold '==> bun x wrangler deploy --dry-run'
-bun x wrangler deploy --dry-run
+bold '==> bun x wrangler deploy --dry-run (production env)'
+bun x wrangler deploy --dry-run --env=""
+
+bold '==> bun x wrangler deploy --dry-run (staging env)'
+bun x wrangler deploy --dry-run --env staging
 
 bold '==> Pack-README drift check'
 bun scripts/generate-pack-readme.mjs site --check </dev/null
