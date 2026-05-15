@@ -138,6 +138,16 @@
       // Removing this line will reintroduce the bug. See the CHANGELOG /
       // PR description for the full investigation.
       "routes": [],
+      // PROPHYLACTIC: same inheritance footgun as `routes` above. `triggers`
+      // (cron) is an INHERITABLE key. If a future change adds cron schedules
+      // at the top level (e.g., a daily registry refresh on the production
+      // Worker), env.staging would silently inherit them and double-fire
+      // every scheduled invocation. We don't currently have any crons, but
+      // setting `triggers.crons` to an empty array here makes the staging
+      // override explicit, so a future cron addition forces a deliberate
+      // decision about whether to mirror to staging. Same audit pattern
+      // applied to all inheritable keys at top-level.
+      "triggers": { "crons": [] },
       "containers": [
         {
           "class_name": "Sandbox",
