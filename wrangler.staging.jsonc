@@ -1,0 +1,98 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // ---------------------------------------------------------------------------
+  // STAGING wrangler config — deploys the `agentnative-site-staging` Worker
+  // on its workers.dev subdomain. Sibling: `wrangler.jsonc` deploys the
+  // `agentnative-site` production Worker on anc.dev.
+  //
+  // The two configs are intentionally separate top-level files (no
+  // `env.staging` block) to work around the Workers Assets cross-env
+  // asset-sharing bug filed at
+  // https://github.com/cloudflare/workers-sdk/issues/13925. The `define`
+  // block below pairs with `src/worker/index.ts`'s `__BUILD_ENV__`
+  // reference so the staging-built script has different bytes than the
+  // production-built script, which keeps their asset namespaces isolated.
+  //
+  // Deploy with: `wrangler deploy --config wrangler.staging.jsonc`
+  // (the `deploy` job in `.github/workflows/deploy.yml` does this on
+  // every push to dev).
+  // ---------------------------------------------------------------------------
+  "name": "agentnative-site-staging",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "send_metrics": false,
+  // Build-time substitution mirrors wrangler.jsonc but with the literal
+  // string "staging". The deliberate divergence between this value and
+  // production's "production" is what keeps the two compiled Worker
+  // scripts at distinct etags. See `src/worker/index.ts`.
+  "define": { "__BUILD_ENV__": "\"staging\"" },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1.0
+  },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      // STAGING pin. Advances independently from production during
+      // development. This is the "leading" side of the soak-then-promote
+      // workflow: new images land here first, soak on the staging
+      // Worker, then get promoted to production's pin via a release PR
+      // to main.
+      //
+      // Image bump procedure (feat PR, dev-targeting):
+      //   1. From clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
+      //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
+      //   3. Update THIS pin only (leave wrangler.jsonc alone). For
+      //      low-risk bumps, update both pins; CI accepts lockstep on
+      //      dev-targeting PRs.
+      //   4. PR to dev; CI verifies the tag exists in the registry
+      //      and (for divergent pins) allows the lead.
+      //   5. Merge; CI deploys the staging Worker
+      //      (agentnative-site-staging) to the new image. Soak.
+      //
+      // See RELEASES.md § Sandbox image releases for the full flow.
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
+      "instance_type": "basic",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "SCORE"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SCORE_CACHE",
+      "bucket_name": "anc-score-cache-staging"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SCORE_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 10, "period": 60 }
+    }
+  ],
+  // Staging: workers.dev only, no custom domain. The staging-noindex
+  // guard in src/worker/headers.ts adds X-Robots-Tag: noindex on every
+  // response served from a *.workers.dev host.
+  "workers_dev": true
+}

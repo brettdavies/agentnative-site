@@ -20,6 +20,25 @@ import { applyHeaders } from './headers';
 // implementation.
 export { Sandbox } from './score/do';
 
+// Build-time env identifier. Wrangler substitutes `__BUILD_ENV__` at
+// deploy via the `define` block in each Worker's config:
+//   wrangler.jsonc         → "production"
+//   wrangler.staging.jsonc → "staging"
+//
+// Why this constant exists: forcing the two compiled Worker scripts to
+// have distinct bytes (and therefore distinct script etags) is the
+// workaround for the Workers Assets cross-env asset-sharing bug filed
+// at https://github.com/cloudflare/workers-sdk/issues/13925. Without
+// some bytes-level divergence, an asset upload from staging silently
+// overrides what production serves at the same URL path.
+//
+// The `typeof` guard keeps tests working: `bun test` does not run
+// through wrangler's bundler, so `__BUILD_ENV__` is undeclared at
+// test time and the fallback to 'development' kicks in.
+declare const __BUILD_ENV__: 'production' | 'staging';
+const BUILD_ENV: 'production' | 'staging' | 'development' =
+  typeof __BUILD_ENV__ !== 'undefined' ? __BUILD_ENV__ : 'development';
+
 export interface Env {
   ASSETS: Fetcher;
 }
@@ -56,6 +75,6 @@ export default {
     }
 
     const upstream = await env.ASSETS.fetch(assetRequest);
-    return applyHeaders(upstream, { request, servedMarkdown, pathname });
+    return applyHeaders(upstream, { request, servedMarkdown, pathname, buildEnv: BUILD_ENV });
   },
 } satisfies ExportedHandler<Env>;

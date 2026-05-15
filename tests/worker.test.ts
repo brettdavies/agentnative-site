@@ -107,6 +107,7 @@ describe('applyHeaders — HTML branch', () => {
       request: req('https://anc.dev/p3'),
       servedMarkdown: false,
       pathname: '/p3',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Link')).toBe('</p3.md>; rel="alternate"; type="text/markdown"');
     expect(res.headers.get('X-Llms-Txt')).toBe('/llms.txt');
@@ -119,6 +120,7 @@ describe('applyHeaders — HTML branch', () => {
       request: req('https://anc.dev/'),
       servedMarkdown: false,
       pathname: '/',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Link')).toBe('</index.md>; rel="alternate"; type="text/markdown"');
   });
@@ -130,6 +132,7 @@ describe('applyHeaders — markdown branch', () => {
       request: req('https://anc.dev/p3.md'),
       servedMarkdown: true,
       pathname: '/p3.md',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
@@ -143,6 +146,7 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
       request: req('https://anc.dev/skill.json'),
       servedMarkdown: false,
       pathname: '/skill.json',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -158,6 +162,7 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
       request: req('https://anc.dev/foo.json'),
       servedMarkdown: false,
       pathname: '/foo.json',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -168,6 +173,7 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
       request: req('https://anc.dev/installer'),
       servedMarkdown: false,
       pathname: '/installer',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).not.toBe('application/json; charset=utf-8');
     expect(res.headers.get('Link')).toContain('rel="alternate"');
@@ -180,6 +186,7 @@ describe('applyHeaders — SVG branch (badge surface)', () => {
       request: req('https://anc.dev/badge/rg.svg'),
       servedMarkdown: false,
       pathname: '/badge/rg.svg',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).toBe('image/svg+xml; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -197,6 +204,7 @@ describe('applyHeaders — SVG branch (badge surface)', () => {
       request: req('https://agentnative-site-staging.workers.dev/badge/rg.svg'),
       servedMarkdown: false,
       pathname: '/badge/rg.svg',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).toBe('image/svg+xml; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -208,6 +216,7 @@ describe('applyHeaders — SVG branch (badge surface)', () => {
       request: req('https://anc.dev/badge'),
       servedMarkdown: false,
       pathname: '/badge',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Content-Type')).not.toBe('image/svg+xml; charset=utf-8');
     expect(res.headers.get('Link')).toContain('rel="alternate"');
@@ -220,6 +229,7 @@ describe('applyHeaders — hashed assets', () => {
       request: req('https://anc.dev/fonts/uncut-sans-variable.woff2'),
       servedMarkdown: false,
       pathname: '/fonts/uncut-sans-variable.woff2',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
@@ -229,6 +239,7 @@ describe('applyHeaders — hashed assets', () => {
       request: req('https://anc.dev/og-image.png'),
       servedMarkdown: false,
       pathname: '/og-image.png',
+      buildEnv: 'development',
     });
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
@@ -240,6 +251,7 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
       request: req('https://agentnative-site.brett.workers.dev/p3'),
       servedMarkdown: false,
       pathname: '/p3',
+      buildEnv: 'development',
     });
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     // Link + X-Llms-Txt still present on HTML.
@@ -251,6 +263,7 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
       request: req('https://agentnative-site.brett.workers.dev/fonts/uncut-sans-variable.woff2'),
       servedMarkdown: false,
       pathname: '/fonts/uncut-sans-variable.woff2',
+      buildEnv: 'development',
     });
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
@@ -261,8 +274,41 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
       request: req('https://anc.dev/p3'),
       servedMarkdown: false,
       pathname: '/p3',
+      buildEnv: 'development',
     });
     expect(res.headers.get('X-Robots-Tag')).toBeNull();
+  });
+});
+
+describe('applyHeaders — X-Build-Env header (cloudflare/workers-sdk#13925 workaround)', () => {
+  test('production buildEnv shows up in the response', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/p3'),
+      servedMarkdown: false,
+      pathname: '/p3',
+      buildEnv: 'production',
+    });
+    expect(res.headers.get('X-Build-Env')).toBe('production');
+  });
+
+  test('staging buildEnv shows up in the response', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://agentnative-site-staging.brett.workers.dev/p3'),
+      servedMarkdown: false,
+      pathname: '/p3',
+      buildEnv: 'staging',
+    });
+    expect(res.headers.get('X-Build-Env')).toBe('staging');
+  });
+
+  test('development buildEnv (tests + local) surfaces too', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/p3'),
+      servedMarkdown: false,
+      pathname: '/p3',
+      buildEnv: 'development',
+    });
+    expect(res.headers.get('X-Build-Env')).toBe('development');
   });
 });
 

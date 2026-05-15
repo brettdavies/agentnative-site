@@ -28,12 +28,12 @@ resolves the account ID from auth at push time. Push output ends with a line lik
 <git-sha>: digest: sha256:... size: ...
 ```
 
-Pin the resulting tag in `wrangler.jsonc`. The file holds two independent pins, and the choice of which one(s) to update
-depends on the change:
+Pin the resulting tag in one of the two wrangler configs. Each config holds its own `containers[0].image`, and the
+choice of which one(s) to update depends on the change:
 
-- For a normal sandbox change (any commit past the base-image FROM line): update only `env.staging.containers[0].image`.
-  The image soaks on staging, then a separate release PR to main promotes the top-level (prod) pin to match. This is the
-  default and what the CI guard expects.
+- For a normal sandbox change (any commit past the base-image FROM line): update only `containers[0].image` in
+  `wrangler.staging.jsonc`. The image soaks on staging, then a separate release PR to main promotes the production pin
+  in `wrangler.jsonc` to match. This is the default and what the CI guard expects.
 - For a low-risk bump (base-image security patch, dependency-only update with no behavior delta): update both pins in
   lockstep. The CI guard accepts equal pins too.
 
@@ -43,7 +43,7 @@ soak-then-promote flow and the release-time invariant the main-targeting CI chec
 After pinning, deploy without rebuilding:
 
 ```sh
-bun x wrangler deploy --env staging
+bun x wrangler deploy --config wrangler.staging.jsonc
 # verify staging is healthy, then promote via the dev → main release flow
 ```
 
