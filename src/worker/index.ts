@@ -13,6 +13,8 @@
 
 import { detectPreference } from './accept';
 import { applyHeaders } from './headers';
+import { isScorePath } from './score/content-negotiation';
+import { handleScore, type ScoreEnv } from './score/handler';
 
 // Live-scoring DO class. Re-exported so wrangler's binding resolver can
 // find `class_name: "Sandbox"` from wrangler.jsonc's containers +
@@ -20,8 +22,19 @@ import { applyHeaders } from './headers';
 // implementation.
 export { Sandbox } from './score/do';
 
+// At runtime wrangler injects every binding declared in wrangler.jsonc
+// (ASSETS plus the SCORE_* set used by /api/score). The Env interface is
+// kept narrow so tests that exercise only the asset-first path can stub
+// a minimal env. The /api/score branch casts to ScoreEnv at dispatch
+// time, which is sound because wrangler always populates the full set.
 export interface Env {
   ASSETS: Fetcher;
+  SCORE?: DurableObjectNamespace;
+  SCORE_KV?: KVNamespace;
+  SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  TURNSTILE_SECRET?: string;
+  SESSION_HMAC_SECRET?: string;
 }
 
 function rewriteToMarkdown(url: URL): URL {
@@ -38,6 +51,13 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
+
+    // Live-scoring routes (plan U5). Sits ABOVE the asset call so the
+    // asset-first invariant for everything else (every other path proxies
+    // to env.ASSETS) is preserved by exclusion, not by overlap.
+    if (isScorePath(pathname)) {
+      return handleScore(request, env as ScoreEnv);
+    }
 
     const pathIsMarkdown = pathname.endsWith('.md');
     const pathIsJson = pathname.endsWith('.json');

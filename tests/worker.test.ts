@@ -342,3 +342,59 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 });
+
+// ---------------------------------------------------------------------------
+// /api/score routing (plan U5). The handler's own behavior is covered by
+// tests/score-handler.test.ts; these tests confirm:
+//   1. /api/score requests are intercepted BEFORE the asset call (the stub
+//      ASSETS fetcher is never reached for /api/score*).
+//   2. Asset-first invariant for every other path is preserved.
+//   3. q-value content negotiation works on the /api/score* surface.
+//      Plan-required test: `text/markdown;q=0.1, application/json;q=0.9`
+//      must resolve to JSON, not markdown — guards against substring-
+//      match regressions per the `accept-header-q-value` learning.
+// ---------------------------------------------------------------------------
+
+describe('worker.fetch — /api/score routing', () => {
+  test('/api/score GET bypasses env.ASSETS asset call', async () => {
+    let assetCalled = false;
+    const env = {
+      ASSETS: {
+        async fetch(): Promise<Response> {
+          assetCalled = true;
+          return new Response('should not be called', { status: 500 });
+        },
+      } as unknown as Fetcher,
+    };
+    const url = 'https://anc.dev/api/score?input=does-not-matter';
+    const res = await worker.fetch(req(url), env);
+    expect(assetCalled).toBe(false);
+    // /api/score requires a real registry-index fetch; without it the
+    // handler errors out, but the asset-first short-circuit must NOT
+    // have served the request body.
+    expect(res.status).not.toBe(200);
+  });
+
+  test('asset-first invariant: /scorecards/ripgrep still proxies to env.ASSETS', async () => {
+    const env = makeEnv({ '/scorecards/ripgrep': 'scorecard html' });
+    const res = await worker.fetch(req('https://anc.dev/scorecards/ripgrep'), env);
+    expect(res.headers.get('X-Echo-Path')).toBe('/scorecards/ripgrep');
+  });
+
+  test('q-value: Accept: text/markdown;q=0.1, application/json;q=0.9 → JSON content-type', async () => {
+    // Plan-required test (accept-header-q-value learning). Substring
+    // matching would pick markdown because the header *contains*
+    // 'text/markdown'. The accepts package + q-value parsing picks JSON.
+    const env = makeEnv({
+      '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}',
+      '/discovery-hints-index.json': '{"by_owner_repo":{}}',
+    });
+    const url = new URL('https://anc.dev/api/score');
+    url.searchParams.set('input', 'unknown-tool');
+    const res = await worker.fetch(
+      new Request(url.toString(), { headers: { accept: 'text/markdown;q=0.1, application/json;q=0.9' } }),
+      env,
+    );
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+});
