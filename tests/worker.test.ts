@@ -7,10 +7,11 @@
 // We exercise the handler end-to-end against a stubbed env.ASSETS fetcher —
 // no wrangler dev needed.
 
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { detectPreference } from '../src/worker/accept';
 import { applyHeaders, isStagingHost } from '../src/worker/headers';
 import worker from '../src/worker/index';
+import { _resetIndexCache } from '../src/worker/score/handler';
 
 function req(url: string, accept?: string): Request {
   const headers: Record<string, string> = {};
@@ -356,23 +357,30 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 // ---------------------------------------------------------------------------
 
 describe('worker.fetch — /api/score routing', () => {
-  test('/api/score GET bypasses env.ASSETS asset call', async () => {
-    let assetCalled = false;
-    const env = {
-      ASSETS: {
-        async fetch(): Promise<Response> {
-          assetCalled = true;
-          return new Response('should not be called', { status: 500 });
-        },
-      } as unknown as Fetcher,
-    };
-    const url = 'https://anc.dev/api/score?input=does-not-matter';
+  // The handler caches the registry + hints indexes at module scope, so
+  // tests that depend on the stubbed env.ASSETS being reached must reset
+  // the cache before each test — otherwise a prior test's data is served
+  // from memory and the stub is never called.
+  beforeEach(() => {
+    _resetIndexCache();
+  });
+
+  test('/api/score response carries the JSON envelope (not asset content)', async () => {
+    // Confirms index.ts routes /api/score to handleScore rather than the
+    // asset path. The handler always returns JSON; the asset path would
+    // return the stubbed asset body. Asserting on the response shape is
+    // both more robust and more meaningful than the previous fragile
+    // assetCalled flag check.
+    const env = makeEnv({
+      '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}',
+      '/discovery-hints-index.json': '{"by_owner_repo":{}}',
+    });
+    const url = 'https://anc.dev/api/score?input=unknown-tool';
     const res = await worker.fetch(req(url), env);
-    expect(assetCalled).toBe(false);
-    // /api/score requires a real registry-index fetch; without it the
-    // handler errors out, but the asset-first short-circuit must NOT
-    // have served the request body.
-    expect(res.status).not.toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = (await res.json()) as { error?: unknown; spec_version?: unknown; checker_url?: unknown };
+    expect(body.spec_version).toBeTruthy();
+    expect(body.checker_url).toBeTruthy();
   });
 
   test('asset-first invariant: /scorecards/ripgrep still proxies to env.ASSETS', async () => {
