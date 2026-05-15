@@ -268,16 +268,6 @@ export async function build() {
   // 8. Scorecard pages — leaderboard + per-tool pages.
   const registry = await loadRegistry(REGISTRY_PATH);
 
-  // 8a. Build-time indexes for the live-scoring path (plan U1):
-  //     - dist/registry-index.json (powers U4's registry-fast-path)
-  //     - dist/discovery-hints-index.json (powers U4's step 0.5 — F1)
-  const { warnings: indexWarnings } = await emitBuildIndexes({
-    registry,
-    hintsPath: HINTS_PATH,
-    distDir: DIST_DIR,
-  });
-  for (const w of indexWarnings) console.warn(`warning: ${w}`);
-
   // v0.4 corpus invariants run before rendering: any scorecard below the
   // schema floor, missing a registry entry, scoring the wrong binary, or
   // carrying a non-RFC-3339 timestamp aborts the build before producing
@@ -296,6 +286,30 @@ export async function build() {
     console.warn(`warning: registry entry "${name}" has no matching scorecard — excluded from leaderboard.`);
   }
   console.log(`WARNINGS_JSON: ${JSON.stringify(scorecardWarnings)}`);
+
+  // 8a. Build-time indexes for the live-scoring path (plan U1 + U5):
+  //     - dist/registry-index.json (powers /api/score registry-fast-path)
+  //     - dist/discovery-hints-index.json (powers U4's step 0.5 — F1)
+  //
+  // U5 augments each registry-index entry with the latest scorecard's
+  // version, the anc binary version that produced it, and the public URL
+  // of the per-tool scorecard page, so /api/score can return the R11
+  // triad without fetching the full scorecard payload.
+  const enrichments = {};
+  for (const t of toolsWithScorecards) {
+    enrichments[t.tool.name] = {
+      version: t.version,
+      anc_version: t.metadata?.anc?.version ?? null,
+      scorecard_url: `/score/${t.tool.name}`,
+    };
+  }
+  const { warnings: indexWarnings } = await emitBuildIndexes({
+    registry,
+    hintsPath: HINTS_PATH,
+    distDir: DIST_DIR,
+    enrichments,
+  });
+  for (const w of indexWarnings) console.warn(`warning: ${w}`);
   const leaderboard = computeLeaderboard(toolsWithScorecards);
 
   const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.
