@@ -35,36 +35,64 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
 
 ## Current state — 2026-05-14
 
-### Shipped to dev (foundation phase complete, ~45% to rollout)
+### Shipped to dev (~50% to rollout)
 
 - U1 — build-time `registry-index` + `discovery-hints-index` (PR
   [#78](https://github.com/brettdavies/agentnative-site/pull/78), commit `82b74dd`)
 - U2 — Alpine + musl sandbox image source at `docker/sandbox/Dockerfile` (PR
   [#79](https://github.com/brettdavies/agentnative-site/pull/79), commit `bf14daf`)
-- U3 partial — wrangler bindings live on prod + staging; DO is a stub; image still on Docker Hub digest (PR
-  [#81](https://github.com/brettdavies/agentnative-site/pull/81), commit `09fe91f`)
+- U3 — wrangler bindings live on staging; DO is a stub returning `{error: 'sandbox_stub_until_u6'}` (PR
+  [#81](https://github.com/brettdavies/agentnative-site/pull/81), commit `09fe91f`). Production-Worker side pending the
+  routing-drift fix (see "Discovered post-U3 shipment" below).
 - U4 — input parser + GitHub URL discovery chain (PR [#80](https://github.com/brettdavies/agentnative-site/pull/80),
   commit `5ac59ca`)
+- U3-followup (staging side) — sandbox image migration off Docker Hub to the Cloudflare managed registry, with the
+  default workflow reframed to staging-leads-prod (PR [#84](https://github.com/brettdavies/agentnative-site/pull/84),
+  open). The staging container app `agentnative-site-staging-sandbox-staging` (id
+  `a0309fd2-9622-4dd8-a6a8-faf95292f08e`) is live on `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1`, version v2,
+  6/6 healthy. Production deploy bundled into the routing-drift release PR.
 - discovery-hit-rate gate (PR [#77](https://github.com/brettdavies/agentnative-site/pull/77), commit `078d233`)
 
-### Blocker discovered post-shipment
+### Discovered post-U3 shipment (2026-05-14 audit)
 
-Docker Hub deprecated. The `wrangler.jsonc` `containers[].image` field still points at
-`docker.io/brettdavies/anc-sandbox@sha256:...`. The U3-followup spike (2026-05-14) resolved the migration shape: build
-locally on Brett's machine using `wrangler containers build -p -t <git-sha>`, push happens during build, then pin
-`wrangler.jsonc` (both env blocks) at `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>` and run `wrangler deploy
---env staging` then `--env production` with no rebuild on deploy. This local-build-once + shared-tag-pin pattern
-preserves the SHA-pinning ergonomic Docker Hub gave us, decouples build from deploy, and avoids the multi-env double
-build that arises from `containers` being a non-inheritable binding (per spike 01,
-<https://developers.cloudflare.com/containers/platform-details/image-management/>). GHA fallback via
-`cloudflare/wrangler-action@v3.14.1` (the version in the current `deploy.yml`) stays available for the rare case Brett
-is offline; expect a ~60-130s cold build on `ubuntu-latest` with no native layer cache (per spike 02). U3-followup is no
-longer a research blocker; it is implementation work with a known shape (see U3 spec body below).
+Three findings surfaced during the U3-followup audit. The Docker Hub blocker is resolved; the other two are open.
+
+**Docker Hub deprecation — RESOLVED via U3-followup (PR #84).** The `containers[].image` field used to pin
+`docker.io/brettdavies/anc-sandbox@sha256:...`; the registry deprecation manifested as repeating `ImagePullError "the
+image registry credentials are invalid"` on the staging container app. PR #84 ships local-build-once via `wrangler
+containers build -p` and pins both env blocks to `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>`. Deploy never
+rebuilds. GHA fallback via `cloudflare/wrangler-action@v3.14.1` stays available for the rare offline-Brett case
+(~60-130s cold build per deploy; no GHA-side layer cache; push auto-skipped when the existing tag still matches).
+
+**Routing drift — OPEN.** The CF audit revealed that `anc.dev` is currently bound to the **staging** Worker
+(`agentnative-site-staging`), not the named-production Worker (`agentnative-site`). The committed `wrangler.jsonc`
+top-level block declares `routes: [{ pattern: "anc.dev", custom_domain: true }]`, which would attach the domain to the
+production Worker on deploy — but the production Worker has not deployed since 2026-05-03 (predates U3 bindings). All
+real `anc.dev` traffic terminates on the staging-named Worker. The named-production Worker is currently orphan infra.
+Likely cause: a manual dashboard attachment during the v0.1 launch on 2026-04-30 that never reverted; git history does
+not record the change. Fix sequence (next session, separate release PR): bring `agentnative-site` current with all dev
+work + U3-followup image pin + create the prod R2 bucket `anc-score-cache`, manually detach `anc.dev` from staging via
+CF API, deploy to main → wrangler reattaches the domain on the named-prod Worker, verify, clean up the orphan DO
+namespace on staging as a documented quarterly action.
+
+**Default image workflow reframed — staging-leads-prod.** The original U3-followup spec said "pin both env blocks to the
+same tag (shared-tag-pin)" with a rationale of "avoids the multi-env double-build". That rationale was a leftover from
+the inline-Dockerfile-path pattern — under registry URIs, deploys never rebuild and the double-build penalty does not
+exist. The two env blocks are independent CF resources (separate container apps, separate version histories) and can
+legitimately diverge. PR #84 adopts staging-leads-prod as the default: new images bump `env.staging` only and soak on
+the staging Worker, then a release PR to main promotes the top-level pin to match. The lockstep pattern remains
+available as a shortcut for low-risk image bumps (base-image patches, dependency-only updates). CI guard in `ci.yml`
+enforces this discipline per PR target: registry-existence is always checked on both pins; equality is enforced only
+when `base_ref == main`.
 
 ### Pending (in execution order for the next session)
 
-1. **U3-followup** — local-build-once + shared-tag-pin migration off Docker Hub (shape resolved by spike 01; see U3 spec
-   body). Unblocks U6's container reality.
+1. **Routing-drift fix + named-prod promotion** — release PR from `main` that cherry-picks dev work (U3 + U4 +
+   discovery-hit-rate-gate) plus U3-followup, AND swaps `anc.dev` custom domain from `agentnative-site-staging` to
+   `agentnative-site`. Custom-domain swap is manual (detach via CF API immediately before merge, deploy reattaches via
+   top-level wrangler.jsonc `routes`) per ops decision 2026-05-14. R2 bucket `anc-score-cache` must be created before
+   the prod deploy. DO migration v1 lands on the named-prod Worker on this deploy (one-way wall). Bundles U3-followup's
+   production deploy; closes the "production side" of U3-followup verification.
 2. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Includes the
    `SCORE_LIMITER` rekey from per-IP to `session-cookie + tool-arg-hash` (see Cost ceiling and abuse mitigation
    section). Unblocks any user-facing wiring.
@@ -106,9 +134,15 @@ U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should
 
 ### Branch baseline for next session
 
-Continue from `dev` directly. The five live-scoring feature branches (`feat/u1-build-indexes`, `feat/u2-sandbox-image`,
-`feat/u3-bindings`, `feat/u4-input-parser`, `feat/discovery-hit-rate-gate`) were merged via squash and have been deleted
-locally; their content is on dev. New work branches off `dev`.
+Continue from `dev` (after PR [#84](https://github.com/brettdavies/agentnative-site/pull/84) merges). U3-followup landed
+on `feat/u3-followup` with four commits — image migration + prose-check denylist + CI pinned-image guard + split-pin
+workflow rework. Post-merge, that branch can be deleted locally. The earlier live-scoring feature branches
+(`feat/u1-build-indexes`, `feat/u2-sandbox-image`, `feat/u3-bindings`, `feat/u4-input-parser`,
+`feat/discovery-hit-rate-gate`) were merged via squash and have been deleted locally; their content is on dev.
+
+Next-session work begins with the routing-drift fix release PR (item 1 under Pending above), which also closes the
+production-side verification of U3-followup. New feature work (U5 onward) branches off `dev` after that release lands on
+main.
 
 ---
 
@@ -1265,11 +1299,16 @@ deploy` per U3).
 
 - [~] U3. **wrangler.jsonc — DO + Containers + R2 + ratelimits bindings** — [partial] shipped 2026-05-09
   ([#81](https://github.com/brettdavies/agentnative-site/pull/81), `09fe91f`). Bindings (`containers`, DO `SCORE`, R2
-  `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) live on prod + staging. The DO at `src/worker/score/do.ts` is a stub
-  returning `{error: 'sandbox_stub_until_u6'}` (real DO lands in U6). The container `image:` field still pins
-  `docker.io/brettdavies/anc-sandbox@sha256:...`. **U3-followup (shape resolved by spike 01, 2026-05-14):** the
-  migration off Docker Hub uses a local-build-once + shared-tag-pin pattern. See the dedicated U3-followup subsection
-  below the original U3 spec for the exact procedure, acceptance criteria, and experimental-verification list.
+  `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) live on the **staging** Worker; the named-production Worker
+  (`agentnative-site`) has NOT yet deployed the bindings (last prod deploy was 2026-05-03, predates this PR). Routing
+  drift discovered 2026-05-14 means `anc.dev` is currently served by the staging Worker. The DO at
+  `src/worker/score/do.ts` is a stub returning `{error: 'sandbox_stub_until_u6'}` (real DO lands in U6). The container
+  `image:` field migrated off Docker Hub via U3-followup (PR
+  [#84](https://github.com/brettdavies/agentnative-site/pull/84)) and now pins
+  `registry.cloudflare.com/<acct>/anc-sandbox:30f61f1` on the staging block. See the dedicated U3-followup subsection
+  below for the local-build-once + staging-leads-prod workflow and the (now-shipped) experimental verifications. The
+  named-production Worker's full U3 + U3-followup deploy lands in the routing-drift release PR described under "Pending"
+  above.
 
 **Goal:** Add the first DO + Containers + R2 + ratelimits bindings the Worker has ever shipped. Pre-push wrangler
 dry-run gate must pass before push.
@@ -1356,12 +1395,23 @@ recorded.
 
 ---
 
-- U3-followup. **Docker Hub to CF managed registry migration (local-build-once + shared-tag-pin)** — shape resolved by
-  spike 01 (2026-05-14); awaiting implementation.
+- U3-followup. **Docker Hub to CF managed registry migration (local-build-once + staging-leads-prod)** — staging side
+  shipped 2026-05-14 via PR [#84](https://github.com/brettdavies/agentnative-site/pull/84) (open); production side
+  bundled into the routing-drift release PR.
+
+> **Post-implementation note (2026-05-14).** Original spec said "shared-tag-pin" (both env blocks always equal). The
+> rationale ("avoids the multi-env double-build") came from the inline-Dockerfile-path pattern; with registry URIs,
+> deploys never rebuild, and the double-build penalty does not exist. The implementation reframed the default
+> workflow to **staging-leads-prod**: feat PRs to dev bump `env.staging` only, soak on the staging Worker, then a
+> release PR to main promotes the top-level pin to match. Lockstep remains available as a shortcut for low-risk
+> bumps. CI guard in `.github/workflows/ci.yml` enforces this per-PR-target (registry-existence always; equality
+> only on main-targeting PRs). See RELEASES.md § "Sandbox image releases (live-scoring)" for the canonical workflow
+> spec.
 
 **Goal:** Replace the deprecated Docker Hub digest pin (`docker.io/brettdavies/anc-sandbox@sha256:...`) with a
-Cloudflare-managed-registry tag pin produced by a single local build, then deploy both env blocks against that one tag
-with no rebuild on deploy. Decouples build from deploy and preserves the SHA-pinning ergonomic Docker Hub gave us.
+Cloudflare-managed-registry tag pin produced by a single local build, then deploy each env block against its own pinned
+tag with no rebuild on deploy. Decouples build from deploy and preserves the SHA-pinning ergonomic Docker Hub gave us.
+The two env blocks' pins can advance independently; staging leads during development, prod advances at release time.
 
 **Requirements:** R4 (image must be pullable by CF runtime), R12 (no per-deploy build cost on the typical site-only PR).
 
