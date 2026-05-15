@@ -127,6 +127,17 @@
       // `agentnative-site-sandbox`.
       "name": "agentnative-site-staging",
       "workers_dev": true,
+      // CRITICAL: explicitly override `routes` to an empty array. Per the
+      // wrangler config docs, `routes` is an INHERITABLE key — if absent
+      // here, env.staging silently inherits the top-level
+      // `routes: [{ pattern: "anc.dev", custom_domain: true }]`. That
+      // inheritance is what produced the routing-drift bug observed since
+      // 2026-04-30: every `wrangler deploy --env staging` was re-attaching
+      // anc.dev to the staging Worker because env.staging was inheriting
+      // the prod route. Explicit empty array breaks the inheritance.
+      // Removing this line will reintroduce the bug. See the CHANGELOG /
+      // PR description for the full investigation.
+      "routes": [],
       "containers": [
         {
           "class_name": "Sandbox",
