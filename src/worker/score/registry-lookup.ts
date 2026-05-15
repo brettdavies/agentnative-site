@@ -20,6 +20,13 @@ export type RegistryEntry = {
   install: string;
   audit_profile?: string;
   repo?: string;
+  // Plan U5 — present when the tool has a committed scorecard. The Worker
+  // uses these to build the R11 triad and route to /score/<slug> without
+  // fetching the scorecard JSON. Tools without a scorecard ship the
+  // metadata-only entry; the registry-fast-path treats them as a miss.
+  version?: string;
+  anc_version?: string;
+  scorecard_url?: string;
 };
 
 export type RegistryIndex = {

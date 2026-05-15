@@ -31,7 +31,7 @@ export function deriveOwnerRepo(tool) {
   return null;
 }
 
-function projectRegistryEntry(tool) {
+function projectRegistryEntry(tool, enrichment) {
   const out = {
     name: tool.name,
     binary: tool.binary,
@@ -39,15 +39,29 @@ function projectRegistryEntry(tool) {
   };
   if (tool.audit_profile) out.audit_profile = tool.audit_profile;
   if (tool.repo) out.repo = tool.repo;
+  // Plan U5: registry-fast-path response carries the latest scorecard's
+  // version + anc_version + URL so the Worker can build the R11 triad and
+  // route the user to /score/<slug> without fetching the scorecard JSON.
+  if (enrichment) {
+    if (enrichment.version) out.version = enrichment.version;
+    if (enrichment.anc_version) out.anc_version = enrichment.anc_version;
+    if (enrichment.scorecard_url) out.scorecard_url = enrichment.scorecard_url;
+  }
   return out;
 }
 
-export function buildRegistryIndex(registry) {
+/**
+ * @param {Array<object>} registry
+ * @param {Record<string, { version?: string, anc_version?: string, scorecard_url?: string }>} [enrichments]
+ *   Per-tool-name lookup of scored-build metadata. Tools without an entry
+ *   here still appear in the index (no scorecard committed yet).
+ */
+export function buildRegistryIndex(registry, enrichments = {}) {
   const by_slug = {};
   const by_owner_repo = {};
   const warnings = [];
   for (const tool of registry) {
-    const projected = projectRegistryEntry(tool);
+    const projected = projectRegistryEntry(tool, enrichments[tool.name]);
     by_slug[tool.name] = projected;
     const ownerRepo = deriveOwnerRepo(tool);
     if (!ownerRepo) {
@@ -109,8 +123,8 @@ export async function loadDiscoveryHints(hintsPath) {
   return hints;
 }
 
-export async function emitBuildIndexes({ registry, hintsPath, distDir }) {
-  const { index: registryIndex, warnings: rWarnings } = buildRegistryIndex(registry);
+export async function emitBuildIndexes({ registry, hintsPath, distDir, enrichments }) {
+  const { index: registryIndex, warnings: rWarnings } = buildRegistryIndex(registry, enrichments);
   const hints = await loadDiscoveryHints(hintsPath);
   const { index: hintsIndex, warnings: hWarnings } = buildDiscoveryHintsIndex(hints, registryIndex);
 

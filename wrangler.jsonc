@@ -94,10 +94,36 @@
     }
   ],
   "ratelimits": [
+    // SCORE_LIMITER — keyed on `<session-id>:<sha256(input)>` inside the
+    // handler (see src/worker/score/handler.ts). 10 distinct-tool requests
+    // per session per minute. Same-tool requests within a session do not
+    // burn budget, which is cache-friendly and lets the registry-fast-path
+    // and R2 caches do their job. New sessions require a Turnstile solve.
     {
       "name": "SCORE_LIMITER",
       "namespace_id": "1001",
       "simple": { "limit": 10, "period": 60 }
+    },
+    // SCORE_LIMITER_IP — coarse per-IP fallback that catches clients
+    // swapping the session cookie to dodge SCORE_LIMITER. Per plan
+    // "Cost ceiling and abuse mitigation" step 2: 30 requests / 60 s / IP.
+    // Distinct namespace so the per-session and per-IP windows don't share
+    // counters.
+    {
+      "name": "SCORE_LIMITER_IP",
+      "namespace_id": "1003",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
+  // SCORE_KV — operator-flippable `scoring_disabled` kill switch (plan
+  // "Cost ceiling and abuse mitigation" step 3). Flip via:
+  //   wrangler kv key put --binding=SCORE_KV scoring_disabled true
+  // The Worker reads + caches the flag in-memory for 30 s; propagates to
+  // every isolate within one KV-read TTL.
+  "kv_namespaces": [
+    {
+      "binding": "SCORE_KV",
+      "id": "5a05224968404e5f96471f1bd007d87a"
     }
   ],
   // Production (top-level): anc.dev custom domain, no .workers.dev URL.
@@ -204,6 +230,17 @@
           "name": "SCORE_LIMITER",
           "namespace_id": "1002",
           "simple": { "limit": 10, "period": 60 }
+        },
+        {
+          "name": "SCORE_LIMITER_IP",
+          "namespace_id": "1004",
+          "simple": { "limit": 30, "period": 60 }
+        }
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "SCORE_KV",
+          "id": "10a0fb8031864421a3ba358e28189317"
         }
       ]
     }
