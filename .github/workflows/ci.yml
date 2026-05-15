@@ -93,15 +93,23 @@ jobs:
       - name: Wrangler config + bundle dry-run
         run: bun x wrangler deploy --dry-run
 
-      # Verifies the sandbox image tag pinned in wrangler.jsonc actually
-      # exists in the Cloudflare managed registry. Catches the failure
+      # Verifies the sandbox image tags pinned in wrangler.jsonc actually
+      # exist in the Cloudflare managed registry. Catches the failure
       # mode where a contributor bumps the Dockerfile + pin but forgets
       # `wrangler containers build -p` (the image push). The dry-run
       # above does NOT validate tag existence, so without this guard the
-      # failure would surface at deploy time rather than PR time. Also
-      # asserts the top-level and env.staging pins reference the same
-      # tag, since divergence would mean prod and staging cannot share
-      # one build (see RELEASES.md § Sandbox image releases).
+      # failure would surface at deploy time rather than PR time.
+      #
+      # Pin alignment between env blocks is workflow-aware:
+      #   dev-targeting PRs:   pins may diverge (staging-leads-prod
+      #                        during the soak-then-promote workflow;
+      #                        see RELEASES.md § Sandbox image releases).
+      #                        Each pin is verified independently against
+      #                        the registry.
+      #   main-targeting PRs:  pins MUST be equal (released state).
+      #                        The release PR is expected to promote the
+      #                        top-level pin to match env.staging before
+      #                        merging.
       #
       # Skipped on forks (secrets are unavailable to PRs from forks by
       # default). Same-repo branches always hit it.
@@ -110,30 +118,59 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
+
           prod_img=$(bun x wrangler deploy --dry-run 2>&1 \
             | grep -oE 'registry\.cloudflare\.com/[^ )]+' | head -1 || true)
           stg_img=$(bun x wrangler deploy --dry-run --env staging 2>&1 \
             | grep -oE 'registry\.cloudflare\.com/[^ )]+' | head -1 || true)
+
           if [ -z "$prod_img" ] || [ -z "$stg_img" ]; then
             echo "::warning::could not extract image URI from wrangler dry-run; skipping registry probe"
             exit 0
           fi
-          if [ "$prod_img" != "$stg_img" ]; then
-            echo "::error::sandbox image pin diverges between env blocks"
-            echo "  top-level:   $prod_img"
-            echo "  env.staging: $stg_img"
-            echo "both env blocks must reference the same tag (RELEASES.md § Sandbox image releases)"
-            exit 1
-          fi
-          pin_tag="${prod_img##*:}"
-          if bun x wrangler containers images list 2>/dev/null \
-              | grep -qE "anc-sandbox[[:space:]]+${pin_tag}\b"; then
-            echo "verified: anc-sandbox:${pin_tag} is in the CF managed registry"
+
+          prod_tag="${prod_img##*:}"
+          stg_tag="${stg_img##*:}"
+
+          # Always: independent registry-existence check on each pinned
+          # tag. Allows staging to lead prod during development.
+          images=$(bun x wrangler containers images list 2>/dev/null || true)
+          fail=0
+
+          if echo "$images" | grep -qE "anc-sandbox[[:space:]]+${prod_tag}\b"; then
+            echo "verified: top-level pin anc-sandbox:${prod_tag} is in the CF managed registry"
           else
-            echo "::error::pinned image anc-sandbox:${pin_tag} not found in CF managed registry"
-            echo "did you forget: bun x wrangler containers build -p -t anc-sandbox:${pin_tag} docker/sandbox/"
+            echo "::error::top-level pin anc-sandbox:${prod_tag} not found in CF managed registry"
+            echo "did you forget: bun x wrangler containers build -p -t anc-sandbox:${prod_tag} docker/sandbox/"
+            fail=1
+          fi
+
+          if [ "$prod_tag" = "$stg_tag" ]; then
+            echo "verified: env.staging pin equals top-level pin (lockstep)"
+          elif echo "$images" | grep -qE "anc-sandbox[[:space:]]+${stg_tag}\b"; then
+            echo "verified: env.staging pin anc-sandbox:${stg_tag} is in the CF managed registry"
+          else
+            echo "::error::env.staging pin anc-sandbox:${stg_tag} not found in CF managed registry"
+            echo "did you forget: bun x wrangler containers build -p -t anc-sandbox:${stg_tag} docker/sandbox/"
+            fail=1
+          fi
+
+          # Release-time invariant: main-targeting PRs must have aligned
+          # pins. Dev-targeting PRs may have divergent pins (staging
+          # leads prod during development).
+          if [ "${BASE_REF}" = "main" ] && [ "$prod_tag" != "$stg_tag" ]; then
+            echo "::error::release PR to main has divergent image pins"
+            echo "  top-level:   anc-sandbox:${prod_tag}"
+            echo "  env.staging: anc-sandbox:${stg_tag}"
+            echo "Promote the top-level pin to match env.staging before merging."
+            echo "See RELEASES.md § Sandbox image releases for the soak-and-promote procedure."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
             exit 1
           fi
 

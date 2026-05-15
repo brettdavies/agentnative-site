@@ -28,9 +28,17 @@ resolves the account ID from auth at push time. Push output ends with a line lik
 <git-sha>: digest: sha256:... size: ...
 ```
 
-Pin the resulting tag in `wrangler.jsonc` — top-level `containers[0].image` AND `env.staging.containers[0].image`. Both
-env blocks share the same tag. `containers` is a non-inheritable per-env binding, but pointing both at one tag avoids a
-multi-env double-build.
+Pin the resulting tag in `wrangler.jsonc`. The file holds two independent pins, and the choice of which one(s) to update
+depends on the change:
+
+- For a normal sandbox change (any commit past the base-image FROM line): update only `env.staging.containers[0].image`.
+  The image soaks on staging, then a separate release PR to main promotes the top-level (prod) pin to match. This is the
+  default and what the CI guard expects.
+- For a low-risk bump (base-image security patch, dependency-only update with no behavior delta): update both pins in
+  lockstep. The CI guard accepts equal pins too.
+
+See [RELEASES.md § Sandbox image releases](../../RELEASES.md#sandbox-image-releases-live-scoring) for the full
+soak-then-promote flow and the release-time invariant the main-targeting CI check enforces.
 
 After pinning, deploy without rebuilding:
 
@@ -39,7 +47,7 @@ bun x wrangler deploy --env staging
 # verify staging is healthy, then promote via the dev → main release flow
 ```
 
-`wrangler deploy` against a fully-qualified `registry.cloudflare.com/...` URI does NOT rebuild — the image is already in
+`wrangler deploy` against a fully-qualified `registry.cloudflare.com/...` URI does NOT rebuild. The image is already in
 the registry from the build step.
 
 ### Sanity probes

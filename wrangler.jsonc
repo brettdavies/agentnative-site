@@ -36,19 +36,34 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      // Image pinned to a Cloudflare-managed-registry tag produced by
-      // a single local build (U3-followup pattern). Bump procedure:
-      //   1. From a clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
-      //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
-      //   3. Replace the tag here AND under env.staging.containers[0].image
-      //      with the new $GIT_SHA.
-      //   4. wrangler deploy --env staging (no rebuild — URI is fully-qualified)
-      //   5. After verification, dev → main release → wrangler deploy.
+      // PRODUCTION pin — this is the image deployed to anc.dev.
+      // Advances only at release time. The staging pin
+      // (env.staging.containers[0].image) advances independently
+      // during development; release PRs to main promote this pin to
+      // match staging after the soak.
+      //
+      // Promotion procedure (release PR, main-targeting):
+      //   1. Confirm the env.staging tag is the one to ship to prod
+      //   2. Replace this tag with env.staging's tag
+      //   3. CI on the main-targeting PR asserts both pins are aligned
+      //      AND that the tag exists in the CF managed registry
+      //   4. Merge; CI deploys prod
+      //
+      // For low-risk image bumps (base-image security patch, no
+      // behavior delta), the shortcut is to update BOTH pins on the
+      // same feat PR — CI on dev-targeting PRs accepts lockstep too.
+      // Use soak-then-promote whenever the change touches sandbox
+      // behavior (anc bump, package manager addition, runtime change).
+      // See RELEASES.md § Sandbox image releases for the full flow.
+      //
       // Image-retention discipline: never delete a tag that backed a
       // shipped Worker version. Deletion silently breaks `wrangler
       // rollback` for any version that referenced the deleted image
       // (cite https://developers.cloudflare.com/containers/platform-details/limits/).
-      // Pair every git release tag with the registry URI in RELEASES.md.
+      // Retention is what makes soak-then-promote safe: the prod pin
+      // keeps pointing at the previous staging-soaked image until the
+      // release explicitly promotes.
+      //
       // Account ID in the URI is acceptable per U3-followup spec:
       // Wrangler resolves it from auth at push time, so the literal
       // committed here is the auth-time-generated tag rather than a
@@ -115,11 +130,29 @@
       "containers": [
         {
           "class_name": "Sandbox",
-          // Staging pins the SAME tag as production. `containers` is
-          // non-inheritable per-env, so both env blocks need their own
-          // copy of the image URI. Pointing both at one tag avoids the
-          // multi-env double-build that arises when both blocks point
-          // at a Dockerfile path (cite spike 01, 2026-05-14).
+          // STAGING pin — advances independently from the top-level
+          // (prod) pin during development. This is the "leading" side
+          // of the soak-then-promote workflow: new images land here
+          // first, soak on the staging Worker, then get promoted to
+          // the top-level pin via a release PR to main.
+          //
+          // Image bump procedure (feat PR, dev-targeting):
+          //   1. From clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
+          //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
+          //   3. Update THIS pin only (leave top-level alone). For low-
+          //      risk bumps, update both pins; CI accepts lockstep on
+          //      dev-targeting PRs.
+          //   4. PR to dev; CI verifies the tag exists in the registry
+          //      and (for divergent pins) allows the lead.
+          //   5. Merge; CI deploys the staging Worker
+          //      (agentnative-site-staging) to the new image. Soak.
+          //
+          // `containers` is non-inheritable per-env, so each env block
+          // needs its own copy of the image URI. The two pins are
+          // independent CF resources (separate container apps, separate
+          // version histories) and may legitimately diverge.
+          //
+          // See RELEASES.md § Sandbox image releases for the full flow.
           "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
           "instance_type": "basic",
           "max_instances": 3
