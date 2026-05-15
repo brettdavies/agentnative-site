@@ -134,4 +134,8 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy
+          # --env="" tells wrangler explicitly to use the top-level config
+          # (the production environment in this repo's multi-env shape).
+          # Without it, wrangler 4.x warns about ambiguity even though
+          # bare `deploy` does the right thing.
+          command: deploy --env=""
