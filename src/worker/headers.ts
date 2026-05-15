@@ -48,6 +48,12 @@ export interface ApplyHeadersOptions {
   request: Request;
   servedMarkdown: boolean;
   pathname: string;
+  /** Build-time env identifier. Surfaces in the `X-Build-Env` response
+   * header so it's trivial to confirm which Worker is serving a given
+   * response. The value differs between configs (`production` from
+   * wrangler.jsonc, `staging` from wrangler.staging.jsonc), which also
+   * forces distinct compiled script etags. See `src/worker/index.ts`. */
+  buildEnv: 'production' | 'staging' | 'development';
 }
 
 /** `true` when the Host header ends with `.workers.dev` — the staging origin. */
@@ -108,6 +114,12 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   if (isStagingHost(url.host)) {
     headers.set('X-Robots-Tag', 'noindex');
   }
+
+  // Surface the build-time env identifier on every response. Diagnostic
+  // header (useful for confirming "which Worker is this") AND the reason
+  // the two Workers' compiled scripts have distinct etags — see
+  // `src/worker/index.ts`'s `__BUILD_ENV__` comment.
+  headers.set('X-Build-Env', opts.buildEnv);
 
   return new Response(response.body, {
     status: response.status,

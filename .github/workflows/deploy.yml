@@ -96,7 +96,10 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy --env staging
+          # Two separate wrangler configs (production vs staging) — see
+          # the header comment in wrangler.staging.jsonc for the rationale
+          # (workaround for cloudflare/workers-sdk#13925).
+          command: deploy --config wrangler.staging.jsonc
 
   production:
     name: build + deploy production
@@ -134,8 +137,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          # --env="" tells wrangler explicitly to use the top-level config
-          # (the production environment in this repo's multi-env shape).
-          # Without it, wrangler 4.x warns about ambiguity even though
-          # bare `deploy` does the right thing.
-          command: deploy --env=""
+          # wrangler.jsonc is the default config so no --config flag is
+          # required. The split-config layout (wrangler.jsonc for prod,
+          # wrangler.staging.jsonc for staging) replaces the previous
+          # multi-env block; see wrangler.jsonc's header comment for the
+          # rationale (workaround for cloudflare/workers-sdk#13925).
+          command: deploy

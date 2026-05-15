@@ -100,7 +100,7 @@ jobs:
       # above does NOT validate tag existence, so without this guard the
       # failure would surface at deploy time rather than PR time.
       #
-      # Pin alignment between env blocks is workflow-aware:
+      # Pin alignment between the two configs is workflow-aware:
       #   dev-targeting PRs:   pins may diverge (staging-leads-prod
       #                        during the soak-then-promote workflow;
       #                        see RELEASES.md § Sandbox image releases).
@@ -108,8 +108,9 @@ jobs:
       #                        the registry.
       #   main-targeting PRs:  pins MUST be equal (released state).
       #                        The release PR is expected to promote the
-      #                        top-level pin to match env.staging before
-      #                        merging.
+      #                        production pin in wrangler.jsonc to match
+      #                        the staging pin in wrangler.staging.jsonc
+      #                        before merging.
       #
       # Skipped on forks (secrets are unavailable to PRs from forks by
       # default). Same-repo branches always hit it.
@@ -122,9 +123,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          prod_img=$(bun x wrangler deploy --dry-run 2>&1 \
+          prod_img=$(bun x wrangler deploy --dry-run --config wrangler.jsonc 2>&1 \
             | grep -oE 'registry\.cloudflare\.com/[^ )]+' | head -1 || true)
-          stg_img=$(bun x wrangler deploy --dry-run --env staging 2>&1 \
+          stg_img=$(bun x wrangler deploy --dry-run --config wrangler.staging.jsonc 2>&1 \
             | grep -oE 'registry\.cloudflare\.com/[^ )]+' | head -1 || true)
 
           if [ -z "$prod_img" ] || [ -z "$stg_img" ]; then
@@ -141,19 +142,19 @@ jobs:
           fail=0
 
           if echo "$images" | grep -qE "anc-sandbox[[:space:]]+${prod_tag}\b"; then
-            echo "verified: top-level pin anc-sandbox:${prod_tag} is in the CF managed registry"
+            echo "verified: production pin anc-sandbox:${prod_tag} (wrangler.jsonc) is in the CF managed registry"
           else
-            echo "::error::top-level pin anc-sandbox:${prod_tag} not found in CF managed registry"
+            echo "::error::production pin anc-sandbox:${prod_tag} (wrangler.jsonc) not found in CF managed registry"
             echo "did you forget: bun x wrangler containers build -p -t anc-sandbox:${prod_tag} docker/sandbox/"
             fail=1
           fi
 
           if [ "$prod_tag" = "$stg_tag" ]; then
-            echo "verified: env.staging pin equals top-level pin (lockstep)"
+            echo "verified: staging pin equals production pin (lockstep)"
           elif echo "$images" | grep -qE "anc-sandbox[[:space:]]+${stg_tag}\b"; then
-            echo "verified: env.staging pin anc-sandbox:${stg_tag} is in the CF managed registry"
+            echo "verified: staging pin anc-sandbox:${stg_tag} (wrangler.staging.jsonc) is in the CF managed registry"
           else
-            echo "::error::env.staging pin anc-sandbox:${stg_tag} not found in CF managed registry"
+            echo "::error::staging pin anc-sandbox:${stg_tag} (wrangler.staging.jsonc) not found in CF managed registry"
             echo "did you forget: bun x wrangler containers build -p -t anc-sandbox:${stg_tag} docker/sandbox/"
             fail=1
           fi
@@ -163,9 +164,9 @@ jobs:
           # leads prod during development).
           if [ "${BASE_REF}" = "main" ] && [ "$prod_tag" != "$stg_tag" ]; then
             echo "::error::release PR to main has divergent image pins"
-            echo "  top-level:   anc-sandbox:${prod_tag}"
-            echo "  env.staging: anc-sandbox:${stg_tag}"
-            echo "Promote the top-level pin to match env.staging before merging."
+            echo "  wrangler.jsonc (prod):         anc-sandbox:${prod_tag}"
+            echo "  wrangler.staging.jsonc (stg):  anc-sandbox:${stg_tag}"
+            echo "Promote the wrangler.jsonc pin to match wrangler.staging.jsonc before merging."
             echo "See RELEASES.md § Sandbox image releases for the soak-and-promote procedure."
             fail=1
           fi

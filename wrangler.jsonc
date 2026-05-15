@@ -1,5 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  // ---------------------------------------------------------------------------
+  // PRODUCTION wrangler config — deploys the `agentnative-site` Worker on
+  // anc.dev. Sibling: `wrangler.staging.jsonc` deploys the
+  // `agentnative-site-staging` Worker on the workers.dev subdomain.
+  //
+  // The two configs are intentionally separate top-level files (no
+  // `env.staging` block here) to work around the Workers Assets cross-env
+  // asset-sharing bug filed at
+  // https://github.com/cloudflare/workers-sdk/issues/13925. With a single
+  // multi-env config, asset uploads from staging deploys silently override
+  // what production serves at the same URL paths whenever the two compiled
+  // Worker scripts have identical bytes. The `define` block below pairs
+  // with `src/worker/index.ts`'s `__BUILD_ENV__` reference to guarantee
+  // the two scripts produce distinct etags.
+  // ---------------------------------------------------------------------------
   "name": "agentnative-site",
   "main": "src/worker/index.ts",
   // account_id is intentionally NOT in the repo. Wrangler picks it up from
@@ -16,6 +31,11 @@
   // contributor's local wrangler invocations stay opted out regardless of
   // their shell environment.
   "send_metrics": false,
+  // Build-time substitution. `__BUILD_ENV__` in src/worker/index.ts is
+  // replaced with the literal string "production" at deploy time.
+  // Staging's config substitutes "staging" instead. Same source file,
+  // distinct compiled output. See header above for the rationale.
+  "define": { "__BUILD_ENV__": "\"production\"" },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -36,15 +56,14 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      // PRODUCTION pin — this is the image deployed to anc.dev.
-      // Advances only at release time. The staging pin
-      // (env.staging.containers[0].image) advances independently
-      // during development; release PRs to main promote this pin to
-      // match staging after the soak.
+      // PRODUCTION pin. Advances only at release time. The staging pin
+      // (in wrangler.staging.jsonc) advances independently during
+      // development; release PRs to main promote this pin to match
+      // staging after the soak.
       //
       // Promotion procedure (release PR, main-targeting):
-      //   1. Confirm the env.staging tag is the one to ship to prod
-      //   2. Replace this tag with env.staging's tag
+      //   1. Confirm the staging tag is the one to ship to prod
+      //   2. Replace this tag with staging's tag
       //   3. CI on the main-targeting PR asserts both pins are aligned
       //      AND that the tag exists in the CF managed registry
       //   4. Merge; CI deploys prod
@@ -100,93 +119,11 @@
       "simple": { "limit": 10, "period": 60 }
     }
   ],
-  // Production (top-level): anc.dev custom domain, no .workers.dev URL.
-  // Deployed via `wrangler deploy` (no --env flag) on push to main.
+  // Production: anc.dev custom domain, no .workers.dev URL.
+  // Deployed via `wrangler deploy` on push to main.
   // Cloudflare auto-provisions SSL cert + DNS CNAME for the custom domain.
   "routes": [{ "pattern": "anc.dev", "custom_domain": true }],
-  "workers_dev": false,
-  // Staging: separate Worker (agentnative-site-staging) deployed from dev.
-  // workers.dev only — no custom domain. The staging-noindex guard in
-  // src/worker/headers.ts adds X-Robots-Tag: noindex on *.workers.dev.
-  // Deploy with: wrangler deploy --env staging
-  //
-  // Wrangler env semantics: SOME keys inherit from top-level, others
-  // (durable_objects, containers, migrations, ratelimits, r2_buckets)
-  // do NOT — wrangler warns when they're missing under an env. Mirror
-  // every live-scoring binding under env.staging explicitly. The
-  // staging Worker name (agentnative-site-staging) namespaces the DO
-  // instances away from prod automatically; the R2 bucket name + the
-  // rate-limit namespace_id need explicit staging suffixes.
-  "env": {
-    "staging": {
-      // Explicit name needed under env.staging because the containers
-      // app-name derivation (worker-name + class-name) doesn't follow
-      // wrangler's automatic `<top>-<env>` env-suffix convention for
-      // containers. With this set, the staging container is named
-      // `agentnative-site-staging-sandbox` and is distinct from prod's
-      // `agentnative-site-sandbox`.
-      "name": "agentnative-site-staging",
-      "workers_dev": true,
-      "containers": [
-        {
-          "class_name": "Sandbox",
-          // STAGING pin — advances independently from the top-level
-          // (prod) pin during development. This is the "leading" side
-          // of the soak-then-promote workflow: new images land here
-          // first, soak on the staging Worker, then get promoted to
-          // the top-level pin via a release PR to main.
-          //
-          // Image bump procedure (feat PR, dev-targeting):
-          //   1. From clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
-          //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
-          //   3. Update THIS pin only (leave top-level alone). For low-
-          //      risk bumps, update both pins; CI accepts lockstep on
-          //      dev-targeting PRs.
-          //   4. PR to dev; CI verifies the tag exists in the registry
-          //      and (for divergent pins) allows the lead.
-          //   5. Merge; CI deploys the staging Worker
-          //      (agentnative-site-staging) to the new image. Soak.
-          //
-          // `containers` is non-inheritable per-env, so each env block
-          // needs its own copy of the image URI. The two pins are
-          // independent CF resources (separate container apps, separate
-          // version histories) and may legitimately diverge.
-          //
-          // See RELEASES.md § Sandbox image releases for the full flow.
-          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
-          "instance_type": "basic",
-          "max_instances": 3
-        }
-      ],
-      "durable_objects": {
-        "bindings": [
-          {
-            "class_name": "Sandbox",
-            "name": "SCORE"
-          }
-        ]
-      },
-      "migrations": [
-        {
-          "tag": "v1",
-          "new_sqlite_classes": ["Sandbox"]
-        }
-      ],
-      "r2_buckets": [
-        {
-          "binding": "SCORE_CACHE",
-          "bucket_name": "anc-score-cache-staging"
-        }
-      ],
-      "ratelimits": [
-        {
-          "name": "SCORE_LIMITER",
-          "namespace_id": "1002",
-          "simple": { "limit": 10, "period": 60 }
-        }
-      ]
-    }
-  }
+  "workers_dev": false
   // Smart Placement intentionally NOT set: this is a static-asset + CN
   // site with no data source. `placement: { mode: "smart" }` + the
   // `assets.run_worker_first: true` we need for the CN branch would let
