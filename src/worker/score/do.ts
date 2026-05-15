@@ -22,6 +22,18 @@ export class Sandbox {
   // biome-ignore lint/complexity/noUselessConstructor: stub signature mirrors the runtime DO contract that U6 will fill in
   constructor(_state: DurableObjectState, _env: unknown) {}
 
+  // U5's handler invokes the DO via `stub.fetch(...)` so the route is
+  // wired end-to-end against the binding boundary. Until U6 lands the
+  // real Sandbox class, every request returns the stub envelope; the
+  // handler maps it to a 503 with `sandbox_stub_until_u6`.
+  async fetch(_request: Request): Promise<Response> {
+    return new Response(JSON.stringify({ error: 'sandbox_stub_until_u6' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  // Reserved RPC method — U6 replaces with the real install + score flow.
   async score(): Promise<{ error: string }> {
     return { error: 'sandbox_stub_until_u6' };
   }
