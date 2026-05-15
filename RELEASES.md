@@ -278,6 +278,49 @@ remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change
 a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level filter for a
 job-level changed-files check.
 
+### Sandbox image releases (live-scoring)
+
+The live-scoring path uses a Cloudflare Containers binding that pins an Alpine + musl sandbox image
+(`docker/sandbox/Dockerfile`). The image lives in the Cloudflare managed registry at
+`registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled from deploy: a Worker code-only deploy
+never rebuilds the image, and an image-only release never reships Worker code unintentionally.
+
+**When the image needs to change:** any commit to `docker/sandbox/Dockerfile` (or its inputs — base-image digest pin
+bumps, `anc` version bumps, `cargo-binstall` version bumps, package additions to `apk add`). Pure Worker code changes
+(`src/**`, `content/**`) do NOT require an image rebuild.
+
+**Image-release procedure** (from a clean working tree on `dev`):
+
+```bash
+GIT_SHA=$(git rev-parse --short HEAD)
+bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
+```
+
+The command runs `docker build` locally and pushes to the CF registry, authenticated via `CLOUDFLARE_API_TOKEN`. Output
+ends with a `<git-sha>: digest: sha256:... size: ...` line confirming the push. Then update `wrangler.jsonc` — BOTH the
+top-level `containers[0].image` AND `env.staging.containers[0].image` — to pin the new tag. The two env blocks share the
+same tag (cite spike 01, 2026-05-14: pointing both at one tag avoids the multi-env double-build that arises from
+`containers` being a non-inheritable per-env binding). Commit the pin alongside any Dockerfile change.
+
+**Deploy then propagates without rebuilding.** `wrangler deploy --env staging` (and later `wrangler deploy` on main)
+against the fully-qualified registry URI does NOT trigger a rebuild — the image is already published.
+
+**Image retention.** Never delete a tag that backed a shipped Worker version. Deletion silently breaks `wrangler
+rollback` for any version that referenced the image, per
+[Containers Limits](https://developers.cloudflare.com/containers/platform-details/limits/). The 50 GB account-wide cap
+is a quarterly prune review, not a routine cleanup. When a release tag ships, record the pair `<git-tag> ↔
+<registry URI>` in the release commit body so the inventory survives.
+
+**DO migrations are one-way walls.** The first Worker version that applied `migrations[].new_sqlite_classes:
+["Sandbox"]` (`v1`) cannot be rolled back across that boundary via `wrangler rollback`, per
+[Versions and deployments / Rollbacks](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/).
+Treat DO-migration commits as milestone releases that get an explicit reviewer note.
+
+**GHA fallback.** If a local build is impossible, set `image:` to a Dockerfile path (`./docker/sandbox/Dockerfile`) and
+let `cloudflare/wrangler-action` build inline on `ubuntu-latest` (~60-130s cold per deploy; no GHA-side layer cache;
+push is auto-skipped when the existing tag still matches). This is a fallback, not the primary path; the
+local-build-once flow above is what the deploy workflow assumes.
+
 ## CI
 
 Two workflows gate pull requests:

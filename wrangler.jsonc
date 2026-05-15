@@ -36,10 +36,24 @@
   "containers": [
     {
       "class_name": "Sandbox",
-      // Image pinned by digest, not tag. Tags can be force-moved
-      // upstream; digests can't. Bump procedure: rebuild + push, then
-      // replace this digest + the trailing version comment.
-      "image": "docker.io/brettdavies/anc-sandbox@sha256:f4cc85fa6e39ab5a7901bbf7f291228e04e36fe126f0ca994c793800b8288ad4", // v3-rc1 (2026-05-04)
+      // Image pinned to a Cloudflare-managed-registry tag produced by
+      // a single local build (U3-followup pattern). Bump procedure:
+      //   1. From a clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
+      //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
+      //   3. Replace the tag here AND under env.staging.containers[0].image
+      //      with the new $GIT_SHA.
+      //   4. wrangler deploy --env staging (no rebuild — URI is fully-qualified)
+      //   5. After verification, dev → main release → wrangler deploy.
+      // Image-retention discipline: never delete a tag that backed a
+      // shipped Worker version. Deletion silently breaks `wrangler
+      // rollback` for any version that referenced the deleted image
+      // (cite https://developers.cloudflare.com/containers/platform-details/limits/).
+      // Pair every git release tag with the registry URI in RELEASES.md.
+      // Account ID in the URI is acceptable per U3-followup spec:
+      // Wrangler resolves it from auth at push time, so the literal
+      // committed here is the auth-time-generated tag rather than a
+      // pre-shared identifier.
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
       "instance_type": "basic",
       "max_instances": 3
     }
@@ -101,7 +115,12 @@
       "containers": [
         {
           "class_name": "Sandbox",
-          "image": "docker.io/brettdavies/anc-sandbox@sha256:f4cc85fa6e39ab5a7901bbf7f291228e04e36fe126f0ca994c793800b8288ad4", // v3-rc1 (2026-05-04)
+          // Staging pins the SAME tag as production. `containers` is
+          // non-inheritable per-env, so both env blocks need their own
+          // copy of the image URI. Pointing both at one tag avoids the
+          // multi-env double-build that arises when both blocks point
+          // at a Dockerfile path (cite spike 01, 2026-05-14).
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
           "instance_type": "basic",
           "max_instances": 3
         }
