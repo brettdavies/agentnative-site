@@ -552,7 +552,11 @@ tools:
     description: CLI for Cloudflare Workers
 
   - name: cf
-    repo: cloudflare/workers-sdk
+    # The Tech Preview npm package ships pre-bundled and declares no
+    # `repository` field. `cf` is NOT in cloudflare/workers-sdk despite
+    # being from the same team. Until Cloudflare discloses the source
+    # repo, the project link points at the npm distribution page.
+    url: https://www.npmjs.com/package/cf
     binary: cf
     language: TypeScript
     tier: workhorse
