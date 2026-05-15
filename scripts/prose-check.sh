@@ -120,7 +120,7 @@ LT_BLOCKING_CATEGORIES='^(TYPOS|GRAMMAR|CONFUSED_WORDS)$'
 #                          is plural.
 #
 # === SITE-LOCAL DENYLIST EXTENSIONS ====================================
-# Three additional rules that misfire on agentnative-site domain jargon:
+# Four additional rules that misfire on agentnative-site domain jargon:
 #
 #   IN_PRINCIPAL       LT confuses "principle" (P1-P8 noun, the contract
 #                      term) with "principal" (chief). Site corpus uses
@@ -133,8 +133,17 @@ LT_BLOCKING_CATEGORIES='^(TYPOS|GRAMMAR|CONFUSED_WORDS)$'
 #   TO_DO_HYPHEN       Site references CE-todo filenames inline ("the
 #                      upstream todo at ..."); LT asks for "to-do"
 #                      hyphenation that would mismatch the artifact name.
+#   PLURAL_MODIFIER    Misfires on CLI command names whose subcommand
+#                      chain is plural+plural by convention (wrangler
+#                      containers images list, kv namespaces list, r2
+#                      buckets list, hyperdrive configs list). LT
+#                      processes the raw markdown text without code-fence
+#                      awareness, so backtick code spans do not filter
+#                      these. Adding the rule denylist is the
+#                      site-corpus-correct fix; the alternative is
+#                      rewording every doc that names a CF CLI command.
 # ========================================================================
-LT_DENY_RULES_DEFAULT='^(MD_BASEFORM|MUST_HAVE_TO|HAVE_PART_AGREEMENT|PREPOSITION_VERB|THIS_NNS|NON_STANDARD_WORD|POSSESSIVE_APOSTROPHE|A_INSTALL|IS_AND_ARE|SINGULAR_NOUN_ADV_AGREEMENT|IN_PRINCIPAL|CONTRACT_CONTACT|TO_DO_HYPHEN)$'
+LT_DENY_RULES_DEFAULT='^(MD_BASEFORM|MUST_HAVE_TO|HAVE_PART_AGREEMENT|PREPOSITION_VERB|THIS_NNS|NON_STANDARD_WORD|POSSESSIVE_APOSTROPHE|A_INSTALL|IS_AND_ARE|SINGULAR_NOUN_ADV_AGREEMENT|IN_PRINCIPAL|CONTRACT_CONTACT|TO_DO_HYPHEN|PLURAL_MODIFIER)$'
 LT_DENY_RULES="${LT_DENY_RULES:-$LT_DENY_RULES_DEFAULT}"
 
 CHANGED_ONLY=0
