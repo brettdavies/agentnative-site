@@ -14,6 +14,12 @@
 import { detectPreference } from './accept';
 import { applyHeaders } from './headers';
 
+// Live-scoring DO class. Re-exported so wrangler's binding resolver can
+// find `class_name: "Sandbox"` from wrangler.jsonc's containers +
+// durable_objects sections. Stub until U6 lands the install + score
+// implementation.
+export { Sandbox } from './score/do';
+
 export interface Env {
   ASSETS: Fetcher;
 }

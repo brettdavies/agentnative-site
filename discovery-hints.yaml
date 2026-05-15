@@ -1,0 +1,45 @@
+# discovery-hints.yaml — explicit owner/repo -> install-spec hints for the
+# live-scoring discovery chain (U4 step 0.5). Absorbs known false-negatives
+# where ecosystem registry metadata is incomplete or non-canonical and U4's
+# tightened step-3 predicates (per gate F1) would otherwise bounce.
+#
+# Seeded from the Pre-Implementation Validation gate write-up at
+# docs/research/2026-05-04-discovery-chain-hit-rate.md. Each entry should
+# carry a `note:` explaining why ecosystem metadata isn't enough — so a
+# future maintainer can drop the hint when the upstream metadata improves.
+#
+# Schema:
+#   - owner_repo : "<owner>/<repo>" — must match the GitHub URL the user
+#                  pasted; case-insensitive at lookup time.
+#   - pm         : one of brew | cargo-binstall | bun | pip | npm | go.
+#                  Must match U4's parse-install.ts table.
+#   - package    : the package-manager identifier (may differ from
+#                  owner_repo when pypi/npm rename, e.g. Aider-AI/aider
+#                  publishes as `aider-chat`).
+#   - binary     : the executable name produced after install. U6's
+#                  `which <binary>` check uses this.
+#   - note       : optional human-readable rationale.
+#
+# Lifecycle:
+#   - Hints whose owner_repo also appears in registry.yaml are dropped at
+#     build time with a warning (committed scorecards win — avoids drift).
+#   - Hints with unknown pm fail the build (typo guard).
+
+hints:
+  - owner_repo: Aider-AI/aider
+    pm: pip
+    package: aider-chat
+    binary: aider
+    note: brew formula homepage routes to aider.chat, not github
+
+  - owner_repo: OpenHands/OpenHands
+    pm: pip
+    package: openhands-ai
+    binary: openhands
+    note: pypi info.home_page is null on the published package
+
+  - owner_repo: sherlock-project/sherlock
+    pm: brew
+    package: sherlock
+    binary: sherlock
+    note: brew formula homepage doesn't reference the github repo

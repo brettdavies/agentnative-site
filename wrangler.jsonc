@@ -9,6 +9,13 @@
   // public repo. See RELEASES.md § Secrets.
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Project-scoped opt-out of wrangler telemetry. Belt-and-suspenders with
+  // the user-level `WRANGLER_SEND_METRICS=false` env var (see dotfiles
+  // config/shell/telemetry.sh) and the per-machine `wrangler telemetry
+  // disable` setting. This one travels with the repo so CI runs and any
+  // contributor's local wrangler invocations stay opted out regardless of
+  // their shell environment.
+  "send_metrics": false,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -20,6 +27,79 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
+  // Live-scoring path (plan U3-U7) — first-ever stateful bindings on
+  // this Worker: DO + Container + R2 + rate-limit. The migrations entry
+  // below is a one-way gate: `new_sqlite_classes` MUST be used (not the
+  // legacy `new_classes`) so the DO is created with SQLite-backed
+  // storage. Reverting needs a follow-up migration with
+  // `deleted_classes`; documented in RELEASES.md once U9 lands.
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      // PRODUCTION pin — this is the image deployed to anc.dev.
+      // Advances only at release time. The staging pin
+      // (env.staging.containers[0].image) advances independently
+      // during development; release PRs to main promote this pin to
+      // match staging after the soak.
+      //
+      // Promotion procedure (release PR, main-targeting):
+      //   1. Confirm the env.staging tag is the one to ship to prod
+      //   2. Replace this tag with env.staging's tag
+      //   3. CI on the main-targeting PR asserts both pins are aligned
+      //      AND that the tag exists in the CF managed registry
+      //   4. Merge; CI deploys prod
+      //
+      // For low-risk image bumps (base-image security patch, no
+      // behavior delta), the shortcut is to update BOTH pins on the
+      // same feat PR — CI on dev-targeting PRs accepts lockstep too.
+      // Use soak-then-promote whenever the change touches sandbox
+      // behavior (anc bump, package manager addition, runtime change).
+      // See RELEASES.md § Sandbox image releases for the full flow.
+      //
+      // Image-retention discipline: never delete a tag that backed a
+      // shipped Worker version. Deletion silently breaks `wrangler
+      // rollback` for any version that referenced the deleted image
+      // (cite https://developers.cloudflare.com/containers/platform-details/limits/).
+      // Retention is what makes soak-then-promote safe: the prod pin
+      // keeps pointing at the previous staging-soaked image until the
+      // release explicitly promotes.
+      //
+      // Account ID in the URI is acceptable per U3-followup spec:
+      // Wrangler resolves it from auth at push time, so the literal
+      // committed here is the auth-time-generated tag rather than a
+      // pre-shared identifier.
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
+      "instance_type": "basic",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "SCORE"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SCORE_CACHE",
+      "bucket_name": "anc-score-cache"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "SCORE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 10, "period": 60 }
+    }
+  ],
   // Production (top-level): anc.dev custom domain, no .workers.dev URL.
   // Deployed via `wrangler deploy` (no --env flag) on push to main.
   // Cloudflare auto-provisions SSL cert + DNS CNAME for the custom domain.
@@ -29,9 +109,82 @@
   // workers.dev only — no custom domain. The staging-noindex guard in
   // src/worker/headers.ts adds X-Robots-Tag: noindex on *.workers.dev.
   // Deploy with: wrangler deploy --env staging
+  //
+  // Wrangler env semantics: SOME keys inherit from top-level, others
+  // (durable_objects, containers, migrations, ratelimits, r2_buckets)
+  // do NOT — wrangler warns when they're missing under an env. Mirror
+  // every live-scoring binding under env.staging explicitly. The
+  // staging Worker name (agentnative-site-staging) namespaces the DO
+  // instances away from prod automatically; the R2 bucket name + the
+  // rate-limit namespace_id need explicit staging suffixes.
   "env": {
     "staging": {
-      "workers_dev": true
+      // Explicit name needed under env.staging because the containers
+      // app-name derivation (worker-name + class-name) doesn't follow
+      // wrangler's automatic `<top>-<env>` env-suffix convention for
+      // containers. With this set, the staging container is named
+      // `agentnative-site-staging-sandbox` and is distinct from prod's
+      // `agentnative-site-sandbox`.
+      "name": "agentnative-site-staging",
+      "workers_dev": true,
+      "containers": [
+        {
+          "class_name": "Sandbox",
+          // STAGING pin — advances independently from the top-level
+          // (prod) pin during development. This is the "leading" side
+          // of the soak-then-promote workflow: new images land here
+          // first, soak on the staging Worker, then get promoted to
+          // the top-level pin via a release PR to main.
+          //
+          // Image bump procedure (feat PR, dev-targeting):
+          //   1. From clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
+          //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
+          //   3. Update THIS pin only (leave top-level alone). For low-
+          //      risk bumps, update both pins; CI accepts lockstep on
+          //      dev-targeting PRs.
+          //   4. PR to dev; CI verifies the tag exists in the registry
+          //      and (for divergent pins) allows the lead.
+          //   5. Merge; CI deploys the staging Worker
+          //      (agentnative-site-staging) to the new image. Soak.
+          //
+          // `containers` is non-inheritable per-env, so each env block
+          // needs its own copy of the image URI. The two pins are
+          // independent CF resources (separate container apps, separate
+          // version histories) and may legitimately diverge.
+          //
+          // See RELEASES.md § Sandbox image releases for the full flow.
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
+          "instance_type": "basic",
+          "max_instances": 3
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "class_name": "Sandbox",
+            "name": "SCORE"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["Sandbox"]
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "SCORE_CACHE",
+          "bucket_name": "anc-score-cache-staging"
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "SCORE_LIMITER",
+          "namespace_id": "1002",
+          "simple": { "limit": 10, "period": 60 }
+        }
+      ]
     }
   }
   // Smart Placement intentionally NOT set: this is a static-asset + CN

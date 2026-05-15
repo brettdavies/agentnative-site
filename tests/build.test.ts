@@ -294,7 +294,7 @@ describe('emitShell — OG image alt text', () => {
     const html = shell();
     expect(html).toContain('property="og:image:alt"');
     expect(html).toContain(
-      'content="agent-native CLI standard — anc.dev — seven principles for CLIs that agents can operate"',
+      'content="agent-native CLI standard — anc.dev — a standard for CLIs that agents can operate"',
     );
   });
 
@@ -309,7 +309,7 @@ describe('emitShell — OG image alt text', () => {
     expect(ogMatch![1]).toBe(twMatch![1]);
   });
 
-  test('footer renders v${SITE_SPEC_VERSION} from content/principles/VERSION (not a hardcoded literal)', () => {
+  test('footer renders v<SITE_SPEC_VERSION> from content/principles/VERSION (not a hardcoded literal)', () => {
     // Regression guard against the v0.1.0 footer drift that shipped with
     // anc.dev v0.1 — the footer must always read SITE_SPEC_VERSION from
     // content/principles/VERSION (the version the site's PROSE has been

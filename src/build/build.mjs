@@ -34,6 +34,7 @@ import {
 } from './content.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { buildLlmsFull, buildLlmsIndex } from './llms.mjs';
+import { emitBuildIndexes } from './registry-index.mjs';
 import { renderMarkdown } from './render.mjs';
 import {
   computeLeaderboard,
@@ -58,6 +59,7 @@ const CONTENT_DIR = join(REPO_ROOT, 'content');
 const PRINCIPLES_DIR = join(CONTENT_DIR, 'principles');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
+const HINTS_PATH = join(REPO_ROOT, 'discovery-hints.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
 const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill.json');
@@ -70,6 +72,7 @@ const LOCKED_SLUGS = [
   'p5-safe-retries-mutation-boundaries',
   'p6-composable-predictable-command-structure',
   'p7-bounded-high-signal-responses',
+  'p8-discoverable-skill-bundle',
 ];
 
 async function ensureDir(dir) {
@@ -78,7 +81,7 @@ async function ensureDir(dir) {
 
 /**
  * Build the homepage body HTML — hero section (title + lede) followed by
- * the seven-principle listing with links to individual pages.
+ * the principle listing with links to individual pages.
  */
 function buildHomepageBody(introTitle, introLede, principles) {
   const entries = principles
@@ -100,7 +103,7 @@ function buildHomepageBody(introTitle, introLede, principles) {
   <h1 class="hero__title">${escHtml(introTitle)}</h1>
   <p class="hero__lede">${escHtml(introLede)}</p>
 </section>
-<section class="principles-index" aria-label="The seven principles">
+<section class="principles-index" aria-label="The eight principles">
   <ol class="principles-index__list">
 ${entries}
   </ol>
@@ -264,6 +267,17 @@ export async function build() {
 
   // 8. Scorecard pages — leaderboard + per-tool pages.
   const registry = await loadRegistry(REGISTRY_PATH);
+
+  // 8a. Build-time indexes for the live-scoring path (plan U1):
+  //     - dist/registry-index.json (powers U4's registry-fast-path)
+  //     - dist/discovery-hints-index.json (powers U4's step 0.5 — F1)
+  const { warnings: indexWarnings } = await emitBuildIndexes({
+    registry,
+    hintsPath: HINTS_PATH,
+    distDir: DIST_DIR,
+  });
+  for (const w of indexWarnings) console.warn(`warning: ${w}`);
+
   // v0.4 corpus invariants run before rendering: any scorecard below the
   // schema floor, missing a registry entry, scoring the wrong binary, or
   // carrying a non-RFC-3339 timestamp aborts the build before producing
@@ -286,7 +300,7 @@ export async function build() {
 
   const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.
   The <strong>score</strong> column is the pass rate <code>pass / (pass + warn + fail)</code>;
-  the <strong>principles met</strong> column counts how many of the seven principles have every
+  the <strong>principles met</strong> column counts how many of the eight principles have every
   check passing. The <strong>audience</strong> classification — when present — is informational,
   not authoritative; the per-tool page's evidence list is the ground truth.</p>
   <p>For the full explanation of scoring, audience classification, audit profiles, and how to

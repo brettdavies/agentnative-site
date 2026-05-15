@@ -31,9 +31,10 @@ high-signal and inside budget.
   }
   ```
 
-- *(Applies when: CLI has list-style commands.)* List operations clamp to a sensible default maximum. A `list` without
-  `--limit` does not return more than a configurable ceiling (e.g., 100 items). If more items exist, the output
-  indicates truncation — `"truncated": true` in JSON, a stderr note in text mode.
+- *(Applies when: CLI has list-style commands.)* List operations clamp to a documented default maximum. A `list` without
+  `--limit` does not return more than a configurable ceiling (e.g., 100 items), and that ceiling is named in `--help` so
+  callers can plan around it. If more items exist, the output indicates truncation — `"truncated": true` in JSON, a
+  stderr note in text mode.
 
 **SHOULD:**
 

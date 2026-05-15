@@ -1,7 +1,7 @@
 # About this standard
 
 The agent-native CLI standard is a specification for command-line tools that behave predictably under agent control.
-Seven principles, enforced by RFC 2119 requirement tiers (MUST / SHOULD / MAY), and measured by a companion linter
+Eight principles, enforced by RFC 2119 requirement tiers (MUST / SHOULD / MAY), and measured by a companion linter
 ([`anc`](/check)) that scores any CLI against them.
 
 ## Provenance
@@ -12,7 +12,7 @@ ratifying, by writing it down concretely first and inviting people to break it.
 
 ## Prior art
 
-The seven-principle structure draws on two distinct lineages.
+The eight-principle structure draws on two distinct lineages.
 
 **Standards and methodologies that shaped the format:**
 
@@ -41,9 +41,9 @@ The spec uses semver-adjacent versioning with three tiers: MAJOR changes break c
 changes add MUSTs or promote SHOULDs; PATCH changes edit prose without shifting requirements. The current version
 appears in the footer of every page.
 
-Principle anchor slugs (`#p1-non-interactive-by-default` through `#p7-bounded-high-signal-responses`) are permanent. If
-a principle merges or splits in a future MAJOR version, the old slug will resolve as a permanent redirect to wherever
-the requirement now lives — citations made today will not 404 after a future restructuring.
+Principle anchor slugs (`#p1-non-interactive-by-default` through `#p8-discoverable-skill-bundle`) are permanent. If a
+principle merges or splits in a future MAJOR version, the old slug will resolve as a permanent redirect to wherever the
+requirement now lives — citations made today will not 404 after a future restructuring.
 
 ## RFC 2119
 
