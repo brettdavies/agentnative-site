@@ -15,12 +15,17 @@
 // Per-PM install command table mirrors the security audit in the plan
 // K-decision row "Per-package-manager script-execution audit": `npm` and
 // `bun` carry `--ignore-scripts`; `pip` carries `--only-binary=:all:`;
-// `cargo binstall` is binary-only by design. `brew` bounces at the
-// `install_unsupported` gate (Linuxbrew/musl incompatibility — Finding
-// F3). `go install` is kept per the 2026-05-18 K-decision re-evaluation
-// (commit 9b45b96 on dev): `gc` does not execute user code at compile
-// time, so the blast radius is bounded by the same 60 s combined
-// install + score timeout that bounds the other PMs.
+// `cargo binstall` is binary-only by design; `uv tool install` uses uv's
+// own resolver (binary-only by default for wheel-bearing packages).
+// `brew` returns null from installCommandFor() so the resolveSpec()
+// discovery-fallback in do.ts (2026-05-18 rework) can translate
+// `brew install <tool>` inputs to whatever cargo / npm / pip / go
+// alternative the discovery chain finds for the brew formula's GitHub
+// repo. brew-only tools (no other PM) bounce as install_unsupported
+// with pm=brew_only. `go install` is kept per the 2026-05-18
+// K-decision re-evaluation (commit 9b45b96 on dev): `gc` does not
+// execute user code at compile time, so the blast radius is bounded
+// by the same 60 s combined install + score timeout.
 
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { InstallSpec } from './discover-binary';
@@ -119,7 +124,15 @@ const INSTALL_HOSTS: Record<string, readonly string[]> = {
   // `403 Forbidden for url (https://index.crates.io/config.json)`.
   'cargo-binstall': ['crates.io', 'static.crates.io', 'index.crates.io', ...GITHUB_RELEASE_HOSTS],
   pip: ['pypi.org', 'files.pythonhosted.org'],
+  // uv hits the same wheel-hosting hosts as pip — pypi.org for metadata
+  // and files.pythonhosted.org for wheel downloads — but via a
+  // different client + resolver path that we hope sidesteps Bug M
+  // (pip metadata 403 via CF fetch passthrough).
+  uv: ['pypi.org', 'files.pythonhosted.org'],
   npm: ['registry.npmjs.org'],
+  // bun's `add -g` resolves from npm — `registry.npmjs.org` is the
+  // only host the install path needs.
+  bun: ['registry.npmjs.org'],
   go: ['proxy.golang.org', 'sum.golang.org', ...GITHUB_RELEASE_HOSTS],
 } as const;
 
@@ -218,17 +231,30 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
 function installCommandFor(spec: InstallSpec): string | null {
   switch (spec.pm) {
     case 'brew':
-      // Linuxbrew/musl is non-viable on Alpine (Finding F3). Bounce.
+      // brew returns null so resolveSpec() in do.ts can apply the
+      // discovery-fallback before this table is consulted. By the time
+      // a request reaches installCommandFor() with pm=brew, the
+      // fallback has already missed — i.e. no alternative PM exists
+      // for the formula. score() catches the null and bounces as
+      // install_unsupported with pm=brew_only (mapped through
+      // resolveSpec, not here, so the user-facing detail surfaces the
+      // brew_only case rather than the legacy pm=brew message).
       return null;
     case 'bun':
-      // Bun runtime is not in the sandbox image (no Alpine apk package,
-      // not installed via tarball). pm=bun parses cleanly at U4 but has
-      // no runtime to invoke; bounce as install_unsupported. Future work
-      // can either add bun to the image or translate to npm install
-      // since bun's package source IS the npm registry — current choice
-      // is to bounce honestly so the user-facing CTA points at
-      // install-anc-locally rather than silently substituting semantics.
-      return null;
+      // Native bun runtime ships in the image (2026-05-18 rework).
+      // --ignore-scripts suppresses npm-style lifecycle hooks since
+      // bun resolves from the npm registry and runs the same script
+      // lifecycle as npm. --no-summary cuts noise from the install
+      // output that would otherwise pollute the truncated details
+      // field on failure.
+      return `bun add -g --ignore-scripts ${shellQuote(spec.package)}`;
+    case 'uv':
+      // Native uv (2026-05-18 rework — split from pm=pip). uv tool
+      // install places the binary at $UV_TOOL_BIN_DIR (default
+      // $HOME/.local/bin, covered by Dockerfile PATH). uv's resolver
+      // sidesteps the pip 24+ PEP 658 metadata fast-path that 403s
+      // through CF fetch passthrough for some packages (Bug M).
+      return `uv tool install ${shellQuote(spec.package)}`;
     case 'cargo-binstall':
       // Standalone `cargo-binstall` binary lives at /usr/local/bin/
       // (Dockerfile lines 73-80). The image ships NO rust toolchain per
@@ -250,21 +276,18 @@ function installCommandFor(spec: InstallSpec): string | null {
       // suppresses ANSI escape sequences in pip's progress output that
       // pollute the orchestration's error `details` field when an
       // install fails. --break-system-packages overrides PEP 668's
-      // "externally-managed-environment" refusal that Alpine's py3-pip
-      // ships with — appropriate for our throwaway sandbox where there
-      // is no system Python to protect. --use-deprecated=legacy-resolver
-      // disables pip 24+'s wheel-metadata fast-path (PEP 658 .metadata
-      // range-request fetch) that returns 403 from files.pythonhosted.org
-      // for some packages when the request flows through the CF Workers
-      // fetch passthrough (Bug M, root cause unknown but the legacy
-      // resolver downloads full wheels and works reliably). Legacy
-      // resolver is scheduled for removal in pip 25+; this is a
-      // temporary workaround until either a wheel-fetch shape fix lands
-      // or we switch to pipx.
+      // "externally-managed-environment" refusal that Debian's
+      // python3-pip ships with — appropriate for our throwaway sandbox
+      // where there is no system Python to protect.
+      //
+      // 2026-05-18: dropped `--use-deprecated=legacy-resolver` (Bug M
+      // workaround on Alpine/musllinux). The Debian-slim rework moves
+      // pip onto manylinux wheels which we believe closes the metadata
+      // 403 gap; staging retest of `pip install httpie` validates.
+      // Re-add this flag in a follow-up if httpie regresses.
       return (
         `PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ` +
-        `--break-system-packages --use-deprecated=legacy-resolver ` +
-        shellQuote(spec.package)
+        `--break-system-packages ${shellQuote(spec.package)}`
       );
     case 'npm':
       // --ignore-scripts suppresses preinstall/install/postinstall
@@ -282,13 +305,25 @@ function installCommandFor(spec: InstallSpec): string | null {
       // `which <binary>` gate from missing on a successful install.
       return `GOBIN=/usr/local/bin go install ${shellQuote(spec.package)}@latest`;
     case 'direct':
-      // Tarball download + extract to /usr/local/bin. The user-pasted URL
-      // is the trust boundary; SHA verification is not done at this
-      // layer (no known-good SHA available for arbitrary user input).
-      // -L follows redirects so github.com release URLs that 302 to
-      // objects.githubusercontent.com resolve correctly (the allowlist
-      // expansion in installHostsFor covers the CDN host).
-      return `curl -fsSL ${shellQuote(spec.url)} | tar xz -C /usr/local/bin/`;
+      // Archive download + extract to /usr/local/bin. The user-pasted
+      // URL is the trust boundary; SHA verification is not done at
+      // this layer (no known-good SHA available for arbitrary user
+      // input). -L follows redirects so github.com release URLs that
+      // 302 to objects.githubusercontent.com resolve correctly (the
+      // allowlist expansion in installHostsFor covers the CDN host).
+      //
+      // 2026-05-18 (Bug N): dispatch extraction on URL extension. The
+      // legacy single-form `tar xz` worked for .tar.gz/.tgz only;
+      // many newer Rust tools (csvlens, etc.) ship .tar.xz exclusively
+      // for compression, plus .zip / .tar.bz2 appear in the wild.
+      // .tar.gz / .tgz   → tar xz
+      // .tar.xz / .txz   → tar xJ  (requires xz-utils in image)
+      // .tar.bz2 / .tbz2 → tar xj  (requires bzip2 in image)
+      // .zip             → unzip into a tmp dir, install matched binary
+      // Anything else    → falls through to tar xz (preserves legacy
+      //                    behavior, will fail loud on unsupported
+      //                    formats so the bounce is visible).
+      return directInstallCommand(spec.url, spec.binary);
     default: {
       // Exhaustiveness check — adding a new PM to the InstallSpec union
       // is a compile error here until the table is updated.
@@ -297,6 +332,57 @@ function installCommandFor(spec: InstallSpec): string | null {
       return null;
     }
   }
+}
+
+// Dispatch the direct-PM install command on archive extension. Kept
+// alongside installCommandFor() (vs. inlined) so the per-extension
+// shapes are individually testable and the test file pins each form.
+//
+// For tarball formats we keep the streaming `curl … | tar` shape from
+// the legacy code path — no /tmp side files, no extra cleanup, and the
+// behavior matches the security audit row that approved this pattern.
+//
+// .zip cannot stream (unzip needs a seekable input), so the zip case
+// downloads to /tmp, extracts into a per-request temp dir, copies the
+// expected binary onto /usr/local/bin via `install -m 0755`, and
+// cleans up. The binary path inside the archive is unknown ahead of
+// time so we search for it by name with `find -name`; this matches
+// the convention of GitHub-released CLIs that put the binary at
+// either the archive root or inside a `<tool>-<version>/` directory.
+function directInstallCommand(url: string, binary: string): string {
+  const lower = url.toLowerCase();
+  const qUrl = shellQuote(url);
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    return `curl -fsSL ${qUrl} | tar xz -C /usr/local/bin/`;
+  }
+  if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) {
+    return `curl -fsSL ${qUrl} | tar xJ -C /usr/local/bin/`;
+  }
+  if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) {
+    return `curl -fsSL ${qUrl} | tar xj -C /usr/local/bin/`;
+  }
+  if (lower.endsWith('.zip')) {
+    const qBin = shellQuote(binary);
+    // mktemp -d gives a per-invocation directory so concurrent
+    // installs (queued at the DO) don't clobber each other's
+    // extraction tree. find -perm /111 narrows to executable matches
+    // so non-binary `<binary>.txt`-style decoys don't shadow the real
+    // target. -print -quit returns the first hit.
+    return (
+      `set -e; ` +
+      `tmp=$(mktemp -d); ` +
+      `curl -fsSL ${qUrl} -o "$tmp/a.zip"; ` +
+      `unzip -q "$tmp/a.zip" -d "$tmp/x"; ` +
+      `found=$(find "$tmp/x" -type f -name ${qBin} -perm /111 -print -quit); ` +
+      `install -m 0755 "$found" /usr/local/bin/${qBin}; ` +
+      `rm -rf "$tmp"`
+    );
+  }
+  // Fall through to the legacy tar-gz shape so URLs without a
+  // recognized extension still attempt extraction. Fails loud if the
+  // download isn't gzip; the orchestration bounces as
+  // chain_resolved_install_failed with the tar error in details.
+  return `curl -fsSL ${qUrl} | tar xz -C /usr/local/bin/`;
 }
 
 function installHostsFor(spec: InstallSpec): readonly string[] {

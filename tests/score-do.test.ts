@@ -354,12 +354,20 @@ describe('sandbox-exec.score() — install table per PM', () => {
     {
       spec: { pm: 'pip', package: 'black', binary: 'black' },
       // PIP_NO_COLOR=1: ANSI suppression in pip output (Bug D).
-      // --break-system-packages: overrides Alpine PEP 668 refusal (Bug I).
-      // --use-deprecated=legacy-resolver: bypasses pip 24+ wheel-metadata
-      //   fast-path that 403s on some packages via CF fetch (Bug M).
-      expected:
-        'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ' +
-        "--break-system-packages --use-deprecated=legacy-resolver 'black'",
+      // --break-system-packages: overrides Debian PEP 668 refusal.
+      expected: 'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ' + "--break-system-packages 'black'",
+    },
+    {
+      spec: { pm: 'uv', package: 'black', binary: 'black' },
+      // Native uv path (split from pm=pip). uv's resolver sidesteps
+      // pip 24+'s PEP 658 metadata fast-path (Bug M).
+      expected: "uv tool install 'black'",
+    },
+    {
+      spec: { pm: 'bun', package: 'prettier', binary: 'prettier' },
+      // Native bun runtime (post-rework). --ignore-scripts matches the
+      // npm path's lifecycle-script suppression.
+      expected: "bun add -g --ignore-scripts 'prettier'",
     },
     {
       spec: { pm: 'npm', package: 'typescript', binary: 'tsc' },
@@ -373,6 +381,19 @@ describe('sandbox-exec.score() — install table per PM', () => {
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.gz', binary: 'foo' },
       expected: "curl -fsSL 'https://example.com/foo.tar.gz' | tar xz -C /usr/local/bin/",
+    },
+    {
+      spec: { pm: 'direct', url: 'https://example.com/foo.tgz', binary: 'foo' },
+      expected: "curl -fsSL 'https://example.com/foo.tgz' | tar xz -C /usr/local/bin/",
+    },
+    {
+      // Bug N: many newer Rust tools (csvlens) ship .tar.xz only.
+      spec: { pm: 'direct', url: 'https://example.com/foo.tar.xz', binary: 'foo' },
+      expected: "curl -fsSL 'https://example.com/foo.tar.xz' | tar xJ -C /usr/local/bin/",
+    },
+    {
+      spec: { pm: 'direct', url: 'https://example.com/foo.tar.bz2', binary: 'foo' },
+      expected: "curl -fsSL 'https://example.com/foo.tar.bz2' | tar xj -C /usr/local/bin/",
     },
   ];
 
@@ -399,10 +420,13 @@ describe('sandbox-exec.score() — install table per PM', () => {
     // + the standalone tarballs. Keep in sync with the Dockerfile.
     const knownBinaries = new Set([
       'cargo-binstall', // tarball at /usr/local/bin/
-      'pip', // py3-pip apk
-      'npm', // npm apk
-      'go', // go apk
-      'curl', // curl apk
+      'pip', // python3-pip apt
+      'uv', // tarball at /usr/local/bin/
+      'npm', // npm apt
+      'bun', // tarball at /usr/local/bin/
+      'go', // golang-go apt
+      'curl', // curl apt
+      'set', // direct .zip case wraps install in `set -e; …`
       'PIP_NO_COLOR=1', // env-var prefix (not a binary) — pip case
       'GOBIN=/usr/local/bin', // env-var prefix (not a binary) — go case
     ]);
@@ -418,28 +442,19 @@ describe('sandbox-exec.score() — install table per PM', () => {
 });
 
 describe('sandbox-exec.score() — bounce classes', () => {
-  test('brew → install_unsupported (Linuxbrew on Alpine non-viable, Finding F3)', async () => {
+  test('brew passed to score() bounces install_unsupported (resolveSpec should translate first)', async () => {
+    // Direct invocation of score() with pm=brew is a contract violation
+    // — resolveSpec in do.ts is supposed to run the discovery-fallback
+    // before this layer is reached. Keeping the bounce guards against a
+    // future caller that skips resolveSpec; the details string names
+    // the contract token (pm=brew_only is the user-facing version that
+    // mapDoError ultimately surfaces).
     const { stub } = makeStub();
     const result = await score(stub, { pm: 'brew', package: 'bat', binary: 'bat' });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toBe('install_unsupported');
     expect(result.details).toContain('brew');
-  });
-
-  test('bun → install_unsupported (Bun runtime not in sandbox image, Bug B)', async () => {
-    // Bun parses cleanly at U4 (parse-install accepts `bun add -g ...`)
-    // but the sandbox image has no bun runtime — no Alpine apk package,
-    // not installed via tarball. Bouncing as install_unsupported (rather
-    // than letting the install fail with `bun: command not found`) keeps
-    // the user-facing CTA on install-anc-locally rather than implying a
-    // transient install error.
-    const { stub } = makeStub();
-    const result = await score(stub, { pm: 'bun', package: 'prettier', binary: 'prettier' });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toBe('install_unsupported');
-    expect(result.details).toContain('bun');
   });
 
   test('install command non-zero → chain_resolved_install_failed', async () => {

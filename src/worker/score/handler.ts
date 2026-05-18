@@ -474,14 +474,18 @@ function mapDoError(payload: { error: string; details?: string }): Response {
     case 'chain_resolved_no_binary_produced':
       return shapeScoreError({ code: 'chain_resolved_no_binary_produced', details, cta_text: CTA_INSTALL_ANC });
     case 'install_unsupported': {
-      // DO emits details like `pm=brew` or `pm=bun`. ScoreError.pm is a
+      // DO emits details like `pm=brew_only` or `pm=bun`. ScoreError.pm is a
       // closed union over the PMs the user-facing error envelope knows
-      // about: 'brew' (Linuxbrew on Alpine/musl, Finding F3) and 'bun'
-      // (Bun runtime absent from the sandbox image, Bug B). Any other
-      // pm bouncing here collapses to chain_resolved_install_failed so
-      // we don't lie about which surface is broken.
+      // about. After the 2026-05-18 rework: 'brew_only' (brew formula
+      // exists but has no alternative PM via the discovery fallback),
+      // 'brew' (legacy code path kept for safety — should be unreachable
+      // post-rework but still maps to a sensible variant if emitted),
+      // and 'bun' (kept for safety; bun is now installable so this
+      // branch should also be unreachable). Any other pm bouncing here
+      // collapses to chain_resolved_install_failed so we don't lie
+      // about which surface is broken.
       const pm = details.match(/^pm=(\w+)/)?.[1];
-      if (pm === 'brew' || pm === 'bun') {
+      if (pm === 'brew_only' || pm === 'brew' || pm === 'bun') {
         return shapeScoreError({ code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC });
       }
       return shapeScoreError({ code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC });

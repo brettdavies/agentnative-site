@@ -26,6 +26,10 @@ import type { DiscoveryHintsIndex } from './registry-lookup';
 import { score as runSandboxScore, type ScoreResult } from './sandbox-exec';
 import type { ValidatedInput } from './validate';
 
+export type BrewFallbackResult =
+  | { ok: true; value: InstallSpec }
+  | { ok: false; error: 'install_unsupported'; details: 'pm=brew_only' };
+
 // ---------------------------------------------------------------------------
 // Env contract
 // ---------------------------------------------------------------------------
@@ -127,7 +131,11 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     }
 
     const spec = await this.resolveSpec(parsed.input);
-    if (!spec.ok) return json({ error: spec.error }, statusFor(spec.error));
+    if (!spec.ok) {
+      const body: { error: string; details?: string } = { error: spec.error };
+      if (spec.details) body.details = spec.details;
+      return json(body, statusFor(spec.error));
+    }
 
     const result = await this.score(spec.value);
     if (!result.ok) {
@@ -165,8 +173,22 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
 
   private async resolveSpec(
     input: ValidatedInput,
-  ): Promise<{ ok: true; value: InstallSpec } | { ok: false; error: string }> {
+  ): Promise<{ ok: true; value: InstallSpec } | { ok: false; error: string; details?: string }> {
     if (input.kind === 'install-command') {
+      // Brew discovery-fallback (2026-05-18 rework). Linuxbrew on Linux
+      // is too slow for the 60 s combined install+score budget; instead
+      // of installing brew in the image, treat `brew install <pkg>`
+      // user-input as a hint to find an alternative PM via the
+      // discovery chain. If discovery succeeds, the substituted spec
+      // runs through the normal install path; if it misses, the
+      // request bounces as install_unsupported pm=brew_only so the
+      // user-facing CTA distinguishes "brew has no peer for this tool"
+      // from "we can't run brew at all". See the K-decision in the
+      // 2026-05-18 handoff for the Linuxbrew-vs-fallback comparison.
+      if (input.spec.pm === 'brew') {
+        const hints = await this.loadHintsIndex();
+        return await resolveBrewFallback(input.spec.package, hints);
+      }
       return { ok: true, value: input.spec };
     }
     if (input.kind === 'github-url') {
@@ -184,6 +206,96 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     // the GET path uses so the front-end can render the same CTA.
     return { ok: false, error: 'chain_no_resolve' };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Brew discovery-fallback
+//
+// `brew install <pkg>` user input is translated to an alternative PM
+// via the discovery chain. brew_only bounces happen when:
+//   - the formula isn't on formulae.brew.sh (404 or fetch error), OR
+//   - the formula's homepage isn't a github.com URL, OR
+//   - the discovery chain misses every distribution OR loops back to
+//     brew (the chain's brew-last priority should prevent the loop,
+//     but the guard catches a regression there).
+//
+// Fetcher injection lets tests pin behavior without touching
+// globalThis.fetch.
+// ---------------------------------------------------------------------------
+
+export async function resolveBrewFallback(
+  pkg: string,
+  hintsIndex: DiscoveryHintsIndex,
+  fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<BrewFallbackResult> {
+  const formula = await fetchBrewFormula(pkg, fetcher);
+  if (!formula) {
+    return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+  }
+  const ownerRepo = parseGithubOwnerRepo(formula.homepage);
+  if (!ownerRepo) {
+    return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+  }
+  const result = await discoverBinary({
+    owner: ownerRepo.owner,
+    repo: ownerRepo.repo,
+    hintsIndex,
+    fetcher,
+  });
+  if (result.ok && result.spec.pm !== 'brew') {
+    return { ok: true, value: result.spec };
+  }
+  return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+}
+
+// ---------------------------------------------------------------------------
+// Brew formula fetcher (discovery-fallback support)
+// ---------------------------------------------------------------------------
+
+type BrewFormulaShape = {
+  homepage?: string;
+};
+
+// Short 2 s timeout: discovery already runs against 5+ registries with
+// their own deadlines; stacking another long timeout here would hurt
+// the worst-case latency more than the bounce itself.
+async function fetchBrewFormula(pkg: string, fetcher: typeof fetch): Promise<BrewFormulaShape | null> {
+  const url = `https://formulae.brew.sh/api/formula/${encodeURIComponent(pkg.toLowerCase())}.json`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 2_000);
+  try {
+    const res = await fetcher(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'anc-discovery/1.0 (+https://anc.dev)' },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as BrewFormulaShape;
+    return data ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Mirrors validate.ts's GITHUB_URL_RE shape so the same repo-root
+// constraints apply — `tree/branch` paths in a formula's homepage
+// field don't drift into resolveSpec.
+export function parseGithubOwnerRepo(url: string | undefined): { owner: string; repo: string } | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== 'github.com') return null;
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length < 2) return null;
+  const owner = segments[0];
+  const repo = segments[1].replace(/\.git$/, '');
+  if (!owner || !repo) return null;
+  return { owner, repo };
 }
 
 // Wire named handlers on the class. Done at module load so a wrangler

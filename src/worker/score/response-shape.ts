@@ -35,7 +35,7 @@ export type ScoreError =
   | { code: 'chain_no_resolve'; cta_text: string }
   | { code: 'discovery_redirect_loop'; cta_text: string }
   | { code: 'rate_limited'; retry_after: number; cta_text: string }
-  | { code: 'install_unsupported'; pm: 'brew' | 'bun' | 'go-compile-only'; cta_text: string }
+  | { code: 'install_unsupported'; pm: 'brew' | 'brew_only' | 'bun' | 'go-compile-only'; cta_text: string }
   | { code: 'chain_resolved_install_failed'; details: string; cta_text: string }
   | { code: 'chain_resolved_no_binary_produced'; details: string; cta_text: string }
   | { code: 'timeout'; phase: 'install' | 'score'; cta_text: string }
