@@ -1,40 +1,333 @@
-// Stub Sandbox DO class for plan U3 wrangler binding registration.
+// Live-scoring Sandbox Durable Object — install + anc check inside an
+// Alpine + musl Container, with two-phase egress (R7) enforced via the
+// CF Sandbox SDK's named outbound handlers (Pattern Y, plan K-decision).
 //
-// The full implementation (extends the Cloudflare Sandbox SDK, runs the
-// two-phase egress + install + anc check flow) lands in U6 with the
-// `@cloudflare/sandbox` import. Until then this exists ONLY to satisfy
-// `wrangler deploy --dry-run` — the Containers + DurableObjects bindings
-// in wrangler.jsonc reference `class_name: "Sandbox"` and wrangler
-// resolves that name by reading the Worker's main module exports.
+// Plan U6 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
+// lines 1817-1944). The U3 stub this replaces returned `{error:
+// 'sandbox_stub_until_u6'}` from a placeholder fetch(); the real class
+// here extends `@cloudflare/sandbox` and inherits the runtime egress
+// control + container exec surface from `@cloudflare/containers`.
 //
-// Uses the legacy class-form DO pattern (no `cloudflare:workers` import)
-// rather than `extends DurableObject` because Bun's test runtime can't
-// resolve the `cloudflare:workers` virtual module — it's a Workers
-// runtime-only entry that bundles in via the Worker build, not Bun's
-// package resolver. U6 will switch to `extends Sandbox` from
-// `@cloudflare/sandbox`, which IS bun-resolvable as a real npm package.
+// Test-mode importability:
 //
-// Calling any RPC method before U6 lands returns a typed error so the
-// surfacing is loud rather than silent if something accidentally hits
-// the binding early (e.g. a misrouted handler, a leaked staging URL).
+//   `@cloudflare/containers` does a top-level `import { DurableObject }
+//   from 'cloudflare:workers'` (workerd virtual module). Bun's test
+//   runtime can't resolve `cloudflare:workers` natively; tests/bun-setup.ts
+//   registers a virtual-module shim so do.ts loads inside `bun test`
+//   without bringing in real DO state machinery. The shim provides no-op
+//   base classes — enough for `import { Sandbox } from '@cloudflare/sandbox'`
+//   to succeed at module load. Tests that exercise real DO behavior
+//   (state, alarms, container exec) require a workerd-backed runtime.
 
-export class Sandbox {
-  // biome-ignore lint/complexity/noUselessConstructor: stub signature mirrors the runtime DO contract that U6 will fill in
-  constructor(_state: DurableObjectState, _env: unknown) {}
+import type { OutboundHandler } from '@cloudflare/containers';
+import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
+import { discoverBinary, type InstallSpec } from './discover-binary';
+import type { DiscoveryHintsIndex } from './registry-lookup';
+import { score as runSandboxScore, type ScoreResult } from './sandbox-exec';
+import type { ValidatedInput } from './validate';
 
-  // U5's handler invokes the DO via `stub.fetch(...)` so the route is
-  // wired end-to-end against the binding boundary. Until U6 lands the
-  // real Sandbox class, every request returns the stub envelope; the
-  // handler maps it to a 503 with `sandbox_stub_until_u6`.
-  async fetch(_request: Request): Promise<Response> {
-    return new Response(JSON.stringify({ error: 'sandbox_stub_until_u6' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
+export type BrewFallbackResult =
+  | { ok: true; value: InstallSpec }
+  | { ok: false; error: 'install_unsupported'; details: 'pm=brew_only' };
+
+// ---------------------------------------------------------------------------
+// Env contract
+// ---------------------------------------------------------------------------
+
+// Wrangler injects all Worker bindings into the DO's env at construction.
+// We declare only what this DO uses so tests can pass a minimal stub.
+export type ScoreSandboxEnv = {
+  ASSETS: Fetcher;
+};
+
+// Body shape U5's handler.ts sends:
+//   stub.fetch(new Request('https://do.internal/score', {
+//     method: 'POST',
+//     body: JSON.stringify({ input: validated, hash: inputHash }),
+//   }))
+export type ScoreRequestBody = {
+  input: ValidatedInput;
+  hash: string;
+};
+
+// ---------------------------------------------------------------------------
+// Outbound handlers (Pattern Y — named, runtime-swappable)
+//
+// Per-request egress observability is the design rationale for choosing
+// named handlers (Pattern Y) over a static allowedHosts list (Pattern X)
+// in the plan K-decision: every outbound attempt during install OR after
+// the noHttp lockdown emits one structured log line so attempted-but-
+// blocked egress surfaces as a security signal in Workers Logs.
+// ---------------------------------------------------------------------------
+
+type AllowedInstallParams = { allowedHostnames: string[] };
+
+// Match a hostname against an allowlist that supports leading-wildcard
+// entries (`*.githubusercontent.com` matches
+// `objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
+// etc.). Exact matches still work without the wildcard. Kept
+// conservative: only `*.` prefix is supported (not arbitrary glob), and
+// the wildcard requires AT LEAST ONE subdomain label — bare apex hits
+// (`githubusercontent.com`) must be allowlisted explicitly to avoid
+// over-permissive matching when the apex domain has different trust
+// semantics from its CDN subdomains.
+function hostnameAllowed(host: string, allowlist: readonly string[]): boolean {
+  for (const entry of allowlist) {
+    if (entry === host) return true;
+    if (entry.startsWith('*.')) {
+      const suffix = entry.slice(1); // `.githubusercontent.com`
+      if (host.length > suffix.length && host.endsWith(suffix)) return true;
+    }
+  }
+  return false;
+}
+
+const allowedInstall: OutboundHandler<unknown, AllowedInstallParams> = async (req, _env, ctx) => {
+  const host = new URL(req.url).hostname;
+  const allowed = hostnameAllowed(host, ctx.params.allowedHostnames);
+  console.log(JSON.stringify({ phase: 'install', host, allowed }));
+  if (allowed) return fetch(req);
+  return new Response(null, { status: 403 });
+};
+
+const noHttp: OutboundHandler = async (req) => {
+  const host = new URL(req.url).hostname;
+  console.log(JSON.stringify({ phase: 'noHttp', host, blocked: true }));
+  return new Response(null, { status: 403 });
+};
+
+// Export the handler shapes so tests can call them as plain functions
+// without instantiating the DO class. Useful for the per-request log
+// shape assertion (test scenario (c)).
+export const handlers = { allowedInstall, noHttp };
+
+// ---------------------------------------------------------------------------
+// DO class
+// ---------------------------------------------------------------------------
+
+export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
+  // TLS interception so HTTPS install hosts (crates.io, pypi.org, etc.)
+  // flow through our outbound handlers. Default-on as of CF Sandbox 0.8.7
+  // (PR #550), declared explicitly for grep-ability.
+  override interceptHttps = true;
+
+  // Override BaseSandbox.fetch (which normally proxies to the container's
+  // HTTP listener) to dispatch the score endpoint instead. Our container
+  // is a compute substrate exposed via exec(), not an HTTP service.
+  override async fetch(request: Request): Promise<Response> {
+    if (request.method !== 'POST') {
+      return json({ error: 'method_not_allowed' }, 405);
+    }
+
+    let parsed: ScoreRequestBody;
+    try {
+      const body = (await request.json()) as ScoreRequestBody;
+      if (!body || typeof body !== 'object' || !body.input) {
+        return json({ error: 'invalid_do_body' }, 400);
+      }
+      parsed = body;
+    } catch {
+      return json({ error: 'invalid_do_body' }, 400);
+    }
+
+    const spec = await this.resolveSpec(parsed.input);
+    if (!spec.ok) {
+      const body: { error: string; details?: string } = { error: spec.error };
+      if (spec.details) body.details = spec.details;
+      return json(body, statusFor(spec.error));
+    }
+
+    const result = await this.score(spec.value);
+    if (!result.ok) {
+      return json({ error: result.error, details: result.details }, statusFor(result.error));
+    }
+    return json(result.value, 200);
   }
 
-  // Reserved RPC method — U6 replaces with the real install + score flow.
-  async score(): Promise<{ error: string }> {
-    return { error: 'sandbox_stub_until_u6' };
+  // RPC entry point — used by tests that want to invoke the score flow
+  // without round-tripping a Request. Also makes the orchestration unit
+  // independently exercisable from a server-side caller (e.g. a future
+  // batch-scoring cron Worker).
+  async score(spec: InstallSpec): Promise<ScoreResult> {
+    return runSandboxScore(this, spec);
+  }
+
+  // Hints index — cached per DO instance (one fetch per cold DO). DO
+  // instance lifetime is bounded by container sleepAfter (5 min by
+  // plan U6), so cold-fetches are amortized across reuse.
+  private hintsPromise: Promise<DiscoveryHintsIndex> | null = null;
+  private async loadHintsIndex(): Promise<DiscoveryHintsIndex> {
+    if (!this.hintsPromise) {
+      this.hintsPromise = this.env.ASSETS.fetch(new Request('https://assets.internal/discovery-hints-index.json'))
+        .then((r) => {
+          if (!r.ok) throw new Error(`hints fetch ${r.status}`);
+          return r.json() as Promise<DiscoveryHintsIndex>;
+        })
+        .catch((err) => {
+          this.hintsPromise = null;
+          throw err;
+        });
+    }
+    return this.hintsPromise;
+  }
+
+  private async resolveSpec(
+    input: ValidatedInput,
+  ): Promise<{ ok: true; value: InstallSpec } | { ok: false; error: string; details?: string }> {
+    if (input.kind === 'install-command') {
+      // Brew discovery-fallback (2026-05-18 rework). Linuxbrew on Linux
+      // is too slow for the 60 s combined install+score budget; instead
+      // of installing brew in the image, treat `brew install <pkg>`
+      // user-input as a hint to find an alternative PM via the
+      // discovery chain. If discovery succeeds, the substituted spec
+      // runs through the normal install path; if it misses, the
+      // request bounces as install_unsupported pm=brew_only so the
+      // user-facing CTA distinguishes "brew has no peer for this tool"
+      // from "we can't run brew at all". See the K-decision in the
+      // 2026-05-18 handoff for the Linuxbrew-vs-fallback comparison.
+      if (input.spec.pm === 'brew') {
+        const hints = await this.loadHintsIndex();
+        return await resolveBrewFallback(input.spec.package, hints);
+      }
+      return { ok: true, value: input.spec };
+    }
+    if (input.kind === 'github-url') {
+      const hints = await this.loadHintsIndex();
+      const result = await discoverBinary({
+        owner: input.owner,
+        repo: input.repo,
+        hintsIndex: hints,
+      });
+      if (result.ok) return { ok: true, value: result.spec };
+      return { ok: false, error: result.error };
+    }
+    // slug-miss path: registry didn't have a scorecard for the slug AND
+    // U6 doesn't live-score slugs (deferred). Bounce with the same code
+    // the GET path uses so the front-end can render the same CTA.
+    return { ok: false, error: 'chain_no_resolve' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Brew discovery-fallback
+//
+// `brew install <pkg>` user input is translated to an alternative PM
+// via the discovery chain. brew_only bounces happen when:
+//   - the formula isn't on formulae.brew.sh (404 or fetch error), OR
+//   - the formula's homepage isn't a github.com URL, OR
+//   - the discovery chain misses every distribution OR loops back to
+//     brew (the chain's brew-last priority should prevent the loop,
+//     but the guard catches a regression there).
+//
+// Fetcher injection lets tests pin behavior without touching
+// globalThis.fetch.
+// ---------------------------------------------------------------------------
+
+export async function resolveBrewFallback(
+  pkg: string,
+  hintsIndex: DiscoveryHintsIndex,
+  fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<BrewFallbackResult> {
+  const formula = await fetchBrewFormula(pkg, fetcher);
+  if (!formula) {
+    return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+  }
+  const ownerRepo = parseGithubOwnerRepo(formula.homepage);
+  if (!ownerRepo) {
+    return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+  }
+  const result = await discoverBinary({
+    owner: ownerRepo.owner,
+    repo: ownerRepo.repo,
+    hintsIndex,
+    fetcher,
+  });
+  if (result.ok && result.spec.pm !== 'brew') {
+    return { ok: true, value: result.spec };
+  }
+  return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+}
+
+// ---------------------------------------------------------------------------
+// Brew formula fetcher (discovery-fallback support)
+// ---------------------------------------------------------------------------
+
+type BrewFormulaShape = {
+  homepage?: string;
+};
+
+// Short 2 s timeout: discovery already runs against 5+ registries with
+// their own deadlines; stacking another long timeout here would hurt
+// the worst-case latency more than the bounce itself.
+async function fetchBrewFormula(pkg: string, fetcher: typeof fetch): Promise<BrewFormulaShape | null> {
+  const url = `https://formulae.brew.sh/api/formula/${encodeURIComponent(pkg.toLowerCase())}.json`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 2_000);
+  try {
+    const res = await fetcher(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'anc-discovery/1.0 (+https://anc.dev)' },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as BrewFormulaShape;
+    return data ?? null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Mirrors validate.ts's GITHUB_URL_RE shape so the same repo-root
+// constraints apply — `tree/branch` paths in a formula's homepage
+// field don't drift into resolveSpec.
+export function parseGithubOwnerRepo(url: string | undefined): { owner: string; repo: string } | null {
+  if (!url) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname !== 'github.com') return null;
+  const segments = parsed.pathname.split('/').filter(Boolean);
+  if (segments.length < 2) return null;
+  const owner = segments[0];
+  const repo = segments[1].replace(/\.git$/, '');
+  if (!owner || !repo) return null;
+  return { owner, repo };
+}
+
+// Wire named handlers on the class. Done at module load so a wrangler
+// binding-resolution pass picks up the static map before any handler
+// invocation. Plan U6 test scenario (a) asserts both keys are present.
+Sandbox.outboundHandlers = { allowedInstall, noHttp };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function json(payload: unknown, status: number): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function statusFor(error: string): number {
+  switch (error) {
+    case 'chain_resolved_install_failed':
+    case 'chain_resolved_no_binary_produced':
+    case 'install_unsupported':
+    case 'anc_check_failed':
+      return 502;
+    case 'timeout':
+      return 504;
+    case 'chain_no_resolve':
+      return 404;
+    case 'anc_version_unreadable':
+      return 500;
+    default:
+      return 500;
   }
 }

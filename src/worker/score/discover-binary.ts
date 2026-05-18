@@ -295,12 +295,21 @@ async function step3_distributions(
   const goLoose = !!goRes?.ok;
   const goTight = goLoose;
 
-  // Priority order matches the plan: brew -> crates -> npm -> pypi -> go.
-  if (brewTight) return { hit: true, pm: 'brew', step: '3-brew' };
+  // Priority order: U6-supported PMs first (crates / npm / pypi / go),
+  // brew last. Original plan said brew first, but the U6 install table
+  // bounces brew as install_unsupported (Linuxbrew is non-viable on
+  // musl, Finding F3). If a tool has both a brew formula AND a working
+  // alternative (e.g. csvlens is in brew AND on crates.io), picking
+  // brew sends the user to a guaranteed bounce when scoring was
+  // possible. Brew is kept as the last resort so brew-only tools still
+  // bounce honestly rather than degrading to chain_no_resolve and
+  // hitting Step 4 README parse — the bounce message at least names
+  // the brew formula. Bug J fix (2026-05-18).
   if (cratesTight) return { hit: true, pm: 'cargo-binstall', step: '3-crates' };
   if (npmTight) return { hit: true, pm: 'npm', step: '3-npm' };
   if (pypiTight) return { hit: true, pm: 'pip', step: '3-pypi' };
   if (goTight) return { hit: true, pm: 'go', step: '3-go' };
+  if (brewTight) return { hit: true, pm: 'brew', step: '3-brew' };
 
   return {
     hit: false,
