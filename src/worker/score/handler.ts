@@ -240,7 +240,16 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   // 7. DO call — U6 ships the real install + score flow. The DO returns
   //   either `{scorecard, anc_version}` on success or `{error, details?}`
   //   on failure, mapped below into the typed ScoreError union.
-  const id = env.SCORE.idFromName('singleton');
+  //
+  // Versioned singleton name: bumping the name string spawns a fresh DO
+  // instance (and fresh container session) the next time it's invoked.
+  // Useful when a deploy lands a sandbox-state-incompatible change and
+  // the existing singleton container session is stuck (observed
+  // 2026-05-18 — prior session hung on first exec after a DO code
+  // update; bumping the version unblocked it). Increment when the DO's
+  // session contract changes meaningfully (install table, outbound
+  // handler shape, etc.).
+  const id = env.SCORE.idFromName('singleton-u6-v2');
   const stub = env.SCORE.get(id);
   const doRes = await stub.fetch(
     new Request('https://do.internal/score', {
@@ -451,13 +460,15 @@ function mapDoError(payload: { error: string; details?: string }): Response {
     case 'chain_resolved_no_binary_produced':
       return shapeScoreError({ code: 'chain_resolved_no_binary_produced', details, cta_text: CTA_INSTALL_ANC });
     case 'install_unsupported': {
-      // DO emits details like `pm=brew`. Only `brew` is a documented
-      // user-facing install_unsupported (Linuxbrew/musl Finding F3); any
-      // other pm bouncing here collapses to chain_resolved_install_failed
-      // so we don't lie about which surface is broken.
+      // DO emits details like `pm=brew` or `pm=bun`. ScoreError.pm is a
+      // closed union over the PMs the user-facing error envelope knows
+      // about: 'brew' (Linuxbrew on Alpine/musl, Finding F3) and 'bun'
+      // (Bun runtime absent from the sandbox image, Bug B). Any other
+      // pm bouncing here collapses to chain_resolved_install_failed so
+      // we don't lie about which surface is broken.
       const pm = details.match(/^pm=(\w+)/)?.[1];
-      if (pm === 'brew') {
-        return shapeScoreError({ code: 'install_unsupported', pm: 'brew', cta_text: CTA_INSTALL_ANC });
+      if (pm === 'brew' || pm === 'bun') {
+        return shapeScoreError({ code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC });
       }
       return shapeScoreError({ code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC });
     }

@@ -105,7 +105,7 @@ describe('sandbox-exec.score() — two-phase egress ordering (test scenario b)',
     const { stub, calls } = makeStub();
     await score(stub, CARGO_SPEC);
     const phase1 = calls.findIndex((c) => c.kind === 'setOutboundHandler' && c.name === 'allowedInstall');
-    const installExec = calls.findIndex((c) => c.kind === 'exec' && c.command.startsWith('cargo binstall '));
+    const installExec = calls.findIndex((c) => c.kind === 'exec' && c.command.startsWith('cargo-binstall '));
     expect(phase1).toBeGreaterThanOrEqual(0);
     expect(installExec).toBeGreaterThan(phase1);
   });
@@ -151,6 +151,97 @@ describe('sandbox-exec.score() — two-phase egress ordering (test scenario b)',
         `unexpected exec under noHttp egress: ${exec.command}`,
       ).toBe(true);
     }
+  });
+});
+
+describe('allowedInstall handler — wildcard hostname matcher', () => {
+  // GitHub moved release assets from objects.githubusercontent.com to
+  // release-assets.githubusercontent.com mid-2024; may shift again.
+  // Allowlist entries supporting `*.githubusercontent.com` cover the
+  // moving target without per-CDN-host churn. Defends the matcher
+  // semantics so the wildcard never accidentally widens (a regex bug
+  // that matched `evil.example.com.attacker.tld` as `*.com` would be
+  // catastrophic).
+  test('exact hostname match still works', async () => {
+    const captured: string[] = [];
+    const orig = console.log;
+    console.log = (m: string) => captured.push(m);
+    try {
+      const resp = await handlers.allowedInstall(new Request('https://crates.io/api/v1/crates/ripgrep'), {} as never, {
+        containerId: 'x',
+        className: 'Sandbox',
+        params: { allowedHostnames: ['crates.io'] },
+      });
+      expect(resp.status).not.toBe(403); // would 403 only if blocked
+    } finally {
+      console.log = orig;
+    }
+    expect(JSON.parse(captured[0]).allowed).toBe(true);
+  });
+
+  test('*.githubusercontent.com matches release-assets, objects, raw, codeload subdomains', async () => {
+    const captured: string[] = [];
+    const orig = console.log;
+    console.log = (m: string) => captured.push(m);
+    const allowlist = ['*.githubusercontent.com'];
+    const subs = [
+      'objects.githubusercontent.com',
+      'release-assets.githubusercontent.com',
+      'raw.githubusercontent.com',
+      'codeload.githubusercontent.com',
+    ];
+    try {
+      for (const sub of subs) {
+        await handlers.allowedInstall(new Request(`https://${sub}/foo`), {} as never, {
+          containerId: 'x',
+          className: 'Sandbox',
+          params: { allowedHostnames: allowlist },
+        });
+      }
+    } finally {
+      console.log = orig;
+    }
+    expect(captured.length).toBe(subs.length);
+    for (const line of captured) {
+      expect(JSON.parse(line).allowed).toBe(true);
+    }
+  });
+
+  test('*.githubusercontent.com rejects evil.com.githubusercontent.com.attacker.tld (no suffix-extension attack)', async () => {
+    const captured: string[] = [];
+    const orig = console.log;
+    console.log = (m: string) => captured.push(m);
+    try {
+      const resp = await handlers.allowedInstall(
+        new Request('https://githubusercontent.com.attacker.tld/payload'),
+        {} as never,
+        { containerId: 'x', className: 'Sandbox', params: { allowedHostnames: ['*.githubusercontent.com'] } },
+      );
+      expect(resp.status).toBe(403);
+    } finally {
+      console.log = orig;
+    }
+    expect(JSON.parse(captured[0]).allowed).toBe(false);
+  });
+
+  test('*.githubusercontent.com does NOT match bare githubusercontent.com (apex must be explicit)', async () => {
+    // Defensive: the wildcard is for SUBdomains only. Bare apex hits
+    // would surprise an operator who allowlisted the wildcard expecting
+    // CDN coverage. If apex coverage is needed, add it explicitly.
+    const captured: string[] = [];
+    const orig = console.log;
+    console.log = (m: string) => captured.push(m);
+    try {
+      const resp = await handlers.allowedInstall(new Request('https://githubusercontent.com/foo'), {} as never, {
+        containerId: 'x',
+        className: 'Sandbox',
+        params: { allowedHostnames: ['*.githubusercontent.com'] },
+      });
+      expect(resp.status).toBe(403);
+    } finally {
+      console.log = orig;
+    }
+    expect(JSON.parse(captured[0]).allowed).toBe(false);
   });
 });
 
@@ -247,26 +338,33 @@ describe('sandbox-exec.score() — happy path', () => {
 });
 
 describe('sandbox-exec.score() — install table per PM', () => {
+  // Each case pins the EXACT command string the orchestration emits.
+  // First-token alignment with an actual binary in the sandbox image is
+  // the load-bearing invariant: `cargo-binstall` (one word, hyphenated)
+  // matches the Dockerfile's standalone binary, NOT `cargo binstall`
+  // (which assumes a rust toolchain we don't ship). Bug A surfaced when
+  // these tests pinned the wrong form; do not relax to a startsWith
+  // match — exact equality keeps the binary-name regression alarm loud.
   const cases: Array<{ spec: InstallSpec; expected: string }> = [
     {
       spec: { pm: 'cargo-binstall', package: 'ripgrep', binary: 'rg' },
-      expected: "cargo binstall --no-confirm --no-symlinks 'ripgrep'",
+      // --install-path /usr/local/bin forces binary onto PATH (Bug L).
+      expected: "cargo-binstall --no-confirm --no-symlinks --install-path /usr/local/bin 'ripgrep'",
     },
     {
       spec: { pm: 'pip', package: 'black', binary: 'black' },
-      expected: "pip install --only-binary=:all: --no-cache-dir 'black'",
+      // PIP_NO_COLOR=1 prefix suppresses pip's ANSI color codes (Bug D).
+      // --break-system-packages overrides Alpine's PEP 668 refusal (Bug I).
+      expected: "PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir --break-system-packages 'black'",
     },
     {
       spec: { pm: 'npm', package: 'typescript', binary: 'tsc' },
       expected: "npm install -g --ignore-scripts 'typescript'",
     },
     {
-      spec: { pm: 'bun', package: 'tsx', binary: 'tsx' },
-      expected: "bun add -g --ignore-scripts 'tsx'",
-    },
-    {
       spec: { pm: 'go', package: 'github.com/jesseduffield/lazygit', binary: 'lazygit' },
-      expected: "go install 'github.com/jesseduffield/lazygit'@latest",
+      // GOBIN=/usr/local/bin forces binary onto PATH (Bug L).
+      expected: "GOBIN=/usr/local/bin go install 'github.com/jesseduffield/lazygit'@latest",
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.gz', binary: 'foo' },
@@ -289,6 +387,30 @@ describe('sandbox-exec.score() — install table per PM', () => {
       expect(installCmds[0].command).toBe(expected);
     });
   }
+
+  test('install table first tokens match binaries present in the sandbox Dockerfile', async () => {
+    // Systemic catch: every install command in the table MUST start with
+    // a binary name that actually exists on the sandbox container PATH.
+    // The set below mirrors docker/sandbox/Dockerfile's apk install line
+    // + the standalone tarballs. Keep in sync with the Dockerfile.
+    const knownBinaries = new Set([
+      'cargo-binstall', // tarball at /usr/local/bin/
+      'pip', // py3-pip apk
+      'npm', // npm apk
+      'go', // go apk
+      'curl', // curl apk
+      'PIP_NO_COLOR=1', // env-var prefix (not a binary) — pip case
+      'GOBIN=/usr/local/bin', // env-var prefix (not a binary) — go case
+    ]);
+    for (const { spec, expected } of cases) {
+      const firstToken = expected.split(/\s+/)[0];
+      expect(
+        knownBinaries.has(firstToken),
+        `pm=${spec.pm} install command first token "${firstToken}" not in known binaries; ` +
+          `update docker/sandbox/Dockerfile or sandbox-exec.ts install table`,
+      ).toBe(true);
+    }
+  });
 });
 
 describe('sandbox-exec.score() — bounce classes', () => {
@@ -301,9 +423,24 @@ describe('sandbox-exec.score() — bounce classes', () => {
     expect(result.details).toContain('brew');
   });
 
+  test('bun → install_unsupported (Bun runtime not in sandbox image, Bug B)', async () => {
+    // Bun parses cleanly at U4 (parse-install accepts `bun add -g ...`)
+    // but the sandbox image has no bun runtime — no Alpine apk package,
+    // not installed via tarball. Bouncing as install_unsupported (rather
+    // than letting the install fail with `bun: command not found`) keeps
+    // the user-facing CTA on install-anc-locally rather than implying a
+    // transient install error.
+    const { stub } = makeStub();
+    const result = await score(stub, { pm: 'bun', package: 'prettier', binary: 'prettier' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('install_unsupported');
+    expect(result.details).toContain('bun');
+  });
+
   test('install command non-zero → chain_resolved_install_failed', async () => {
     const responder: ExecResponder = (cmd) => {
-      if (cmd.startsWith('cargo binstall ')) {
+      if (cmd.startsWith('cargo-binstall ')) {
         return { success: false, stdout: '', stderr: 'no binary asset for x86_64-musl', exitCode: 1 };
       }
       return defaultResponder(cmd);
@@ -314,6 +451,31 @@ describe('sandbox-exec.score() — bounce classes', () => {
     if (result.ok) return;
     expect(result.error).toBe('chain_resolved_install_failed');
     expect(result.details).toContain('no binary asset');
+  });
+
+  test('install stderr with ANSI color codes → details field strips them (Bug D)', async () => {
+    // pip emits CSI escape sequences in progress output. The truncate()
+    // helper strips them before returning so the user-facing details
+    // field is plain text — no `\x1b[31m` artifacts visible in the API
+    // response or downstream CLI / browser renderings.
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.includes('pip install ')) {
+        return {
+          success: false,
+          stdout: '',
+          stderr: '\x1b[31mERROR\x1b[0m: Could not find a version that satisfies the requirement nonexistent',
+          exitCode: 1,
+        };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub } = makeStub(responder);
+    const result = await score(stub, { pm: 'pip', package: 'nonexistent', binary: 'nonexistent' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('chain_resolved_install_failed');
+    expect(result.details).toBe('ERROR: Could not find a version that satisfies the requirement nonexistent');
+    expect(result.details).not.toContain('\x1b');
   });
 
   test('which check misses → chain_resolved_no_binary_produced (pallets/click case)', async () => {

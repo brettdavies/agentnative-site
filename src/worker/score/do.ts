@@ -58,9 +58,29 @@ export type ScoreRequestBody = {
 
 type AllowedInstallParams = { allowedHostnames: string[] };
 
+// Match a hostname against an allowlist that supports leading-wildcard
+// entries (`*.githubusercontent.com` matches
+// `objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
+// etc.). Exact matches still work without the wildcard. Kept
+// conservative: only `*.` prefix is supported (not arbitrary glob), and
+// the wildcard requires AT LEAST ONE subdomain label — bare apex hits
+// (`githubusercontent.com`) must be allowlisted explicitly to avoid
+// over-permissive matching when the apex domain has different trust
+// semantics from its CDN subdomains.
+function hostnameAllowed(host: string, allowlist: readonly string[]): boolean {
+  for (const entry of allowlist) {
+    if (entry === host) return true;
+    if (entry.startsWith('*.')) {
+      const suffix = entry.slice(1); // `.githubusercontent.com`
+      if (host.length > suffix.length && host.endsWith(suffix)) return true;
+    }
+  }
+  return false;
+}
+
 const allowedInstall: OutboundHandler<unknown, AllowedInstallParams> = async (req, _env, ctx) => {
   const host = new URL(req.url).hostname;
-  const allowed = ctx.params.allowedHostnames.includes(host);
+  const allowed = hostnameAllowed(host, ctx.params.allowedHostnames);
   console.log(JSON.stringify({ phase: 'install', host, allowed }));
   if (allowed) return fetch(req);
   return new Response(null, { status: 403 });

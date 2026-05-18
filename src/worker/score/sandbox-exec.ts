@@ -90,20 +90,37 @@ const SHORT_EXEC_TIMEOUT_MS = 5_000; // `which`, `anc --version`.
 // Phase 1 install for each PM; Phase 2 (anc check) blocks all hosts.
 // Tightening or relaxing this map changes the security baseline — pair
 // any update with a refresh of the K-decision audit row.
+//
+// GitHub release downloads (cargo-binstall, go install with GitHub-hosted
+// modules, direct binary URLs) hit api.github.com for release metadata,
+// then github.com for the download URL, which 302-redirects to one of
+// several CDN hosts under `*.githubusercontent.com`
+// (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`,
+// `codeload.githubusercontent.com`, `raw.githubusercontent.com`, etc.).
+// The list shifts over time — GitHub moved release assets from
+// `objects.` to `release-assets.` mid-2024 and may shift again. The
+// wildcard `*.githubusercontent.com` entry (matched by the
+// hostnameAllowed helper in do.ts) covers the moving CDN target so we
+// don't keep playing whack-a-mole as GitHub rotates infrastructure.
+// api.github.com queries are subject to the anonymous rate limit
+// (60/hr/IP, pooled across CF egress IPs) — separate runtime risk.
+const GITHUB_RELEASE_HOSTS = [
+  'api.github.com',
+  'github.com',
+  'codeload.github.com',
+  '*.githubusercontent.com',
+] as const;
+
 const INSTALL_HOSTS: Record<string, readonly string[]> = {
-  'cargo-binstall': [
-    'crates.io',
-    'static.crates.io',
-    'github.com',
-    'objects.githubusercontent.com',
-    'codeload.github.com',
-  ],
+  // `index.crates.io` is the sparse-index host (default in cargo
+  // 1.70+); cargo-binstall hits it for `config.json` before any crate
+  // download. Older `crates.io` redirects there, but the sparse index
+  // is the direct path. Without it, cargo-binstall fails with
+  // `403 Forbidden for url (https://index.crates.io/config.json)`.
+  'cargo-binstall': ['crates.io', 'static.crates.io', 'index.crates.io', ...GITHUB_RELEASE_HOSTS],
   pip: ['pypi.org', 'files.pythonhosted.org'],
   npm: ['registry.npmjs.org'],
-  // Bun add -g pulls packages from the npm registry (Bun mirrors npm
-  // resolution). Same allowlist as npm.
-  bun: ['registry.npmjs.org'],
-  go: ['proxy.golang.org', 'sum.golang.org'],
+  go: ['proxy.golang.org', 'sum.golang.org', ...GITHUB_RELEASE_HOSTS],
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -203,30 +220,62 @@ function installCommandFor(spec: InstallSpec): string | null {
     case 'brew':
       // Linuxbrew/musl is non-viable on Alpine (Finding F3). Bounce.
       return null;
+    case 'bun':
+      // Bun runtime is not in the sandbox image (no Alpine apk package,
+      // not installed via tarball). pm=bun parses cleanly at U4 but has
+      // no runtime to invoke; bounce as install_unsupported. Future work
+      // can either add bun to the image or translate to npm install
+      // since bun's package source IS the npm registry — current choice
+      // is to bounce honestly so the user-facing CTA points at
+      // install-anc-locally rather than silently substituting semantics.
+      return null;
     case 'cargo-binstall':
-      return `cargo binstall --no-confirm --no-symlinks ${shellQuote(spec.package)}`;
+      // Standalone `cargo-binstall` binary lives at /usr/local/bin/
+      // (Dockerfile lines 73-80). The image ships NO rust toolchain per
+      // Premise #2 ("no compilers, no toolchains"), so the `cargo` CLI
+      // does not exist — calling `cargo binstall <pkg>` would fail with
+      // `cargo: command not found`. The binstall README documents the
+      // standalone use case.
+      //
+      // --install-path /usr/local/bin overrides cargo-binstall's default
+      // of $CARGO_HOME/bin (= ~/.cargo/bin), which isn't on our PATH.
+      // Without it, the binary installs successfully but the post-install
+      // `which <binary>` gate misses and the request bounces as
+      // chain_resolved_no_binary_produced.
+      return `cargo-binstall --no-confirm --no-symlinks --install-path /usr/local/bin ${shellQuote(spec.package)}`;
     case 'pip':
       // --only-binary=:all: refuses sdist execution (the setup.py
       // arbitrary-code-exec class). --no-cache-dir keeps the container
-      // filesystem clean across requests on a warm DO.
-      return `pip install --only-binary=:all: --no-cache-dir ${shellQuote(spec.package)}`;
+      // filesystem clean across requests on a warm DO. PIP_NO_COLOR=1
+      // suppresses ANSI escape sequences in pip's progress output that
+      // pollute the orchestration's error `details` field when an
+      // install fails. --break-system-packages overrides PEP 668's
+      // "externally-managed-environment" refusal that Alpine's py3-pip
+      // ships with — appropriate for our throwaway sandbox where there
+      // is no system Python to protect.
+      return `PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir --break-system-packages ${shellQuote(spec.package)}`;
     case 'npm':
       // --ignore-scripts suppresses preinstall/install/postinstall
       // lifecycle hooks — keeps Phase 1 egress from being abused by
       // lifecycle scripts before the Phase 2 lockdown fires.
       return `npm install -g --ignore-scripts ${shellQuote(spec.package)}`;
-    case 'bun':
-      // Bun mirrors npm lifecycle semantics; same flag, same reason.
-      return `bun add -g --ignore-scripts ${shellQuote(spec.package)}`;
     case 'go':
       // Toolchain retained per the 2026-05-18 K-decision (commit 9b45b96
       // on dev). `gc` does not execute user code at compile time, so the
       // blast radius is bounded by the 60 s combined timeout.
-      return `go install ${shellQuote(spec.package)}@latest`;
+      //
+      // GOBIN=/usr/local/bin overrides go's default of $GOPATH/bin
+      // (= ~/go/bin), which isn't on our PATH. Same fix as the
+      // cargo-binstall --install-path flag — keeps the post-install
+      // `which <binary>` gate from missing on a successful install.
+      return `GOBIN=/usr/local/bin go install ${shellQuote(spec.package)}@latest`;
     case 'direct':
       // Tarball download + extract to /usr/local/bin. The user-pasted URL
       // is the trust boundary; SHA verification is not done at this
       // layer (no known-good SHA available for arbitrary user input).
+      // -L follows redirects so github.com release URLs that 302 to
+      // objects.githubusercontent.com resolve correctly (the allowlist
+      // expansion in installHostsFor covers the CDN host).
       return `curl -fsSL ${shellQuote(spec.url)} | tar xz -C /usr/local/bin/`;
     default: {
       // Exhaustiveness check — adding a new PM to the InstallSpec union
@@ -241,7 +290,18 @@ function installCommandFor(spec: InstallSpec): string | null {
 function installHostsFor(spec: InstallSpec): readonly string[] {
   if (spec.pm === 'direct') {
     try {
-      return [new URL(spec.url).hostname];
+      const host = new URL(spec.url).hostname;
+      // GitHub release download URLs (`github.com/.../releases/download/...`)
+      // HTTP 302 redirect to `objects.githubusercontent.com`, sometimes
+      // via `codeload.github.com` for source archives. Allow all three
+      // together so `curl -fsSL` can follow the redirect chain to the
+      // actual asset without the allowlist handler 403-ing the redirect
+      // target. Other hosts (e.g. a direct CDN URL) get only the
+      // declared hostname.
+      if (host === 'github.com' || GITHUB_RELEASE_HOSTS.includes(host as (typeof GITHUB_RELEASE_HOSTS)[number])) {
+        return GITHUB_RELEASE_HOSTS;
+      }
+      return [host];
     } catch {
       return [];
     }
@@ -266,9 +326,20 @@ function parseAncVersion(stdout: string): string | null {
   return match ? match[1] : null;
 }
 
+// CSI (Control Sequence Introducer) escape sequences emitted by terminal-
+// aware tools (pip progress bars, npm spinners) pollute the details
+// field that surfaces back to the user. Strip before truncation so the
+// truncated tail isn't a mangled partial escape sequence. The ESC
+// (\x1b) byte is the load-bearing prefix of every ANSI CSI sequence —
+// matching it literally is the point of this pattern, so the biome
+// noControlCharactersInRegex lint is deliberately suppressed here.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC is the CSI prefix; matching it is intentional
+const ANSI_CSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+
 function truncate(s: string | undefined, n = 500): string {
   if (!s) return '';
-  return s.length > n ? `${s.slice(0, n)}…` : s;
+  const clean = s.replace(ANSI_CSI_RE, '');
+  return clean.length > n ? `${clean.slice(0, n)}…` : clean;
 }
 
 function timeoutAfter(ms: number): Promise<ScoreFailure> {
