@@ -26,6 +26,8 @@
 //
 // Other methods → 405.
 
+import type { Container } from '@cloudflare/containers';
+import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
 import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
@@ -34,6 +36,12 @@ import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForErro
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
 import { type ValidatedInput, validateInput } from './validate';
+
+// Sandbox DO instance pool size. Must match `max_instances` in
+// wrangler.jsonc `containers[]` so getRandom's hash space lines up with
+// the CF Containers app config — under-shooting wastes provisioned
+// capacity; over-shooting picks IDs that don't have a container.
+const MAX_INSTANCES = 3;
 
 // ---------------------------------------------------------------------------
 // Env contract
@@ -241,16 +249,22 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   //   either `{scorecard, anc_version}` on success or `{error, details?}`
   //   on failure, mapped below into the typed ScoreError union.
   //
-  // Versioned singleton name: bumping the name string spawns a fresh DO
-  // instance (and fresh container session) the next time it's invoked.
-  // Useful when a deploy lands a sandbox-state-incompatible change and
-  // the existing singleton container session is stuck (observed
-  // 2026-05-18 — prior session hung on first exec after a DO code
-  // update; bumping the version unblocked it). Increment when the DO's
-  // session contract changes meaningfully (install table, outbound
-  // handler shape, etc.).
-  const id = env.SCORE.idFromName('singleton-u6-v2');
-  const stub = env.SCORE.get(id);
+  // Pool of MAX_INSTANCES DO instances via getRandom (plan U6
+  // K-decision). Each request picks a random instance — parallel load
+  // spreads across the pool instead of queuing serially behind a
+  // single container session. Critical for Show HN spike absorption
+  // (singleton bottlenecked at one exec at a time inside the SDK
+  // session, observed 2026-05-18; cold-start + parallel queue =
+  // cascading 60s timeouts).
+  //
+  // getRandom (from @cloudflare/containers) calls
+  // `binding.idFromName('instance-${0..N-1}')` + `binding.get(id)`. IDs
+  // are stable across requests so the same instance reuses its warm
+  // container session for subsequent requests routed to it.
+  const stub = (await getRandom(
+    env.SCORE as unknown as DurableObjectNamespace<Container>,
+    MAX_INSTANCES,
+  )) as DurableObjectStub;
   const doRes = await stub.fetch(
     new Request('https://do.internal/score', {
       method: 'POST',

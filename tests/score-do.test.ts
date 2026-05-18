@@ -353,9 +353,13 @@ describe('sandbox-exec.score() — install table per PM', () => {
     },
     {
       spec: { pm: 'pip', package: 'black', binary: 'black' },
-      // PIP_NO_COLOR=1 prefix suppresses pip's ANSI color codes (Bug D).
-      // --break-system-packages overrides Alpine's PEP 668 refusal (Bug I).
-      expected: "PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir --break-system-packages 'black'",
+      // PIP_NO_COLOR=1: ANSI suppression in pip output (Bug D).
+      // --break-system-packages: overrides Alpine PEP 668 refusal (Bug I).
+      // --use-deprecated=legacy-resolver: bypasses pip 24+ wheel-metadata
+      //   fast-path that 403s on some packages via CF fetch (Bug M).
+      expected:
+        'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ' +
+        "--break-system-packages --use-deprecated=legacy-resolver 'black'",
     },
     {
       spec: { pm: 'npm', package: 'typescript', binary: 'tsc' },

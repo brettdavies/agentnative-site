@@ -252,8 +252,20 @@ function installCommandFor(spec: InstallSpec): string | null {
       // install fails. --break-system-packages overrides PEP 668's
       // "externally-managed-environment" refusal that Alpine's py3-pip
       // ships with — appropriate for our throwaway sandbox where there
-      // is no system Python to protect.
-      return `PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir --break-system-packages ${shellQuote(spec.package)}`;
+      // is no system Python to protect. --use-deprecated=legacy-resolver
+      // disables pip 24+'s wheel-metadata fast-path (PEP 658 .metadata
+      // range-request fetch) that returns 403 from files.pythonhosted.org
+      // for some packages when the request flows through the CF Workers
+      // fetch passthrough (Bug M, root cause unknown but the legacy
+      // resolver downloads full wheels and works reliably). Legacy
+      // resolver is scheduled for removal in pip 25+; this is a
+      // temporary workaround until either a wheel-fetch shape fix lands
+      // or we switch to pipx.
+      return (
+        `PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ` +
+        `--break-system-packages --use-deprecated=legacy-resolver ` +
+        shellQuote(spec.package)
+      );
     case 'npm':
       // --ignore-scripts suppresses preinstall/install/postinstall
       // lifecycle hooks — keeps Phase 1 egress from being abused by
