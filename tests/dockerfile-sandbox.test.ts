@@ -131,4 +131,14 @@ describe('docker/sandbox/Dockerfile — sandbox runtime', () => {
     expect(envPath).toContain('/usr/local/go/bin');
     expect(envPath).toContain('/root/.local/bin'); // pip user-installs
   });
+
+  test('declares at least one EXPOSE so wrangler dev --local accepts the container binding', async () => {
+    // deep-check.yml unblock — see U6 K-decision in the plan. Port 3000
+    // is reserved by the CF Sandbox SDK's internal Bun server, so any
+    // placeholder must avoid it. 8080 is the U6 choice.
+    const df = await loadDockerfile();
+    const exposeLines = df.split('\n').filter((l) => /^EXPOSE\s+\d+/.test(l));
+    expect(exposeLines.length).toBeGreaterThanOrEqual(1);
+    expect(df).not.toMatch(/^EXPOSE\s+3000\b/m);
+  });
 });

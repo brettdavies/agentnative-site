@@ -92,4 +92,15 @@ RUN set -eux; \
 
 ENV PATH="/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:/root/.local/bin:${PATH}"
 
+# wrangler 4.x's `dev --local` rejects container bindings whose Dockerfile
+# declares zero EXPOSE directives ("The container 'Sandbox' does not
+# expose any ports"). The U6 install + score flow doesn't bind a port at
+# runtime — it dispatches `exec()` against the CF Sandbox SDK's internal
+# HTTP server on port 3000 (reserved by the SDK; do not reuse). 8080 is a
+# placeholder that satisfies the static `wrangler dev` check without
+# colliding with the SDK's reserved port. Required to unblock
+# `.github/workflows/deep-check.yml` (both `e2e` and `lhci` jobs start a
+# wrangler dev as the test webServer).
+EXPOSE 8080
+
 ENTRYPOINT ["/sandbox"]

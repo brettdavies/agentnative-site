@@ -1,0 +1,13 @@
+# Bun test runtime config.
+#
+# preload runs before every `bun test` invocation. tests/bun-setup.ts
+# registers a virtual-module shim for `cloudflare:workers`, which
+# `@cloudflare/containers` (transitive dep of `@cloudflare/sandbox`)
+# imports at module load. Without the shim every test that transitively
+# pulls src/worker/score/do.ts (via the Worker entry export) throws
+# `Cannot find package 'cloudflare:workers'` at import time.
+#
+# Rationale lives in tests/bun-setup.ts.
+
+[test]
+preload = ["./tests/bun-setup.ts"]

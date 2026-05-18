@@ -237,9 +237,9 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 
   // 6. R2 cache — U7 lands the read+write. Stubbed as always-miss.
-  // 7. DO call — U6 lands the real sandbox. The stub returns the
-  //   `sandbox_stub_until_u6` envelope; surface it verbatim so the route
-  //   is honest about its state until U6 ships.
+  // 7. DO call — U6 ships the real install + score flow. The DO returns
+  //   either `{scorecard, anc_version}` on success or `{error, details?}`
+  //   on failure, mapped below into the typed ScoreError union.
   const id = env.SCORE.idFromName('singleton');
   const stub = env.SCORE.get(id);
   const doRes = await stub.fetch(
@@ -265,6 +265,9 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     );
   }
 
+  // Defense-in-depth: if the binding ever points back at the U3 stub
+  // (botched rollback, misconfigured wrangler.jsonc) the user gets a
+  // typed 503 instead of a raw stub error envelope.
   if (isStubError(doPayload)) {
     return shapeWithPreference(
       shapeScoreError({ code: 'sandbox_stub_until_u6', cta_text: CTA_INSTALL_ANC }),
@@ -273,11 +276,27 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     );
   }
 
-  // Future U6 success branch — DO returns the scorecard payload. For U5
-  // the stub never reaches here, but the type contract is fixed in place.
-  return shapeWithPreference(shapeScoreSuccess(doPayload, 'unknown', 'live'), preference, {
-    setCookie,
-  });
+  if (isDoError(doPayload)) {
+    return shapeWithPreference(mapDoError(doPayload), preference, { setCookie });
+  }
+
+  if (isDoSuccess(doPayload)) {
+    return shapeWithPreference(shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live'), preference, {
+      setCookie,
+    });
+  }
+
+  // DO returned 2xx but with an unrecognized envelope shape. Fail loud
+  // per R11 rather than synthesize a partial success.
+  return shapeWithPreference(
+    shapeScoreError({
+      code: 'incomplete_response_contract',
+      details: 'DO returned unrecognized envelope shape',
+      cta_text: CTA_INSTALL_ANC,
+    }),
+    preference,
+    { setCookie },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +415,68 @@ function isStubError(payload: unknown): boolean {
   return (
     typeof payload === 'object' && payload !== null && (payload as { error?: string }).error === 'sandbox_stub_until_u6'
   );
+}
+
+// ---------------------------------------------------------------------------
+// DO response envelope type guards + error mapping (U6 contract).
+//
+// The DO returns one of two shapes after install + score:
+//   success:  { scorecard: <anc JSON envelope>, anc_version: '0.3.1' }
+//   failure:  { error: '<ScoreErrorCode>', details?: '<string>' }
+//
+// The handler narrows on the envelope shape, then maps DO error codes to
+// user-facing ScoreError variants. Codes the DO knows about but the user
+// envelope doesn't (anc_check_failed, anc_version_unreadable) collapse to
+// incomplete_response_contract so R11's hard-gate semantics hold.
+
+function isDoSuccess(payload: unknown): payload is { scorecard: unknown; anc_version: string } {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const obj = payload as Record<string, unknown>;
+  return 'scorecard' in obj && typeof obj.anc_version === 'string';
+}
+
+function isDoError(payload: unknown): payload is { error: string; details?: string } {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const obj = payload as Record<string, unknown>;
+  return typeof obj.error === 'string';
+}
+
+function mapDoError(payload: { error: string; details?: string }): Response {
+  const details = payload.details ?? '';
+  switch (payload.error) {
+    case 'chain_no_resolve':
+      return shapeScoreError({ code: 'chain_no_resolve', cta_text: CTA_INSTALL_ANC });
+    case 'chain_resolved_install_failed':
+      return shapeScoreError({ code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC });
+    case 'chain_resolved_no_binary_produced':
+      return shapeScoreError({ code: 'chain_resolved_no_binary_produced', details, cta_text: CTA_INSTALL_ANC });
+    case 'install_unsupported': {
+      // DO emits details like `pm=brew`. Only `brew` is a documented
+      // user-facing install_unsupported (Linuxbrew/musl Finding F3); any
+      // other pm bouncing here collapses to chain_resolved_install_failed
+      // so we don't lie about which surface is broken.
+      const pm = details.match(/^pm=(\w+)/)?.[1];
+      if (pm === 'brew') {
+        return shapeScoreError({ code: 'install_unsupported', pm: 'brew', cta_text: CTA_INSTALL_ANC });
+      }
+      return shapeScoreError({ code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC });
+    }
+    case 'timeout':
+      // DO doesn't differentiate install-phase vs score-phase timeout
+      // (the 60 s budget covers both). Defaulting to 'score' matches the
+      // common case: install completes quickly, anc check is the long pole.
+      return shapeScoreError({ code: 'timeout', phase: 'score', cta_text: CTA_INSTALL_ANC });
+    default:
+      // anc_check_failed / anc_version_unreadable / setOutboundHandler
+      // failures land here. R11 demands the response triad; if we can't
+      // deliver scorecard + anc_version, surface the contract gap loudly
+      // rather than synthesize a partial.
+      return shapeScoreError({
+        code: 'incomplete_response_contract',
+        details: `${payload.error}${details ? `: ${details.slice(0, 160)}` : ''}`,
+        cta_text: CTA_INSTALL_ANC,
+      });
+  }
 }
 
 function validationErrorFor(
