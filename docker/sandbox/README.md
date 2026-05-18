@@ -1,12 +1,12 @@
 # Live-scoring sandbox image
 
-Alpine + musl image for the live-scoring path. Carries the Cloudflare Sandbox SDK server, package managers
-(cargo-binstall, pip, npm, go), and a pre-built musl `anc` baked in from agentnative-cli v0.3.1. NO COMPILERS, NO
-TOOLCHAINS.
+Debian-trixie-slim + glibc image for the live-scoring path. Carries the Cloudflare Sandbox SDK server, package managers
+(`cargo-binstall`, `pip`, `uv`, `npm`, `bun`, `go` runtime), and a pre-built `anc` binary from agentnative-cli v0.3.1.
+NO COMPILERS, NO TOOLCHAINS.
 
 Plan reference:
 [`docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md`](../../docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md)
-U2.
+U2 + U6.
 
 ## Build and push
 
@@ -59,12 +59,9 @@ Local smoke before pushing (optional but recommended on Dockerfile changes):
 docker run --rm "anc-sandbox:$GIT_SHA" /usr/local/bin/anc --version
 # expect: anc 0.3.1
 
-# cargo-binstall path
-docker run --rm "anc-sandbox:$GIT_SHA" /usr/local/bin/cargo-binstall --version
-
 # all expected pms on PATH
 docker run --rm "anc-sandbox:$GIT_SHA" sh -c \
-  'cargo-binstall --version && pip --version && npm --version && go version'
+  'cargo-binstall --version && pip --version && uv --version && npm --version && bun --version && go version'
 ```
 
 Image size against the budget (<=350 MB compressed; fits CF Containers `basic`):
@@ -115,14 +112,16 @@ remotely, skipping push"`). This is a fallback; the primary path is the local bu
 
 ## SHA pinning
 
-Three external assets are pinned by sha256 inside the Dockerfile:
+Each external asset baked into the image is pinned by sha256 inside the Dockerfile:
 
-| Asset                                               | Pinned at                                             |
-| --------------------------------------------------- | ----------------------------------------------------- |
-| `cloudflare/sandbox:0.9.2-musl`                     | image digest from Docker Hub                          |
-| `alpine:3.21`                                       | multi-arch index digest from Docker Hub               |
-| `cargo-binstall-x86_64-unknown-linux-musl.full.tgz` | sha256 of the GitHub release asset (computed locally) |
-| `agentnative-x86_64-unknown-linux-musl.tar.gz`      | sha256 from the release's `sha256sum.txt`             |
+| Asset                                              | Pinned at                                             |
+| -------------------------------------------------- | ----------------------------------------------------- |
+| `cloudflare/sandbox:0.9.4`                         | image digest from Docker Hub                          |
+| `debian:trixie-slim`                               | multi-arch index digest from Docker Hub               |
+| `cargo-binstall-x86_64-unknown-linux-gnu.full.tgz` | sha256 of the GitHub release asset (computed locally) |
+| `agentnative-x86_64-unknown-linux-gnu.tar.gz`      | sha256 from the release's `sha256sum.txt`             |
+| `bun-linux-x64.zip` (bun-v1.3.14)                  | sha256 from the release's `SHASUMS256.txt`            |
+| `uv-x86_64-unknown-linux-gnu.tar.gz` (0.11.15)     | sha256 from the release's `<asset>.sha256` file       |
 
 To bump any pin, resolve the new sha and update both the URL line and the `echo '<sha> ...' | sha256sum -c -`
 verification line. Keep them in sync.
@@ -131,16 +130,23 @@ To resolve the cloudflare/sandbox digest after a version bump:
 
 ```sh
 curl -fsSL "https://hub.docker.com/v2/repositories/cloudflare/sandbox/tags/<tag>/" \
-  | jaq -r '.images[0].digest'
+  | jaq -r '.digest'
 ```
+
+For other GitHub-hosted releases (`agentnative-cli`, `cargo-binstall`, `uv`) the sha256 ships next to the binary
+(`sha256sum.txt`, `<asset>.sha256`). For `bun`, the release page ships a `SHASUMS256.txt`. Always read the upstream
+checksum file rather than computing locally — the upstream value is what you're trusting.
 
 ## What's NOT in the image (and why)
 
-- **brew.** Linuxbrew on Alpine + musl is not a supported configuration (linuxbrew assumes glibc symbols). User inputs
-  that resolve to `pm: brew` via U4's chain hit U6's `chain_resolved_install_failed` bounce class.
-- **C/C++/Rust toolchains.** `apk add build-base gcc rust` would balloon the image past the size budget AND violate
-  Premise #2 (install-from-binary only). The `cargo install` (compile) path is intentionally absent — cargo-binstall's
-  job is precompiled-only.
+- **brew.** Linuxbrew on Linux takes 20-60 s per install for most formulae; complex formulae exceed the 60 s install +
+  score budget. `brew install <pkg>` user inputs route through the discovery-fallback in
+  `src/worker/score/do.ts:resolveSpec()`: fetch the formula metadata from `formulae.brew.sh`, parse the homepage as a
+  GitHub URL, run the existing `discoverBinary` chain to find an alternative (crates, npm, PyPI, go, direct). Formulae
+  without a peer PM bounce as `install_unsupported pm=brew_only`.
+- **C/C++/Rust toolchains.** `apt-get install build-essential gcc rustc` would balloon the image past the size budget
+  AND violate Premise #2 (install-from-binary only). The `cargo install` (compile) path is intentionally absent —
+  cargo-binstall's job is precompiled-only.
 - **Specific source-only packages.** Anything that requires compilation during `pip install` (no wheel published) will
   fail at install-time. U6 `pip install --only-binary=:all:` makes that explicit.
 
