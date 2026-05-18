@@ -1945,6 +1945,31 @@ check` is exec'd). Timeout is honored. `anc_version` is captured live, never har
 the U6 merge SHA (proves the Dockerfile EXPOSE is correct and `wrangler dev --local` works with the new container config
 end to end).
 
+**Amendment (2026-05-18) — base-image rework + brew discovery-fallback:**
+
+PR #95 ships the U6 unit body above PLUS a base-image switch and a brew-input translation layer:
+
+- Image: `cloudflare/sandbox:0.9.2-musl` on Alpine 3.21 → `cloudflare/sandbox:0.9.4` on debian-trixie-slim (glibc).
+  `cargo-binstall` and the baked-in `anc` binary switched to the gnu variants. Native `bun` (`bun-linux-x64.zip`) and
+  `uv` (`uv-x86_64-unknown-linux-gnu.tar.gz`) added via pinned tarballs. `xz-utils` + `bzip2` + `unzip` apt packages
+  back the per-extension dispatch added to `sandbox-exec.ts directInstallCommand` for `.tar.xz` / `.tar.bz2` / `.zip`
+  releases.
+- `pm=uv` split from `pm=pip` in `parse-install.ts`. `uv tool install <pkg>` no longer normalizes to pm=pip; it runs
+  through the native uv binary.
+- Brew discovery-fallback in `do.ts:resolveSpec()`. `brew install <pkg>` inputs fetch the formula from
+  `formulae.brew.sh`, parse the homepage as a GitHub URL, and run the existing `discoverBinary` chain to find an
+  alternative PM. Formulae without a peer PM bounce as `install_unsupported pm=brew_only` (the user-facing CTA carries
+  the new `pm: 'brew_only'` variant via the `install_unsupported.pm` union).
+- Linuxbrew rejected. Brew on Linux takes 20-60 s per install for typical formulae; complex formulae routinely exceed
+  the 60 s install+score budget. The fallback covers the common case where an alternative exists; brew-only formulae
+  bounce honestly.
+- Pre-flight library-vs-CLI detection (sharper bounce for `pip install requests`-style library inputs) is deferred. The
+  reactive `which <binary>` gate at the install layer is good enough until telemetry shows library inputs are a
+  meaningful fraction of install-command traffic.
+
+Image budget after the rework: same `basic` instance, same per-minute pricing, only the disk footprint changes
+(projected ~300-380 MB compressed; the 350 MB ceiling has headroom).
+
 ---
 
 - U7. **R2 cache (read on hit, write on miss)**
