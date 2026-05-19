@@ -1819,8 +1819,8 @@ unmodified). Triad enforcement is a hard gate, not a code-review check.
 
 - U6. **Sandbox-side: install + score (two-phase egress, anc check)**
 
-**Goal:** Implement the Sandbox DO class and the install + score flow. Two-phase egress is mandatory (R7). Singleton
-container per design Premise #6.
+**Goal:** Implement the Sandbox DO class and the install + score flow. Two-phase egress is mandatory (R7). Pool of
+short-lived containers (per design Premise #6, evolved from singleton to 10-instance pool to absorb Show HN spike).
 
 **Requirements:** R4, R7, R11 (anc_version captured at exec time).
 
@@ -1828,194 +1828,163 @@ container per design Premise #6.
 
 **Files:**
 
-- Create: `src/worker/score/do.ts` (Sandbox DO class extending the SDK base)
-- Create: `src/worker/score/sandbox-exec.ts` (orchestration)
-- Modify: `docker/sandbox/Dockerfile` — add `EXPOSE` directive(s) for any port the Sandbox container will listen on at
-  runtime (the install + score flow may need none today, but wrangler 4.x's `dev --local` requires at least one EXPOSE
-  for any container binding, otherwise local dev errors with `The container "Sandbox" does not expose any ports`). Pick
-  the actual ports the implementation uses; if none, declare a placeholder (e.g. `EXPOSE 8080`) so deep-check's
-  `wrangler dev` based webServer can start. Port 3000 is reserved for the internal Bun server per the Sandbox SDK docs —
-  do not use it. Background: this gap was surfaced today (2026-05-15) by the deep-check failure investigation after the
-  routes-inheritance fix landed; the container existed only as a stub returning `{error: 'sandbox_stub_until_u6'}` so no
-  ports were needed for runtime, but `wrangler dev` checks the Dockerfile statically. Rebuilding + repinning the image
-  as part of this unit is the natural moment to absorb the ceremony.
+- Create: `src/worker/score/do.ts` (Sandbox DO class extending the SDK base + brew/go discovery-fallback helpers)
+- Create: `src/worker/score/sandbox-exec.ts` (orchestration + per-PM install table)
+- Modify: `docker/sandbox/Dockerfile` — `EXPOSE 8080` required for any container binding (wrangler 4.x `dev --local`
+  rejects bindings whose Dockerfile declares zero EXPOSE directives, otherwise `deep-check.yml` errors with `The
+  container "Sandbox" does not expose any ports`). Port 3000 is reserved for the SDK's internal Bun server; do not
+  reuse.
 - Test: `tests/score-do.test.ts` (unit tests with stubbed `Container` + `getSandbox`). MUST include: (a) static
   `Sandbox.outboundHandlers` map has both `allowedInstall` and `noHttp` keys before any `setOutboundHandler` call —
   catches misnamed-key regressions silently degrading egress policy; (b) order assertion via stubbed handler call log —
   `setOutboundHandler("allowedInstall", {...})` fires BEFORE `exec(installCmd)` AND `setOutboundHandler("noHttp")` fires
   BEFORE `exec("anc check ...")`; (c) per-request log lines emitted by handlers match expected `{phase, host,
   allowed|blocked}` shape (the per-request observability that justified Pattern Y).
-- Modify: `tests/score-handler.test.ts` — tighten the DO mock to exercise the real
-  `env.SCORE.idFromName(name).fetch(...)` chain rather than returning a fixed envelope from a hand-rolled `.fetch()`
-  stub. Driven by the 2026-05-15 staging incident (PR [#94](https://github.com/brettdavies/agentnative-site/pull/94)):
-  the U5-era stub in this file returned JSON directly from a `.fetch()` mock that bypassed the binding-boundary check,
-  masking the fact that the real DO at `src/worker/score/do.ts` had no `fetch()` method. Production Workers DO requires
-  `fetch()` for HTTP-shaped invocations and threw `Handler does not export a fetch() function` (CF error 1101) on first
-  POST to staging. U6 replaces the stub with the real `@cloudflare/sandbox`-extending class, so the mock must mirror the
-  real binding shape (id → stub → fetch) or the same drift can recur silently.
+- Test: `tests/score-do-brew-fallback.test.ts` (brew formula → discoverBinary redirect path).
+- Test: `tests/score-do-go-fallback.test.ts` (go module → discoverBinary redirect path).
+- Modify: `tests/score-handler.test.ts` — DO mock typed via `Sandbox['fetch']` so any future Sandbox class that loses or
+  renames `fetch` is a TypeScript error here, not a first-deploy 5xx. Driven by PR #94 (the U5-era stub returned JSON
+  directly from a `.fetch()` mock that bypassed the binding-boundary check, masking the fact that the real DO at
+  `src/worker/score/do.ts` had no `fetch()` method — production threw `Handler does not export a fetch() function` (CF
+  error 1101) on first POST).
+
+**Image (debian-trixie-slim + glibc):**
+
+- Base: `cloudflare/sandbox:0.9.2` (bare/glibc; same major version as the prior Alpine staging) on `debian:trixie-slim`.
+  Both pinned by sha256 digest.
+- Package managers: `cargo-binstall` (gnu variant) and `anc` (gnu variant from agentnative-cli releases) installed via
+  pinned tarballs. `python3-pip`, `npm`, plus archive tools (`bzip2`, `unzip`, `xz-utils`) installed via `apt-get`.
+- Native `bun` (`bun-linux-x64.zip`) and `uv` (`uv-x86_64-unknown-linux-gnu.tar.gz`) installed via pinned tarballs.
+- Upstream Go from `go.dev/dl` (pinned by sha256). Debian's `golang-go` package ships `CGO_ENABLED=0`, which silently
+  disables `GODEBUG=netdns=cgo` and forces Go onto its pure-Go resolver (which bypasses `/etc/gai.conf`); upstream Go
+  has cgo enabled by default.
+- Container network fixes: uncomment IPv4-mapped precedence in `/etc/gai.conf` (CF Containers' outbound IPv6 is
+  unreliable; Rust HTTP clients, libcurl, and Go's cgo resolver otherwise hang on the AAAA-first attempt). `ENV
+  GODEBUG=netdns=cgo` so Go honors the precedence.
+- Install-destination consistency: `ENV BUN_INSTALL=/usr/local` and `ENV UV_TOOL_BIN_DIR=/usr/local/bin` send every PM's
+  binaries to `/usr/local/bin`, matching the per-command `cargo-binstall --install-path` and `GOBIN` flags. The
+  post-install `which <binary>` gate finds binaries in one canonical place regardless of which PM installed them.
+- Brew is OMITTED. Linuxbrew on Linux takes 20-60 s per install for typical formulae; complex formulae exceed the 60 s
+  install + score budget. `brew install <pkg>` user input is translated to an alternative PM via the discovery-fallback
+  in `do.ts:resolveSpec()` (see Approach below).
+- NO COMPILERS. No `build-essential`, no `gcc`, no Rust toolchain. Install paths are: cargo binstall (precompiled), pip
+  (wheels only via `--only-binary=:all:`), uv (uses its own resolver, binary-preferring), npm + bun
+  (`--ignore-scripts`), direct (binary tarball or zip from a URL), go (redirected to a GitHub release binary by the go
+  discovery-fallback, never a source compile).
+- Image budget: ≤350 MB compressed.
 
 **Approach:**
 
-- `do.ts`: Sandbox DO class extends the Sandbox base class. Singleton ID: `getRandom(env.SCORE, 3, { sleepAfter: "5m"
-  })` (3-instance pool; CF Containers picks an available instance per request). Declares two inline async handlers as a
-  static `outboundHandlers` map (Pattern Y, decided 2026-05-05; see K-decision two-phase egress for the X/Y/Z comparison
-  and the code shape):
+- `do.ts`: Sandbox DO class extends the Sandbox base class. Pool selection: `getRandom(env.SCORE, 10)` in `handler.ts`
+  (10-instance pool sized for Show HN absorbance; same `basic` instance per pool entry). Declares two inline async
+  handlers as a static `outboundHandlers` map (Pattern Y; see K-decision for the X/Y/Z comparison):
+
 - `allowedInstall(req, env, ctx)` — checks `ctx.params.allowedHostnames`, passes through via `fetch(req)` or returns
-  403; logs every request with `{phase, host, allowed}` for security observability.
+    403; logs every request with `{phase, host, allowed}` for security observability.
 - `noHttp(req)` — returns 403 for every request; logs `{phase: "noHttp", host, blocked: true}`. These are inline
-  functions in the same Worker bundle, NOT separate Workers and NOT service bindings — no `wrangler.jsonc` change needed
-  beyond the existing DO + Container + R2 + ratelimits. Implements `score(installSpec)` RPC method.
-- `sandbox-exec.ts` orchestrates:
+    functions in the same Worker bundle, not separate Workers and not service bindings; no `wrangler.jsonc` change
+    needed beyond the existing DO + Container + R2 + ratelimits.
 
-1. Determine `installHosts` from `installSpec.pm` (e.g., `brew` → `["formulae.brew.sh", "ghcr.io", "github.com"]`;
-   `cargo-binstall` → `["crates.io", "static.crates.io", "github.com"]`; `direct` → host of the URL).
-2. Phase 1 egress: for a single host, `sandbox.setOutboundByHost(host, "allowedInstall")`; for multiple hosts (e.g.
-   `crates.io` + `static.crates.io`), `sandbox.setOutboundByHosts(hostList, "allowedInstall")` (plural method, per SDK
-   0.9.x). Pick by `installHosts.length`. Both forms reference the user-defined `allowedInstall` handler registered in
-   `do.ts`.
-3. Run install command, captured by `installSpec.pm` (table in code):
+- `do.ts:resolveSpec()` translates user input to an `InstallSpec` before `score()` runs. Three input kinds:
 
-- `brew install <pkg>` (NOT supported in the current image — Linuxbrew on Alpine/musl is non-viable; surfaces as
-  bounce-out at install time)
-- `cargo binstall --no-confirm <pkg>`
-- `pip install <pkg>` (wheels only — `--only-binary=:all:`; refuses sdist execution)
-- `npm install -g --ignore-scripts <pkg>` (skips preinstall/install/postinstall script execution; required to keep Phase
-  1 egress from being abused by lifecycle scripts before the Phase 2 handler fires)
-- `go install <module>@latest` — image ships the full Go toolchain (`apk add go`), so this WILL compile from source.
-  Phase 1 egress is open to `proxy.golang.org` during compilation; the security audit row for `go install` MUST treat
-  this as "compiles attacker-controlled code, mitigated only by sandbox isolation," not as "fails fast / bounce out."
-  See K-decisions section reconciliation.
-- `direct`: `curl -fsSL <url> | tar xz -C /usr/local/bin/` (or unzip for `.zip`)
+1. `install-command` with `pm: 'brew'` — call `resolveBrewFallback(pkg)`: fetch the formula metadata from
+     `formulae.brew.sh`, parse the homepage as a GitHub URL, run the existing `discoverBinary` chain. If discovery
+     returns a non-brew spec, install that. If discovery misses OR the formula's homepage isn't on github.com OR the
+     formula 404s, bounce as `install_unsupported pm=brew_only`.
+2. `install-command` with `pm: 'go'` — call `resolveGoFallback(modulePath)`: parse `github.com/<owner>/<repo>` from the
+     module path (subpath segments stripped), run `discoverBinary`. If the resolution is non-go (typically `direct` from
+     a GitHub release asset, e.g. glow → `glow_*_Linux_x86_64.tar.gz`), install that. Modules outside `github.com`
+     (rsc.io/quote, golang.org/x/…) OR github repos without release binaries bounce as `install_unsupported
+     pm=go_no_binary`. Fast-fail UX; no source compile ever runs.
+3. All other `install-command` inputs and `github-url` inputs flow through the install table directly.
 
-1. Verify binary on `PATH`: `which <binary>` returns 0; if not, fail with `chain_resolved_no_binary_produced` (per gate
-   F4 — distinguishes "install succeeded but produced no runnable binary" from "install command itself failed"). Common
-   failure mode: the chain resolved to a library-only pypi package (e.g. Click ships wheels but no `console_scripts`
-   entry).
-2. Phase 2 egress: `sandbox.setOutboundHandler("noHttp")` — routes all subsequent requests to the user-defined `noHttp`
-   handler (which the DO class registered to return 403 for any HTTP egress). Same caveat as Phase 1: `noHttp` is a
-   user-defined name, not a built-in SDK verb.
-3. `sandbox.exec("anc --version")` → capture `anc_version` (parse the stdout).
+- `sandbox-exec.ts:score()` orchestrates per request:
+
+1. Determine `installHosts` from `installSpec.pm` (e.g., `cargo-binstall` → `["crates.io", "static.crates.io",
+     "index.crates.io", "github.com", "*.githubusercontent.com", …]`; `direct` → host of the URL, expanded to
+     `GITHUB_RELEASE_HOSTS` when the URL points at github.com so curl can follow the 302 redirect chain).
+2. Phase 1 egress: `sandbox.setOutboundHandler<{ allowedHostnames }>('allowedInstall', { allowedHostnames })`.
+3. Run install command, captured by `installSpec.pm`:
+
+- `cargo binstall --no-confirm --no-symlinks --install-path /usr/local/bin <pkg>` (cargo-binstall standalone; no `cargo`
+       CLI in image)
+- `pip install --only-binary=:all: --no-cache-dir --break-system-packages <pkg>` (wheels only — refuses sdist arbitrary
+       code; `--break-system-packages` overrides Debian's PEP 668 refusal)
+- `uv tool install <pkg>` (native uv; uses its own resolver, sidesteps pip's PEP 658 metadata fast-path)
+- `npm install -g --ignore-scripts <pkg>` (skips pre/install/post lifecycle scripts; keeps Phase 1 egress from being
+       abused before the Phase 2 lockdown fires)
+- `bun add -g --ignore-scripts <pkg>` (same lifecycle-script discipline as npm)
+- `direct`: extension-dispatched download + extract. The shell pipeline downloads to a per-invocation `mktemp -d` tmp
+       dir, extracts (`tar xzf` for `.tar.gz`/`.tgz`, `tar xJf` for `.tar.xz`, `tar xjf` for `.tar.bz2`, `unzip -q` for
+       `.zip`), then `find -type f -name <binary> -perm /111 -print -quit` locates the binary inside the (possibly
+       nested) archive layout. `install -m 0755 "$found" /usr/local/bin/<binary>` deposits the binary in the canonical
+       location. The whole pipeline runs in a `( set -e; … )` subshell so a failure exits the subshell, not the
+       persistent container shell (the latter would produce `SessionTerminatedError` 1101 for every subsequent request
+       routed to the affected DO instance).
+- `brew` and `go` return `null` from `installCommandFor()`; the discovery-fallbacks in `resolveSpec` translate upstream
+       of this layer. Hitting either case here is a contract violation and bounces as `install_unsupported
+       pm=<brew|go>`.
+
+1. Verify binary on `PATH`: `which <binary>` returns 0; otherwise fail with `chain_resolved_no_binary_produced` (gate F4
+     distinguishes "install succeeded but produced no runnable binary" from "install command itself failed"). Common
+     trigger: chain resolved to a library-only pypi package (e.g. Click ships wheels but no `console_scripts` entry).
+2. Phase 2 egress: `sandbox.setOutboundHandler('noHttp')` — routes all subsequent requests to the user-defined `noHttp`
+     handler (returns 403 for any HTTP egress).
+3. `sandbox.exec("anc --version")` → capture `anc_version` (parsed from stdout).
 4. Look up registry entry by tool name to get `audit_profile` if known; else omit.
 5. `sandbox.exec("anc check --command <binary> --output json [--audit-profile <p>]")` → parse JSON.
 6. Return `{scorecard, anc_version}` to the Worker. DO writes-through to R2 via U7.
 
-- Total budget: 60 s timeout on `sandbox.exec()` (install + score combined). Hard fail beyond → return 504 to user.
-- Singleton container; sequential `exec()` calls. If concurrent requests stack, queue at the DO; the SDK serializes by
-  default per single instance.
+- Total budget: 60 s timeout on `sandbox.exec()` (install + score combined). Hard fail beyond returns 504 to user.
+- Per-instance container is short-lived; the SDK serializes `exec()` calls within an instance. The 10-instance pool
+  absorbs concurrent load by spreading requests across distinct containers via `getRandom`.
 
 **Patterns to follow:**
 
 -
-
-[docs/solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md](../solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md)
-— two-phase egress design. -
-[docs/solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md](../solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md)
-— anc JSON envelope shape; pass-through verbatim.
+  [docs/solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md](../solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md)
+  — two-phase egress design.
+-
+  [docs/solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md](../solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md)
+  — anc JSON envelope shape; pass-through verbatim.
 
 **Test scenarios:**
 
 - **Happy path (cargo binstall):** install spec `{pm: "cargo-binstall", pkg: "ripgrep"}` → install succeeds → score
   succeeds → JSON returned with `anc_version` populated.
-- **Happy path (brew):** install spec `{pm: "brew", pkg: "bat"}` → same.
-- **Happy path (direct binary download):** install spec `{pm: "direct", url:
-  "https://github.com/.../bird-x86_64-unknown-linux-musl.tar.gz", binary: "bird"}` → tarball downloaded, extracted,
+- **Happy path (uv tool install):** `{pm: "uv", pkg: "black"}` → wheel install via uv → scored.
+- **Happy path (bun add -g):** `{pm: "bun", pkg: "prettier"}` → npm-registry install → scored.
+- **Happy path (direct binary download, flat archive):** `{pm: "direct", url:
+  "https://github.com/.../tool-x86_64-unknown-linux-musl.tar.gz", binary: "tool"}` → tarball downloaded, extracted,
   scored.
-- **Edge case (`audit_profile` from registry):** known tool → `anc check --audit-profile human-tui ...` invoked.
-- **Edge case (install fails — package not found):** sandbox returns non-zero from install; DO returns `{error:
-  "chain_resolved_install_failed", details}`; Worker returns 502 to user. (Renamed from `install_failed` per gate F4 for
-  symmetry with `chain_resolved_no_binary_produced` and `chain_no_resolve`.)
-- **Edge case (binary not on PATH after install):** detected by `which` check; DO returns `{error:
-  "chain_resolved_no_binary_produced"}`; Worker returns 502. (Renamed from `install_did_not_provide_binary` per gate F4.
-  The `pallets/click` failure mode — wheel installs cleanly but no `console_scripts` entry.)
+- **Happy path (direct binary download, nested archive):** csvlens-style `csvlens-x86_64-unknown-linux-musl/csvlens`
+  layout extracts via `find -name csvlens` and installs to `/usr/local/bin/csvlens`.
+- **Happy path (brew via fallback):** `brew install bat` → discoverBinary picks a non-brew spec → installed and scored.
+- **Happy path (go via fallback):** `go install github.com/charmbracelet/glow@latest` → discoverBinary picks the GitHub
+  release asset → installed via `direct` → scored. No source compile runs.
+- **Edge case (`audit_profile` from registry):** known tool → `anc check --audit-profile <profile> ...` invoked.
+- **Bounce (brew formula has no peer PM):** `brew install <fake>` → `install_unsupported pm=brew_only`.
+- **Bounce (go module without GitHub release binary):** `go install rsc.io/quote/v3@latest` → `install_unsupported
+  pm=go_no_binary`.
+- **Bounce (install command fails):** sandbox returns non-zero from install; DO returns `chain_resolved_install_failed`
+  with details; Worker returns 502.
+- **Bounce (binary not on PATH after install):** `which` check misses; DO returns `chain_resolved_no_binary_produced`;
+  Worker returns 502. (The `pallets/click` failure mode — wheel installs cleanly but no `console_scripts` entry.)
 - **Error path (anc check exits non-zero):** preserve and forward the parsed error JSON if available.
 - **Error path (60 s timeout):** DO returns `{error: "timeout"}`; Worker returns 504.
 - **Error path (`setOutboundHandler` call fails):** DO returns 500; user-visible error message scrubs internals.
-- **Integration:** assert two `setOutbound*` calls in correct order: `setOutboundByHost(...)` BEFORE install,
-  `setOutboundHandler("noHttp")` AFTER install but BEFORE `anc check`. This is the safety invariant.
+- **Integration:** assert egress ordering: `setOutboundHandler('allowedInstall', ...)` fires BEFORE install exec, AND
+  `setOutboundHandler('noHttp')` fires BEFORE `anc check` exec. Safety invariant.
 - **Integration:** stdout/stderr captured by `sandbox.exec` does not contain any host name from outside `installHosts ∪
-  {"localhost"}` after Phase 2 — defense in depth assertion.
+  {"localhost"}` after Phase 2 (defense in depth).
 - **Integration:** response includes `anc_version` populated from the running binary (not from a constant).
-- **Integration (CI):** `.github/workflows/deep-check.yml` runs to green after this unit lands. Both jobs (`e2e` and
-  `lhci`) start `wrangler dev --local` as the test webServer; the Dockerfile must have at least one EXPOSE directive for
-  `wrangler dev` to accept the container binding. Pre-U6 state of this workflow has been red since 2026-05-15 with `The
-  container "Sandbox" does not expose any ports`; that error must be gone in the U6 deploy verification.
+- **Integration (CI):** `.github/workflows/deep-check.yml` runs to green. Both jobs (`e2e` and `lhci`) start `wrangler
+  dev --local` as the test webServer; the Dockerfile's `EXPOSE 8080` lets `wrangler dev` accept the container binding.
 
 **Verification:** Two-phase egress is provably enforced (test asserts the second handler call is `noHttp` BEFORE `anc
 check` is exec'd). Timeout is honored. `anc_version` is captured live, never hard-coded. `deep-check.yml` is green on
-the U6 merge SHA (proves the Dockerfile EXPOSE is correct and `wrangler dev --local` works with the new container config
-end to end).
-
-**Amendment (2026-05-18) — base-image rework + brew discovery-fallback:**
-
-PR #95 ships the U6 unit body above PLUS a base-image switch and a brew-input translation layer:
-
-- Image: `cloudflare/sandbox:0.9.2-musl` on Alpine 3.21 → `cloudflare/sandbox:0.9.4` on debian-trixie-slim (glibc).
-  `cargo-binstall` and the baked-in `anc` binary switched to the gnu variants. Native `bun` (`bun-linux-x64.zip`) and
-  `uv` (`uv-x86_64-unknown-linux-gnu.tar.gz`) added via pinned tarballs. `xz-utils` + `bzip2` + `unzip` apt packages
-  back the per-extension dispatch added to `sandbox-exec.ts directInstallCommand` for `.tar.xz` / `.tar.bz2` / `.zip`
-  releases.
-- `pm=uv` split from `pm=pip` in `parse-install.ts`. `uv tool install <pkg>` no longer normalizes to pm=pip; it runs
-  through the native uv binary.
-- Brew discovery-fallback in `do.ts:resolveSpec()`. `brew install <pkg>` inputs fetch the formula from
-  `formulae.brew.sh`, parse the homepage as a GitHub URL, and run the existing `discoverBinary` chain to find an
-  alternative PM. Formulae without a peer PM bounce as `install_unsupported pm=brew_only` (the user-facing CTA carries
-  the new `pm: 'brew_only'` variant via the `install_unsupported.pm` union).
-- Linuxbrew rejected. Brew on Linux takes 20-60 s per install for typical formulae; complex formulae routinely exceed
-  the 60 s install+score budget. The fallback covers the common case where an alternative exists; brew-only formulae
-  bounce honestly.
-- Pre-flight library-vs-CLI detection (sharper bounce for `pip install requests`-style library inputs) is deferred. The
-  reactive `which <binary>` gate at the install layer is good enough until telemetry shows library inputs are a
-  meaningful fraction of install-command traffic.
-
-Image budget after the rework: same `basic` instance, same per-minute pricing, only the disk footprint changes
-(projected ~300-380 MB compressed; the 350 MB ceiling has headroom).
-
-**Amendment (2026-05-18, post-staging) — go discovery-fallback + container-network fixes:**
-
-Staging matrix on the rework image surfaced five regressions vs the prior Alpine staging. Root causes and fixes,
-recorded so a future revisit doesn't relearn:
-
-- Container outbound IPv6 is unreliable on CF Containers; Rust HTTP clients (cargo-binstall, uv), libcurl, and Go's
-  pure-Go resolver default to AAAA-first and hang on the IPv6 attempt. Fix: uncomment the IPv4-mapped precedence line in
-  `/etc/gai.conf` so glibc's `getaddrinfo` prefers IPv4.
-- Debian's `golang-go` package ships `CGO_ENABLED=0`, which silently disables `GODEBUG=netdns=cgo` and forces Go onto
-  its pure-Go resolver (which bypasses `gai.conf`). Fix: install upstream Go from `go.dev/dl` (cgo-enabled by default),
-  pinned by sha256.
-- `bun add -g` and `uv tool install` install binaries to `$HOME/.bun/bin` and `$HOME/.local/bin` respectively, which the
-  post-install `which <binary>` gate doesn't reach. Fix: set `ENV BUN_INSTALL=/usr/local` and `ENV
-  UV_TOOL_BIN_DIR=/usr/local/bin` in the Dockerfile so every PM lands binaries at `/usr/local/bin` (matching the
-  per-command flags `cargo-binstall --install-path` and `GOBIN`).
-- Discovery's `LINUX_X64_ASSET_RE` matched `bat-musl_*_linux-amd64.deb` (Debian package, not a tarball) BEFORE the
-  `.tar.gz` releases in the asset list, producing `chain_resolved_install_failed` with `gzip: stdin: not in gzip
-  format`. Fix: tighten the regex to require x86_64/amd64 AND linux substrings AND a recognized archive extension.
-- The direct PM extracted streamed tarballs straight to `/usr/local/bin/`, which fails for archives whose binary is
-  nested in a `<tool>-<arch>/` directory (csvlens-style). Fix: extract to a tmp dir, find the binary by name (`find
-  -type f -name <binary> -perm /111`), then `install` it to `/usr/local/bin`. The shell pipeline runs in a `( set -e; …
-  )` subshell so a failure exits the subshell, not the persistent container shell (the latter would produce
-  `SessionTerminatedError` and 1101-error every subsequent request routed to the affected DO instance).
-- Roll the CF Sandbox SDK base from `0.9.4` back to `0.9.2` (same major version as the prior Alpine staging). The
-  upstream 0.9.3 / 0.9.4 changelogs don't touch outbound interception, but the rollback isolates the variable.
-
-**Go discovery-fallback (mirrors the brew fallback):**
-
-`go install <module>@latest` is fundamentally source compilation. Compiling on `basic` (1/16 vCPU) takes 2-3 minutes for
-tools like `glow`, exceeding any reasonable budget. The U2 "binary-only, no toolchains" premise also rules out shipping
-a Go compiler in the image. New policy in `do.ts:resolveSpec`:
-
-- If the input parses to `pm: 'go'`, treat the module path as a discovery hint. Parse `github.com/<owner>/<repo>` out of
-  the path (subpath segments stripped), then run the existing `discoverBinary` chain. If discovery returns a non-`go`
-  spec, install that (typically `direct` from a GitHub release asset, e.g. `glow` → `glow_*_Linux_x86_64.tar.gz`).
-- If the module path isn't on `github.com` (rsc.io/quote, golang.org/x/...) OR the github repo has no release binary,
-  bounce as `install_unsupported pm=go_no_binary`. Fast-fail UX, no compile attempted.
-- `installCommandFor()` returns `null` for `pm: 'go'` — `resolveSpec` is the only path that reaches `score()` with a go
-  input, and it's already translated upstream. The null acts as a safety net.
-
-Net effect: `go install github.com/charmbracelet/glow@latest` now resolves to the GitHub release binary and scores
-without compiling. Modules outside that pattern bounce honestly. Staging matrix verified 11/11 on `basic` instance with
-the 60 s budget after the fix.
-
-`max_instances` bumped from 3 to 10 to reduce queue contention during the Show HN traffic envelope. Same `basic`
-instance type, same per-instance cost; pool size scales horizontal capacity, not per-request cost.
+the U6 merge SHA. Staging end-to-end matrix passes 11/11 across all PMs (npm, cargo, pip, uv, bun, go-fallback,
+brew-fallback, direct in flat + nested archive layouts, and the two intentional bounces).
 
 ---
 
