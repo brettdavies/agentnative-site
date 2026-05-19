@@ -14,7 +14,7 @@
 #   docker build -f docker/sandbox/Dockerfile -t anc-sandbox .
 #   docker image inspect anc-sandbox --format '{{.Size}}'
 
-FROM docker.io/cloudflare/sandbox:0.9.4@sha256:f5f9a59ace0e364eb830464d31017515f8dc34837573da7386d2a59cebd360d0 AS sandbox-base
+FROM docker.io/cloudflare/sandbox:0.9.2@sha256:3a8626db5d3d838d947abadd37b818e48628b17f12cf2e87d89b8e83a6676482 AS sandbox-base
 
 # Multi-arch index digest pinned; Docker resolves to the amd64 child at
 # pull time.
@@ -32,7 +32,6 @@ RUN apt-get update \
         ca-certificates \
         curl \
         git \
-        golang-go \
         libstdc++6 \
         nodejs \
         npm \
@@ -41,6 +40,30 @@ RUN apt-get update \
         unzip \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Upstream Go (NOT Debian's golang-go). Debian builds Go with
+# CGO_ENABLED=0, which makes GODEBUG=netdns=cgo silently fall back to
+# Go's pure-Go resolver. The pure-Go resolver's IPv6 dual-stack
+# behavior hangs on CF Containers (outbound IPv6 is unreliable),
+# producing 60 s timeouts on `go install`. The official tarball ships
+# with CGO enabled, so cgo resolver works and honors /etc/gai.conf's
+# IPv4 precedence.
+RUN set -eux; \
+    curl -fsSL -o /tmp/go.tgz \
+        https://go.dev/dl/go1.26.3.linux-amd64.tar.gz; \
+    echo '2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556  /tmp/go.tgz' | sha256sum -c -; \
+    tar xzf /tmp/go.tgz -C /usr/local/; \
+    rm /tmp/go.tgz; \
+    /usr/local/go/bin/go version
+
+# Force IPv4 precedence in glibc's getaddrinfo. CF Containers' outbound
+# IPv6 path is unreliable for many upstream endpoints; tools whose HTTP
+# clients default to AAAA-first (cargo-binstall, go module proxy, curl,
+# uv) otherwise hang on the IPv6 attempt before falling back to A.
+# Python urllib3, npm, and bun happen to prefer A records and work
+# without this. Uncomment the IPv4-mapped precedence line in
+# /etc/gai.conf — glibc treats this as "rank IPv4 addresses above IPv6".
+RUN sed -i 's/^#\(precedence ::ffff:0:0\/96  100\)/\1/' /etc/gai.conf
 
 RUN set -eux; \
     curl -fsSL -o /tmp/cb.tgz \
@@ -83,7 +106,20 @@ RUN set -eux; \
     rm -rf /tmp/uv.tgz /tmp/uv-x86_64-unknown-linux-gnu; \
     uv --version
 
-ENV PATH="/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:/root/.local/bin:${PATH}"
+# Every PM's install destination redirected to /usr/local/bin so the
+# post-install `which <binary>` gate in sandbox-exec.ts always looks in
+# the same place. Mirrors the per-command flags
+# (cargo-binstall --install-path, GOBIN=...) for the ENV-configurable
+# package managers (bun, uv) so the convention is consistent across
+# the entire install table.
+ENV BUN_INSTALL=/usr/local
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+# Go's runtime DNS resolver bypasses glibc by default and ignores the
+# IPv4-precedence fix in /etc/gai.conf above. Force the cgo resolver so
+# `go install` honors the system address-selection policy.
+ENV GODEBUG=netdns=cgo
+
+ENV PATH="/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:${PATH}"
 
 # Port 3000 is reserved by the CF Sandbox SDK; pick a different port so
 # `wrangler dev --local` accepts the container binding without

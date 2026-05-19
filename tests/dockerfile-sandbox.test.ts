@@ -103,14 +103,13 @@ describe('docker/sandbox/Dockerfile — no-toolchains invariant (Premise #2)', (
     }
   });
 
-  test('go runtime is present via golang-go (needed for `go install` of precompiled modules)', async () => {
+  test('upstream Go runtime (cgo-enabled) is installed from go.dev/dl', async () => {
     const df = await loadDockerfile();
-    // The package must appear inside the apt-get install block, not in
-    // a comment. Pull the RUN block by header match and assert.
-    const aptBlocks = df.match(/^RUN apt-get[^\n]*(\n[ ]+[^\n]*)*/gm) || [];
-    expect(aptBlocks.length).toBeGreaterThan(0);
-    const joined = aptBlocks.join('\n');
-    expect(joined).toMatch(/\bgolang-go\b/);
+    // Debian's golang-go is built with CGO_ENABLED=0 — that silently
+    // disables GODEBUG=netdns=cgo and makes go install hang on CF
+    // Containers' IPv6 path. Upstream Go ships with cgo enabled.
+    expect(df).toMatch(/go\.dev\/dl\/go[0-9.]+\.linux-amd64\.tar\.gz/);
+    expect(df).toMatch(/echo '[0-9a-f]{64} {2}\/tmp\/go\.tgz' \| sha256sum -c -/);
   });
 });
 
@@ -126,11 +125,11 @@ describe('docker/sandbox/Dockerfile — package manager coverage', () => {
 
   test('all six U4-supported pms have a runtime in the image: cargo-binstall, pip, npm, go, bun, uv', async () => {
     const df = await loadDockerfile();
-    // python3-pip / npm / golang-go come from apt; cargo-binstall + bun + uv
+    // python3-pip / npm come from apt; cargo-binstall + bun + uv + go
     // come from pinned tarball downloads.
     expect(df).toMatch(/\bpython3-pip\b/);
     expect(df).toMatch(/\bnpm\b/);
-    expect(df).toMatch(/\bgolang-go\b/);
+    expect(df).toMatch(/go\.dev\/dl\/go[0-9.]+\.linux-amd64/);
     expect(df).toMatch(/cargo-binstall/);
     expect(df).toMatch(/bun-linux-x64\.zip/);
     expect(df).toMatch(/uv-x86_64-unknown-linux-gnu\.tar\.gz/);
@@ -184,9 +183,29 @@ describe('docker/sandbox/Dockerfile — sandbox runtime', () => {
     expect(envPath).toContain('/usr/local/bin');
     expect(envPath).toContain('/usr/local/cargo/bin');
     expect(envPath).toContain('/usr/local/go/bin');
-    // /root/.local/bin is the default UV_TOOL_BIN_DIR — uv tool install
-    // symlinks each tool's binary here on the post-install pass.
-    expect(envPath).toContain('/root/.local/bin');
+  });
+
+  test('every PM redirects global installs to /usr/local/bin (single dest)', async () => {
+    // Consistency invariant: the post-install `which <binary>` gate in
+    // sandbox-exec.ts looks on PATH; centralising every PM at
+    // /usr/local/bin avoids the per-PM "where does this binary land"
+    // game. BUN_INSTALL/bin = /usr/local/bin; UV_TOOL_BIN_DIR =
+    // /usr/local/bin; cargo-binstall --install-path + GOBIN in the
+    // sandbox-exec install commands also target /usr/local/bin.
+    const df = await loadDockerfile();
+    expect(df).toMatch(/^ENV BUN_INSTALL=\/usr\/local$/m);
+    expect(df).toMatch(/^ENV UV_TOOL_BIN_DIR=\/usr\/local\/bin$/m);
+  });
+
+  test('Go uses cgo resolver to honor /etc/gai.conf IPv4 precedence', async () => {
+    // CF Containers IPv6 outbound is unreliable. /etc/gai.conf is
+    // patched to prefer IPv4 for glibc's getaddrinfo. Go's pure-Go
+    // resolver bypasses gai.conf; GODEBUG=netdns=cgo forces Go to use
+    // getaddrinfo and honor the precedence. Requires Go built with
+    // CGO (upstream tarball, not Debian's CGO_ENABLED=0 build).
+    const df = await loadDockerfile();
+    expect(df).toMatch(/^ENV GODEBUG=netdns=cgo$/m);
+    expect(df).toMatch(/sed -i .* \/etc\/gai\.conf/);
   });
 
   test('declares at least one EXPOSE so wrangler dev --local accepts the container binding', async () => {

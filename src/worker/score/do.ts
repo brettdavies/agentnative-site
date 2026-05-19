@@ -106,10 +106,14 @@ export const handlers = { allowedInstall, noHttp };
 // ---------------------------------------------------------------------------
 
 export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
-  // TLS interception so HTTPS install hosts (crates.io, pypi.org, etc.)
-  // flow through our outbound handlers. Default-on as of CF Sandbox 0.8.7
-  // (PR #550), declared explicitly for grep-ability.
-  override interceptHttps = true;
+  // DIAGNOSTIC: HTTPS interception OFF to isolate whether the SDK's
+  // Worker-fetch passthrough is the cause of the upstream-403 regressions
+  // seen on staging after the Debian-slim rework. With interception off,
+  // container HTTPS bypasses allowedInstall + noHttp entirely; outbound
+  // hits upstream from the CF Container IP rather than the Worker fetch
+  // IP. Phase 2 lockdown is lost while this flag is false — must revert
+  // before merge.
+  override interceptHttps = false;
 
   // Override BaseSandbox.fetch (which normally proxies to the container's
   // HTTP listener) to dispatch the score endpoint instead. Our container
@@ -189,6 +193,18 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
         const hints = await this.loadHintsIndex();
         return await resolveBrewFallback(input.spec.package, hints);
       }
+      if (input.spec.pm === 'go') {
+        // `go install <module>@latest` would compile from source —
+        // violating U2's binary-only premise. Redirect through the
+        // discovery chain (parallel pattern to brew): if the module
+        // path points at a github.com repo AND that repo ships a
+        // GitHub release binary, install via `direct`. If not, bounce
+        // as install_unsupported pm=go_no_binary so the user-facing
+        // CTA surfaces the no-binary case rather than starting a
+        // compile that would time out.
+        const hints = await this.loadHintsIndex();
+        return await resolveGoFallback(input.spec.package, hints);
+      }
       return { ok: true, value: input.spec };
     }
     if (input.kind === 'github-url') {
@@ -246,6 +262,73 @@ export async function resolveBrewFallback(
     return { ok: true, value: result.spec };
   }
   return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
+}
+
+// ---------------------------------------------------------------------------
+// Go discovery-fallback
+//
+// `go install <module>@latest` is source-compilation by design — Go
+// modules don't ship binaries. Running it on the sandbox would either
+// require a Go toolchain capable of compiling within the 60 s budget
+// (impossible on CF Containers basic — see 2026-05-18 staging matrix)
+// OR violate U2's binary-only premise. We redirect through the
+// discovery chain: a module path of the form
+// `github.com/<owner>/<repo>/...` is treated as a GitHub-URL input,
+// and discoverBinary picks the GitHub Releases asset (Step 2) for
+// tools that ship binaries (glow, lazygit, gh, fzf, etc.). Modules
+// outside github.com OR github.com repos without release binaries
+// bounce as install_unsupported pm=go_no_binary — fast-fail UX rather
+// than a long compile that times out.
+// ---------------------------------------------------------------------------
+
+export type GoFallbackResult =
+  | { ok: true; value: InstallSpec }
+  | { ok: false; error: 'install_unsupported'; details: 'pm=go_no_binary' };
+
+export async function resolveGoFallback(
+  modulePath: string,
+  hintsIndex: DiscoveryHintsIndex,
+  fetcher: typeof fetch = globalThis.fetch.bind(globalThis),
+): Promise<GoFallbackResult> {
+  const ownerRepo = parseGoModuleOwnerRepo(modulePath);
+  if (!ownerRepo) {
+    return { ok: false, error: 'install_unsupported', details: 'pm=go_no_binary' };
+  }
+  const result = await discoverBinary({
+    owner: ownerRepo.owner,
+    repo: ownerRepo.repo,
+    hintsIndex,
+    fetcher,
+  });
+  // Only accept a `direct` resolution (Step 2 GitHub Releases asset)
+  // or a non-go cross-PM resolution. If discovery looped back to
+  // `go` somehow (shouldn't — Step 3 picks brew last among PMs,
+  // and Step 4 README parse won't return pm=go for a `go install`
+  // input), bounce honestly to avoid infinite indirection.
+  if (result.ok && result.spec.pm !== 'go') {
+    return { ok: true, value: result.spec };
+  }
+  return { ok: false, error: 'install_unsupported', details: 'pm=go_no_binary' };
+}
+
+// Parse a Go module path of the form `github.com/<owner>/<repo>[/...]`
+// into { owner, repo }. Subpath segments (e.g. `cmd/humanize`) are
+// stripped — the GitHub release for the repo applies, regardless of
+// which subpackage the module declares. Returns null for non-github
+// module paths (rsc.io/quote, golang.org/x/..., etc.) — those have no
+// GitHub release equivalent and bounce as go_no_binary.
+function parseGoModuleOwnerRepo(modulePath: string): { owner: string; repo: string } | null {
+  // Strip any @ version suffix the parser might have left in place,
+  // defensively (parse-install already does this, but the fallback
+  // shouldn't depend on the caller's hygiene).
+  const cleaned = modulePath.split('@')[0];
+  const segments = cleaned.split('/').filter(Boolean);
+  if (segments.length < 3) return null;
+  if (segments[0] !== 'github.com') return null;
+  const owner = segments[1];
+  const repo = segments[2];
+  if (!owner || !repo) return null;
+  return { owner, repo };
 }
 
 // ---------------------------------------------------------------------------

@@ -374,26 +374,45 @@ describe('sandbox-exec.score() — install table per PM', () => {
       expected: "npm install -g --ignore-scripts 'typescript'",
     },
     {
-      spec: { pm: 'go', package: 'github.com/jesseduffield/lazygit', binary: 'lazygit' },
-      // GOBIN=/usr/local/bin forces binary onto PATH (Bug L).
-      expected: "GOBIN=/usr/local/bin go install 'github.com/jesseduffield/lazygit'@latest",
-    },
-    {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.gz', binary: 'foo' },
-      expected: "curl -fsSL 'https://example.com/foo.tar.gz' | tar xz -C /usr/local/bin/",
+      // direct install: extract to tmp, find binary by name, install
+      // to /usr/local/bin. Handles flat AND nested archive layouts
+      // (csvlens-style `<tool-arch>/csvlens` nesting).
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.tar.gz' -o "$tmp/a"; ` +
+        `tar xzf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tgz', binary: 'foo' },
-      expected: "curl -fsSL 'https://example.com/foo.tgz' | tar xz -C /usr/local/bin/",
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.tgz' -o "$tmp/a"; ` +
+        `tar xzf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
     },
     {
-      // Bug N: many newer Rust tools (csvlens) ship .tar.xz only.
+      // Bug N: many newer Rust tools (csvlens) ship .tar.xz only,
+      // often with the binary nested in a `<tool>-<arch>/` directory.
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.xz', binary: 'foo' },
-      expected: "curl -fsSL 'https://example.com/foo.tar.xz' | tar xJ -C /usr/local/bin/",
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.tar.xz' -o "$tmp/a"; ` +
+        `tar xJf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.bz2', binary: 'foo' },
-      expected: "curl -fsSL 'https://example.com/foo.tar.bz2' | tar xj -C /usr/local/bin/",
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.tar.bz2' -o "$tmp/a"; ` +
+        `tar xjf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
     },
   ];
 
@@ -424,11 +443,9 @@ describe('sandbox-exec.score() — install table per PM', () => {
       'uv', // tarball at /usr/local/bin/
       'npm', // npm apt
       'bun', // tarball at /usr/local/bin/
-      'go', // golang-go apt
       'curl', // curl apt
-      'set', // direct .zip case wraps install in `set -e; …`
+      '(', // direct install wraps the pipeline in a `( set -e; … )` subshell
       'PIP_NO_COLOR=1', // env-var prefix (not a binary) — pip case
-      'GOBIN=/usr/local/bin', // env-var prefix (not a binary) — go case
     ]);
     for (const { spec, expected } of cases) {
       const firstToken = expected.split(/\s+/)[0];
@@ -446,15 +463,28 @@ describe('sandbox-exec.score() — bounce classes', () => {
     // Direct invocation of score() with pm=brew is a contract violation
     // — resolveSpec in do.ts is supposed to run the discovery-fallback
     // before this layer is reached. Keeping the bounce guards against a
-    // future caller that skips resolveSpec; the details string names
-    // the contract token (pm=brew_only is the user-facing version that
-    // mapDoError ultimately surfaces).
+    // future caller that skips resolveSpec.
     const { stub } = makeStub();
     const result = await score(stub, { pm: 'brew', package: 'bat', binary: 'bat' });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toBe('install_unsupported');
     expect(result.details).toContain('brew');
+  });
+
+  test('go passed to score() bounces install_unsupported (resolveSpec should translate first)', async () => {
+    // Parallel to the brew bounce: `go install` would compile from
+    // source, violating U2's binary-only premise. resolveSpec's
+    // resolveGoFallback in do.ts redirects github.com/<owner>/<repo>
+    // module paths through the discovery chain so a GitHub release
+    // binary substitutes for the compile. Direct invocation of
+    // score() with pm=go is a contract violation and bounces.
+    const { stub } = makeStub();
+    const result = await score(stub, { pm: 'go', package: 'github.com/charmbracelet/glow', binary: 'glow' });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('install_unsupported');
+    expect(result.details).toContain('go');
   });
 
   test('install command non-zero → chain_resolved_install_failed', async () => {

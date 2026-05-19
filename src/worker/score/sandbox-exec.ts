@@ -295,15 +295,16 @@ function installCommandFor(spec: InstallSpec): string | null {
       // lifecycle scripts before the Phase 2 lockdown fires.
       return `npm install -g --ignore-scripts ${shellQuote(spec.package)}`;
     case 'go':
-      // Toolchain retained per the 2026-05-18 K-decision (commit 9b45b96
-      // on dev). `gc` does not execute user code at compile time, so the
-      // blast radius is bounded by the 60 s combined timeout.
-      //
-      // GOBIN=/usr/local/bin overrides go's default of $GOPATH/bin
-      // (= ~/go/bin), which isn't on our PATH. Same fix as the
-      // cargo-binstall --install-path flag — keeps the post-install
-      // `which <binary>` gate from missing on a successful install.
-      return `GOBIN=/usr/local/bin go install ${shellQuote(spec.package)}@latest`;
+      // pm=go bounces here so resolveSpec()'s go discovery-fallback
+      // (do.ts:resolveGoFallback) translates `go install <module>`
+      // inputs upstream of this layer. If a request reaches
+      // installCommandFor() with pm=go the fallback has already
+      // missed, which means the module isn't on github.com OR the
+      // repo has no GitHub release binary — both flagged as
+      // install_unsupported pm=go_no_binary by resolveSpec. The null
+      // here is a safety net; sandbox-exec wouldn't otherwise know
+      // whether to compile (would violate U2 binary-only) or bounce.
+      return null;
     case 'direct':
       // Archive download + extract to /usr/local/bin. The user-pasted
       // URL is the trust boundary; SHA verification is not done at
@@ -338,51 +339,51 @@ function installCommandFor(spec: InstallSpec): string | null {
 // alongside installCommandFor() (vs. inlined) so the per-extension
 // shapes are individually testable and the test file pins each form.
 //
-// For tarball formats we keep the streaming `curl … | tar` shape from
-// the legacy code path — no /tmp side files, no extra cleanup, and the
-// behavior matches the security audit row that approved this pattern.
-//
-// .zip cannot stream (unzip needs a seekable input), so the zip case
-// downloads to /tmp, extracts into a per-request temp dir, copies the
-// expected binary onto /usr/local/bin via `install -m 0755`, and
-// cleans up. The binary path inside the archive is unknown ahead of
-// time so we search for it by name with `find -name`; this matches
-// the convention of GitHub-released CLIs that put the binary at
-// either the archive root or inside a `<tool>-<version>/` directory.
+// All formats extract into a per-invocation tmp dir, then `find` the
+// binary by name and `install` it to /usr/local/bin. The earlier
+// streaming `tar -C /usr/local/bin/` shape failed for archives whose
+// binary was nested inside a top-level directory (csvlens ships
+// `csvlens-x86_64-unknown-linux-musl/csvlens`, which would land at
+// `/usr/local/bin/csvlens-x86_64-unknown-linux-musl/csvlens` instead
+// of `/usr/local/bin/csvlens`). The find+install shape handles both
+// flat and nested archive layouts.
 function directInstallCommand(url: string, binary: string): string {
   const lower = url.toLowerCase();
   const qUrl = shellQuote(url);
+  const qBin = shellQuote(binary);
+  let extractCmd: string;
   if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
-    return `curl -fsSL ${qUrl} | tar xz -C /usr/local/bin/`;
+    extractCmd = `tar xzf "$tmp/a" -C "$tmp/x"`;
+  } else if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) {
+    extractCmd = `tar xJf "$tmp/a" -C "$tmp/x"`;
+  } else if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) {
+    extractCmd = `tar xjf "$tmp/a" -C "$tmp/x"`;
+  } else if (lower.endsWith('.zip')) {
+    extractCmd = `unzip -q "$tmp/a" -d "$tmp/x"`;
+  } else {
+    // Unknown extension: attempt gzip-tar as a last resort. Fails loud
+    // on mismatch; orchestration bounces as chain_resolved_install_failed.
+    extractCmd = `tar xzf "$tmp/a" -C "$tmp/x"`;
   }
-  if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) {
-    return `curl -fsSL ${qUrl} | tar xJ -C /usr/local/bin/`;
-  }
-  if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz2')) {
-    return `curl -fsSL ${qUrl} | tar xj -C /usr/local/bin/`;
-  }
-  if (lower.endsWith('.zip')) {
-    const qBin = shellQuote(binary);
-    // mktemp -d gives a per-invocation directory so concurrent
-    // installs (queued at the DO) don't clobber each other's
-    // extraction tree. find -perm /111 narrows to executable matches
-    // so non-binary `<binary>.txt`-style decoys don't shadow the real
-    // target. -print -quit returns the first hit.
-    return (
-      `set -e; ` +
-      `tmp=$(mktemp -d); ` +
-      `curl -fsSL ${qUrl} -o "$tmp/a.zip"; ` +
-      `unzip -q "$tmp/a.zip" -d "$tmp/x"; ` +
-      `found=$(find "$tmp/x" -type f -name ${qBin} -perm /111 -print -quit); ` +
-      `install -m 0755 "$found" /usr/local/bin/${qBin}; ` +
-      `rm -rf "$tmp"`
-    );
-  }
-  // Fall through to the legacy tar-gz shape so URLs without a
-  // recognized extension still attempt extraction. Fails loud if the
-  // download isn't gzip; the orchestration bounces as
-  // chain_resolved_install_failed with the tar error in details.
-  return `curl -fsSL ${qUrl} | tar xz -C /usr/local/bin/`;
+  // Wrapped in `( ... )` subshell so `set -e` exits the subshell on
+  // failure rather than the persistent container shell session (which
+  // would kill the session and 1101-error every subsequent request
+  // routed to this DO instance — SessionTerminatedError).
+  //
+  // find -perm /111 narrows to executable matches so non-binary
+  // `<binary>.txt`-style decoys don't shadow the real target.
+  // -print -quit returns the first hit.
+  return (
+    `( set -e; ` +
+    `tmp=$(mktemp -d); ` +
+    `mkdir "$tmp/x"; ` +
+    `curl -fsSL ${qUrl} -o "$tmp/a"; ` +
+    `${extractCmd}; ` +
+    `found=$(find "$tmp/x" -type f -name ${qBin} -perm /111 -print -quit); ` +
+    `test -n "$found"; ` +
+    `install -m 0755 "$found" /usr/local/bin/${qBin}; ` +
+    `rm -rf "$tmp" )`
+  );
 }
 
 function installHostsFor(spec: InstallSpec): readonly string[] {

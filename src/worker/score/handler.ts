@@ -41,7 +41,7 @@ import { type ValidatedInput, validateInput } from './validate';
 // wrangler.jsonc `containers[]` so getRandom's hash space lines up with
 // the CF Containers app config — under-shooting wastes provisioned
 // capacity; over-shooting picks IDs that don't have a container.
-const MAX_INSTANCES = 3;
+const MAX_INSTANCES = 10;
 
 // ---------------------------------------------------------------------------
 // Env contract
@@ -485,7 +485,7 @@ function mapDoError(payload: { error: string; details?: string }): Response {
       // collapses to chain_resolved_install_failed so we don't lie
       // about which surface is broken.
       const pm = details.match(/^pm=(\w+)/)?.[1];
-      if (pm === 'brew_only' || pm === 'brew' || pm === 'bun') {
+      if (pm === 'brew_only' || pm === 'brew' || pm === 'bun' || pm === 'go_no_binary') {
         return shapeScoreError({ code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC });
       }
       return shapeScoreError({ code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC });

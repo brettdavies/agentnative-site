@@ -200,9 +200,9 @@
           // version histories) and may legitimately diverge.
           //
           // See RELEASES.md § Sandbox image releases for the full flow.
-          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:f9f3b13",
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:iter4",
           "instance_type": "basic",
-          "max_instances": 3
+          "max_instances": 10
         }
       ],
       "durable_objects": {
