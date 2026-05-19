@@ -19,6 +19,16 @@ const REGISTRY_INDEX = {
       version: '14.1.0',
       anc_version: '0.3.1',
       scorecard_url: '/score/ripgrep',
+      score_pct: 92,
+    },
+    bat: {
+      name: 'bat',
+      binary: 'bat',
+      install: 'cargo install bat',
+      version: '0.26.1',
+      anc_version: '0.3.1',
+      scorecard_url: '/score/bat',
+      score_pct: 78,
     },
   },
   by_owner_repo: {},
@@ -107,36 +117,41 @@ beforeEach(() => {
 });
 
 describe('/api/score — share_url derivation', () => {
-  // `cargo install ripgrep` → parser binary='ripgrep' → cache key
-  // scores/ripgrep/<SPEC_VERSION>.json. share_url should be the matching
-  // /live-score/ripgrep URL.
-  const CACHED_KEY = 'scores/ripgrep/0.4.0.json';
+  // `cargo install uncurated-tool` → parser binary='uncurated-tool' →
+  // cache key scores/uncurated-tool/<SPEC_VERSION>.json. share_url should
+  // be the matching /live-score/uncurated-tool URL.
+  //
+  // Deliberately fictional package name: NOT in this file's REGISTRY_INDEX
+  // (ripgrep + bat are curated there), so the install-command cross-check
+  // (registry-lookup.ts) doesn't intercept and the input flows through to
+  // the cache tier — which is what these share_url tests need to exercise.
+  const CACHED_KEY = 'scores/uncurated-tool/0.4.0.json';
   const CACHED_PAYLOAD = {
     spec_version: '0.4.0',
     anc_version: '0.3.1',
-    tool_version: '14.1.0',
-    scorecard: { badge: { score_pct: 92, eligible: true }, results: [] },
+    tool_version: '0.1.0',
+    scorecard: { badge: { score_pct: 70, eligible: false }, results: [] },
   };
 
   test('cached install-command hit: share_url = /live-score/<binary>', async () => {
     const env = makeEnv({ [CACHED_KEY]: CACHED_PAYLOAD });
-    const res = await handleScore(postScore('cargo install ripgrep'), env);
+    const res = await handleScore(postScore('cargo install uncurated-tool'), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { share_url?: string; scorecard: unknown };
-    expect(body.share_url).toBe('/live-score/ripgrep');
+    expect(body.share_url).toBe('/live-score/uncurated-tool');
   });
 
   test('cached install-command hit: share_url stable across requests', async () => {
     const env = makeEnv({ [CACHED_KEY]: CACHED_PAYLOAD });
-    const r1 = await handleScore(postScore('cargo install ripgrep'), env);
-    const r2 = await handleScore(postScore('cargo install ripgrep'), env);
+    const r1 = await handleScore(postScore('cargo install uncurated-tool'), env);
+    const r2 = await handleScore(postScore('cargo install uncurated-tool'), env);
     const b1 = (await r1.json()) as { share_url?: string };
     const b2 = (await r2.json()) as { share_url?: string };
     // Same binary → same share URL. This is the design improvement over
     // session-id minting: shareable URLs map to scored binaries, not to
     // request instances.
-    expect(b1.share_url).toBe('/live-score/ripgrep');
-    expect(b2.share_url).toBe('/live-score/ripgrep');
+    expect(b1.share_url).toBe('/live-score/uncurated-tool');
+    expect(b2.share_url).toBe('/live-score/uncurated-tool');
   });
 
   test('registry_hit does NOT carry share_url (scorecard_url is the share surface)', async () => {
@@ -145,11 +160,40 @@ describe('/api/score — share_url derivation', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       share_url?: string;
-      scorecard: { kind?: string; scorecard_url?: string };
+      scorecard: { kind?: string; scorecard_url?: string; score_pct?: number | null };
     };
     expect(body.share_url).toBeUndefined();
     expect(body.scorecard.kind).toBe('registry_hit');
     expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
+  });
+
+  test('registry_hit carries score_pct for the curated-reward UX', async () => {
+    const env = makeEnv();
+    const res = await handleScore(postScore('ripgrep'), env);
+    const body = (await res.json()) as {
+      scorecard: { kind?: string; score_pct?: number | null };
+    };
+    expect(body.scorecard.kind).toBe('registry_hit');
+    expect(body.scorecard.score_pct).toBe(92);
+  });
+
+  test('install-command resolving to a curated tool returns registry_hit, not live (bat fix)', async () => {
+    // `cargo install bat` parses to binary='bat'. With the U8+ cross-check,
+    // this should hit by_slug.bat and return registry_hit, NOT fall through
+    // to the cache + live path. Pre-fix behavior would have run the
+    // sandbox; post-fix is instant.
+    const env = makeEnv();
+    const res = await handleScore(postScore('cargo install bat'), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      scorecard: { kind?: string; scorecard_url?: string; score_pct?: number | null };
+      share_url?: string;
+    };
+    expect(body.scorecard.kind).toBe('registry_hit');
+    expect(body.scorecard.scorecard_url).toBe('/score/bat');
+    expect(body.scorecard.score_pct).toBe(78);
+    // No share_url: registry_hit uses scorecard_url, not /live-score.
+    expect(body.share_url).toBeUndefined();
   });
 
   test('github-url with hint: share_url derives from hint.binary', async () => {

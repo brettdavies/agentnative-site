@@ -42,10 +42,14 @@ function projectRegistryEntry(tool, enrichment) {
   // Plan U5: registry-fast-path response carries the latest scorecard's
   // version + anc_version + URL so the Worker can build the R11 triad and
   // route the user to /score/<slug> without fetching the scorecard JSON.
+  // U8+: also carry score_pct so the registry_hit envelope can show a
+  // "Curated - N% pass rate" reward inline on the homepage form without
+  // a second round-trip.
   if (enrichment) {
     if (enrichment.version) out.version = enrichment.version;
     if (enrichment.anc_version) out.anc_version = enrichment.anc_version;
     if (enrichment.scorecard_url) out.scorecard_url = enrichment.scorecard_url;
+    if (typeof enrichment.score_pct === 'number') out.score_pct = enrichment.score_pct;
   }
   return out;
 }

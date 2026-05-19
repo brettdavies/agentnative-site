@@ -37,6 +37,11 @@ export type RegistryEntry = {
   version?: string;
   anc_version?: string;
   scorecard_url?: string;
+  // U8+ — score_pct surfaces into the registry_hit envelope so the
+  // homepage form can show a curated-tool reward (e.g., "Curated · 92%
+  // pass rate · Opening the audited scorecard…") inline before redirect,
+  // without a second round-trip to fetch the scorecard JSON.
+  score_pct?: number;
 };
 
 export type RegistryIndex = {
@@ -84,9 +89,23 @@ export function lookupRegistry(
     if (hint) return { kind: 'hint', hint };
     return { kind: 'miss' };
   }
-  // install-command and unknown don't trigger lookups; the caller passes
-  // them through directly (install-command -> U6 with the parsed spec;
-  // unknown -> 400 to user).
+  if (input.kind === 'install-command') {
+    // Cross-check the parser's binary against curated by_slug. Catches
+    // inputs like `cargo install bat` (binary='bat', curated as
+    // by_slug['bat']) and `npm i -g typescript` (binary='typescript',
+    // curated as by_slug['typescript']). Without this, install-commands
+    // that resolve to a curated tool fall through to the R2 cache (empty
+    // on first request) and then to the live path — paying sandbox cost
+    // for a tool the site already has a curated audit for. Per-binary
+    // alias edge case (e.g., `cargo install rg` typing the binary name
+    // not the package name) still falls through; an explicit by_binary
+    // map would catch that but isn't worth the index churn for the
+    // current corpus.
+    const entry = registryIndex.by_slug[input.spec.binary];
+    if (entry) return { kind: 'registry', entry };
+    return { kind: 'miss' };
+  }
+  // unknown — passed through to a 400 by the caller.
   return { kind: 'miss' };
 }
 

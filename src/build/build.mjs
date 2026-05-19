@@ -385,6 +385,11 @@ export async function build() {
       version: t.version,
       anc_version: t.metadata?.anc?.version ?? null,
       scorecard_url: `/score/${t.tool.name}`,
+      // Carried into the registry-fast-path envelope so the homepage
+      // form can show a "Curated · X% pass rate" reward inline without
+      // a second round-trip to fetch the scorecard JSON. Schema 0.5
+      // guarantees badge.score_pct is an integer 0..100.
+      score_pct: t.scorecard?.badge?.score_pct ?? null,
     };
   }
   const { warnings: indexWarnings } = await emitBuildIndexes({

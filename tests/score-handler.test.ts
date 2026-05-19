@@ -508,20 +508,31 @@ describe('/api/score — content negotiation', () => {
 // The cache key uses SPEC_VERSION (build-time constant) as the
 // anc-version proxy. The constant currently reads 0.4.0 from
 // src/worker/spec-version.gen.ts; if it bumps, update the keys here.
-const CACHE_KEY_RIPGREP = 'scores/ripgrep/0.4.0.json';
+//
+// `uncurated-tool` is a deliberately-fictional package name used as the
+// cache-tier exemplar — clearly NOT in the test fixture's
+// REGISTRY_INDEX.by_slug, so the U8+ install-command-binary cross-check
+// (registry-lookup.ts) doesn't intercept and the input flows through to
+// the cache tier as intended. Avoid swapping to a real CLI tool name
+// here: tests stub the DO response so the package never actually
+// installs, but a real name in test code can mislead a future reader
+// into pasting it as a live-demo example where it would either fail
+// (no real package) or run a slow install. Fictional name = self-
+// documenting "this is fixture data, not a real package".
+const CACHE_KEY_UNCURATED = 'scores/uncurated-tool/0.4.0.json';
 
-const CACHED_RIPGREP_PAYLOAD = {
+const CACHED_UNCURATED_PAYLOAD = {
   spec_version: '0.4.0',
   anc_version: '0.3.1',
-  tool_version: '15.1.0',
-  scorecard: { tool: { name: 'ripgrep', binary: 'ripgrep', version: '15.1.0' }, score: { value: 92 } },
+  tool_version: '3.04',
+  scorecard: { tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '3.04' }, score: { value: 92 } },
 };
 
 describe('/api/score — R2 cache tier (plan U7)', () => {
   test('install-command + R2 hit → 200 cached, DO never dispatched, gates bypassed', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
-      cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD },
+      cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD },
       tracker,
       // Hard-fail every metered gate. The cached hit must bypass all of
       // them — proving the unmetered contract (R6 extended to cache).
@@ -529,7 +540,7 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
       rateLimit: false,
       ipRateLimit: false,
     });
-    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(0);
     const body = (await res.json()) as {
@@ -538,7 +549,7 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
       spec_version: string;
       checker_url: string;
     };
-    expect(body.scorecard.tool.name).toBe('ripgrep');
+    expect(body.scorecard.tool.name).toBe('uncurated-tool');
     expect(body.scorecard.score.value).toBe(92);
     expect(body.anc_version).toBe('0.3.1');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
@@ -550,31 +561,31 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
       cacheContent: {},
       tracker,
       doResponse: {
-        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
+        scorecard: { tool: { name: 'uncurated-tool', version: '3.04' } },
         anc_version: '0.3.1',
       },
     });
-    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(1);
     const body = (await res.json()) as { scorecard: { tool: { name: string } } };
-    expect(body.scorecard.tool.name).toBe('ripgrep');
+    expect(body.scorecard.tool.name).toBe('uncurated-tool');
   });
 
   test('?fromCache=false bypasses R2 read, live path runs even with cache prefilled', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
-      cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD },
+      cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD },
       tracker,
       doResponse: {
-        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' }, score: { value: 50 } },
+        scorecard: { tool: { name: 'uncurated-tool', version: '3.04' }, score: { value: 50 } },
         anc_version: '0.3.1',
       },
     });
     const req = new Request('https://anc.dev/api/score?fromCache=false', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input: 'cargo binstall ripgrep', turnstile_token: 'tok' }),
+      body: JSON.stringify({ input: 'cargo binstall uncurated-tool', turnstile_token: 'tok' }),
     });
     const res = await handleScore(req, env);
     expect(res.status).toBe(200);
@@ -593,7 +604,7 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     const env = makeEnv({
       // Pre-seed the cache under the slug's binary key. The registry
       // already has ripgrep with scorecard_url + anc_version.
-      cacheContent: { 'scores/rg/0.4.0.json': CACHED_RIPGREP_PAYLOAD },
+      cacheContent: { 'scores/rg/0.4.0.json': CACHED_UNCURATED_PAYLOAD },
       tracker,
     });
     const res = await handleScore(postScore('ripgrep'), env);
@@ -610,11 +621,11 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
       cacheThrows: true,
       tracker,
       doResponse: {
-        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
+        scorecard: { tool: { name: 'uncurated-tool', version: '3.04' } },
         anc_version: '0.3.1',
       },
     });
-    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(1);
   });
@@ -626,25 +637,25 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     // matches a cached binary returns 200.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
-      cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD },
+      cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD },
       tracker,
     });
-    const res = await handleScore(getScore('cargo binstall ripgrep'), env);
+    const res = await handleScore(getScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(0);
   });
 
   test('GET install-command with cache miss returns 404 (read-only contract)', async () => {
     const env = makeEnv({ cacheContent: {} });
-    const res = await handleScore(getScore('cargo binstall ripgrep'), env);
+    const res = await handleScore(getScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('chain_no_resolve');
   });
 
   test('cached scorecard preserves R11 triad', async () => {
-    const env = makeEnv({ cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD } });
-    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const env = makeEnv({ cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD } });
+    const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     const body = (await res.json()) as {
       spec_version: string;
       anc_version: string;
@@ -776,7 +787,7 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       // Pre-seed ONLY under the curated 'rg' key.
-      cacheContent: { 'scores/rg/0.4.0.json': CACHED_RIPGREP_PAYLOAD },
+      cacheContent: { 'scores/rg/0.4.0.json': CACHED_UNCURATED_PAYLOAD },
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
@@ -786,35 +797,35 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     // POST install-command — key derives to scores/ripgrep/0.4.0.json,
     // which is empty. The pre-seeded scores/rg/0.4.0.json must NOT be
     // served (it's the curated path's key, not the install-command path's).
-    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(1);
   });
 
   test('anc-version partition: reads under SPEC_VERSION slot, stale entries under a different slot are unreachable', async () => {
     // SPEC_VERSION is currently '0.4.0'. A stale entry under
-    // scores/cowsay/0.3.0.json (older spec) must be unreachable when
+    // scores/uncurated-tool/0.3.0.json (older spec) must be unreachable when
     // the running Worker computes the key from SPEC_VERSION='0.4.0'.
     // This pins the partition-by-version property so a future change
     // that strips the version from the key surfaces here.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       cacheContent: {
-        'scores/cowsay/0.3.0.json': {
+        'scores/uncurated-tool/0.3.0.json': {
           spec_version: '0.3.0',
           anc_version: '0.2.5',
           tool_version: '1.5.0',
-          scorecard: { tool: { name: 'cowsay', version: '1.5.0' } },
+          scorecard: { tool: { name: 'uncurated-tool', version: '1.5.0' } },
         },
         // NO entry under 0.4.0 → cache miss.
       },
       tracker,
       doResponse: {
-        scorecard: { tool: { name: 'cowsay', version: '1.6.0' } },
+        scorecard: { tool: { name: 'uncurated-tool', version: '1.6.0' } },
         anc_version: '0.3.1',
       },
     });
-    const res = await handleScore(postScore('npm install -g cowsay'), env);
+    const res = await handleScore(postScore('npm install -g uncurated-tool'), env);
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(1);
     const body = (await res.json()) as { scorecard: { tool: { version: string } } };
@@ -825,8 +836,8 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
   test('cached hit returns Cache-Control: public, max-age=300 for CDN-edge cooperation', async () => {
     // Pinned per plan U7 — the per-write Cache-Control header keeps CDN
     // edges from over-caching while R2 lifecycle handles the long TTL.
-    const env = makeEnv({ cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD } });
-    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const env = makeEnv({ cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD } });
+    const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
   });
 
@@ -921,7 +932,7 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
       cacheStore,
       tracker,
       doResponse: {
-        scorecard: { tool: { name: 'cowsay', binary: 'cowsay', version: '1.6.0' } },
+        scorecard: { tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '1.6.0' } },
         anc_version: '0.3.1',
       },
     });
@@ -932,7 +943,7 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     const req1 = new Request('https://anc.dev/api/score?fromCache=false', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ input: 'npm install -g cowsay', turnstile_token: 'tok' }),
+      body: JSON.stringify({ input: 'npm install -g uncurated-tool', turnstile_token: 'tok' }),
     });
     const res1 = await handleScore(req1, env);
     expect(res1.status).toBe(200);
@@ -943,18 +954,21 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     // by injecting it into the shared cacheStore — this is what
     // writeCacheBestEffort would do after a successful score.
     cacheStore.set(
-      'scores/cowsay/0.4.0.json',
+      'scores/uncurated-tool/0.4.0.json',
       JSON.stringify({
         spec_version: '0.4.0',
         anc_version: '0.3.1',
         tool_version: '1.6.0',
-        scorecard: { tool: { name: 'cowsay', binary: 'cowsay', version: '1.6.0' }, score: { value: 92 } },
+        scorecard: {
+          tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '1.6.0' },
+          score: { value: 92 },
+        },
       }),
     );
 
     // Second request WITHOUT ?fromCache=false. The cache write should
     // now be readable; DO should NOT dispatch again.
-    const req2 = postScore('npm install -g cowsay');
+    const req2 = postScore('npm install -g uncurated-tool');
     const res2 = await handleScore(req2, env);
     expect(res2.status).toBe(200);
     // Tracker is still 1 from the first call; the second call hits cache.

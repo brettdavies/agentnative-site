@@ -70,10 +70,40 @@ describe('lookupRegistry', () => {
     expect(lookupRegistry(input, REGISTRY, HINTS).kind).toBe('miss');
   });
 
-  test('install-command input → miss (caller passes spec through directly)', () => {
+  test('install-command with curated binary → registry hit (cross-check by spec.binary)', () => {
+    // `cargo install ripgrep` parses to binary='ripgrep'. The curated
+    // by_slug map has ripgrep, so this should hit registry, not fall
+    // through to the cache + live path. Catches the bat-shaped class of
+    // install-command-resolving-to-curated-tool inputs that previously
+    // paid sandbox cost for a tool already audited.
     const input: ValidatedInput = {
       kind: 'install-command',
-      spec: { pm: 'brew', package: 'ripgrep', binary: 'ripgrep' },
+      spec: { pm: 'cargo-binstall', package: 'ripgrep', binary: 'ripgrep' },
+    };
+    const r = lookupRegistry(input, REGISTRY, HINTS);
+    expect(r.kind).toBe('registry');
+    if (r.kind === 'registry') {
+      expect(r.entry.name).toBe('ripgrep');
+      expect(r.entry.binary).toBe('rg'); // curated entry's actual binary, not the parser's binary
+    }
+  });
+
+  test('install-command with non-curated binary → miss (live path)', () => {
+    const input: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'brew', package: 'obscure-tool', binary: 'obscure-tool' },
+    };
+    expect(lookupRegistry(input, REGISTRY, HINTS).kind).toBe('miss');
+  });
+
+  test('install-command binary-alias edge case (cargo install <binary-not-package>) → miss', () => {
+    // Typing `cargo install rg` (the binary name, not the cargo package
+    // name 'ripgrep') makes the parser report binary='rg'. by_slug has
+    // 'ripgrep' but not 'rg' (rg is curated under tool.binary, not
+    // tool.name). Documented edge case — falls through to live path.
+    const input: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'cargo-binstall', package: 'rg', binary: 'rg' },
     };
     expect(lookupRegistry(input, REGISTRY, HINTS).kind).toBe('miss');
   });

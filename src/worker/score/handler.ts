@@ -189,6 +189,11 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
           kind: 'registry_hit',
           tool: lookup.entry,
           scorecard_url: lookup.scorecard_url,
+          // Surface the curated score so the homepage form can render a
+          // "Curated · N% pass rate" reward inline before the redirect.
+          // null when the registry entry predates the U8+ enrichment
+          // (gracefully degrades on the client).
+          score_pct: typeof lookup.entry.score_pct === 'number' ? lookup.entry.score_pct : null,
         },
         lookup.anc_version,
         'cache-hit',
