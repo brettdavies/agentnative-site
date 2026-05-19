@@ -37,7 +37,17 @@
 # docs/solutions/tooling-decisions/cloudflare-staging-turnstile-test-secret-2026-05-19.md
 # for the full pattern.
 #
-# Dependencies: curl, jaq (preferred) or jq, wrangler (bun x wrangler), date (GNU or BSD).
+# Cloudflare Access (added 2026-05-19): the staging Worker URL is now
+# gated by a CF Access Self-Hosted Application. CLI clients must send
+# CF-Access-Client-Id + CF-Access-Client-Secret headers from a service
+# token. This script reads them from 1Password by item title:
+#   "Cloudflare Access Service Token - agentnative-site-staging"
+# A missing service-token item OR a missing op CLI surfaces as an
+# instant 302 redirect to `*.cloudflareaccess.com` on every request,
+# which the harness reports as a clear FAIL rather than a confusing
+# protocol-level error.
+#
+# Dependencies: curl, jaq (preferred) or jq, wrangler (bun x wrangler), date (GNU or BSD), op (1Password CLI).
 
 set -u
 
@@ -55,6 +65,33 @@ if [ -z "$JQ_BIN" ]; then
   echo "FATAL: neither jaq nor jq is installed. Install one (brew install jaq) and retry." >&2
   exit 2
 fi
+
+# Fetch CF Access service token credentials from 1Password. The values
+# never enter the script's logged output; they live in shell variables
+# scoped to this process and are passed to curl via -H. The 1Password
+# helper scripts default to the secrets-dev vault.
+OP_ITEM="Cloudflare Access Service Token - agentnative-site-staging"
+OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
+if [ ! -x "$OP_READ" ]; then
+  echo "FATAL: 1Password helper not found at $OP_READ. Export OP_READ to point at it, or install the 1password skill." >&2
+  exit 2
+fi
+CF_ACCESS_CLIENT_ID="$("$OP_READ" "$OP_ITEM" client_id 2>/dev/null || true)"
+CF_ACCESS_CLIENT_SECRET="$("$OP_READ" "$OP_ITEM" client_secret 2>/dev/null || true)"
+if [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
+  echo "FATAL: could not read CF Access service token from 1Password item '$OP_ITEM'." >&2
+  echo "       Verify the item exists in vault 'secrets-dev' with fields 'client_id' and 'client_secret'." >&2
+  echo "       Then re-run. Without these credentials every staging request returns 302 to *.cloudflareaccess.com." >&2
+  exit 2
+fi
+
+# Curl helper that always carries the CF Access service-token headers.
+# All HTTP calls below go through these so the Access boundary is
+# transparent to the test logic.
+ACCESS_HEADERS=(
+  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID"
+  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET"
+)
 
 PASS=0
 FAIL=0
@@ -87,7 +124,7 @@ expect_status_post() {
   local tmp
   tmp=$(mktemp)
   local code
-  code=$(curl -s -o "$tmp" -w '%{http_code}' \
+  code=$(curl -s -o "$tmp" -w '%{http_code}' "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score$query" \
     --data "$body")
@@ -105,7 +142,7 @@ expect_error_code() {
   local tmp
   tmp=$(mktemp)
   local code
-  code=$(curl -s -o "$tmp" -w '%{http_code}' \
+  code=$(curl -s -o "$tmp" -w '%{http_code}' "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score$query" \
     --data "$body")
@@ -123,7 +160,7 @@ expect_error_code() {
 expect_status_method() {
   local label=$1 method=$2 expected=$3
   local code
-  code=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" "$STAGING_URL/api/score")
+  code=$(curl -s -o /dev/null -w '%{http_code}' "${ACCESS_HEADERS[@]}" -X "$method" "$STAGING_URL/api/score")
   if [ "$code" = "$expected" ]; then
     ok "$label (method=$method, status=$code)"
   else
@@ -139,7 +176,7 @@ expect_warm_hit() {
   tmp=$(mktemp)
   local start_ms end_ms duration code
   start_ms=$(now_ms)
-  code=$(curl -s -o "$tmp" -w '%{http_code}' \
+  code=$(curl -s -o "$tmp" -w '%{http_code}' "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score" --data "$body")
   end_ms=$(now_ms)
@@ -168,7 +205,7 @@ expect_cold_then_warm() {
   # COLD
   local start_ms end_ms duration code
   start_ms=$(now_ms)
-  code=$(curl -s -o "$tmp_cold" -w '%{http_code}' --max-time 90 \
+  code=$(curl -s -o "$tmp_cold" -w '%{http_code}' --max-time 90 "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score" --data "$body")
   end_ms=$(now_ms)
@@ -196,7 +233,7 @@ expect_cold_then_warm() {
 
   # WARM
   start_ms=$(now_ms)
-  code=$(curl -s -o "$tmp_warm" -w '%{http_code}' \
+  code=$(curl -s -o "$tmp_warm" -w '%{http_code}' "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score" --data "$body")
   end_ms=$(now_ms)
@@ -267,11 +304,11 @@ expect_warm_hit "D01 POST cowsay (cached from prior run)" '{"input":"npm install
 # GET path: cache tier also honored on GET per U7 (read-only contract extended).
 GET_LATENCY=$({
   start_ms=$(now_ms)
-  curl -s -o /dev/null "$STAGING_URL/api/score?input=npm%20install%20-g%20cowsay"
+  curl -s -o /dev/null "${ACCESS_HEADERS[@]}" "$STAGING_URL/api/score?input=npm%20install%20-g%20cowsay"
   end_ms=$(now_ms)
   echo $((end_ms - start_ms))
 })
-GET_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$STAGING_URL/api/score?input=npm%20install%20-g%20cowsay")
+GET_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${ACCESS_HEADERS[@]}" "$STAGING_URL/api/score?input=npm%20install%20-g%20cowsay")
 if [ "$GET_STATUS" = "200" ] && [ "$GET_LATENCY" -lt 2000 ]; then
   ok "D02 GET cowsay → 200 cache-hit ($GET_LATENCY ms)"
 else
@@ -281,7 +318,7 @@ fi
 # GET on an uncached non-registry github-url → 404 chain_no_resolve.
 # GET is registry + cache tier only (read-only contract). The cache tier
 # can't help here because there's no derivable binary upfront.
-GET_404_STATUS=$(curl -s -o /tmp/d03 -w '%{http_code}' "$STAGING_URL/api/score?input=https%3A%2F%2Fgithub.com%2Ftotally%2Funknown-tool-12345")
+GET_404_STATUS=$(curl -s -o /tmp/d03 -w '%{http_code}' "${ACCESS_HEADERS[@]}" "$STAGING_URL/api/score?input=https%3A%2F%2Fgithub.com%2Ftotally%2Funknown-tool-12345")
 GET_404_CODE=$("$JQ_BIN" -r '.error.code // ""' </tmp/d03 2>/dev/null)
 if [ "$GET_404_STATUS" = "404" ] && [ "$GET_404_CODE" = "chain_no_resolve" ]; then
   ok "D03 GET unknown github → 404 chain_no_resolve"
@@ -305,7 +342,7 @@ if [ "$COLD" = true ]; then
   # the existing entry with a freshly-scored copy).
   printf '  exercising ?fromCache=false bypass on cowsay (1 sandbox spawn)\n'
   start_ms=$(now_ms)
-  code=$(curl -s -o /tmp/e04 -w '%{http_code}' --max-time 90 \
+  code=$(curl -s -o /tmp/e04 -w '%{http_code}' --max-time 90 "${ACCESS_HEADERS[@]}" \
     -X POST -H 'content-type: application/json' \
     "$STAGING_URL/api/score?fromCache=false" \
     --data '{"input":"npm install -g cowsay","turnstile_token":"x"}')
