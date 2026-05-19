@@ -10,6 +10,16 @@
 # src/worker/score/do.ts:resolveSpec(). Brew-only formulae bounce as
 # install_unsupported with pm=brew_only.
 #
+# Python version: the FINAL base is `python:3.12-slim-trixie` rather than
+# the bare `debian:trixie-slim` because aider-chat (and many other
+# Python-ecosystem tools) constrain Python to `<3.13,>=3.10`. Debian
+# Trixie defaults to Python 3.13, which makes pip's resolver back off to
+# ancient package versions trying to find a compatible wheel — see
+# docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md
+# for the full investigation. Otherwise the environment is identical
+# Trixie (same glibc, same apt repos, same Node 22, same anc/bun/uv/go
+# binary versions).
+#
 # Image budget: <=350 MB compressed. Verify locally:
 #   docker build -f docker/sandbox/Dockerfile -t anc-sandbox .
 #   docker image inspect anc-sandbox --format '{{.Size}}'
@@ -17,14 +27,20 @@
 FROM docker.io/cloudflare/sandbox:0.9.2@sha256:3a8626db5d3d838d947abadd37b818e48628b17f12cf2e87d89b8e83a6676482 AS sandbox-base
 
 # Multi-arch index digest pinned; Docker resolves to the amd64 child at
-# pull time.
-FROM docker.io/library/debian:trixie-slim@sha256:109e2c65005bf160609e4ba6acf7783752f8502ad218e298253428690b9eaa4b AS final
+# pull time. The official Python image installs CPython 3.12 + pip +
+# setuptools + wheel into /usr/local/, which lands ahead of /usr/bin on
+# PATH — so our existing `pip install` command picks up the 3.12 pip
+# without code changes. We DROP `python3` and `python3-pip` from the
+# apt install below because the base image already provides them.
+FROM docker.io/library/python:3.12-slim-trixie@sha256:bf73779de6dbd030f3d189eeeb246286965832761ace318c1518300f76c0840d AS final
 
 COPY --from=sandbox-base /container-server/sandbox /sandbox
 
 # bzip2 / unzip / xz-utils back the per-extension dispatch in
 # sandbox-exec.ts directInstallCommand() for .tar.bz2 / .zip / .tar.xz
-# releases. libstdc++6 satisfies the sandbox-server runtime dep.
+# releases. libstdc++6 satisfies the sandbox-server runtime dep. Python
+# + pip are provided by the base image (see FROM line above) so neither
+# `python3` nor `python3-pip` is in this apt install list.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -35,8 +51,6 @@ RUN apt-get update \
         libstdc++6 \
         nodejs \
         npm \
-        python3 \
-        python3-pip \
         unzip \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
