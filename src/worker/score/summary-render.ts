@@ -1,12 +1,12 @@
-// Server-side renderer for /live-score/<binary> + markdown twin.
+// Server-side renderer for /score/live/<binary> + markdown twin.
 //
 // Plan U8 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
 // "summary-render.ts" bullet). Reads the cached scorecard from R2 and
 // emits either:
 //
-//   - HTML at /live-score/<binary> — top-3 issues + score badge + CTA,
+//   - HTML at /score/live/<binary> — top-3 issues + score badge + CTA,
 //     wrapped in the site shell (build-emitted template asset).
-//   - Markdown at /live-score/<binary>.md OR Accept: text/markdown — same
+//   - Markdown at /score/live/<binary>.md OR Accept: text/markdown — same
 //     content, plain markdown twin so agents pasting `Accept:
 //     text/markdown` get a clean document. Mirrors the site-wide
 //     "every HTML page has a markdown twin" invariant.
@@ -15,7 +15,7 @@
 // `/score/<tool>` page carries — this is a paste-and-share surface, not
 // a deep-dive page.
 //
-// Shell template comes from `dist/_internal/live-score-shell.html`,
+// Shell template comes from `dist/_internal/score-live-shell.html`,
 // emitted by `src/build/build.mjs` from the same `emitShell()` helper
 // that builds the static pages. Drift can't happen because the template
 // is regenerated on every build.
@@ -31,7 +31,7 @@ import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { get as cacheGet, keyFor as cacheKeyFor } from './cache';
 
-// Lazy-cached shell template — fetched on the first /live-score request
+// Lazy-cached shell template — fetched on the first /score/live request
 // in each isolate and held for the lifetime of the isolate. Workers re-
 // instantiate isolates frequently so the bounded staleness is fine.
 let shellTemplatePromise: Promise<string> | null = null;
@@ -39,8 +39,8 @@ let shellTemplatePromise: Promise<string> | null = null;
 async function loadShellTemplate(env: { ASSETS: Fetcher }): Promise<string> {
   if (!shellTemplatePromise) {
     shellTemplatePromise = (async () => {
-      const res = await env.ASSETS.fetch(new Request('https://assets.internal/_internal/live-score-shell.html'));
-      if (!res.ok) throw new Error(`live-score shell template missing (status ${res.status})`);
+      const res = await env.ASSETS.fetch(new Request('https://assets.internal/_internal/score-live-shell.html'));
+      if (!res.ok) throw new Error(`score-live shell template missing (status ${res.status})`);
       return await res.text();
     })().catch((err) => {
       shellTemplatePromise = null;
@@ -101,7 +101,7 @@ export type SummaryRenderInput = {
 };
 
 /**
- * Build the HTML body for `/live-score/<binary>`. Reuses the visual rhythm
+ * Build the HTML body for `/score/live/<binary>`. Reuses the visual rhythm
  * of `buildScorecardBody` in `scorecards-render.mjs` but trims to the
  * summary surface: header + score badge + top-3 issues + install-anc CTA.
  * No full check table; no per-tool meta block.
@@ -166,7 +166,7 @@ ${issuesBlock}
 }
 
 /**
- * Build the markdown body for `/live-score/<binary>.md`. Same content
+ * Build the markdown body for `/score/live/<binary>.md`. Same content
  * structure as the HTML body — header, score, top issues, CTA — emitted
  * as plain markdown so agents pasting `Accept: text/markdown` get a
  * clean document with no HTML escapes. Mirrors the markdown-twin
@@ -198,7 +198,7 @@ export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
     lines.push('');
     // Shared with the static /score/<tool>.md check table — single source
     // of truth for the row format in src/shared/scorecard-format.mjs.
-    // Absolute baseUrl because /live-score/<binary>.md is consumed by
+    // Absolute baseUrl because /score/live/<binary>.md is consumed by
     // agents via Accept negotiation and must self-resolve cross-origin
     // (no absolutifyMarkdownLinks pass like the static .md twins get).
     for (const row of formatCheckTableMarkdownLines(issues, { baseUrl: 'https://anc.dev' })) {
@@ -226,7 +226,7 @@ export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
 // ---------------------------------------------------------------------------
 
 // Same CSP shape applyHeaders sets on static pages — mirrored here because
-// /live-score/<binary> bypasses the static asset pipeline. Three Turnstile
+// /score/live/<binary> bypasses the static asset pipeline. Three Turnstile
 // directives (script-src, frame-src, connect-src) are kept even though
 // this page itself doesn't load Turnstile, because the share-URL surface
 // links back to the homepage form, and a uniform CSP across HTML responses
@@ -281,16 +281,22 @@ const BINARY_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export type LiveScorePathMatch = {
   binary: string;
-  /** True for `/live-score/<binary>.md`, false for the canonical HTML path. */
+  /** True for `/score/live/<binary>.md`, false for the canonical HTML path. */
   isMarkdown: boolean;
 };
 
 /**
- * Extract `<binary>` from `/live-score/<binary>` or `/live-score/<binary>.md`.
+ * Extract `<binary>` from `/score/live/<binary>` or `/score/live/<binary>.md`.
  * Returns null when the path doesn't match OR the slug fails the strict
  * shape check (no uppercase, no dots, no slashes, no leading hyphen,
  * bounded length). Tight regex matters here — this is the user-input
  * boundary for an R2 key lookup.
+ *
+ * URL pattern nests under the existing `/score/` namespace so the URL
+ * hierarchy reads as: `/score/<tool>` (curated static) and
+ * `/score/live/<binary>` (dynamic live-scored). The string "live" is
+ * reserved as a registry name in scorecards.mjs so a future curated tool
+ * named "live" can't collide.
  *
  * The two surfaces share routing because every HTML page on the site
  * carries a markdown twin (site-wide invariant). The handler picks the
@@ -306,17 +312,17 @@ export function parseLiveScorePath(pathname: string): string | null {
 }
 
 export function parseLiveScorePathMatch(pathname: string): LiveScorePathMatch | null {
-  const mdMatch = pathname.match(/^\/live-score\/([^/]+)\.md$/);
+  const mdMatch = pathname.match(/^\/score\/live\/([^/]+)\.md$/);
   if (mdMatch) {
     return BINARY_SLUG_RE.test(mdMatch[1]) ? { binary: mdMatch[1], isMarkdown: true } : null;
   }
-  const m = pathname.match(/^\/live-score\/([^/]+)$/);
+  const m = pathname.match(/^\/score\/live\/([^/]+)$/);
   if (!m) return null;
   return BINARY_SLUG_RE.test(m[1]) ? { binary: m[1], isMarkdown: false } : null;
 }
 
 /**
- * Handle a GET `/live-score/<binary>` (or `.md`) request. Returns:
+ * Handle a GET `/score/live/<binary>` (or `.md`) request. Returns:
  *   - 200 HTML / markdown with the rendered summary if R2 has a cached scorecard
  *   - 404 HTML / markdown if the cache is empty (no recent paste-and-score
  *     for this binary, or the 7-day lifecycle reaped the entry)
@@ -346,7 +352,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
 
   // The DO's cache write uses spec.binary (the parser-derived binary).
   // The handler's share_url uses the same. So a user never visits a
-  // /live-score/<alias> URL we'd need to redirect — the URL we emit IS
+  // /score/live/<alias> URL we'd need to redirect — the URL we emit IS
   // the cache key. Aliases (e.g., the static /score/rg → /score/ripgrep
   // redirect) live on the curated-static side and don't apply here.
   const cached = await cacheGet(env, cacheKeyFor(binary, SPEC_VERSION));
@@ -373,7 +379,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   const pct = (cached.scorecard as Scorecard).badge?.score_pct ?? 0;
   const title = `${toolName} — Agent-Native Live Score`;
   const description = `${toolName} scored ${pct}% against the agent-native CLI standard (anc ${cached.anc_version}, spec ${SPEC_VERSION}). Live-scored binary, not a curated audit.`;
-  const canonicalPath = `/live-score/${binary}`;
+  const canonicalPath = `/score/live/${binary}`;
 
   let template: string;
   try {
@@ -418,7 +424,7 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
 
   const title = `Not yet scored — anc.dev`;
   const description = `No cached live scorecard for ${binary}. Score it on the homepage or run anc check locally.`;
-  const canonicalPath = `/live-score/${binary}`;
+  const canonicalPath = `/score/live/${binary}`;
 
   let template: string;
   try {

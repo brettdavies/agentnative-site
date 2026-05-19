@@ -78,6 +78,11 @@ export async function loadRegistry(registryPath) {
     if (t.name === 'scorecards') {
       throw new Error('registry.yaml: "scorecards" is reserved — slug collision with the leaderboard page');
     }
+    if (t.name === 'live') {
+      throw new Error(
+        'registry.yaml: "live" is reserved — slug collision with the /score/live/<binary> dynamic share-URL namespace (plan U8)',
+      );
+    }
     if (seen.has(t.name)) {
       throw new Error(`registry.yaml: duplicate name "${t.name}"`);
     }

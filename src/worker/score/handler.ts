@@ -591,9 +591,10 @@ async function sha256(input: string): Promise<string> {
 /**
  * Build the shareable HTML URL for an inline-scorecard response. Reads the
  * cache-tier binary derivation from registry-lookup so the share URL and
- * the cache key the DO writes to stay in lockstep. The `/live-score/`
- * prefix is a separate top-level namespace so it never collides with the
- * curated `/score/<tool>` static-asset namespace.
+ * the cache key the DO writes to stay in lockstep. The `/score/live/`
+ * prefix nests under the existing `/score/<tool>` curated namespace; the
+ * string "live" is reserved in the registry (scorecards.mjs) so no
+ * curated tool can collide.
  *
  * Returns null when the binary isn't derivable upfront (github-url without
  * a hint). In that case the JSON response ships without `share_url`; the
@@ -601,7 +602,7 @@ async function sha256(input: string): Promise<string> {
  */
 function shareUrlForInput(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
   const binary = deriveShareBinary(input, hintsIndex);
-  return binary ? `/live-score/${binary}` : null;
+  return binary ? `/score/live/${binary}` : null;
 }
 
 // Statically referenced so `_unused` linters see these as live exports —

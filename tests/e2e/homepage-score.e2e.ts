@@ -12,7 +12,7 @@
 //     challenges.cloudflare.com on the homepage response header
 //   - markdown-twin silence: /index.md must NOT mention live-score,
 //     turnstile, challenges.cloudflare.com, or /api/score
-//   - /live-score/<binary>.html → 301 redirect to /live-score/<binary>
+//   - /score/live/<binary>.html → 301 redirect to /score/live/<binary>
 //     (URL pattern consistency with the rest of the site)
 //   - red-team: no token leak in URL on redirect, sitekey absent in
 //     prod-style env (the form disables itself)
@@ -97,7 +97,7 @@ test.describe('homepage live-scoring form — happy path', () => {
         site_spec_version: '0.4.0',
         anc_version: '0.3.1',
         checker_url: 'https://anc.dev/score',
-        share_url: '/live-score/ripgrep',
+        share_url: '/score/live/ripgrep',
       },
     });
 
@@ -114,7 +114,7 @@ test.describe('homepage live-scoring form — happy path', () => {
     await page.locator('[data-live-score-submit]').click();
 
     // After submit, the page should redirect to share_url.
-    await page.waitForURL('**/live-score/ripgrep', { timeout: 10_000 });
+    await page.waitForURL('**/score/live/ripgrep', { timeout: 10_000 });
     const elapsed = Date.now() - start;
     expect(elapsed).toBeGreaterThanOrEqual(1900); // 2 s minus a small jitter tolerance
 
@@ -146,7 +146,7 @@ test.describe('homepage live-scoring form — happy path', () => {
   test('example chip click fills input and lazy-loads Turnstile', async ({ page }) => {
     const observer = await mockTurnstileAndScore(page, {
       status: 200,
-      body: { scorecard: SCORECARD_SAMPLE, anc_version: '0.3.1', spec_version: '0.4.0', share_url: '/live-score/bat' },
+      body: { scorecard: SCORECARD_SAMPLE, anc_version: '0.3.1', spec_version: '0.4.0', share_url: '/score/live/bat' },
     });
 
     await page.goto('/');
@@ -346,20 +346,20 @@ test.describe('homepage live-scoring form — CSP + markdown-twin regressions', 
 });
 
 test.describe('/live-score URL canonicalization', () => {
-  test('/live-score/<binary>.html → 301 to /live-score/<binary>', async ({ request }) => {
-    const res = await request.get('/live-score/ripgrep.html', { maxRedirects: 0 });
+  test('/score/live/<binary>.html → 301 to /score/live/<binary>', async ({ request }) => {
+    const res = await request.get('/score/live/ripgrep.html', { maxRedirects: 0 });
     expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe('/live-score/ripgrep');
+    expect(res.headers().location).toBe('/score/live/ripgrep');
   });
 
-  test('/live-score/<binary> (no extension) returns HTML 404 when uncached', async ({ request }) => {
-    const res = await request.get('/live-score/unknown-binary-xyz');
+  test('/score/live/<binary> (no extension) returns HTML 404 when uncached', async ({ request }) => {
+    const res = await request.get('/score/live/unknown-binary-xyz');
     expect(res.status()).toBe(404);
     expect(res.headers()['content-type']).toContain('text/html');
   });
 
-  test('/live-score/<binary>.md returns markdown twin (404 when uncached)', async ({ request }) => {
-    const res = await request.get('/live-score/unknown-binary-xyz.md');
+  test('/score/live/<binary>.md returns markdown twin (404 when uncached)', async ({ request }) => {
+    const res = await request.get('/score/live/unknown-binary-xyz.md');
     expect(res.status()).toBe(404);
     expect(res.headers()['content-type']).toContain('text/markdown');
   });
@@ -373,7 +373,7 @@ test.describe('homepage live-scoring — red-team', () => {
         scorecard: SCORECARD_SAMPLE,
         spec_version: '0.4.0',
         anc_version: '0.3.1',
-        share_url: '/live-score/ripgrep',
+        share_url: '/score/live/ripgrep',
         checker_url: 'https://anc.dev/score',
       },
     });
@@ -381,7 +381,7 @@ test.describe('homepage live-scoring — red-team', () => {
     await page.goto('/');
     await page.locator('#live-score-input').fill('ripgrep');
     await page.locator('[data-live-score-submit]').click();
-    await page.waitForURL('**/live-score/ripgrep', { timeout: 10_000 });
+    await page.waitForURL('**/score/live/ripgrep', { timeout: 10_000 });
 
     const finalUrl = page.url();
     expect(finalUrl).not.toContain('fake-token');

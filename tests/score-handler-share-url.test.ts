@@ -1,4 +1,4 @@
-// Integration: /api/score sets `share_url` to `/live-score/<binary>` on
+// Integration: /api/score sets `share_url` to `/score/live/<binary>` on
 // inline-scorecard success branches; omits it for registry_hit (which
 // carries scorecard_url) and for github-url-without-hint live runs.
 //
@@ -119,7 +119,7 @@ beforeEach(() => {
 describe('/api/score — share_url derivation', () => {
   // `cargo install uncurated-tool` → parser binary='uncurated-tool' →
   // cache key scores/uncurated-tool/<SPEC_VERSION>.json. share_url should
-  // be the matching /live-score/uncurated-tool URL.
+  // be the matching /score/live/uncurated-tool URL.
   //
   // Deliberately fictional package name: NOT in this file's REGISTRY_INDEX
   // (ripgrep + bat are curated there), so the install-command cross-check
@@ -133,12 +133,12 @@ describe('/api/score — share_url derivation', () => {
     scorecard: { badge: { score_pct: 70, eligible: false }, results: [] },
   };
 
-  test('cached install-command hit: share_url = /live-score/<binary>', async () => {
+  test('cached install-command hit: share_url = /score/live/<binary>', async () => {
     const env = makeEnv({ [CACHED_KEY]: CACHED_PAYLOAD });
     const res = await handleScore(postScore('cargo install uncurated-tool'), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { share_url?: string; scorecard: unknown };
-    expect(body.share_url).toBe('/live-score/uncurated-tool');
+    expect(body.share_url).toBe('/score/live/uncurated-tool');
   });
 
   test('cached install-command hit: share_url stable across requests', async () => {
@@ -150,8 +150,8 @@ describe('/api/score — share_url derivation', () => {
     // Same binary → same share URL. This is the design improvement over
     // session-id minting: shareable URLs map to scored binaries, not to
     // request instances.
-    expect(b1.share_url).toBe('/live-score/uncurated-tool');
-    expect(b2.share_url).toBe('/live-score/uncurated-tool');
+    expect(b1.share_url).toBe('/score/live/uncurated-tool');
+    expect(b2.share_url).toBe('/score/live/uncurated-tool');
   });
 
   test('registry_hit does NOT carry share_url (scorecard_url is the share surface)', async () => {
@@ -211,7 +211,7 @@ describe('/api/score — share_url derivation', () => {
     const res = await handleScore(postScore('https://github.com/Aider-AI/aider'), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { share_url?: string };
-    expect(body.share_url).toBe('/live-score/aider');
+    expect(body.share_url).toBe('/score/live/aider');
   });
 
   test('github-url with hint: case-insensitive matching (hintsIndex)', async () => {
@@ -228,7 +228,7 @@ describe('/api/score — share_url derivation', () => {
     const res = await handleScore(postScore('https://github.com/aider-ai/aider'), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { share_url?: string };
-    expect(body.share_url).toBe('/live-score/aider');
+    expect(body.share_url).toBe('/score/live/aider');
   });
 
   test('go-install command: share_url uses last-segment binary derivation', async () => {
@@ -244,6 +244,6 @@ describe('/api/score — share_url derivation', () => {
     const res = await handleScore(postScore('go install github.com/sqlc-dev/sqlc@latest'), env);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { share_url?: string };
-    expect(body.share_url).toBe('/live-score/sqlc');
+    expect(body.share_url).toBe('/score/live/sqlc');
   });
 });

@@ -1,7 +1,7 @@
-// Worker entry routing for /live-score/* paths.
+// Worker entry routing for /score/live/* paths.
 //
 // Plan U8: live-score URL pattern matches the rest of the site —
-// `/live-score/<binary>` is the canonical no-extension form. `.md` is the
+// `/score/live/<binary>` is the canonical no-extension form. `.md` is the
 // markdown twin. `.html` redirects to the canonical form (mirrors the
 // CF Static Assets html_handling=auto-trailing-slash behavior for the
 // curated /score/<tool> static pages).
@@ -42,7 +42,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
             headers: { 'content-type': 'text/markdown; charset=utf-8' },
           });
         }
-        if (path === '/_internal/live-score-shell.html') {
+        if (path === '/_internal/score-live-shell.html') {
           return new Response(SHELL_TEMPLATE, { status: 200 });
         }
         return new Response('not found', { status: 404 });
@@ -62,30 +62,30 @@ beforeEach(() => {
 });
 
 describe('/live-score URL canonicalization', () => {
-  test('/live-score/<binary>.html → 301 redirect to /live-score/<binary>', async () => {
+  test('/score/live/<binary>.html → 301 redirect to /score/live/<binary>', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/live-score/ripgrep.html'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.html'), env);
     expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('/live-score/ripgrep');
+    expect(res.headers.get('location')).toBe('/score/live/ripgrep');
   });
 
-  test('/live-score/<binary>.html redirects regardless of cache state', async () => {
+  test('/score/live/<binary>.html redirects regardless of cache state', async () => {
     // Redirect is at the routing layer, so it fires before the R2 lookup
     // — a missing cache entry doesn't change the redirect behavior.
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/live-score/unknown-tool.html'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/unknown-tool.html'), env);
     expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('/live-score/unknown-tool');
+    expect(res.headers.get('location')).toBe('/score/live/unknown-tool');
   });
 
-  test('/live-score/<bad-slug>.html does NOT redirect — falls to ASSETS 404', async () => {
+  test('/score/live/<bad-slug>.html does NOT redirect — falls to ASSETS 404', async () => {
     // Path-traversal guards: shape regex rejects uppercase, dots, slashes.
     const env = makeEnv();
     for (const path of [
-      '/live-score/RipGrep.html',
-      '/live-score/../etc.html',
-      '/live-score/-bad.html',
-      '/live-score/foo/bar.html',
+      '/score/live/RipGrep.html',
+      '/score/live/../etc.html',
+      '/score/live/-bad.html',
+      '/score/live/foo/bar.html',
     ]) {
       const res = await worker.fetch(new Request(`https://anc.dev${path}`), env);
       // Either a 404 from ASSETS or a 301 — the must-NOT is that the
@@ -94,18 +94,18 @@ describe('/live-score URL canonicalization', () => {
     }
   });
 
-  test('/live-score/<binary>.md → markdown twin (no redirect)', async () => {
+  test('/score/live/<binary>.md → markdown twin (no redirect)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/live-score/ripgrep.md'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.md'), env);
     // No cache prefilled → 404, but with markdown content-type (the
     // /live-score handler is what serves it, NOT a static asset).
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/markdown');
   });
 
-  test('/live-score/<binary> (no extension) → handled by handleLiveScorePage', async () => {
+  test('/score/live/<binary> (no extension) → handled by handleLiveScorePage', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/live-score/ripgrep'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep'), env);
     // No cache prefilled → 404 HTML (the canonical route, not a redirect).
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/html');
@@ -157,9 +157,9 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
 });
 
 describe('/_internal/* interceptor', () => {
-  test('direct GET /_internal/live-score-shell.html → 404', async () => {
+  test('direct GET /_internal/score-live-shell.html → 404', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/_internal/live-score-shell.html'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/_internal/score-live-shell.html'), env);
     expect(res.status).toBe(404);
   });
 

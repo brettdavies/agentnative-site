@@ -1,4 +1,4 @@
-// Worker route: GET /live-score/<binary>
+// Worker route: GET /score/live/<binary>
 //
 // Plan U8 — shareable result URL renders the cached scorecard as HTML.
 // Cache-key share-URL design: the same key the DO writes to (scores/<binary>/<spec>.json)
@@ -61,7 +61,7 @@ function makeEnv(content: Record<string, unknown> = {}) {
       async fetch(req: Request | string) {
         const url = typeof req === 'string' ? req : req.url;
         const path = new URL(url).pathname;
-        if (path === '/_internal/live-score-shell.html') {
+        if (path === '/_internal/score-live-shell.html') {
           return new Response(SHELL_TEMPLATE, { status: 200 });
         }
         return new Response('not found', { status: 404 });
@@ -98,42 +98,42 @@ function get(path: string): Request {
 }
 
 describe('parseLiveScorePath', () => {
-  test('accepts /live-score/<binary> with lowercase alphanumeric + hyphen', () => {
-    expect(parseLiveScorePath('/live-score/ripgrep')).toBe('ripgrep');
-    expect(parseLiveScorePath('/live-score/ast-grep')).toBe('ast-grep');
-    expect(parseLiveScorePath('/live-score/btm')).toBe('btm');
-    expect(parseLiveScorePath('/live-score/aider2')).toBe('aider2');
+  test('accepts /score/live/<binary> with lowercase alphanumeric + hyphen', () => {
+    expect(parseLiveScorePath('/score/live/ripgrep')).toBe('ripgrep');
+    expect(parseLiveScorePath('/score/live/ast-grep')).toBe('ast-grep');
+    expect(parseLiveScorePath('/score/live/btm')).toBe('btm');
+    expect(parseLiveScorePath('/score/live/aider2')).toBe('aider2');
   });
 
   test('rejects uppercase, dots (non-.md), slashes (path traversal guard)', () => {
-    expect(parseLiveScorePath('/live-score/RipGrep')).toBeNull();
-    expect(parseLiveScorePath('/live-score/ripgrep.json')).toBeNull();
-    expect(parseLiveScorePath('/live-score/ripgrep.html')).toBeNull();
-    expect(parseLiveScorePath('/live-score/../etc/passwd')).toBeNull();
-    expect(parseLiveScorePath('/live-score/foo/bar')).toBeNull();
-    expect(parseLiveScorePath('/live-score/foo bar')).toBeNull();
+    expect(parseLiveScorePath('/score/live/RipGrep')).toBeNull();
+    expect(parseLiveScorePath('/score/live/ripgrep.json')).toBeNull();
+    expect(parseLiveScorePath('/score/live/ripgrep.html')).toBeNull();
+    expect(parseLiveScorePath('/score/live/../etc/passwd')).toBeNull();
+    expect(parseLiveScorePath('/score/live/foo/bar')).toBeNull();
+    expect(parseLiveScorePath('/score/live/foo bar')).toBeNull();
   });
 
   test('accepts .md suffix and reports isMarkdown', () => {
-    expect(parseLiveScorePathMatch('/live-score/ripgrep')).toEqual({ binary: 'ripgrep', isMarkdown: false });
-    expect(parseLiveScorePathMatch('/live-score/ripgrep.md')).toEqual({ binary: 'ripgrep', isMarkdown: true });
-    expect(parseLiveScorePathMatch('/live-score/ast-grep.md')).toEqual({ binary: 'ast-grep', isMarkdown: true });
+    expect(parseLiveScorePathMatch('/score/live/ripgrep')).toEqual({ binary: 'ripgrep', isMarkdown: false });
+    expect(parseLiveScorePathMatch('/score/live/ripgrep.md')).toEqual({ binary: 'ripgrep', isMarkdown: true });
+    expect(parseLiveScorePathMatch('/score/live/ast-grep.md')).toEqual({ binary: 'ast-grep', isMarkdown: true });
   });
 
   test('rejects malformed .md paths', () => {
-    expect(parseLiveScorePathMatch('/live-score/.md')).toBeNull();
-    expect(parseLiveScorePathMatch('/live-score/ripgrep.md.md')).toBeNull();
-    expect(parseLiveScorePathMatch('/live-score/ripgrep.MD')).toBeNull();
-    expect(parseLiveScorePathMatch('/live-score/../etc.md')).toBeNull();
+    expect(parseLiveScorePathMatch('/score/live/.md')).toBeNull();
+    expect(parseLiveScorePathMatch('/score/live/ripgrep.md.md')).toBeNull();
+    expect(parseLiveScorePathMatch('/score/live/ripgrep.MD')).toBeNull();
+    expect(parseLiveScorePathMatch('/score/live/../etc.md')).toBeNull();
   });
 
   test('rejects leading hyphen + over-long slugs', () => {
-    expect(parseLiveScorePath('/live-score/-ripgrep')).toBeNull();
-    expect(parseLiveScorePath(`/live-score/${'a'.repeat(65)}`)).toBeNull();
+    expect(parseLiveScorePath('/score/live/-ripgrep')).toBeNull();
+    expect(parseLiveScorePath(`/score/live/${'a'.repeat(65)}`)).toBeNull();
   });
 
   test('rejects empty + bare prefix paths', () => {
-    expect(parseLiveScorePath('/live-score/')).toBeNull();
+    expect(parseLiveScorePath('/score/live/')).toBeNull();
     expect(parseLiveScorePath('/live-score')).toBeNull();
     expect(parseLiveScorePath('/livescore/ripgrep')).toBeNull();
   });
@@ -147,7 +147,7 @@ describe('parseLiveScorePath', () => {
 describe('handleLiveScorePage — happy path', () => {
   test('returns 200 HTML with rendered scorecard summary', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     expect(res.headers.get('x-robots-tag')).toBe('noindex');
@@ -159,12 +159,12 @@ describe('handleLiveScorePage — happy path', () => {
     expect(html).toContain('exits 0 on missing flag'); // top issue
     expect(html).toContain('subcommands listed'); // top issue
     expect(html).toContain('href="/install"'); // canonical install link (dedup with content/install.md)
-    expect(html).toContain('https://anc.dev/live-score/ripgrep'); // canonical
+    expect(html).toContain('https://anc.dev/score/live/ripgrep'); // canonical
   });
 
   test('top-issues block surfaces FAIL before WARN', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
     const failIdx = html.indexOf('exits 0 on missing flag');
     const warnIdx = html.indexOf('subcommands listed');
@@ -175,7 +175,7 @@ describe('handleLiveScorePage — happy path', () => {
 
   test('omits per-tool check table and meta sections (summary-only)', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
     expect(html).not.toContain('scorecard-checks');
     expect(html).not.toContain('scorecard-meta');
@@ -184,7 +184,7 @@ describe('handleLiveScorePage — happy path', () => {
 
   test('renders cached freshness marker', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
     expect(html).toContain('cached');
   });
@@ -198,7 +198,7 @@ describe('handleLiveScorePage — happy path', () => {
       },
     };
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: cleanPayload });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
     expect(html).toContain('No failing or warning checks');
   });
@@ -207,7 +207,7 @@ describe('handleLiveScorePage — happy path', () => {
 describe('handleLiveScorePage — 404 + edge cases', () => {
   test('returns 404 HTML for missing cache entry', async () => {
     const env = makeEnv();
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/html');
     const html = await res.text();
@@ -218,21 +218,21 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
 
   test('returns 404 for slug shape violation (path traversal)', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(get('/live-score/../etc'), env);
+    const res = await handleLiveScorePage(get('/score/live/../etc'), env);
     expect(res.status).toBe(404);
   });
 
   test('405 for non-GET/HEAD methods', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
     for (const method of ['POST', 'PUT', 'DELETE', 'PATCH'] as const) {
-      const res = await handleLiveScorePage(new Request('https://anc.dev/live-score/ripgrep', { method }), env);
+      const res = await handleLiveScorePage(new Request('https://anc.dev/score/live/ripgrep', { method }), env);
       expect(res.status).toBe(405);
     }
   });
 
   test('HEAD returns 200 + body (cheap; matches GET semantics)', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(new Request('https://anc.dev/live-score/ripgrep', { method: 'HEAD' }), env);
+    const res = await handleLiveScorePage(new Request('https://anc.dev/score/live/ripgrep', { method: 'HEAD' }), env);
     expect(res.status).toBe(200);
   });
 
@@ -263,7 +263,7 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
       },
     } as unknown as { ASSETS: Fetcher; SCORE_CACHE: R2Bucket };
     _resetShellTemplateCache();
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     expect(res.status).toBe(500);
     expect(res.headers.get('content-type')).toContain('text/plain');
   });
@@ -274,7 +274,7 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
     // parseLiveScorePath rejects anything outside [a-z0-9-], a clean slug
     // is still escaped by the renderer. Cover that path explicitly.
     const env = makeEnv();
-    const res = await handleLiveScorePage(get('/live-score/foo-bar'), env);
+    const res = await handleLiveScorePage(get('/score/live/foo-bar'), env);
     expect(res.status).toBe(404);
     const html = await res.text();
     expect(html).toContain('No live score for');
@@ -284,9 +284,9 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
 });
 
 describe('handleLiveScorePage — markdown twin', () => {
-  test('GET /live-score/<binary>.md returns text/markdown with summary', async () => {
+  test('GET /score/live/<binary>.md returns text/markdown with summary', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep.md'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep.md'), env);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/markdown');
     const md = await res.text();
@@ -298,9 +298,9 @@ describe('handleLiveScorePage — markdown twin', () => {
     expect(md).not.toContain('<'); // no HTML tags in markdown twin
   });
 
-  test('Accept: text/markdown on /live-score/<binary> returns markdown', async () => {
+  test('Accept: text/markdown on /score/live/<binary> returns markdown', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const req = new Request('https://anc.dev/live-score/ripgrep', {
+    const req = new Request('https://anc.dev/score/live/ripgrep', {
       method: 'GET',
       headers: { accept: 'text/markdown' },
     });
@@ -311,9 +311,9 @@ describe('handleLiveScorePage — markdown twin', () => {
     expect(md).toContain('# ripgrep');
   });
 
-  test('Accept: text/html on /live-score/<binary> returns HTML (default)', async () => {
+  test('Accept: text/html on /score/live/<binary> returns HTML (default)', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const req = new Request('https://anc.dev/live-score/ripgrep', {
+    const req = new Request('https://anc.dev/score/live/ripgrep', {
       method: 'GET',
       headers: { accept: 'text/html' },
     });
@@ -323,7 +323,7 @@ describe('handleLiveScorePage — markdown twin', () => {
 
   test('404 markdown response for missing cache entry', async () => {
     const env = makeEnv();
-    const res = await handleLiveScorePage(get('/live-score/ripgrep.md'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep.md'), env);
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/markdown');
     const md = await res.text();
@@ -347,14 +347,14 @@ describe('handleLiveScorePage — markdown twin', () => {
       },
     };
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: pipeXssPayload });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep.md'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep.md'), env);
     const md = await res.text();
     expect(md).toContain('cmd \\| grep foo \\| head -1');
   });
 
   test('Accept q-weighted header picks markdown when text/markdown wins', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
-    const req = new Request('https://anc.dev/live-score/ripgrep', {
+    const req = new Request('https://anc.dev/score/live/ripgrep', {
       method: 'GET',
       headers: { accept: 'text/html;q=0.1, text/markdown;q=0.9' },
     });
@@ -380,7 +380,7 @@ describe('handleLiveScorePage — HTML escape sanity', () => {
       },
     };
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: xssPayload });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
     // Neither <script> nor <img onerror> should appear raw — they must
     // be entity-escaped before reaching the response body.
@@ -396,7 +396,7 @@ describe('handleLiveScorePage — HTML escape sanity', () => {
       scorecard: { ...SAMPLE_SCORECARD, tool: { name: '<svg/onload=alert(3)>', binary: 'rg' } },
     };
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: xssPayload });
-    const res = await handleLiveScorePage(get('/live-score/ripgrep'), env);
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
     expect(html).not.toContain('<svg/onload=alert(3)>');
     expect(html).toContain('&lt;svg');

@@ -74,14 +74,14 @@ export default {
       return handleScore(request, env as ScoreEnv);
     }
 
-    // /live-score/<binary>.html → 302 to /live-score/<binary>. Mirrors
+    // /score/live/<binary>.html → 301 to /score/live/<binary>. Mirrors
     // the rest of the site (static `/score/<tool>.html` is canonicalized
     // away from the .html extension by CF Static Assets'
-    // html_handling=auto-trailing-slash); the live-score route is
+    // html_handling=auto-trailing-slash); the /score/live/ route is
     // Worker-served so the same redirect is explicit here.
-    const liveScoreHtmlMatch = pathname.match(/^\/live-score\/([a-z0-9][a-z0-9-]{0,63})\.html$/);
+    const liveScoreHtmlMatch = pathname.match(/^\/score\/live\/([a-z0-9][a-z0-9-]{0,63})\.html$/);
     if (liveScoreHtmlMatch) {
-      const canonical = `/live-score/${liveScoreHtmlMatch[1]}`;
+      const canonical = `/score/live/${liveScoreHtmlMatch[1]}`;
       return new Response(null, {
         status: 301,
         headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
@@ -92,9 +92,10 @@ export default {
     // scorecard from R2 by binary slug, renders an HTML summary view.
     // Strict regex enforced by parseLiveScorePath — slugs must match
     // /^[a-z0-9][a-z0-9-]{0,63}$/, so an attacker can't pivot this
-    // route into an arbitrary R2 key read. Accepts both /live-score/<binary>
-    // and /live-score/<binary>.md (markdown twin) per the site-wide
-    // twin invariant.
+    // route into an arbitrary R2 key read. Accepts both /score/live/<binary>
+    // and /score/live/<binary>.md (markdown twin) per the site-wide
+    // twin invariant. The "live" segment is reserved as a registry name
+    // (scorecards.mjs) so no curated tool can collide with this route.
     if (parseLiveScorePath(pathname)) {
       return handleLiveScorePage(request, env as ScoreEnv);
     }

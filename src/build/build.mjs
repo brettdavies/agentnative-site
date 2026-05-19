@@ -622,12 +622,14 @@ export async function build() {
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
 
   // 9b. Live-score shell template (plan U8). Worker's summary-render.ts
-  // fetches this asset to wrap dynamic `/live-score/<binary>` responses
+  // fetches this asset to wrap dynamic `/score/live/<binary>` responses
   // in the same shell as static pages. The `/_internal/*` namespace is
   // intercepted by the Worker entry so direct user access returns 404 —
-  // the file exists for internal env.ASSETS fetches only.
+  // the file exists for internal env.ASSETS fetches only. Filename
+  // mirrors the URL path so a future reader greps `score-live` and
+  // finds both ends.
   await ensureDir(join(DIST_DIR, '_internal'));
-  await writeFile(join(DIST_DIR, '_internal', 'live-score-shell.html'), emitShellTemplate({ themeInitJs: themeInit }));
+  await writeFile(join(DIST_DIR, '_internal', 'score-live-shell.html'), emitShellTemplate({ themeInitJs: themeInit }));
 
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex

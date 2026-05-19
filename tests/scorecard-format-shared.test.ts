@@ -1,9 +1,9 @@
 // Unit tests for src/shared/scorecard-format.mjs — the Worker-safe primitives
 // shared by build-time markdown rendering (scorecards-render.mjs) and the
-// Worker's /live-score/<binary>.md route (summary-render.ts).
+// Worker's /score/live/<binary>.md route (summary-render.ts).
 //
 // The row formatter is the load-bearing primitive: every check-table row in
-// both `dist/score/<tool>.md` and `/live-score/<binary>.md` flows through
+// both `dist/score/<tool>.md` and `/score/live/<binary>.md` flows through
 // it. Pipe-escape behavior and principle-link shape live here.
 
 import { describe, expect, test } from 'bun:test';
