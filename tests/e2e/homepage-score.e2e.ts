@@ -143,6 +143,91 @@ test.describe('homepage live-scoring form — happy path', () => {
     expect(observer.scoreCalls()).toBe(1);
   });
 
+  test('curated registry_hit shows "Curated · N% pass rate" reward before redirect', async ({ page }) => {
+    // The registry_hit envelope now carries score_pct so the homepage form
+    // can render a small "you found one of ours" reward inline before the
+    // redirect. The reward shows for the remainder of the 2 s theater
+    // floor, then the page navigates.
+    await mockTurnstileAndScore(page, {
+      status: 200,
+      body: {
+        scorecard: {
+          kind: 'registry_hit',
+          tool: { name: 'bat' },
+          scorecard_url: '/score/bat',
+          score_pct: 78,
+        },
+        spec_version: '0.4.0',
+        anc_version: '0.3.1',
+        checker_url: 'https://anc.dev/score',
+      },
+    });
+
+    await page.goto('/');
+    await page.locator('#live-score-input').fill('cargo install bat');
+    await page.locator('[data-live-score-submit]').click();
+
+    // Reward text appears in the status slot (with the --curated class
+    // applied for the accent-color identity cue) BEFORE the redirect.
+    const status = page.locator('[data-live-score-status]');
+    await expect(status).toHaveClass(/live-score__status--curated/, { timeout: 5_000 });
+    await expect(status).toContainText(/Curated/);
+    await expect(status).toContainText(/78% pass rate/);
+
+    // After the theater floor elapses, the page navigates to the curated
+    // scorecard URL.
+    await page.waitForURL('**/score/bat', { timeout: 10_000 });
+  });
+
+  test('phase progression updates status text while waiting on /api/score', async ({ page }) => {
+    // Mock /api/score with an artificial delay so the phase progression
+    // has time to tick at least once before the response arrives.
+    await page.route('https://challenges.cloudflare.com/turnstile/v0/api.js**', async (route) => {
+      await route.fulfill({
+        contentType: 'application/javascript',
+        body: `
+          window.turnstile = {
+            render(_el, opts) {
+              window.__lastTurnstileCallback = opts.callback;
+              return 'fake-widget-id';
+            },
+            execute() {
+              const cb = window.__lastTurnstileCallback;
+              if (cb) setTimeout(() => cb('fake-token'), 10);
+            },
+            reset() {}, remove() {},
+          };
+        `,
+      });
+    });
+    await page.route('**/api/score', async (route) => {
+      // Hold the response for 1.5 s so the phase ticker has time to fire
+      // the t=900 ms "Resolving install path…" tick.
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({
+          scorecard: SCORECARD_SAMPLE,
+          spec_version: '0.4.0',
+          anc_version: '0.3.1',
+          checker_url: 'https://anc.dev/score',
+          share_url: '/score/live/ripgrep',
+        }),
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#live-score-input').fill('cargo install something-uncurated');
+    await page.locator('[data-live-score-submit]').click();
+
+    const status = page.locator('[data-live-score-status]');
+    // First tick: "Queued…" lands immediately on submit.
+    await expect(status).toContainText(/Queued/, { timeout: 1_000 });
+    // Second tick at t=900 ms: "Resolving install path…"
+    await expect(status).toContainText(/Resolving install path/, { timeout: 2_500 });
+  });
+
   test('example chip click fills input and lazy-loads Turnstile', async ({ page }) => {
     const observer = await mockTurnstileAndScore(page, {
       status: 200,

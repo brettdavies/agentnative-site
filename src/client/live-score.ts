@@ -126,7 +126,7 @@ function initLiveScore(els: {
     }
 
     setSubmitting(els, true);
-    renderStatus(els.statusEl, 'Scoring…');
+    renderStatus(els.statusEl, 'Queued…');
 
     let token: string;
     try {
@@ -139,26 +139,68 @@ function initLiveScore(els: {
       return;
     }
 
-    try {
-      const [response] = await Promise.all([
-        fetch('/api/score', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ input: value, turnstile_token: token }),
-        }),
-        new Promise((resolve) => window.setTimeout(resolve, THEATER_MIN_MS)),
-      ]);
+    // Phase progression: while we wait for /api/score, the status line
+    // cycles through realistic prose phases. Timings approximate real
+    // sandbox runs — too long is misleading, too short reads as frantic.
+    // The cycle is cancelled the moment the response arrives so the user
+    // never sees an obviously-stale phase after the work is done.
+    const phaseTimer = startPhaseProgression(els.statusEl);
+    const start = Date.now();
 
-      const payload = await response.json().catch(() => ({}) as Record<string, unknown>);
-      handleScoreResponse(els, response.status, payload);
+    let response: Response;
+    let payload: Record<string, unknown>;
+    try {
+      response = await fetch('/api/score', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: value, turnstile_token: token }),
+      });
+      payload = await response.json().catch(() => ({}) as Record<string, unknown>);
     } catch (err) {
-      renderInlineError(els.statusEl, networkErrorMessage(err));
-    } finally {
+      phaseTimer.cancel();
       setSubmitting(els, false);
+      renderInlineError(els.statusEl, networkErrorMessage(err));
+      return;
+    } finally {
       if (widgetId && window.turnstile) {
         window.turnstile.reset(widgetId);
       }
     }
+
+    phaseTimer.cancel();
+
+    // Curated-hit reward: when /api/score short-circuits via the registry-
+    // fast-path (slug, install-command-with-curated-binary, or github-url
+    // matching a curated owner/repo), surface a small "you found one of
+    // ours" moment before the redirect. The reward shows for the
+    // remainder of the 2 s theater floor — long enough to read, not long
+    // enough to annoy. score_pct is enriched into the registry-index at
+    // build time (build.mjs + registry-index.mjs), so this needs no
+    // second round-trip.
+    const sc = payload.scorecard as { kind?: string; scorecard_url?: string; score_pct?: number | null } | undefined;
+    if (response.status === 200 && sc?.kind === 'registry_hit' && typeof sc.scorecard_url === 'string') {
+      const reward =
+        typeof sc.score_pct === 'number'
+          ? `Curated · ${sc.score_pct}% pass rate · opening the audited scorecard…`
+          : 'Curated · opening the audited scorecard…';
+      renderCuratedReward(els.statusEl, reward);
+      const elapsed = Date.now() - start;
+      const remaining = Math.max(0, THEATER_MIN_MS - elapsed);
+      window.setTimeout(() => {
+        window.location.href = sc.scorecard_url as string;
+      }, remaining);
+      return;
+    }
+
+    // All other branches (inline scorecard, error, bounce) flow through
+    // the existing handler. Honor the theater floor first so a fast
+    // cached response doesn't snap the user through before they've
+    // registered that anything happened.
+    const elapsed = Date.now() - start;
+    const remaining = Math.max(0, THEATER_MIN_MS - elapsed);
+    if (remaining > 0) await new Promise((r) => window.setTimeout(r, remaining));
+    setSubmitting(els, false);
+    handleScoreResponse(els, response.status, payload);
   });
 }
 
@@ -316,8 +358,57 @@ function renderInlineError(statusEl: HTMLParagraphElement, message: string): voi
  * response render (success or failure) naturally overwrites this text. */
 function renderStatus(statusEl: HTMLParagraphElement, message: string): void {
   statusEl.hidden = false;
-  statusEl.classList.remove('live-score__status--error', 'live-score__status--bounce');
+  statusEl.classList.remove('live-score__status--error', 'live-score__status--bounce', 'live-score__status--curated');
   statusEl.textContent = message;
+}
+
+/** Show the curated-hit reward inline before redirect. Identity color via
+ * --accent in CSS so the visual cue is "this is one of ours" without a
+ * banner, badge, or animation. */
+function renderCuratedReward(statusEl: HTMLParagraphElement, message: string): void {
+  statusEl.hidden = false;
+  statusEl.classList.remove('live-score__status--error', 'live-score__status--bounce');
+  statusEl.classList.add('live-score__status--curated');
+  statusEl.textContent = message;
+}
+
+/** Phase progression while waiting on /api/score.
+ *
+ * Static "Scoring…" would say nothing about WHAT is taking time, and the
+ * brand voice ("authority through precision, engagement through detail")
+ * rewards a status line that mirrors the actual phases. The phases are a
+ * client-side approximation — real per-step polling is U9 — but the
+ * timings approximate the median sandbox run so the text stays honest:
+ *
+ *   - Queued (until t=900 ms)
+ *   - Resolving install path (until t=2.5 s)
+ *   - Installing in sandbox (until t=18 s)
+ *   - Running anc check (until response)
+ *
+ * Cancelling the cycle when the response arrives keeps the user from
+ * ever seeing a phase that's obviously past the work. No CSS animation,
+ * no spinner — text replacement IS the indicator. */
+type PhaseTimer = { cancel: () => void };
+
+function startPhaseProgression(statusEl: HTMLParagraphElement): PhaseTimer {
+  const schedule: { atMs: number; text: string }[] = [
+    { atMs: 900, text: 'Resolving install path…' },
+    { atMs: 2500, text: 'Installing in sandbox…' },
+    { atMs: 18000, text: 'Running anc check…' },
+  ];
+  const handles: number[] = [];
+  for (const phase of schedule) {
+    handles.push(
+      window.setTimeout(() => {
+        renderStatus(statusEl, phase.text);
+      }, phase.atMs),
+    );
+  }
+  return {
+    cancel: () => {
+      for (const h of handles) window.clearTimeout(h);
+    },
+  };
 }
 
 function setSubmitting(els: { submitBtn: HTMLButtonElement; input: HTMLInputElement }, submitting: boolean): void {

@@ -1437,6 +1437,18 @@ body:has(.leaderboard-hero) main {
   color: var(--must);
 }
 
+/* Curated-hit reward: the user pasted a tool we've already audited.
+ * Identity-color the status text via --accent so the moment lands as
+ * "you found one of ours" without a banner, badge, or animation. The
+ * reward is visible for the remainder of the 2 s theater floor before
+ * the redirect to /score/<slug>; mid-dot separators in the copy mirror
+ * the footer rhythm. */
+.live-score__status--curated {
+  color: var(--accent);
+  font-weight: 600;
+  font-feature-settings: var(--ff-tabular, 'tnum' 1, 'kern' 1);
+}
+
 .live-score__status--bounce .live-score__bounce-headline {
   margin: 0 0 0.4rem;
   font-size: 1rem;
