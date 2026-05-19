@@ -231,3 +231,10 @@ unauth
 client_secret
 client_id
 non_identity
+CPython
+Trixie
+aider
+litellm
+scipy
+pyperclip
+pycparser
