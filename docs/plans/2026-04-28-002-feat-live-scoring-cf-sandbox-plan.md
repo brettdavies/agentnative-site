@@ -79,8 +79,8 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
   (`PIP_UPLOADED_PRIOR_TO`, `UV_EXCLUDE_NEWER="7 days"`), staging instance promoted to `standard-2` (lifts pip
   extraction CPU/IO budget for aider-chat's 91 MB wheel set), and a runbook/decision-log split: `RELEASES.md` becomes
   runbook-only (commands, paths, tables), `ARCHITECTURE.md` is a new top-level decision log holding all rationale prose.
-  Staging container app now on `:d87ed0a` + `standard-2`; production stays on `:30f61f1` + `basic` until a release PR
-  promotes the image.
+  Staging container app now on `:d87ed0a` + `standard-2`. Production is not in scope until U10 ships and the whole plan
+  is complete.
 
 ### Discovered post-U3 shipment (2026-05-14 audit)
 
@@ -161,12 +161,10 @@ be observable before the analytics dashboards are trustworthy).
 ### Branch baseline for next session
 
 Continue from `dev` post PR [#99](https://github.com/brettdavies/agentnative-site/pull/99) merge (2026-05-19,
-`eb9cbc7`). `main` is on the production-side U3 + U3-followup deploy from release PR
-[#85](https://github.com/brettdavies/agentnative-site/pull/85) (2026-05-15); U5/U6/U7 are dev-only and will promote to
-`main` via a future release-PR-to-main batch (RELEASES.md staging-leads-prod flow). The U5/U6/U7 feature branches
-(`feat/u5-score-route`, `feat/u6-sandbox-do`, `feat/u7-r2-cache`, `feat/u7-red-team-tests`,
-`fix/u7-lifecycle-doc-syntax`, `fix/sandbox-python-3.12`) were squash-merged and deleted locally; their content is on
-dev.
+`eb9cbc7`). U5/U6/U7 are dev-only; nothing about this plan ships to production until the entire plan (through U10) is
+complete. The U5/U6/U7 feature branches (`feat/u5-score-route`, `feat/u6-sandbox-do`, `feat/u7-r2-cache`,
+`feat/u7-red-team-tests`, `fix/u7-lifecycle-doc-syntax`, `fix/sandbox-python-3.12`) were squash-merged and deleted
+locally; their content is on dev.
 
 Next-session work begins with U8 (item 1 under Pending above). New feature branch off `dev`. See
 `.context/handoffs/2026-05-19-002-u8-homepage-form-handoff.md` for the U8 kickoff brief.
