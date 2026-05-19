@@ -107,8 +107,12 @@ when `base_ref == main`.
    install-anc CTA, build-emitted `spec-version.gen.ts`. No markdown twin (live-scoring is HTML-only; agents have `anc
    check` locally). Result-presentation shape (inline / modal / shareable subpage) is an open U8 question.
 5. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
+6. **U10** — analytics + billing guardrails: Workers Analytics Engine telemetry (one event per `/api/score` with pm /
+   error / freshness / latency dimensions), kill-switch flip runbook, Budget Alerts at $5 / $25 / $100. Auto-kill via
+   cron is deferred to U10.1 once real traffic patterns inform the threshold.
 
-U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should land alongside U6 / U8.
+U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should land alongside U6 / U8. U10 lands after
+U7 (cache hit/miss is the largest cost lever and must be observable before the analytics dashboards are trustworthy).
 
 ### Risks to design against during U5-U8
 
@@ -1880,56 +1884,55 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
   handlers as a static `outboundHandlers` map (Pattern Y; see K-decision for the X/Y/Z comparison):
 
 - `allowedInstall(req, env, ctx)` — checks `ctx.params.allowedHostnames`, passes through via `fetch(req)` or returns
-    403; logs every request with `{phase, host, allowed}` for security observability.
+  403; logs every request with `{phase, host, allowed}` for security observability.
 - `noHttp(req)` — returns 403 for every request; logs `{phase: "noHttp", host, blocked: true}`. These are inline
-    functions in the same Worker bundle, not separate Workers and not service bindings; no `wrangler.jsonc` change
-    needed beyond the existing DO + Container + R2 + ratelimits.
+  functions in the same Worker bundle, not separate Workers and not service bindings; no `wrangler.jsonc` change needed
+  beyond the existing DO + Container + R2 + ratelimits.
 
 - `do.ts:resolveSpec()` translates user input to an `InstallSpec` before `score()` runs. Three input kinds:
 
 1. `install-command` with `pm: 'brew'` — call `resolveBrewFallback(pkg)`: fetch the formula metadata from
-     `formulae.brew.sh`, parse the homepage as a GitHub URL, run the existing `discoverBinary` chain. If discovery
-     returns a non-brew spec, install that. If discovery misses OR the formula's homepage isn't on github.com OR the
-     formula 404s, bounce as `install_unsupported pm=brew_only`.
+   `formulae.brew.sh`, parse the homepage as a GitHub URL, run the existing `discoverBinary` chain. If discovery returns
+   a non-brew spec, install that. If discovery misses OR the formula's homepage isn't on github.com OR the formula 404s,
+   bounce as `install_unsupported pm=brew_only`.
 2. `install-command` with `pm: 'go'` — call `resolveGoFallback(modulePath)`: parse `github.com/<owner>/<repo>` from the
-     module path (subpath segments stripped), run `discoverBinary`. If the resolution is non-go (typically `direct` from
-     a GitHub release asset, e.g. glow → `glow_*_Linux_x86_64.tar.gz`), install that. Modules outside `github.com`
-     (rsc.io/quote, golang.org/x/…) OR github repos without release binaries bounce as `install_unsupported
-     pm=go_no_binary`. Fast-fail UX; no source compile ever runs.
+   module path (subpath segments stripped), run `discoverBinary`. If the resolution is non-go (typically `direct` from a
+   GitHub release asset, e.g. glow → `glow_*_Linux_x86_64.tar.gz`), install that. Modules outside `github.com`
+   (rsc.io/quote, golang.org/x/…) OR github repos without release binaries bounce as `install_unsupported
+   pm=go_no_binary`. Fast-fail UX; no source compile ever runs.
 3. All other `install-command` inputs and `github-url` inputs flow through the install table directly.
 
 - `sandbox-exec.ts:score()` orchestrates per request:
 
 1. Determine `installHosts` from `installSpec.pm` (e.g., `cargo-binstall` → `["crates.io", "static.crates.io",
-     "index.crates.io", "github.com", "*.githubusercontent.com", …]`; `direct` → host of the URL, expanded to
-     `GITHUB_RELEASE_HOSTS` when the URL points at github.com so curl can follow the 302 redirect chain).
+   "index.crates.io", "github.com", "*.githubusercontent.com", …]`; `direct` → host of the URL, expanded to
+   `GITHUB_RELEASE_HOSTS` when the URL points at github.com so curl can follow the 302 redirect chain).
 2. Phase 1 egress: `sandbox.setOutboundHandler<{ allowedHostnames }>('allowedInstall', { allowedHostnames })`.
 3. Run install command, captured by `installSpec.pm`:
 
 - `cargo binstall --no-confirm --no-symlinks --install-path /usr/local/bin <pkg>` (cargo-binstall standalone; no `cargo`
-       CLI in image)
+  CLI in image)
 - `pip install --only-binary=:all: --no-cache-dir --break-system-packages <pkg>` (wheels only — refuses sdist arbitrary
-       code; `--break-system-packages` overrides Debian's PEP 668 refusal)
+  code; `--break-system-packages` overrides Debian's PEP 668 refusal)
 - `uv tool install <pkg>` (native uv; uses its own resolver, sidesteps pip's PEP 658 metadata fast-path)
 - `npm install -g --ignore-scripts <pkg>` (skips pre/install/post lifecycle scripts; keeps Phase 1 egress from being
-       abused before the Phase 2 lockdown fires)
+  abused before the Phase 2 lockdown fires)
 - `bun add -g --ignore-scripts <pkg>` (same lifecycle-script discipline as npm)
 - `direct`: extension-dispatched download + extract. The shell pipeline downloads to a per-invocation `mktemp -d` tmp
-       dir, extracts (`tar xzf` for `.tar.gz`/`.tgz`, `tar xJf` for `.tar.xz`, `tar xjf` for `.tar.bz2`, `unzip -q` for
-       `.zip`), then `find -type f -name <binary> -perm /111 -print -quit` locates the binary inside the (possibly
-       nested) archive layout. `install -m 0755 "$found" /usr/local/bin/<binary>` deposits the binary in the canonical
-       location. The whole pipeline runs in a `( set -e; … )` subshell so a failure exits the subshell, not the
-       persistent container shell (the latter would produce `SessionTerminatedError` 1101 for every subsequent request
-       routed to the affected DO instance).
+  dir, extracts (`tar xzf` for `.tar.gz`/`.tgz`, `tar xJf` for `.tar.xz`, `tar xjf` for `.tar.bz2`, `unzip -q` for
+  `.zip`), then `find -type f -name <binary> -perm /111 -print -quit` locates the binary inside the (possibly nested)
+  archive layout. `install -m 0755 "$found" /usr/local/bin/<binary>` deposits the binary in the canonical location. The
+  whole pipeline runs in a `( set -e; … )` subshell so a failure exits the subshell, not the persistent container shell
+  (the latter would produce `SessionTerminatedError` 1101 for every subsequent request routed to the affected DO
+  instance).
 - `brew` and `go` return `null` from `installCommandFor()`; the discovery-fallbacks in `resolveSpec` translate upstream
-       of this layer. Hitting either case here is a contract violation and bounces as `install_unsupported
-       pm=<brew|go>`.
+  of this layer. Hitting either case here is a contract violation and bounces as `install_unsupported pm=<brew|go>`.
 
 1. Verify binary on `PATH`: `which <binary>` returns 0; otherwise fail with `chain_resolved_no_binary_produced` (gate F4
-     distinguishes "install succeeded but produced no runnable binary" from "install command itself failed"). Common
-     trigger: chain resolved to a library-only pypi package (e.g. Click ships wheels but no `console_scripts` entry).
+   distinguishes "install succeeded but produced no runnable binary" from "install command itself failed"). Common
+   trigger: chain resolved to a library-only pypi package (e.g. Click ships wheels but no `console_scripts` entry).
 2. Phase 2 egress: `sandbox.setOutboundHandler('noHttp')` — routes all subsequent requests to the user-defined `noHttp`
-     handler (returns 403 for any HTTP egress).
+   handler (returns 403 for any HTTP egress).
 3. `sandbox.exec("anc --version")` → capture `anc_version` (parsed from stdout).
 4. Look up registry entry by tool name to get `audit_profile` if known; else omit.
 5. `sandbox.exec("anc check --command <binary> --output json [--audit-profile <p>]")` → parse JSON.
@@ -1942,11 +1945,11 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
 **Patterns to follow:**
 
 -
-  [docs/solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md](../solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md)
-  — two-phase egress design.
--
-  [docs/solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md](../solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md)
-  — anc JSON envelope shape; pass-through verbatim.
+
+[docs/solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md](../solutions/architecture-patterns/cf-sandbox-secure-cli-execution-2026-04-17.md)
+— two-phase egress design. -
+[docs/solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md](../solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md)
+— anc JSON envelope shape; pass-through verbatim.
 
 **Test scenarios:**
 
@@ -2287,6 +2290,115 @@ mention. Operational readiness for the v3 deploy.
 
 **Verification:** Full `bun test` + `playwright test` (chromium project) passes locally and in CI. Smoke runs on every
 staging deploy. Runbook committed; RELEASES.md rev'd; README mentions `/score`.
+
+---
+
+- U10. **Analytics + billing guardrails**
+
+**Goal:** A queryable telemetry surface for live-scoring usage / performance / errors, plus a layered cost-cap stance
+(implicit per-request limits + manual kill switch + email-only budget alerts). Auto-killing on cost is deferred to
+U10.1; this unit ships the visibility + the operator levers.
+
+**Requirements:** New (operational, not in R1-R12).
+
+**Dependencies:** U5 (handler emits telemetry per request), U6 (DO emits per-install events), U7 (cache hit/miss is the
+largest cost lever and must be tracked).
+
+**Files:**
+
+- Modify: `wrangler.jsonc` — add `analytics_engine_datasets` binding `SCORE_TELEMETRY` under both top-level (prod) and
+  `env.staging`. Each environment writes to a separate dataset (`anc_live_score_prod`, `anc_live_score_staging`) so
+  staging traffic doesn't pollute prod dashboards.
+- Create: `src/worker/score/telemetry.ts` — single `recordScoreEvent(env, fields)` helper that wraps
+  `env.SCORE_TELEMETRY.writeDataPoint(...)`. Centralises the field-shape contract so handler.ts and do.ts can't drift.
+  Best-effort: any AE write error logs and swallows; never blocks the response.
+- Modify: `src/worker/score/handler.ts` — call `recordScoreEvent` exactly once per `/api/score` response (success AND
+  error paths). Fields cover the user-facing dimensions: input kind, pm, error code, freshness, response status.
+- Modify: `src/worker/score/do.ts` (or `sandbox-exec.ts`) — emit per-exec timing in the success path so the install +
+  anc-check breakdown is observable. Reuse the same `recordScoreEvent` surface; tag with `phase: 'install' | 'score'` so
+  handler + sandbox events stay distinguishable in queries.
+- Create: `tests/score-telemetry.test.ts` — stubs `SCORE_TELEMETRY.writeDataPoint`, asserts it's called once per
+  `/api/score` request with the documented field shape on every branch (registry hit, live success, every bounce class,
+  every error path). Also asserts AE write failure is swallowed (no propagated error).
+- Modify: `tests/score-handler.test.ts` — extend `makeEnv` to provide a `SCORE_TELEMETRY` stub so existing tests don't
+  break and the new emit calls are observable.
+- Modify: `RELEASES.md` — add a "Cost guardrails" section documenting: (a) Budget Alert thresholds set at $5 / $25 /
+  $100 (manual CF dashboard setup; one-time, per-account); (b) the kill-switch flip procedure (`wrangler kv key put
+  --binding=SCORE_KV scoring_disabled true`); (c) the dataset names + sample AE SQL queries for the operator dashboard.
+- Create: `docs/runbooks/live-scoring-analytics.md` — query playbook. Includes the canonical SQL queries for: daily
+  request volume by pm, p50/p99 install+score latency by pm, error-code distribution, registry-hit-rate (the
+  cost-efficiency signal), top tools by request count.
+
+**Approach:**
+
+- **Workers Analytics Engine** because it's purpose-built for this shape: schemaless write-only sink, $0.25/M writes
+  after the free tier, queryable via SQL API or CF dashboard. AE rejects values silently rather than throwing on
+  cardinality limits, so the wrapper enforces shape at the boundary.
+- **Field schema (one writeDataPoint per request):**
+- `blobs` (low-cardinality strings, ≤20 per dataset, ≤96 bytes each):
+- `blob1`: input kind — `"registry" | "install-command" | "github-url" | "slug-miss" | "invalid"`
+- `blob2`: pm — `"npm" | "cargo-binstall" | "pip" | "uv" | "bun" | "go" | "brew" | "direct" | null`
+- `blob3`: error code — null on success, otherwise the `ScoreError.code` string
+- `blob4`: freshness — `"live" | "cache-hit" | "registry-hit" | null`
+- `blob5`: resolved_step (when discovery ran) — `"0.5-hints" | "2-releases-asset" | "3-crates" | …` from
+  `DiscoveryResult.resolved_step`
+- `doubles` (numbers, ≤20 per dataset):
+- `double1`: total ms (Worker handler wall clock)
+- `double2`: install ms (from `sandbox.exec` install duration; null on registry hit / error before install)
+- `double3`: anc check ms (null on registry hit / error before anc check)
+- `double4`: response HTTP status
+- `indexes` (one per dataset, used for AE sampling):
+- `index1`: tool name OR slug (whichever the input resolved to; null on validation errors). Cardinality target ≤10k; AE
+  samples high-cardinality indexes automatically.
+- **Two datasets, not one.** `anc_live_score_prod` and `anc_live_score_staging` keep noise out of prod aggregates.
+  Wrangler's env semantics already isolate the binding per env; we just give each a different `dataset` name.
+- **Best-effort writes.** `try { env.SCORE_TELEMETRY.writeDataPoint(...) } catch (err) { console.log(...) }`. AE outages
+  must not block `/api/score` responses. The console.log retains the lost event in Workers Logs for manual recovery
+  during AE incidents.
+- **Cost guardrails (the layered stance):**
+
+1. **Implicit:** `SCORE_LIMITER` (10 req/min/session) + `SCORE_LIMITER_IP` (30 req/min/IP). Already shipped in U5; these
+   are the per-user cost ceilings. AE confirms whether they're effective.
+2. **Manual:** `SCORE_KV.scoring_disabled` kill switch already wired (`isScoringDisabled` in handler.ts). U10 documents
+   the flip procedure in RELEASES.md so operators can act in under a minute.
+3. **Email:** CF Budget Alerts at $5 / $25 / $100 via the CF dashboard. Email-only (per the existing plan note on "Cost
+   ceiling has no native auto-cap"). Document the setup steps in RELEASES.md.
+4. **Automated kill:** DEFERRED to U10.1. A scheduled Worker (cron trigger) querying AE for the rolling 24h request
+   count and auto-flipping `scoring_disabled` past a threshold. The pieces (AE dataset + kill switch + cron primitive in
+   Workers) all exist, but wiring them is its own discrete change and depends on real traffic patterns to set the
+   threshold. Don't speculate.
+
+**Patterns to follow:**
+
+- Cloudflare Workers Analytics Engine docs
+  ([introduction](https://developers.cloudflare.com/analytics/analytics-engine/),
+  [data shape](https://developers.cloudflare.com/analytics/analytics-engine/get-started/),
+  [sampling + cost](https://developers.cloudflare.com/analytics/analytics-engine/sampling/)).
+- The existing `isScoringDisabled` + `_resetKillSwitchCache` pattern in `src/worker/score/kill-switch.ts` — best-effort
+  read with bounded cache, graceful degradation on KV outage. Telemetry write follows the same graceful-degradation
+  discipline.
+
+**Test scenarios:**
+
+- **Every response path emits exactly one event.** Registry hit → 1 event with `freshness="registry-hit"`. Live success
+  → 1 event with `freshness="live"` and `double2`/`double3` populated. Every bounce class (invalid input, turnstile
+  failure, rate limit, scoring disabled, chain_no_resolve, all install_unsupported variants,
+  chain_resolved_install_failed, chain_resolved_no_binary_produced, timeout, incomplete_response_contract) → 1 event
+  with the matching `error_code` blob and `double4` matching the HTTP status.
+- **AE write failure does not break the response.** Stubbed `writeDataPoint` throws; handler still returns the scorecard
+  (success path) or error envelope (error path). Asserts the console.log surfaced the failure.
+- **Field-shape regression.** Pin blob/double/index slot assignments via the test so a future refactor that reorders
+  fields (silently breaking saved queries) fails locally.
+- **Dataset binding isolation.** Production wrangler config targets `anc_live_score_prod`; staging targets
+  `anc_live_score_staging`. Asserted via a config-shape test in `tests/wrangler-config.test.ts` (or equivalent; reuse
+  existing if one exists).
+- **Kill switch + telemetry interaction.** When `scoring_disabled=true`, the bounce event STILL emits (so operators can
+  see kill-switch-fired traffic in AE).
+
+**Verification:** First staging deploy with U10 emits ≥1 event per `/api/score` request, queryable via the SQL API
+returning the expected row count. Budget Alerts confirmed via test email on a low threshold ($1). Runbook query playbook
+returns expected daily aggregates against staging traffic. Production rollout gated on staging soak proving the AE
+writes don't measurably affect `/api/score` p99 (target: <5 ms added per request).
 
 ---
 
