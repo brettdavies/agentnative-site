@@ -227,3 +227,7 @@ yazi
 yq
 zoomable
 zoxide
+unauth
+client_secret
+client_id
+non_identity
