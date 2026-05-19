@@ -280,11 +280,22 @@ job-level changed-files check.
 
 ### Sandbox image releases (live-scoring)
 
-The live-scoring path uses a Cloudflare Containers binding that pins a debian-trixie-slim + glibc sandbox image
+The live-scoring path uses a Cloudflare Containers binding that pins a `python:3.12-slim-trixie` sandbox image
 (`docker/sandbox/Dockerfile`) carrying the Cloudflare Sandbox SDK plus the package managers the install paths support
-(cargo-binstall, pip, uv, npm, bun, upstream Go runtime). The image lives in the Cloudflare managed registry at
-`registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled from deploy: a Worker code-only deploy
-never rebuilds the image, and an image-only release never reships Worker code unintentionally.
+(cargo-binstall, pip, uv, npm, bun, upstream Go runtime). The base provides CPython 3.12 + pip on top of Debian Trixie
+(glibc 2.40); 3.12 satisfies the `<3.13,>=3.10` Python constraint that a broad slice of the PyPI ecosystem ships under,
+where Trixie's default Python 3.13 would force pip's resolver to back off to ancient package versions. The image lives
+in the Cloudflare managed registry at `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled
+from deploy: a Worker code-only deploy never rebuilds the image, and an image-only release never reships Worker code
+unintentionally. See
+[`docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md)
+for the version-pin rationale + matrix of which install paths use which Python.
+
+**Instance type.** Staging runs `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk). The previous `basic` tier (1/4 vCPU, 1 GiB
+RAM, 4 GB disk) ran the registry-curated matrix fine but timed out on heavy Python tools (aider's ~91 MB of compiled
+wheels: scipy 35 MB + tree-sitter-language-pack 19 MB + litellm 14 MB + others) because wheel extraction is
+CPU+disk-bound. Production stays on `basic` until U10 billing telemetry quantifies the per-request cost delta. Promotion
+procedure for the tier bump follows the same soak-then-promote flow as image bumps.
 
 `wrangler.jsonc` holds TWO independent image pins:
 
