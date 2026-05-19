@@ -29,6 +29,7 @@
 
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { InstallSpec } from './discover-binary';
+import { SDIST_TRUSTED_NAMES } from './sdist-allowlist';
 
 // ---------------------------------------------------------------------------
 // Result + error types
@@ -277,17 +278,37 @@ function installCommandFor(spec: InstallSpec): string | null {
       // pollute the orchestration's error `details` field when an
       // install fails. --break-system-packages overrides PEP 668's
       // "externally-managed-environment" refusal that Debian's
-      // python3-pip ships with — appropriate for our throwaway sandbox
-      // where there is no system Python to protect.
+      // python3-pip ships with — kept for safety even though the
+      // python:3.12-slim-trixie base (2026-05-19) does NOT carry the
+      // EXTERNALLY-MANAGED marker, so the flag is a no-op there.
       //
       // 2026-05-18: dropped `--use-deprecated=legacy-resolver` (Bug M
       // workaround on Alpine/musllinux). The Debian-slim rework moves
       // pip onto manylinux wheels which we believe closes the metadata
       // 403 gap; staging retest of `pip install httpie` validates.
       // Re-add this flag in a follow-up if httpie regresses.
+      //
+      // 2026-05-19: `--no-binary=<name1,name2,...>` selectively allows
+      // sdist install for specific trusted packages (sdist-allowlist.ts).
+      // Each entry has a vetted maintainer + upstream issue trail;
+      // adding to the list is a deliberate security loosening for that
+      // ONE package, the rest of the dep graph stays wheel-only.
+      // Empty allowlist → no --no-binary flag.
+      //
+      // 2026-05-19: `PIP_UPLOADED_PRIOR_TO=<date>` enforces a 7-day
+      // package-release delay so a fresh-publish supply-chain attack
+      // has at minimum a 7-day detection window before our sandbox
+      // would install it. The date is computed at exec time via shell
+      // substitution so image age doesn't widen the gate; uv's
+      // equivalent (UV_EXCLUDE_NEWER) is baked as an image ENV because
+      // uv accepts relative durations natively. pip support is v26.0+;
+      // older pip versions ignore the env var (no-op until upstream
+      // lands, then the gate auto-activates on image rebuild).
       return (
-        `PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ` +
-        `--break-system-packages ${shellQuote(spec.package)}`
+        `PIP_UPLOADED_PRIOR_TO=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) ` +
+        `PIP_NO_COLOR=1 pip install --only-binary=:all:` +
+        (SDIST_TRUSTED_NAMES ? ` --no-binary=${SDIST_TRUSTED_NAMES}` : '') +
+        ` --no-cache-dir --break-system-packages ${shellQuote(spec.package)}`
       );
     case 'npm':
       // --ignore-scripts suppresses preinstall/install/postinstall

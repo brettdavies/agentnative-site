@@ -76,7 +76,7 @@ die() {
 [ -x "$OP_CREATE" ] || die "1Password create helper not found at $OP_CREATE."
 
 API_TOKEN="$("$OP_READ" "$OP_ITEM_API_TOKEN" credential 2>/dev/null || true)"
-[ -n "$API_TOKEN" ] || die "could not read API token from 1Password item '$OP_ITEM_API_TOKEN'. Verify the item exists in vault 'secrets-dev' with a field named 'credential'."
+[ -n "$API_TOKEN" ] || die "could not read API token from 1Password item '$OP_ITEM_API_TOKEN'. Verify the item exists with a field named 'credential'."
 
 API_BASE="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID"
 

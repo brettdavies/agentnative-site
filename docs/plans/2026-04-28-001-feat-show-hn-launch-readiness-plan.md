@@ -313,8 +313,7 @@ A post-launch retro (per the central tracker's Distribution Plan section) compou
 
 - `Show HN best practices` (HN community wisdom, ad-hoc): post in the morning PT, peak window 9-11 AM. Drop on Tue/Wed/
   Thu, never Mon (fatigue) or Fri (weekend dilution).
-- `Cloudflare cache-purge API`: token in 1Password (`secrets-dev` vault, field `Cloudflare API Token - Wrangler
-  (bigdaddy)`). Per `RELEASES.md` `## Skill releases` runbook step 5.
+- `Cloudflare cache-purge API`: token in 1Password. Per `RELEASES.md` `## Skill releases` runbook step 5.
 
 ---
 
@@ -677,13 +676,12 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
 7. **Skill-distribution cutover ops** (per the master plan's Unit 5 cutover sequence): a. `gh repo view
    brettdavies/agentnative-skill --json visibility -q .visibility` → confirm PUBLIC. b. Run `bun x playwright test
    --project=skill` against the live `anc.dev` URL. All four host clones must succeed via HTTPS now. Failure here is a
-   launch-block. c. Cache-purge `/skill`, `/skill.json`, `/skill.md` via Cloudflare API (token in 1Password
-   `secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). **One-time legacy eviction:** also purge
-   `/install`, `/install.json`, `/install.md` once on this first deploy after PR #44 — the bundle no longer lives at
-   those paths, but the CDN may still cache pre-split bundle responses. Verify with `curl -sI https://anc.dev/skill.json
-   | grep cf-cache-status` returns `MISS` on the first request after purge. d. Smoke-check live: `curl -s
-   https://anc.dev/skill.json | jq -e '.source.commit | length == 40'`. Expect `true`. e. Seed daily probe: `gh workflow
-   run skill-availability.yml`. Confirm green run within 5 minutes.
+   launch-block. c. Cache-purge `/skill`, `/skill.json`, `/skill.md` via Cloudflare API (token in 1Password). **One-time
+   legacy eviction:** also purge `/install`, `/install.json`, `/install.md` once on this first deploy after PR #44 — the
+   bundle no longer lives at those paths, but the CDN may still cache pre-split bundle responses. Verify with `curl -sI
+   https://anc.dev/skill.json | grep cf-cache-status` returns `MISS` on the first request after purge. d. Smoke-check
+   live: `curl -s https://anc.dev/skill.json | jq -e '.source.commit | length == 40'`. Expect `true`. e. Seed daily
+   probe: `gh workflow run skill-availability.yml`. Confirm green run within 5 minutes.
 8. **Cold-device prod smoke (U5 second pass):** phone on cellular hits `https://anc.dev/` and walks the same checklist.
 9. **Update central tracker:** record this entry in the Day-1 Status Log with the gates flipped to `done`. Commit as
    `chore: update launch tracker — pre-launch release cut`.
