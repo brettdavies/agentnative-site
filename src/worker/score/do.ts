@@ -413,7 +413,13 @@ Sandbox.outboundHandlers = { allowedInstall, noHttp };
 // short-circuit at the surface to avoid the throw). All write paths
 // inside cache.put already swallow R2 failures — this wrapper handles
 // the precondition layer above that.
-async function writeCacheBestEffort(
+//
+// Exported for unit tests (tests/score-do-cache-write.test.ts) since the
+// Sandbox class itself isn't directly instantiable under bun:test without
+// the workerd shim. The wrapper carries the full precondition + write
+// flow that fetch() invokes, so testing it directly pins the cache-write
+// contract without touching DO boilerplate.
+export async function writeCacheBestEffort(
   env: ScoreSandboxEnv,
   spec: InstallSpec,
   value: { scorecard: unknown; anc_version: string },
@@ -453,8 +459,9 @@ async function writeCacheBestEffort(
 // Pulls `scorecard.tool.version` if present. The shape is the anc
 // JSON envelope; the field is populated by `anc check` from whatever
 // version flag the tool exposes. Unknown values bail out so cache.put's
-// refusal-to-cache-half-state isn't reached at runtime.
-function extractToolVersion(scorecard: unknown): string | null {
+// refusal-to-cache-half-state isn't reached at runtime. Exported for
+// the same unit-test reason as writeCacheBestEffort.
+export function extractToolVersion(scorecard: unknown): string | null {
   if (typeof scorecard !== 'object' || scorecard === null) return null;
   const tool = (scorecard as { tool?: unknown }).tool;
   if (typeof tool !== 'object' || tool === null) return null;
