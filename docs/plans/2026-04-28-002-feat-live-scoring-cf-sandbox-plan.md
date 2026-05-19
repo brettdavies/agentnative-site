@@ -33,9 +33,9 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
 
 ---
 
-## Current state — 2026-05-14
+## Current state — 2026-05-19
 
-### Shipped to dev (~50% to rollout)
+### Shipped to dev (~70% to rollout)
 
 - U1 — build-time `registry-index` + `discovery-hints-index` (PR
   [#78](https://github.com/brettdavies/agentnative-site/pull/78), commit `82b74dd`)
@@ -54,6 +54,33 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
   shipped 2026-05-15 via release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) on the same image pin
   (lockstep); CI main-targeting pin-equality guard exercised cleanly on PR #85's first run.
 - discovery-hit-rate gate (PR [#77](https://github.com/brettdavies/agentnative-site/pull/77), commit `078d233`)
+- U5 — Worker `/api/score` route with content negotiation, R11-triad response shape, registry-fast-path (unmetered),
+  Turnstile siteverify, signed HMAC session cookie, KV kill switch, and dual rate-limits — shipped 2026-05-15 via PR
+  [#93](https://github.com/brettdavies/agentnative-site/pull/93) (commit `8a03bcb`). DO still returned
+  `sandbox_stub_until_u6` at U5 ship; the route was exercised end-to-end to the DO boundary so U6 could drop in without
+  further plumbing.
+- U6 — Sandbox DO install + score with two-phase egress (`allowedInstall` → `noHttp`) — shipped 2026-05-18 via PR
+  [#95](https://github.com/brettdavies/agentnative-site/pull/95) (commit `af9f568`). Real `@cloudflare/sandbox` DO
+  replaces the stub; `sandbox-exec.ts` orchestrator handles per-PM install + `anc check --output json`.
+- U7 — R2 cache (read-on-hit, write-on-miss) + unified `lookupScorecard()` returning a tagged-union (`curated | cached |
+  miss`); cache key `scores/{binary}/{anc-version}.json`; 7-day TTL via R2 bucket lifecycle rule — shipped across four
+  PRs 2026-05-19:
+- PR [#96](https://github.com/brettdavies/agentnative-site/pull/96) (commit `6c9d665`) — core cache wrapper, unified
+  lookup, handler rewrite.
+- PR [#97](https://github.com/brettdavies/agentnative-site/pull/97) (commit `ef1f518`) — corrects the `wrangler r2
+  bucket lifecycle add` syntax in RELEASES.md (positional bucket/name/prefix args, `--expire-days` flag) and pins the
+  corrected shape via a drift-guard test.
+- PR [#98](https://github.com/brettdavies/agentnative-site/pull/98) (commit `f053733`) — red-team test coverage
+  (cross-PM aliasing under one binary, github-url with hint HIT/MISS, `?fromCache=false` write semantics), opt-in
+  staging cache smoke script (`scripts/staging-cache-smoke.sh`), and Cloudflare Access in front of the staging Worker as
+  DDoS defense (idempotent bootstrap at `scripts/cf-access-bootstrap.sh`).
+- PR [#99](https://github.com/brettdavies/agentnative-site/pull/99) (commit `eb9cbc7`) — sandbox base swap to
+  `python:3.12-slim-trixie`, sdist allowlist (`pyperclip`, `pycparser`) gated by a 7-day supply-chain release-delay
+  (`PIP_UPLOADED_PRIOR_TO`, `UV_EXCLUDE_NEWER="7 days"`), staging instance promoted to `standard-2` (lifts pip
+  extraction CPU/IO budget for aider-chat's 91 MB wheel set), and a runbook/decision-log split: `RELEASES.md` becomes
+  runbook-only (commands, paths, tables), `ARCHITECTURE.md` is a new top-level decision log holding all rationale prose.
+  Staging container app now on `:d87ed0a` + `standard-2`; production stays on `:30f61f1` + `basic` until a release PR
+  promotes the image.
 
 ### Discovered post-U3 shipment (2026-05-14 audit)
 
@@ -95,24 +122,17 @@ when `base_ref == main`.
 
 ### Pending (in execution order for the next session)
 
-1. **U5** — Worker `/api/score` route + content negotiation + response shape + `spec-version.gen.ts`. Includes the
-   `SCORE_LIMITER` rekey from per-IP to `session-cookie + tool-arg-hash` (see Cost ceiling and abuse mitigation
-   section). Unblocks any user-facing wiring.
-2. **U6** — replace DO stub with real `@cloudflare/sandbox`-extending DO; two-phase egress (`allowedInstall` then
-   `noHttp`); `sandbox-exec.ts` orchestrator with per-PM install matrix and `anc check --command --output json`.
-   Highest-risk single unit.
-3. **U7** — R2 cache (read on hit, write on miss; key shape `scores/{slug}/{anc-v}/{tool-v}.json`).
-4. **U8** — paste-input form on the homepage (`/`, NOT a dedicated `/score` subpage), Turnstile invisible mode +
+1. **U8** — paste-input form on the homepage (`/`, NOT a dedicated `/score` subpage), Turnstile invisible mode +
    lazy-load on form interaction, CSP update for `challenges.cloudflare.com`, client-side polling, summary + top-3 +
    install-anc CTA, build-emitted `spec-version.gen.ts`. No markdown twin (live-scoring is HTML-only; agents have `anc
    check` locally). Result-presentation shape (inline / modal / shareable subpage) is an open U8 question.
-5. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
-6. **U10** — analytics + billing guardrails: Workers Analytics Engine telemetry (one event per `/api/score` with pm /
+2. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
+3. **U10** — analytics + billing guardrails: Workers Analytics Engine telemetry (one event per `/api/score` with pm /
    error / freshness / latency dimensions), kill-switch flip runbook, Budget Alerts at $5 / $25 / $100. Auto-kill via
    cron is deferred to U10.1 once real traffic patterns inform the threshold.
 
-U7 and U8 can land in either order after U5 + U6. U9 is cross-cutting and should land alongside U6 / U8. U10 lands after
-U7 (cache hit/miss is the largest cost lever and must be observable before the analytics dashboards are trustworthy).
+U9 is cross-cutting and should land alongside U8. U10 lands after U7 (cache hit/miss is the largest cost lever and must
+be observable before the analytics dashboards are trustworthy).
 
 ### Risks to design against during U5-U8
 
@@ -140,13 +160,16 @@ U7 (cache hit/miss is the largest cost lever and must be observable before the a
 
 ### Branch baseline for next session
 
-Continue from `dev` (post release PR [#85](https://github.com/brettdavies/agentnative-site/pull/85) merge, 2026-05-15).
-`main` is now current with all post-#73 dev work and the production-side U3 + U3-followup deploy. The earlier
-live-scoring feature branches (`feat/u1-build-indexes`, `feat/u2-sandbox-image`, `feat/u3-bindings`,
-`feat/u4-input-parser`, `feat/discovery-hit-rate-gate`, `feat/u3-followup`) were squash-merged and have been deleted
-locally; their content is on dev and main.
+Continue from `dev` post PR [#99](https://github.com/brettdavies/agentnative-site/pull/99) merge (2026-05-19,
+`eb9cbc7`). `main` is on the production-side U3 + U3-followup deploy from release PR
+[#85](https://github.com/brettdavies/agentnative-site/pull/85) (2026-05-15); U5/U6/U7 are dev-only and will promote to
+`main` via a future release-PR-to-main batch (RELEASES.md staging-leads-prod flow). The U5/U6/U7 feature branches
+(`feat/u5-score-route`, `feat/u6-sandbox-do`, `feat/u7-r2-cache`, `feat/u7-red-team-tests`,
+`fix/u7-lifecycle-doc-syntax`, `fix/sandbox-python-3.12`) were squash-merged and deleted locally; their content is on
+dev.
 
-Next-session work begins with U5 (item 1 under Pending above). New feature branches off `dev`.
+Next-session work begins with U8 (item 1 under Pending above). New feature branch off `dev`. See
+`.context/handoffs/2026-05-19-002-u8-homepage-form-handoff.md` for the U8 kickoff brief.
 
 ---
 
@@ -1119,29 +1142,31 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-### Shipping Progress (last updated 2026-05-14)
+### Shipping Progress (last updated 2026-05-19)
 
-| Unit | Status    | Shipping refs                                                                                        |
-| ---- | --------- | ---------------------------------------------------------------------------------------------------- |
-| U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd`                 |
-| U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` (see U3-fu)     |
-| U3   | [partial] | PR [#81](https://github.com/brettdavies/agentnative-site/pull/81) — commit `09fe91f` (bindings only) |
-| U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca`                 |
-| U5   | [pending] | depends on U3 (bindings shipped) + U4 (parser, shipped)                                              |
-| U6   | [pending] | depends on U2 (image, shipped) + U3-followup + U4 (shipped) + U5                                     |
-| U7   | [pending] | depends on U3-followup + U6                                                                          |
-| U8   | [pending] | depends on U5                                                                                        |
-| U9   | [pending] | cross-cutting; depends on U1-U8                                                                      |
+| Unit | Status    | Shipping refs                                                                                                                                                                                                                                                                      |
+| ---- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| U1   | [shipped] | PR [#78](https://github.com/brettdavies/agentnative-site/pull/78) — commit `82b74dd`                                                                                                                                                                                               |
+| U2   | [shipped] | PR [#79](https://github.com/brettdavies/agentnative-site/pull/79) — commit `bf14daf` (see U3-fu)                                                                                                                                                                                   |
+| U3   | [shipped] | PR [#81](https://github.com/brettdavies/agentnative-site/pull/81) (`09fe91f`) + U3-fu (PR #84)                                                                                                                                                                                     |
+| U4   | [shipped] | PR [#80](https://github.com/brettdavies/agentnative-site/pull/80) — commit `5ac59ca`                                                                                                                                                                                               |
+| U5   | [shipped] | PR [#93](https://github.com/brettdavies/agentnative-site/pull/93) — commit `8a03bcb` (2026-05-15)                                                                                                                                                                                  |
+| U6   | [shipped] | PR [#95](https://github.com/brettdavies/agentnative-site/pull/95) — commit `af9f568` (2026-05-18)                                                                                                                                                                                  |
+| U7   | [shipped] | PRs [#96](https://github.com/brettdavies/agentnative-site/pull/96) + [#97](https://github.com/brettdavies/agentnative-site/pull/97) + [#98](https://github.com/brettdavies/agentnative-site/pull/98) + [#99](https://github.com/brettdavies/agentnative-site/pull/99) — 2026-05-19 |
+| U8   | [pending] | depends on U5 (shipped); next-up unit                                                                                                                                                                                                                                              |
+| U9   | [pending] | cross-cutting; depends on U1-U8                                                                                                                                                                                                                                                    |
+| U10  | [pending] | depends on U7 (shipped); analytics + billing guardrails                                                                                                                                                                                                                            |
 
-**Phase 1 (foundation: data + image + parser) is complete.** U3 partially landed in PR #81: wrangler bindings
-(`containers`, DO `SCORE`, R2 `SCORE_CACHE`, ratelimit `SCORE_LIMITER`) are live on prod + staging; the DO at
-`src/worker/score/do.ts` is a stub returning `{error: 'sandbox_stub_until_u6'}`; the container `image:` field still pins
-`docker.io/brettdavies/anc-sandbox@sha256:...`. The Docker Hub registry was deprecated post-shipment, so a U3-followup
-unit must migrate `image:` to inline `./docker/sandbox/Dockerfile` and wire the Cloudflare managed registry build into
-`.github/workflows/deploy.yml`. Phase 2 (sandbox install + R2 cache + UX) follows — see "Current state — 2026-05-14"
-near the top of this document for the rollout-order summary. The Pre-Implementation Validation gate
-([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of Phase 1 and conditioned the U1, U4, U6,
-U8 specs via the F1 + F4 findings (see plan amend commit `08a9a24`).
+**Phases 1 and 2 are complete.** U1 through U4 land the foundation (data, image, parser, bindings). U5 wires
+`/api/score` with the abuse-mitigation stack but leaves the DO as a stub. U6 replaces the stub with the real
+Sandbox-extending DO, two-phase egress, and the `sandbox-exec.ts` orchestrator. U7 layers the R2 cache (read on hit,
+write on miss) and a unified `lookupScorecard()` so curated and cached results share a single unmetered path; the
+four-PR U7 sequence also covers a documentation drift fix (lifecycle-add syntax), red-team test gaps, a staging cache
+smoke script, Cloudflare Access on the staging Worker, and a sandbox-base swap to `python:3.12-slim-trixie` with sdist
+allowlist, supply-chain release delay, `standard-2` staging instance, and a runbook / decision-log document split. The
+Pre-Implementation Validation gate ([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of
+Phase 1 and conditioned the U1, U4, U6, U8 specs via the F1 and F4 findings (see plan amend commit `08a9a24`). Phase 3
+(UX, tests, and guardrails) covers U8, U9, and U10.
 
 ---
 
@@ -1689,7 +1714,9 @@ Discovery chain short-circuits correctly. Bounce-out errors carry R9's CTA shape
 
 ---
 
-- U5. **Worker `/api/score` route + rate limit + content negotiation + response shape**
+- [x] U5. **Worker `/api/score` route + rate limit + content negotiation + response shape** — shipped 2026-05-15 via PR
+  [#93](https://github.com/brettdavies/agentnative-site/pull/93) (commit `8a03bcb`); DO remained a stub returning
+  `sandbox_stub_until_u6` at U5 ship.
 
 **Goal:** Wire `/api/score` into `src/worker/index.ts`. Coordinate the input classifier (U4) → registry lookup (U4) →
 rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Shape the response with the SoT triad.
@@ -1821,7 +1848,8 @@ unmodified). Triad enforcement is a hard gate, not a code-review check.
 
 ---
 
-- U6. **Sandbox-side: install + score (two-phase egress, anc check)**
+- [x] U6. **Sandbox-side: install + score (two-phase egress, anc check)** — shipped 2026-05-18 via PR
+  [#95](https://github.com/brettdavies/agentnative-site/pull/95) (commit `af9f568`).
 
 **Goal:** Implement the Sandbox DO class and the install + score flow. Two-phase egress is mandatory (R7). Pool of
 short-lived containers (per design Premise #6, evolved from singleton to 10-instance pool to absorb Show HN spike).
@@ -1991,7 +2019,12 @@ brew-fallback, direct in flat + nested archive layouts, and the two intentional 
 
 ---
 
-- U7. **R2 cache (read on hit, write on miss) + unified scorecard lookup**
+- [x] U7. **R2 cache (read on hit, write on miss) + unified scorecard lookup** — shipped 2026-05-19 across PRs
+  [#96](https://github.com/brettdavies/agentnative-site/pull/96) (`6c9d665`, core),
+  [#97](https://github.com/brettdavies/agentnative-site/pull/97) (`ef1f518`, lifecycle-syntax doc fix),
+  [#98](https://github.com/brettdavies/agentnative-site/pull/98) (`f053733`, red-team tests + staging smoke + Cloudflare
+  Access), and [#99](https://github.com/brettdavies/agentnative-site/pull/99) (`eb9cbc7`, sandbox base swap + sdist
+  allowlist + supply-chain delay + standard-2 + RELEASES/ARCHITECTURE split).
 
 **Goal:** R2 read on every cache-fast-path; R2 write on every successful sandbox round-trip. The registry-fast-path and
 the R2 cache merge into a single `lookupScorecard()` call that the handler invokes once. Both hit kinds (curated
@@ -2038,13 +2071,13 @@ reach those gates.
   Resolution order:
 
 1. **Registry first** (cheapest, in-memory): if the input maps to a curated entry with `scorecard_url`, return
-     `curated`. Done.
+   `curated`. Done.
 2. **R2 cache fallback** (when binary is cheaply known): derive the cache key from `input.spec.binary` (for
-     `install-command` inputs) OR from `hint.binary` (for `github-url` inputs that have a discovery hint). Call
-     `cache.get(key)`. Return `cached` on hit.
+   `install-command` inputs) OR from `hint.binary` (for `github-url` inputs that have a discovery hint). Call
+   `cache.get(key)`. Return `cached` on hit.
 3. **Miss** when neither layer has it. Includes the `github-url`-without-hint case — we can't derive a binary without
-     running discovery, and discovery is part of the live path. Future revisit may add a discovery-driven
-     read-after-resolve, but launch keeps the bar simple.
+   running discovery, and discovery is part of the live path. Future revisit may add a discovery-driven
+   read-after-resolve, but launch keeps the bar simple.
 
   Both `curated` and `cached` results bypass the kill switch / Turnstile / rate-limit / session-cookie gates. They are
   unmetered (consistent with R6). Only `miss` proceeds to the metered live path.
@@ -2066,13 +2099,13 @@ reach those gates.
 - **cache.ts surface:**
 
 - `get(env, key)`: `await env.SCORE_CACHE.get(key, "json")`. Null → miss. Validate the cached payload includes
-    `spec_version`, `anc_version`, `tool_version` AND a `scorecard` field; if any missing, treat as miss + log +
-    best-effort `delete` (corrupted entry).
+  `spec_version`, `anc_version`, `tool_version` AND a `scorecard` field; if any missing, treat as miss + log +
+  best-effort `delete` (corrupted entry).
 - `put(env, key, scorecard, ancVersion, toolVersion)`: refuse if `ancVersion` or `toolVersion` is missing (fail-fast —
-    never cache half-state). Store as JSON with `httpMetadata.contentType: application/json`. Write is best-effort:
-    failure logs but does not fail the user response.
+  never cache half-state). Store as JSON with `httpMetadata.contentType: application/json`. Write is best-effort:
+  failure logs but does not fail the user response.
 - `keyFor(binary, ancVersion)`: pure helper, returns `scores/{binary}/{ancVersion}.json`. Single source of truth for the
-    key shape so reads and writes can't drift.
+  key shape so reads and writes can't drift.
 
 - **`?fromCache=false` query bypasses read but still writes** (so the next request benefits). Operator escape hatch for
   "did the registry version just update?" scenarios.
@@ -2083,8 +2116,10 @@ reach those gates.
 **Patterns to follow:**
 
 -
-  [docs/solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md](../solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md)
-  — `anc-version` in key for auto-invalidation; refuse to cache if version missing.
+
+[docs/solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md](../solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md)
+— `anc-version` in key for auto-invalidation; refuse to cache if version missing.
+
 - [docs/research/2026-04-28-cloudflare-live-scoring-v2.md](../research/2026-04-28-cloudflare-live-scoring-v2.md) §7 — R2
   caching strategy.
 
