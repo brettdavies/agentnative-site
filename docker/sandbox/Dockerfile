@@ -128,6 +128,19 @@ RUN set -eux; \
 # the entire install table.
 ENV BUN_INSTALL=/usr/local
 ENV UV_TOOL_BIN_DIR=/usr/local/bin
+
+# Supply-chain release-delay gate: refuse to install any uv/uvx package
+# published less than 7 days ago. A malicious tag-overwrite or
+# fresh-publish attack has at minimum a 7-day detection window before
+# our sandbox would install it. uv handles relative durations natively
+# (v0.9.17+); pip's equivalent (PIP_UPLOADED_PRIOR_TO, v26.0+) requires
+# an absolute date, so the pip path computes it at exec time in
+# src/worker/score/sandbox-exec.ts rather than baking a stale value
+# here. npm + bun are not gated yet because user inputs through those
+# PMs pass through the registry / discovery hint vetting layer; pip and
+# uv take raw user-typed package names so the unmediated attack surface
+# is higher.
+ENV UV_EXCLUDE_NEWER="7 days"
 # Go's runtime DNS resolver bypasses glibc by default and ignores the
 # IPv4-precedence fix in /etc/gai.conf above. Force the cgo resolver so
 # `go install` honors the system address-selection policy.

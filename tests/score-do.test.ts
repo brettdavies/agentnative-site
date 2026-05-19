@@ -354,8 +354,22 @@ describe('sandbox-exec.score() — install table per PM', () => {
     {
       spec: { pm: 'pip', package: 'black', binary: 'black' },
       // PIP_NO_COLOR=1: ANSI suppression in pip output (Bug D).
-      // --break-system-packages: overrides Debian PEP 668 refusal.
-      expected: 'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-cache-dir ' + "--break-system-packages 'black'",
+      // --break-system-packages: overrides Debian PEP 668 refusal (no-op
+      // on the python:3.12-slim-trixie base, retained for safety).
+      // --no-binary=pyperclip,pycparser: selective sdist allowlist for
+      // known sdist-only transitive deps in the agent-tool ecosystem.
+      // pyperclip (Aider #4105) and pycparser (cffi dep, pyperclip #288)
+      // are both pure-Python with mature upstreams. The list lives in
+      // src/worker/score/sdist-allowlist.ts; if entries change, this
+      // expectation must move with it.
+      // PIP_UPLOADED_PRIOR_TO=$(date -u -d '7 days ago' ...): supply-chain
+      // release-delay gate. Date computed at exec time so image age
+      // doesn't widen the gate. pip v26.0+ honors the env var; older
+      // pip ignores it harmlessly.
+      expected:
+        "PIP_UPLOADED_PRIOR_TO=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) " +
+        'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-binary=pyperclip,pycparser --no-cache-dir ' +
+        "--break-system-packages 'black'",
     },
     {
       spec: { pm: 'uv', package: 'black', binary: 'black' },
@@ -432,26 +446,54 @@ describe('sandbox-exec.score() — install table per PM', () => {
     });
   }
 
-  test('install table first tokens match binaries present in the sandbox Dockerfile', async () => {
-    // Systemic catch: every install command in the table MUST start with
-    // a binary name that actually exists on the sandbox container PATH.
-    // The set below mirrors docker/sandbox/Dockerfile's apk install line
+  test('install table first binaries match binaries present in the sandbox Dockerfile', async () => {
+    // Systemic catch: every install command in the table MUST invoke a
+    // binary name that actually exists on the sandbox container PATH.
+    // The set below mirrors docker/sandbox/Dockerfile's apt install line
     // + the standalone tarballs. Keep in sync with the Dockerfile.
+    //
+    // Tokens that look like `NAME=value` are env-var prefixes (e.g.
+    // `PIP_NO_COLOR=1`, `PIP_UPLOADED_PRIOR_TO=$(date ...)` — the latter
+    // spans multiple whitespace tokens because of the $(...) command
+    // substitution). The matcher skips env-var prefixes (and the inner
+    // tokens of any command substitution they contain) until it finds
+    // the actual binary name.
     const knownBinaries = new Set([
       'cargo-binstall', // tarball at /usr/local/bin/
-      'pip', // python3-pip apt
+      'pip', // provided by the python:3.12-slim-trixie base
       'uv', // tarball at /usr/local/bin/
       'npm', // npm apt
       'bun', // tarball at /usr/local/bin/
       'curl', // curl apt
       '(', // direct install wraps the pipeline in a `( set -e; … )` subshell
-      'PIP_NO_COLOR=1', // env-var prefix (not a binary) — pip case
     ]);
+
+    // Find the first token that is NOT an env-var assignment (NAME=...)
+    // AND is not inside a $(...) command substitution. Handles
+    // multi-word `$(...)` interiors by skipping until the closing `)`.
+    function firstBinary(cmd: string): string {
+      const tokens = cmd.split(/\s+/);
+      let inCommandSub = false;
+      for (const t of tokens) {
+        if (inCommandSub) {
+          if (t.includes(')')) inCommandSub = false;
+          continue;
+        }
+        if (t.includes('$(') && !t.includes(')')) {
+          inCommandSub = true;
+          continue;
+        }
+        if (/^[A-Z_][A-Z0-9_]*=/.test(t)) continue; // env-var prefix
+        return t;
+      }
+      return tokens[0];
+    }
+
     for (const { spec, expected } of cases) {
-      const firstToken = expected.split(/\s+/)[0];
+      const binary = firstBinary(expected);
       expect(
-        knownBinaries.has(firstToken),
-        `pm=${spec.pm} install command first token "${firstToken}" not in known binaries; ` +
+        knownBinaries.has(binary),
+        `pm=${spec.pm} install command first binary "${binary}" not in known binaries; ` +
           `update docker/sandbox/Dockerfile or sandbox-exec.ts install table`,
       ).toBe(true);
     }
@@ -611,5 +653,83 @@ describe('sandbox-exec.score() — shell injection safety', () => {
     expect(installCmd).toBeDefined();
     // POSIX escape: foo'\''; rm -rf /;'\''   wrapped in '...'
     expect(installCmd?.command).toContain("'foo'\\''; rm -rf /;'\\'''");
+  });
+});
+
+describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-time)', () => {
+  // The pip install command must carry a PIP_UPLOADED_PRIOR_TO env-var
+  // prefix that refuses to install packages published less than 7 days
+  // ago. Date computed at exec time via shell substitution so a long-
+  // running image doesn't widen the gate. pip v26.0+ honors the env
+  // var; older pip versions ignore it (no-op). The companion uv gate
+  // (UV_EXCLUDE_NEWER) is asserted at the image layer in
+  // tests/dockerfile-sandbox.test.ts.
+
+  test('pip install command prepends PIP_UPLOADED_PRIOR_TO with a 7-day shell-computed date', async () => {
+    const { stub, calls } = makeStub();
+    await score(stub, { pm: 'pip', package: 'black', binary: 'black' });
+    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(installCmd).toBeDefined();
+    // The env-var prefix MUST be present and MUST use shell command
+    // substitution so the date refreshes on every exec rather than
+    // being frozen at image-build time.
+    expect(installCmd?.command).toMatch(/^PIP_UPLOADED_PRIOR_TO=\$\(date -u -d '7 days ago' \+%Y-%m-%dT%H:%M:%SZ\) /);
+  });
+
+  test('PIP_UPLOADED_PRIOR_TO precedes PIP_NO_COLOR and the pip binary in the command string', async () => {
+    // Token order matters because env-var prefixes only apply to the
+    // command they precede. Putting the date AFTER `pip` would invoke
+    // pip without the gate and then set an unused shell variable.
+    const { stub, calls } = makeStub();
+    await score(stub, { pm: 'pip', package: 'httpie', binary: 'http' });
+    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(installCmd).toBeDefined();
+    const cmd = installCmd?.command ?? '';
+    const priorIdx = cmd.indexOf('PIP_UPLOADED_PRIOR_TO=');
+    const colorIdx = cmd.indexOf('PIP_NO_COLOR=');
+    const pipIdx = cmd.indexOf(' pip install ');
+    expect(priorIdx).toBe(0);
+    expect(colorIdx).toBeGreaterThan(priorIdx);
+    expect(pipIdx).toBeGreaterThan(colorIdx);
+  });
+
+  test('shell substitution uses GNU date syntax compatible with the debian-trixie base', async () => {
+    // `date -u -d '<relative>' +<format>` is GNU-date syntax; BSD date
+    // would need `-v-7d`. The python:3.12-slim-trixie base ships GNU
+    // coreutils, so the -d form is correct. Pin the syntax so a future
+    // base swap to a non-GNU coreutils image surfaces here.
+    const { stub, calls } = makeStub();
+    await score(stub, { pm: 'pip', package: 'pylint', binary: 'pylint' });
+    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(installCmd).toBeDefined();
+    // GNU form: -d '<relative>'.  BSD form (rejected): -v-7d.
+    expect(installCmd?.command).toContain("date -u -d '7 days ago'");
+    expect(installCmd?.command).not.toContain('date -u -v-7d');
+  });
+
+  test('non-pip install paths do NOT carry PIP_UPLOADED_PRIOR_TO (env-var is pip-scoped only)', async () => {
+    // Leaking the pip env-var into npm/bun/cargo/uv installs would be
+    // dead weight at best and could mask a missing real implementation
+    // for those PMs. uv's gate is set via image ENV (UV_EXCLUDE_NEWER),
+    // not via this prefix.
+    const npmStub = makeStub();
+    await score(npmStub.stub, { pm: 'npm', package: 'cowsay', binary: 'cowsay' });
+    const npmCmd = npmStub.calls.find((c) => c.kind === 'exec' && c.command.includes('npm install')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(npmCmd?.command).not.toContain('PIP_UPLOADED_PRIOR_TO');
+
+    const uvStub = makeStub();
+    await score(uvStub.stub, { pm: 'uv', package: 'black', binary: 'black' });
+    const uvCmd = uvStub.calls.find((c) => c.kind === 'exec' && c.command.includes('uv tool install')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(uvCmd?.command).not.toContain('PIP_UPLOADED_PRIOR_TO');
   });
 });

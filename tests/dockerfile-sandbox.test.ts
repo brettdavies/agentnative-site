@@ -1,5 +1,7 @@
 // Static shape assertions for the live-scoring sandbox image (plan U6
-// base-image rework, 2026-05-18 — debian-trixie-slim / glibc).
+// base-image rework, 2026-05-18 — debian-trixie-slim / glibc; plan U7
+// follow-up 2026-05-19 — python:3.12-slim-trixie to satisfy aider-chat
+// and similar tools that require Python <3.13).
 //
 // The image-size + smoke-test verifications require a working Docker
 // daemon (CI doesn't have one) and live in docker/sandbox/README.md as
@@ -28,7 +30,7 @@ describe('docker/sandbox/Dockerfile — SHA-pin discipline', () => {
     }
   });
 
-  test('base images are CF Sandbox SDK 0.9.x (glibc) + debian-trixie-slim', async () => {
+  test('base images are CF Sandbox SDK 0.9.x (glibc) + python:3.12-slim-trixie', async () => {
     const df = await loadDockerfile();
     // The 0.9.4 (non-suffixed) tag is the glibc base; -musl/-python/etc are
     // siblings. Mismatching the variant against the apt/binary install
@@ -36,7 +38,13 @@ describe('docker/sandbox/Dockerfile — SHA-pin discipline', () => {
     // sandbox-server runtime contract.
     expect(df).toMatch(/cloudflare\/sandbox:0\.9\.\d+@sha256:/);
     expect(df).not.toMatch(/cloudflare\/sandbox:0\.9\.\d+-musl@/);
-    expect(df).toMatch(/debian:trixie-slim@sha256:/);
+    // 2026-05-19: swapped from `debian:trixie-slim` to
+    // `python:3.12-slim-trixie` so the system Python is 3.12 (satisfies
+    // the <3.13 constraint that broad swaths of the PyPI ecosystem
+    // declare, e.g. aider-chat per Aider-AI/aider#3037). The Trixie
+    // variant keeps the same Debian userland we already validated.
+    expect(df).toMatch(/python:3\.12-slim-trixie@sha256:/);
+    expect(df).not.toMatch(/^FROM docker\.io\/library\/debian:/m);
   });
 
   test('cargo-binstall download verifies via sha256sum -c', async () => {
@@ -125,9 +133,11 @@ describe('docker/sandbox/Dockerfile — package manager coverage', () => {
 
   test('all six U4-supported pms have a runtime in the image: cargo-binstall, pip, npm, go, bun, uv', async () => {
     const df = await loadDockerfile();
-    // python3-pip / npm come from apt; cargo-binstall + bun + uv + go
-    // come from pinned tarball downloads.
-    expect(df).toMatch(/\bpython3-pip\b/);
+    // Python + pip come from the python:3.12-slim-trixie FROM line
+    // (2026-05-19), not from an apt python3-pip install. The base image
+    // provides /usr/local/bin/pip and /usr/local/bin/python3 ahead of
+    // /usr/bin on PATH.
+    expect(df).toMatch(/python:3\.12-slim-trixie/);
     expect(df).toMatch(/\bnpm\b/);
     expect(df).toMatch(/go\.dev\/dl\/go[0-9.]+\.linux-amd64/);
     expect(df).toMatch(/cargo-binstall/);
@@ -216,5 +226,37 @@ describe('docker/sandbox/Dockerfile — sandbox runtime', () => {
     const exposeLines = df.split('\n').filter((l) => /^EXPOSE\s+\d+/.test(l));
     expect(exposeLines.length).toBeGreaterThanOrEqual(1);
     expect(df).not.toMatch(/^EXPOSE\s+3000\b/m);
+  });
+});
+
+describe('docker/sandbox/Dockerfile — supply-chain release-delay gate', () => {
+  // The image bakes a 7-day "package must have been published at least
+  // this long ago" gate for uv installs. Mirrors the maintainer's shell
+  // convention for the same defense. A malicious fresh-publish (or a
+  // legitimate package taken over and re-published) cannot reach our
+  // sandbox until it has been on PyPI for at least 7 days.
+  //
+  // uv accepts a relative duration natively (UV_EXCLUDE_NEWER), so the
+  // gate is set at image build time as an ENV var. pip's equivalent
+  // (PIP_UPLOADED_PRIOR_TO) requires an absolute timestamp and is
+  // therefore computed at exec time in sandbox-exec.ts (see the
+  // companion test in tests/score-do.test.ts).
+
+  test('ENV UV_EXCLUDE_NEWER is set to "7 days"', async () => {
+    const df = await loadDockerfile();
+    expect(df).toMatch(/^ENV UV_EXCLUDE_NEWER="7 days"$/m);
+  });
+
+  test('UV_EXCLUDE_NEWER is set AFTER uv is installed so future uv-using RUN steps inherit it', async () => {
+    // Order matters: if UV_EXCLUDE_NEWER were declared above the uv
+    // install step, any in-image `uv` invocation during build would
+    // start enforcing the 7-day gate. Setting it after the uv install
+    // leaves the image-build uv calls (uv --version, etc.) gate-free
+    // while ensuring runtime uv invocations honor it.
+    const df = await loadDockerfile();
+    const uvInstallIdx = df.search(/uv --version/);
+    const uvExcludeNewerIdx = df.search(/^ENV UV_EXCLUDE_NEWER=/m);
+    expect(uvInstallIdx).toBeGreaterThan(0);
+    expect(uvExcludeNewerIdx).toBeGreaterThan(uvInstallIdx);
   });
 });
