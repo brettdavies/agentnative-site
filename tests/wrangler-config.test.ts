@@ -124,3 +124,36 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
     expect(bindings).toContain('SCORE_CACHE');
   });
 });
+
+// ---------------------------------------------------------------------------
+// R2 score-cache lifecycle documentation drift (plan U7)
+// ---------------------------------------------------------------------------
+
+// The 7-day TTL on the SCORE_CACHE bucket lives as an R2 bucket lifecycle
+// rule, NOT in wrangler.jsonc — R2 lifecycle isn't a wrangler-config
+// surface yet. The setup commands live in RELEASES.md so a fresh bucket
+// recreate doesn't lose the TTL. Drift on that documentation is silent:
+// a future R2 bucket recreate could ship without the lifecycle rule, and
+// the cache would grow forever. This test asserts the literal commands
+// are present so removal forces a deliberate update.
+
+describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', () => {
+  const releasesPath = join(import.meta.dir, '..', 'RELEASES.md');
+  const releases = readFileSync(releasesPath, 'utf8');
+
+  test('documents the 7-day lifecycle command for the prod bucket', () => {
+    expect(releases).toMatch(/wrangler r2 bucket lifecycle add anc-score-cache --prefix scores\/ --expiration-days 7/);
+  });
+
+  test('documents the 7-day lifecycle command for the staging bucket', () => {
+    expect(releases).toMatch(
+      /wrangler r2 bucket lifecycle add anc-score-cache-staging --prefix scores\/ --expiration-days 7/,
+    );
+  });
+
+  test('mentions the canonical cache key prefix so a future audit can grep for it', () => {
+    // scores/{binary}/{anc-version}.json — the prefix anchors the
+    // lifecycle scope. If the prefix moves, the docs must move with it.
+    expect(releases).toMatch(/scores\/\{binary\}\/\{anc-version\}\.json/);
+  });
+});

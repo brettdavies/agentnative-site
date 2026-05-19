@@ -10,7 +10,17 @@
 // Lookup is case-insensitive on owner/repo because GitHub URLs are
 // case-preserving but case-insensitive at resolution. A user pasting
 // `github.com/aider-ai/aider` should hit the `Aider-AI/aider` hint.
+//
+// Plan U7 extends this module with `lookupScorecard()`, an async unified
+// resolution that consults registry first and then falls through to the
+// R2 cache when the binary is cheaply derivable. Both `curated` and
+// `cached` results bypass the metered gates (Turnstile, rate-limit, DO)
+// per R6 — cached scorecards are functionally identical to curated ones
+// (no sandbox cost). The legacy sync `lookupRegistry()` stays exported
+// for callers that don't need the cache layer (registry-lookup tests,
+// future callers that want just the registry tier).
 
+import * as cache from './cache';
 import type { ParsedInstall } from './parse-install';
 import type { ValidatedInput } from './validate';
 
@@ -78,4 +88,96 @@ export function lookupRegistry(
   // them through directly (install-command -> U6 with the parsed spec;
   // unknown -> 400 to user).
   return { kind: 'miss' };
+}
+
+// ---------------------------------------------------------------------------
+// Unified scorecard lookup (plan U7)
+// ---------------------------------------------------------------------------
+
+// Resolution covers BOTH the curated registry tier (in-memory hashmap,
+// no I/O) and the R2 cache tier (one R2 GET on hit, cheap). Resolution
+// order:
+//
+//   1. Registry first. Slug or github-url with a curated entry whose
+//      scorecard_url+anc_version are populated → `curated`. Done.
+//   2. R2 cache fallback when the binary is cheaply known:
+//      - install-command: `spec.binary` from the parser
+//      - github-url with a hint: `hint.binary`
+//      - github-url without hint: skipped (no binary derivable upfront;
+//        discovery is part of the live path)
+//      - slug-without-curated-scorecard: skipped (slugs without a
+//        scorecard_url have no install spec to derive a binary from)
+//   3. `miss` otherwise. The handler proceeds to the metered live path.
+//
+// `cached` results carry the cached payload's anc_version (NOT the
+// build-time SPEC_VERSION constant used to build the lookup key), so the
+// response triad reflects which anc the scorecard was actually scored by.
+//
+// `skipCache` short-circuits the R2 read tier — registry still consults
+// freely. Callers pass `skipCache: true` to honor the `?fromCache=false`
+// operator escape hatch ("did the registry version just update?").
+
+export type ScorecardLookupResult =
+  | { kind: 'curated'; entry: RegistryEntry; scorecard_url: string; anc_version: string }
+  | { kind: 'cached'; scorecard: unknown; anc_version: string; tool_version: string }
+  | { kind: 'miss' };
+
+export type ScorecardLookupOptions = {
+  // Build-time spec version, used as the partition slot in the cache key
+  // (handoff Decision 2 + gotcha 3). All readers and writers must pass
+  // the same value to avoid key drift.
+  specVersion: string;
+  // When true, skip the R2 read tier. Registry is still consulted.
+  skipCache?: boolean;
+};
+
+export async function lookupScorecard(
+  input: ValidatedInput,
+  env: cache.CacheEnv,
+  registryIndex: RegistryIndex,
+  hintsIndex: DiscoveryHintsIndex,
+  opts: ScorecardLookupOptions,
+): Promise<ScorecardLookupResult> {
+  // Tier 1: registry. Curated scorecards always win over the cache.
+  const registry = lookupRegistry(input, registryIndex, hintsIndex);
+  if (registry.kind === 'registry' && registry.entry.scorecard_url && registry.entry.anc_version) {
+    return {
+      kind: 'curated',
+      entry: registry.entry,
+      scorecard_url: registry.entry.scorecard_url,
+      anc_version: registry.entry.anc_version,
+    };
+  }
+
+  // Tier 2: R2 cache. Derive the binary from whatever is cheaply
+  // available; bail out otherwise (no I/O speculation).
+  if (opts.skipCache) return { kind: 'miss' };
+
+  const binary = deriveCacheBinary(input, registry);
+  if (!binary) return { kind: 'miss' };
+
+  const cached = await cache.get(env, cache.keyFor(binary, opts.specVersion));
+  if (cached) {
+    return {
+      kind: 'cached',
+      scorecard: cached.scorecard,
+      anc_version: cached.anc_version,
+      tool_version: cached.tool_version,
+    };
+  }
+
+  return { kind: 'miss' };
+}
+
+// Returns the binary slug usable as a cache key, or null when the input
+// can't be resolved without running discovery. Lifted out of
+// lookupScorecard so the derivation is independently testable and so the
+// "where does the binary come from?" decision lives in one place.
+function deriveCacheBinary(input: ValidatedInput, registry: RegistryLookupResult): string | null {
+  if (input.kind === 'install-command') return input.spec.binary;
+  if (registry.kind === 'hint') return registry.hint.binary;
+  // github-url without a hint, or slug without a curated scorecard:
+  // no upfront binary. The live path will run discovery and write to
+  // the cache afterward, so the NEXT request benefits.
+  return null;
 }
