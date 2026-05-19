@@ -181,3 +181,25 @@ function deriveCacheBinary(input: ValidatedInput, registry: RegistryLookupResult
   // the cache afterward, so the NEXT request benefits.
   return null;
 }
+
+/**
+ * Public form of the cache-key binary derivation, used by the handler to
+ * compute the `share_url` (`/live-score/<binary>`) for cached + live
+ * inline-scorecard responses. Same logic as the internal cache-tier
+ * derivation, exported so the handler can reuse it without re-running a
+ * full lookup. Returns null when no binary is derivable upfront (the only
+ * case is github-url without a hint; the user's response carries no
+ * share_url and they can re-paste to re-score).
+ */
+export function deriveShareBinary(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
+  if (input.kind === 'install-command') return input.spec.binary;
+  if (input.kind === 'github-url') {
+    const key = `${input.owner}/${input.repo}`;
+    const hint = lookupOwnerRepo(hintsIndex.by_owner_repo, key);
+    return hint?.binary ?? null;
+  }
+  // slug: registry-fast-path catches curated slugs into the `registry_hit`
+  // branch (which uses scorecard_url, not share_url). A slug without a
+  // curated scorecard isn't valid input — validateInput rejects it.
+  return null;
+}

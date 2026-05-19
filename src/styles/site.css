@@ -1219,3 +1219,318 @@ body:has(.leaderboard-hero) main {
     transition-duration: 0.01ms;
   }
 }
+
+/* =============================================================
+ * Live-scoring form (plan U8) — homepage paste-input surface.
+ * Builds on existing tokens: --accent for focus + submit, --bg-code
+ * for the input field, --border for hairlines, --must/--should/--may
+ * for bounce-panel keyword color (NO side-stripe accents — banned),
+ * --space-* for rhythm. No glassmorphism, no gradient text, no
+ * equal-tile cards — restrained per DESIGN.md §4.
+ * ============================================================= */
+
+.live-score {
+  display: grid;
+  gap: var(--space-5);
+  margin-block: var(--space-7) var(--space-6);
+  padding-block: var(--space-5);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.live-score__cta h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+  letter-spacing: -0.01em;
+}
+
+.live-score__lede {
+  margin: 0;
+  color: var(--fg-secondary);
+  max-inline-size: var(--measure);
+}
+
+.live-score__lede code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-code);
+  padding: 0 0.35em;
+  border-radius: 3px;
+}
+
+.live-score__form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.live-score__label {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--fg-secondary);
+}
+
+.live-score__input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+.live-score__input {
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-body);
+  min-inline-size: 0;
+}
+
+.live-score__input::placeholder {
+  color: var(--fg-muted);
+}
+
+.live-score__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.live-score__input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.live-score__submit {
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  font-weight: 600;
+  padding: var(--space-3) var(--space-5);
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.live-score__submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.live-score__submit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.live-score__submit:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.live-score__help {
+  margin: 0;
+  font-size: var(--text-secondary);
+  color: var(--fg-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.live-score__chip {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  padding: 0.2rem 0.55rem;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-body);
+  cursor: pointer;
+}
+
+.live-score__chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.live-score__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.live-score__progress {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-2);
+  font-size: var(--text-caption);
+  font-family: var(--font-mono);
+  color: var(--fg-secondary);
+}
+
+.live-score__step {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.live-score__step[data-active='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.live-score__step[data-done='true'] {
+  color: var(--may);
+}
+
+.live-score__status {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: var(--text-secondary);
+}
+
+/* Bounce-panel variants — keyword color via the existing --must/--should
+   semantic accents. No left-stripe border (impeccable absolute ban). */
+.live-score__status--error {
+  color: var(--must);
+}
+
+.live-score__status--bounce .live-score__bounce-headline {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-h4);
+  font-weight: 600;
+  color: var(--must);
+}
+
+.live-score__status--bounce .live-score__bounce-body {
+  margin: 0 0 var(--space-3);
+  color: var(--fg-body);
+}
+
+.live-score__status--bounce .live-score__bounce-body code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg);
+  padding: 0 0.35em;
+  border-radius: 3px;
+}
+
+.live-score__status--bounce .live-score__bounce-stderr {
+  margin: 0 0 var(--space-3);
+  max-block-size: 16rem;
+  overflow: auto;
+  font-size: 0.82rem;
+}
+
+.live-score__status--bounce .live-score__bounce-cta {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+
+.live-score__status--bounce .live-score__bounce-cta code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg);
+  padding: 0 0.35em;
+  border-radius: 3px;
+}
+
+/* =============================================================
+ * /live-score/<binary> result page (plan U8 — share surface).
+ * Reuses the per-tool scorecard score badge component; adds a
+ * compact header with version + binary + freshness marker.
+ * ============================================================= */
+
+.live-score-summary__header {
+  margin-block-end: var(--space-5);
+}
+
+.live-score-summary__header h1 {
+  margin: 0;
+  font-size: var(--text-h1);
+  letter-spacing: -0.01em;
+}
+
+.live-score-summary__version {
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  font-weight: 400;
+  color: var(--fg-secondary);
+  margin-inline-start: var(--space-3);
+}
+
+.live-score-summary__meta {
+  margin-block: var(--space-3) 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+
+.live-score-summary__meta code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-code);
+  padding: 0 0.35em;
+  border-radius: 3px;
+}
+
+.live-score-summary__freshness {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  margin-inline-start: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: lowercase;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-muted);
+}
+
+.live-score-summary__freshness--live {
+  color: var(--may);
+  border-color: var(--may);
+}
+
+.live-score-summary__score {
+  margin-block: var(--space-5);
+}
+
+.live-score-summary__issues {
+  margin-block: var(--space-5);
+}
+
+.live-score-summary__issues h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+}
+
+.live-score-summary__cta {
+  margin-block: var(--space-6) var(--space-5);
+  padding-block-start: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.live-score-summary__cta h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+}
+
+.live-score-summary__cta p {
+  color: var(--fg-secondary);
+  max-inline-size: var(--measure);
+}
+
+.live-score-summary__cta-aside {
+  font-size: var(--text-secondary);
+}

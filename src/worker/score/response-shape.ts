@@ -57,6 +57,17 @@ export type ScoreSuccess = {
   site_spec_version: string;
   anc_version: string;
   checker_url: string;
+  // Set for inline scorecards (cached + live branches) when the binary is
+  // derivable from the input. The homepage form's JS redirects here after
+  // a successful submit. URL shape `/live-score/<binary>` reads from the
+  // R2 cache that the DO + cached lookups write to; one write, one share
+  // surface. Absent for:
+  //   - `registry_hit` responses (carry their own `scorecard_url` pointing
+  //     at the curated static page)
+  //   - github-url-without-hint live runs (binary not derivable in the
+  //     handler before the DO discovery; rare in practice — Aider-AI/aider
+  //     etc. all ship hints)
+  share_url?: string;
 };
 
 const CTA_INSTALL_ANC = 'Install `anc` and run `anc check .` in your project for full depth.';
@@ -126,6 +137,7 @@ export function shapeScoreSuccess(
   scorecard: unknown,
   anc_version: string | null | undefined,
   freshness: ResponseFreshness,
+  shareUrl?: string | null,
 ): Response {
   if (!anc_version) {
     return shapeScoreError(
@@ -144,6 +156,7 @@ export function shapeScoreSuccess(
     site_spec_version: SITE_SPEC_VERSION,
     anc_version,
     checker_url: CHECKER_URL,
+    ...(shareUrl ? { share_url: shareUrl } : {}),
   };
 
   const headers = freshness === 'cache-hit' ? JSON_HEADERS_CACHE_HIT : JSON_HEADERS_LIVE;

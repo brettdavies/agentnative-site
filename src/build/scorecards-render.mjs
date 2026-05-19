@@ -2,7 +2,14 @@
 // per-tool scorecard pages. Template concern only; data loading and
 // scoring live in scorecards.mjs.
 
-import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util.mjs';
+import {
+  BONUS_GROUPS,
+  escHtml,
+  formatCheckTableMarkdownLines,
+  groupToPrincipleNum,
+  PRINCIPLE_GROUPS,
+  PRINCIPLE_NAMES,
+} from '../shared/scorecard-format.mjs';
 
 // Display-only mirror of the CLI's badge eligibility floor (80%). All
 // eligibility decisions read `scorecard.badge.eligible` (canonical source
@@ -12,15 +19,8 @@ import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util
 // scorecard.badge.eligible directly.
 const BADGE_FLOOR_DISPLAY_PCT = 80;
 
-/**
- * Map a check group string to a principle number (1-7) or null for bonus groups.
- * @param {string} group
- * @returns {number | null}
- */
-function groupToPrincipleNum(group) {
-  const match = group.match(/^P(\d+)$/);
-  return match ? Number(match[1]) : null;
-}
+// groupToPrincipleNum lives in src/shared/scorecard-format.mjs (single source
+// of truth shared with the Worker). Imported above.
 
 // Evidence prefix the CLI emits for any check suppressed by `--audit-profile`.
 // Mirrors `SUPPRESSION_EVIDENCE_PREFIX` in agentnative/src/principles/registry.rs
@@ -647,13 +647,13 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     lines.push('');
   }
 
-  // Check results table
-  lines.push('| Status | Check | Principle | Evidence |');
-  lines.push('|--------|-------|-----------|----------|');
-  for (const check of scorecard.results) {
-    const pNum = groupToPrincipleNum(check.group);
-    const groupLabel = pNum ? `[${check.group}](/p${pNum})` : check.group;
-    lines.push(`| ${check.status.toUpperCase()} | ${check.label} | ${groupLabel} | ${check.evidence || ''} |`);
+  // Check results table — formatted by the shared row helper so the
+  // /score/<tool>.md and /live-score/<binary>.md surfaces stay in lockstep.
+  // Empty `baseUrl` produces site-relative links (`/p3`); the build's
+  // absolutifyMarkdownLinks pass rewrites those to absolute anc.dev URLs
+  // for the twin output (matches the other markdown pages in this file).
+  for (const row of formatCheckTableMarkdownLines(scorecard.results)) {
+    lines.push(row);
   }
   lines.push('');
 

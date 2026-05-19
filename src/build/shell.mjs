@@ -70,6 +70,35 @@ const esc = escHtml;
  * @param {string=} args.baseUrl             — absolute base (default prod).
  * @returns {string} full HTML document.
  */
+/**
+ * Emit a placeholder-only version of the shell. Used by the Worker to
+ * render dynamic pages (plan U8: /live-score/<binary>) without
+ * duplicating the shell layout. The template has four placeholders:
+ *
+ *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
+ *   {{DESCRIPTION}}      — meta description + og:description
+ *   {{CANONICAL_PATH}}   — site-relative canonical path (no trailing extension)
+ *   {{BODY}}             — already-rendered body HTML (pre-escaped by caller)
+ *
+ * Same shell layout as the static pages; the only difference is the
+ * placeholders for the four dynamic fields. The markdown-twin link in
+ * the footer substitutes to `{{CANONICAL_PATH}}.md` so live-score pages
+ * carry the same markdown-twin affordance as every other page.
+ */
+export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
+  return emitShell({
+    title: '{{TITLE}}',
+    description: '{{DESCRIPTION}}',
+    canonicalPath: '{{CANONICAL_PATH}}',
+    bodyHtml: '{{BODY}}',
+    themeInitJs: themeInitJs ?? '',
+    isIndex: false,
+    principles: [],
+    baseUrl,
+    extraScripts: [],
+  });
+}
+
 export function emitShell({
   title,
   description,
@@ -120,6 +149,7 @@ ${principles
     <title>${esc(title)}</title>
     <meta name="description" content="${esc(description)}" />
     <link rel="canonical" href="${canonical}" />
+${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
     <meta property="og:title" content="${esc(title)}" />

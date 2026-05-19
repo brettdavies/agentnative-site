@@ -43,13 +43,14 @@ import {
   loadScoredTools,
   runScorecardInvariants,
 } from './scorecards.mjs';
+import { generateSpecVersionModule } from './spec-version-gen.mjs';
 import {
   buildLeaderboardBody,
   buildLeaderboardMarkdown,
   buildScorecardBody,
   buildScorecardMarkdown,
 } from './scorecards-render.mjs';
-import { emitShell } from './shell.mjs';
+import { emitShell, emitShellTemplate } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
 import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
@@ -80,8 +81,10 @@ async function ensureDir(dir) {
 }
 
 /**
- * Build the homepage body HTML — hero section (title + lede) followed by
- * the principle listing with links to individual pages.
+ * Build the homepage body HTML — hero, live-scoring form section (plan U8),
+ * principle listing, install-anc CTA. The live-score section sits between
+ * hero and principles per the wireframe-first placement; layout polish is
+ * deferred to /design-review after the basic surface renders.
  */
 function buildHomepageBody(introTitle, introLede, principles) {
   const entries = principles
@@ -103,10 +106,67 @@ function buildHomepageBody(introTitle, introLede, principles) {
   <h1 class="hero__title">${escHtml(introTitle)}</h1>
   <p class="hero__lede">${escHtml(introLede)}</p>
 </section>
+${buildLiveScoreSection()}
 <section class="principles-index" aria-label="The eight principles">
   <ol class="principles-index__list">
 ${entries}
   </ol>
+</section>`;
+}
+
+/**
+ * Live-scoring paste-input form section (plan U8). Server-rendered shell:
+ * the JS at /js/live-score.js (lazy-loaded with the rest of the deferred
+ * client bundle) wires submit + Turnstile + theater. The Turnstile sitekey
+ * is injected by the Worker at request time via meta[name=turnstile-sitekey]
+ * — only set on staging until U10 promotion, so production HTML carries an
+ * empty value and the JS disables the form with a "not yet live" message.
+ *
+ * R9 CTA framing: install-anc is the PRIMARY surface, not buried. Visible
+ * above the form input so a visitor who never engages the form still sees
+ * the local-install option first.
+ */
+function buildLiveScoreSection() {
+  return `<section class="live-score" aria-labelledby="live-score-heading" data-live-score-section>
+  <div class="live-score__cta">
+    <h2 id="live-score-heading">Score a CLI tool</h2>
+    <p class="live-score__lede">
+      <a href="/install">Install <code>anc</code> locally</a> for source + project depth — the web demo
+      below shows binary and behavioral checks only.
+    </p>
+  </div>
+  <form class="live-score__form" method="post" action="/api/score" novalidate data-live-score-form>
+    <label class="live-score__label" for="live-score-input">
+      Paste a tool name, install command, or GitHub URL
+    </label>
+    <div class="live-score__input-row">
+      <input
+        id="live-score-input"
+        class="live-score__input"
+        name="input"
+        type="text"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="ripgrep"
+        required
+        aria-describedby="live-score-help"
+      />
+      <button type="submit" class="live-score__submit" data-live-score-submit>Score</button>
+    </div>
+    <p id="live-score-help" class="live-score__help">
+      Examples (click to fill):
+      <button type="button" class="live-score__chip" data-live-score-example="ripgrep">ripgrep</button>
+      <button type="button" class="live-score__chip" data-live-score-example="brew install bat">brew install bat</button>
+      <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli">https://github.com/cli/cli</button>
+    </p>
+    <ol class="live-score__progress" data-live-score-progress hidden>
+      <li class="live-score__step" data-step="validate">Validating input</li>
+      <li class="live-score__step" data-step="resolve">Resolving install path</li>
+      <li class="live-score__step" data-step="install">Installing in sandbox</li>
+      <li class="live-score__step" data-step="score">Running anc check</li>
+    </ol>
+    <div class="live-score__status" data-live-score-status role="status" aria-live="polite" hidden></div>
+  </form>
 </section>`;
 }
 
@@ -157,12 +217,37 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
       throw new Error(`invariant: dist/p${n}.md does not match absolutified ${sourcePath}`);
     }
   }
+
+  // 5. Markdown-twin silence for the homepage (plan U8). The homepage HTML
+  // gains the live-scoring form; the markdown twin MUST NOT carry any of
+  // that surface (no form markup, no JS reference, no Turnstile mention,
+  // no /api/score documentation). Agents pasting `Accept: text/markdown`
+  // against `/` are expected to use `anc check` locally; the form is
+  // HTML-only by design. A future copy edit that leaks any of these
+  // tokens into the homepage markdown fails the build here.
+  const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
+  const FORBIDDEN_IN_INDEX_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score'];
+  for (const needle of FORBIDDEN_IN_INDEX_MD) {
+    if (indexMd.toLowerCase().includes(needle.toLowerCase())) {
+      throw new Error(
+        `invariant: dist/index.md leaked live-scoring surface "${needle}". The homepage markdown twin stays silent on the form per plan U8.`,
+      );
+    }
+  }
 }
 
 export async function build() {
   await ensureDir(DIST_DIR);
 
+  // 0. Regenerate src/worker/spec-version.gen.ts from VERSION files BEFORE
+  // copyAssets bundles the client/worker JS. The Worker imports the file via
+  // a relative module path, so an out-of-date constant would otherwise ship
+  // verbatim into the bundle even when the VERSION files have advanced. The
+  // drift test (tests/spec-version-gen.test.ts) is the second guardrail.
+  await generateSpecVersionModule();
+
   // 1. Copy static assets + bundle client JS. themeInit inlined into every shell.
+  // bundleClient also emits /js/live-score.js used by the homepage form.
   const { themeInit } = await copyAssets({ repoRoot: REPO_ROOT, distDir: DIST_DIR });
 
   // 2. Sorted principle files.
@@ -219,6 +304,10 @@ export async function build() {
       bodyHtml: indexBody,
       themeInitJs: themeInit,
       isIndex: true,
+      // Plan U8: homepage carries the live-scoring form. /js/live-score.js
+      // is bundled in assets.mjs alongside theme/clipboard/leaderboard and
+      // loads with `defer`. Lazy-loads Turnstile + handles submit/redirect.
+      extraScripts: ['/js/live-score.js'],
     }),
   );
 
@@ -531,6 +620,17 @@ export async function build() {
     ],
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
+
+  // 9b. Live-score shell template (plan U8). Worker's summary-render.ts
+  // fetches this asset to wrap dynamic `/live-score/<binary>` responses
+  // in the same shell as static pages. The `/_internal/*` namespace is
+  // intercepted by the Worker entry so direct user access returns 404 —
+  // the file exists for internal env.ASSETS fetches only.
+  await ensureDir(join(DIST_DIR, '_internal'));
+  await writeFile(
+    join(DIST_DIR, '_internal', 'live-score-shell.html'),
+    emitShellTemplate({ themeInitJs: themeInit }),
+  );
 
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex

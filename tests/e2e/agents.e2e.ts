@@ -81,7 +81,7 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toMatch(/^>\s+/m);
     expect(body).toContain('## Principles');
     const bullets = body.match(/^-\s+\[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
-    expect(bullets.length).toBe(7);
+    expect(bullets.length).toBe(8);
     // Sub-pages (check, about) present under ## Pages.
     expect(body).toContain('## Pages');
     const pageLinks = body.match(/^-\s+\[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];

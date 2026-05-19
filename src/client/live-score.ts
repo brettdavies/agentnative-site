@@ -1,0 +1,364 @@
+// Homepage live-scoring form — paste-input, lazy-loaded Turnstile, 2 s
+// theater floor, redirect on success.
+//
+// Plan U8 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md):
+//
+//   - Turnstile script (https://challenges.cloudflare.com/turnstile/v0/api.js)
+//     is NOT loaded on every homepage visit. Lazy-load on first focus/click/
+//     paste against the form input. A Playwright regression asserts the
+//     script is NOT requested when the user scrolls past without engaging.
+//   - On submit: render the invisible Turnstile widget, await token, POST
+//     to /api/score with {input, turnstile_token}. Promise.all with a 2 s
+//     timer enforces the cached-theater minimum from
+//     docs/solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md.
+//   - Response branches:
+//       kind=='registry_hit'  → window.location = scorecard_url
+//       inline scorecard      → window.location = share_url (/live-score/<binary>)
+//       4xx with chain_*       → render class-specific bounce panel
+//       other errors          → inline error message
+//
+// Turnstile sitekey comes from <meta name="turnstile-sitekey" content="...">,
+// substituted at request time by the Worker. Production pre-promotion ships
+// empty content — the form disables itself with a "not yet live" notice
+// rather than rendering a non-functional widget.
+
+interface TurnstileApi {
+  render(
+    element: HTMLElement | string,
+    options: {
+      sitekey: string;
+      size?: 'invisible' | 'normal' | 'compact';
+      callback?: (token: string) => void;
+      'error-callback'?: () => void;
+      'expired-callback'?: () => void;
+    },
+  ): string;
+  execute(widgetId?: string): void;
+  reset(widgetId?: string): void;
+  remove(widgetId?: string): void;
+}
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+const TURNSTILE_SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+const THEATER_MIN_MS = 2000;
+const STDERR_TRUNCATE_CHARS = 300;
+
+const form = document.querySelector<HTMLFormElement>('[data-live-score-form]');
+const input = document.querySelector<HTMLInputElement>('#live-score-input');
+const submitBtn = document.querySelector<HTMLButtonElement>('[data-live-score-submit]');
+const statusEl = document.querySelector<HTMLDivElement>('[data-live-score-status]');
+const progressEl = document.querySelector<HTMLOListElement>('[data-live-score-progress]');
+
+if (form && input && submitBtn && statusEl && progressEl) {
+  initLiveScore({ form, input, submitBtn, statusEl, progressEl });
+}
+
+function initLiveScore(els: {
+  form: HTMLFormElement;
+  input: HTMLInputElement;
+  submitBtn: HTMLButtonElement;
+  statusEl: HTMLDivElement;
+  progressEl: HTMLOListElement;
+}): void {
+  const sitekey = readSitekey();
+  if (!sitekey) {
+    // Production pre-promotion path: TURNSTILE_SITEKEY var is not set.
+    // Disable the form so a click can't dispatch a request that will
+    // fail siteverify with no actionable error.
+    disableFormWithMessage(els, 'Live scoring is available on staging only — install anc locally to score.');
+    return;
+  }
+
+  let turnstilePromise: Promise<TurnstileApi> | null = null;
+  let widgetId: string | null = null;
+
+  function ensureTurnstileLoaded(): Promise<TurnstileApi> {
+    if (turnstilePromise) return turnstilePromise;
+    turnstilePromise = new Promise<TurnstileApi>((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = TURNSTILE_SCRIPT_URL;
+      script.async = true;
+      script.defer = true;
+      script.onload = () => {
+        if (window.turnstile) resolve(window.turnstile);
+        else reject(new Error('Turnstile failed to attach to window'));
+      };
+      script.onerror = () => reject(new Error('Turnstile script failed to load'));
+      document.head.appendChild(script);
+    }).catch((err) => {
+      // Reset on failure so the next interaction retries — common cause
+      // is a transient network blip on first paint.
+      turnstilePromise = null;
+      throw err;
+    });
+    return turnstilePromise;
+  }
+
+  // Lazy-load: first interaction wins. Once the script is in-flight we
+  // don't re-add it on subsequent events.
+  const lazyLoad = () => {
+    void ensureTurnstileLoaded();
+  };
+  els.input.addEventListener('focus', lazyLoad, { once: true });
+  els.input.addEventListener('paste', lazyLoad, { once: true });
+  els.input.addEventListener('click', lazyLoad, { once: true });
+
+  // Example chips fill the input + trigger the lazy-load (since the user
+  // is clearly engaging with the form). Mirrors the paste interaction.
+  for (const chip of document.querySelectorAll<HTMLButtonElement>('[data-live-score-example]')) {
+    chip.addEventListener('click', () => {
+      const value = chip.dataset.liveScoreExample ?? '';
+      els.input.value = value;
+      els.input.focus();
+      lazyLoad();
+    });
+  }
+
+  els.form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const value = els.input.value.trim();
+    if (!value) {
+      renderInlineError(els.statusEl, 'Paste a tool name, install command, or GitHub URL.');
+      return;
+    }
+
+    setSubmitting(els, true);
+    clearStatus(els.statusEl);
+    revealProgress(els.progressEl);
+
+    let token: string;
+    try {
+      token = await acquireTurnstileToken(sitekey, await ensureTurnstileLoaded(), els.form, (id) => {
+        widgetId = id;
+      });
+    } catch (err) {
+      setSubmitting(els, false);
+      hideProgress(els.progressEl);
+      renderInlineError(els.statusEl, 'Verification challenge failed to load. Please try again.');
+      return;
+    }
+
+    try {
+      const [response] = await Promise.all([
+        fetch('/api/score', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ input: value, turnstile_token: token }),
+        }),
+        new Promise((resolve) => window.setTimeout(resolve, THEATER_MIN_MS)),
+      ]);
+
+      const payload = await response.json().catch(() => ({}) as Record<string, unknown>);
+      handleScoreResponse(els, response.status, payload);
+    } catch (err) {
+      renderInlineError(els.statusEl, networkErrorMessage(err));
+    } finally {
+      setSubmitting(els, false);
+      hideProgress(els.progressEl);
+      if (widgetId && window.turnstile) {
+        window.turnstile.reset(widgetId);
+      }
+    }
+  });
+}
+
+function readSitekey(): string | null {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=turnstile-sitekey]');
+  const value = meta?.content?.trim();
+  // Empty string (production pre-promotion) is treated as absent, so the
+  // form short-circuits to the local-install copy without a network round-trip.
+  return value ? value : null;
+}
+
+function acquireTurnstileToken(
+  sitekey: string,
+  api: TurnstileApi,
+  formEl: HTMLFormElement,
+  onWidget: (id: string) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let container = formEl.querySelector<HTMLDivElement>('[data-turnstile-mount]');
+    if (!container) {
+      container = document.createElement('div');
+      container.setAttribute('data-turnstile-mount', '');
+      container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
+      formEl.appendChild(container);
+    }
+    const id = api.render(container, {
+      sitekey,
+      size: 'invisible',
+      callback: (token: string) => resolve(token),
+      'error-callback': () => reject(new Error('turnstile_error')),
+      'expired-callback': () => reject(new Error('turnstile_expired')),
+    });
+    onWidget(id);
+    api.execute(id);
+  });
+}
+
+function handleScoreResponse(
+  els: { statusEl: HTMLDivElement },
+  status: number,
+  payload: Record<string, unknown>,
+): void {
+  // Registry hit: the curated /score/<slug> page is the share surface.
+  const scorecard = payload.scorecard as { kind?: string; scorecard_url?: string } | undefined;
+  if (status === 200 && scorecard?.kind === 'registry_hit' && typeof scorecard.scorecard_url === 'string') {
+    window.location.href = scorecard.scorecard_url;
+    return;
+  }
+
+  // Inline scorecard: redirect to the shareable /live-score/<binary> page.
+  if (status === 200 && typeof payload.share_url === 'string') {
+    window.location.href = payload.share_url;
+    return;
+  }
+
+  // 200 but no share_url AND no registry_hit redirect (github-url-without-hint
+  // live run). Show a fallback message — the user got a result, but the
+  // shareable URL surface isn't available for this input shape.
+  if (status === 200) {
+    renderInlineError(
+      els.statusEl,
+      "Scored, but this input doesn't have a shareable result URL yet. Run anc locally for a saved scorecard.",
+    );
+    return;
+  }
+
+  // 4xx / 5xx: branch on error.code for the three bounce panels + the
+  // common error tags. Anything else falls through to a generic message.
+  const err = payload.error as { code?: string; details?: string; retry_after?: number } | undefined;
+  switch (err?.code) {
+    case 'chain_no_resolve':
+      renderBouncePanel(els.statusEl, {
+        headline: "We couldn't find a pre-built binary for that.",
+        body: 'anc only scores tools with a published binary release. <a href="/install">Install anc locally</a> to score source + project depth.',
+      });
+      return;
+    case 'chain_resolved_install_failed':
+      renderBouncePanel(els.statusEl, {
+        headline: "Found an install path, but it didn't run.",
+        body: 'The install command returned a non-zero exit. <a href="/install">Install anc locally</a> for more flexible install options.',
+        details: truncateStderr(err?.details),
+      });
+      return;
+    case 'chain_resolved_no_binary_produced':
+      renderBouncePanel(els.statusEl, {
+        headline: 'That looks like a library, not a CLI.',
+        body: 'We installed it, but no command-line entry point appeared on PATH. anc only scores binaries. If this is wrong, paste the actual binary name as <code>&lt;command&gt;</code> to retry. <a href="/install">Install anc locally</a> for full project depth.',
+      });
+      return;
+    case 'rate_limited': {
+      const retry = err?.retry_after ?? 60;
+      renderInlineError(els.statusEl, `Too many requests. Try again in ${retry}s.`);
+      return;
+    }
+    case 'turnstile_failed':
+      renderInlineError(els.statusEl, 'Verification failed. Please try again.');
+      return;
+    case 'scoring_disabled':
+      renderInlineError(els.statusEl, 'Live scoring is paused. Run anc locally — see the install copy above.');
+      return;
+    case 'non_github_host':
+      renderInlineError(els.statusEl, 'Only public GitHub repos are supported.');
+      return;
+    case 'invalid_url':
+    case 'non_https_url':
+    case 'invalid_url_path':
+    case 'unparseable_install_command':
+    case 'unrecognized_input':
+      renderInlineError(els.statusEl, 'That input is not a recognized tool, install command, or GitHub URL.');
+      return;
+    case 'timeout':
+      renderInlineError(els.statusEl, 'The scan ran past the time budget. Run anc locally for unconstrained scoring.');
+      return;
+    default:
+      renderInlineError(els.statusEl, 'Scoring failed. Please try again or run anc locally.');
+  }
+}
+
+function truncateStderr(input: unknown): string | undefined {
+  if (typeof input !== 'string' || input.length === 0) return undefined;
+  if (input.length <= STDERR_TRUNCATE_CHARS) return input;
+  return `${input.slice(0, STDERR_TRUNCATE_CHARS)}… (truncated)`;
+}
+
+function renderBouncePanel(
+  statusEl: HTMLDivElement,
+  panel: { headline: string; body: string; details?: string },
+): void {
+  statusEl.hidden = false;
+  statusEl.classList.add('live-score__status--bounce');
+  statusEl.classList.remove('live-score__status--error');
+  const detailsBlock = panel.details
+    ? `<pre class="live-score__bounce-stderr"><code>${escapeHtml(panel.details)}</code></pre>`
+    : '';
+  // panel.body is template-literal HTML controlled by THIS module — no
+  // user input flows into it. The headline is escaped (it's a fixed string
+  // per the closed-set bounce error codes). Stderr details are escapeHtml'd
+  // before rendering inside <code>.
+  statusEl.innerHTML = `
+    <h3 class="live-score__bounce-headline">${escapeHtml(panel.headline)}</h3>
+    <p class="live-score__bounce-body">${panel.body}</p>
+    ${detailsBlock}
+  `;
+}
+
+function renderInlineError(statusEl: HTMLDivElement, message: string): void {
+  statusEl.hidden = false;
+  statusEl.classList.add('live-score__status--error');
+  statusEl.classList.remove('live-score__status--bounce');
+  statusEl.textContent = message;
+}
+
+function clearStatus(statusEl: HTMLDivElement): void {
+  statusEl.hidden = true;
+  statusEl.classList.remove('live-score__status--error', 'live-score__status--bounce');
+  statusEl.textContent = '';
+}
+
+function revealProgress(progressEl: HTMLOListElement): void {
+  progressEl.hidden = false;
+}
+
+function hideProgress(progressEl: HTMLOListElement): void {
+  progressEl.hidden = true;
+}
+
+function setSubmitting(els: { submitBtn: HTMLButtonElement; input: HTMLInputElement }, submitting: boolean): void {
+  els.submitBtn.disabled = submitting;
+  els.input.disabled = submitting;
+  els.submitBtn.textContent = submitting ? 'Scoring…' : 'Score';
+}
+
+function disableFormWithMessage(
+  els: {
+    submitBtn: HTMLButtonElement;
+    input: HTMLInputElement;
+    statusEl: HTMLDivElement;
+  },
+  message: string,
+): void {
+  els.input.disabled = true;
+  els.submitBtn.disabled = true;
+  renderInlineError(els.statusEl, message);
+}
+
+function networkErrorMessage(err: unknown): string {
+  if (err instanceof TypeError) return 'Network error. Check your connection and try again.';
+  return 'Scoring failed. Please try again.';
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

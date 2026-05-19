@@ -44,7 +44,7 @@ import { detectScorePreference } from '../accept';
 import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
-import { type DiscoveryHintsIndex, lookupScorecard, type RegistryIndex } from './registry-lookup';
+import { type DiscoveryHintsIndex, deriveShareBinary, lookupScorecard, type RegistryIndex } from './registry-lookup';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
@@ -198,7 +198,11 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 
   if (lookup.kind === 'cached') {
-    return shapeWithPreference(shapeScoreSuccess(lookup.scorecard, lookup.anc_version, 'cache-hit'), preference);
+    const shareUrl = shareUrlForInput(validated, hintsIndex);
+    return shapeWithPreference(
+      shapeScoreSuccess(lookup.scorecard, lookup.anc_version, 'cache-hit', shareUrl),
+      preference,
+    );
   }
 
   // GET requests stop after the read-only tiers: paste-and-share contract.
@@ -334,9 +338,12 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 
   if (isDoSuccess(doPayload)) {
-    return shapeWithPreference(shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live'), preference, {
-      setCookie,
-    });
+    const shareUrl = shareUrlForInput(validated, hintsIndex);
+    return shapeWithPreference(
+      shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live', shareUrl),
+      preference,
+      { setCookie },
+    );
   }
 
   // DO returned 2xx but with an unrecognized envelope shape. Fail loud
@@ -574,6 +581,22 @@ async function sha256(input: string): Promise<string> {
   const bytes = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Build the shareable HTML URL for an inline-scorecard response. Reads the
+ * cache-tier binary derivation from registry-lookup so the share URL and
+ * the cache key the DO writes to stay in lockstep. The `/live-score/`
+ * prefix is a separate top-level namespace so it never collides with the
+ * curated `/score/<tool>` static-asset namespace.
+ *
+ * Returns null when the binary isn't derivable upfront (github-url without
+ * a hint). In that case the JSON response ships without `share_url`; the
+ * user still has the scorecard inline and can re-paste to re-score.
+ */
+function shareUrlForInput(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
+  const binary = deriveShareBinary(input, hintsIndex);
+  return binary ? `/live-score/${binary}` : null;
 }
 
 // Statically referenced so `_unused` linters see these as live exports —
