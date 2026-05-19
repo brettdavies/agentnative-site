@@ -2011,8 +2011,8 @@ a Go compiler in the image. New policy in `do.ts:resolveSpec`:
   input, and it's already translated upstream. The null acts as a safety net.
 
 Net effect: `go install github.com/charmbracelet/glow@latest` now resolves to the GitHub release binary and scores
-without compiling. Modules outside that pattern bounce honestly. Staging matrix verified 11/11 on `basic` instance
-- 60 s budget after the fix.
+without compiling. Modules outside that pattern bounce honestly. Staging matrix verified 11/11 on `basic` instance with
+the 60 s budget after the fix.
 
 `max_instances` bumped from 3 to 10 to reduce queue contention during the Show HN traffic envelope. Same `basic`
 instance type, same per-instance cost; pool size scales horizontal capacity, not per-request cost.
