@@ -407,6 +407,71 @@ bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 
 Both buckets were configured on 2026-05-19 alongside the U7 merge.
 
+## Staging access (Cloudflare Access)
+
+The staging Worker at `agentnative-site-staging.brettdavies.workers.dev` is gated by a Cloudflare Access Self-Hosted
+Application. Two policies sit on the app: one for browser identity flow (email allow), one for CLI service-token flow
+(non-identity decision). Cloudflare Access evaluates both at the CF edge before any request reaches the Worker, so any
+client without a valid identity or service token gets a 302 redirect to `*.cloudflareaccess.com` and never touches our
+sandbox or rate-limit budget.
+
+The staging Turnstile binding stays as Cloudflare's documented always-passes test secret because workers.dev subdomains
+cannot bind real Turnstile widgets. Access is the auth layer; Turnstile is a no-op gate kept for code-path parity with
+production.
+
+### Browser flow
+
+Visit `https://agentnative-site-staging.brettdavies.workers.dev` (any path). CF Access shows its auth challenge; pick
+the configured IdP (Google SSO or email OTP). A session cookie is issued for 90 days (`session_duration=2160h`). Re-auth
+is rare.
+
+### CLI flow
+
+Scripts that POST to staging (currently `scripts/staging-cache-smoke.sh`) read service-token credentials from 1Password
+and send them as headers:
+
+```text
+CF-Access-Client-Id:     <client_id from 1Password>
+CF-Access-Client-Secret: <client_secret from 1Password>
+```
+
+The 1Password item is titled `Cloudflare Access Service Token - agentnative-site-staging` (tags
+`cloudflare,access,service-token,agentnative-site,staging`, vault `secrets-dev`). The smoke script fails fast with a
+clear FATAL message if the item is missing or unreadable, rather than letting requests silently 302.
+
+### Bootstrap from scratch
+
+The full Access setup (app + service token + two policies) is encoded as an idempotent script:
+
+```bash
+CF_ACCOUNT_ID=<account-id> ./scripts/cf-access-bootstrap.sh
+```
+
+The script checks each resource by NAME, skips what exists, and creates only what's missing. Re-running on a
+fully-configured account reports `exists, skipping` at every step and runs the unauth + service-token verification
+probes at the end.
+
+Prerequisite: a scoped CF API token in 1Password (`Cloudflare API Token - Access Setup (agentnative-site)`) with these
+account-level permissions: `Access: Apps and Policies Write` AND `Access: Service Tokens Write`. The first permission
+group's name is easy to typo as the narrower `Access: Apps Write` in the CF dashboard — both exist; only the longer form
+covers policy management.
+
+Disaster recovery: if the Access app gets deleted or the account is restored from backup, re-running the bootstrap
+script reconstructs the full auth surface from 1Password-resident credentials. A new service token is created if needed;
+the new client_secret is captured into 1Password without ever entering script output.
+
+### Rotation
+
+| Resource               | Cadence                              | How                                                                                                                                                          |
+| ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Setup API token        | Quarterly or at expiry (default 90d) | CF dashboard → My Profile → API Tokens → Edit → Regenerate; update the `credential` field in the matching 1Password item.                                    |
+| Service token          | Yearly or at expiry (default 1y)     | `POST /accounts/{aid}/access/service_tokens/{id}/rotate` returns a new `client_secret` ONCE; update the 1Password item.                                      |
+| App `session_duration` | Rare                                 | `PUT /accounts/{aid}/access/apps/{id}` with full body and the new value. `PATCH` is NOT supported on Access endpoints with API-token auth (returns `10405`). |
+
+Detailed inventory (IDs, AUD, JSON request bodies, rotation playbooks) lives in the private
+`docs/solutions/tooling-decisions/cloudflare-access-staging-worker-2026-05-19.md` since IDs are reconnaissance signal
+even though they aren't secrets.
+
 ## CI
 
 Two workflows gate pull requests:

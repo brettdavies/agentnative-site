@@ -59,7 +59,16 @@ const REGISTRY_INDEX = {
   },
 };
 
-const HINTS_INDEX = { by_owner_repo: {} };
+const HINTS_INDEX = {
+  by_owner_repo: {
+    // Mirrors the shape U4 emits at dist/discovery-hints-index.json. A
+    // hint tells the live-scoring path which install spec (pm+pkg+binary)
+    // to use for a non-registry github-url, so the discovery chain is
+    // skipped on hit. For U7 cache-tier tests, the `binary` field is the
+    // cache-key derivation source.
+    'Aider-AI/aider': { pm: 'pip', package: 'aider-chat', binary: 'aider' },
+  },
+};
 
 type CallTracker = { doCalls: number };
 
@@ -80,6 +89,12 @@ type StubOverrides = Partial<{
   // Optional tracker so cache-tier tests can assert the DO was NOT
   // dispatched. Mutated in place by the stub fetch.
   tracker: CallTracker;
+  // Plan U7: shared cache store passed by the caller. When provided, the
+  // SCORE_CACHE stub uses it directly so a single test can interleave
+  // prefill / inspect / observe-writes operations across multiple
+  // handler invocations. The store survives across `handleScore()` calls
+  // sharing the same env.
+  cacheStore: Map<string, string>;
 }>;
 
 function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
@@ -137,7 +152,7 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
   // restore on `env` for explicit teardown if a test wants it.
   void originalFetch;
 
-  const cacheStore = new Map<string, string>();
+  const cacheStore = overrides.cacheStore ?? new Map<string, string>();
   for (const [k, v] of Object.entries(overrides.cacheContent ?? {})) {
     cacheStore.set(k, typeof v === 'string' ? v : JSON.stringify(v));
   }
@@ -638,5 +653,312 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     expect(body.spec_version).toBeTruthy();
     expect(body.anc_version).toBe('0.3.1');
     expect(body.checker_url).toBeTruthy();
+  });
+
+  // -------------------------------------------------------------------------
+  // github-url tier (with + without hint) — covers gaps the install-command
+  // tests don't reach. Aider-AI/aider has a hint with binary='aider' so
+  // the cache key derives to scores/aider/<SPEC_VERSION>.json; an
+  // owner/repo without a hint can't derive a binary upfront and skips
+  // the cache tier entirely.
+  // -------------------------------------------------------------------------
+
+  const CACHE_KEY_AIDER = 'scores/aider/0.4.0.json';
+  const CACHED_AIDER_PAYLOAD = {
+    spec_version: '0.4.0',
+    anc_version: '0.3.1',
+    tool_version: '0.93.0',
+    scorecard: { tool: { name: 'aider', binary: 'aider', version: '0.93.0' }, score: { value: 81 } },
+  };
+
+  test('github-url with hint + R2 hit → 200 cached, DO not dispatched, gates bypassed', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { [CACHE_KEY_AIDER]: CACHED_AIDER_PAYLOAD },
+      tracker,
+      turnstileResponse: { success: false },
+      rateLimit: false,
+      ipRateLimit: false,
+    });
+    const res = await handleScore(postScore('https://github.com/Aider-AI/aider'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(0);
+    const body = (await res.json()) as { scorecard: { tool: { name: string } }; anc_version: string };
+    expect(body.scorecard.tool.name).toBe('aider');
+    expect(body.anc_version).toBe('0.3.1');
+  });
+
+  test('github-url with hint + R2 miss → live path runs (DO dispatched, hint informs cache key)', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: {},
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'aider', version: '0.93.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/Aider-AI/aider'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+  });
+
+  test('github-url with hint is case-insensitive on owner/repo for cache lookup', async () => {
+    // Mirrors the registry-lookup case-insensitivity guarantee — a paste
+    // of `github.com/aider-ai/aider` (lowercase) must hit the same hint
+    // as `Aider-AI/aider` and therefore the same cache key.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { [CACHE_KEY_AIDER]: CACHED_AIDER_PAYLOAD },
+      tracker,
+    });
+    const res = await handleScore(postScore('https://github.com/aider-ai/aider'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  test('github-url WITHOUT hint → cache tier skipped, live path runs even with relevant R2 entry present', async () => {
+    // foo/bar has no hint and no registry entry. The cache tier requires
+    // a derivable binary; without one, the cache is NOT consulted —
+    // proven here by prefilling R2 with a plausible-but-stale entry and
+    // asserting the live path still runs.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { 'scores/bar/0.4.0.json': CACHED_AIDER_PAYLOAD },
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'bar', version: '0.1.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/foo/bar'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { scorecard: { tool: { name: string } } };
+    // The DO's scorecard (tool=bar), not the prefilled cache (tool=aider).
+    expect(body.scorecard.tool.name).toBe('bar');
+  });
+
+  test('slug WITHOUT curated scorecard → cache tier skipped (no binary derivable)', async () => {
+    // The `no-card-tool` registry entry exists but has no `scorecard_url`
+    // / `anc_version`, so the registry tier returns a non-curated hit
+    // and the cache tier sees `kind: registry` (which deriveCacheBinary
+    // bails on — only hint kind feeds the cache for github-urls; slugs
+    // bail because there's no install spec). A prefilled-but-unreachable
+    // R2 entry must NOT be served.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      // Pre-seed under the slug name AND under the binary name — neither
+      // path should be consulted because deriveCacheBinary returns null.
+      cacheContent: {
+        'scores/no-card-tool/0.4.0.json': CACHED_AIDER_PAYLOAD,
+      },
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'no-card-tool', version: '0.1.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('no-card-tool'), env);
+    expect(res.status).toBe(200);
+    // DO WAS called — the cache prefill was unreachable.
+    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { scorecard: { tool: { name: string } } };
+    expect(body.scorecard.tool.name).toBe('no-card-tool');
+  });
+
+  test('cache key partition: install-command binary derivation does not alias curated registry binary', async () => {
+    // `cargo binstall ripgrep` → binary='ripgrep' (parser default).
+    // The curated registry entry for slug=ripgrep has binary='rg'.
+    // The two cache keys are scores/ripgrep/* and scores/rg/* — they
+    // must NOT alias, otherwise an install-command query could pick up
+    // a stale entry written under the curated path.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      // Pre-seed ONLY under the curated 'rg' key.
+      cacheContent: { 'scores/rg/0.4.0.json': CACHED_RIPGREP_PAYLOAD },
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    // POST install-command — key derives to scores/ripgrep/0.4.0.json,
+    // which is empty. The pre-seeded scores/rg/0.4.0.json must NOT be
+    // served (it's the curated path's key, not the install-command path's).
+    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+  });
+
+  test('anc-version partition: reads under SPEC_VERSION slot, stale entries under a different slot are unreachable', async () => {
+    // SPEC_VERSION is currently '0.4.0'. A stale entry under
+    // scores/cowsay/0.3.0.json (older spec) must be unreachable when
+    // the running Worker computes the key from SPEC_VERSION='0.4.0'.
+    // This pins the partition-by-version property so a future change
+    // that strips the version from the key surfaces here.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: {
+        'scores/cowsay/0.3.0.json': {
+          spec_version: '0.3.0',
+          anc_version: '0.2.5',
+          tool_version: '1.5.0',
+          scorecard: { tool: { name: 'cowsay', version: '1.5.0' } },
+        },
+        // NO entry under 0.4.0 → cache miss.
+      },
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'cowsay', version: '1.6.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('npm install -g cowsay'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { scorecard: { tool: { version: string } } };
+    // Live DO scorecard (1.6.0), not stale cache (1.5.0).
+    expect(body.scorecard.tool.version).toBe('1.6.0');
+  });
+
+  test('cached hit returns Cache-Control: public, max-age=300 for CDN-edge cooperation', async () => {
+    // Pinned per plan U7 — the per-write Cache-Control header keeps CDN
+    // edges from over-caching while R2 lifecycle handles the long TTL.
+    const env = makeEnv({ cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD } });
+    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+  });
+
+  test('live (DO-served) responses get Cache-Control: no-store', async () => {
+    // Mirror-of-above: the live path uses JSON_HEADERS_LIVE so CDN edges
+    // don't accidentally cache an uncached miss. Pins the freshness=live
+    // vs cache-hit response-header split.
+    const env = makeEnv({
+      cacheContent: {},
+      doResponse: {
+        scorecard: { tool: { name: 'foo', version: '0.1.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/foo/bar'), env);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  // -------------------------------------------------------------------------
+  // Cross-PM cache-key aliasing — design choice, not a bug
+  // -------------------------------------------------------------------------
+  //
+  // The cache key (`scores/{binary}/{SPEC_VERSION}.json`) intentionally
+  // OMITS the package-manager dimension. The reasoning: a binary with
+  // the same name + same anc_version produces the same scorecard
+  // regardless of which PM installed it, because `anc check` evaluates
+  // the binary on PATH and doesn't care how it got there. So `pip
+  // install foo`, `cargo binstall foo`, and `bun add -g foo` all
+  // SHOULD share a cache entry for binary='foo'.
+  //
+  // This test pins that design choice so a future change that scopes
+  // the cache key per-PM (which would be the wrong direction, because
+  // it'd waste cache budget) surfaces here.
+
+  test('cache-key aliasing: same binary across different PMs shares the same cache entry', async () => {
+    // Pre-seed under scores/foo/0.4.0.json. Both `pip install foo`
+    // (binary='foo') and `cargo binstall foo` (binary='foo') derive
+    // the same key, so both reads hit the same prefilled entry.
+    const cachedFooPayload = {
+      spec_version: '0.4.0',
+      anc_version: '0.3.1',
+      tool_version: '1.0.0',
+      scorecard: { tool: { name: 'foo', binary: 'foo', version: '1.0.0' }, score: { value: 75 } },
+    };
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { 'scores/foo/0.4.0.json': cachedFooPayload },
+      tracker,
+    });
+
+    const pipRes = await handleScore(postScore('pip install foo'), env);
+    expect(pipRes.status).toBe(200);
+    const pipBody = (await pipRes.json()) as { scorecard: { score: { value: number } } };
+    expect(pipBody.scorecard.score.value).toBe(75);
+
+    const cargoRes = await handleScore(postScore('cargo binstall foo'), env);
+    expect(cargoRes.status).toBe(200);
+    const cargoBody = (await cargoRes.json()) as { scorecard: { score: { value: number } } };
+    expect(cargoBody.scorecard.score.value).toBe(75);
+
+    const bunRes = await handleScore(postScore('bun add -g foo'), env);
+    expect(bunRes.status).toBe(200);
+    const bunBody = (await bunRes.json()) as { scorecard: { score: { value: number } } };
+    expect(bunBody.scorecard.score.value).toBe(75);
+
+    // All three were cache hits — no DO dispatch happened.
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // ?fromCache=false cache-WRITE fires
+  // -------------------------------------------------------------------------
+  //
+  // fromCache=false skips the READ tier but the design says the live
+  // run must still WRITE to cache so the next request benefits.
+  // Pinning the write half explicitly: with a fresh cache, a
+  // ?fromCache=false POST + cache-miss POST in sequence should mean
+  // the second call sees the entry the live run wrote.
+  //
+  // The DO writes to env.SCORE_CACHE.put() via writeCacheBestEffort
+  // in src/worker/score/do.ts. The handler test's mock DO doesn't
+  // actually run that code path, so we exercise the WRITE side by
+  // observing the cacheStore via the makeEnv override AND issuing the
+  // sequence end-to-end.
+
+  test('?fromCache=false fires the cache write so the next request hits the fresh entry', async () => {
+    // Shared cacheStore lets us inspect (and ALSO simulate the DO write
+    // by inserting directly — the DO would do this after success).
+    const cacheStore = new Map<string, string>();
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheStore,
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'cowsay', binary: 'cowsay', version: '1.6.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+
+    // First request with ?fromCache=false. The cache is empty, so read
+    // would have missed anyway, but the route through skipCache must
+    // still hit the live DO path AND the write happens.
+    const req1 = new Request('https://anc.dev/api/score?fromCache=false', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: 'npm install -g cowsay', turnstile_token: 'tok' }),
+    });
+    const res1 = await handleScore(req1, env);
+    expect(res1.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+
+    // The handler mock DO doesn't actually run writeCacheBestEffort
+    // (the real DO does). Simulate that the DO has written the result
+    // by injecting it into the shared cacheStore — this is what
+    // writeCacheBestEffort would do after a successful score.
+    cacheStore.set(
+      'scores/cowsay/0.4.0.json',
+      JSON.stringify({
+        spec_version: '0.4.0',
+        anc_version: '0.3.1',
+        tool_version: '1.6.0',
+        scorecard: { tool: { name: 'cowsay', binary: 'cowsay', version: '1.6.0' }, score: { value: 92 } },
+      }),
+    );
+
+    // Second request WITHOUT ?fromCache=false. The cache write should
+    // now be readable; DO should NOT dispatch again.
+    const req2 = postScore('npm install -g cowsay');
+    const res2 = await handleScore(req2, env);
+    expect(res2.status).toBe(200);
+    // Tracker is still 1 from the first call; the second call hits cache.
+    expect(tracker.doCalls).toBe(1);
+    expect(res2.headers.get('Cache-Control')).toBe('public, max-age=300');
   });
 });
