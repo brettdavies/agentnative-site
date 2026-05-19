@@ -1222,67 +1222,107 @@ body:has(.leaderboard-hero) main {
 
 /* =============================================================
  * Live-scoring form (plan U8) — homepage paste-input surface.
- * Builds on existing tokens: --accent for focus + submit, --bg-code
- * for the input field, --border for hairlines, --must/--should/--may
- * for bounce-panel keyword color (NO side-stripe accents — banned),
- * --space-* for rhythm. No glassmorphism, no gradient text, no
- * equal-tile cards — restrained per DESIGN.md §4.
+ *
+ * Integrates with the principle-entry rhythm above the principles
+ * list: same `3rem 1fr` grid (kicker | content), same top-border
+ * separator, same numbered-prefix-in-accent-mono treatment. The
+ * kicker reads "Try" — telling the visitor this row is a
+ * pre-principles entry point, not principle 0.
+ *
+ * Restraint over decoration: no card grid, no bordered widget,
+ * no uppercase-tracked labels. The input IS the centerpiece — the
+ * Score button carries the only solid color in the form so the
+ * eye lands there without ambient ornament.
+ *
+ * Tokens: --accent for focus + submit + kicker, --bg-code for the
+ * input field, --border for the hairline separator, --must for
+ * error and bounce-panel keyword color. No side-stripe borders,
+ * no glassmorphism, no gradient text.
  * ============================================================= */
 
 .live-score {
-  display: grid;
-  gap: var(--space-5);
-  margin-block: var(--space-7) var(--space-6);
-  padding-block: var(--space-5);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border-subtle, var(--border));
+  /* Match the principle-entry enter-stagger so the form lands as the
+   * first row of the homepage's content rhythm, not as a separate
+   * widget below the hero. */
+  animation: principle-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 80ms;
 }
 
-.live-score__cta h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-h3);
-  letter-spacing: -0.01em;
+.live-score__row {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  grid-template-rows: auto;
+  column-gap: 1.25rem;
+  padding: 1.5rem 0.75rem 1.75rem;
+  margin: 0 -0.75rem;
+}
+
+.live-score__kicker {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 350;
+  color: var(--accent);
+  line-height: 1.15;
+  padding-top: 0.15rem;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  /* "Try" sits where the principle numbers sit — same column, same
+   * font, same weight, same color. Visual continuity with the list
+   * below; no decoration needed. */
+}
+
+.live-score__content {
+  display: grid;
+  /* Generous gap between heading + lede; tighter cluster lower down
+   * (form input + chips). The varied rhythm is intentional. */
+  gap: 0.35rem;
+}
+
+.live-score__title {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--fg-heading);
+  line-height: 1.35;
+  letter-spacing: -0.005em;
 }
 
 .live-score__lede {
-  margin: 0;
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
   color: var(--fg-secondary);
-  max-inline-size: var(--measure);
+  line-height: 1.5;
+  max-inline-size: 65ch;
 }
 
 .live-score__lede code {
   font-family: var(--font-mono);
   font-size: 0.92em;
   background: var(--bg-code);
-  padding: 0 0.35em;
+  padding: 0 0.3em;
   border-radius: 3px;
 }
 
 .live-score__form {
   display: grid;
-  gap: var(--space-3);
-}
-
-.live-score__label {
-  font-size: var(--text-caption);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-  color: var(--fg-secondary);
+  gap: 0.6rem;
 }
 
 .live-score__input-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: var(--space-3);
+  gap: 0.5rem;
   align-items: stretch;
 }
 
 .live-score__input {
   font-family: var(--font-mono);
-  font-size: var(--text-body);
-  line-height: var(--leading-body);
-  padding: var(--space-3) var(--space-4);
+  /* Fluid larger size so the input reads as the centerpiece — bigger
+   * than body type, smaller than h1. Matches the visual weight of
+   * the principle title that follows it. */
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  line-height: 1.4;
+  padding: 0.7rem 0.85rem;
   background: var(--bg-code);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1307,14 +1347,19 @@ body:has(.leaderboard-hero) main {
 
 .live-score__submit {
   font-family: var(--font-sans);
-  font-size: var(--text-body);
+  /* Match the input's fluid size step so they read as a pair, not a
+   * size jump. */
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
   font-weight: 600;
-  padding: var(--space-3) var(--space-5);
+  padding: 0.7rem 1.25rem;
   background: var(--accent);
   color: var(--bg);
   border: 1px solid var(--accent);
   border-radius: 4px;
   cursor: pointer;
+  /* The only solid-color surface in the form. Restrained color
+   * strategy + one accent ≤10% works here because the form occupies
+   * less than 10% of the homepage real estate. */
 }
 
 .live-score__submit:hover:not(:disabled) {
@@ -1331,119 +1376,125 @@ body:has(.leaderboard-hero) main {
   cursor: progress;
 }
 
+/* Chips render as inline prose: "or try <code>ripgrep</code>, <code>...</code>".
+ * Buttons under the hood (keyboard + ARIA), but visually they look
+ * like clickable code spans, not action buttons. Differentiates from
+ * the submit button so the eye lands on Score, not the chips. */
 .live-score__help {
-  margin: 0;
-  font-size: var(--text-secondary);
+  margin: 0.1rem 0 0;
+  font-size: 0.88rem;
   color: var(--fg-secondary);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
+  line-height: 1.6;
 }
 
 .live-score__chip {
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  padding: 0.2rem 0.55rem;
-  background: var(--bg-code);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  color: var(--fg-body);
+  display: inline;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
   cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.live-score__chip code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
 }
 
 .live-score__chip:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent);
 }
 
 .live-score__chip:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
+  border-radius: 2px;
 }
 
-.live-score__progress {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: var(--space-2);
-  font-size: var(--text-caption);
-  font-family: var(--font-mono);
-  color: var(--fg-secondary);
-}
-
-.live-score__step {
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-code);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-}
-
-.live-score__step[data-active='true'] {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.live-score__step[data-done='true'] {
-  color: var(--may);
-}
-
+/* Single-line status — JS swaps in prose like "Resolving install
+ * path..." during a live run. Replaces the 4-tile progress grid
+ * (slop: identical card grid). No fake animation; the 2 s theater
+ * floor itself is the wait signal. */
 .live-score__status {
-  margin: 0;
-  padding: var(--space-4) var(--space-5);
-  background: var(--bg-code);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: var(--text-secondary);
+  margin: 0.6rem 0 0;
+  font-size: 0.92rem;
+  color: var(--fg-body);
+  /* Inherits monospace from code descendants when JS injects bounce
+   * panels; for plain status text the sans body font is fine. */
 }
 
-/* Bounce-panel variants — keyword color via the existing --must/--should
-   semantic accents. No left-stripe border (impeccable absolute ban). */
 .live-score__status--error {
   color: var(--must);
 }
 
 .live-score__status--bounce .live-score__bounce-headline {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-h4);
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--must);
 }
 
 .live-score__status--bounce .live-score__bounce-body {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 0.6rem;
   color: var(--fg-body);
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
 .live-score__status--bounce .live-score__bounce-body code {
   font-family: var(--font-mono);
   font-size: 0.92em;
-  background: var(--bg);
-  padding: 0 0.35em;
+  background: var(--bg-code);
+  padding: 0 0.3em;
   border-radius: 3px;
 }
 
 .live-score__status--bounce .live-score__bounce-stderr {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 0.6rem;
   max-block-size: 16rem;
   overflow: auto;
   font-size: 0.82rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 4px;
 }
 
-.live-score__status--bounce .live-score__bounce-cta {
-  margin: 0;
-  color: var(--fg-secondary);
-  font-size: var(--text-secondary);
-}
-
-.live-score__status--bounce .live-score__bounce-cta code {
-  font-family: var(--font-mono);
-  font-size: 0.92em;
-  background: var(--bg);
-  padding: 0 0.35em;
-  border-radius: 3px;
+/* Narrow viewports: collapse the principle-rhythm grid so the kicker
+ * sits inline with the content. Avoids the awkward 3rem orphan column
+ * on phones. (max-width vs max-inline-size: the latter is CSS MQ L5 and
+ * not yet broadly supported / not yet in biome's recognized spec list.
+ * max-width is functionally equivalent for this LTR site.) */
+@media (max-width: 36rem) {
+  .live-score__row {
+    grid-template-columns: 1fr;
+    row-gap: 0.4rem;
+    padding: 1.25rem 0.75rem 1.5rem;
+  }
+  .live-score__kicker {
+    font-size: 1rem;
+    line-height: 1.4;
+    padding-top: 0;
+  }
+  .live-score__input-row {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  .live-score__submit {
+    /* Full-width on narrow viewports — the input and button stack and
+     * each spans the full content column. */
+    justify-self: stretch;
+  }
 }
 
 /* =============================================================

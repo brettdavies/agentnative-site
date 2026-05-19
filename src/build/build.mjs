@@ -43,7 +43,6 @@ import {
   loadScoredTools,
   runScorecardInvariants,
 } from './scorecards.mjs';
-import { generateSpecVersionModule } from './spec-version-gen.mjs';
 import {
   buildLeaderboardBody,
   buildLeaderboardMarkdown,
@@ -53,6 +52,7 @@ import {
 import { emitShell, emitShellTemplate } from './shell.mjs';
 import { buildSitemap } from './sitemap.mjs';
 import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
+import { generateSpecVersionModule } from './spec-version-gen.mjs';
 import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -128,45 +128,40 @@ ${entries}
  */
 function buildLiveScoreSection() {
   return `<section class="live-score" aria-labelledby="live-score-heading" data-live-score-section>
-  <div class="live-score__cta">
-    <h2 id="live-score-heading">Score a CLI tool</h2>
-    <p class="live-score__lede">
-      <a href="/install">Install <code>anc</code> locally</a> for source + project depth — the web demo
-      below shows binary and behavioral checks only.
-    </p>
-  </div>
-  <form class="live-score__form" method="post" action="/api/score" novalidate data-live-score-form>
-    <label class="live-score__label" for="live-score-input">
-      Paste a tool name, install command, or GitHub URL
-    </label>
-    <div class="live-score__input-row">
-      <input
-        id="live-score-input"
-        class="live-score__input"
-        name="input"
-        type="text"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="ripgrep"
-        required
-        aria-describedby="live-score-help"
-      />
-      <button type="submit" class="live-score__submit" data-live-score-submit>Score</button>
+  <div class="live-score__row">
+    <span class="live-score__kicker" aria-hidden="true">Try</span>
+    <div class="live-score__content">
+      <h2 id="live-score-heading" class="live-score__title">Score a binary, live.</h2>
+      <p class="live-score__lede">
+        <a href="/install">Install <code>anc</code> locally</a> for source + project depth. The demo here is binary and behavioral checks only.
+      </p>
+      <form class="live-score__form" method="post" action="/api/score" novalidate data-live-score-form>
+        <div class="live-score__input-row">
+          <input
+            id="live-score-input"
+            class="live-score__input"
+            name="input"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="ripgrep"
+            required
+            aria-label="Tool name, install command, or GitHub URL"
+            aria-describedby="live-score-help"
+          />
+          <button type="submit" class="live-score__submit" data-live-score-submit>Score</button>
+        </div>
+        <p id="live-score-help" class="live-score__help">
+          or try
+          <button type="button" class="live-score__chip" data-live-score-example="ripgrep"><code>ripgrep</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="brew install bat"><code>brew install bat</code></button>,
+          or
+          <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli"><code>github.com/cli/cli</code></button>.
+        </p>
+        <p class="live-score__status" data-live-score-status role="status" aria-live="polite" hidden></p>
+      </form>
     </div>
-    <p id="live-score-help" class="live-score__help">
-      Examples (click to fill):
-      <button type="button" class="live-score__chip" data-live-score-example="ripgrep">ripgrep</button>
-      <button type="button" class="live-score__chip" data-live-score-example="brew install bat">brew install bat</button>
-      <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli">https://github.com/cli/cli</button>
-    </p>
-    <ol class="live-score__progress" data-live-score-progress hidden>
-      <li class="live-score__step" data-step="validate">Validating input</li>
-      <li class="live-score__step" data-step="resolve">Resolving install path</li>
-      <li class="live-score__step" data-step="install">Installing in sandbox</li>
-      <li class="live-score__step" data-step="score">Running anc check</li>
-    </ol>
-    <div class="live-score__status" data-live-score-status role="status" aria-live="polite" hidden></div>
-  </form>
+  </div>
 </section>`;
 }
 
@@ -627,10 +622,7 @@ export async function build() {
   // intercepted by the Worker entry so direct user access returns 404 —
   // the file exists for internal env.ASSETS fetches only.
   await ensureDir(join(DIST_DIR, '_internal'));
-  await writeFile(
-    join(DIST_DIR, '_internal', 'live-score-shell.html'),
-    emitShellTemplate({ themeInitJs: themeInit }),
-  );
+  await writeFile(join(DIST_DIR, '_internal', 'live-score-shell.html'), emitShellTemplate({ themeInitJs: themeInit }));
 
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex

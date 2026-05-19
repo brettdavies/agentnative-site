@@ -51,19 +51,17 @@ const STDERR_TRUNCATE_CHARS = 300;
 const form = document.querySelector<HTMLFormElement>('[data-live-score-form]');
 const input = document.querySelector<HTMLInputElement>('#live-score-input');
 const submitBtn = document.querySelector<HTMLButtonElement>('[data-live-score-submit]');
-const statusEl = document.querySelector<HTMLDivElement>('[data-live-score-status]');
-const progressEl = document.querySelector<HTMLOListElement>('[data-live-score-progress]');
+const statusEl = document.querySelector<HTMLParagraphElement>('[data-live-score-status]');
 
-if (form && input && submitBtn && statusEl && progressEl) {
-  initLiveScore({ form, input, submitBtn, statusEl, progressEl });
+if (form && input && submitBtn && statusEl) {
+  initLiveScore({ form, input, submitBtn, statusEl });
 }
 
 function initLiveScore(els: {
   form: HTMLFormElement;
   input: HTMLInputElement;
   submitBtn: HTMLButtonElement;
-  statusEl: HTMLDivElement;
-  progressEl: HTMLOListElement;
+  statusEl: HTMLParagraphElement;
 }): void {
   const sitekey = readSitekey();
   if (!sitekey) {
@@ -128,17 +126,15 @@ function initLiveScore(els: {
     }
 
     setSubmitting(els, true);
-    clearStatus(els.statusEl);
-    revealProgress(els.progressEl);
+    renderStatus(els.statusEl, 'Scoring…');
 
     let token: string;
     try {
       token = await acquireTurnstileToken(sitekey, await ensureTurnstileLoaded(), els.form, (id) => {
         widgetId = id;
       });
-    } catch (err) {
+    } catch {
       setSubmitting(els, false);
-      hideProgress(els.progressEl);
       renderInlineError(els.statusEl, 'Verification challenge failed to load. Please try again.');
       return;
     }
@@ -159,7 +155,6 @@ function initLiveScore(els: {
       renderInlineError(els.statusEl, networkErrorMessage(err));
     } finally {
       setSubmitting(els, false);
-      hideProgress(els.progressEl);
       if (widgetId && window.turnstile) {
         window.turnstile.reset(widgetId);
       }
@@ -202,7 +197,7 @@ function acquireTurnstileToken(
 }
 
 function handleScoreResponse(
-  els: { statusEl: HTMLDivElement },
+  els: { statusEl: HTMLParagraphElement },
   status: number,
   payload: Record<string, unknown>,
 ): void {
@@ -289,7 +284,7 @@ function truncateStderr(input: unknown): string | undefined {
 }
 
 function renderBouncePanel(
-  statusEl: HTMLDivElement,
+  statusEl: HTMLParagraphElement,
   panel: { headline: string; body: string; details?: string },
 ): void {
   statusEl.hidden = false;
@@ -303,31 +298,26 @@ function renderBouncePanel(
   // per the closed-set bounce error codes). Stderr details are escapeHtml'd
   // before rendering inside <code>.
   statusEl.innerHTML = `
-    <h3 class="live-score__bounce-headline">${escapeHtml(panel.headline)}</h3>
-    <p class="live-score__bounce-body">${panel.body}</p>
+    <span class="live-score__bounce-headline">${escapeHtml(panel.headline)}</span>
+    <span class="live-score__bounce-body">${panel.body}</span>
     ${detailsBlock}
   `;
 }
 
-function renderInlineError(statusEl: HTMLDivElement, message: string): void {
+function renderInlineError(statusEl: HTMLParagraphElement, message: string): void {
   statusEl.hidden = false;
   statusEl.classList.add('live-score__status--error');
   statusEl.classList.remove('live-score__status--bounce');
   statusEl.textContent = message;
 }
 
-function clearStatus(statusEl: HTMLDivElement): void {
-  statusEl.hidden = true;
+/** Show a transient in-progress message (e.g. "Scoring…") during a request.
+ * Uses the same status slot bounce panels + inline errors target, so the
+ * response render (success or failure) naturally overwrites this text. */
+function renderStatus(statusEl: HTMLParagraphElement, message: string): void {
+  statusEl.hidden = false;
   statusEl.classList.remove('live-score__status--error', 'live-score__status--bounce');
-  statusEl.textContent = '';
-}
-
-function revealProgress(progressEl: HTMLOListElement): void {
-  progressEl.hidden = false;
-}
-
-function hideProgress(progressEl: HTMLOListElement): void {
-  progressEl.hidden = true;
+  statusEl.textContent = message;
 }
 
 function setSubmitting(els: { submitBtn: HTMLButtonElement; input: HTMLInputElement }, submitting: boolean): void {
@@ -340,7 +330,7 @@ function disableFormWithMessage(
   els: {
     submitBtn: HTMLButtonElement;
     input: HTMLInputElement;
-    statusEl: HTMLDivElement;
+    statusEl: HTMLParagraphElement;
   },
   message: string,
 ): void {
