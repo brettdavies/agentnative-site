@@ -1970,6 +1970,53 @@ PR #95 ships the U6 unit body above PLUS a base-image switch and a brew-input tr
 Image budget after the rework: same `basic` instance, same per-minute pricing, only the disk footprint changes
 (projected ~300-380 MB compressed; the 350 MB ceiling has headroom).
 
+**Amendment (2026-05-18, post-staging) — go discovery-fallback + container-network fixes:**
+
+Staging matrix on the rework image surfaced five regressions vs the prior Alpine staging. Root causes and fixes,
+recorded so a future revisit doesn't relearn:
+
+- Container outbound IPv6 is unreliable on CF Containers; Rust HTTP clients (cargo-binstall, uv), libcurl, and Go's
+  pure-Go resolver default to AAAA-first and hang on the IPv6 attempt. Fix: uncomment the IPv4-mapped precedence line in
+  `/etc/gai.conf` so glibc's `getaddrinfo` prefers IPv4.
+- Debian's `golang-go` package ships `CGO_ENABLED=0`, which silently disables `GODEBUG=netdns=cgo` and forces Go onto
+  its pure-Go resolver (which bypasses `gai.conf`). Fix: install upstream Go from `go.dev/dl` (cgo-enabled by default),
+  pinned by sha256.
+- `bun add -g` and `uv tool install` install binaries to `$HOME/.bun/bin` and `$HOME/.local/bin` respectively, which the
+  post-install `which <binary>` gate doesn't reach. Fix: set `ENV BUN_INSTALL=/usr/local` and `ENV
+  UV_TOOL_BIN_DIR=/usr/local/bin` in the Dockerfile so every PM lands binaries at `/usr/local/bin` (matching the
+  per-command flags `cargo-binstall --install-path` and `GOBIN`).
+- Discovery's `LINUX_X64_ASSET_RE` matched `bat-musl_*_linux-amd64.deb` (Debian package, not a tarball) BEFORE the
+  `.tar.gz` releases in the asset list, producing `chain_resolved_install_failed` with `gzip: stdin: not in gzip
+  format`. Fix: tighten the regex to require x86_64/amd64 AND linux substrings AND a recognized archive extension.
+- The direct PM extracted streamed tarballs straight to `/usr/local/bin/`, which fails for archives whose binary is
+  nested in a `<tool>-<arch>/` directory (csvlens-style). Fix: extract to a tmp dir, find the binary by name (`find
+  -type f -name <binary> -perm /111`), then `install` it to `/usr/local/bin`. The shell pipeline runs in a `( set -e; …
+  )` subshell so a failure exits the subshell, not the persistent container shell (the latter would produce
+  `SessionTerminatedError` and 1101-error every subsequent request routed to the affected DO instance).
+- Roll the CF Sandbox SDK base from `0.9.4` back to `0.9.2` (same major version as the prior Alpine staging). The
+  upstream 0.9.3 / 0.9.4 changelogs don't touch outbound interception, but the rollback isolates the variable.
+
+**Go discovery-fallback (mirrors the brew fallback):**
+
+`go install <module>@latest` is fundamentally source compilation. Compiling on `basic` (1/16 vCPU) takes 2-3 minutes for
+tools like `glow`, exceeding any reasonable budget. The U2 "binary-only, no toolchains" premise also rules out shipping
+a Go compiler in the image. New policy in `do.ts:resolveSpec`:
+
+- If the input parses to `pm: 'go'`, treat the module path as a discovery hint. Parse `github.com/<owner>/<repo>` out of
+  the path (subpath segments stripped), then run the existing `discoverBinary` chain. If discovery returns a non-`go`
+  spec, install that (typically `direct` from a GitHub release asset, e.g. `glow` → `glow_*_Linux_x86_64.tar.gz`).
+- If the module path isn't on `github.com` (rsc.io/quote, golang.org/x/...) OR the github repo has no release binary,
+  bounce as `install_unsupported pm=go_no_binary`. Fast-fail UX, no compile attempted.
+- `installCommandFor()` returns `null` for `pm: 'go'` — `resolveSpec` is the only path that reaches `score()` with a go
+  input, and it's already translated upstream. The null acts as a safety net.
+
+Net effect: `go install github.com/charmbracelet/glow@latest` now resolves to the GitHub release binary and scores
+without compiling. Modules outside that pattern bounce honestly. Staging matrix verified 11/11 on `basic` instance
+- 60 s budget after the fix.
+
+`max_instances` bumped from 3 to 10 to reduce queue contention during the Show HN traffic envelope. Same `basic`
+instance type, same per-instance cost; pool size scales horizontal capacity, not per-request cost.
+
 ---
 
 - U7. **R2 cache (read on hit, write on miss)**
