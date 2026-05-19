@@ -280,8 +280,9 @@ job-level changed-files check.
 
 ### Sandbox image releases (live-scoring)
 
-The live-scoring path uses a Cloudflare Containers binding that pins an Alpine + musl sandbox image
-(`docker/sandbox/Dockerfile`). The image lives in the Cloudflare managed registry at
+The live-scoring path uses a Cloudflare Containers binding that pins a debian-trixie-slim + glibc sandbox image
+(`docker/sandbox/Dockerfile`) carrying the Cloudflare Sandbox SDK plus the package managers the install paths support
+(cargo-binstall, pip, uv, npm, bun, upstream Go runtime). The image lives in the Cloudflare managed registry at
 `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled from deploy: a Worker code-only deploy
 never rebuilds the image, and an image-only release never reships Worker code unintentionally.
 

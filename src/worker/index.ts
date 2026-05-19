@@ -16,10 +16,18 @@ import { applyHeaders } from './headers';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 
+// The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
+// outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
+// is undefined, export ContainerProxy from the containers package in
+// your worker entrypoint" if it's missing. Surfaces only at runtime on
+// the first DO fetch; wrangler dry-run, deploy, and the bun-test
+// `cloudflare:workers` shim all pass. Same class of failure as PR #94
+// (Sandbox `fetch()` missing) — documented in
+// docs/solutions/integration-issues/cloudflare-workers-do-mock-must-mirror-binding-shape-2026-05-15.md.
+export { ContainerProxy } from '@cloudflare/sandbox';
 // Live-scoring DO class. Re-exported so wrangler's binding resolver can
 // find `class_name: "Sandbox"` from wrangler.jsonc's containers +
-// durable_objects sections. Stub until U6 lands the install + score
-// implementation.
+// durable_objects sections.
 export { Sandbox } from './score/do';
 
 // At runtime wrangler injects every binding declared in wrangler.jsonc

@@ -48,8 +48,19 @@ export type ExhaustedSteps = {
   readme: { hit: false; reason: string };
 };
 
-const LINUX_X64_ASSET_RE =
-  /(linux[-_]x86[-_]?64|x86[-_]64[-_]unknown[-_]linux|linux[-_]amd64|amd64[-_]linux|linux64|linux[-_]gnu|linux[-_]musl)/i;
+// Asset must satisfy BOTH conditions:
+//   1. Linux + x86_64/amd64 — the loose substring match below excludes
+//      aarch64 / armhf / i686 by REQUIRING an x86_64 / amd64 token AND a
+//      linux marker in the same name. The legacy regex matched
+//      `aarch64-unknown-linux-gnu` via the `linux-gnu` substring, which
+//      cross-architected installs onto our x86_64 sandbox.
+//   2. A real archive extension. .deb / .rpm / .sha256 / .pkg drop here
+//      because directInstallCommand only knows how to extract tar/zip.
+//      Before this filter, bat releases (which ship .deb files BEFORE
+//      .tar.gz files in the asset list) resolved to a .deb and failed
+//      with `gzip: stdin: not in gzip format`.
+const LINUX_X64_ASSET_RE = /(?=.*(?:x86[-_]?64|amd64))(?=.*linux)/i;
+const LINUX_X64_ARCHIVE_RE = /\.(?:tar\.gz|tar\.xz|tar\.bz2|tgz|txz|tbz2|zip)$/i;
 
 const INSTALL_CMD_RE =
   /^\s*\$?\s*(brew|cargo|bun|uv|pip|pip3|pipx|npm|yarn|pnpm|go)\s+(install|add|i|tool|global|binstall)/i;
@@ -201,7 +212,7 @@ async function step2_releasesAsset(
   );
   if (!release) return { hit: false, reason: 'no_release_or_404' };
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  const match = assets.find((a) => a.name && LINUX_X64_ASSET_RE.test(a.name));
+  const match = assets.find((a) => a.name && LINUX_X64_ASSET_RE.test(a.name) && LINUX_X64_ARCHIVE_RE.test(a.name));
   if (match?.browser_download_url) return { hit: true, url: match.browser_download_url };
   return { hit: false, reason: assets.length > 0 ? 'no_linux_x64_asset' : 'release_has_no_assets' };
 }
@@ -295,12 +306,21 @@ async function step3_distributions(
   const goLoose = !!goRes?.ok;
   const goTight = goLoose;
 
-  // Priority order matches the plan: brew -> crates -> npm -> pypi -> go.
-  if (brewTight) return { hit: true, pm: 'brew', step: '3-brew' };
+  // Priority order: U6-supported PMs first (crates / npm / pypi / go),
+  // brew last. Original plan said brew first, but the U6 install table
+  // bounces brew as install_unsupported (Linuxbrew is non-viable on
+  // musl, Finding F3). If a tool has both a brew formula AND a working
+  // alternative (e.g. csvlens is in brew AND on crates.io), picking
+  // brew sends the user to a guaranteed bounce when scoring was
+  // possible. Brew is kept as the last resort so brew-only tools still
+  // bounce honestly rather than degrading to chain_no_resolve and
+  // hitting Step 4 README parse — the bounce message at least names
+  // the brew formula. Bug J fix (2026-05-18).
   if (cratesTight) return { hit: true, pm: 'cargo-binstall', step: '3-crates' };
   if (npmTight) return { hit: true, pm: 'npm', step: '3-npm' };
   if (pypiTight) return { hit: true, pm: 'pip', step: '3-pypi' };
   if (goTight) return { hit: true, pm: 'go', step: '3-go' };
+  if (brewTight) return { hit: true, pm: 'brew', step: '3-brew' };
 
   return {
     hit: false,

@@ -4,8 +4,24 @@
 // bindings (ASSETS / DO / KV / rate-limit / Turnstile fetcher). Each test
 // reaches one branch of the handler and asserts on status + envelope
 // shape + R11 triad presence.
+//
+// DO mock fidelity (U6 plan amendment, 2026-05-15):
+//
+//   The U5-era stub returned `{error: 'sandbox_stub_until_u6'}` from a
+//   hand-rolled `.fetch()` mock that bypassed the binding-boundary check
+//   the production runtime enforces. PR #93 shipped a real DO class with
+//   no `fetch()` method and the first staging POST threw `Handler does
+//   not export a fetch() function` (Cloudflare error 1101). The mock had
+//   a `.fetch` property; the real DO didn't.
+//
+//   This file tightens the mock by typing the stub's fetch handler via
+//   `Sandbox['fetch']` so any future Sandbox class that loses or renames
+//   `fetch` is a compile error here, not a first-deploy 5xx. See
+//   docs/solutions/integration-issues/cloudflare-workers-do-mock-must-mirror-binding-shape-2026-05-15.md
+//   for the full pattern + prevention recipe.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import type { Sandbox } from '../src/worker/score/do';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 
@@ -73,19 +89,22 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
     },
   };
 
+  // Type the stub's fetch via `Sandbox['fetch']` so any future Sandbox
+  // class that loses or renames `fetch` (or changes its signature) is a
+  // TypeScript compile error AND a runtime invocation error in this
+  // file. Closes the drift class that PR #93 hit. See file header.
+  const stubFetch: Sandbox['fetch'] = async (_req) => {
+    return new Response(JSON.stringify(doResponse), {
+      status: doStatus,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
   const stubDo = {
     idFromName(_name: string) {
       return { id: 'stub' };
     },
     get(_id: unknown) {
-      return {
-        async fetch(_req: Request): Promise<Response> {
-          return new Response(JSON.stringify(doResponse), {
-            status: doStatus,
-            headers: { 'content-type': 'application/json' },
-          });
-        },
-      };
+      return { fetch: stubFetch };
     },
   };
 
@@ -287,11 +306,45 @@ describe('/api/score — POST pipeline error paths', () => {
     expect(res.status).toBe(429);
   });
 
-  test('DO stub passthrough → 503 sandbox_stub_until_u6', async () => {
-    const res = await handleScore(postScore('https://github.com/foo/bar'), makeEnv());
+  test('DO stub envelope passthrough → 503 sandbox_stub_until_u6 (defense-in-depth)', async () => {
+    // Defense-in-depth: if the production DO binding ever points back at
+    // the U3 stub (e.g. via a botched rollback or a misconfigured
+    // wrangler.jsonc), the handler still bounces with the sandbox_stub
+    // envelope instead of leaking the raw stub error to the user. The
+    // isStubError() check in handler.ts is what makes this safe.
+    const res = await handleScore(
+      postScore('https://github.com/foo/bar'),
+      makeEnv({ doResponse: { error: 'sandbox_stub_until_u6' } }),
+    );
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('sandbox_stub_until_u6');
+  });
+
+  test('DO returns valid scorecard envelope → 200 with R11 triad', async () => {
+    // Post-U6 success path: DO returns {scorecard, anc_version} from
+    // sandbox-exec.score(). The handler wraps it into the response shape
+    // with spec_version + checker_url. This is the test that pins the
+    // U6 → U5 contract.
+    const res = await handleScore(
+      postScore('https://github.com/foo/bar'),
+      makeEnv({
+        doResponse: {
+          scorecard: { tool: { name: 'bar', binary: 'bar' }, score: { value: 73 } },
+          anc_version: '0.3.1',
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      spec_version: string;
+      anc_version: string;
+      checker_url: string;
+      scorecard: { tool: { name: string } };
+    };
+    expect(body.scorecard.tool.name).toBe('bar');
+    expect(body.spec_version).toBeTruthy();
+    expect(body.checker_url).toBeTruthy();
   });
 });
 
