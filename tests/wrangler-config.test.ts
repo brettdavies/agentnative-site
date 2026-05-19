@@ -142,12 +142,18 @@ describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', ()
   const releases = readFileSync(releasesPath, 'utf8');
 
   test('documents the 7-day lifecycle command for the prod bucket', () => {
-    expect(releases).toMatch(/wrangler r2 bucket lifecycle add anc-score-cache --prefix scores\/ --expiration-days 7/);
+    // Positional args: bucket, rule-name, prefix. Flag: --expire-days.
+    // Earlier docs shipped `--prefix scores/ --expiration-days 7`, which
+    // wrangler 4.x rejects (Unknown arguments). The drift-guard pins the
+    // correct shape so the regression class can't re-emerge silently.
+    expect(releases).toMatch(
+      /wrangler r2 bucket lifecycle add anc-score-cache scores-7day-ttl scores\/ --expire-days 7/,
+    );
   });
 
   test('documents the 7-day lifecycle command for the staging bucket', () => {
     expect(releases).toMatch(
-      /wrangler r2 bucket lifecycle add anc-score-cache-staging --prefix scores\/ --expiration-days 7/,
+      /wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores\/ --expire-days 7/,
     );
   });
 

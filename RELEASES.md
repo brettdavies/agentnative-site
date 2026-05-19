@@ -378,27 +378,34 @@ above is what the deploy workflow assumes.
 
 Plan U7 caches successful live scorecards under `scores/{binary}/{anc-version}.json` in the `SCORE_CACHE` R2 bucket
 (`anc-score-cache` prod, `anc-score-cache-staging` staging). A 7-day lifecycle rule reaps stale entries at the bucket
-level rather than per-write — keeping `Cache-Control: public, max-age=300` on every object so CDN edges don't over-cache
+level rather than per-write, keeping `Cache-Control: public, max-age=300` on every object so CDN edges don't over-cache
 while the R2 origin holds the long TTL.
 
-Configure once per bucket (the rule survives subsequent deploys; only re-run if the bucket is recreated):
+The `wrangler r2 bucket lifecycle add` command takes bucket, lifecycle-rule name, and prefix as **positional** arguments
+(in that order), with `--expire-days` as the flag controlling the TTL. Earlier docs incorrectly used `--prefix` and
+`--expiration-days` flags, which wrangler 4.x rejects.
+
+Configure once per bucket (idempotent on the rule name; only re-run if the bucket is recreated):
 
 ```bash
-bun x wrangler r2 bucket lifecycle add anc-score-cache --prefix scores/ --expiration-days 7
-bun x wrangler r2 bucket lifecycle add anc-score-cache-staging --prefix scores/ --expiration-days 7
+bun x wrangler r2 bucket lifecycle add anc-score-cache scores-7day-ttl scores/ --expire-days 7 -y
+bun x wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores/ --expire-days 7 -y
 ```
 
-The `--prefix scores/` scope means future writes under a different prefix in the same bucket are NOT subject to this
-TTL. If you add a new prefix (e.g., `audit-logs/`), set up a matching lifecycle rule for it deliberately rather than
-broadening this one. A `tests/wrangler-config.test.ts` assertion pins this section so a future drift surfaces in CI (the
-test scans this file for the literal `wrangler r2 bucket lifecycle add` commands).
+The rule name (`scores-7day-ttl`) identifies the rule for future updates or removal. The prefix (`scores/`) scopes the
+TTL so future writes under a different prefix in the same bucket are NOT affected. If you add a new prefix (e.g.,
+`audit-logs/`), set up a matching lifecycle rule for it deliberately rather than broadening this one. The
+`tests/wrangler-config.test.ts` drift-guard scans this section for the exact literal command so a future regression on
+the syntax surfaces in CI.
 
-Verify the rule landed:
+Verify the rule landed (expect `scores-7day-ttl` with prefix `scores/` and action `Expire objects after 7 days`):
 
 ```bash
 bun x wrangler r2 bucket lifecycle list anc-score-cache
 bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 ```
+
+Both buckets were configured on 2026-05-19 alongside the U7 merge.
 
 ## CI
 
