@@ -280,22 +280,12 @@ job-level changed-files check.
 
 ### Sandbox image releases (live-scoring)
 
-The live-scoring path uses a Cloudflare Containers binding that pins a `python:3.12-slim-trixie` sandbox image
-(`docker/sandbox/Dockerfile`) carrying the Cloudflare Sandbox SDK plus the package managers the install paths support
-(cargo-binstall, pip, uv, npm, bun, upstream Go runtime). The base provides CPython 3.12 + pip on top of Debian Trixie
-(glibc 2.40); 3.12 satisfies the `<3.13,>=3.10` Python constraint that a broad slice of the PyPI ecosystem ships under,
-where Trixie's default Python 3.13 would force pip's resolver to back off to ancient package versions. The image lives
-in the Cloudflare managed registry at `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build is decoupled
-from deploy: a Worker code-only deploy never rebuilds the image, and an image-only release never reships Worker code
-unintentionally. See
-[`docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md)
-for the version-pin rationale + matrix of which install paths use which Python.
-
-**Instance type.** Staging runs `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk). The previous `basic` tier (1/4 vCPU, 1 GiB
-RAM, 4 GB disk) ran the registry-curated matrix fine but timed out on heavy Python tools (aider's ~91 MB of compiled
-wheels: scipy 35 MB + tree-sitter-language-pack 19 MB + litellm 14 MB + others) because wheel extraction is
-CPU+disk-bound. Production stays on `basic` until U10 billing telemetry quantifies the per-request cost delta. Promotion
-procedure for the tier bump follows the same soak-then-promote flow as image bumps.
+- **Base**: `python:3.12-slim-trixie` + Cloudflare Sandbox SDK + PMs (cargo-binstall, pip, uv, npm, bun, upstream Go).
+- **Image**: `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build decoupled from deploy.
+- **Instance type**: staging `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk); prod `basic` (1/4 vCPU). Promotion: release
+  PR + soak.
+- **Rationale**:
+  [`docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md).
 
 `wrangler.jsonc` holds TWO independent image pins:
 
@@ -420,68 +410,18 @@ Both buckets were configured on 2026-05-19 alongside the U7 merge.
 
 ## Staging access (Cloudflare Access)
 
-The staging Worker at `agentnative-site-staging.brettdavies.workers.dev` is gated by a Cloudflare Access Self-Hosted
-Application. Two policies sit on the app: one for browser identity flow (email allow), one for CLI service-token flow
-(non-identity decision). Cloudflare Access evaluates both at the CF edge before any request reaches the Worker, so any
-client without a valid identity or service token gets a 302 redirect to `*.cloudflareaccess.com` and never touches our
-sandbox or rate-limit budget.
+Staging Worker gated by CF Access. Browser: SSO/email-OTP at `https://agentnative-site-staging.brettdavies.workers.dev`
+(90-day session). CLI: `CF-Access-Client-Id` + `CF-Access-Client-Secret` headers from 1Password item `Cloudflare Access
+Service Token - agentnative-site-staging` (vault `secrets-dev`).
 
-The staging Turnstile binding stays as Cloudflare's documented always-passes test secret because workers.dev subdomains
-cannot bind real Turnstile widgets. Access is the auth layer; Turnstile is a no-op gate kept for code-path parity with
-production.
-
-### Browser flow
-
-Visit `https://agentnative-site-staging.brettdavies.workers.dev` (any path). CF Access shows its auth challenge; pick
-the configured IdP (Google SSO or email OTP). A session cookie is issued for 90 days (`session_duration=2160h`). Re-auth
-is rare.
-
-### CLI flow
-
-Scripts that POST to staging (currently `scripts/staging-cache-smoke.sh`) read service-token credentials from 1Password
-and send them as headers:
-
-```text
-CF-Access-Client-Id:     <client_id from 1Password>
-CF-Access-Client-Secret: <client_secret from 1Password>
-```
-
-The 1Password item is titled `Cloudflare Access Service Token - agentnative-site-staging` (tags
-`cloudflare,access,service-token,agentnative-site,staging`, vault `secrets-dev`). The smoke script fails fast with a
-clear FATAL message if the item is missing or unreadable, rather than letting requests silently 302.
-
-### Bootstrap from scratch
-
-The full Access setup (app + service token + two policies) is encoded as an idempotent script:
+Bootstrap (idempotent):
 
 ```bash
 CF_ACCOUNT_ID=<account-id> ./scripts/cf-access-bootstrap.sh
 ```
 
-The script checks each resource by NAME, skips what exists, and creates only what's missing. Re-running on a
-fully-configured account reports `exists, skipping` at every step and runs the unauth + service-token verification
-probes at the end.
-
-Prerequisite: a scoped CF API token in 1Password (`Cloudflare API Token - Access Setup (agentnative-site)`) with these
-account-level permissions: `Access: Apps and Policies Write` AND `Access: Service Tokens Write`. The first permission
-group's name is easy to typo as the narrower `Access: Apps Write` in the CF dashboard — both exist; only the longer form
-covers policy management.
-
-Disaster recovery: if the Access app gets deleted or the account is restored from backup, re-running the bootstrap
-script reconstructs the full auth surface from 1Password-resident credentials. A new service token is created if needed;
-the new client_secret is captured into 1Password without ever entering script output.
-
-### Rotation
-
-| Resource               | Cadence                              | How                                                                                                                                                          |
-| ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Setup API token        | Quarterly or at expiry (default 90d) | CF dashboard → My Profile → API Tokens → Edit → Regenerate; update the `credential` field in the matching 1Password item.                                    |
-| Service token          | Yearly or at expiry (default 1y)     | `POST /accounts/{aid}/access/service_tokens/{id}/rotate` returns a new `client_secret` ONCE; update the 1Password item.                                      |
-| App `session_duration` | Rare                                 | `PUT /accounts/{aid}/access/apps/{id}` with full body and the new value. `PATCH` is NOT supported on Access endpoints with API-token auth (returns `10405`). |
-
-Detailed inventory (IDs, AUD, JSON request bodies, rotation playbooks) lives in the private
-`docs/solutions/tooling-decisions/cloudflare-access-staging-worker-2026-05-19.md` since IDs are reconnaissance signal
-even though they aren't secrets.
+Inventory + rotation playbook + dashboard permission-group gotcha:
+[`docs/solutions/tooling-decisions/cloudflare-access-staging-worker-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-access-staging-worker-2026-05-19.md).
 
 ## CI
 
