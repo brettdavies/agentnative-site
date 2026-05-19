@@ -732,4 +732,70 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
       | undefined;
     expect(uvCmd?.command).not.toContain('PIP_UPLOADED_PRIOR_TO');
   });
+
+  // The remaining tests in this group execute the shell substitution
+  // directly (via Bun.spawn) and assert the runtime output, not just
+  // the literal string baked into the install command. The static
+  // tests above pin "the right string is in the command"; these
+  // dynamic tests pin "the string actually produces what pip wants".
+  // Together they catch a future change that swaps `+%Y-%m-%dT%H:%M:%SZ`
+  // for something pip 26+ wouldn't accept.
+
+  test('shell substitution produces an ISO 8601 string pip will accept', async () => {
+    // The exact shell substitution embedded in sandbox-exec.ts.
+    const proc = Bun.spawn(['bash', '-c', "date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ"], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const out = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    // ISO 8601 with second-precision and Zulu suffix — the shape pip
+    // 26+ accepts for PIP_UPLOADED_PRIOR_TO. A future change that
+    // emits a different format (e.g. local timezone, fractional
+    // seconds, or +HH:MM offset) will fail this match before reaching
+    // the sandbox.
+    expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  test('shell substitution computes a timestamp ~7 days in the past', async () => {
+    // Sanity: the substitution must actually produce a 7-days-ago
+    // timestamp, not "now" or some other arithmetic. Tolerance is
+    // ±10 minutes to absorb test-runtime clock drift and DST quirks.
+    const proc = Bun.spawn(['bash', '-c', "date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ"], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const out = (await new Response(proc.stdout).text()).trim();
+    await proc.exited;
+    const producedMs = Date.parse(out);
+    expect(Number.isFinite(producedMs)).toBe(true);
+    const expectedMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const driftMinutes = Math.abs(producedMs - expectedMs) / 60_000;
+    expect(driftMinutes).toBeLessThan(10);
+  });
+
+  test('shell substitution is the EXACT form embedded in the install command (no drift)', async () => {
+    // Defends against a partial refactor that updates the install
+    // command in sandbox-exec.ts but forgets to update the shell
+    // executed at runtime (or vice versa). Re-extract the substitution
+    // from the live install command and run it; assert it succeeds.
+    const { stub, calls } = makeStub();
+    await score(stub, { pm: 'pip', package: 'mypy', binary: 'mypy' });
+    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(installCmd).toBeDefined();
+    // Extract the `$(...)` substitution from the install command.
+    const match = installCmd?.command.match(/^PIP_UPLOADED_PRIOR_TO=\$\(([^)]+)\)/);
+    expect(match).not.toBeNull();
+    const substitution = match?.[1];
+    expect(substitution).toBeTruthy();
+    if (!substitution) return;
+    // Run it.
+    const proc = Bun.spawn(['bash', '-c', substitution], { stdout: 'pipe', stderr: 'pipe' });
+    const out = (await new Response(proc.stdout).text()).trim();
+    const exitCode = await proc.exited;
+    expect(exitCode).toBe(0);
+    expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
 });
