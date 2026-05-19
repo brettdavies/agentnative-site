@@ -1,7 +1,6 @@
 # Releasing agentnative-site
 
-Every change reaches production via this pipeline. Direct commits to `dev` or `main` are not permitted — every change
-has a PR number in its squash commit message, which keeps the history scannable and attributable.
+Operational runbook. Rationale lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ```text
 feature branch → PR to dev (squash merge)
@@ -11,13 +10,10 @@ feature branch → PR to dev (squash merge)
               → deploy.yml publishes to production (anc.dev)
 ```
 
-**Exception — `docs/plans/`.** Plan documents are author-driven thinking artifacts. They don't ship to production
-(`guard-main-docs.yml` blocks `docs/plans/`, `docs/solutions/`, and `docs/brainstorms/` from reaching `main`) and they
-don't need code review. Commit them directly to `dev` with a `docs(plans):` Conventional Commits message — skip the
-feature branch entirely. The dev ruleset's admin bypass (`bypass_actor` for RepositoryRole 5) allows this without
-needing the otherwise-required CI check. The same convention applies to ad-hoc edits of `docs/brainstorms/` and
-`docs/solutions/` (the latter being a symlink to the shared `solutions-docs` repo, which has its own commit flow). Code,
-content, scripts, registry, and everything else still go through the PR pipeline above.
+Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message.
+
+**Exception** for `docs/plans/`, `docs/brainstorms/`, `docs/solutions/`: commit directly to `dev` with `docs(plans):`
+(or similar) message. No feature branch, no PR. These paths never reach `main` (`guard-main-docs.yml`).
 
 ## Branches
 
@@ -25,13 +21,10 @@ content, scripts, registry, and everything else still go through the PR pipeline
 | ---------------------------- | --------------------------------------- | ------------------------------------------- | ------------------------------------ |
 | `main`                       | Production. Only release commits.       | Forever.                                    | `.github/rulesets/protect-main.json` |
 | `dev`                        | Integration. All feature PRs land here. | Forever. Never delete.                      | `.github/rulesets/protect-dev.json`  |
-| `feat/*`, `fix/*`, `chore/*` | Feature work.                           | One PR's worth. Auto-deleted on merge.      | None — squash into dev freely.       |
+| `feat/*`, `fix/*`, `chore/*` | Feature work.                           | One PR's worth. Auto-deleted on merge.      | None. Squash into dev freely.        |
 | `release/*`                  | The head of a dev → main PR.            | One release's worth. Auto-deleted on merge. | None.                                |
 
-`dev` is a **forever branch**. Never delete it locally or remotely, even after a `release/* → main` merge. The next
-release cycle reuses the same `dev`. The repo's `deleteBranchOnMerge: true` setting doesn't touch `dev` as long as `dev`
-is never the head of a PR — using a short-lived `release/*` head is what keeps the setting compatible with a forever
-integration branch.
+→ Rationale: [`ARCHITECTURE.md` § Branching model](./ARCHITECTURE.md#branching-model).
 
 ## Daily development (feature → dev)
 
@@ -45,219 +38,119 @@ gh pr create --base dev --title "feat(scope): what changed"
 ```
 
 - **Commit style**: [Conventional Commits](https://www.conventionalcommits.org/).
-- **PR body**: follow the repo's PR template. The `## Changelog` section is the source of truth for user-facing release
-  notes. PR bodies remain editable post-merge — typos and oversights can be fixed by editing the PR on GitHub later. If
-  a generated `CHANGELOG.md` flow lands here (deferred until needed; the upstream `agentnative-spec` runs one via
-  `scripts/generate-changelog.sh` + `cliff.toml` and re-fetches PR bodies via the GitHub API on each run), the same
-  edited bodies become its source.
-- **PR body prose scrub**: `gh pr create` and `gh pr edit` send body text directly to GitHub; no local pre-push hook
-  sees it. Save the body to `/tmp/`, run Vale + LanguageTool + unslop, fix findings, then submit via `--body-file`. See
-  [§ Prose scrubbing](#prose-scrubbing).
+- **PR body**: follow `.github/pull_request_template.md`. See [§ PR body](#pr-body).
+- **PR body prose scrub**: see [§ Prose scrubbing](#prose-scrubbing).
 
 ## PR body
 
-Every PR — feature, fix, docs, release — uses `.github/pull_request_template.md` verbatim. Six sections, no inventions:
-`## Summary`, `## Changelog`, `## Type of Change`, `## Related Issues/Stories`, `## Files Modified`, `## Testing`.
+Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inventions: `## Summary`, `## Changelog`,
+`## Type of Change`, `## Related Issues/Stories`, `## Files Modified`, `## Testing`.
 
-- **No explainer prose anywhere in the body.** Every section is user-facing substance only: what is changing for the
-  consumer that was not already there. `## Summary` is one short paragraph. Do NOT recap the workflow (cherry-pick,
-  regenerate, pre-push gate, CI behavior is documented in this file and `.github/`). Do NOT paste triple-diff output,
-  pre-push gate results, CI check status, exclusion rationale, or other verification artifacts into the body. Those stay
-  local; anomalies get fixed before push, not audit-trailed in the body.
-- **Changelog** subsections (`### Added` / `### Changed` / `### Fixed` / `### Documentation`) hold the user-facing
-  entries. The template's RULES (in the HTML comment at the top of the section) are literal: 1-5 bullets, delete empty
-  subsections entirely, each bullet starts with a verb. Prose-only edits leave the section empty or omit it.
-- **Type of Change** is one checkbox. Prefer `feat` / `fix` over `chore` when the change has any user-observable effect
-  (config defaults, env vars, default behaviors). `cliff.toml` skips `^chore` (and `^style` / `^test` / `^ci` /
-  `^build`) regardless of body content; mistyping a user-facing change as `chore` silently strips it from release notes.
-- **Related Issues/Stories** has four labels (`Story:` / `Issue:` / `Architecture:` / `Related PRs:`). All four are
-  required even when empty — write `- None.` or `n/a` rather than deleting the label.
-- **Files Modified** has four sub-headers (`**Modified:**` / `**Created:**` / `**Renamed:**` / `**Deleted:**`). All four
-  are required even when empty — `Renamed: None.` / `Deleted: None.`
-- **Internal tooling commits** (`chore(cliff): ...`, `chore(prose-check): ...`, etc.) do NOT appear in the PR body's `##
-  Changelog`. They are not user-facing.
-- **Release PRs** repeat the entries from the upstream feature PRs they cherry-pick. The repetition is intentional and
-  harmless: `cliff.toml`'s `^release` skip prevents the release-PR squash commit from being double-counted in any future
-  regeneration.
-- **No AI attribution.** Never append `Co-Authored-By: Claude …`, `🤖 Generated with [Claude Code]`, or any similar
-  AI-attribution trailer to PR bodies or commit messages. Commits and PRs stand on their own technical content.
-- **No hard line wraps.** Author each paragraph and each bullet as one logical line, however long. GitHub soft-wraps for
-  display; hard wraps within prose produce visible mid-sentence breaks in some renderers and interfere with the
-  prose-check pipeline (Vale's line-anchored output reports findings against split lines, LanguageTool's input handling
-  can choke on certain control-char interactions). The auto-format hook skips `/tmp/` paths so the body keeps its
-  authored shape — don't undo that with manual wrapping during composition. The same rule applies to commit messages
-  composed via heredoc and to any markdown that ships verbatim to GitHub.
+- **No explainer prose anywhere in the body.** User-facing substance only.
+- **Changelog** subsections (`### Added` / `### Changed` / `### Fixed` / `### Documentation`): 1-5 bullets each, delete
+  empty subsections, each bullet starts with a verb.
+- **Type of Change**: one checkbox. Prefer `feat`/`fix` over `chore` for any user-observable change.
+- **Related Issues/Stories**: four labels (`Story:` / `Issue:` / `Architecture:` / `Related PRs:`). All four required
+  even when empty (`- None.` / `n/a`).
+- **Files Modified**: four sub-headers (`Modified` / `Created` / `Renamed` / `Deleted`). All four required even when
+  empty.
+- **No AI attribution** in commits or PR bodies.
+- **No hard line wraps**: one logical line per paragraph or bullet.
 
-The PR body is read by humans reviewing what shipped. Workflow mechanics, verification output, and tool-fix provenance
-are noise from that perspective; they belong in this file (`RELEASES.md`), the script outputs, and the commit history
-respectively.
+→ Rationale: [`ARCHITECTURE.md` § PR body conventions](./ARCHITECTURE.md#pr-body-conventions).
 
 ## Releasing dev to main
 
-Engineering docs (`docs/plans/`, `docs/solutions/`, `docs/brainstorms/`) live on `dev` only. `guard-main-docs.yml`
-blocks them from reaching `main`, and the `guard-release-branch.yml` workflow rejects any PR to main whose head isn't
-`release/*`. You MUST use the release-branch cherry-pick pattern:
-
-**Branch naming** (CalVer, mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). The
-date prefix is the planned merge date, not the cut date — re-naming on slip is allowed but not required. Slug is
-kebab-case, short, descriptive (3-6 words). Bare `release/<slug>` (no date prefix) is no longer permitted; the date
-prefix is what makes release branches sortable and unambiguous when multiple cuts are in flight.
-
-The `guard-release-branch.yml` workflow currently enforces the `release/` prefix only on PRs targeting `main`; the
-CalVer date prefix is convention-enforced via review and this doc. Tightening the workflow regex to require
-`^release/\d{4}-\d{2}-\d{2}-` is a tracked follow-up — until that lands, a PR with a date-less branch name will pass CI
-but should be renamed before merge.
-
 ```bash
-# 1. Branch from main, NOT dev. Branching from dev causes add/add conflicts
-#    when dev and main have divergent histories (the post-squash-merge norm).
+# 1. Branch from main, NOT dev.
 git fetch origin
-git checkout -b release/<slug> origin/main
+git checkout -b release/<YYYY-MM-DD>-<slug> origin/main
 
-# 2. List the dev commits not yet on main:
+# 2. List the dev commits not yet on main.
 git log --oneline dev --not origin/main
 
-# 3. Cherry-pick the ones you want to ship. Docs commits stay on dev.
+# 3. Cherry-pick the ones to ship. Docs commits stay on dev.
 git cherry-pick <sha1> <sha2> ...
 
-# 4. Triple-diff verification — belt-and-suspenders sweep that catches both
-#    directions of drift before the release tag goes out:
-#
-#    A. main → release  (what users will see; the intended ship surface)
-#    B. release → dev   (should be empty for non-doc paths until the
-#                        bump/CHANGELOG commits land, and even then should
-#                        only list those release-prep files — anything else
-#                        is a missed cherry-pick)
-#    C. dev → main      (sanity: phantom commits dev "appears ahead" on
-#                        because cherry-pick rewrites SHAs post-squash)
-git diff origin/main..HEAD --stat                                                # A
-git diff HEAD..origin/dev --name-only | grep -v '^docs/' || echo "(none)"        # B
-git diff origin/dev..origin/main --stat | tail -5                                # C
-#
-# Re-confirm no guarded paths leaked (this caught the original miss class):
+# 4. Triple-diff verification.
+git diff origin/main..HEAD --stat                                              # A: ship surface
+git diff HEAD..origin/dev --name-only | grep -v '^docs/' || echo "(none)"      # B: no missed picks
+git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
+
+# Re-confirm no guarded paths leaked.
 git diff origin/main..HEAD --name-only \
   | grep -E '^(docs/plans|docs/brainstorms|docs/ideation|docs/reviews|docs/solutions|\.context)' \
-  && echo "LEAKED — reset and redo" || echo "(clean — no guarded paths)"
-#
-# Patch-id cherry check — catches commits on dev that have NO patch-id
-# equivalent on release. The file-level diff in B misses this class when
-# the same content happens to land via a different commit.
-#
-# IMPORTANT: in a squash-merge workflow this output is noisy. Every '+'
-# line needs human triage — it does NOT auto-block the release. Expected
-# sources of '+' lines that are NOT real misses:
-#
-#   1. Historical commits squash-merged in prior releases. The squash
-#      commit on main has a different patch-id than the dev commits it
-#      consolidates, so old commits show as '+' forever. Anything older
-#      than the previous release tag is almost always this.
-#   2. Cherry-picks where conflict resolution stripped guarded paths
-#      (docs/plans, docs/brainstorms, etc.) or otherwise altered the
-#      tree. Same source-code intent, different patch-id.
-#   3. Intentionally skipped commits — docs-only commits, release-prep
-#      backports, revert-and-redo prep steps.
-#
-# A real miss looks like: a recent feat/fix/chore commit on dev whose
-# *file content* is not yet on main. To triage a '+' line:
-#
-#   git show <sha> --stat                       # what did it touch?
-#   git diff origin/main..HEAD -- <those-files> # already on release?
-#
-# If every touched file is guarded (docs/plans/, docs/brainstorms/, etc.)
-# OR the content is already on main via a prior squash, it's a false
-# positive — no action. Otherwise cherry-pick the commit and re-run the
-# triple-diff.
-git cherry HEAD origin/dev | grep '^+' || echo "(none — release is patch-equivalent through dev)"
-#
-# If B lists any non-docs path you didn't expect, fetch dev, identify the
-# commit (`git log dev --not origin/main`), cherry-pick it, re-run the
-# triple-diff. Missed cherry-picks have shipped to main on this and sibling
-# repos before — this step is the cheap way to catch them.
+  && echo "LEAKED — reset and redo" || echo "(clean)"
 
-# 5. Push and open the PR. The release-PR body is contributor-authored and goes
-#    directly to GitHub (no pre-push reach), so scrub it through Vale +
-#    LanguageTool + unslop before --body-file. See "Prose scrubbing" below.
-git push -u origin release/<slug>
-gh pr create --base main --head release/<slug> \
+# Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
+git cherry HEAD origin/dev | grep '^+' || echo "(none)"
+
+# 5. Push and open PR. Scrub body in /tmp/ first.
+git push -u origin release/<YYYY-MM-DD>-<slug>
+gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
   --title "release: <summary>" --body-file /tmp/body.md
 ```
 
-When the PR merges, `deploy.yml` picks up the push to `main` and publishes to staging (see "Deploy" below). Auto-delete
-removes `release/<slug>` from the remote on merge. `dev` is untouched.
+**Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
+kebab-case, 3-6 words.
 
-### Why branch from main, not dev
+When the PR merges, `deploy.yml` publishes to staging. Auto-delete removes `release/<slug>` from the remote on merge.
+`dev` is untouched.
 
-Branching from `dev` and then `git rm`-ing the guarded paths seems simpler but produces `add/add` merge conflicts
-whenever `dev` and `main` have diverged (which they always do after the first squash merge). The file appears as "added"
-on both sides with different content. Always branch from `origin/main` and cherry-pick onto it.
+→ Rationale + triple-diff false-positive triage:
+[`ARCHITECTURE.md` § Triple-diff verification](./ARCHITECTURE.md#triple-diff-verification).
 
 ## Prose scrubbing
 
-Pre-push covers `*.md` files in the repo via Vale + LanguageTool (see U4 of
-[`docs/plans/2026-05-07-001-feat-prose-check-site-plan.md`](./docs/plans/2026-05-07-001-feat-prose-check-site-plan.md)).
-Three release-flow artifacts live outside that net and need a manual scrub before they ship:
+Pre-push covers `*.md` files via Vale + LanguageTool. Three artifacts live outside that net and need a manual scrub:
 
-- **PR bodies.** `gh pr create` and `gh pr edit` send body text directly to GitHub; pre-push has no reach there.
-- **Release-PR bodies.** The `release/*` PR to `main` carries contributor-authored wrap-up text composed after the
-  cherry-picks land, and the same out-of-repo gap applies.
-- **Any future generated changelog.** This repo does not yet generate a `CHANGELOG.md`, but if one is added later it
-  inherits whatever prose its upstream PR bodies carry — same scrub procedure applies.
-
-**Scrub before submit.** Author and clean PR bodies in `/tmp/` first, then submit via `--body-file` once. This avoids
-the round-trip of "submit, scrub, edit, scrub again" — every fix lands locally and the public PR sees only clean text.
-The auto-format hook skips `/tmp/` paths so the body keeps its authored shape and no soft-wrapping is injected.
-
-The site vendors Vale rule packs locally (brand pack + site channel + `write-good` + `proselint`) via
-`scripts/sync-prose-tooling.sh`; the procedure below uses the local `.vale.ini` directly. The canonical description of
-the rule packs and the orchestrator's blocking-category whitelist lives in the spec at
-[`~/dev/agentnative-spec/docs/architecture/voice-enforcement.md`](https://github.com/brettdavies/agentnative/blob/dev/docs/architecture/voice-enforcement.md).
+- PR bodies (`gh pr create` / `gh pr edit` send body text directly to GitHub).
+- Release-PR bodies (composed after cherry-picks land).
+- Future generated changelog (if a `CHANGELOG.md` flow lands here).
 
 ```bash
-# 1. Author or fetch the artifact in /tmp/.
-$EDITOR /tmp/body.md                                           # author from scratch (gh pr create)
-gh pr view <num> --json body --jq .body > /tmp/body.md         # fetch existing (gh pr edit)
-# cp CHANGELOG.md /tmp/body.md                                 # for changelog scrub (when one exists)
+# 1. Author or fetch in /tmp/.
+$EDITOR /tmp/body.md                                           # author from scratch
+gh pr view <num> --json body --jq .body > /tmp/body.md         # fetch existing
 
 # 2. Vale (local rule packs at error tier).
 vale --no-global --output=line --minAlertLevel=error /tmp/body.md
 
-# 3. LanguageTool (blocking categories: TYPOS|GRAMMAR|CONFUSED_WORDS, mirrors the orchestrator's whitelist).
+# 3. LanguageTool (blocking categories: TYPOS|GRAMMAR|CONFUSED_WORDS).
 curl -sS -X POST "${LANGUAGETOOL_URL:-http://pool.tail42ba87.ts.net:8081}/v2/check" \
   --data-urlencode "language=en-US" --data-urlencode "text@/tmp/body.md" \
   | jaq '.matches[] | select(.rule.category.id | test("^(TYPOS|GRAMMAR|CONFUSED_WORDS)$"))'
 
-# 4. unslop (em-dash density and AI-unique structural patterns Vale + LT do not catch).
+# 4. unslop (em-dash density + AI-unique structural patterns).
 ~/.claude/skills/unslop/scripts/score.py /tmp/body.md
 
-# 5. Apply fixes in /tmp/body.md. Re-run 2-4 until 0 blocking and unslop score is 0.
+# 5. Apply fixes in /tmp/. Re-run 2-4 until 0 blocking + unslop score 0.
 
-# 6. Submit the cleaned version once.
+# 6. Submit once.
 gh pr create --base <base> --title "..." --body-file /tmp/body.md      # new PR
 gh pr edit <num> --body-file /tmp/body.md                              # existing PR
-# (regenerate CHANGELOG.md per the repo's existing changelog flow, once one exists)
 ```
 
-For a future generated-changelog finding, fix the upstream PR body (which the regeneration script re-fetches every run)
-and regenerate. Hand-editing the generated artifact directly produces drift the next regeneration overwrites.
+→ Rationale + which artifacts need this:
+[`ARCHITECTURE.md` § Prose scrubbing scope](./ARCHITECTURE.md#prose-scrubbing-scope).
 
 ## Deploy
 
-`.github/workflows/deploy.yml` runs on pushes to `dev` or `main`, targeting separate Workers via wrangler environments:
+`.github/workflows/deploy.yml` runs on pushes to `dev` or `main`:
 
 | Branch | Worker                     | Domain                                             | Wrangler command                |
 | ------ | -------------------------- | -------------------------------------------------- | ------------------------------- |
 | `dev`  | `agentnative-site-staging` | `agentnative-site-staging.<subdomain>.workers.dev` | `wrangler deploy --env staging` |
 | `main` | `agentnative-site`         | `anc.dev` (custom domain, `workers_dev: false`)    | `wrangler deploy`               |
 
-The staging-host guard in `src/worker/headers.ts` adds `X-Robots-Tag: noindex` on any response served from a
-`.workers.dev` host. Production at `anc.dev` gets full indexing.
+The staging-host guard in `src/worker/headers.ts` adds `X-Robots-Tag: noindex` on `.workers.dev` hosts.
 
-Manual deploys use `workflow_dispatch` with an explicit environment picker:
+Manual deploys:
 
 ```bash
 gh workflow run deploy.yml -f environment=staging              # redeploy staging
 gh workflow run deploy.yml -f environment=production            # redeploy production
-gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # deploy a specific SHA to staging
+gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # specific SHA to staging
 ```
 
 ### Docs-only commits skip deploy
@@ -265,18 +158,12 @@ gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # deploy a speci
 A `paths-ignore` filter on the `push` trigger skips deploy when a commit only touches paths the build doesn't ingest:
 
 - `docs/**` — all planning, design, and solution docs.
-- Root-level `*.md` — `README.md`, `AGENTS.md`, `RELEASES.md`, `CHANGELOG.md` (the glob doesn't cross `/`, so
-  `content/*.md` pages still deploy).
+- Root-level `*.md` — `README.md`, `AGENTS.md`, `RELEASES.md`, `CHANGELOG.md`. The glob doesn't cross `/`, so
+  `content/*.md` pages still deploy.
 
-Everything else — `content/**`, `src/**`, `scripts/**`, workflows, `wrangler.jsonc`, `package.json`, etc. — still
-triggers a deploy on push. `workflow_dispatch` is unaffected, so manual redeploys always work regardless of what
-changed.
+`workflow_dispatch` is unaffected by `paths-ignore`.
 
-The filter is symmetric across `dev` and `main`. In practice the `main` side is mostly theoretical:
-`guard-main-docs.yml` already blocks `docs/plans|solutions|brainstorms|reviews/**` from reaching `main` via PR, and the
-remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would redeploy
-a bit-identical Worker. If a future case needs unconditional main-branch deploys, swap the workflow-level filter for a
-job-level changed-files check.
+→ Rationale: [`ARCHITECTURE.md` § Docs-only deploy filter](./ARCHITECTURE.md#docs-only-deploy-filter).
 
 ### Sandbox image releases (live-scoring)
 
@@ -284,25 +171,15 @@ job-level changed-files check.
 - **Image**: `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`. Build decoupled from deploy.
 - **Instance type**: staging `standard-2` (1 vCPU, 6 GiB RAM, 12 GB disk); prod `basic` (1/4 vCPU). Promotion: release
   PR + soak.
-- **Rationale**:
+- **Rationale + version-pin matrix**:
   [`docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md`](docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md).
 
 `wrangler.jsonc` holds TWO independent image pins:
 
-- `containers[0].image` (top-level) is the PRODUCTION pin. The `agentnative-site` Worker on `anc.dev` deploys from this
-  tag. Advances only at release time.
-- `env.staging.containers[0].image` is the STAGING pin. The `agentnative-site-staging` Worker on
-  `agentnative-site-staging.brettdavies.workers.dev` deploys from this tag. Advances independently during development.
+- `containers[0].image` (top-level) = PRODUCTION pin. Advances only at release time.
+- `env.staging.containers[0].image` = STAGING pin. Advances independently during development.
 
-The two pins may legitimately differ. Each env block owns its own container application with its own version history.
-The pins describe what staging and prod each run, not a shared constraint.
-
-#### Default workflow: staging soak then promote
-
-Most image changes go through a staging-soak cycle before reaching production. This protects prod from any sandbox
-regression that only surfaces under real install traffic.
-
-**Image bump (feat PR to dev):**
+#### Image bump (feat PR to dev)
 
 ```bash
 # from a clean working tree on dev
@@ -310,109 +187,47 @@ GIT_SHA=$(git rev-parse --short HEAD)
 bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 ```
 
-The command runs `docker build` locally and pushes to the CF registry, authenticated via `CLOUDFLARE_API_TOKEN`. Output
-ends with a `<git-sha>: digest: sha256:... size: ...` line confirming the push.
+Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Commit Dockerfile change +
+staging-pin update together. PR to `dev`.
 
-Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Leave the top-level (prod) pin
-alone. Commit the Dockerfile change + the staging-pin update together. PR to `dev`.
+#### Promotion (release PR to main)
 
-CI on a dev-targeting PR verifies the new staging tag exists in the registry; the prod pin keeps pointing at the
-last-released tag, which also still exists (image-retention discipline). The CI guard accepts the divergence.
+Cut a `release/*` branch from `main`, cherry-pick the dev commits, then add one promotion commit bumping the top-level
+`containers[0].image` to match `env.staging.containers[0].image`. CI on a main-targeting PR enforces: both pins exist in
+the CF managed registry AND both pins point at the same tag.
 
-After merge to dev, CI deploys `agentnative-site-staging` to the new image. Soak: observability, integration tests, real
-traffic on the staging.workers.dev URL.
+#### Lockstep-bump shortcut
 
-**Promotion (release PR to main):**
+For low-risk image changes (security patch, dependency-only update with no behavior delta), update BOTH pins in the same
+feat PR.
 
-When the image is ready to ship, cut a release branch from `main` and cherry-pick the dev commits as usual. Add one
-promotion commit that bumps the top-level `containers[0].image` to match `env.staging.containers[0].image`. Open the PR
-to `main`. CI on a main-targeting PR enforces TWO invariants:
+→ Soak-then-promote rationale, retention discipline, DO migration walls, GHA fallback:
+[`ARCHITECTURE.md` § Sandbox image releases](./ARCHITECTURE.md#sandbox-image-releases).
 
-- both pins exist in the CF managed registry, AND
-- both pins point at the same tag (released state)
+#### R2 score-cache lifecycle
 
-Merge. CI deploys `agentnative-site` to the promoted image, and the site at `anc.dev` is now on the new sandbox.
-
-#### Shortcut: lockstep bumps (low-risk changes only)
-
-For image changes that don't need a soak (base-image security patch, dependency-only update with no behavior delta),
-update BOTH pins in the same feat PR. The dev-targeting PR has equal pins from the start; the eventual release PR
-carries equal pins; staging and prod deploy the new image in lockstep.
-
-The CI guard accepts this because both pins exist in the registry on every PR.
-
-Use the soak-then-promote default for any change that touches sandbox behavior: package manager additions, runtime
-version bumps, `anc` upgrades, `cargo-binstall` upgrades, anything in `docker/sandbox/Dockerfile` past the base-image
-FROM line.
-
-#### Deploy never rebuilds
-
-`wrangler deploy --env staging` (and `wrangler deploy` on main) against the fully-qualified registry URI does NOT
-trigger a rebuild. The image was already published during the local `wrangler containers build -p` step.
-
-#### Image-retention discipline
-
-NEVER delete a tag from the CF managed registry that backed a shipped Worker version. Deletion silently breaks `wrangler
-rollback` for any version that referenced the image, per
-[Containers Limits](https://developers.cloudflare.com/containers/platform-details/limits/). The 50 GB account-wide cap
-is a quarterly prune review, not a routine cleanup. When a release tag ships, record the pair `<git-tag> <-> <registry
-URI>` in the release commit body so the inventory survives.
-
-Retention is what makes soak-then-promote safe: while a new image is soaking on staging, the prod pin still references
-the previous release's tag, and that tag must remain in the registry for prod to keep serving.
-
-#### DO migrations are one-way walls
-
-The first Worker version that applied `migrations[].new_sqlite_classes: ["Sandbox"]` (`v1`) cannot be rolled back across
-that boundary via `wrangler rollback`, per
-[Versions and deployments / Rollbacks](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/).
-Treat DO-migration commits as milestone releases that get an explicit reviewer note.
-
-#### GHA fallback
-
-If a local build is impossible, set `image:` to a Dockerfile path (`./docker/sandbox/Dockerfile`) and let
-`cloudflare/wrangler-action` build inline on `ubuntu-latest` (~60-130s cold per deploy; no GHA-side layer cache; push is
-auto-skipped when the existing tag still matches). This is a fallback, not the primary path; the local-build-once flow
-above is what the deploy workflow assumes.
-
-#### R2 score-cache lifecycle (one-time setup per bucket)
-
-Plan U7 caches successful live scorecards under `scores/{binary}/{anc-version}.json` in the `SCORE_CACHE` R2 bucket
-(`anc-score-cache` prod, `anc-score-cache-staging` staging). A 7-day lifecycle rule reaps stale entries at the bucket
-level rather than per-write, keeping `Cache-Control: public, max-age=300` on every object so CDN edges don't over-cache
-while the R2 origin holds the long TTL.
-
-The `wrangler r2 bucket lifecycle add` command takes bucket, lifecycle-rule name, and prefix as **positional** arguments
-(in that order), with `--expire-days` as the flag controlling the TTL. Earlier docs incorrectly used `--prefix` and
-`--expiration-days` flags, which wrangler 4.x rejects.
-
-Configure once per bucket (idempotent on the rule name; only re-run if the bucket is recreated):
+Configure once per bucket (idempotent on the rule name):
 
 ```bash
 bun x wrangler r2 bucket lifecycle add anc-score-cache scores-7day-ttl scores/ --expire-days 7 -y
 bun x wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores/ --expire-days 7 -y
 ```
 
-The rule name (`scores-7day-ttl`) identifies the rule for future updates or removal. The prefix (`scores/`) scopes the
-TTL so future writes under a different prefix in the same bucket are NOT affected. If you add a new prefix (e.g.,
-`audit-logs/`), set up a matching lifecycle rule for it deliberately rather than broadening this one. The
-`tests/wrangler-config.test.ts` drift-guard scans this section for the exact literal command so a future regression on
-the syntax surfaces in CI.
-
-Verify the rule landed (expect `scores-7day-ttl` with prefix `scores/` and action `Expire objects after 7 days`):
+Verify:
 
 ```bash
 bun x wrangler r2 bucket lifecycle list anc-score-cache
 bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 ```
 
-Both buckets were configured on 2026-05-19 alongside the U7 merge.
+Both buckets were configured on 2026-05-19. The `tests/wrangler-config.test.ts` drift-guard pins the exact literal
+command above.
 
 ## Staging access (Cloudflare Access)
 
 Staging Worker gated by CF Access. Browser: SSO/email-OTP at `https://agentnative-site-staging.brettdavies.workers.dev`
-(90-day session). CLI: `CF-Access-Client-Id` + `CF-Access-Client-Secret` headers from 1Password item `Cloudflare Access
-Service Token - agentnative-site-staging` (vault `secrets-dev`).
+(90-day session). CLI: `CF-Access-Client-Id` + `CF-Access-Client-Secret` headers from 1Password (see
+`scripts/staging-cache-smoke.sh` for the item lookup convention).
 
 Bootstrap (idempotent):
 
@@ -427,61 +242,41 @@ Inventory + rotation playbook + dashboard permission-group gotcha:
 
 Two workflows gate pull requests:
 
-| Workflow      | Fires on                                           | Purpose                                                                                                        |
-| ------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `ci.yml`      | PR with any change outside `docs/**` / root `*.md` | Heavy pipeline: `bun install → lint → build → test → wrangler --dry-run`. ~30s warm.                           |
-| `ci-stub.yml` | PR that touches only `docs/**` or root `*.md`      | No-op stub. Emits the required check name to satisfy the ruleset gate without running the heavy pipeline. ~5s. |
+| Workflow      | Fires on                                           | Purpose                                                                              |
+| ------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `ci.yml`      | PR with any change outside `docs/**` / root `*.md` | Heavy pipeline: `bun install → lint → build → test → wrangler --dry-run`. ~30s warm. |
+| `ci-stub.yml` | PR that touches only `docs/**` or root `*.md`      | No-op stub. Emits the required check name without running the heavy pipeline. ~5s.   |
 
-Both jobs are named `lint · build · test · wrangler` — the same context the dev/main rulesets require. On a PR that
-mixes docs and code, both workflows fire and both pass; the required-check gate is satisfied either way.
+Both jobs are named `lint · build · test · wrangler`.
 
-### Why the stub
+`ci.yml`'s `paths-ignore:` list and `ci-stub.yml`'s `paths:` list must stay identical.
 
-Required status checks + `paths-ignore` is a known
-[GitHub Actions sharp edge](https://docs.github.com/en/actions/using-jobs/using-conditions-to-control-job-execution): if
-the workflow is filtered out for a given PR, the required check shows as "Expected" forever and the PR can't merge. The
-stub workflow fires exactly when `ci.yml` is filtered, emits the same check context as a no-op success, and unblocks the
-PR.
-
-### The invariant
-
-`ci.yml`'s `paths-ignore:` list and `ci-stub.yml`'s `paths:` list must stay identical. Drift creates gaps (no workflow
-fires → required check never reports → PR stuck) or benign double-runs on mixed PRs. A comment in both files calls this
-out explicitly; keep them in sync when editing either one.
-
-### Visual-fidelity gates
-
-Beyond the workflow checks above, two visual-regression rules apply to any change touching CSS, layout, or rendered
-output: a "browser-verify before done" agent-side rule (working today) and a Playwright snapshot diff in CI (planned,
-deferred until the design system stabilizes). Both live in [`AGENTS.md` § Visual fidelity](./AGENTS.md#visual-fidelity)
-— that's the source of truth. A release that didn't satisfy those gates upstream isn't unblocked by this pipeline being
-green.
+→ Rationale + status-check context pitfall:
+[`ARCHITECTURE.md` § CI workflow split](./ARCHITECTURE.md#ci-workflow-split).
 
 ## Secrets
 
-Stored as GitHub Actions secrets on `brettdavies/agentnative-site`. Accessible to workflows via `${{ secrets.<name> }}`.
+GitHub Actions secrets on `brettdavies/agentnative-site`:
 
-| Secret          | Purpose                                                                                                                                                                         | Rotation                                                    |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `CF_API_TOKEN`  | Cloudflare API token with `Workers Scripts:Edit` + `Account:Read`. Used by `wrangler-action` to deploy.                                                                         | Max 1 year; renew before expiry.                            |
-| `CF_ACCOUNT_ID` | Cloudflare account ID. Not a formal secret, but kept out of the public repo; surfaces to wrangler via `CLOUDFLARE_ACCOUNT_ID` env (passed to `wrangler-action` as `accountId`). | Effectively never — changes only if the CF account changes. |
+| Secret          | Purpose                                                                                                 | Rotation                                |
+| --------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `CF_API_TOKEN`  | Cloudflare API token with `Workers Scripts:Edit` + `Account:Read`. Used by `wrangler-action` to deploy. | Max 1 year; renew before expiry.        |
+| `CF_ACCOUNT_ID` | Cloudflare account ID. Surfaces to wrangler via `CLOUDFLARE_ACCOUNT_ID` env.                            | Changes only if the CF account changes. |
 
-`GITHUB_TOKEN` is provided automatically by GitHub Actions; no setup needed.
+`GITHUB_TOKEN` is provided by GitHub Actions automatically.
 
-Secrets are also mirrored in 1Password (`secrets-dev` vault) for disaster-recovery and cross-device use.
+Secrets are also mirrored in 1Password for disaster recovery and cross-device use.
 
 ## Branch protection
 
-Two rulesets are committed under `.github/rulesets/` and applied to the repo via the GitHub API:
+Rulesets committed under `.github/rulesets/`, applied to the repo via the GitHub API:
 
 - `protect-main.json` — required signatures, linear history, squash-only merges via PR, required status checks (`ci`,
   `guard-docs`, `guard-release-branch`), creation/deletion blocked, non-fast-forward blocked.
-- `protect-dev.json` — required signatures, deletion blocked, non-fast-forward blocked. No PR-requirement at the ruleset
-  level; the PR-only norm is enforced by convention + the `guard-release-branch` check on the main side.
+- `protect-dev.json` — required signatures, deletion blocked, non-fast-forward blocked. PR-only norm is convention +
+  `guard-release-branch` on the main side.
 
 ### Applying changes
-
-Edit the JSON locally, then sync to the remote:
 
 ```bash
 # First apply (creating a ruleset):
@@ -493,67 +288,45 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
   --input .github/rulesets/protect-main.json
 ```
 
-Committing the JSON alongside the code means ruleset changes land via the same review process as workflow changes — a
-`chore(ci): tighten protect-main` release goes through dev → release/* → main like anything else.
-
-### Status-check context pitfall
-
-The `required_status_checks[].context` strings in `protect-main.json` must match exactly what GitHub publishes for each
-check:
-
-- **Inline job** (with `name:` field): published as just `<job-name>` (no workflow-name prefix).
-- **Reusable-workflow caller** (`uses: .../foo.yml@ref`): published as `<caller-job-id> / <reusable-job-id-or-name>`.
-
-Mixing these produces a stuck-but-green PR: all actual checks report green, but the ruleset waits forever on a context
-that will never appear. Confirm the real contexts after a first CI run with:
-
-```bash
-gh api repos/brettdavies/agentnative-site/commits/<sha>/check-runs --jq '.check_runs[].name'
-```
+→ Status-check context strings (inline vs reusable):
+[`ARCHITECTURE.md` § Status-check context strings](./ARCHITECTURE.md#status-check-context-strings).
 
 ## Skill releases
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
-[`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). This site vendors the skill's
-manifest (per-host install commands, version, surface metadata) in `src/data/skill.json`; the skill repo holds the
-actual content. Surface contract in `DESIGN.md` §3.9. Update detection at install sites is delegated to the skill
-bundle's `bin/check-update`, which compares the local bundle's `VERSION` against `main` on GitHub.
+[`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). Site vendors the manifest in
+`src/data/skill.json`; the skill repo holds the actual content.
 
-The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
-branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release requires the skill
-maintainer to fast-forward `main` to the new tag.
+### Release procedure
 
-### Skill-release procedure
+1. **Cut the skill release** (in `agentnative-skill`): edit, commit, tag `v0.x.y`, push `dev --follow-tags`.
+   Fast-forward `main` to the new tag and push:
 
-1. **Cut the skill release** (in `agentnative-skill`): edit, commit, tag `v0.x.y` (signed if a key is configured), then
-   `git push origin dev --follow-tags`. Fast-forward `main` to the new tag and push: `git checkout main && git merge
-   --ff-only v0.x.y && git push origin main`. The site's bare `git clone --depth 1` lands on `main`, so the fast-forward
-   is what makes the new release reachable.
+   ```bash
+   git checkout main && git merge --ff-only v0.x.y && git push origin main
+   ```
+
 2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill.json` to bump
-   `version` and update any per-host install commands, description, or other surface fields the release modified. If
-   nothing user-facing changed, skip the manifest bump entirely — the skill bundle's `bin/check-update` is what tells
-   installed users a new release exists.
-3. **PR to `dev`**: CI runs the unit + worker tests on the bumped manifest. Squash-merge on green.
+   `version` and update any per-host install commands, description, or other surface fields.
+3. **PR to `dev`**: CI runs unit + worker tests on the bumped manifest. Squash-merge on green.
 4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
-5. **Cache-purge** `/skill`, `/skill.json`, and `/skill.md` via the Cloudflare cache-purge API after a manifest bump, so
-   users don't pick up the old shape from the 24h `s-maxage` window. Use the API token stored in 1Password
-   (`secrets-dev` vault, `Cloudflare API Token - Wrangler (bigdaddy)`). First-deploy-after-rename note (cutover from
-   `/install*` → `/skill*`): also purge `/install`, `/install.json`, and `/install.md` once to evict any cached skill
-   content under the old paths. Skip this on subsequent deploys.
-6. **Verify the deployed manifest**: `curl -s https://anc.dev/skill.json | jq -r .version` matches the new version. The
-   Playwright `skill` project (`bun x playwright test --project=skill`) re-runs the live 4-host clone against the
-   advertised hosts; run it locally before tagging if anything in the manifest's host commands changed.
+5. **Cache-purge** `/skill`, `/skill.json`, `/skill.md` via the Cloudflare cache-purge API (token in 1Password).
+   First-deploy-after-rename: also purge `/install`, `/install.json`, `/install.md` once.
+6. **Verify**: `curl -s https://anc.dev/skill.json | jq -r .version` matches the new version. Run the Playwright `skill`
+   project (`bun x playwright test --project=skill`) against the live host.
+
+→ Rationale: [`ARCHITECTURE.md` § Skill releases](./ARCHITECTURE.md#skill-releases).
 
 ### Skill-availability probe
 
 `.github/workflows/skill-availability.yml` runs `git ls-remote --exit-code
-https://github.com/brettdavies/agentnative-skill.git HEAD` daily at 13:00 UTC and on `workflow_dispatch`. It catches
-visibility regressions between releases (repo deletion, accidental flip back to private, branch rename). The probe runs
-over unauthenticated HTTPS; failures show up in the Actions tab and email the run owner. After the cutover that flips
-the skill repo public, run `gh workflow run skill-availability.yml` once to seed a green run on the schedule.
+https://github.com/brettdavies/agentnative-skill.git HEAD` daily at 13:00 UTC and on `workflow_dispatch`. Catches
+visibility regressions (repo deletion, accidental flip back to private, branch rename). After flipping the skill repo
+public, run `gh workflow run skill-availability.yml` once to seed a green run on the schedule.
 
 ## Related docs
 
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — release flow rationale, CI design, status-check pitfalls
 - [`AGENT.md`](./AGENT.md) — onboarding, repo conventions, tool-site sequencing
 - [`DESIGN.md`](./DESIGN.md) — design system and build contract
 - [`docs/TODOS.md`](./docs/TODOS.md) — deferred work (not in v0 scope)

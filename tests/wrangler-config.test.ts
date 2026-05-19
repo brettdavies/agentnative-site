@@ -156,10 +156,19 @@ describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', ()
       /wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores\/ --expire-days 7/,
     );
   });
+});
+
+describe('ARCHITECTURE.md — R2 score-cache key shape (plan U7)', () => {
+  // The cache key prefix `scores/{binary}/{anc-version}.json` is the
+  // load-bearing fact behind the lifecycle rule's `scores/` filter. The
+  // rationale + key shape live in ARCHITECTURE.md (RELEASES.md is the
+  // runbook). If the prefix moves, the architecture doc must move with
+  // it — this drift-guard makes the prefix change visible in CI.
+
+  const architecturePath = join(import.meta.dir, '..', 'ARCHITECTURE.md');
+  const architecture = readFileSync(architecturePath, 'utf8');
 
   test('mentions the canonical cache key prefix so a future audit can grep for it', () => {
-    // scores/{binary}/{anc-version}.json — the prefix anchors the
-    // lifecycle scope. If the prefix moves, the docs must move with it.
-    expect(releases).toMatch(/scores\/\{binary\}\/\{anc-version\}\.json/);
+    expect(architecture).toMatch(/scores\/\{binary\}\/\{anc-version\}\.json/);
   });
 });

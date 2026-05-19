@@ -69,7 +69,7 @@ fi
 # Fetch CF Access service token credentials from 1Password. The values
 # never enter the script's logged output; they live in shell variables
 # scoped to this process and are passed to curl via -H. The 1Password
-# helper scripts default to the secrets-dev vault.
+# helper script picks up the operator's default vault.
 OP_ITEM="Cloudflare Access Service Token - agentnative-site-staging"
 OP_READ="${OP_READ:-$HOME/.claude/skills/1password/scripts/read_field.sh}"
 if [ ! -x "$OP_READ" ]; then
@@ -80,7 +80,7 @@ CF_ACCESS_CLIENT_ID="$("$OP_READ" "$OP_ITEM" client_id 2>/dev/null || true)"
 CF_ACCESS_CLIENT_SECRET="$("$OP_READ" "$OP_ITEM" client_secret 2>/dev/null || true)"
 if [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
   echo "FATAL: could not read CF Access service token from 1Password item '$OP_ITEM'." >&2
-  echo "       Verify the item exists in vault 'secrets-dev' with fields 'client_id' and 'client_secret'." >&2
+  echo "       Verify the item exists in 1Password with fields 'client_id' and 'client_secret'." >&2
   echo "       Then re-run. Without these credentials every staging request returns 302 to *.cloudflareaccess.com." >&2
   exit 2
 fi
