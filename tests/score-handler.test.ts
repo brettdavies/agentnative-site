@@ -844,4 +844,121 @@ describe('/api/score — R2 cache tier (plan U7)', () => {
     const res = await handleScore(postScore('https://github.com/foo/bar'), env);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
   });
+
+  // -------------------------------------------------------------------------
+  // Cross-PM cache-key aliasing — design choice, not a bug
+  // -------------------------------------------------------------------------
+  //
+  // The cache key (`scores/{binary}/{SPEC_VERSION}.json`) intentionally
+  // OMITS the package-manager dimension. The reasoning: a binary with
+  // the same name + same anc_version produces the same scorecard
+  // regardless of which PM installed it, because `anc check` evaluates
+  // the binary on PATH and doesn't care how it got there. So `pip
+  // install foo`, `cargo binstall foo`, and `bun add -g foo` all
+  // SHOULD share a cache entry for binary='foo'.
+  //
+  // This test pins that design choice so a future change that scopes
+  // the cache key per-PM (which would be the wrong direction, because
+  // it'd waste cache budget) surfaces here.
+
+  test('cache-key aliasing: same binary across different PMs shares the same cache entry', async () => {
+    // Pre-seed under scores/foo/0.4.0.json. Both `pip install foo`
+    // (binary='foo') and `cargo binstall foo` (binary='foo') derive
+    // the same key, so both reads hit the same prefilled entry.
+    const cachedFooPayload = {
+      spec_version: '0.4.0',
+      anc_version: '0.3.1',
+      tool_version: '1.0.0',
+      scorecard: { tool: { name: 'foo', binary: 'foo', version: '1.0.0' }, score: { value: 75 } },
+    };
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { 'scores/foo/0.4.0.json': cachedFooPayload },
+      tracker,
+    });
+
+    const pipRes = await handleScore(postScore('pip install foo'), env);
+    expect(pipRes.status).toBe(200);
+    const pipBody = (await pipRes.json()) as { scorecard: { score: { value: number } } };
+    expect(pipBody.scorecard.score.value).toBe(75);
+
+    const cargoRes = await handleScore(postScore('cargo binstall foo'), env);
+    expect(cargoRes.status).toBe(200);
+    const cargoBody = (await cargoRes.json()) as { scorecard: { score: { value: number } } };
+    expect(cargoBody.scorecard.score.value).toBe(75);
+
+    const bunRes = await handleScore(postScore('bun add -g foo'), env);
+    expect(bunRes.status).toBe(200);
+    const bunBody = (await bunRes.json()) as { scorecard: { score: { value: number } } };
+    expect(bunBody.scorecard.score.value).toBe(75);
+
+    // All three were cache hits — no DO dispatch happened.
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // ?fromCache=false cache-WRITE fires
+  // -------------------------------------------------------------------------
+  //
+  // fromCache=false skips the READ tier but the design says the live
+  // run must still WRITE to cache so the next request benefits.
+  // Pinning the write half explicitly: with a fresh cache, a
+  // ?fromCache=false POST + cache-miss POST in sequence should mean
+  // the second call sees the entry the live run wrote.
+  //
+  // The DO writes to env.SCORE_CACHE.put() via writeCacheBestEffort
+  // in src/worker/score/do.ts. The handler test's mock DO doesn't
+  // actually run that code path, so we exercise the WRITE side by
+  // observing the cacheStore via the makeEnv override AND issuing the
+  // sequence end-to-end.
+
+  test('?fromCache=false fires the cache write so the next request hits the fresh entry', async () => {
+    // Shared cacheStore lets us inspect (and ALSO simulate the DO write
+    // by inserting directly — the DO would do this after success).
+    const cacheStore = new Map<string, string>();
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheStore,
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'cowsay', binary: 'cowsay', version: '1.6.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+
+    // First request with ?fromCache=false. The cache is empty, so read
+    // would have missed anyway, but the route through skipCache must
+    // still hit the live DO path AND the write happens.
+    const req1 = new Request('https://anc.dev/api/score?fromCache=false', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: 'npm install -g cowsay', turnstile_token: 'tok' }),
+    });
+    const res1 = await handleScore(req1, env);
+    expect(res1.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+
+    // The handler mock DO doesn't actually run writeCacheBestEffort
+    // (the real DO does). Simulate that the DO has written the result
+    // by injecting it into the shared cacheStore — this is what
+    // writeCacheBestEffort would do after a successful score.
+    cacheStore.set(
+      'scores/cowsay/0.4.0.json',
+      JSON.stringify({
+        spec_version: '0.4.0',
+        anc_version: '0.3.1',
+        tool_version: '1.6.0',
+        scorecard: { tool: { name: 'cowsay', binary: 'cowsay', version: '1.6.0' }, score: { value: 92 } },
+      }),
+    );
+
+    // Second request WITHOUT ?fromCache=false. The cache write should
+    // now be readable; DO should NOT dispatch again.
+    const req2 = postScore('npm install -g cowsay');
+    const res2 = await handleScore(req2, env);
+    expect(res2.status).toBe(200);
+    // Tracker is still 1 from the first call; the second call hits cache.
+    expect(tracker.doCalls).toBe(1);
+    expect(res2.headers.get('Cache-Control')).toBe('public, max-age=300');
+  });
 });

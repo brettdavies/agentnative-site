@@ -263,9 +263,33 @@ printf '\n=== staging-cache-smoke @ %s ===\n' "$STAGING_URL"
 printf '    SPEC_VERSION=%s  COLD=%s\n\n' "$SPEC_VERSION" "$COLD"
 
 # -----------------------------------------------------------------------------
+# Group Z — CF Access boundary (must run FIRST so a lifted Access app
+# surfaces here rather than silently letting the rest of the suite
+# "pass" via the service-token bypass)
+# -----------------------------------------------------------------------------
+#
+# Without the ACCESS_HEADERS, an unauth request to the staging Worker
+# must be intercepted by Cloudflare Access and redirected to the
+# account's *.cloudflareaccess.com login flow. If we instead see a 200
+# or a 4xx from the Worker, the Access app has been disabled or its
+# policies wiped, AND the rest of the suite would falsely "pass"
+# (because every other request carries the service-token headers).
+# This probe catches the boundary getting silently lifted.
+printf '[Z] CF Access boundary\n'
+ZUNAUTH_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$STAGING_URL/api/score?input=ripgrep")
+ZUNAUTH_LOC=$(curl -s -o /dev/null -w '%{redirect_url}' \
+  "$STAGING_URL/api/score?input=ripgrep")
+if [ "$ZUNAUTH_STATUS" = "302" ] && echo "$ZUNAUTH_LOC" | grep -q 'cloudflareaccess.com'; then
+  ok "Z01 unauth request → 302 to *.cloudflareaccess.com (boundary enforced)"
+else
+  ko "Z01 unauth boundary" "expected 302 to *.cloudflareaccess.com; got status=$ZUNAUTH_STATUS location=${ZUNAUTH_LOC:-<empty>}"
+fi
+
+# -----------------------------------------------------------------------------
 # Group A — input validation (warm; no sandbox)
 # -----------------------------------------------------------------------------
-printf '[A] input validation\n'
+printf '\n[A] input validation\n'
 expect_error_code "A01 empty input"            '{"input":"","turnstile_token":"x"}'                                         400 unrecognized_input
 expect_status_post "A02 malformed JSON body"   'not json'                                                                    400
 expect_error_code "A03 non-https URL"          '{"input":"http://github.com/foo/bar","turnstile_token":"x"}'                400 non_https_url
