@@ -1,19 +1,31 @@
 // /api/score request handler — orchestrates the live-scoring pipeline.
 //
-// Plan U5 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// "U5 Approach"):
+// Plan U5 + U7 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
+// "U5 Approach", "U7 Approach"):
 //
 //   1. Validate input (U4).
-//   2. Registry lookup (U4). Hit AND scorecard exists → return registry-hit
-//      envelope pointing at /score/<slug>. Unmetered (no kill-switch, no
-//      Turnstile, no rate-limit) per R6 (registry-theater path is unmetered).
-//   3. Kill switch (`scoring_disabled` in SCORE_KV) — 503 + Retry-After.
-//   4. Turnstile siteverify (POST only) — 400 turnstile_failed on miss.
-//   5. Rate limit on `<session-id>:<sha256(input)>` (SCORE_LIMITER) and a
+//   2. Unified scorecard lookup (U7). One call to lookupScorecard()
+//      collapses the registry-fast-path and the R2 cache fallback into
+//      a single tier-resolved decision. `curated` returns the
+//      registry-hit envelope pointing at /score/<slug>; `cached` returns
+//      the inline scorecard JSON; both bypass the metered gates
+//      (kill-switch, Turnstile, rate-limit, DO) per R6 — cached
+//      scorecards are functionally identical to curated ones (no
+//      sandbox cost). `miss` falls through to the live path.
+//   3. GET requests stop after step 2: GET is the paste-and-share /
+//      bookmark read-only contract. A miss returns 404 chain_no_resolve.
+//   4. Kill switch (`scoring_disabled` in SCORE_KV) — 503 + Retry-After.
+//   5. Turnstile siteverify (POST only) — 400 turnstile_failed on miss.
+//   6. Rate limit on `<session-id>:<sha256(input)>` (SCORE_LIMITER) and a
 //      coarse per-IP fallback (SCORE_LIMITER_IP). 429 with Retry-After.
-//   6. R2 cache lookup — U7 owns this; U5 stubs as always-miss.
-//   7. DO call — U6 owns this; U5 passes through the stub sandbox_stub_until_u6
-//      error envelope verbatim, mapped to 503 by statusForError().
+//   7. DO call — U6 owns the install + score flow. On success the DO
+//      writes to SCORE_CACHE itself (do.ts), so the next request for the
+//      same binary short-circuits at step 2's cache tier.
+//
+// `?fromCache=false` operator escape hatch: skips the R2 read tier (step
+// 2 cache fallback) but still consults the curated registry AND still
+// writes to the cache after a live run. Useful when "did the registry
+// version just update?" needs an authoritative re-score.
 //
 // GET / POST split:
 //   - GET  /api/score(.md|.json)?input=…  read-only. Registry-fast-path
@@ -30,8 +42,9 @@ import type { Container } from '@cloudflare/containers';
 import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
 import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
+import type { CacheEnv } from './cache';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
-import { type DiscoveryHintsIndex, lookupRegistry, type RegistryIndex } from './registry-lookup';
+import { type DiscoveryHintsIndex, lookupScorecard, type RegistryIndex } from './registry-lookup';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
@@ -49,7 +62,8 @@ const MAX_INSTANCES = 10;
 
 export type ScoreEnv = KillSwitchEnv &
   SessionEnv &
-  TurnstileEnv & {
+  TurnstileEnv &
+  CacheEnv & {
     ASSETS: Fetcher;
     SCORE: DurableObjectNamespace;
     SCORE_LIMITER: RateLimit;
@@ -155,24 +169,39 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     return shapeWithPreference(shapeScoreError(validationErrorFor(validated.error, rawInput)), preference);
   }
 
-  // 2. Registry-fast-path (unmetered).
-  const lookup = lookupRegistry(validated, registryIndex, hintsIndex);
-  if (lookup.kind === 'registry' && lookup.entry.scorecard_url && lookup.entry.anc_version) {
+  // 2. Unified scorecard lookup — registry tier first, then R2 cache
+  //    tier when the binary is cheaply derivable. Both hit kinds are
+  //    unmetered (R6 extended to cached scorecards).
+  //
+  //    `?fromCache=false` skips the R2 read tier so an operator can
+  //    force a fresh registry consult + live run. The cache WRITE
+  //    after the live run still fires (so the next request benefits).
+  const skipCache = url.searchParams.get('fromCache') === 'false';
+  const lookup = await lookupScorecard(validated, env, registryIndex, hintsIndex, {
+    specVersion: SPEC_VERSION,
+    skipCache,
+  });
+
+  if (lookup.kind === 'curated') {
     return shapeWithPreference(
       shapeScoreSuccess(
         {
           kind: 'registry_hit',
           tool: lookup.entry,
-          scorecard_url: lookup.entry.scorecard_url,
+          scorecard_url: lookup.scorecard_url,
         },
-        lookup.entry.anc_version,
+        lookup.anc_version,
         'cache-hit',
       ),
       preference,
     );
   }
 
-  // GET requests stop at registry-fast-path: read-only contract.
+  if (lookup.kind === 'cached') {
+    return shapeWithPreference(shapeScoreSuccess(lookup.scorecard, lookup.anc_version, 'cache-hit'), preference);
+  }
+
+  // GET requests stop after the read-only tiers: paste-and-share contract.
   if (method === 'GET') {
     return shapeWithPreference(shapeScoreError({ code: 'chain_no_resolve', cta_text: CTA_INSTALL_ANC }), preference);
   }
@@ -244,8 +273,9 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     }
   }
 
-  // 6. R2 cache — U7 lands the read+write. Stubbed as always-miss.
-  // 7. DO call — U6 ships the real install + score flow. The DO returns
+  // 7. DO call — U6 ships the install + score flow; U7 wires the
+  //    post-success cache write inside the DO itself (do.ts), so this
+  //    handler doesn't need a follow-up write step. The DO returns
   //   either `{scorecard, anc_version}` on success or `{error, details?}`
   //   on failure, mapped below into the typed ScoreError union.
   //

@@ -374,6 +374,32 @@ If a local build is impossible, set `image:` to a Dockerfile path (`./docker/san
 auto-skipped when the existing tag still matches). This is a fallback, not the primary path; the local-build-once flow
 above is what the deploy workflow assumes.
 
+#### R2 score-cache lifecycle (one-time setup per bucket)
+
+Plan U7 caches successful live scorecards under `scores/{binary}/{anc-version}.json` in the `SCORE_CACHE` R2 bucket
+(`anc-score-cache` prod, `anc-score-cache-staging` staging). A 7-day lifecycle rule reaps stale entries at the bucket
+level rather than per-write — keeping `Cache-Control: public, max-age=300` on every object so CDN edges don't over-cache
+while the R2 origin holds the long TTL.
+
+Configure once per bucket (the rule survives subsequent deploys; only re-run if the bucket is recreated):
+
+```bash
+bun x wrangler r2 bucket lifecycle add anc-score-cache --prefix scores/ --expiration-days 7
+bun x wrangler r2 bucket lifecycle add anc-score-cache-staging --prefix scores/ --expiration-days 7
+```
+
+The `--prefix scores/` scope means future writes under a different prefix in the same bucket are NOT subject to this
+TTL. If you add a new prefix (e.g., `audit-logs/`), set up a matching lifecycle rule for it deliberately rather than
+broadening this one. A `tests/wrangler-config.test.ts` assertion pins this section so a future drift surfaces in CI (the
+test scans this file for the literal `wrangler r2 bucket lifecycle add` commands).
+
+Verify the rule landed:
+
+```bash
+bun x wrangler r2 bucket lifecycle list anc-score-cache
+bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
+```
+
 ## CI
 
 Two workflows gate pull requests:

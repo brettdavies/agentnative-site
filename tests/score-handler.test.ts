@@ -61,6 +61,8 @@ const REGISTRY_INDEX = {
 
 const HINTS_INDEX = { by_owner_repo: {} };
 
+type CallTracker = { doCalls: number };
+
 type StubOverrides = Partial<{
   kvDisabled: boolean;
   turnstileSecret: string;
@@ -70,6 +72,14 @@ type StubOverrides = Partial<{
   doStatus: number;
   rateLimit: boolean;
   ipRateLimit: boolean;
+  // Plan U7: prefill SCORE_CACHE with these payloads (key → JSON-encoded body).
+  cacheContent: Record<string, unknown>;
+  // Plan U7: if true, the SCORE_CACHE.get stub throws — exercises the
+  // best-effort read-failure path in cache.get.
+  cacheThrows: boolean;
+  // Optional tracker so cache-tier tests can assert the DO was NOT
+  // dispatched. Mutated in place by the stub fetch.
+  tracker: CallTracker;
 }>;
 
 function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
@@ -89,11 +99,13 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
     },
   };
 
+  const tracker = overrides.tracker;
   // Type the stub's fetch via `Sandbox['fetch']` so any future Sandbox
   // class that loses or renames `fetch` (or changes its signature) is a
   // TypeScript compile error AND a runtime invocation error in this
   // file. Closes the drift class that PR #93 hit. See file header.
   const stubFetch: Sandbox['fetch'] = async (_req) => {
+    if (tracker) tracker.doCalls += 1;
     return new Response(JSON.stringify(doResponse), {
       status: doStatus,
       headers: { 'content-type': 'application/json' },
@@ -125,6 +137,34 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
   // restore on `env` for explicit teardown if a test wants it.
   void originalFetch;
 
+  const cacheStore = new Map<string, string>();
+  for (const [k, v] of Object.entries(overrides.cacheContent ?? {})) {
+    cacheStore.set(k, typeof v === 'string' ? v : JSON.stringify(v));
+  }
+  const cacheStub = {
+    async get(key: string) {
+      if (overrides.cacheThrows) throw new Error('r2_get_failed');
+      const raw = cacheStore.get(key);
+      if (raw === undefined) return null;
+      // Mirror R2's R2ObjectBody surface — `.json()` is the only method
+      // src/worker/score/cache.ts actually calls.
+      return {
+        async json() {
+          return JSON.parse(raw);
+        },
+        async text() {
+          return raw;
+        },
+      };
+    },
+    async put(key: string, value: unknown) {
+      cacheStore.set(key, typeof value === 'string' ? value : String(value));
+    },
+    async delete(key: string) {
+      cacheStore.delete(key);
+    },
+  };
+
   return {
     ASSETS: {
       async fetch(req: Request | string): Promise<Response> {
@@ -141,6 +181,7 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
     } as Fetcher,
     SCORE: stubDo as unknown as DurableObjectNamespace,
     SCORE_KV: stubKv as unknown as KVNamespace,
+    SCORE_CACHE: cacheStub as unknown as R2Bucket,
     SCORE_LIMITER: {
       async limit() {
         return { success: rateLimit };
@@ -442,5 +483,160 @@ describe('/api/score — content negotiation', () => {
     });
     const res = await handleScore(req, makeEnv());
     expect(res.headers.get('Content-Type')).toContain('text/markdown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2 cache tier (plan U7)
+// ---------------------------------------------------------------------------
+
+// The cache key uses SPEC_VERSION (build-time constant) as the
+// anc-version proxy. The constant currently reads 0.4.0 from
+// src/worker/spec-version.gen.ts; if it bumps, update the keys here.
+const CACHE_KEY_RIPGREP = 'scores/ripgrep/0.4.0.json';
+
+const CACHED_RIPGREP_PAYLOAD = {
+  spec_version: '0.4.0',
+  anc_version: '0.3.1',
+  tool_version: '15.1.0',
+  scorecard: { tool: { name: 'ripgrep', binary: 'ripgrep', version: '15.1.0' }, score: { value: 92 } },
+};
+
+describe('/api/score — R2 cache tier (plan U7)', () => {
+  test('install-command + R2 hit → 200 cached, DO never dispatched, gates bypassed', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD },
+      tracker,
+      // Hard-fail every metered gate. The cached hit must bypass all of
+      // them — proving the unmetered contract (R6 extended to cache).
+      turnstileResponse: { success: false },
+      rateLimit: false,
+      ipRateLimit: false,
+    });
+    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(0);
+    const body = (await res.json()) as {
+      scorecard: { tool: { name: string }; score: { value: number } };
+      anc_version: string;
+      spec_version: string;
+      checker_url: string;
+    };
+    expect(body.scorecard.tool.name).toBe('ripgrep');
+    expect(body.scorecard.score.value).toBe(92);
+    expect(body.anc_version).toBe('0.3.1');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+  });
+
+  test('install-command + R2 miss → live path runs (DO dispatched)', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: {},
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { scorecard: { tool: { name: string } } };
+    expect(body.scorecard.tool.name).toBe('ripgrep');
+  });
+
+  test('?fromCache=false bypasses R2 read, live path runs even with cache prefilled', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD },
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' }, score: { value: 50 } },
+        anc_version: '0.3.1',
+      },
+    });
+    const req = new Request('https://anc.dev/api/score?fromCache=false', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: 'cargo binstall ripgrep', turnstile_token: 'tok' }),
+    });
+    const res = await handleScore(req, env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { scorecard: { score: { value: number } } };
+    // The DO's scorecard (value: 50), not the cached one (value: 92).
+    expect(body.scorecard.score.value).toBe(50);
+  });
+
+  test('curated registry hit still wins over R2 cache (commit ordering)', async () => {
+    // If a curated entry AND a cached entry both exist for the same
+    // binary, the curated one must win because it points at a stable
+    // /score/<slug> page. Cached entries are launch-time live scores
+    // and should never override committed scorecards.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      // Pre-seed the cache under the slug's binary key. The registry
+      // already has ripgrep with scorecard_url + anc_version.
+      cacheContent: { 'scores/rg/0.4.0.json': CACHED_RIPGREP_PAYLOAD },
+      tracker,
+    });
+    const res = await handleScore(postScore('ripgrep'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(0);
+    const body = (await res.json()) as { scorecard: { kind?: string; scorecard_url?: string } };
+    expect(body.scorecard.kind).toBe('registry_hit');
+    expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
+  });
+
+  test('R2 read failure → treated as miss, live path runs', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheThrows: true,
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+  });
+
+  test('GET install-command with cached hit returns 200 (unmetered read-only tier)', async () => {
+    // GET ?input=<install-command> normally validates fine; the existing
+    // contract was "GET only hits the registry, otherwise 404". With U7
+    // the cache tier is also a read-only/unmetered tier, so a GET that
+    // matches a cached binary returns 200.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD },
+      tracker,
+    });
+    const res = await handleScore(getScore('cargo binstall ripgrep'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  test('GET install-command with cache miss returns 404 (read-only contract)', async () => {
+    const env = makeEnv({ cacheContent: {} });
+    const res = await handleScore(getScore('cargo binstall ripgrep'), env);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+  });
+
+  test('cached scorecard preserves R11 triad', async () => {
+    const env = makeEnv({ cacheContent: { [CACHE_KEY_RIPGREP]: CACHED_RIPGREP_PAYLOAD } });
+    const res = await handleScore(postScore('cargo binstall ripgrep'), env);
+    const body = (await res.json()) as {
+      spec_version: string;
+      anc_version: string;
+      checker_url: string;
+    };
+    expect(body.spec_version).toBeTruthy();
+    expect(body.anc_version).toBe('0.3.1');
+    expect(body.checker_url).toBeTruthy();
   });
 });
