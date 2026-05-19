@@ -1991,58 +1991,136 @@ brew-fallback, direct in flat + nested archive layouts, and the two intentional 
 
 ---
 
-- U7. **R2 cache (read on hit, write on miss)**
+- U7. **R2 cache (read on hit, write on miss) + unified scorecard lookup**
 
-**Goal:** R2 read on every cache-fast-path; R2 write on every successful sandbox round-trip. Key shape includes
-`anc_version` for auto-invalidation.
+**Goal:** R2 read on every cache-fast-path; R2 write on every successful sandbox round-trip. The registry-fast-path and
+the R2 cache merge into a single `lookupScorecard()` call that the handler invokes once. Both hit kinds (curated
+scorecard from `registry.yaml`, cached scorecard from R2) bypass Turnstile + rate-limit + DO spawn; only true misses
+reach those gates.
 
-**Requirements:** R5, R12 (repeat runs ~free).
+**Requirements:** R5, R6 (registry-theater unmetered — extended to cached scorecards), R12 (repeat runs ~free).
 
 **Dependencies:** U3 (R2 binding), U6 (DO produces scorecard).
 
 **Files:**
 
-- Create: `src/worker/score/cache.ts`
-- Modify: `src/worker/score/sandbox-exec.ts` (write-through after success — one-line addition)
-- Test: `tests/score-cache.test.ts`
+- Create: `src/worker/score/cache.ts` (R2 `get` + `put` wrapper).
+- Modify: `src/worker/score/registry-lookup.ts` → rename / extend the existing sync `lookupRegistry()` into an async
+  `lookupScorecard()` that consults registry first, then falls through to `cache.get()` when registry misses AND the
+  binary is cheaply known. Return shape becomes a tagged union covering both kinds (`curated` + `cached` + `miss`).
+- Modify: `src/worker/score/handler.ts` — replace the two-call dance (registry-fast-path at step 2, R2 cache check after
+  step 5) with one `lookupScorecard()` call before any metered gate fires. Curated hit → redirect to `/score/<slug>`;
+  cached hit → return the inline scorecard JSON with `Cache-Control` matching the cached freshness.
+- Modify: `src/worker/score/sandbox-exec.ts` — on successful score, write to R2 via `cache.put(...)` (best-effort,
+  one-line addition after the existing return).
+- Test: `tests/score-cache.test.ts` (cache `get` + `put` contract).
+- Test: extend `tests/score-handler.test.ts` to exercise the cached-hit branch (mocked R2 returns a scorecard, handler
+  returns it without dispatching to the DO).
 
 **Approach:**
 
-- `get(key)`: `await env.SCORE_CACHE.get(key, "json")`. Null → miss. Validate that the cached payload includes
-  `spec_version`, `anc_version`, `tool_version`; if any missing, treat as miss + log (corrupted cache entry, best-effort
-  delete).
-- `put(key, scorecard, ancVersion, toolVersion)`: refuse if `ancVersion` or `toolVersion` is missing (fail-fast — never
-  cache half-state). Store as JSON with `httpMetadata.contentType: application/json`, `cacheControl: "public,
-  max-age=86400, s-maxage=86400"`. Write is best-effort: failure logs but does not fail the user response.
-- Key: `scores/{tool-slug}/{anc-version}/{tool-version}.json` where `tool-version` is the version reported by the binary
-  after install (or a 7-char SHA for direct-binary downloads where there's no semver).
-- `?fromCache=false` query bypasses read but still writes (so the next request benefits).
+- **Unified lookup signature:**
+
+  ```ts
+  type ScorecardLookupResult =
+    | { kind: 'curated'; entry: RegistryEntry; scorecard_url: string; anc_version: string }
+    | { kind: 'cached'; scorecard: unknown; anc_version: string; tool_version: string }
+    | { kind: 'miss' };
+
+  async function lookupScorecard(
+    input: ValidatedInput,
+    env: ScoreEnv,
+    registryIndex: RegistryIndex,
+    hintsIndex: DiscoveryHintsIndex,
+  ): Promise<ScorecardLookupResult>;
+  ```
+
+  Resolution order:
+
+1. **Registry first** (cheapest, in-memory): if the input maps to a curated entry with `scorecard_url`, return
+     `curated`. Done.
+2. **R2 cache fallback** (when binary is cheaply known): derive the cache key from `input.spec.binary` (for
+     `install-command` inputs) OR from `hint.binary` (for `github-url` inputs that have a discovery hint). Call
+     `cache.get(key)`. Return `cached` on hit.
+3. **Miss** when neither layer has it. Includes the `github-url`-without-hint case — we can't derive a binary without
+     running discovery, and discovery is part of the live path. Future revisit may add a discovery-driven
+     read-after-resolve, but launch keeps the bar simple.
+
+  Both `curated` and `cached` results bypass the kill switch / Turnstile / rate-limit / session-cookie gates. They are
+  unmetered (consistent with R6). Only `miss` proceeds to the metered live path.
+
+- **Cache key shape (launch — version-agnostic, "option 1"):**
+
+  `scores/{binary}/{anc-version}.json`
+
+  Rationale: computing a `{tool-version}` segment requires installing the tool first, defeating the cache. Going
+  version-agnostic means a cached entry is served until either (a) `anc` bumps (the key path naturally changes) or
+  (b) the 7-day R2 lifecycle rule reaps the entry. Trade-off acknowledged: a user can see a cached scorecard scored
+  against an older upstream tool version until the entry ages out. Acceptable for launch; fine-tune in a follow-up
+  (`U7.1`) if telemetry shows stale-cache UX complaints.
+
+- **TTL: 7 days via R2 object expiration** (configured at the bucket level, not per-write). One-time `wrangler r2 bucket
+  lifecycle add` setup committed to RELEASES.md as part of the bucket-creation procedure. Per-write `cacheControl`
+  header stays at `public, max-age=300` so CDN edges don't over-cache; R2 lifecycle handles the long TTL.
+
+- **cache.ts surface:**
+
+- `get(env, key)`: `await env.SCORE_CACHE.get(key, "json")`. Null → miss. Validate the cached payload includes
+    `spec_version`, `anc_version`, `tool_version` AND a `scorecard` field; if any missing, treat as miss + log +
+    best-effort `delete` (corrupted entry).
+- `put(env, key, scorecard, ancVersion, toolVersion)`: refuse if `ancVersion` or `toolVersion` is missing (fail-fast —
+    never cache half-state). Store as JSON with `httpMetadata.contentType: application/json`. Write is best-effort:
+    failure logs but does not fail the user response.
+- `keyFor(binary, ancVersion)`: pure helper, returns `scores/{binary}/{ancVersion}.json`. Single source of truth for the
+    key shape so reads and writes can't drift.
+
+- **`?fromCache=false` query bypasses read but still writes** (so the next request benefits). Operator escape hatch for
+  "did the registry version just update?" scenarios.
+
 - Smart Tiered Cache enables sub-50 ms cache hits at the edge for R2 origins (auto-enabled since 2024-11-20); no
   explicit configuration needed.
 
 **Patterns to follow:**
 
 -
-
-[docs/solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md](../solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md)
-— anc-version in key for auto-invalidation; refuse to cache if version missing.
-
+  [docs/solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md](../solutions/best-practices/versioned-scorecard-filenames-and-non-github-registry-2026-04-20.md)
+  — `anc-version` in key for auto-invalidation; refuse to cache if version missing.
 - [docs/research/2026-04-28-cloudflare-live-scoring-v2.md](../research/2026-04-28-cloudflare-live-scoring-v2.md) §7 — R2
   caching strategy.
 
 **Test scenarios:**
 
-- **Happy path:** write then read → matches.
-- **Happy path:** read on miss → null.
-- **Edge case:** `anc-version` change → cache miss for old key (assert via stubbed env).
-- **Edge case:** corrupted cache entry (missing `anc_version` in payload) → treated as miss + log + best-effort delete.
-- **Error path:** R2 write fails (network) → DO logs but does not fail the request — user still gets a result.
-- **Error path:** `put` called with missing `ancVersion` → throws (caller bug).
-- **Integration:** full round-trip — first request misses cache, sandbox runs, writes; second identical request hits
-  cache, no sandbox spawn, sub-100 ms total.
+- **Happy path (cache write + read):** `cache.put(rg, 0.3.1, 14.1.0, scorecard)` then `cache.get(scores/rg/0.3.1.json)`
+  → returns the scorecard.
+- **Happy path (registry curated overrides cache):** registry has a curated entry for `ripgrep` AND R2 has a stale
+  cached entry; `lookupScorecard` returns the curated one (registry wins).
+- **Happy path (cached hit bypasses metered gates):** input → `install-command pm=cargo-binstall package=ripgrep
+  binary=rg`, R2 has `scores/rg/0.3.1.json`; handler returns 200 with the cached scorecard. Asserts: Turnstile fetcher
+  NOT called; rate-limiter NOT called; DO stub NOT called; response has `Cache-Control: public, max-age=300`.
+- **Happy path (cache miss flows to live path):** registry miss + R2 miss → handler proceeds through Turnstile +
+  rate-limit + DO call. On DO success, `cache.put` is invoked with the new scorecard.
+- **Edge case (anc-version bump):** R2 has `scores/rg/0.3.0.json`; the running Worker is on `anc_version 0.3.1`;
+  `lookupScorecard` derives key `scores/rg/0.3.1.json` and misses (old entry is still in R2 but unreachable; lifecycle
+  reaps it on schedule).
+- **Edge case (corrupted cache entry):** R2 returns JSON missing `anc_version`; treated as miss + log + best-effort
+  delete; live path runs.
+- **Edge case (github-url without hint):** `https://github.com/some/unknown` → no registry entry, no hint → no binary
+  derivable upfront → cache lookup skipped → flow proceeds to discovery + live install. After the live run, `cache.put`
+  writes under the derived binary key. A future request for the same URL still pays discovery, but the install + score
+  is short-circuited if the binary cache key matches.
+- **Edge case (`?fromCache=false`):** query param set → cache read skipped, live path runs, cache write still fires.
+- **Error path (R2 read fails):** treated as miss; live path runs; user still gets a result.
+- **Error path (R2 write fails):** DO logs but does not fail the request — user still gets the scorecard.
+- **Error path (`put` called with missing `ancVersion`):** throws (caller bug).
+- **Integration (full round-trip):** first request misses cache → sandbox runs → cache writes; second identical request
+  hits cache → no sandbox spawn → sub-100 ms total. Asserted via timing + DO call-count.
+- **Integration (TTL):** R2 lifecycle config is asserted in `tests/wrangler-config.test.ts` (or equivalent — pin the
+  7-day expiration so a future drift surfaces).
 
 **Verification:** Cache hits eliminate sandbox spawns for repeat queries. R2 write failures do not block user responses.
-Key shape includes `anc-version`. Refusal-to-cache-half-state is enforced.
+Key shape includes `anc-version`. Refusal-to-cache-half-state is enforced. Curated and cached lookups share a single
+code path in `handler.ts`. 7-day R2 lifecycle is documented in RELEASES.md and verified on the staging bucket before the
+first prod cut.
 
 ---
 
