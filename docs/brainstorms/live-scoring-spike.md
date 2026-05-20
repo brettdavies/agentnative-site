@@ -5,19 +5,22 @@ topic: live-scoring-spike
 
 # Live Scoring Spike: "Paste a Repo URL, Get a Score"
 
-> **Status (2026-04-28):** Superseded in part by
+> **Status (2026-05-20):** Superseded by
 > [docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md](../plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md).
-> This brainstorm captured the original design exploration (2026-04-17). The v2 plan absorbs it with these
-> material changes:
+> The plan absorbed this brainstorm's exploration (2026-04-17) and now drives all implementation decisions through
+> U1-U8, with U9 (tests + runbook + release procedure) and U10 (analytics + budget alerts) still to land. Material
+> shifts from this brainstorm to the plan:
 >
 > - SDK pin: `@cloudflare/sandbox@0.8.x` (was `@0.7.0`); runtime outbound handlers need 0.8.9+.
-> - Image base: stays glibc (Debian-slim) per launch-week constraints — supersedes Alpine+musl framing.
+> - Image base: stays glibc (Debian-slim) per launch-week constraints, superseding the Alpine+musl framing.
 > - GA: Containers + Sandboxes shipped GA 2026-04-13; "beta enabled" prerequisite removed.
 > - Cost line items updated for 2025-11-21 active-CPU billing.
 > - GPU passthrough references removed (no current Containers schema for it).
 > - Outbound Workers (2026-03-26) added as the security primitive for two-phase egress.
+> - Result-presentation K-decision landed on cache-key-derived share URLs at `/score/live/<binary>` rather than
+>   minted session ids.
 >
-> Read both this brainstorm and the v2 plan together; the plan is the authoritative current shape.
+> The plan is authoritative. This file is preserved as exploratory context, not as a current-state reference.
 
 ## Context
 

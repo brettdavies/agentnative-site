@@ -223,6 +223,110 @@ bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 Both buckets were configured on 2026-05-19. The `tests/wrangler-config.test.ts` drift-guard pins the exact literal
 command above.
 
+## Live-scoring (v3) release procedure
+
+The live-scoring stack adds a Worker route (`/api/score`), a `Sandbox` Durable Object, a Container image, two R2
+buckets, a KV namespace (`SCORE_KV`), and two rate-limit bindings to the static-site release. Static-site mechanics are
+unchanged.
+
+→ Rationale and platform constraints:
+[`ARCHITECTURE.md` § Sandbox image releases](./ARCHITECTURE.md#sandbox-image-releases) and
+[§ DO migrations are one-way walls](./ARCHITECTURE.md#do-migrations-are-one-way-walls).
+
+### Image rebuild path
+
+Image build and registry push happen inside the local `wrangler containers build -p` step (see § Sandbox image releases
+above). `wrangler deploy` does NOT rebuild. Pin format: `registry.cloudflare.com/<account-id>/anc-sandbox:<git-sha>`.
+Immutability is per-Worker-version via `wrangler rollback`, not via a `@sha256:` literal.
+
+### Migration v1: the rollback recipe
+
+`migrations[].new_sqlite_classes: ["Sandbox"]` (tag `v1`) is a one-way gate; rationale lives in
+[`ARCHITECTURE.md` § DO migrations are one-way walls](./ARCHITECTURE.md#do-migrations-are-one-way-walls). The only path
+past `v1` is a follow-up migration:
+
+```jsonc
+// wrangler.jsonc
+"migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["Sandbox"] },
+  { "tag": "v2-drop-sandbox", "deleted_classes": ["Sandbox"] }
+]
+```
+
+Apply via a normal `wrangler deploy` against a Worker version that no longer references the `Sandbox` DO binding. The
+`SCORE_CACHE` R2 bucket, `SCORE_KV`, and rate-limit counters are untouched by the migration.
+
+### Cross-migration rollback rehearsal
+
+Run on staging before opening the first `release/*` PR to main. The no-prod-until-U10 rule keeps this from blocking
+today's work; capture the deploy IDs in the evidence table below at the next staging soak window.
+
+```bash
+# 1. Confirm migration v1 is live on staging.
+bun x wrangler deployments list --env staging | head -20
+
+# 2. Verify /api/score works against a curated slug.
+curl -fSsL -H "Content-Type: application/json" \
+  -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+  -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+  -d '{"input":"ripgrep","turnstile_token":"x"}' \
+  https://agentnative-site-staging.brettdavies.workers.dev/api/score \
+  | jq '.scorecard.kind, .spec_version'
+
+# 3. Apply the follow-up migration on a throwaway branch.
+#    Edit wrangler.jsonc to add the v2-drop-sandbox migration AND
+#    remove the Sandbox DO binding under env.staging, then:
+bun x wrangler deploy --env staging
+
+# 4. Verify /api/score now bounces cleanly and non-sandbox routes still serve.
+curl -i https://agentnative-site-staging.brettdavies.workers.dev/api/score \
+  -H "Content-Type: application/json" -d '{}' | head -20
+curl -fSsL https://agentnative-site-staging.brettdavies.workers.dev/ | head -5
+curl -fSsL https://agentnative-site-staging.brettdavies.workers.dev/scorecards | head -5
+
+# 5. Restore the Sandbox DO with a NEW migration tag (cannot reuse v1).
+#    Edit wrangler.jsonc to add a v3-restore-sandbox migration with
+#    new_sqlite_classes: ["Sandbox"] and re-add the binding, then:
+bun x wrangler deploy --env staging
+
+# 6. Confirm /api/score works again (step 2 repeated).
+```
+
+Capture staging deploy IDs and DO instance counts at each step in the rehearsal-evidence block below.
+
+#### Rehearsal evidence
+
+| Step    | Date    | Staging deploy ID | DO instance count | Notes                                          |
+| ------- | ------- | ----------------- | ----------------- | ---------------------------------------------- |
+| pending | pending | pending           | pending           | Rehearsal scheduled before the first prod cut. |
+
+### Sandbox image promotion
+
+Standard staging-leads-prod soak (see § Sandbox image releases above). Two pins in `wrangler.jsonc`:
+`env.staging.containers[0].image` advances first; `containers[0].image` (top-level production pin) advances on the
+release PR. Lockstep-bump shortcut for low-risk image changes only. CI on a main-targeting PR enforces both pins exist
+in the CF managed registry AND both pins point at the same tag.
+
+### Post-deploy smoke
+
+`.github/workflows/deploy.yml` runs a smoke step against staging after every successful staging deploy. POSTs to
+`/api/score` for the `ripgrep` slug with the CF Access service-token headers and a Turnstile test token; asserts the
+response triad (`spec_version`, `site_spec_version`, `anc_version`, `checker_url`) plus `scorecard.kind ===
+"registry_hit"`. Fails the deploy on a missing field. No production smoke step runs until U10 promotes live scoring to
+anc.dev.
+
+→ Scope rationale (why the smoke covers only the registry-fast-path):
+[`ARCHITECTURE.md` § Post-deploy smoke scope](./ARCHITECTURE.md#post-deploy-smoke-scope).
+
+### Cost-watch hand-off
+
+Operator telemetry queries, error-tier breakdowns, cache hit-rate watchpoints, and the kill-switch flip procedure live
+in the live-scoring monitoring runbook:
+
+- TODO: `docs/runbooks/live-scoring-monitoring.md` (U9 deliverable 5, deferred to a follow-up session).
+
+Budget Alert thresholds, Analytics Engine query playbooks, and auto-kill cron logic are U10 scope.
+
 ## Staging access (Cloudflare Access)
 
 Staging Worker gated by CF Access. Browser: SSO/email-OTP at `https://agentnative-site-staging.brettdavies.workers.dev`

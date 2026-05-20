@@ -198,6 +198,19 @@ that boundary via `wrangler rollback` (per
 [Versions and deployments / Rollbacks](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/)).
 Treat DO-migration commits as milestone releases that get an explicit reviewer note.
 
+The only path past the wall is a follow-up migration with `deleted_classes: ["Sandbox"]` on a Worker version that no
+longer references the DO binding. The Cloudflare platform destroys the durable storage attached to the deleted class as
+part of applying the migration; this is a platform behaviour, not a project choice. The R2 score cache survives because
+it lives on a separate binding (`SCORE_CACHE`). The kill-switch flag (`SCORE_KV.scoring_disabled`) and rate-limit
+counters live on KV / rate-limit bindings and are also untouched. The only data loss is whatever the `Sandbox` DO's
+SQLite storage held at the moment the `deleted_classes` migration applies.
+
+Cross-migration recovery is therefore non-trivial: applying the rollback once destroys data, and re-introducing the
+`Sandbox` class later requires a fresh migration tag (`v3-restore-sandbox` or similar; `v1` cannot be reused). The
+rehearsal exists to prove the sequence works on staging before any prod cut depends on it, and to make the data-loss
+cost concrete (the evidence table in `RELEASES.md` records DO instance counts at each step). Skipping the rehearsal is
+what makes the first prod incident unrecoverable in practice.
+
 ### GHA fallback
 
 If a local build is impossible, set `image:` to a Dockerfile path (`./docker/sandbox/Dockerfile`) and let
@@ -217,6 +230,26 @@ TTL so future writes under a different prefix in the same bucket are NOT affecte
 
 The `tests/wrangler-config.test.ts` drift-guard scans the RELEASES.md section for the exact literal command so a future
 regression on the syntax surfaces in CI.
+
+### Post-deploy smoke scope
+
+The CI smoke step after staging deploys (`/api/score` with the `ripgrep` slug, asserting the response triad and
+`registry_hit`) deliberately covers the registry-fast-path only. The motivation is two-sided.
+
+First, the registry-fast-path is the surface every other branch of the pipeline depends on: if the curated
+`/api/score?input=ripgrep` doesn't return `{ scorecard, spec_version, site_spec_version, anc_version, checker_url }`, no
+downstream tier works either. Failing the deploy on this surface catches the broadest class of regressions in the
+shortest run time.
+
+Second, the alternative branches each carry a cost the smoke step shouldn't pay on every deploy. Live-sandbox dispatch
+spins a Container instance and pulls from package registries; doing it on every staging deploy multiplies billable
+egress and surfaces ecosystem-dependency flakes as red builds. Gate behaviour (Turnstile bouncing, rate-limit
+exhaustion) is a contract assertion that lives in unit tests, where it can be exercised deterministically without
+external infrastructure. The opt-in `homepage-score-live` e2e suite covers the live round-trip on a manual / nightly
+cadence where the cost and the latency are acceptable.
+
+The smoke is therefore a high-leverage tripwire, not a full pipeline test. When it fails, the deploy is wrong; when it
+passes, the deploy is at least serving the response triad to a curated input — not a proof that the live path works.
 
 ## CI workflow split
 

@@ -1,7 +1,8 @@
 # agentnative-site
 
 Source for the agent-native CLI standard website. Presents the 7 principles for building CLI tools that AI agents can
-operate as first-class users.
+operate as first-class users. The site also hosts curated tool scorecards at `/score/<tool>` and a live-scoring form at
+`/score` that returns shareable results at `/score/live/<binary>`.
 
 ## Development
 
