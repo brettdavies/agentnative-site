@@ -330,4 +330,20 @@ Out of scope for this runbook; named here so the operator knows where the gap is
   the staging Worker).
 - Authenticated GitHub PAT for discovery, if chronic unauth-quota exhaustion has materialised by then.
 
+### Agent-deterministic checks (U10 design choice)
+
+Today every entry above resolves to `wrangler ...`, a dashboard click, or a log eyeball; none of those return parseable
+status to an agent. Two candidate paths to choose between when U10 starts, captured here so the design conversation
+begins with both on the table:
+
+- **JSON wrapper scripts** in `scripts/monitoring/` that emit `{status, evidence}` per check (kill-switch state, R2
+  cache health, recent deploys, error-tier sample). Pattern matches `scripts/smoke-api-score.sh`. Callable by operators,
+  CI, and agents via Bash. Workers Analytics Engine integration optional.
+- **Cloudflare Workers Observability MCP** queries (e.g.,
+  `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability`) documented inline next to each manual
+  check. Agent-only (operators stay on `wrangler`). No new code surface; pure docs expansion.
+
+Both together is viable. The trade-off (single shell surface vs. two parallel agent surfaces; CI reach vs. agent
+immediacy) is the choice to make at U10 kickoff.
+
 Until U10 lands, the runbook above is the operator's only playbook.
