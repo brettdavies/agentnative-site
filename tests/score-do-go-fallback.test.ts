@@ -1,13 +1,17 @@
-// Go discovery-fallback tests for resolveSpec() in do.ts.
+// Go discovery-fallback tests for resolveSpec() in resolve-spec.ts.
 //
 // `go install <module>@latest` would compile from source on the sandbox,
 // violating U2's binary-only premise. resolveSpec redirects through the
 // discovery chain: a module path of the form `github.com/<owner>/<repo>`
 // runs through discoverBinary so a GitHub Releases asset substitutes
 // for the compile. Non-github modules bounce as go_no_binary.
+//
+// 2026-05-20 move: pre-move this lived in do.ts and was invoked at the
+// DO boundary. Resolution now happens at the Worker tier; the function
+// signature is unchanged, only the file location moved.
 
 import { describe, expect, test } from 'bun:test';
-import { resolveGoFallback } from '../src/worker/score/do';
+import { resolveGoFallback } from '../src/worker/score/resolve-spec';
 
 type FetchHandler = (url: string) => Response | Promise<Response>;
 

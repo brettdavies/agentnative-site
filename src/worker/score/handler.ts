@@ -1,7 +1,6 @@
 // /api/score request handler — orchestrates the live-scoring pipeline.
 //
-// Plan U5 + U7 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// "U5 Approach", "U7 Approach"):
+// Pipeline (post 2026-05-20 discovery-move):
 //
 //   1. Validate input (U4).
 //   2. Unified scorecard lookup (U7). One call to lookupScorecard()
@@ -14,13 +13,27 @@
 //      sandbox cost). `miss` falls through to the live path.
 //   3. GET requests stop after step 2: GET is the paste-and-share /
 //      bookmark read-only contract. A miss returns 404 chain_no_resolve.
-//   4. Kill switch (`scoring_disabled` in SCORE_KV) — 503 + Retry-After.
-//   5. Turnstile siteverify (POST only) — 400 turnstile_failed on miss.
-//   6. Rate limit on `<session-id>:<sha256(input)>` (SCORE_LIMITER) and a
+//   4. GitHub accessibility pre-check (POST + github-url + no branch +
+//      no hint) — fast-fail private/inaccessible repos as
+//      github_repo_not_accessible before the discovery fan-out.
+//   5. Resolve InstallSpec (resolve-spec.ts; moved here from the DO on
+//      2026-05-20). The Worker now runs the discovery chain + brew/go
+//      fallbacks. A `chain_no_resolve` / `install_unsupported` /
+//      `invalid_url_path` result bounces HERE — no DO dispatch, no
+//      compute billed, no kill-switch / Turnstile / rate-limit budget
+//      burned on a request that produces no spec to score. The bounces
+//      land BEFORE the metered gates intentionally: the DO never runs
+//      on these paths so there's nothing for the gates to protect.
+//   6. Kill switch (`scoring_disabled` in SCORE_KV) — 503 + Retry-After.
+//   7. Turnstile siteverify (POST only) — 400 turnstile_failed on miss.
+//   8. Rate limit on `<session-id>:<sha256(input)>` (SCORE_LIMITER) and a
 //      coarse per-IP fallback (SCORE_LIMITER_IP). 429 with Retry-After.
-//   7. DO call — U6 owns the install + score flow. On success the DO
-//      writes to SCORE_CACHE itself (do.ts), so the next request for the
-//      same binary short-circuits at step 2's cache tier.
+//   9. DO call with the RESOLVED InstallSpec ({spec, hash} body).
+//      Pre-2026-05-20 the DO received `{input, hash}` and did its own
+//      discovery; the move drops a duplicate `loadHintsIndex` and lets
+//      no-resolve requests skip the container entirely. On success the
+//      DO writes to SCORE_CACHE itself (do.ts), so the next request
+//      for the same binary short-circuits at step 2's cache tier.
 //
 // `?fromCache=false` operator escape hatch: skips the R2 read tier (step
 // 2 cache fallback) but still consults the curated registry AND still
@@ -52,6 +65,7 @@ import {
   lookupScorecard,
   type RegistryIndex,
 } from './registry-lookup';
+import { resolveSpec } from './resolve-spec';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
@@ -234,12 +248,79 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     return shapeWithPreference(shapeScoreError({ code: 'chain_no_resolve', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
-  // 3. Kill switch (operator flip).
+  // 3. GitHub accessibility pre-check. For github-url inputs without a
+  //    hint and without an explicit branch, probe github.com directly
+  //    with a HEAD before paying the discovery fan-out (and any
+  //    downstream DO cold-start cost). A 404 from github means the repo
+  //    is private, deleted, or never existed — discovery can't resolve
+  //    a binary regardless. Fast-fail with `github_repo_not_accessible`
+  //    so the user sees an honest "we can't see that repo" panel rather
+  //    than a generic `chain_no_resolve` after several upstream-API
+  //    round-trips.
+  //
+  //    The probe runs BEFORE the metered gates intentionally: a private
+  //    repo never produces a scorecard, so kill-switch / Turnstile /
+  //    rate-limit budget would be wasted bouncing it. Same rationale
+  //    applies to the resolveSpec step below — both are pre-gate cost
+  //    avoidance.
+  //
+  //    Skip conditions (each is an information-preserving short-circuit):
+  //      - non-github-url input (slug / install-command — no repo to probe)
+  //      - github-url with explicit branch (the live path clones anyway;
+  //        HEAD on the repo root tells us nothing about the branch
+  //        existing)
+  //      - github-url that resolved to a hint (we already know the
+  //        install path; a transient github 404 here shouldn't break a
+  //        repo we've explicitly curated install metadata for)
+  //
+  //    Fail-OPEN on anything other than a clean 404: 5xx, network
+  //    timeout, abort all fall through to discovery so a github outage
+  //    doesn't silently break scoring. The accessibility module's
+  //    in-isolate cache absorbs repeated probes for the same repo.
+  if (validated.kind === 'github-url' && !validated.branch) {
+    const registryHit = lookupRegistry(validated, registryIndex, hintsIndex);
+    if (registryHit.kind !== 'hint') {
+      const accessibility = await checkGithubAccessibility(validated.owner, validated.repo);
+      if (accessibility.state === 'not_accessible') {
+        return shapeWithPreference(
+          shapeScoreError({
+            code: 'github_repo_not_accessible',
+            cta_text: CTA_INSTALL_ANC,
+          }),
+          preference,
+        );
+      }
+    }
+  }
+
+  // 4. Resolve InstallSpec. Pre-2026-05-20 this happened inside the DO;
+  //    moving it here means a `chain_no_resolve` paste (e.g.
+  //    brettdavies/dotfiles) bounces at the Worker tier in ~200 ms
+  //    instead of spinning up a container to discover the same fact.
+  //    The brew/go fallbacks live here too — they share the discovery
+  //    chain's fetcher, so a single `globalThis.fetch` covers every
+  //    outbound call this step makes (tests inject via globalThis.fetch
+  //    on the request boundary; production runs on Cloudflare's fetch).
+  //
+  //    Failure here exits the pipeline BEFORE kill-switch / Turnstile /
+  //    rate-limit. The reasoning is symmetric with the accessibility
+  //    check above: a no-resolve request never reaches a sandbox, so
+  //    the metered gates have nothing to protect. Burning rate-limit
+  //    budget on a no-resolve would also feel hostile (the user pasted
+  //    a repo we can't score — punishing them with a 429 if they retry
+  //    a different paste would surface badly).
+  const resolution = await resolveSpec(validated, hintsIndex);
+  if (!resolution.ok) {
+    return shapeWithPreference(resolutionErrorToResponse(resolution.error, resolution.details), preference);
+  }
+  const spec = resolution.spec;
+
+  // 5. Kill switch (operator flip).
   if (await isScoringDisabled(env)) {
     return shapeWithPreference(shapeScoreError({ code: 'scoring_disabled', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
-  // 4. Turnstile siteverify. Misconfigured env (no secret) is a fail-fast
+  // 6. Turnstile siteverify. Misconfigured env (no secret) is a fail-fast
   // 500 — the route MUST NOT accept POST traffic with the bot-defense
   // layer disabled.
   let verifyResult: Awaited<ReturnType<typeof verifyTurnstile>>;
@@ -258,7 +339,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     return shapeWithPreference(shapeScoreError({ code: 'turnstile_failed', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
-  // 5. Session cookie + rate limit. Fresh session is minted on first
+  // 7. Session cookie + rate limit. Fresh session is minted on first
   //   passing-Turnstile request; subsequent requests reuse it via cookie.
   let session: { sid: string } | null;
   let setCookie: string | null = null;
@@ -301,49 +382,15 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     }
   }
 
-  // 6. GitHub accessibility pre-check. For github-url inputs without a
-  //    hint and without an explicit branch, probe github.com directly
-  //    with a HEAD before paying the DO cold-start cost. A 404 from
-  //    github means the repo is private, deleted, or never existed —
-  //    the sandbox cannot resolve a binary regardless. Fast-fail with
-  //    `github_repo_not_accessible` so the user sees an honest "we
-  //    can't see that repo" panel rather than a generic
-  //    `chain_no_resolve` after a multi-second spin-up.
-  //
-  //    Skip conditions (each preserves the DO's existing behavior):
-  //      - non-github-url input (slug / install-command — no repo to probe)
-  //      - github-url with explicit branch (DO clones anyway; HEAD on
-  //        the repo root tells us nothing about the branch existing)
-  //      - github-url that resolved to a hint (we already know the
-  //        install path; a transient github 404 here shouldn't break a
-  //        repo we've explicitly curated install metadata for)
-  //
-  //    Fail-OPEN on anything other than a clean 404: 5xx, network
-  //    timeout, abort all fall through to the DO so a github outage
-  //    doesn't silently break scoring. The accessibility module's
-  //    in-isolate cache absorbs repeated probes for the same repo.
-  if (validated.kind === 'github-url' && !validated.branch) {
-    const registryHit = lookupRegistry(validated, registryIndex, hintsIndex);
-    if (registryHit.kind !== 'hint') {
-      const accessibility = await checkGithubAccessibility(validated.owner, validated.repo);
-      if (accessibility.state === 'not_accessible') {
-        return shapeWithPreference(
-          shapeScoreError({
-            code: 'github_repo_not_accessible',
-            cta_text: CTA_INSTALL_ANC,
-          }),
-          preference,
-          { setCookie },
-        );
-      }
-    }
-  }
-
-  // 7. DO call — U6 ships the install + score flow; U7 wires the
-  //    post-success cache write inside the DO itself (do.ts), so this
-  //    handler doesn't need a follow-up write step. The DO returns
-  //   either `{scorecard, anc_version}` on success or `{error, details?}`
-  //   on failure, mapped below into the typed ScoreError union.
+  // 8. DO call — the DO now receives a resolved InstallSpec rather than
+  //    a raw ValidatedInput. The contract narrowed in the 2026-05-20
+  //    discovery-move; do.ts no longer fans out to the discovery chain
+  //    or runs brew/go fallbacks (those happen at step 4 above). The DO
+  //    returns either `{scorecard, anc_version}` on success or
+  //    `{error, details?}` on failure, mapped below into the typed
+  //    ScoreError union. The DO still writes successful scorecards to
+  //    SCORE_CACHE itself (U7), so the next request for the same binary
+  //    short-circuits at step 2's cache tier.
   //
   // Pool of MAX_INSTANCES DO instances via getRandom (plan U6
   // K-decision). Each request picks a random instance — parallel load
@@ -364,7 +411,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   const doRes = await stub.fetch(
     new Request('https://do.internal/score', {
       method: 'POST',
-      body: JSON.stringify({ input: validated, hash: inputHash }),
+      body: JSON.stringify({ spec, hash: inputHash }),
       headers: { 'content-type': 'application/json' },
     }),
   );
@@ -561,6 +608,41 @@ function isDoError(payload: unknown): payload is { error: string; details?: stri
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return typeof obj.error === 'string';
+}
+
+// Translate a `resolveSpec()` failure into a shaped ScoreError response.
+// Worker-side resolution can fail in three ways: no spec discoverable
+// (chain_no_resolve), an unsupported PM after fallback (install_unsupported
+// pm=brew_only / pm=go_no_binary), or a branch-shape that bypassed
+// validate.ts somehow (invalid_url_path — defense in depth). The pm
+// extraction here mirrors mapDoError() so the user-facing error envelope
+// shape is identical regardless of which tier produced the bounce.
+function resolutionErrorToResponse(
+  error: 'chain_no_resolve' | 'install_unsupported' | 'invalid_url_path',
+  details?: string,
+): Response {
+  if (error === 'chain_no_resolve') {
+    return shapeScoreError({ code: 'chain_no_resolve', cta_text: CTA_INSTALL_ANC });
+  }
+  if (error === 'invalid_url_path') {
+    return shapeScoreError({
+      code: 'invalid_url_path',
+      cta_text: 'Paste the repo root URL (e.g. https://github.com/owner/repo), not a branch or release link.',
+    });
+  }
+  // install_unsupported — extract pm from `details` (e.g. `pm=brew_only`).
+  // Worker-side resolveSpec only emits brew_only and go_no_binary today;
+  // any other pm collapses to a generic chain_resolved_install_failed so
+  // the user-facing envelope doesn't claim a pm we can't classify.
+  const pm = details?.match(/^pm=(\w+)/)?.[1];
+  if (pm === 'brew_only' || pm === 'brew' || pm === 'bun' || pm === 'go_no_binary') {
+    return shapeScoreError({ code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC });
+  }
+  return shapeScoreError({
+    code: 'chain_resolved_install_failed',
+    details: details ?? '',
+    cta_text: CTA_INSTALL_ANC,
+  });
 }
 
 function mapDoError(payload: { error: string; details?: string }): Response {

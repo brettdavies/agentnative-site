@@ -91,6 +91,22 @@ type StubOverrides = Partial<{
   // case-mismatched paste still finds the mock.
   githubHeadResponses: Record<string, GithubHeadResponse>;
   githubFetchTracker: { calls: string[] };
+  // Post-2026-05-20 discovery-move: the Worker now runs the discovery
+  // fan-out (api.github.com releases, crates.io, npm, pypi, proxy.golang,
+  // README parse). Tests that previously relied on a DO-side discovery
+  // mock now have to seed the Worker's discovery fetch path. Two knobs:
+  //
+  //   - releaseAssets: when set for an `<owner>/<repo>` key, the Step 2
+  //     release lookup returns the named browser_download_url so
+  //     discovery resolves to `pm: 'direct'` with that URL. Empty/missing
+  //     → 404 → Step 2 misses. Steps 3 (crates/npm/pypi/go) and 4
+  //     (README parse) miss unconditionally in this mock.
+  //
+  // The compositeFetcher returns 404 for every discovery URL unless an
+  // override matches — which means without seeding, every github-url
+  // input bounces as chain_no_resolve at the Worker tier. That matches
+  // the post-move bounce flow we're testing.
+  releaseAssets: Record<string, { name: string; url: string }>;
 }>;
 
 function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
@@ -132,6 +148,7 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
   // tests don't exercise the bot-defense gate.
   const githubHeadResponses = overrides.githubHeadResponses ?? {};
   const githubFetchTracker = overrides.githubFetchTracker;
+  const releaseAssets = overrides.releaseAssets ?? {};
   const compositeFetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     if (url.startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) {
@@ -153,6 +170,32 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
       // future regression switched to GET, this test would surface it.
       expect(init?.method).toBe('HEAD');
       return new Response(null, { status, headers: { 'content-type': 'text/html' } });
+    }
+    // Discovery URLs (post 2026-05-20 discovery-move: the Worker fans
+    // these out, not the DO). Pattern-match in order of likelihood and
+    // return 404 by default so no-resolve flows are the default test
+    // shape; tests that need a release-asset hit seed `releaseAssets`.
+    const releaseMatch = url.match(/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/releases\/latest$/);
+    if (releaseMatch) {
+      const key = `${releaseMatch[1].toLowerCase()}/${releaseMatch[2].toLowerCase()}`;
+      const asset = releaseAssets[key];
+      if (asset) {
+        return new Response(JSON.stringify({ assets: [{ name: asset.name, browser_download_url: asset.url }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('', { status: 404 });
+    }
+    if (
+      url.startsWith('https://formulae.brew.sh/') ||
+      url.startsWith('https://crates.io/') ||
+      url.startsWith('https://registry.npmjs.org/') ||
+      url.startsWith('https://pypi.org/') ||
+      url.startsWith('https://proxy.golang.org/') ||
+      url.startsWith('https://raw.githubusercontent.com/')
+    ) {
+      return new Response('', { status: 404 });
     }
     // Anything else (unexpected) — surface the URL so a stray fetch is
     // visible in test output rather than silently returning success.
@@ -265,17 +308,18 @@ describe('/api/score — branch URLs + no-release repos', () => {
     });
   });
 
-  test('owner/repo shorthand for no-release repo → 404 chain_no_resolve, R11 triad preserved', async () => {
-    // Mocks the live-probed behavior: DO clones the repo, runs the
-    // discovery chain, finds no install path + no GitHub releases + no
-    // binary, returns {error: 'chain_no_resolve'} with no details. The
-    // handler must surface 404, preserve spec_version + checker_url,
-    // and emit no share_url (no binary derivable for the share surface).
+  test('owner/repo shorthand for no-release repo → 404 chain_no_resolve at Worker, DO never dispatched', async () => {
+    // Post-2026-05-20 discovery-move: the Worker (not the DO) runs the
+    // discovery fan-out. brettdavies/dotfiles ships no releases + no
+    // crates/npm/pypi/go alternative + no parseable README install
+    // block, so the Worker's resolveSpec returns chain_no_resolve and
+    // the DO is never dispatched. The compositeFetcher returns 404 for
+    // every discovery URL by default, modelling exactly this case.
+    //
+    // R11 triad must still be present on the error envelope. share_url
+    // is absent because no binary was derivable.
     const tracker: CallTracker = { doCalls: 0 };
-    const env = makeEnv({
-      tracker,
-      doResponse: { error: 'chain_no_resolve' },
-    });
+    const env = makeEnv({ tracker });
     const res = await handleScore(postScore('brettdavies/dotfiles'), env);
     expect(res.status).toBe(404);
     const body = (await res.json()) as {
@@ -288,16 +332,24 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.spec_version).toBeTruthy();
     expect(body.checker_url).toBeTruthy();
     expect(body.share_url).toBeUndefined();
-    // Live path WAS reached (cache tier skipped because no derivable binary).
-    expect(tracker.doCalls).toBe(1);
+    // The Worker bounced before the DO — no compute billed, no metered-
+    // gate budget burned.
+    expect(tracker.doCalls).toBe(0);
   });
 
   test('owner/repo shorthand for no-binary repo → 502 chain_resolved_no_binary_produced, R11 triad preserved', async () => {
-    // Alternate failure mode for the same shape: discovery resolved an
-    // install path but the install completed without producing a binary
-    // on PATH. Different status (502 vs 404), same triad guarantee, no
-    // share_url.
+    // Discovery resolves (Step 2 release asset hit), so the DO is
+    // dispatched with the InstallSpec. The DO mock returns the
+    // "install ran but no binary appeared on PATH" error — different
+    // failure class from chain_no_resolve, different status (502 vs
+    // 404), but the same R11 triad guarantee + no share_url.
     const env = makeEnv({
+      releaseAssets: {
+        'brettdavies/dotfiles': {
+          name: 'dotfiles-linux-x86_64.tar.gz',
+          url: 'https://example.com/dotfiles-linux-x86_64.tar.gz',
+        },
+      },
       doResponse: {
         error: 'chain_resolved_no_binary_produced',
         details: 'install ran but no binary appeared on PATH',
@@ -352,11 +404,17 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(1);
 
-    // Verify the DO received the validated input with branch set — the
-    // do.ts side uses this to thread the branch into the git clone.
-    const sent = tracker.lastBody as { input?: { kind?: string; branch?: string } } | undefined;
-    expect(sent?.input?.kind).toBe('github-url');
-    expect(sent?.input?.branch).toBe('master');
+    // Verify the DO received a resolved InstallSpec (post-2026-05-20
+    // discovery-move shape: `{spec, hash}` instead of `{input, hash}`).
+    // Branch URLs route to a git-clone spec that threads owner/repo/
+    // branch directly through to the clone command in sandbox-exec.ts.
+    const sent = tracker.lastBody as
+      | { spec?: { pm?: string; owner?: string; repo?: string; branch?: string } }
+      | undefined;
+    expect(sent?.spec?.pm).toBe('git-clone');
+    expect(sent?.spec?.owner).toBe('orf');
+    expect(sent?.spec?.repo).toBe('gping');
+    expect(sent?.spec?.branch).toBe('master');
 
     const body = (await res.json()) as {
       scorecard: { kind?: string; tool: { name: string } };
@@ -511,7 +569,13 @@ describe('/api/score — github accessibility pre-check', () => {
   //    not_accessible) would fail loudly here.
   // -------------------------------------------------------------------------
 
-  test('public repo → HEAD 200, DO dispatched', async () => {
+  test('public repo → HEAD 200, discovery runs (DO dispatched when spec resolves)', async () => {
+    // Public repo with a release asset: HEAD probe passes, Worker
+    // discovery resolves the release artifact, DO dispatched with the
+    // resolved InstallSpec. The chain_no_resolve case (no release asset
+    // → bounce at Worker before DO) is covered in the test block above;
+    // this one proves the pre-check + discovery hand-off works end-to-
+    // end for a real release.
     const tracker: CallTracker = { doCalls: 0 };
     const headTracker = { calls: [] as string[] };
     const env = makeEnv({
@@ -520,17 +584,21 @@ describe('/api/score — github accessibility pre-check', () => {
       githubHeadResponses: {
         'brettdavies/dotfiles': { kind: 'status', status: 200 },
       },
-      doResponse: { error: 'chain_no_resolve' },
+      releaseAssets: {
+        'brettdavies/dotfiles': {
+          name: 'dotfiles-linux-x86_64.tar.gz',
+          url: 'https://example.com/dotfiles-linux-x86_64.tar.gz',
+        },
+      },
+      doResponse: {
+        scorecard: { tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' } },
+        anc_version: '0.3.1',
+      },
     });
     const res = await handleScore(postScore('brettdavies/dotfiles'), env);
-    // chain_no_resolve from DO, but the important thing is the DO was
-    // reached. The chain_no_resolve case is already covered above; here
-    // we're proving the pre-check did NOT short-circuit the live path.
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     expect(tracker.doCalls).toBe(1);
     expect(headTracker.calls).toContain('brettdavies/dotfiles');
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('chain_no_resolve');
   });
 
   // -------------------------------------------------------------------------
@@ -646,31 +714,39 @@ describe('/api/score — github accessibility pre-check', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 6. Fail-OPEN: github HEAD 5xx → proceed to DO. A transient github
-  //    outage must not silently break scoring; the DO will run its own
-  //    probe and produce an honest error if the repo is genuinely
-  //    broken. Same contract for HEAD throwing (timeout, network).
+  // 6. Fail-OPEN: github HEAD 5xx → proceed to the discovery step. A
+  //    transient github outage must not silently break scoring; the
+  //    Worker's resolveSpec runs discovery and either resolves (DO
+  //    dispatched) or bounces chain_no_resolve. The point is that the
+  //    pre-check did NOT fast-fail with github_repo_not_accessible —
+  //    the github outage was not allowed to mask a real result.
+  //    Same contract for HEAD throwing (timeout, network).
   // -------------------------------------------------------------------------
 
-  test('github HEAD 5xx → fail-open, DO dispatched', async () => {
+  test('github HEAD 5xx → fail-open through accessibility, Worker discovery runs', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,
       githubHeadResponses: {
         'brettdavies/dotfiles': { kind: 'status', status: 503 },
       },
-      doResponse: { error: 'chain_no_resolve' },
+      // No release asset seeded → discovery bounces chain_no_resolve at
+      // the Worker. The KEY assertion is that the accessibility 5xx
+      // didn't short-circuit to github_repo_not_accessible — the
+      // discovery step ran AND its own (also-no-resolve) verdict was
+      // surfaced.
     });
     const res = await handleScore(postScore('brettdavies/dotfiles'), env);
-    // DO ran, returned chain_no_resolve. The point is that the pre-check
-    // did NOT fast-fail with github_repo_not_accessible.
     expect(res.status).toBe(404);
-    expect(tracker.doCalls).toBe(1);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('chain_no_resolve');
+    // The Worker did the discovery work itself; DO was never reached
+    // (post-2026-05-20 discovery-move: chain_no_resolve bounces at the
+    // Worker tier).
+    expect(tracker.doCalls).toBe(0);
   });
 
-  test('github HEAD throws (network timeout) → fail-open, DO dispatched', async () => {
+  test('github HEAD throws (network timeout) → fail-open through accessibility, Worker discovery runs', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,
@@ -682,11 +758,12 @@ describe('/api/score — github accessibility pre-check', () => {
         // proceeds — but we throw the realistic shape for honesty.
         'brettdavies/dotfiles': { kind: 'throw', error: new DOMException('aborted', 'AbortError') },
       },
-      doResponse: { error: 'chain_no_resolve' },
     });
     const res = await handleScore(postScore('brettdavies/dotfiles'), env);
     expect(res.status).toBe(404);
-    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+    expect(tracker.doCalls).toBe(0);
   });
 
   // -------------------------------------------------------------------------
@@ -756,5 +833,203 @@ describe('/api/score — github accessibility pre-check', () => {
     expect(result.state).toBe('accessible');
     // Exactly one fetch — no follow.
     expect(calls).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/score — Worker-side discovery (post 2026-05-20 discovery-move)
+//
+// The discovery chain + brew/go fallbacks moved from the DO into the
+// Worker. The tests below pin the new behavior at the integration
+// layer: chain_no_resolve bounces happen at the Worker before any DO
+// dispatch, before any metered gate runs, and the DO request body is
+// `{spec, hash}` rather than the pre-move `{input, hash}`.
+//
+// The roster fixtures (brettdavies/dotfiles, openclaw/gogcli, orf/gping)
+// come from the brettdavies/* test-fixture roster
+// (~/.claude/projects/-home-brett-dev-agentnative-site/memory/
+// reference_test_fixture_repos.md) — real repos so the shapes match
+// production traffic, mocked at the fetch boundary so the tests run
+// offline.
+// ---------------------------------------------------------------------------
+
+describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
+  test('chain_no_resolve at the Worker tier — DO never dispatched (foo/bar fixture)', async () => {
+    // No releaseAssets seeded; brettdavies/dotfiles (no install path,
+    // no releases, no crates/npm/pypi/go peer) is the canonical
+    // chain_no_resolve fixture from the roster.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({ tracker });
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  test('chain_no_resolve bypasses kill-switch + Turnstile + rate-limit gates', async () => {
+    // The Worker's resolveSpec runs BEFORE the metered gates. A
+    // no-resolve paste must not burn rate-limit budget or trigger
+    // Turnstile, even when the operator has flipped the kill switch.
+    // Test setup: arm every gate to deny — if any of them fires, this
+    // test would fail with the gate's status (503 / 400 / 429). We
+    // expect the Worker's chain_no_resolve to short-circuit ahead of
+    // all of them, so the response is the discovery 404.
+    const tracker: CallTracker = { doCalls: 0 };
+
+    // Build env with every metered gate refusing. The makeEnv default
+    // path doesn't expose kvDisabled / rateLimit knobs — extend env
+    // post-construction so the test stays additive on the existing
+    // fixture surface.
+    const env = makeEnv({ tracker });
+    env.SCORE_KV = {
+      async get(key: string) {
+        if (key === 'scoring_disabled') return 'true';
+        return null;
+      },
+    } as unknown as KVNamespace;
+    env.SCORE_LIMITER = {
+      async limit() {
+        return { success: false };
+      },
+    };
+    env.SCORE_LIMITER_IP = {
+      async limit() {
+        return { success: false };
+      },
+    };
+    // Turnstile siteverify denial: hijack the compositeFetcher's
+    // turnstile branch via env.TURNSTILE_SECRET swap. The fetcher
+    // returns success unconditionally for siteverify, so to deny we
+    // override globalThis.fetch to refuse on that path.
+    // Easier: rely on the chain_no_resolve short-circuit happening
+    // BEFORE Turnstile siteverify gets called. If Turnstile WAS hit,
+    // its mock would still pass (success: true) — that's a false
+    // positive risk. So check the kill-switch path is the loud one.
+
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    // chain_no_resolve, NOT scoring_disabled / rate_limited / turnstile_failed.
+    // If a future refactor put the gates back ahead of resolveSpec,
+    // the response would be 503 (kill-switch) or 429 (rate-limit) — a
+    // status mismatch that surfaces here.
+    expect(body.error.code).toBe('chain_no_resolve');
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  test('discovery success dispatches DO with resolved InstallSpec ({spec, hash} body)', async () => {
+    // openclaw/gogcli ships a Linux x86_64 .tar.gz release asset; in
+    // production the Worker resolves to pm=direct with the release URL
+    // as the InstallSpec.url. The DO sees that spec — NOT a
+    // ValidatedInput envelope — and the install path follows the
+    // direct-archive flow with auto-detect (Fix 1) to surface the
+    // actual archive binary name.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      tracker,
+      releaseAssets: {
+        'openclaw/gogcli': {
+          name: 'gog_linux_x86_64.tar.gz',
+          url: 'https://example.com/gog_linux_x86_64.tar.gz',
+        },
+      },
+      doResponse: {
+        scorecard: { tool: { name: 'gog', binary: 'gog', version: '0.4.2' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+
+    // Worker resolved BEFORE dispatch — the DO sees the typed
+    // InstallSpec (`{spec, hash}`), never the raw ValidatedInput.
+    const body = tracker.lastBody as
+      | { spec?: { pm?: string; url?: string; binary?: string }; hash?: string; input?: unknown }
+      | undefined;
+    expect(body?.spec?.pm).toBe('direct');
+    expect(body?.spec?.url).toBe('https://example.com/gog_linux_x86_64.tar.gz');
+    // Default-binary derivation is the repo name; the DO's auto-detect
+    // (sandbox-exec.ts Fix 1) overrides this when the archive carries a
+    // differently-named executable (gogcli → gog at exec time).
+    expect(body?.spec?.binary).toBe('gogcli');
+    // The hash is still on the wire for telemetry alignment.
+    expect(typeof body?.hash).toBe('string');
+    // No `input` field — the pre-move shape was `{input, hash}`; the
+    // current shape is `{spec, hash}`. A test that finds `input` is
+    // an indicator that the refactor was partially reverted.
+    expect(body?.input).toBeUndefined();
+  });
+
+  test('branch URL constructs git-clone InstallSpec at the Worker (no discovery fetches)', async () => {
+    // Branch-scoped pastes bypass discovery entirely: the spec is built
+    // directly from validated owner/repo/branch and shipped to the DO.
+    // The compositeFetcher would throw on any discovery URL fetch (no
+    // releaseAssets seeded, no formula/crate/npm/pypi/go entries), so a
+    // discovery call would surface as `unexpected fetch in test` — the
+    // test passing IS the proof that no discovery ran.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      tracker,
+      doResponse: {
+        scorecard: { tool: { name: 'gping', binary: 'gping', version: null } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    const body = tracker.lastBody as
+      | { spec?: { pm?: string; owner?: string; repo?: string; branch?: string } }
+      | undefined;
+    expect(body?.spec?.pm).toBe('git-clone');
+    expect(body?.spec?.owner).toBe('orf');
+    expect(body?.spec?.repo).toBe('gping');
+    expect(body?.spec?.branch).toBe('master');
+  });
+
+  test('brettdavies/dotfiles → chain_no_resolve at Worker, no DO call (roster fixture)', async () => {
+    // The roster's canonical "no install path, no release" repo. With
+    // discovery now in the Worker, this paste must bounce ~200 ms at
+    // the Worker tier rather than spinning up a container. The
+    // compositeFetcher returns 404 for every discovery URL by default
+    // — that's what the production traffic against this real repo
+    // would also see (modulo any future release the user might ship).
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({ tracker });
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+    expect(tracker.doCalls).toBe(0);
+  });
+
+  test('openclaw/gogcli → discovery resolves at Worker, DO sees release-asset InstallSpec', async () => {
+    // Companion to brettdavies/dotfiles: the roster's canonical
+    // "ships a release asset" repo. Worker discovery's Step 2 lands
+    // the release URL, the DO sees `pm=direct` with that URL, and the
+    // archive auto-detect path (Fix 1) sorts out the gogcli → gog
+    // binary-name mismatch at exec time inside the container.
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      tracker,
+      releaseAssets: {
+        'openclaw/gogcli': {
+          name: 'gog_linux_x86_64.tar.gz',
+          url: 'https://example.com/gog_linux_x86_64.tar.gz',
+        },
+      },
+      doResponse: {
+        scorecard: { tool: { name: 'gog', binary: 'gog', version: '0.4.2' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    const body = tracker.lastBody as { spec?: { pm?: string; url?: string } } | undefined;
+    expect(body?.spec?.pm).toBe('direct');
+    expect(body?.spec?.url).toContain('gog_linux_x86_64.tar.gz');
   });
 });

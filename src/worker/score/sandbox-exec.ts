@@ -14,7 +14,7 @@
 // carries `--only-binary=:all:`; `cargo binstall` is binary-only by
 // design; `uv tool install` uses uv's own resolver (binary-only by
 // default for wheel-bearing packages). `brew` returns null from
-// installCommandFor() so the resolveSpec() discovery-fallback in do.ts
+// installCommandFor() so the resolveSpec() discovery-fallback in resolve-spec.ts
 // (2026-05-18 rework) can translate `brew install <tool>` inputs to
 // whatever cargo / npm / pip / go alternative the discovery chain finds
 // for the brew formula's GitHub repo. brew-only tools (no other PM)
@@ -287,8 +287,9 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
 function installCommandFor(spec: InstallSpec): string | null {
   switch (spec.pm) {
     case 'brew':
-      // brew returns null so resolveSpec() in do.ts can apply the
-      // discovery-fallback before this table is consulted. By the time
+      // brew returns null so resolveSpec() in resolve-spec.ts (Worker
+      // tier post-2026-05-20) can apply the discovery-fallback before
+      // this table is consulted. By the time
       // a request reaches installCommandFor() with pm=brew, the
       // fallback has already missed — i.e. no alternative PM exists
       // for the formula. score() catches the null and bounces as
@@ -378,7 +379,7 @@ function installCommandFor(spec: InstallSpec): string | null {
       return `npm install -g --ignore-scripts ${shellQuote(spec.package)}`;
     case 'go':
       // pm=go bounces here so resolveSpec()'s go discovery-fallback
-      // (do.ts:resolveGoFallback) translates `go install <module>`
+      // (resolve-spec.ts:resolveGoFallback) translates `go install <module>`
       // inputs upstream of this layer. If a request reaches
       // installCommandFor() with pm=go the fallback has already
       // missed, which means the module isn't on github.com OR the
@@ -391,7 +392,7 @@ function installCommandFor(spec: InstallSpec): string | null {
       // Branch-scoped source clone. The branch name was validated at
       // validate.ts (BRANCH_NAME_RE + explicit
       // `..` reject) AND re-validated at the DO boundary (do.ts
-      // resolveSpec). buildGitCloneCommand() refuses to emit a command
+      // resolveSpec in resolve-spec.ts). buildGitCloneCommand() refuses to emit a command
       // for a branch that fails the validBranchName check — defense
       // in depth so a future caller that builds an InstallSpec
       // directly (skipping validate.ts AND resolveSpec) still can't
@@ -681,7 +682,8 @@ export function extractGateDetails(stderr: string): GateDetails | null {
 //     repo matches `[A-Za-z0-9._-]+`. Neither character class includes
 //     shell metacharacters.
 //   - branch is double-validated: validate.ts at the Worker boundary
-//     AND do.ts at the DO boundary (resolveSpec). buildGitCloneCommand
+//     AND resolve-spec.ts at the Worker boundary (resolveSpec).
+//     buildGitCloneCommand
 //     does a THIRD check via validBranchName() before string
 //     interpolation as a final defense — if a future code path
 //     constructs an InstallSpec directly (bypassing both upstream
