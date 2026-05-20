@@ -117,7 +117,7 @@ gh pr view <num> --json body --jq .body > /tmp/body.md         # fetch existing
 vale --no-global --output=line --minAlertLevel=error /tmp/body.md
 
 # 3. LanguageTool (blocking categories: TYPOS|GRAMMAR|CONFUSED_WORDS).
-curl -sS -X POST "${LANGUAGETOOL_URL:-http://pool.tail42ba87.ts.net:8081}/v2/check" \
+curl -sS -X POST "${LANGUAGETOOL_URL:-http://languagetool:8081}/v2/check" \
   --data-urlencode "language=en-US" --data-urlencode "text@/tmp/body.md" \
   | jaq '.matches[] | select(.rule.category.id | test("^(TYPOS|GRAMMAR|CONFUSED_WORDS)$"))'
 

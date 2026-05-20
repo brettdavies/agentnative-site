@@ -20,7 +20,7 @@
 #                       reads tokens from styles/site/BannedFonts.yml)
 #   7. prose-check    — bash scripts/prose-check.sh
 #                       (Vale + LanguageTool over *.md in scope; LT skips
-#                       cleanly when pool is unreachable)
+#                       cleanly when LanguageTool is unreachable)
 #
 # Stages 5-7 each redirect child stdin to </dev/null. The branch-deletion
 # short-circuit at the top of the hook consumes the hook-protocol bytes
