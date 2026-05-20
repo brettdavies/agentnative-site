@@ -125,6 +125,20 @@
       "id": "5a05224968404e5f96471f1bd007d87a"
     }
   ],
+  // SCORE_TELEMETRY — Workers Analytics Engine dataset for /api/score
+  // observability. Handler emits one writeDataPoint per request with the
+  // canonical field shape documented in docs/runbooks/live-scoring-analytics.md.
+  // Two distinct dataset names (top-level vs env.staging) keep staging
+  // noise out of prod aggregates. Dataset is created on first write — no
+  // wrangler analytics-engine create step. Field-shape contract is pinned
+  // by tests/score-telemetry.test.ts; reordering blobs/doubles silently
+  // breaks saved AE SQL queries, so the regression guard fires loudly.
+  "analytics_engine_datasets": [
+    {
+      "binding": "SCORE_TELEMETRY",
+      "dataset": "anc_live_score_prod"
+    }
+  ],
   // Production Turnstile sitekey deferred until production promotion. The
   // homepage form template reads TURNSTILE_SITEKEY from this env var to
   // render the invisible widget. Absent here so a misconfigured prod cut
@@ -247,6 +261,12 @@
         {
           "binding": "SCORE_KV",
           "id": "10a0fb8031864421a3ba358e28189317"
+        }
+      ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "SCORE_TELEMETRY",
+          "dataset": "anc_live_score_staging"
         }
       ],
       // Cloudflare's "always passes" test sitekey (public, documented at

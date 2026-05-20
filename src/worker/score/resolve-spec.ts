@@ -39,20 +39,25 @@
 // across the DO request boundary now is a typed, narrowed InstallSpec
 // rather than a raw `ValidatedInput`.
 
-import { discoverBinary, type InstallSpec } from './discover-binary';
+import { discoverBinary, type InstallSpec, type ResolvedStep } from './discover-binary';
 import type { DiscoveryHintsIndex } from './registry-lookup';
 import { type ValidatedInput, validBranchName } from './validate';
 
+// `resolved_step` is populated when the discovery chain or one of its
+// fallbacks ran; absent for paths that never touch discoverBinary
+// (install-command non-brew/go, branch-scoped git-clone, registry slug
+// miss). Handler.ts threads it into the AE telemetry blob5 so analytics
+// queries can attribute live traffic to specific discovery tiers.
 export type ResolveResult =
-  | { ok: true; spec: InstallSpec }
+  | { ok: true; spec: InstallSpec; resolved_step?: ResolvedStep }
   | { ok: false; error: 'chain_no_resolve' | 'install_unsupported' | 'invalid_url_path'; details?: string };
 
 export type BrewFallbackResult =
-  | { ok: true; value: InstallSpec }
+  | { ok: true; value: InstallSpec; resolved_step?: ResolvedStep }
   | { ok: false; error: 'install_unsupported'; details: 'pm=brew_only' };
 
 export type GoFallbackResult =
-  | { ok: true; value: InstallSpec }
+  | { ok: true; value: InstallSpec; resolved_step?: ResolvedStep }
   | { ok: false; error: 'install_unsupported'; details: 'pm=go_no_binary' };
 
 export type ResolveOptions = {
@@ -76,11 +81,15 @@ export async function resolveSpec(
   if (input.kind === 'install-command') {
     if (input.spec.pm === 'brew') {
       const result = await resolveBrewFallback(input.spec.package, hintsIndex, opts.fetcher);
-      return result.ok ? { ok: true, spec: result.value } : { ok: false, error: result.error, details: result.details };
+      return result.ok
+        ? { ok: true, spec: result.value, resolved_step: result.resolved_step }
+        : { ok: false, error: result.error, details: result.details };
     }
     if (input.spec.pm === 'go') {
       const result = await resolveGoFallback(input.spec.package, hintsIndex, opts.fetcher);
-      return result.ok ? { ok: true, spec: result.value } : { ok: false, error: result.error, details: result.details };
+      return result.ok
+        ? { ok: true, spec: result.value, resolved_step: result.resolved_step }
+        : { ok: false, error: result.error, details: result.details };
     }
     return { ok: true, spec: input.spec };
   }
@@ -110,7 +119,7 @@ export async function resolveSpec(
       hintsIndex,
       fetcher: opts.fetcher,
     });
-    if (result.ok) return { ok: true, spec: result.spec };
+    if (result.ok) return { ok: true, spec: result.spec, resolved_step: result.resolved_step };
     return { ok: false, error: result.error };
   }
   // slug input that didn't hit the registry tier: we don't live-score
@@ -154,7 +163,7 @@ export async function resolveBrewFallback(
     fetcher,
   });
   if (result.ok && result.spec.pm !== 'brew') {
-    return { ok: true, value: result.spec };
+    return { ok: true, value: result.spec, resolved_step: result.resolved_step };
   }
   return { ok: false, error: 'install_unsupported', details: 'pm=brew_only' };
 }
@@ -198,7 +207,7 @@ export async function resolveGoFallback(
   // and Step 4 README parse won't return pm=go for a `go install`
   // input), bounce honestly to avoid infinite indirection.
   if (result.ok && result.spec.pm !== 'go') {
-    return { ok: true, value: result.spec };
+    return { ok: true, value: result.spec, resolved_step: result.resolved_step };
   }
   return { ok: false, error: 'install_unsupported', details: 'pm=go_no_binary' };
 }

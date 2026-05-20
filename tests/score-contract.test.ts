@@ -218,6 +218,7 @@ function makeEnvFromIndex(index: RegistryIndex): ScoreEnv {
         return { success: true };
       },
     },
+    SCORE_TELEMETRY: { writeDataPoint() {} },
     TURNSTILE_SECRET: 'test',
     SESSION_HMAC_SECRET: 'test-hmac-secret-long-enough',
   } as ScoreEnv;

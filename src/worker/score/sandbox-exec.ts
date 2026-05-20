@@ -40,6 +40,17 @@ export type ScoreSuccess = {
   value: {
     scorecard: unknown;
     anc_version: string;
+    // Wall-clock duration of the install exec, captured around the
+    // single `sandbox.exec(installCmd, ...)` call. Null only for paths
+    // that never reach this orchestrator (the DO never runs); inside
+    // runScore the install always runs before a success, so this is
+    // always populated on the ok-true branch. Threaded through the
+    // DO success envelope so handler.ts can populate the AE
+    // `install ms` slot without a second timing surface.
+    install_ms: number;
+    // Wall-clock duration of the anc check exec. Same shape +
+    // rationale as install_ms; populated on the ok-true branch.
+    anc_check_ms: number;
   };
 };
 
@@ -171,7 +182,9 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     allowedHostnames: [...hosts],
   });
 
+  const installStart = Date.now();
   const installResult = await sandbox.exec(installCmd, { timeout: TOTAL_TIMEOUT_MS });
+  const installMs = Date.now() - installStart;
   if (!installResult.success) {
     // Gate-capture (Fix 3): direct-install commands emit `GATE:<step>` markers
     // to stderr before each step. The LAST marker names the step that
@@ -260,7 +273,9 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     : auditProfile
       ? `anc check --command ${shellQuote(binary)} --output json --audit-profile ${shellQuote(auditProfile)}`
       : `anc check --command ${shellQuote(binary)} --output json`;
+  const ancCheckStart = Date.now();
   const checkResult = await sandbox.exec(ancCheckCmd, { timeout: TOTAL_TIMEOUT_MS });
+  const ancCheckMs = Date.now() - ancCheckStart;
 
   // anc emits a structured envelope on stdout even on non-zero exit when
   // a check produced findings. Try to parse before declaring failure.
@@ -278,7 +293,10 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     return { ok: false, error: 'anc_check_failed', details: 'anc returned non-JSON stdout' };
   }
 
-  return { ok: true, value: { scorecard, anc_version: ancVersion } };
+  return {
+    ok: true,
+    value: { scorecard, anc_version: ancVersion, install_ms: installMs, anc_check_ms: ancCheckMs },
+  };
 }
 
 // ---------------------------------------------------------------------------
