@@ -867,21 +867,126 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
     expect(tracker.doCalls).toBe(0);
   });
 
-  test('chain_no_resolve bypasses kill-switch + Turnstile + rate-limit gates', async () => {
-    // The Worker's resolveSpec runs BEFORE the metered gates. A
-    // no-resolve paste must not burn rate-limit budget or trigger
-    // Turnstile, even when the operator has flipped the kill switch.
-    // Test setup: arm every gate to deny — if any of them fires, this
-    // test would fail with the gate's status (503 / 400 / 429). We
-    // expect the Worker's chain_no_resolve to short-circuit ahead of
-    // all of them, so the response is the discovery 404.
-    const tracker: CallTracker = { doCalls: 0 };
+  test('chain_no_resolve still burns metered gates (kill-switch + Turnstile + rate-limit run BEFORE discovery)', async () => {
+    // Post 2026-05-20 gates-before-discovery reorder: the metered gates
+    // sit AHEAD of resolveSpec, so a no-resolve paste pays the gate
+    // toll before reaching the discovery fan-out. This pins the new
+    // ordering — a regression that moved discovery back ahead of the
+    // gates would let an unauthenticated caller fire the ~5-call
+    // discovery chain at zero rate-limit cost.
+    //
+    // Three sub-cases, one per gate, each with a no-resolve fixture
+    // (brettdavies/dotfiles — no install path, no release). Asserting
+    // separately so the failing gate is identifiable from the test
+    // name, not buried inside a single status check.
 
-    // Build env with every metered gate refusing. The makeEnv default
-    // path doesn't expose kvDisabled / rateLimit knobs — extend env
-    // post-construction so the test stays additive on the existing
-    // fixture surface.
-    const env = makeEnv({ tracker });
+    // 4a. Kill switch flipped → 503 scoring_disabled (not chain_no_resolve).
+    {
+      _resetKillSwitchCache();
+      const tracker: CallTracker = { doCalls: 0 };
+      const githubFetchTracker = { calls: [] as string[] };
+      const env = makeEnv({ tracker, githubFetchTracker });
+      env.SCORE_KV = {
+        async get(key: string) {
+          if (key === 'scoring_disabled') return 'true';
+          return null;
+        },
+      } as unknown as KVNamespace;
+      const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('scoring_disabled');
+      // Kill-switch denied before any outbound — no HEAD probe, no
+      // discovery fetches, no DO dispatch.
+      expect(githubFetchTracker.calls).toEqual([]);
+      expect(tracker.doCalls).toBe(0);
+    }
+
+    // 4b. Turnstile denial → 400 turnstile_failed (not chain_no_resolve).
+    //     Build a sibling makeEnv but override globalThis.fetch's
+    //     siteverify response to refuse. The default compositeFetcher
+    //     replies success on every siteverify; we hand-wrap it here.
+    {
+      _resetKillSwitchCache();
+      const tracker: CallTracker = { doCalls: 0 };
+      const githubFetchTracker = { calls: [] as string[] };
+      const env = makeEnv({ tracker, githubFetchTracker });
+      const originalFetch = globalThis.fetch;
+      const denyTurnstileFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) {
+          return new Response(JSON.stringify({ success: false }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return originalFetch(input, init);
+      }) as unknown as typeof fetch;
+      (globalThis as { fetch: typeof fetch }).fetch = denyTurnstileFetch;
+      try {
+        const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: { code: string } };
+        expect(body.error.code).toBe('turnstile_failed');
+        // Turnstile denied before discovery — no HEAD probe, no
+        // discovery fetches, no DO dispatch.
+        expect(githubFetchTracker.calls).toEqual([]);
+        expect(tracker.doCalls).toBe(0);
+      } finally {
+        (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+      }
+    }
+
+    // 4c. Rate-limit denial → 429 rate_limited (not chain_no_resolve).
+    {
+      _resetKillSwitchCache();
+      const tracker: CallTracker = { doCalls: 0 };
+      const githubFetchTracker = { calls: [] as string[] };
+      const env = makeEnv({ tracker, githubFetchTracker });
+      env.SCORE_LIMITER = {
+        async limit() {
+          return { success: false };
+        },
+      };
+      const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('rate_limited');
+      // Limiter denied before discovery — no HEAD probe, no
+      // discovery fetches, no DO dispatch.
+      expect(githubFetchTracker.calls).toEqual([]);
+      expect(tracker.doCalls).toBe(0);
+    }
+
+    // 4c'. Per-IP fallback denial → 429 rate_limited (same shape).
+    {
+      _resetKillSwitchCache();
+      const tracker: CallTracker = { doCalls: 0 };
+      const githubFetchTracker = { calls: [] as string[] };
+      const env = makeEnv({ tracker, githubFetchTracker });
+      env.SCORE_LIMITER_IP = {
+        async limit() {
+          return { success: false };
+        },
+      };
+      const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('rate_limited');
+      expect(githubFetchTracker.calls).toEqual([]);
+      expect(tracker.doCalls).toBe(0);
+    }
+  });
+
+  test('curated registry hit STILL bypasses gates (R6 unmetered contract preserved)', async () => {
+    // R6: curated registry hits are unmetered. Even with every gate
+    // hard-failing, a `ripgrep` POST must return registry_hit 200 from
+    // the read-only registry tier (step 2 in handler.ts). If a future
+    // refactor moved the gates ahead of lookupScorecard, this test
+    // would surface as a 503 / 400 / 429.
+    const tracker: CallTracker = { doCalls: 0 };
+    const githubFetchTracker = { calls: [] as string[] };
+    const env = makeEnv({ tracker, githubFetchTracker });
     env.SCORE_KV = {
       async get(key: string) {
         if (key === 'scoring_disabled') return 'true';
@@ -898,24 +1003,161 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
         return { success: false };
       },
     };
-    // Turnstile siteverify denial: hijack the compositeFetcher's
-    // turnstile branch via env.TURNSTILE_SECRET swap. The fetcher
-    // returns success unconditionally for siteverify, so to deny we
-    // override globalThis.fetch to refuse on that path.
-    // Easier: rely on the chain_no_resolve short-circuit happening
-    // BEFORE Turnstile siteverify gets called. If Turnstile WAS hit,
-    // its mock would still pass (success: true) — that's a false
-    // positive risk. So check the kill-switch path is the loud one.
+    const originalFetch = globalThis.fetch;
+    const denyTurnstileFetch = (async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) {
+        return new Response(JSON.stringify({ success: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch in curated-bypass test: ${url}`);
+    }) as unknown as typeof fetch;
+    (globalThis as { fetch: typeof fetch }).fetch = denyTurnstileFetch;
+    try {
+      const res = await handleScore(postScore('ripgrep'), env);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { scorecard: { kind: string; scorecard_url: string } };
+      expect(body.scorecard.kind).toBe('registry_hit');
+      expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
+      // No outbound — registry hit served from in-memory index.
+      expect(githubFetchTracker.calls).toEqual([]);
+      expect(tracker.doCalls).toBe(0);
+    } finally {
+      (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+    }
+  });
 
-    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+  test('R2 cache hit STILL bypasses gates (R6 extended to cached scorecards)', async () => {
+    // R6 extended: a cached scorecard is functionally identical to a
+    // curated one — no sandbox cost, no metered budget. With cache
+    // prefilled and every gate denying, the response must still be
+    // 200 from the cache tier.
+    const tracker: CallTracker = { doCalls: 0 };
+    const githubFetchTracker = { calls: [] as string[] };
+    const env = makeEnv({
+      tracker,
+      githubFetchTracker,
+      cacheContent: {
+        'scores/dotfiles/0.4.0.json': {
+          spec_version: '0.4.0',
+          anc_version: '0.3.1',
+          tool_version: '1.0.0',
+          scorecard: {
+            tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' },
+            score: { value: 88 },
+          },
+        },
+      },
+    });
+    env.SCORE_KV = {
+      async get(key: string) {
+        if (key === 'scoring_disabled') return 'true';
+        return null;
+      },
+    } as unknown as KVNamespace;
+    env.SCORE_LIMITER = {
+      async limit() {
+        return { success: false };
+      },
+    };
+    env.SCORE_LIMITER_IP = {
+      async limit() {
+        return { success: false };
+      },
+    };
+    const originalFetch = globalThis.fetch;
+    const denyTurnstileFetch = (async (input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) {
+        return new Response(JSON.stringify({ success: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch in cache-bypass test: ${url}`);
+    }) as unknown as typeof fetch;
+    (globalThis as { fetch: typeof fetch }).fetch = denyTurnstileFetch;
+    try {
+      // brettdavies/dotfiles has no hint, so cache lookup needs to derive
+      // a binary. The Aider-shape hint test in score-handler.test.ts
+      // already exercises that path; here we use the install-command
+      // shape which derives binary='dotfiles' from the slug parser.
+      const res = await handleScore(postScore('npm install -g dotfiles'), env);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { scorecard: { tool: { name: string }; score: { value: number } } };
+      expect(body.scorecard.tool.name).toBe('dotfiles');
+      expect(body.scorecard.score.value).toBe(88);
+      // No outbound — cache served the response.
+      expect(githubFetchTracker.calls).toEqual([]);
+      expect(tracker.doCalls).toBe(0);
+    } finally {
+      (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+    }
+  });
+
+  test('GET on missing slug returns 404 without burning gates', async () => {
+    // GET is the read-only paste-and-share contract. A miss must 404
+    // chain_no_resolve from step 2's read-only tier — never consult
+    // gates, never reach discovery or the DO. This pins the GET-skip
+    // contract: a future refactor that accidentally routed GET through
+    // the gates would burn rate-limit budget on bookmark traffic.
+    const tracker: CallTracker = { doCalls: 0 };
+    const githubFetchTracker = { calls: [] as string[] };
+    const env = makeEnv({ tracker, githubFetchTracker });
+    // Arm the limiter to deny — a GET that reached it would surface here.
+    env.SCORE_LIMITER = {
+      async limit() {
+        throw new Error('limiter must not be called for GET');
+      },
+    };
+    const req = new Request('https://anc.dev/api/score?input=brettdavies%2Fdotfiles', { method: 'GET' });
+    const res = await handleScore(req, env);
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
-    // chain_no_resolve, NOT scoring_disabled / rate_limited / turnstile_failed.
-    // If a future refactor put the gates back ahead of resolveSpec,
-    // the response would be 503 (kill-switch) or 429 (rate-limit) — a
-    // status mismatch that surfaces here.
     expect(body.error.code).toBe('chain_no_resolve');
+    // No outbound at all — siteverify, HEAD probe, discovery all skipped.
+    expect(githubFetchTracker.calls).toEqual([]);
     expect(tracker.doCalls).toBe(0);
+  });
+
+  test('github accessibility pre-check fires AFTER gates (Turnstile fail → no HEAD probe)', async () => {
+    // Gate-ordering invariant: the HEAD pre-check is an outbound and
+    // every cost-bearing call lives behind the gates. A Turnstile fail
+    // must short-circuit BEFORE the HEAD probe runs, otherwise we'd be
+    // paying a github.com call on traffic the bot-defense layer just
+    // rejected.
+    const tracker: CallTracker = { doCalls: 0 };
+    const githubFetchTracker = { calls: [] as string[] };
+    const env = makeEnv({ tracker, githubFetchTracker });
+    const originalFetch = globalThis.fetch;
+    const denyTurnstileFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) {
+        return new Response(JSON.stringify({ success: false }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      // Any github fetch here would prove the HEAD probe fired BEFORE
+      // Turnstile (the bug). Surface as a loud failure rather than a
+      // silent pass-through.
+      return originalFetch(input, init);
+    }) as unknown as typeof fetch;
+    (globalThis as { fetch: typeof fetch }).fetch = denyTurnstileFetch;
+    try {
+      const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('turnstile_failed');
+      // The HEAD probe target would be 'brettdavies/dotfiles' if it ran
+      // — assert the tracker stayed empty.
+      expect(githubFetchTracker.calls).toEqual([]);
+      expect(tracker.doCalls).toBe(0);
+    } finally {
+      (globalThis as { fetch: typeof fetch }).fetch = originalFetch;
+    }
   });
 
   test('discovery success dispatches DO with resolved InstallSpec ({spec, hash} body)', async () => {
