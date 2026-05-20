@@ -1446,7 +1446,7 @@ body:has(.leaderboard-hero) main {
 .live-score__status--curated {
   color: var(--accent);
   font-weight: 600;
-  font-feature-settings: var(--ff-tabular, 'tnum' 1, 'kern' 1);
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
 }
 
 .live-score__status--bounce .live-score__bounce-headline {
