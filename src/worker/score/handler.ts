@@ -43,8 +43,15 @@ import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
 import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
+import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
-import { type DiscoveryHintsIndex, deriveShareBinary, lookupScorecard, type RegistryIndex } from './registry-lookup';
+import {
+  type DiscoveryHintsIndex,
+  deriveShareBinary,
+  lookupRegistry,
+  lookupScorecard,
+  type RegistryIndex,
+} from './registry-lookup';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
@@ -291,6 +298,44 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
         preference,
         { setCookie },
       );
+    }
+  }
+
+  // 6. GitHub accessibility pre-check. For github-url inputs without a
+  //    hint and without an explicit branch, probe github.com directly
+  //    with a HEAD before paying the DO cold-start cost. A 404 from
+  //    github means the repo is private, deleted, or never existed —
+  //    the sandbox cannot resolve a binary regardless. Fast-fail with
+  //    `github_repo_not_accessible` so the user sees an honest "we
+  //    can't see that repo" panel rather than a generic
+  //    `chain_no_resolve` after a multi-second spin-up.
+  //
+  //    Skip conditions (each preserves the DO's existing behavior):
+  //      - non-github-url input (slug / install-command — no repo to probe)
+  //      - github-url with explicit branch (DO clones anyway; HEAD on
+  //        the repo root tells us nothing about the branch existing)
+  //      - github-url that resolved to a hint (we already know the
+  //        install path; a transient github 404 here shouldn't break a
+  //        repo we've explicitly curated install metadata for)
+  //
+  //    Fail-OPEN on anything other than a clean 404: 5xx, network
+  //    timeout, abort all fall through to the DO so a github outage
+  //    doesn't silently break scoring. The accessibility module's
+  //    in-isolate cache absorbs repeated probes for the same repo.
+  if (validated.kind === 'github-url' && !validated.branch) {
+    const registryHit = lookupRegistry(validated, registryIndex, hintsIndex);
+    if (registryHit.kind !== 'hint') {
+      const accessibility = await checkGithubAccessibility(validated.owner, validated.repo);
+      if (accessibility.state === 'not_accessible') {
+        return shapeWithPreference(
+          shapeScoreError({
+            code: 'github_repo_not_accessible',
+            cta_text: CTA_INSTALL_ANC,
+          }),
+          preference,
+          { setCookie },
+        );
+      }
     }
   }
 

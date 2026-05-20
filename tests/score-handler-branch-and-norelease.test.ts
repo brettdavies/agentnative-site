@@ -22,11 +22,19 @@
 // stub shape score-handler.test.ts uses, so any future Sandbox class
 // drift (renamed fetch, changed signature) is a TypeScript error here.
 
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { Sandbox } from '../src/worker/score/do';
+import { _resetAccessibilityCache } from '../src/worker/score/github-accessibility';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { validateInput } from '../src/worker/score/validate';
+
+// Snapshot globalThis.fetch BEFORE the first makeEnv() override so afterAll
+// can restore it. Bun runs tests in a single process; if this file leaves
+// the global fetch pointing at our compositeFetcher, subsequent test
+// files (score-do.test.ts uses bare `fetch()` in allowedInstall handlers)
+// get the wrong dispatcher and surface as `unexpected fetch` errors.
+const ORIGINAL_FETCH = globalThis.fetch;
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -68,12 +76,21 @@ const HINTS_INDEX = {
 };
 
 type CallTracker = { doCalls: number; lastBody?: unknown };
+// Global fetch tracker captures both the Turnstile siteverify and the
+// github HEAD pre-check. Tests assert that the HEAD probe was issued for
+// the expected owner/repo (or skipped, when a hint exists / branch is set).
+type GithubHeadResponse = { kind: 'status'; status: number } | { kind: 'throw'; error: unknown };
 
 type StubOverrides = Partial<{
   doResponse: unknown;
   doStatus: number;
   tracker: CallTracker;
   cacheContent: Record<string, unknown>;
+  // Keys are `<owner>/<repo>` lowercased. The pre-check uses lowercase
+  // owner+repo in its in-isolate cache key; we mirror that here so a
+  // case-mismatched paste still finds the mock.
+  githubHeadResponses: Record<string, GithubHeadResponse>;
+  githubFetchTracker: { calls: string[] };
 }>;
 
 function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
@@ -107,14 +124,41 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
     },
   };
 
-  // Turnstile siteverify success — these tests aren't exercising the
-  // bot-defense gate, they're exercising the post-Turnstile pipeline.
-  const turnstileFetcher = async () =>
-    new Response(JSON.stringify({ success: true }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  (globalThis as { fetch: typeof fetch }).fetch = turnstileFetcher as unknown as typeof fetch;
+  // globalThis.fetch dispatch: Turnstile siteverify and the github HEAD
+  // pre-check both read globalThis.fetch in production. We dispatch on URL
+  // so a single override covers both. Default for github.com is "accessible"
+  // (200) — tests that need a private/nonexistent repo pass an explicit
+  // `githubHeadResponses` entry. Default for Turnstile is success — these
+  // tests don't exercise the bot-defense gate.
+  const githubHeadResponses = overrides.githubHeadResponses ?? {};
+  const githubFetchTracker = overrides.githubFetchTracker;
+  const compositeFetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    if (url.startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) {
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.startsWith('https://github.com/')) {
+      const ownerRepo = url.slice('https://github.com/'.length).toLowerCase();
+      if (githubFetchTracker) githubFetchTracker.calls.push(ownerRepo);
+      const mock = githubHeadResponses[ownerRepo];
+      if (mock?.kind === 'throw') throw mock.error;
+      // Default behavior: HEAD returns 200 (repo accessible). Tests that
+      // need a 404 or 5xx pass an explicit mock entry above.
+      const status = mock?.kind === 'status' ? mock.status : 200;
+      // Sanity guard against accidentally letting a method other than HEAD
+      // sneak through: the real handler ONLY issues HEAD here, and if a
+      // future regression switched to GET, this test would surface it.
+      expect(init?.method).toBe('HEAD');
+      return new Response(null, { status, headers: { 'content-type': 'text/html' } });
+    }
+    // Anything else (unexpected) — surface the URL so a stray fetch is
+    // visible in test output rather than silently returning success.
+    throw new Error(`unexpected fetch in test: ${url}`);
+  };
+  (globalThis as { fetch: typeof fetch }).fetch = compositeFetcher as unknown as typeof fetch;
 
   const cacheStore = new Map<string, string>();
   for (const [k, v] of Object.entries(overrides.cacheContent ?? {})) {
@@ -188,6 +232,14 @@ function postScore(input: string): Request {
 beforeEach(() => {
   _resetIndexCache();
   _resetKillSwitchCache();
+  _resetAccessibilityCache();
+});
+
+// Restore the original globalThis.fetch so this file doesn't poison
+// subsequent test files (score-do.test.ts in particular uses bare fetch()
+// inside allowedInstall handlers and depends on the unmocked global).
+afterAll(() => {
+  globalThis.fetch = ORIGINAL_FETCH;
 });
 
 // ---------------------------------------------------------------------------
@@ -393,5 +445,316 @@ describe('/api/score — branch URLs + no-release repos', () => {
     const body = (await res.json()) as { scorecard: { score?: { value: number } } };
     // The live DO's score (77), not the prefilled cache's (99).
     expect(body.scorecard.score?.value).toBe(77);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/score — github accessibility pre-check (private / nonexistent repo)
+//
+// Avoids paying the DO sandbox cold-start cost on a request that cannot
+// resolve a binary regardless: github 404 on the repo root means private,
+// renamed, or never existed. Fast-fail with `github_repo_not_accessible`
+// instead of spinning up the sandbox to discover the same fact.
+//
+// Skip matrix (proceed to DO without probing):
+//   - github-url with explicit branch (DO clones; HEAD on root is silent
+//     about branch existence)
+//   - github-url that matched a curated discovery hint (we already know
+//     the install path; a transient github 404 shouldn't break a curated
+//     repo)
+//   - curated registry hits (never reach the pre-check; the lookupScorecard
+//     tier returns 'curated' before we get here)
+//   - non-github-url inputs (no repo to probe)
+//
+// Fail-OPEN matrix (proceed to DO when github itself misbehaves):
+//   - HEAD returns 5xx
+//   - HEAD throws (timeout, network error)
+// ---------------------------------------------------------------------------
+
+describe('/api/score — github accessibility pre-check', () => {
+  // -------------------------------------------------------------------------
+  // 1. Private / nonexistent repo: HEAD 404 → fast-fail, no DO dispatched.
+  //    This is the user-reported case (brettdavies/solutions is private; the
+  //    sandbox would otherwise burn a cold-start trying to discover a
+  //    binary). The fast-fail status is 404 — same as chain_no_resolve —
+  //    but the error.code differs so the client can render a precise
+  //    "GitHub couldn't find that repo" bounce panel instead of the
+  //    generic "no pre-built binary" copy.
+  // -------------------------------------------------------------------------
+
+  test('private/nonexistent repo → fast-fail with github_repo_not_accessible, no DO dispatched', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      tracker,
+      githubHeadResponses: {
+        'brettdavies/solutions': { kind: 'status', status: 404 },
+      },
+    });
+    const res = await handleScore(postScore('brettdavies/solutions'), env);
+    expect(res.status).toBe(404);
+    expect(tracker.doCalls).toBe(0);
+    const body = (await res.json()) as {
+      error: { code: string };
+      spec_version: string;
+      checker_url: string;
+    };
+    expect(body.error.code).toBe('github_repo_not_accessible');
+    // R11 triad on error.
+    expect(body.spec_version).toBeTruthy();
+    expect(body.checker_url).toBeTruthy();
+  });
+
+  // -------------------------------------------------------------------------
+  // 2. Public repo: HEAD 200 → DO dispatched as usual. Mirrors the existing
+  //    brettdavies/dotfiles test but pins the pre-check explicitly so a
+  //    future change that flipped the default (e.g., treating all 2xx as
+  //    not_accessible) would fail loudly here.
+  // -------------------------------------------------------------------------
+
+  test('public repo → HEAD 200, DO dispatched', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const headTracker = { calls: [] as string[] };
+    const env = makeEnv({
+      tracker,
+      githubFetchTracker: headTracker,
+      githubHeadResponses: {
+        'brettdavies/dotfiles': { kind: 'status', status: 200 },
+      },
+      doResponse: { error: 'chain_no_resolve' },
+    });
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    // chain_no_resolve from DO, but the important thing is the DO was
+    // reached. The chain_no_resolve case is already covered above; here
+    // we're proving the pre-check did NOT short-circuit the live path.
+    expect(res.status).toBe(404);
+    expect(tracker.doCalls).toBe(1);
+    expect(headTracker.calls).toContain('brettdavies/dotfiles');
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+  });
+
+  // -------------------------------------------------------------------------
+  // 3. Branch URL skips the pre-check. The DO needs to clone regardless,
+  //    and HEAD on the repo root is silent about whether the branch ref
+  //    exists — so the probe wouldn't add information. The skip path also
+  //    avoids a confusing UX where a public-repo + nonexistent-branch
+  //    paste 200s on the pre-check and then errors at the DO with the
+  //    real failure code.
+  // -------------------------------------------------------------------------
+
+  test('explicit branch URL → skips pre-check (DO needs to clone regardless)', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const headTracker = { calls: [] as string[] };
+    const env = makeEnv({
+      tracker,
+      githubFetchTracker: headTracker,
+      // Intentionally NOT providing a githubHeadResponses entry: the
+      // compositeFetcher would throw `unexpected fetch` if the handler
+      // tried to probe github here, and the test would fail loudly.
+      doResponse: {
+        scorecard: { tool: { name: 'gping', binary: 'gping', version: null } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    expect(headTracker.calls).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // 4. Hint-matched repo skips the pre-check. Curated install metadata
+  //    already exists; a transient github 404 shouldn't break the live
+  //    path for a repo we explicitly know how to install. (We DON'T match
+  //    on score-card existence — that's the curated-registry tier above.)
+  //    The hint case is github-url that matched discovery-hints, not
+  //    by_owner_repo.
+  // -------------------------------------------------------------------------
+
+  test('hint-matched repo → skips pre-check', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const headTracker = { calls: [] as string[] };
+    // Per-test env override: inject a hint for aider-ai/aider so the
+    // registry-lookup tier returns 'hint', which the handler treats as
+    // "skip the HEAD probe" (we already curate install metadata).
+    const baseEnv = makeEnv({
+      tracker,
+      githubFetchTracker: headTracker,
+      doResponse: {
+        scorecard: { tool: { name: 'aider', binary: 'aider', version: '0.50.0' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const envWithHints: ScoreEnv = {
+      ...baseEnv,
+      ASSETS: {
+        async fetch(req: Request | string): Promise<Response> {
+          const url = typeof req === 'string' ? req : req.url;
+          const path = new URL(url).pathname;
+          if (path === '/registry-index.json') {
+            return new Response(JSON.stringify(REGISTRY_INDEX), { status: 200 });
+          }
+          if (path === '/discovery-hints-index.json') {
+            // Aider hint: matches what discovery-hints index ships for
+            // aider-ai/aider in production. The presence of this hint
+            // gates the pre-check skip.
+            return new Response(
+              JSON.stringify({
+                by_owner_repo: {
+                  'Aider-AI/aider': { pm: 'pip', package: 'aider-chat', binary: 'aider' },
+                },
+              }),
+              { status: 200 },
+            );
+          }
+          return new Response('not found', { status: 404 });
+        },
+      } as Fetcher,
+    };
+    const res = await handleScore(postScore('https://github.com/Aider-AI/aider'), envWithHints);
+    expect(res.status).toBe(200);
+    expect(tracker.doCalls).toBe(1);
+    // The whole point: no HEAD probe was issued. compositeFetcher would
+    // throw `unexpected fetch` if one had been — but additionally we
+    // assert the tracker for clarity.
+    expect(headTracker.calls).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // 5. Curated registry hit never reaches the pre-check. The
+  //    lookupScorecard tier returns 'curated' for slugs / curated
+  //    by_owner_repo entries; the handler short-circuits at step 2 with
+  //    a `registry_hit` envelope and never touches Turnstile, rate-limit,
+  //    HEAD probe, or DO.
+  // -------------------------------------------------------------------------
+
+  test('curated by_owner_repo → registry-fast-path wins, no HEAD probe', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const headTracker = { calls: [] as string[] };
+    const env = makeEnv({
+      tracker,
+      githubFetchTracker: headTracker,
+    });
+    const res = await handleScore(postScore('https://github.com/BurntSushi/ripgrep'), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scorecard: { kind?: string; scorecard_url?: string } };
+    expect(body.scorecard.kind).toBe('registry_hit');
+    expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
+    // Registry hit unmetered: no Turnstile, no DO, no HEAD probe.
+    expect(tracker.doCalls).toBe(0);
+    expect(headTracker.calls).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // 6. Fail-OPEN: github HEAD 5xx → proceed to DO. A transient github
+  //    outage must not silently break scoring; the DO will run its own
+  //    probe and produce an honest error if the repo is genuinely
+  //    broken. Same contract for HEAD throwing (timeout, network).
+  // -------------------------------------------------------------------------
+
+  test('github HEAD 5xx → fail-open, DO dispatched', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      tracker,
+      githubHeadResponses: {
+        'brettdavies/dotfiles': { kind: 'status', status: 503 },
+      },
+      doResponse: { error: 'chain_no_resolve' },
+    });
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    // DO ran, returned chain_no_resolve. The point is that the pre-check
+    // did NOT fast-fail with github_repo_not_accessible.
+    expect(res.status).toBe(404);
+    expect(tracker.doCalls).toBe(1);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+  });
+
+  test('github HEAD throws (network timeout) → fail-open, DO dispatched', async () => {
+    const tracker: CallTracker = { doCalls: 0 };
+    const env = makeEnv({
+      tracker,
+      githubHeadResponses: {
+        // The probe's AbortController uses DOMException('AbortError'); we
+        // surface that shape so the accessibility module sees a real
+        // timeout and tags reason='timeout'. The handler's fail-open
+        // path doesn't actually branch on the reason — any 'unknown'
+        // proceeds — but we throw the realistic shape for honesty.
+        'brettdavies/dotfiles': { kind: 'throw', error: new DOMException('aborted', 'AbortError') },
+      },
+      doResponse: { error: 'chain_no_resolve' },
+    });
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    expect(res.status).toBe(404);
+    expect(tracker.doCalls).toBe(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // 7. Red-team: slug validation must happen BEFORE the URL is built.
+  //    validate.ts already enforces this at the Worker boundary, so a
+  //    bad slug never reaches the handler; this test pins the module's
+  //    own guard in place against a future caller that bypasses
+  //    validate.ts (e.g., a new internal route). We call the
+  //    accessibility module directly because the integration path is
+  //    sealed.
+  // -------------------------------------------------------------------------
+
+  test('accessibility module refuses invalid slug without issuing fetch (defense-in-depth)', async () => {
+    const { checkGithubAccessibility } = await import('../src/worker/score/github-accessibility');
+    let fetchCalls = 0;
+    const sentinelFetcher = (async () => {
+      fetchCalls += 1;
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    // Each input is something validate.ts already rejects (path traversal,
+    // spaces, semicolons). The module's OWNER_RE / REPO_RE refuse them
+    // independently so a regression in validate.ts doesn't open a
+    // probe-URL injection.
+    const bad: Array<[string, string]> = [
+      ['../etc', 'passwd'],
+      ['foo bar', 'baz'],
+      ['ok-owner', 'evil; rm -rf'],
+      ['-leading-hyphen', 'ok'],
+      ['', 'ok'],
+      ['ok', ''],
+    ];
+    for (const [owner, repo] of bad) {
+      const result = await checkGithubAccessibility(owner, repo, { fetcher: sentinelFetcher });
+      expect(result.state).toBe('unknown');
+      if (result.state === 'unknown') {
+        expect(result.reason).toBe('invalid_slug');
+      }
+    }
+    expect(fetchCalls).toBe(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. Red-team: HEAD must not follow redirects to non-github hosts. A
+  //    hypothetical github 30x to evil.com is benign in production
+  //    (github doesn't do that), but the manual-redirect mode makes the
+  //    safety property structural. We pin the behavior so a future
+  //    refactor that switched to `redirect: 'follow'` would fail here.
+  // -------------------------------------------------------------------------
+
+  test('accessibility module treats 30x as accessible without dereferencing Location', async () => {
+    const { checkGithubAccessibility, _resetAccessibilityCache: resetCache } = await import(
+      '../src/worker/score/github-accessibility'
+    );
+    resetCache();
+    let calls = 0;
+    const fetcher = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      // Redirect mode MUST be 'manual' — otherwise a follow could pivot
+      // off-host. This assertion fires if a future refactor relaxes it.
+      expect(init?.redirect).toBe('manual');
+      return new Response(null, {
+        status: 301,
+        headers: { Location: 'https://evil.com/owner/repo' },
+      });
+    }) as unknown as typeof fetch;
+    const result = await checkGithubAccessibility('Renamed-Owner', 'renamed-repo', { fetcher });
+    expect(result.state).toBe('accessible');
+    // Exactly one fetch — no follow.
+    expect(calls).toBe(1);
   });
 });

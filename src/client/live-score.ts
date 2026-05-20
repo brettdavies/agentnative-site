@@ -309,6 +309,12 @@ function handleScoreResponse(
         body: 'anc only scores tools with a published binary release. <a href="/install">Install anc locally</a> to score source + project depth.',
       });
       return;
+    case 'github_repo_not_accessible':
+      renderBouncePanel(els.statusEl, {
+        headline: "GitHub couldn't find that repo.",
+        body: 'It may be private, renamed, or never existed. <a href="/install">Install anc locally</a> to score private repos directly — the live sandbox has no GitHub credentials.',
+      });
+      return;
     case 'chain_resolved_install_failed':
       renderBouncePanel(els.statusEl, {
         headline: "Found an install path, but it didn't run.",

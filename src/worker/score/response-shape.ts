@@ -33,6 +33,7 @@ export type ScoreError =
   | { code: 'unrecognized_input'; cta_text: string }
   | { code: 'unparseable_install_command'; details: string; cta_text: string }
   | { code: 'chain_no_resolve'; cta_text: string }
+  | { code: 'github_repo_not_accessible'; cta_text: string }
   | { code: 'discovery_redirect_loop'; cta_text: string }
   | { code: 'rate_limited'; retry_after: number; cta_text: string }
   | { code: 'install_unsupported'; pm: 'brew' | 'brew_only' | 'bun' | 'go_no_binary'; cta_text: string }
@@ -89,6 +90,7 @@ export function statusForError(error: ScoreError): number {
     case 'turnstile_failed':
       return 400;
     case 'chain_no_resolve':
+    case 'github_repo_not_accessible':
       return 404;
     case 'rate_limited':
       return 429;
