@@ -323,6 +323,22 @@ function handleScoreResponse(
       });
       return;
     case 'chain_resolved_no_binary_produced':
+      // Two distinct shapes land under this code:
+      //   - "Archive contains no binary named ..." — the direct-install
+      //     auto-detect filter found zero executable candidates after
+      //     stripping docs/manifests. The archive shipped only docs OR
+      //     all candidates failed the path/extension guard. Render the
+      //     archive-specific bounce so the user can see the file list.
+      //   - Otherwise — a registry install succeeded but no entry point
+      //     ended up on PATH (pallets/click-class library miss).
+      if (isArchiveNoBinaryDetails(err?.details)) {
+        renderBouncePanel(els.statusEl, {
+          headline: "The archive doesn't contain the binary we expected.",
+          body: 'The release ships files but no executable that matches our auto-detector. <a href="/install">Install anc locally</a> to score this tool directly — the auto-detector picks the most-likely binary, but humans pick better.',
+          details: truncateStderr(err?.details),
+        });
+        return;
+      }
       renderBouncePanel(els.statusEl, {
         headline: 'That looks like a library, not a CLI.',
         body: 'We installed it, but no command-line entry point appeared on PATH. anc only scores binaries. If this is wrong, paste the actual binary name as <code>&lt;command&gt;</code> to retry. <a href="/install">Install anc locally</a> for full project depth.',
@@ -414,6 +430,19 @@ function isPackageNotFoundStderr(details: string | undefined): boolean {
     /\bnot found in (the )?registry\b/.test(haystack) ||
     /\b404 not found\b/.test(haystack)
   );
+}
+
+/** Heuristic: does this stderr text indicate "the archive extracted but
+ * contained no recognizable binary"? The direct-install path emits a
+ * specific `DETAILS:Archive contains no binary named ...` line when the
+ * auto-detect filter finds zero candidates (a release that ships only
+ * docs, or whose binary name + filename were both filtered out as
+ * non-executable). When this fires we render a more specific bounce
+ * panel than the generic install_failed one — the user sees the actual
+ * archive listing and understands why a manual hint is needed. */
+function isArchiveNoBinaryDetails(details: string | undefined): boolean {
+  if (typeof details !== 'string' || details.length === 0) return false;
+  return /\bArchive contains no binary named\b/i.test(details);
 }
 
 /** install_unsupported variant rendering. pm carries the specific install
