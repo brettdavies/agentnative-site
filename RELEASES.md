@@ -325,7 +325,72 @@ in the live-scoring monitoring runbook:
 
 - [`docs/runbooks/live-scoring-monitoring.md`](docs/runbooks/live-scoring-monitoring.md).
 
-Budget Alert thresholds, Analytics Engine query playbooks, and auto-kill cron logic are U10 scope.
+The queryable counterpart with canonical Analytics Engine SQL lives in the analytics runbook:
+
+- [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-analytics.md).
+
+### Cost guardrails
+
+Four-layer cost-cap stance, ordered by speed-to-act:
+
+1. **Implicit per-request limits.** `SCORE_LIMITER` (10 req/min/session) and `SCORE_LIMITER_IP` (30 req/min/IP) are the
+   per-user cost ceilings. Live since U5. Analytics Engine confirms whether they are effective on the registry-hit-rate
+   query in the analytics runbook (high registry-hit-rate means most traffic is unmetered; low rate means the limiters
+   are the load-bearing ceiling).
+2. **Manual kill switch.** Flip via `wrangler kv key put`:
+
+   ```bash
+   # Staging
+   wrangler kv key put --binding=SCORE_KV --env staging scoring_disabled true
+
+   # Production
+   wrangler kv key put --binding=SCORE_KV scoring_disabled true
+   ```
+
+   Recovery time is bounded by the in-isolate cache TTL (30 s) and the KV global propagation (≤60 s). Reset by deleting
+   the key:
+
+   ```bash
+   wrangler kv key delete --binding=SCORE_KV --env staging scoring_disabled
+   ```
+
+   The operator-facing playbook lives in the monitoring runbook; this section names the procedure.
+3. **Email-only Cloudflare Budget Alerts** at $5, $25, and $100 thresholds. Cloudflare has no native cost auto-cap; the
+   billing dashboard is read-only at the API layer. Configure in the Cloudflare dashboard under Billing → Notifications.
+   Add three separate Budget Alerts (one per threshold) with the operator email on the destination list; each alert
+   fires once per billing cycle when the rolling charge crosses its threshold; setup is one-time per account and the
+   alerts persist across deploys. Confirm the wiring with a test alert at a low threshold ($1) before relying on the
+   production thresholds.
+4. **Automated kill switch via cron.** DEFERRED to U10.1. Concept: a scheduled Worker queries the Analytics Engine
+   dataset for rolling 24h request count and flips `scoring_disabled` past a threshold. Threshold tuning needs real
+   traffic data; the pieces (dataset + kill switch + Workers cron primitive) all exist, but wiring them is its own
+   discrete change. Do not speculate.
+
+#### Analytics Engine datasets
+
+Two distinct datasets keep staging traffic out of production aggregates:
+
+| Environment | Binding           | Dataset                  |
+| ----------- | ----------------- | ------------------------ |
+| Production  | `SCORE_TELEMETRY` | `anc_live_score_prod`    |
+| Staging     | `SCORE_TELEMETRY` | `anc_live_score_staging` |
+
+Datasets are created on first write — no `wrangler analytics-engine create` step needed. Confirm in the Cloudflare
+dashboard under Workers → Analytics Engine after the first post-deploy request.
+
+Sample query (paste into the dashboard's AE SQL editor, replace dataset name per environment):
+
+```sql
+SELECT blob2 AS pm, COUNT() AS requests
+FROM anc_live_score_staging
+WHERE timestamp > NOW() - INTERVAL '24' HOUR
+GROUP BY pm
+ORDER BY requests DESC
+FORMAT JSONCompact
+```
+
+The full canonical query playbook (daily volume, p50/p99 latency, error distribution, registry-hit-rate, top tools)
+lives in [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-analytics.md).
 
 ## Staging access (Cloudflare Access)
 

@@ -1,12 +1,17 @@
 # Live-scoring monitoring runbook
 
-Operator playbook for `/api/score`. Manual + log-query workflow against the Wrangler observability binding; the only
-telemetry surface is the `score.tier` log line that `src/worker/score/handler.ts` emits once per request. Automated
-dashboards, Workers Analytics Engine custom datasets, Budget Alerts, and the auto-kill cron are U10 scope. This runbook
-keeps the operator productive against the data that exists today.
+Operator playbook for `/api/score`. Manual + log-query workflow against the Wrangler observability binding; the primary
+telemetry surface is the `score.tier` log line that `src/worker/score/handler.ts` emits once per request, with a
+queryable Workers Analytics Engine counterpart (`SCORE_TELEMETRY` binding → `anc_live_score_prod` /
+`anc_live_score_staging`) introduced in U10. The analytics runbook covers the AE SQL playbook end-to-end; this runbook
+covers manual incident response, kill-switch flips, and the operator-facing diagnostic recipes.
+
+For canonical Analytics Engine SQL (daily volume, p50/p99 latency, error distribution, registry-hit-rate), see the
+[live-scoring analytics runbook](./live-scoring-analytics.md). Threshold values in this runbook apply identically when
+computed via AE SQL.
 
 The runbook stays in staging-mode prose until live scoring promotes to anc.dev. Production-specific commands land here
-when U10 ships.
+when production promotion happens.
 
 ## Telemetry contract
 
@@ -75,6 +80,16 @@ rationale.
 Watch: `live` climbing above ~30% sustained. Alarm: `live` above ~50% sustained over an hour. Either signals broken
 cache writes, registry coverage gaps, or an abuse pattern fanning out to uncached binaries.
 
+**AE (primary):** Use the
+[registry-hit-rate query in the analytics runbook](./live-scoring-analytics.md#registry-hit-rate--the-cost-efficiency-signal)
+for sustained tier-mix monitoring; the same row also surfaces `cache_hit_rate` and `live_rate` for the same window.
+
+**Manual log-query (fallback when AE is down):** filter the Workers Logs dashboard by `scope:"score.tier"` and bucket
+`tier` values over the window of interest.
+
+**Agent (MCP):** `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability` with filter
+`scope:"score.tier"` and a `groupBy: ["tier"]` aggregation returns the same buckets without the dashboard round-trip.
+
 ### Error rate by code
 
 Group `error_<code>` lines and break down by `code`. Some codes are user-driven and expected:
@@ -102,6 +117,17 @@ The signal-bearing codes:
 
 HTTP-status mapping is canonical in `src/worker/score/response-shape.ts:statusForError`.
 
+**AE (primary):** Use the
+[error-code-distribution query in the analytics runbook](./live-scoring-analytics.md#error-code-distribution); it groups
+`blob3` (error code) and counts. The same query carries `avg_status` so a status drift (e.g., a code that should be 404
+returning 500) surfaces inline.
+
+**Manual log-query (fallback when AE is down):** filter Workers Logs by `scope:"score.tier"` and bucket on lines where
+`tier` starts with `error_`. Slower than AE but covers the same fields.
+
+**Agent (MCP):** `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability` with filter
+`scope:"score.tier" AND tier:error_*` and a `groupBy: ["tier"]` aggregation returns the same per-code breakdown.
+
 ### Cache hit rate, pre-discovery vs post-discovery
 
 From `cache_pre_attempted` / `cache_pre_hit` / `cache_post_attempted` / `cache_post_hit`. Compute:
@@ -111,8 +137,14 @@ From `cache_pre_attempted` / `cache_pre_hit` / `cache_post_attempted` / `cache_p
 
 Pre-hit rate should be substantially higher than post-hit rate in a healthy state, because pre-discovery hits are the
 cheapest path. If post-hit rate consistently dominates, the cache key shape (`scores/<binary>/<SPEC_VERSION>.json`,
-keyed on the discovered binary) isn't catching round-1 traffic. The reshape (key on owner/repo) is U10's call; document
-the observation here and surface it in the next planning pass rather than acting in U9.
+keyed on the discovered binary) isn't catching round-1 traffic. The reshape (key on owner/repo) is a future planning
+call; document the observation here and surface it in the next planning pass rather than acting on each spike.
+
+**Cross-source dependency:** Analytics Engine carries only `freshness` (`live` / `cache-hit` / `registry-hit`) — it does
+NOT carry the `cache_pre_*` / `cache_post_*` booleans, which stay in the `score.tier` console log. To break down
+cache-hit traffic by pre-discovery vs post-discovery, run the manual log-query above and combine the result with the
+Analytics Engine freshness aggregate. See the
+[cache-hit composition cross-source note in the analytics runbook](./live-scoring-analytics.md#cache-hit-composition-cross-source-query).
 
 ### GitHub unauth quota proximity
 
@@ -296,8 +328,9 @@ reference points, not contracts; tune as soak data arrives.
   Releases, the repo metadata endpoint, and a few README/asset fetches).
 - Turnstile siteverify rate. One per session mint; should track `tier === 'live'` plus `tier === 'cache_post'` roughly.
 
-Production cost watch is U10 scope. The Budget Alerts at $5 / $25 / $100 the plan calls for live in CF dashboard and
-trigger ahead of the kill-switch, so the manual checklist is a backstop, not the primary signal.
+Production cost watch is documented in [`RELEASES.md` § Cost guardrails](../../RELEASES.md#cost-guardrails). Budget
+Alerts at $5 / $25 / $100 live in the Cloudflare dashboard and trigger ahead of the kill-switch, so the manual checklist
+is a backstop, not the primary signal.
 
 ## Cross-references
 
@@ -316,34 +349,27 @@ trigger ahead of the kill-switch, so the manual checklist is a backstop, not the
   [§ DO migrations are one-way walls](../../ARCHITECTURE.md#do-migrations-are-one-way-walls).
 - Plan unit: `docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md` (U9 deliverable 5).
 
-## What U10 adds
+## Still deferred
 
-Out of scope for this runbook; named here so the operator knows where the gap is:
+Out of scope for U10, named here so the operator knows where the next gap is:
 
-- Workers Analytics Engine custom dataset shaped around `score.tier`. Replaces the hand-rolled log queries with stored
-  aggregates and saved dashboard tiles.
-- Budget Alerts at $5 / $25 / $100 against the Worker + Container budget. First line of defense; the kill-switch becomes
-  the second line.
-- Auto-kill cron. Reads Budget Alert state (or an Analytics Engine aggregate) and flips `scoring_disabled` automatically
-  when the budget breaches the configured ceiling.
-- Production-side procedure block in this runbook (commands, thresholds, escalation paths against anc.dev rather than
-  the staging Worker).
-- Authenticated GitHub PAT for discovery, if chronic unauth-quota exhaustion has materialised by then.
+- **Auto-kill cron** (U10.1). Reads an Analytics Engine aggregate for rolling 24h request count and flips
+  `scoring_disabled` automatically when the budget breaches the configured ceiling. Threshold needs real traffic data to
+  set; deferred until staging soak produces enough signal.
+- **Production-side procedure block** in this runbook (commands, thresholds, escalation paths against anc.dev rather
+  than the staging Worker). Lands when live scoring promotes to anc.dev.
+- **Authenticated GitHub PAT for discovery**, if chronic unauth-quota exhaustion has materialised by then.
 
-### Agent-deterministic checks (U10 design choice)
+### Agent-deterministic checks
 
-Today every entry above resolves to `wrangler ...`, a dashboard click, or a log eyeball; none of those return parseable
-status to an agent. Two candidate paths to choose between when U10 starts, captured here so the design conversation
-begins with both on the table:
+**Decision (U10):** Path B (MCP queries) shipped. Each manual check above carries an inline **Agent (MCP)** subsection
+naming the `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability` (or related cloudflare-bindings
+MCP) call. No `scripts/monitoring/` wrapper scripts were added; the existing wrangler CLI + dashboard surface stays the
+operator path, and agents reach the same data through native MCP tools.
 
-- **JSON wrapper scripts** in `scripts/monitoring/` that emit `{status, evidence}` per check (kill-switch state, R2
-  cache health, recent deploys, error-tier sample). Pattern matches `scripts/smoke-api-score.sh`. Callable by operators,
-  CI, and agents via Bash. Workers Analytics Engine integration optional.
-- **Cloudflare Workers Observability MCP** queries (e.g.,
-  `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability`) documented inline next to each manual
-  check. Agent-only (operators stay on `wrangler`). No new code surface; pure docs expansion.
-
-Both together is viable. The trade-off (single shell surface vs. two parallel agent surfaces; CI reach vs. agent
-immediacy) is the choice to make at U10 kickoff.
+Rationale: agents already have Cloudflare MCP tools; documenting which call to make for which check costs zero new code
+surface and zero ongoing maintenance. The alternative (shell scripts in `scripts/monitoring/`) was deferred — its unique
+value is GitHub Actions cron reach, which U10's acceptance bar doesn't require. If automated CI monitoring becomes a
+need later, scripts can land as a separate change without unwinding the MCP docs.
 
 Until U10 lands, the runbook above is the operator's only playbook.
