@@ -3,14 +3,22 @@
 // Pipeline (post 2026-05-20 gates-before-discovery reorder):
 //
 //   1. Validate input (U4).
-//   2. Unified scorecard lookup (U7). One call to lookupScorecard()
-//      collapses the registry-fast-path and the R2 cache fallback into
-//      a single tier-resolved decision. `curated` returns the
-//      registry-hit envelope pointing at /score/<slug>; `cached` returns
-//      the inline scorecard JSON; both bypass the metered gates
-//      (kill-switch, Turnstile, rate-limit, DO) per R6 — cached
-//      scorecards are functionally identical to curated ones (no
-//      sandbox cost). `miss` falls through to the live path.
+//   2. Unified scorecard lookup — pre-discovery (U7). One call to
+//      lookupScorecard() collapses the registry-fast-path and the R2
+//      cache pre-check into a single tier-resolved decision. `curated`
+//      returns the registry-hit envelope pointing at /score/<slug>;
+//      `cached` returns the inline scorecard JSON; both bypass the
+//      metered gates (kill-switch, Turnstile, rate-limit, DO) per R6
+//      — cached scorecards are functionally identical to curated ones
+//      (no sandbox cost). `miss` falls through to the live path.
+//
+//      The pre-discovery cache key is keyed by whatever binary is
+//      cheaply derivable from input alone: install-command's
+//      `spec.binary`, or a hinted github-url's `hint.binary`. A
+//      github-url WITHOUT a hint has no binary upfront — that case
+//      always misses here and falls through to discovery (step 6),
+//      after which step 6.5 re-checks the cache with the resolved
+//      binary.
 //   3. GET requests stop after step 2: GET is the paste-and-share /
 //      bookmark read-only contract. A miss returns 404 chain_no_resolve.
 //      GET never consults gates and never reaches discovery or the DO.
@@ -41,17 +49,37 @@
 //      metered gates so an attacker cannot DoS the discovery layer
 //      (~5 parallel registry calls + GitHub Releases per request) at
 //      zero rate-limit cost.
+//   6.5. Unified scorecard lookup — post-discovery cache. Discovery now
+//      knows `spec.binary`, so for github-url-without-hint inputs that
+//      missed at step 2 we can re-check the cache with the resolved
+//      binary before paying the DO container cost. Same cache binding,
+//      same key shape (`scores/<binary>/<SPEC_VERSION>.json`) as step
+//      2 — readers and writers can't drift. Skipped for
+//      `git-clone` specs (branch-scoped, ephemeral, never cached) and
+//      when `?fromCache=false` is set. A hit here is wire-indistinguish-
+//      able from a step-2 cache hit: same `freshness: 'cache-hit'`,
+//      same `Cache-Control: public, max-age=300`. Both bypass the DO.
 //   7. DO call with the RESOLVED InstallSpec ({spec, hash} body).
 //      Pre-2026-05-20 the DO received `{input, hash}` and did its own
 //      discovery; the move drops a duplicate `loadHintsIndex` and lets
 //      no-resolve requests skip the container entirely. On success the
 //      DO writes to SCORE_CACHE itself (do.ts), so the next request
-//      for the same binary short-circuits at step 2's cache tier.
+//      for the same binary short-circuits at step 2's cache tier
+//      (when the binary is derivable from input) or at step 6.5's
+//      post-discovery re-check (when it isn't).
 //
-// `?fromCache=false` operator escape hatch: skips the R2 read tier (step
-// 2 cache fallback) but still consults the curated registry AND still
-// writes to the cache after a live run. Useful when "did the registry
-// version just update?" needs an authoritative re-score.
+// `?fromCache=false` operator escape hatch: skips BOTH the pre-discovery
+// (step 2) and post-discovery (step 6.5) cache read tiers. The curated
+// registry is still consulted, and the cache WRITE after a live run still
+// fires. Useful when "did the registry version just update?" needs an
+// authoritative re-score.
+//
+// Telemetry: one structured log line per request, `scope: 'score.tier'`,
+// captures which tier served the response (`curated` | `cache_pre` |
+// `cache_post` | `live` | `error_<code>`) plus per-tier attempt + hit
+// flags so we can later query "what percentage of cache hits came from
+// pre vs post discovery?" via the observability binding. Not exposed in
+// the response body — operational signal only.
 //
 // GET / POST split:
 //   - GET  /api/score(.md|.json)?input=…  read-only. Registry-fast-path
@@ -69,6 +97,7 @@ import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
 import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
+import * as cache from './cache';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
 import {
@@ -150,17 +179,85 @@ export function _resetIndexCache(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Telemetry — per-request tier accumulator.
+//
+// One structured log line per request, scope `score.tier`, captures which
+// tier served the response and the pre/post-discovery cache attempt+hit
+// flags so operators can later query "what percentage of cache hits came
+// from pre vs post discovery?" via the observability binding. NOT exposed
+// in the response body — operational signal, not part of the R11 triad
+// contract.
+//
+// `tier` records the resolution branch that produced the response:
+//   - `curated`     — registry-fast-path hit
+//   - `cache_pre`   — step 2 R2 cache hit (binary derivable from input)
+//   - `cache_post`  — step 6.5 R2 cache hit (binary discovered, then re-checked)
+//   - `live`        — DO dispatched and returned success
+//   - `error_<code>`— terminal error (validation, gate denial, no-resolve, etc.)
+//
+// The accumulator is mutated as the pipeline progresses; the single log
+// line is emitted in a try/finally so every code path reports.
+// ---------------------------------------------------------------------------
+
+type Telemetry = {
+  tier: string;
+  cache_pre_attempted: boolean;
+  cache_pre_hit: boolean;
+  cache_post_attempted: boolean;
+  cache_post_hit: boolean;
+  binary: string | null;
+  input_kind: string | null;
+};
+
+function newTelemetry(): Telemetry {
+  return {
+    tier: 'unset',
+    cache_pre_attempted: false,
+    cache_pre_hit: false,
+    cache_post_attempted: false,
+    cache_post_hit: false,
+    binary: null,
+    input_kind: null,
+  };
+}
+
+function emitTelemetry(t: Telemetry): void {
+  console.log(
+    JSON.stringify({
+      scope: 'score.tier',
+      tier: t.tier,
+      cache_pre_attempted: t.cache_pre_attempted,
+      cache_pre_hit: t.cache_pre_hit,
+      cache_post_attempted: t.cache_post_attempted,
+      cache_post_hit: t.cache_post_hit,
+      binary: t.binary,
+      input_kind: t.input_kind,
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
 const CTA_INSTALL_ANC = CTA.installAnc;
 
 export async function handleScore(request: Request, env: ScoreEnv): Promise<Response> {
+  const telemetry = newTelemetry();
+  try {
+    return await handleScoreInner(request, env, telemetry);
+  } finally {
+    emitTelemetry(telemetry);
+  }
+}
+
+async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Telemetry): Promise<Response> {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
   const preference = preferenceForResponse(url.pathname, request);
 
   if (method !== 'GET' && method !== 'POST') {
+    telemetry.tier = 'error_unrecognized_input';
     return shapeWithPreference(
       shapeScoreError({
         code: 'unrecognized_input',
@@ -177,6 +274,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   if (method === 'POST') {
     const parsed = await parsePostBody(request);
     if (!parsed.ok) {
+      telemetry.tier = 'error_unrecognized_input';
       return shapeWithPreference(
         shapeScoreError({
           code: 'unrecognized_input',
@@ -192,6 +290,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 
   if (!rawInput) {
+    telemetry.tier = 'error_unrecognized_input';
     return shapeWithPreference(shapeScoreError({ code: 'unrecognized_input', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
@@ -200,8 +299,10 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
 
   const validated = validateInput(rawInput, registryIndex);
   if (validated.kind === 'unknown') {
+    telemetry.tier = `error_${validated.error}`;
     return shapeWithPreference(shapeScoreError(validationErrorFor(validated.error, rawInput)), preference);
   }
+  telemetry.input_kind = validated.kind;
 
   // 2. Unified scorecard lookup — registry tier first, then R2 cache
   //    tier when the binary is cheaply derivable. Both hit kinds are
@@ -221,6 +322,20 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   //    the default-branch scorecard).
   const skipCache = url.searchParams.get('fromCache') === 'false';
   const isBranchScopedUrl = validated.kind === 'github-url' && typeof validated.branch === 'string';
+  // Pre-discovery cache attempt is recorded for any non-branch input
+  // that didn't opt out via ?fromCache=false. Whether the attempt
+  // results in a hit depends on lookupScorecard's tier-2 path —
+  // install-command and hinted github-url paste have a binary upfront
+  // and reach the cache read; github-url-without-hint silently skips
+  // the R2 read inside lookupScorecard (no binary derivable). We treat
+  // "attempted" as the policy intent (we WOULD have looked it up if a
+  // binary were available) rather than the wire fact, so the field
+  // stays useful for the "what percentage of cache hits came from
+  // round-1 vs round-2?" question even when the round-1 read was a
+  // structural no-op.
+  if (!isBranchScopedUrl && !skipCache) {
+    telemetry.cache_pre_attempted = true;
+  }
   const lookup = isBranchScopedUrl
     ? ({ kind: 'miss' } as const)
     : await lookupScorecard(validated, env, registryIndex, hintsIndex, {
@@ -229,6 +344,8 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
       });
 
   if (lookup.kind === 'curated') {
+    telemetry.tier = 'curated';
+    telemetry.binary = lookup.entry.binary ?? null;
     return shapeWithPreference(
       shapeScoreSuccess(
         {
@@ -249,7 +366,10 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 
   if (lookup.kind === 'cached') {
+    telemetry.tier = 'cache_pre';
+    telemetry.cache_pre_hit = true;
     const shareUrl = shareUrlForInput(validated, hintsIndex);
+    telemetry.binary = shareUrl ? shareUrl.replace(/^\/score\/live\//, '') : null;
     return shapeWithPreference(
       shapeScoreSuccess(lookup.scorecard, lookup.anc_version, 'cache-hit', shareUrl),
       preference,
@@ -258,6 +378,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
 
   // GET requests stop after the read-only tiers: paste-and-share contract.
   if (method === 'GET') {
+    telemetry.tier = 'error_chain_no_resolve';
     return shapeWithPreference(shapeScoreError({ code: 'chain_no_resolve', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
@@ -284,6 +405,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
 
   // 4a. Kill switch (operator flip).
   if (await isScoringDisabled(env)) {
+    telemetry.tier = 'error_scoring_disabled';
     return shapeWithPreference(shapeScoreError({ code: 'scoring_disabled', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
@@ -296,13 +418,16 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
       remoteIp: request.headers.get('cf-connecting-ip') ?? undefined,
     });
   } catch (err) {
+    telemetry.tier = 'error_service_misconfigured';
     return shapeWithPreference(serviceMisconfigured(err), preference);
   }
 
   if (!verifyResult.ok) {
     if (verifyResult.reason === 'misconfigured') {
+      telemetry.tier = 'error_service_misconfigured';
       return shapeWithPreference(serviceMisconfigured('TURNSTILE_SECRET missing'), preference);
     }
+    telemetry.tier = 'error_turnstile_failed';
     return shapeWithPreference(shapeScoreError({ code: 'turnstile_failed', cta_text: CTA_INSTALL_ANC }), preference);
   }
 
@@ -319,6 +444,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     }
   } catch (err) {
     if (err instanceof SessionConfigError) {
+      telemetry.tier = 'error_service_misconfigured';
       return shapeWithPreference(serviceMisconfigured('SESSION_HMAC_SECRET missing'), preference);
     }
     throw err;
@@ -329,6 +455,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
 
   const limited = await env.SCORE_LIMITER.limit({ key: limiterKey });
   if (!limited.success) {
+    telemetry.tier = 'error_rate_limited';
     return shapeWithPreference(
       shapeScoreError({ code: 'rate_limited', retry_after: 60, cta_text: CTA_INSTALL_ANC }),
       preference,
@@ -341,6 +468,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     const ipKey = request.headers.get('cf-connecting-ip') ?? 'unknown';
     const ipLimited = await env.SCORE_LIMITER_IP.limit({ key: ipKey });
     if (!ipLimited.success) {
+      telemetry.tier = 'error_rate_limited';
       return shapeWithPreference(
         shapeScoreError({ code: 'rate_limited', retry_after: 60, cta_text: CTA_INSTALL_ANC }),
         preference,
@@ -384,6 +512,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     if (registryHit.kind !== 'hint') {
       const accessibility = await checkGithubAccessibility(validated.owner, validated.repo);
       if (accessibility.state === 'not_accessible') {
+        telemetry.tier = 'error_github_repo_not_accessible';
         return shapeWithPreference(
           shapeScoreError({
             code: 'github_repo_not_accessible',
@@ -414,11 +543,52 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   //    designed behavior, not a leak.
   const resolution = await resolveSpec(validated, hintsIndex);
   if (!resolution.ok) {
+    telemetry.tier = `error_${resolution.error}`;
     return shapeWithPreference(resolutionErrorToResponse(resolution.error, resolution.details), preference, {
       setCookie,
     });
   }
   const spec = resolution.spec;
+  telemetry.binary = spec.binary;
+
+  // 6.5. Post-discovery cache lookup. Discovery now knows `spec.binary`,
+  //      which the step-2 pre-discovery check couldn't derive for
+  //      github-url-without-hint inputs. Re-check the cache with the
+  //      resolved binary before paying the DO container cost.
+  //
+  //      Same cache binding, same key shape as step 2 — readers and
+  //      writers can't drift. A hit here is wire-indistinguishable from
+  //      a step-2 hit (same `freshness: 'cache-hit'`, same Cache-Control
+  //      `public, max-age=300`); both bypass the DO.
+  //
+  //      Skip conditions:
+  //        - `spec.pm === 'git-clone'`: branch-scoped scores aren't
+  //          cached (no share_url, ephemeral). Caching under the bare
+  //          binary name would clobber the default-branch scorecard,
+  //          so the live path skips the write too and this read has
+  //          nothing meaningful to consult.
+  //        - `skipCache` (?fromCache=false): the operator escape hatch
+  //          is documented as "do not consult any cache, force a live
+  //          run" — applies uniformly to both round-1 and round-2.
+  //
+  //      Telemetry: `cache_post_attempted` records whether we issued
+  //      the R2 read; `cache_post_hit` flips when the read returned a
+  //      payload. The combination lets us separate "we tried and the
+  //      cache was empty" from "we never tried" for hit-rate analysis.
+  if (spec.pm !== 'git-clone' && !skipCache) {
+    telemetry.cache_post_attempted = true;
+    const cached = await cache.get(env, cache.keyFor(spec.binary, SPEC_VERSION));
+    if (cached) {
+      telemetry.cache_post_hit = true;
+      telemetry.tier = 'cache_post';
+      const shareUrl = shareUrlForInput(validated, hintsIndex);
+      return shapeWithPreference(
+        shapeScoreSuccess(cached.scorecard, cached.anc_version, 'cache-hit', shareUrl),
+        preference,
+        { setCookie },
+      );
+    }
+  }
 
   // 7. DO call — the DO now receives a resolved InstallSpec rather than
   //    a raw ValidatedInput. The contract narrowed in the 2026-05-20
@@ -458,6 +628,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   try {
     doPayload = await doRes.json();
   } catch {
+    telemetry.tier = 'error_incomplete_response_contract';
     return shapeWithPreference(
       shapeScoreError({
         code: 'incomplete_response_contract',
@@ -473,6 +644,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   // (botched rollback, misconfigured wrangler.jsonc) the user gets a
   // typed 503 instead of a raw stub error envelope.
   if (isStubError(doPayload)) {
+    telemetry.tier = 'error_sandbox_stub_until_u6';
     return shapeWithPreference(
       shapeScoreError({ code: 'sandbox_stub_until_u6', cta_text: CTA_INSTALL_ANC }),
       preference,
@@ -481,10 +653,12 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 
   if (isDoError(doPayload)) {
+    telemetry.tier = `error_${doPayload.error}`;
     return shapeWithPreference(mapDoError(doPayload), preference, { setCookie });
   }
 
   if (isDoSuccess(doPayload)) {
+    telemetry.tier = 'live';
     const shareUrl = shareUrlForInput(validated, hintsIndex);
     return shapeWithPreference(
       shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live', shareUrl),
@@ -495,6 +669,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
 
   // DO returned 2xx but with an unrecognized envelope shape. Fail loud
   // per R11 rather than synthesize a partial success.
+  telemetry.tier = 'error_incomplete_response_contract';
   return shapeWithPreference(
     shapeScoreError({
       code: 'incomplete_response_contract',

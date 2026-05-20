@@ -81,11 +81,14 @@ type CallTracker = { doCalls: number; lastBody?: unknown };
 // the expected owner/repo (or skipped, when a hint exists / branch is set).
 type GithubHeadResponse = { kind: 'status'; status: number } | { kind: 'throw'; error: unknown };
 
+type CacheTracker = { gets: string[]; puts: string[] };
+
 type StubOverrides = Partial<{
   doResponse: unknown;
   doStatus: number;
   tracker: CallTracker;
   cacheContent: Record<string, unknown>;
+  cacheTracker: CacheTracker;
   // Keys are `<owner>/<repo>` lowercased. The pre-check uses lowercase
   // owner+repo in its in-isolate cache key; we mirror that here so a
   // case-mismatched paste still finds the mock.
@@ -207,8 +210,10 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
   for (const [k, v] of Object.entries(overrides.cacheContent ?? {})) {
     cacheStore.set(k, typeof v === 'string' ? v : JSON.stringify(v));
   }
+  const cacheTracker = overrides.cacheTracker;
   const cacheStub = {
     async get(key: string) {
+      if (cacheTracker) cacheTracker.gets.push(key);
       const raw = cacheStore.get(key);
       if (raw === undefined) return null;
       return {
@@ -221,6 +226,7 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
       };
     },
     async put(key: string, value: unknown) {
+      if (cacheTracker) cacheTracker.puts.push(key);
       cacheStore.set(key, typeof value === 'string' ? value : String(value));
     },
     async delete(key: string) {
@@ -1273,5 +1279,349 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
     const body = tracker.lastBody as { spec?: { pm?: string; url?: string } } | undefined;
     expect(body?.spec?.pm).toBe('direct');
     expect(body?.spec?.url).toContain('gog_linux_x86_64.tar.gz');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/score — post-discovery R2 cache (step 6.5)
+//
+// Step 6.5 re-checks the R2 cache AFTER discovery resolves the
+// InstallSpec, using the same key shape as step 2
+// (`scores/<binary>/<SPEC_VERSION>.json`). The motivating case is
+// github-url-without-hint pastes: the step-2 pre-check has no binary
+// to look up, so it misses structurally — but once discovery resolves
+// `spec.binary`, a previous scoring run's cache write becomes
+// addressable. The post-discovery hit serves the cached scorecard
+// instead of paying the DO cold-start.
+//
+// Wire contract: a step-6.5 hit is indistinguishable from a step-2 hit
+// from the response shape (same `freshness: 'cache-hit'`,
+// `Cache-Control: public, max-age=300`). Both bypass the DO.
+//
+// Skip matrix:
+//   - `spec.pm === 'git-clone'` (branch URLs): branch-scoped scores are
+//     never cached, so the read has nothing to consult.
+//   - `?fromCache=false`: operator escape hatch applies uniformly to
+//     both round-1 and round-2.
+//
+// Telemetry: a single structured log line per request, scope
+// `score.tier`, with `tier` + `cache_pre_attempted` +
+// `cache_pre_hit` + `cache_post_attempted` + `cache_post_hit`.
+// ---------------------------------------------------------------------------
+
+describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
+  test('round-1 miss + round-2 hit → returns cached, DO never dispatched, tier=cache_post', async () => {
+    // github-url-without-hint paste: round-1 cache lookup misses
+    // because no binary is derivable from input alone. Discovery
+    // resolves to a release asset with `binary='gogcli'` (the
+    // discover-binary default for a release ZIP's name). Round-2 reads
+    // `scores/gogcli/0.4.0.json` and hits — DO is never dispatched.
+    const tracker: CallTracker = { doCalls: 0 };
+    const cacheTracker: CacheTracker = { gets: [], puts: [] };
+    const env = makeEnv({
+      tracker,
+      cacheTracker,
+      releaseAssets: {
+        'openclaw/gogcli': {
+          name: 'gog_linux_x86_64.tar.gz',
+          url: 'https://example.com/gog_linux_x86_64.tar.gz',
+        },
+      },
+      cacheContent: {
+        'scores/gogcli/0.4.0.json': {
+          spec_version: '0.4.0',
+          anc_version: '0.3.1',
+          tool_version: '0.4.2',
+          scorecard: {
+            tool: { name: 'gog', binary: 'gog', version: '0.4.2' },
+            score: { value: 91 },
+          },
+        },
+      },
+      // If the DO is ever dispatched, this would be the response —
+      // but the test asserts doCalls==0, so this is unreachable.
+      doResponse: {
+        scorecard: { tool: { name: 'should-not-see-this', binary: 'x' } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
+    expect(res.status).toBe(200);
+    // The cached scorecard served the response — value 91, not the
+    // DO's would-be value.
+    const body = (await res.json()) as {
+      scorecard: { tool: { name: string }; score: { value: number } };
+      anc_version: string;
+    };
+    expect(body.scorecard.score.value).toBe(91);
+    expect(body.scorecard.tool.name).toBe('gog');
+    expect(body.anc_version).toBe('0.3.1');
+    // DO not dispatched.
+    expect(tracker.doCalls).toBe(0);
+    // Two cache GETs fired: the round-1 attempt inside lookupScorecard
+    // structurally short-circuits (no binary → no I/O), so only the
+    // round-2 read is visible. Verify the key shape exactly.
+    expect(cacheTracker.gets).toContain('scores/gogcli/0.4.0.json');
+  });
+
+  test('round-1 hit → discovery never runs, round-2 never runs (no double-fetch)', async () => {
+    // install-command paste with a binary derivable upfront: round-1
+    // hits at step 2 and short-circuits the pipeline. Discovery, the
+    // accessibility probe, gates, and round-2 all never run.
+    // Asserting on the cache tracker proves only ONE cache read fired
+    // (the round-1 read) — a regression that re-issued the round-2
+    // read for an already-hit-at-round-1 input would show two gets.
+    const tracker: CallTracker = { doCalls: 0 };
+    const cacheTracker: CacheTracker = { gets: [], puts: [] };
+    const env = makeEnv({
+      tracker,
+      cacheTracker,
+      cacheContent: {
+        'scores/dotfiles/0.4.0.json': {
+          spec_version: '0.4.0',
+          anc_version: '0.3.1',
+          tool_version: '1.0.0',
+          scorecard: {
+            tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' },
+            score: { value: 75 },
+          },
+        },
+      },
+    });
+    const res = await handleScore(postScore('npm install -g dotfiles'), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scorecard: { score: { value: number } } };
+    expect(body.scorecard.score.value).toBe(75);
+    expect(tracker.doCalls).toBe(0);
+    // EXACTLY one cache read — round-1. No round-2.
+    expect(cacheTracker.gets).toEqual(['scores/dotfiles/0.4.0.json']);
+  });
+
+  test('round-1 miss + discovery success + round-2 miss → DO dispatched, tier=live', async () => {
+    // github-url-without-hint: round-1 misses (no binary). Discovery
+    // resolves to a release asset. Round-2 reads but the cache is
+    // empty — DO is dispatched and runs the live scoring path.
+    const tracker: CallTracker = { doCalls: 0 };
+    const cacheTracker: CacheTracker = { gets: [], puts: [] };
+    const env = makeEnv({
+      tracker,
+      cacheTracker,
+      releaseAssets: {
+        'openclaw/gogcli': {
+          name: 'gog_linux_x86_64.tar.gz',
+          url: 'https://example.com/gog_linux_x86_64.tar.gz',
+        },
+      },
+      doResponse: {
+        scorecard: { tool: { name: 'gog', binary: 'gog', version: '0.4.2' }, score: { value: 88 } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scorecard: { score: { value: number } } };
+    expect(body.scorecard.score.value).toBe(88);
+    // DO ran — live tier.
+    expect(tracker.doCalls).toBe(1);
+    // Round-2 read fired (and missed).
+    expect(cacheTracker.gets).toContain('scores/gogcli/0.4.0.json');
+  });
+
+  test('round-1 miss + chain_no_resolve → no round-2 attempt (nothing to look up)', async () => {
+    // github-url-without-hint paste where discovery bounces
+    // chain_no_resolve: there's no `spec.binary` to key on, so
+    // round-2 must not fire. The pipeline bounces 404 at the Worker
+    // tier without any post-discovery cache read.
+    const tracker: CallTracker = { doCalls: 0 };
+    const cacheTracker: CacheTracker = { gets: [], puts: [] };
+    const env = makeEnv({ tracker, cacheTracker });
+    const res = await handleScore(postScore('brettdavies/dotfiles'), env);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('chain_no_resolve');
+    expect(tracker.doCalls).toBe(0);
+    // No round-2 attempt — the only cache get is the round-1
+    // structural short-circuit (lookupScorecard with no binary derives
+    // null and returns miss without I/O). In practice this means the
+    // tracker stays empty: round-1 doesn't reach the R2 layer either.
+    // A round-2 read for `scores/<anything>/0.4.0.json` MUST NOT
+    // appear in gets.
+    expect(cacheTracker.gets).toEqual([]);
+  });
+
+  test('branch URL → skips round-2 entirely (git-clone has no cache key)', async () => {
+    // Branch-scoped paste: spec.pm === 'git-clone'. Step 6.5 must
+    // skip the read because branch-scoped scores aren't cached
+    // (caching under the bare binary name would clobber the
+    // default-branch scorecard).
+    const tracker: CallTracker = { doCalls: 0 };
+    const cacheTracker: CacheTracker = { gets: [], puts: [] };
+    const env = makeEnv({
+      tracker,
+      cacheTracker,
+      // Even prefilling the cache under the repo name shouldn't
+      // matter — branch URLs bypass step 6.5 regardless.
+      cacheContent: {
+        'scores/gping/0.4.0.json': {
+          spec_version: '0.4.0',
+          anc_version: '0.3.1',
+          tool_version: '1.0.0',
+          scorecard: { tool: { name: 'gping', binary: 'gping', version: '1.0.0' }, score: { value: 99 } },
+        },
+      },
+      doResponse: {
+        scorecard: { tool: { name: 'gping', binary: 'gping', version: null }, score: { value: 50 } },
+        anc_version: '0.3.1',
+      },
+    });
+    const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
+    expect(res.status).toBe(200);
+    // The live DO ran — score 50 from the DO, not 99 from cache.
+    const body = (await res.json()) as { scorecard: { score: { value: number } } };
+    expect(body.scorecard.score.value).toBe(50);
+    expect(tracker.doCalls).toBe(1);
+    // No round-2 read for the gping key (or any key) — branch URLs
+    // bypass step 6.5 entirely. Round-1 also skipped (branch URLs
+    // skip both tiers).
+    expect(cacheTracker.gets).toEqual([]);
+  });
+
+  test('?fromCache=false → skips BOTH cache checks, DO always dispatched', async () => {
+    // Operator escape hatch: ?fromCache=false applies uniformly to
+    // round-1 and round-2. Even with the round-2 cache prefilled
+    // with a matching entry, the DO must dispatch and run live.
+    const tracker: CallTracker = { doCalls: 0 };
+    const cacheTracker: CacheTracker = { gets: [], puts: [] };
+    const env = makeEnv({
+      tracker,
+      cacheTracker,
+      releaseAssets: {
+        'openclaw/gogcli': {
+          name: 'gog_linux_x86_64.tar.gz',
+          url: 'https://example.com/gog_linux_x86_64.tar.gz',
+        },
+      },
+      cacheContent: {
+        'scores/gogcli/0.4.0.json': {
+          spec_version: '0.4.0',
+          anc_version: '0.3.1',
+          tool_version: '0.4.2',
+          scorecard: { tool: { name: 'gog', binary: 'gog' }, score: { value: 91 } },
+        },
+      },
+      doResponse: {
+        scorecard: { tool: { name: 'gog', binary: 'gog' }, score: { value: 42 } },
+        anc_version: '0.3.1',
+      },
+    });
+    const req = new Request('https://anc.dev/api/score?fromCache=false', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ input: 'https://github.com/openclaw/gogcli', turnstile_token: 'tok' }),
+    });
+    const res = await handleScore(req, env);
+    expect(res.status).toBe(200);
+    // The live DO ran — score 42, not the cached 91.
+    const body = (await res.json()) as { scorecard: { score: { value: number } } };
+    expect(body.scorecard.score.value).toBe(42);
+    expect(tracker.doCalls).toBe(1);
+    // No cache READS fired (neither round-1 nor round-2). The
+    // post-DO cache WRITE may still fire — that's the documented
+    // ?fromCache=false behavior (skip read, allow write).
+    expect(cacheTracker.gets).toEqual([]);
+  });
+
+  test('telemetry: cache_pre_attempted, cache_pre_hit, cache_post_attempted, cache_post_hit all logged per request', async () => {
+    // One structured log line per request, scope `score.tier`, with
+    // all four cache flags + tier + binary + input_kind. Spy on
+    // console.log and verify the shape for two representative paths:
+    // a round-2 hit (the new code path this commit adds) and a round-1
+    // hit (the existing pre-discovery path).
+    const originalLog = console.log;
+    const logs: string[] = [];
+    console.log = (...args: unknown[]) => {
+      const first = args[0];
+      if (typeof first === 'string') logs.push(first);
+    };
+    try {
+      // (a) round-2 hit on a github-url-without-hint.
+      {
+        const env = makeEnv({
+          releaseAssets: {
+            'openclaw/gogcli': {
+              name: 'gog_linux_x86_64.tar.gz',
+              url: 'https://example.com/gog_linux_x86_64.tar.gz',
+            },
+          },
+          cacheContent: {
+            'scores/gogcli/0.4.0.json': {
+              spec_version: '0.4.0',
+              anc_version: '0.3.1',
+              tool_version: '0.4.2',
+              scorecard: { tool: { name: 'gog', binary: 'gog' }, score: { value: 91 } },
+            },
+          },
+        });
+        logs.length = 0;
+        const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
+        expect(res.status).toBe(200);
+        const tierLog = logs
+          .map((l) => {
+            try {
+              return JSON.parse(l) as Record<string, unknown>;
+            } catch {
+              return null;
+            }
+          })
+          .filter((p): p is Record<string, unknown> => p !== null && p.scope === 'score.tier');
+        expect(tierLog).toHaveLength(1);
+        const entry = tierLog[0];
+        expect(entry.tier).toBe('cache_post');
+        expect(entry.cache_pre_attempted).toBe(true);
+        expect(entry.cache_pre_hit).toBe(false);
+        expect(entry.cache_post_attempted).toBe(true);
+        expect(entry.cache_post_hit).toBe(true);
+        expect(entry.binary).toBe('gogcli');
+        expect(entry.input_kind).toBe('github-url');
+      }
+
+      // (b) round-1 hit on an install-command.
+      {
+        const env = makeEnv({
+          cacheContent: {
+            'scores/dotfiles/0.4.0.json': {
+              spec_version: '0.4.0',
+              anc_version: '0.3.1',
+              tool_version: '1.0.0',
+              scorecard: { tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' } },
+            },
+          },
+        });
+        logs.length = 0;
+        const res = await handleScore(postScore('npm install -g dotfiles'), env);
+        expect(res.status).toBe(200);
+        const tierLog = logs
+          .map((l) => {
+            try {
+              return JSON.parse(l) as Record<string, unknown>;
+            } catch {
+              return null;
+            }
+          })
+          .filter((p): p is Record<string, unknown> => p !== null && p.scope === 'score.tier');
+        expect(tierLog).toHaveLength(1);
+        const entry = tierLog[0];
+        expect(entry.tier).toBe('cache_pre');
+        expect(entry.cache_pre_attempted).toBe(true);
+        expect(entry.cache_pre_hit).toBe(true);
+        // Round-2 not attempted: round-1 short-circuited the pipeline.
+        expect(entry.cache_post_attempted).toBe(false);
+        expect(entry.cache_post_hit).toBe(false);
+        expect(entry.binary).toBe('dotfiles');
+        expect(entry.input_kind).toBe('install-command');
+      }
+    } finally {
+      console.log = originalLog;
+    }
   });
 });
