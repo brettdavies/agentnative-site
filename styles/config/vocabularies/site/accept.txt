@@ -241,3 +241,9 @@ scipy
 pyperclip
 pycparser
 backports
+hashmap
+misconfigured
+sdist
+siteverify
+uncached
+unmetered

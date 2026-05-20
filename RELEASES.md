@@ -323,7 +323,7 @@ anc.dev.
 Operator telemetry queries, error-tier breakdowns, cache hit-rate watchpoints, and the kill-switch flip procedure live
 in the live-scoring monitoring runbook:
 
-- TODO: `docs/runbooks/live-scoring-monitoring.md` (U9 deliverable 5, deferred to a follow-up session).
+- [`docs/runbooks/live-scoring-monitoring.md`](docs/runbooks/live-scoring-monitoring.md).
 
 Budget Alert thresholds, Analytics Engine query playbooks, and auto-kill cron logic are U10 scope.
 
