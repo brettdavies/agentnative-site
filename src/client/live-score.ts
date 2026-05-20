@@ -106,6 +106,19 @@ function initLiveScore(els: {
   els.input.addEventListener('paste', lazyLoad, { once: true });
   els.input.addEventListener('click', lazyLoad, { once: true });
 
+  // bfcache restore: when the user browser-backs from /score/live/<binary>
+  // (or any successor page) into this homepage, the browser may restore
+  // the page from the back-forward cache with the form still in its
+  // submitting state — input + button disabled, status slot showing the
+  // curated-reward or phase-progression text from the previous submit.
+  // Reset to a clean state so the form is immediately usable again.
+  // Standard a11y pattern, no copy change needed.
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    setSubmitting(els, false);
+    clearStatus(els.statusEl);
+  });
+
   // Example chips fill the input + trigger the lazy-load (since the user
   // is clearly engaging with the form). Mirrors the paste interaction.
   for (const chip of document.querySelectorAll<HTMLButtonElement>('[data-live-score-example]')) {
@@ -269,7 +282,26 @@ function handleScoreResponse(
 
   // 4xx / 5xx: branch on error.code for the three bounce panels + the
   // common error tags. Anything else falls through to a generic message.
-  const err = payload.error as { code?: string; details?: string; retry_after?: number } | undefined;
+  const err = payload.error as { code?: string; details?: string; retry_after?: number; pm?: string } | undefined;
+
+  // Issue-1 reclassification: the DO currently returns
+  // `chain_resolved_install_failed` even when the package manager couldn't
+  // find the package at all (cargo: "X is not found"; brew: "No available
+  // formula"; pip: "No matching distribution"). In those cases no install
+  // path was ever resolved — the "didn't run" headline is misleading.
+  // Detect the pattern in stderr and render a registry-not-found bounce
+  // instead. Backend follow-up: the DO classifier should emit
+  // `chain_no_resolve` (or a new `chain_resolved_package_not_found`)
+  // directly so the client doesn't have to second-guess.
+  if (err?.code === 'chain_resolved_install_failed' && isPackageNotFoundStderr(err.details)) {
+    renderBouncePanel(els.statusEl, {
+      headline: "That package isn't in the registry.",
+      body: 'The package manager couldn\'t find a package by that name. Check the spelling, or paste a GitHub URL if the project ships releases there. <a href="/install">Install anc locally</a> to score private or unpublished tools.',
+      details: truncateStderr(err.details),
+    });
+    return;
+  }
+
   switch (err?.code) {
     case 'chain_no_resolve':
       renderBouncePanel(els.statusEl, {
@@ -290,6 +322,9 @@ function handleScoreResponse(
         body: 'We installed it, but no command-line entry point appeared on PATH. anc only scores binaries. If this is wrong, paste the actual binary name as <code>&lt;command&gt;</code> to retry. <a href="/install">Install anc locally</a> for full project depth.',
       });
       return;
+    case 'install_unsupported':
+      renderInstallUnsupportedBounce(els.statusEl, err?.pm);
+      return;
     case 'rate_limited': {
       const retry = err?.retry_after ?? 60;
       renderInlineError(els.statusEl, `Too many requests. Try again in ${retry}s.`);
@@ -301,8 +336,20 @@ function handleScoreResponse(
     case 'scoring_disabled':
       renderInlineError(els.statusEl, 'Live scoring is paused. Run anc locally — see the install copy above.');
       return;
+    case 'sandbox_stub_until_u6':
+      renderInlineError(
+        els.statusEl,
+        'Live scoring is still rolling out for this input shape. Run anc locally for the full check.',
+      );
+      return;
     case 'non_github_host':
       renderInlineError(els.statusEl, 'Only public GitHub repos are supported.');
+      return;
+    case 'discovery_redirect_loop':
+      renderInlineError(
+        els.statusEl,
+        'GitHub redirected us in a loop while resolving releases. Try again, or paste the exact owner/repo URL.',
+      );
       return;
     case 'invalid_url':
     case 'non_https_url':
@@ -314,8 +361,72 @@ function handleScoreResponse(
     case 'timeout':
       renderInlineError(els.statusEl, 'The scan ran past the time budget. Run anc locally for unconstrained scoring.');
       return;
+    case 'service_misconfigured':
+      renderInlineError(
+        els.statusEl,
+        "Live scoring is misconfigured on our side. We've been notified. Run anc locally for now.",
+      );
+      return;
+    case 'incomplete_response_contract':
+      renderInlineError(
+        els.statusEl,
+        'The scoring service returned an incomplete response. Try again, or run anc locally.',
+      );
+      return;
     default:
       renderInlineError(els.statusEl, 'Scoring failed. Please try again or run anc locally.');
+  }
+}
+
+/** Heuristic: does this stderr text indicate "the package manager could
+ * not find the package" (as opposed to "found it but install failed")?
+ * Patterns cover cargo, brew, pip, npm, pipx, go. Case-insensitive.
+ * Kept conservative — a false positive here re-labels a real install
+ * failure as a registry miss, which is less honest than the inverse. */
+function isPackageNotFoundStderr(details: string | undefined): boolean {
+  if (typeof details !== 'string' || details.length === 0) return false;
+  const haystack = details.toLowerCase();
+  return (
+    /\bis not found\b/.test(haystack) ||
+    /\bno matching (package|distribution|formula)\b/.test(haystack) ||
+    /\bcould not find\b/.test(haystack) ||
+    /\bno available formula\b/.test(haystack) ||
+    /\bunknown package\b/.test(haystack) ||
+    /\bdoes not exist\b/.test(haystack) ||
+    /\bnot found in (the )?registry\b/.test(haystack) ||
+    /\b404 not found\b/.test(haystack)
+  );
+}
+
+/** install_unsupported variant rendering. pm carries the specific install
+ * mechanism the sandbox refused; copy is tailored per pm so the user gets
+ * a concrete alternative instead of a generic "try something else". */
+function renderInstallUnsupportedBounce(statusEl: HTMLParagraphElement, pm: string | undefined): void {
+  switch (pm) {
+    case 'brew':
+    case 'brew_only':
+      renderBouncePanel(statusEl, {
+        headline: "Homebrew installs aren't sandboxed yet.",
+        body: 'Homebrew needs a desktop runtime the sandbox doesn\'t provide. Try a <code>cargo install</code>, <code>pipx install</code>, or <code>npm i -g</code> equivalent, or paste a GitHub URL. <a href="/install">Install anc locally</a> to score brew-only tools.',
+      });
+      return;
+    case 'bun':
+      renderBouncePanel(statusEl, {
+        headline: "`bun install` isn't sandboxed yet.",
+        body: 'The sandbox doesn\'t wire Bun\'s global install path onto PATH. Try an <code>npm i -g</code> or <code>pipx install</code> equivalent, or <a href="/install">install anc locally</a>.',
+      });
+      return;
+    case 'go_no_binary':
+      renderBouncePanel(statusEl, {
+        headline: "That Go module doesn't expose a CLI binary.",
+        body: 'anc only scores tools that produce a command on PATH. Paste a binary-producing package, or <a href="/install">install anc locally</a> to score libraries.',
+      });
+      return;
+    default:
+      renderBouncePanel(statusEl, {
+        headline: "That install path isn't supported in the sandbox.",
+        body: 'Paste a <code>cargo install</code>, <code>pipx install</code>, <code>npm i -g</code>, or GitHub URL instead, or <a href="/install">install anc locally</a>.',
+      });
   }
 }
 
@@ -351,6 +462,15 @@ function renderInlineError(statusEl: HTMLParagraphElement, message: string): voi
   statusEl.classList.add('live-score__status--error');
   statusEl.classList.remove('live-score__status--bounce');
   statusEl.textContent = message;
+}
+
+/** Reset the status slot to its initial hidden+empty state. Used by the
+ * bfcache `pageshow` handler so a back-nav into the homepage doesn't
+ * leave stale curated-reward or phase-progression text behind. */
+function clearStatus(statusEl: HTMLParagraphElement): void {
+  statusEl.hidden = true;
+  statusEl.classList.remove('live-score__status--error', 'live-score__status--bounce', 'live-score__status--curated');
+  statusEl.textContent = '';
 }
 
 /** Show a transient in-progress message (e.g. "Scoring…") during a request.
