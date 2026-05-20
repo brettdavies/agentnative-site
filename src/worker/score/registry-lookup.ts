@@ -1,8 +1,5 @@
 // Registry + discovery-hints hit-test for the live-scoring path.
 //
-// Plan U4 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md,
-// "registry-lookup.ts" bullet at the end of the U4 Approach block).
-//
 // Order matters: registry-fast-path > hint > miss. Committed scorecards
 // always win over hints (avoids drift); hints always win over live
 // discovery (we curated them because live discovery was wrong).
@@ -11,14 +8,14 @@
 // case-preserving but case-insensitive at resolution. A user pasting
 // `github.com/aider-ai/aider` should hit the `Aider-AI/aider` hint.
 //
-// Plan U7 extends this module with `lookupScorecard()`, an async unified
-// resolution that consults registry first and then falls through to the
-// R2 cache when the binary is cheaply derivable. Both `curated` and
-// `cached` results bypass the metered gates (Turnstile, rate-limit, DO)
-// per R6 — cached scorecards are functionally identical to curated ones
-// (no sandbox cost). The legacy sync `lookupRegistry()` stays exported
-// for callers that don't need the cache layer (registry-lookup tests,
-// future callers that want just the registry tier).
+// `lookupScorecard()` is the async unified resolution that consults
+// registry first and then falls through to the R2 cache when the binary
+// is cheaply derivable. Both `curated` and `cached` results bypass the
+// metered gates (Turnstile, rate-limit, DO) — cached scorecards
+// are functionally identical to curated ones (no sandbox cost). The sync
+// `lookupRegistry()` stays exported for callers that don't need the
+// cache layer (registry-lookup tests, future callers that want just the
+// registry tier).
 
 import * as cache from './cache';
 import type { ParsedInstall } from './parse-install';
@@ -30,13 +27,19 @@ export type RegistryEntry = {
   install: string;
   audit_profile?: string;
   repo?: string;
-  // Plan U5 — present when the tool has a committed scorecard. The Worker
-  // uses these to build the R11 triad and route to /score/<slug> without
-  // fetching the scorecard JSON. Tools without a scorecard ship the
+  // Present when the tool has a committed scorecard. The Worker uses
+  // these to build the spec_version + anc_version + checker_url triad
+  // and route to /score/<slug> without fetching the scorecard JSON.
+  // Tools without a scorecard ship the
   // metadata-only entry; the registry-fast-path treats them as a miss.
   version?: string;
   anc_version?: string;
   scorecard_url?: string;
+  // score_pct surfaces into the registry_hit envelope so the homepage
+  // form can show a curated-tool reward (e.g., "Curated · 92% pass rate
+  // · Opening the audited scorecard…") inline before redirect, without
+  // a second round-trip to fetch the scorecard JSON.
+  score_pct?: number;
 };
 
 export type RegistryIndex = {
@@ -84,14 +87,28 @@ export function lookupRegistry(
     if (hint) return { kind: 'hint', hint };
     return { kind: 'miss' };
   }
-  // install-command and unknown don't trigger lookups; the caller passes
-  // them through directly (install-command -> U6 with the parsed spec;
-  // unknown -> 400 to user).
+  if (input.kind === 'install-command') {
+    // Cross-check the parser's binary against curated by_slug. Catches
+    // inputs like `cargo install bat` (binary='bat', curated as
+    // by_slug['bat']) and `npm i -g typescript` (binary='typescript',
+    // curated as by_slug['typescript']). Without this, install-commands
+    // that resolve to a curated tool fall through to the R2 cache (empty
+    // on first request) and then to the live path — paying sandbox cost
+    // for a tool the site already has a curated audit for. Per-binary
+    // alias edge case (e.g., `cargo install rg` typing the binary name
+    // not the package name) still falls through; an explicit by_binary
+    // map would catch that but isn't worth the index churn for the
+    // current corpus.
+    const entry = registryIndex.by_slug[input.spec.binary];
+    if (entry) return { kind: 'registry', entry };
+    return { kind: 'miss' };
+  }
+  // unknown — passed through to a 400 by the caller.
   return { kind: 'miss' };
 }
 
 // ---------------------------------------------------------------------------
-// Unified scorecard lookup (plan U7)
+// Unified scorecard lookup
 // ---------------------------------------------------------------------------
 
 // Resolution covers BOTH the curated registry tier (in-memory hashmap,
@@ -123,9 +140,8 @@ export type ScorecardLookupResult =
   | { kind: 'miss' };
 
 export type ScorecardLookupOptions = {
-  // Build-time spec version, used as the partition slot in the cache key
-  // (handoff Decision 2 + gotcha 3). All readers and writers must pass
-  // the same value to avoid key drift.
+  // Build-time spec version, used as the partition slot in the cache key.
+  // All readers and writers must pass the same value to avoid key drift.
   specVersion: string;
   // When true, skip the R2 read tier. Registry is still consulted.
   skipCache?: boolean;
@@ -179,5 +195,33 @@ function deriveCacheBinary(input: ValidatedInput, registry: RegistryLookupResult
   // github-url without a hint, or slug without a curated scorecard:
   // no upfront binary. The live path will run discovery and write to
   // the cache afterward, so the NEXT request benefits.
+  return null;
+}
+
+/**
+ * Public form of the cache-key binary derivation, used by the handler to
+ * compute the `share_url` (`/live-score/<binary>`) for cached + live
+ * inline-scorecard responses. Same logic as the internal cache-tier
+ * derivation, exported so the handler can reuse it without re-running a
+ * full lookup. Returns null when no binary is derivable upfront (the only
+ * case is github-url without a hint; the user's response carries no
+ * share_url and they can re-paste to re-score).
+ */
+export function deriveShareBinary(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
+  if (input.kind === 'install-command') return input.spec.binary;
+  if (input.kind === 'github-url') {
+    // Branch-scoped pastes don't get a share URL. The /score/live/<binary>
+    // surface is keyed by binary alone; reusing it for a branch-scoped
+    // score would clobber the default-branch scorecard. The user still
+    // gets the scorecard inline in the response — they just can't bookmark
+    // it. A branch-aware share URL is a future enhancement.
+    if (input.branch) return null;
+    const key = `${input.owner}/${input.repo}`;
+    const hint = lookupOwnerRepo(hintsIndex.by_owner_repo, key);
+    return hint?.binary ?? null;
+  }
+  // slug: registry-fast-path catches curated slugs into the `registry_hit`
+  // branch (which uses scorecard_url, not share_url). A slug without a
+  // curated scorecard isn't valid input — validateInput rejects it.
   return null;
 }

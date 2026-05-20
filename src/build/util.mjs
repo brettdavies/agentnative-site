@@ -43,35 +43,16 @@ export function parseFilename(filename) {
   return { n: Number(match[1]), slug: match[2] };
 }
 
-/**
- * Escape HTML special characters in a string.
- * @param {string} s
- * @returns {string}
- */
-export function escHtml(s) {
-  return String(s).replace(
-    /[<>&"']/g,
-    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c],
-  );
-}
-
-// -------------------------------------------------------------------
-// Shared constants (STAR — single authoritative source)
-// -------------------------------------------------------------------
-
-export const PRINCIPLE_NAMES = {
-  P1: 'Non-Interactive by Default',
-  P2: 'Structured, Parseable Output',
-  P3: 'Progressive Help Discovery',
-  P4: 'Fail-Fast, Actionable Errors',
-  P5: 'Safe Retries & Mutation Boundaries',
-  P6: 'Composable, Predictable Command Structure',
-  P7: 'Bounded, High-Signal Responses',
-};
-
-export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);
-
-export const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
+// Worker-safe primitives + constants live in `src/shared/scorecard-format.mjs`
+// so both the build (Node) and the Worker (Cloudflare runtime) can import
+// them without dragging in this file's fs.readFileSync calls. Re-exported
+// here for backward compat with existing build-side callers.
+export {
+  BONUS_GROUPS,
+  escHtml,
+  PRINCIPLE_GROUPS,
+  PRINCIPLE_NAMES,
+} from '../shared/scorecard-format.mjs';
 
 // =====================================================================
 // Spec version constants — three distinct concepts, three distinct files.

@@ -1,4 +1,4 @@
-// Brew discovery-fallback tests for resolveSpec() in do.ts.
+// Brew discovery-fallback tests for resolveSpec() in resolve-spec.ts.
 //
 // When a user pastes `brew install <pkg>`, resolveSpec fetches the
 // formula metadata from formulae.brew.sh, parses the homepage as a
@@ -6,9 +6,13 @@
 // github-url inputs. The brew-only bounce is intentionally
 // indistinguishable from a missing formula or a non-github homepage so
 // the user-facing CTA stays simple.
+//
+// 2026-05-20 move: pre-move this lived in do.ts and was invoked at the
+// DO boundary. Resolution now happens at the Worker tier; the function
+// signature is unchanged, only the file location moved.
 
 import { describe, expect, test } from 'bun:test';
-import { parseGithubOwnerRepo, resolveBrewFallback } from '../src/worker/score/do';
+import { parseGithubOwnerRepo, resolveBrewFallback } from '../src/worker/score/resolve-spec';
 
 type FetchHandler = (url: string) => Response | Promise<Response>;
 

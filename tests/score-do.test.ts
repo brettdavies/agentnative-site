@@ -1,7 +1,6 @@
 // Sandbox DO + two-phase egress orchestration tests.
 //
-// Plan U6 verification — covers the three test scenarios the plan body
-// specifies as MUST:
+// Covers three MUST-hold scenarios for the egress-handler contract:
 //
 //   (a) Sandbox.outboundHandlers static map has both `allowedInstall`
 //       and `noHttp` keys BEFORE any setOutboundHandler call runs.
@@ -345,6 +344,52 @@ describe('sandbox-exec.score() — install table per PM', () => {
   // (which assumes a rust toolchain we don't ship). Bug A surfaced when
   // these tests pinned the wrong form; do not relax to a startsWith
   // match — exact equality keeps the binary-name regression alarm loud.
+
+  // Direct-install command shape (auto-detect + gate-markers — Fix 1/3):
+  // build the expected string from URL + extract verb + preferred binary
+  // so each tested archive extension stays a one-line spec while the
+  // (long) shell pipeline lives in one place.
+  function directExpected(url: string, extract: string, preferred: string): string {
+    const qUrl = `'${url}'`;
+    const qPref = `'${preferred}'`;
+    return (
+      `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+      `echo 'GATE:download' >&2; ` +
+      `curl -fsSL ${qUrl} -o "$tmp/a" 2>"$tmp/curl_err" || ` +
+      `{ echo "DETAILS:Download failed: $(cat "$tmp/curl_err" | head -c 200)" >&2; exit 10; }; ` +
+      `echo 'GATE:extract' >&2; ` +
+      `${extract} 2>"$tmp/ext_err" || ` +
+      `{ echo "DETAILS:Extract failed: $(cat "$tmp/ext_err" | head -c 200)" >&2; exit 12; }; ` +
+      `echo 'GATE:find_binary' >&2; ` +
+      `candidates=$(find "$tmp/x" -type f -perm /111 -printf '%P\\n' 2>/dev/null | ` +
+      `grep -viE '(^|/)(LICEN[CS]E|README|CHANGELOG|NOTICE|AUTHORS|COPYING|MANIFEST|Makefile|\\.gitignore)([._-].*)?$' | ` +
+      `grep -viE '\\.(md|markdown|txt|html|htm|json|yml|yaml|toml|xml|cfg|ini|sh|bat|cmd|py|rb|pl)$' | ` +
+      `grep -vE '(^|/)\\.\\.(/|$)' | ` +
+      `grep -vE '^/' || true); ` +
+      `if [ -z "$candidates" ]; then ` +
+      `all=$(find "$tmp/x" -type f -printf '%P\\n' 2>/dev/null | head -10 | tr '\\n' ' '); ` +
+      `echo "DETAILS:Archive contains no binary named ${preferred}. Files seen: $all" >&2; ` +
+      `exit 11; ` +
+      `fi; ` +
+      `best=$(printf '%s\\n' "$candidates" | awk -v pref=${qPref} '` +
+      `{ ` +
+      `n=split($0, parts, "/"); name=parts[n]; ` +
+      `score=0; ` +
+      `if (name == pref) score=1000; ` +
+      `else if (index(name, pref) > 0) score=500; ` +
+      `if (name !~ /\\./) score+=10; ` +
+      `score -= length(name); ` +
+      `if (score > best_score || best == "") { best_score=score; best=$0 } ` +
+      `} END { print best }'); ` +
+      `detected=$(basename "$best"); ` +
+      `echo 'GATE:install_binary' >&2; ` +
+      `install -m 0755 "$tmp/x/$best" "/usr/local/bin/$detected" 2>"$tmp/inst_err" || ` +
+      `{ echo "DETAILS:Install staging failed: $(cat "$tmp/inst_err" | head -c 200)" >&2; exit 13; }; ` +
+      `rm -rf "$tmp"; ` +
+      `echo "DETECTED_BINARY=$detected" )`
+    );
+  }
+
   const cases: Array<{ spec: InstallSpec; expected: string }> = [
     {
       spec: { pm: 'cargo-binstall', package: 'ripgrep', binary: 'rg' },
@@ -366,8 +411,14 @@ describe('sandbox-exec.score() — install table per PM', () => {
       // release-delay gate. Date computed at exec time so image age
       // doesn't widen the gate. pip v26.0+ honors the env var; older
       // pip ignores it harmlessly.
+      // PIP_DISABLE_PIP_VERSION_CHECK=1: suppresses pip's "A new release
+      // of pip is available" stderr notice so the scorecard evidence +
+      // bounce-panel details stay clean. Also baked as image ENV in
+      // docker/sandbox/Dockerfile; the inline pass keeps the
+      // currently-deployed image quiet until the next rebuild lands.
       expected:
         "PIP_UPLOADED_PRIOR_TO=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) " +
+        'PIP_DISABLE_PIP_VERSION_CHECK=1 ' +
         'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-binary=pyperclip,pycparser --no-cache-dir ' +
         "--break-system-packages 'black'",
     },
@@ -389,44 +440,70 @@ describe('sandbox-exec.score() — install table per PM', () => {
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.gz', binary: 'foo' },
-      // direct install: extract to tmp, find binary by name, install
-      // to /usr/local/bin. Handles flat AND nested archive layouts
-      // (csvlens-style `<tool-arch>/csvlens` nesting).
-      expected:
-        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
-        `curl -fsSL 'https://example.com/foo.tar.gz' -o "$tmp/a"; ` +
-        `tar xzf "$tmp/a" -C "$tmp/x"; ` +
-        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
-        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+      // direct install: extract to tmp, auto-detect binary (Fix 1) by
+      // listing executables + filtering docs + scoring against the
+      // preferred name. Installs the chosen file under its OWN basename
+      // and echoes DETECTED_BINARY=<name> so runScore overrides
+      // spec.binary before the `which` gate runs. Each pipeline step
+      // emits a GATE:<name> marker (Fix 3) for failure classification.
+      expected: directExpected('https://example.com/foo.tar.gz', `tar xzf "$tmp/a" -C "$tmp/x"`, 'foo'),
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tgz', binary: 'foo' },
-      expected:
-        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
-        `curl -fsSL 'https://example.com/foo.tgz' -o "$tmp/a"; ` +
-        `tar xzf "$tmp/a" -C "$tmp/x"; ` +
-        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
-        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+      expected: directExpected('https://example.com/foo.tgz', `tar xzf "$tmp/a" -C "$tmp/x"`, 'foo'),
     },
     {
       // Bug N: many newer Rust tools (csvlens) ship .tar.xz only,
       // often with the binary nested in a `<tool>-<arch>/` directory.
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.xz', binary: 'foo' },
-      expected:
-        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
-        `curl -fsSL 'https://example.com/foo.tar.xz' -o "$tmp/a"; ` +
-        `tar xJf "$tmp/a" -C "$tmp/x"; ` +
-        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
-        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+      expected: directExpected('https://example.com/foo.tar.xz', `tar xJf "$tmp/a" -C "$tmp/x"`, 'foo'),
     },
     {
       spec: { pm: 'direct', url: 'https://example.com/foo.tar.bz2', binary: 'foo' },
-      expected:
-        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
-        `curl -fsSL 'https://example.com/foo.tar.bz2' -o "$tmp/a"; ` +
-        `tar xjf "$tmp/a" -C "$tmp/x"; ` +
-        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
-        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+      expected: directExpected('https://example.com/foo.tar.bz2', `tar xjf "$tmp/a" -C "$tmp/x"`, 'foo'),
+    },
+    {
+      // .txz alias for .tar.xz — same xJ flag.
+      spec: { pm: 'direct', url: 'https://example.com/foo.txz', binary: 'foo' },
+      expected: directExpected('https://example.com/foo.txz', `tar xJf "$tmp/a" -C "$tmp/x"`, 'foo'),
+    },
+    {
+      // .tbz2 alias for .tar.bz2 — same xj flag.
+      spec: { pm: 'direct', url: 'https://example.com/foo.tbz2', binary: 'foo' },
+      expected: directExpected('https://example.com/foo.tbz2', `tar xjf "$tmp/a" -C "$tmp/x"`, 'foo'),
+    },
+    {
+      // .zip — unzip into the tmp dir, then auto-detect + install.
+      // Mirrors how GitHub Windows-style release artifacts (and the
+      // occasional Linux tool, e.g. bun) get extracted. The post-extract
+      // find walk is recursive, so an archive that expands to
+      // `extracted-dir/bin/<tool>` resolves identically to a flat archive.
+      spec: { pm: 'direct', url: 'https://example.com/foo.zip', binary: 'foo' },
+      expected: directExpected('https://example.com/foo.zip', `unzip -q "$tmp/a" -d "$tmp/x"`, 'foo'),
+    },
+    {
+      // Unknown / no recognized extension: falls back to `tar xz` so
+      // legacy tar.gz-without-extension URLs keep working. Fails loud
+      // if the archive isn't actually gzip-tar, which surfaces as a
+      // chain_resolved_install_failed bounce with the curl/tar stderr
+      // visible to the user.
+      spec: { pm: 'direct', url: 'https://example.com/foo-release', binary: 'foo' },
+      expected: directExpected('https://example.com/foo-release', `tar xzf "$tmp/a" -C "$tmp/x"`, 'foo'),
+    },
+    {
+      // Binary in subfolder coverage: the find walk under "$tmp/x" has
+      // no -maxdepth, so an archive whose binary lives at
+      // `<arch-dir>/bin/<binary>` (or any nesting depth) resolves
+      // identically. The command-shape assertion above pins the
+      // recursive walk; this case pins it explicitly so a future
+      // refactor that adds `-maxdepth 1` breaks here loudly. URL is a
+      // .tar.gz with a binary name that implies a release-folder layout.
+      spec: { pm: 'direct', url: 'https://example.com/nested-binary.tar.gz', binary: 'nested-binary' },
+      expected: directExpected(
+        'https://example.com/nested-binary.tar.gz',
+        `tar xzf "$tmp/a" -C "$tmp/x"`,
+        'nested-binary',
+      ),
     },
   ];
 
@@ -516,7 +593,7 @@ describe('sandbox-exec.score() — bounce classes', () => {
 
   test('go passed to score() bounces install_unsupported (resolveSpec should translate first)', async () => {
     // Parallel to the brew bounce: `go install` would compile from
-    // source, violating U2's binary-only premise. resolveSpec's
+    // source, violating the binary-only premise. resolveSpec's
     // resolveGoFallback in do.ts redirects github.com/<owner>/<repo>
     // module paths through the discovery chain so a GitHub release
     // binary substitutes for the compile. Direct invocation of
@@ -713,6 +790,27 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     expect(installCmd?.command).not.toContain('date -u -v-7d');
   });
 
+  test('pip install command carries PIP_DISABLE_PIP_VERSION_CHECK=1 to suppress upgrade notice', async () => {
+    // The Dockerfile bakes this as an image ENV so future builds are
+    // quiet at the OS level, but the currently-deployed image predates
+    // that change. Prepending the env var inline at exec time gives
+    // the currently-deployed sandbox the suppression immediately,
+    // without a rebuild. The companion image-level test lives in
+    // tests/dockerfile-sandbox.test.ts.
+    const { stub, calls } = makeStub();
+    await score(stub, { pm: 'pip', package: 'black', binary: 'black' });
+    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(installCmd).toBeDefined();
+    expect(installCmd?.command).toContain('PIP_DISABLE_PIP_VERSION_CHECK=1');
+    // Ordering: must precede `pip install` so it applies to the pip
+    // invocation rather than being set as an unused shell variable
+    // afterward.
+    const cmd = installCmd?.command ?? '';
+    expect(cmd.indexOf('PIP_DISABLE_PIP_VERSION_CHECK=1')).toBeLessThan(cmd.indexOf(' pip install '));
+  });
+
   test('non-pip install paths do NOT carry PIP_UPLOADED_PRIOR_TO (env-var is pip-scoped only)', async () => {
     // Leaking the pip env-var into npm/bun/cargo/uv installs would be
     // dead weight at best and could mask a missing real implementation
@@ -797,5 +895,238 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     const exitCode = await proc.exited;
     expect(exitCode).toBe(0);
     expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix 1 — auto-detect archive binary
+// Fix 3 — gate-capture in directInstallCommand
+// ---------------------------------------------------------------------------
+
+describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
+  // The install command is what the orchestration tells the container to
+  // run; the container then echoes `DETECTED_BINARY=<name>` to stdout
+  // and runScore() overrides spec.binary before the `which` gate. These
+  // tests stub the container, return a canned auto-detect result, and
+  // assert the `which` + `anc check` calls reference the detected name.
+
+  test('archive auto-detect picks gog when repo=gogcli (the gogcli/openclaw fix)', async () => {
+    // gogcli/openclaw case: GitHub Releases ships a `gog` binary, but
+    // the repo is `gogcli`. Pre-fix Step 2 hardcoded binary=ctx.repo,
+    // and the post-extract `find -name gogcli` missed. Now the install
+    // command does its own listing + scoring + emits the chosen name.
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('(') && cmd.includes('GATE:download')) {
+        // Auto-detect picked `gog` from the archive.
+        return { success: true, stdout: 'DETECTED_BINARY=gog\n', stderr: '' };
+      }
+      if (cmd.startsWith('which ')) {
+        return { success: true, stdout: '/usr/local/bin/gog\n', stderr: '' };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub, calls } = makeStub(responder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/gog-linux-amd64.tar.gz',
+      binary: 'gogcli', // the repo name, NOT the actual binary
+    });
+    expect(result.ok).toBe(true);
+    // The which gate must run against the DETECTED name, not the
+    // pre-fix repo name. This is the load-bearing assertion for Fix 1.
+    const whichCall = calls.find((c) => c.kind === 'exec' && c.command.startsWith('which ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(whichCall?.command).toBe("which 'gog'");
+    const ancCall = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc check ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(ancCall?.command).toContain("--command 'gog'");
+  });
+
+  test('no DETECTED_BINARY in stdout → spec.binary stays the preferred name', async () => {
+    // Backward-compat: any non-direct PM install command, or a future
+    // direct-install variant that doesn't emit the marker, keeps the
+    // existing spec.binary value. (npm / pip / cargo-binstall already
+    // print package-manager-specific noise without the marker.)
+    const { stub, calls } = makeStub();
+    const result = await score(stub, CARGO_SPEC);
+    expect(result.ok).toBe(true);
+    const whichCall = calls.find((c) => c.kind === 'exec' && c.command.startsWith('which ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(whichCall?.command).toBe("which 'rg'");
+  });
+
+  test('DETECTED_BINARY with shell-meta in name → rejected, spec.binary unchanged', async () => {
+    // Defense in depth: the install command's own filter rejects
+    // path-traversal candidates upstream. The extractDetectedBinary
+    // parser whitelists [A-Za-z0-9._-] so any smuggled bytes (e.g.
+    // `gog; rm -rf /`) don't reach the shell-quoted `anc check
+    // --command <binary>` slot.
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('(') && cmd.includes('GATE:download')) {
+        return { success: true, stdout: 'DETECTED_BINARY=gog; rm -rf /\n', stderr: '' };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub, calls } = makeStub(responder);
+    await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/x.tar.gz',
+      binary: 'safe',
+    });
+    const whichCall = calls.find((c) => c.kind === 'exec' && c.command.startsWith('which ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    // Stays 'safe' (the original spec.binary) because the malicious
+    // detected name failed the [A-Za-z0-9._-] whitelist.
+    expect(whichCall?.command).toBe("which 'safe'");
+  });
+});
+
+describe('sandbox-exec.score() — gate-capture in install details (Fix 3)', () => {
+  // Each direct-install pipeline step emits a GATE:<name> marker to
+  // stderr BEFORE running, and on failure also emits a step-specific
+  // DETAILS:<text> line. extractGateDetails() in sandbox-exec.ts picks
+  // up the LAST GATE marker and the DETAILS line; runScore threads
+  // them into the user-facing details field instead of the raw stderr.
+
+  test('curl-fail surfaces "Download failed:" in details', async () => {
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('(') && cmd.includes('GATE:download')) {
+        return {
+          success: false,
+          stdout: '',
+          stderr: 'GATE:download\nDETAILS:Download failed: curl: (22) The requested URL returned error: 404\n',
+          exitCode: 10,
+        };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub } = makeStub(responder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/missing.tar.gz',
+      binary: 'missing',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('chain_resolved_install_failed');
+    expect(result.details).toMatch(/^Download failed:/);
+  });
+
+  test('extract-fail surfaces "Extract failed:" in details', async () => {
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('(') && cmd.includes('GATE:download')) {
+        return {
+          success: false,
+          stdout: '',
+          stderr: 'GATE:download\nGATE:extract\nDETAILS:Extract failed: gzip: stdin: not in gzip format\n',
+          exitCode: 12,
+        };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub } = makeStub(responder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/notarchive.tar.gz',
+      binary: 'foo',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('chain_resolved_install_failed');
+    expect(result.details).toMatch(/^Extract failed:/);
+  });
+
+  test('no-binary-candidates → chain_resolved_no_binary_produced + lists archive contents', async () => {
+    // Red-team case: an archive that ships only docs. The auto-detect
+    // filter strips every entry, the pipeline exits 11, and the
+    // orchestration re-classifies as no_binary_produced (it's an
+    // "archive shipped no executable" miss, not an "install failed"
+    // miss).
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('(') && cmd.includes('GATE:download')) {
+        return {
+          success: false,
+          stdout: '',
+          stderr:
+            'GATE:download\nGATE:extract\nGATE:find_binary\nDETAILS:Archive contains no binary named foo. Files seen: LICENSE README.md\n',
+          exitCode: 11,
+        };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub } = makeStub(responder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/docs-only.tar.gz',
+      binary: 'foo',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('chain_resolved_no_binary_produced');
+    expect(result.details).toContain('Archive contains no binary named foo');
+    expect(result.details).toContain('LICENSE');
+  });
+
+  test('install-staging-fail surfaces "Install staging failed:" in details', async () => {
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('(') && cmd.includes('GATE:download')) {
+        return {
+          success: false,
+          stdout: '',
+          stderr:
+            'GATE:download\nGATE:extract\nGATE:find_binary\nGATE:install_binary\nDETAILS:Install staging failed: install: cannot stat file\n',
+          exitCode: 13,
+        };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub } = makeStub(responder);
+    const result = await score(stub, {
+      pm: 'direct',
+      url: 'https://example.com/x.tar.gz',
+      binary: 'foo',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('chain_resolved_install_failed');
+    expect(result.details).toMatch(/^Install staging failed:/);
+  });
+
+  test('no GATE markers in stderr → falls back to raw truncated stderr (back-compat)', async () => {
+    // Non-direct PMs (npm, pip, cargo-binstall) don't emit GATE
+    // markers. Existing behavior — surface the raw stderr — must be
+    // preserved so we don't regress error messages for the registry-
+    // install paths.
+    const responder: ExecResponder = (cmd) => {
+      if (cmd.startsWith('cargo-binstall ')) {
+        return { success: false, stdout: '', stderr: 'plain stderr without markers', exitCode: 1 };
+      }
+      return defaultResponder(cmd);
+    };
+    const { stub } = makeStub(responder);
+    const result = await score(stub, CARGO_SPEC);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe('chain_resolved_install_failed');
+    expect(result.details).toBe('plain stderr without markers');
+  });
+
+  test('extractGateDetails + extractDetectedBinary export shape', async () => {
+    // Sanity-check the parser exports so client-side users can rely on
+    // them. Keeps the module surface stable.
+    const m = await import('../src/worker/score/sandbox-exec');
+    expect(typeof m.extractDetectedBinary).toBe('function');
+    expect(typeof m.extractGateDetails).toBe('function');
+    expect(m.extractDetectedBinary('foo\nDETECTED_BINARY=gog\n')).toBe('gog');
+    expect(m.extractDetectedBinary('no marker')).toBeNull();
+    expect(m.extractGateDetails('GATE:download\nDETAILS:Download failed: 404')?.kind).toBe('download');
+    expect(
+      m.extractGateDetails('GATE:find_binary\nDETAILS:Archive contains no binary named x. Files seen:')?.kind,
+    ).toBe('no_binary_candidates');
+    expect(m.extractGateDetails('')).toBeNull();
   });
 });

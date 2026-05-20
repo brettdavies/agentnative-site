@@ -1,6 +1,12 @@
 .DS_Store
 node_modules/
 .env
+# wrangler's local-secrets file (per-env variants also covered). Holds
+# secrets like TURNSTILE_SECRET for `wrangler dev --local`. Never commit
+# even when the value is a public Cloudflare test secret — keeping the
+# habit tight beats explaining the exception.
+.dev.vars
+.dev.vars.*
 .context/
 # docs/solutions/ is a symlink to ~/dev/solutions-docs (see AGENT.md).
 # Ignore that specific subpath; docs/design/ and any other future docs/

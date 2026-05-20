@@ -2,7 +2,14 @@
 // per-tool scorecard pages. Template concern only; data loading and
 // scoring live in scorecards.mjs.
 
-import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util.mjs';
+import {
+  BONUS_GROUPS,
+  escHtml,
+  formatCheckTableMarkdownLines,
+  groupToPrincipleNum,
+  PRINCIPLE_GROUPS,
+  PRINCIPLE_NAMES,
+} from '../shared/scorecard-format.mjs';
 
 // Display-only mirror of the CLI's badge eligibility floor (80%). All
 // eligibility decisions read `scorecard.badge.eligible` (canonical source
@@ -12,15 +19,8 @@ import { BONUS_GROUPS, escHtml, PRINCIPLE_GROUPS, PRINCIPLE_NAMES } from './util
 // scorecard.badge.eligible directly.
 const BADGE_FLOOR_DISPLAY_PCT = 80;
 
-/**
- * Map a check group string to a principle number (1-7) or null for bonus groups.
- * @param {string} group
- * @returns {number | null}
- */
-function groupToPrincipleNum(group) {
-  const match = group.match(/^P(\d+)$/);
-  return match ? Number(match[1]) : null;
-}
+// groupToPrincipleNum lives in src/shared/scorecard-format.mjs (single source
+// of truth shared with the Worker). Imported above.
 
 // Evidence prefix the CLI emits for any check suppressed by `--audit-profile`.
 // Mirrors `SUPPRESSION_EVIDENCE_PREFIX` in agentnative/src/principles/registry.rs
@@ -116,10 +116,10 @@ function renderCheckRows(checks) {
 export function buildLeaderboardBody(leaderboard, methodology) {
   const tierBadge = (tier) => `<span class="tier-badge tier-badge--${escHtml(tier)}">${escHtml(tier)}</span>`;
 
-  // Post-U3 inversion: every leaderboard entry has a scorecard (registry
-  // entries without scorecards are excluded by loadScoredTools). The em-dash
-  // "—" / "—/7" cells the pre-inversion code carried for unscored rows are
-  // gone with the unscored row itself. Score read directly from schema 0.5
+  // Every leaderboard entry has a scorecard (registry entries without
+  // scorecards are excluded by loadScoredTools). The em-dash "—" / "—/7"
+  // cells the pre-inversion code carried for unscored rows are gone with
+  // the unscored row itself. Score read directly from schema 0.5
   // `badge.score_pct` — the CLI is canonical for the integer.
   const scoreCell = (entry) => {
     const pct = entry.scorecard.badge.score_pct;
@@ -155,8 +155,8 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   // Eligible-tool count for the badge callout. Reads scorecard.badge.eligible
   // (schema 0.5) — the CLI is canonical for what eligibility means. Lets the
   // callout cite a real number ("24 tools currently qualify") instead of a
-  // vague "tools that qualify." Post-U3 every leaderboard entry has a
-  // scorecard, so no null guard needed.
+  // vague "tools that qualify." Every leaderboard entry has a scorecard,
+  // so no null guard needed.
   const eligibleCount = leaderboard.filter((e) => e.scorecard.badge.eligible).length;
   const floorPct = BADGE_FLOOR_DISPLAY_PCT;
 
@@ -590,7 +590,7 @@ export function buildLeaderboardMarkdown(leaderboard) {
   ];
 
   for (const entry of leaderboard) {
-    // Post-U3: every leaderboard entry has a scorecard.
+    // Every leaderboard entry has a scorecard at this point.
     const score = `${entry.scorecard.badge.score_pct}%`;
     const ps = entry.principleScore;
     const principles = `${ps.met}/${ps.total}`;
@@ -647,13 +647,13 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     lines.push('');
   }
 
-  // Check results table
-  lines.push('| Status | Check | Principle | Evidence |');
-  lines.push('|--------|-------|-----------|----------|');
-  for (const check of scorecard.results) {
-    const pNum = groupToPrincipleNum(check.group);
-    const groupLabel = pNum ? `[${check.group}](/p${pNum})` : check.group;
-    lines.push(`| ${check.status.toUpperCase()} | ${check.label} | ${groupLabel} | ${check.evidence || ''} |`);
+  // Check results table — formatted by the shared row helper so the
+  // /score/<tool>.md and /live-score/<binary>.md surfaces stay in lockstep.
+  // Empty `baseUrl` produces site-relative links (`/p3`); the build's
+  // absolutifyMarkdownLinks pass rewrites those to absolute anc.dev URLs
+  // for the twin output (matches the other markdown pages in this file).
+  for (const row of formatCheckTableMarkdownLines(scorecard.results)) {
+    lines.push(row);
   }
   lines.push('');
 

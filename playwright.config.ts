@@ -48,7 +48,11 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /skill\.e2e\.ts/,
+      // Both opt-in live projects (skill + homepage-score-live) are
+      // excluded from the default suite — they hit real network endpoints
+      // (github.com clone hosts, the staging Worker) that the deep-check
+      // daily schedule shouldn't depend on.
+      testIgnore: [/skill\.e2e\.ts/, /homepage-score-live\.e2e\.ts/],
     },
     { name: 'mobile-android', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
     { name: 'mobile-ios', use: { ...devices['iPhone 13'] }, testMatch: /flows\.e2e\.ts/ },
@@ -60,9 +64,28 @@ export default defineConfig({
       // Live `git clone` against github.com over the network — give it room.
       timeout: 60_000,
     },
+    {
+      name: 'homepage-score-live',
+      // Live staging Worker. Set ANC_STAGING_BASE_URL before invoking;
+      // see tests/e2e/homepage-score-live.e2e.ts for full env contract.
+      // Excluded from the default suite; run with --project=homepage-score-live.
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /homepage-score-live\.e2e\.ts/,
+      // Real Sandbox container cold starts and Turnstile siteverify
+      // round-trips push the per-test budget past Playwright's default.
+      timeout: 120_000,
+    },
   ],
   webServer: {
-    command: 'bun run build && bun x wrangler dev --local --port ' + PORT,
+    // --env staging: the staging-pinned Sandbox image is the one we keep
+    // locally; the top-level prod image is rotated less frequently and
+    // often isn't in the dev Docker cache, which makes `wrangler dev
+    // --local` (no --env) fail with a misleading "container Sandbox does
+    // not expose any ports" error during prepareContainerImagesForDev.
+    // Using --env staging also gives the homepage-score E2E suite a real
+    // TURNSTILE_SITEKEY var to substitute into the meta tag — matches
+    // staging behavior directly.
+    command: 'bun run build && bun x wrangler dev --local --env staging --port ' + PORT,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

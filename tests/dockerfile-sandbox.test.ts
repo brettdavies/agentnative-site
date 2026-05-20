@@ -1,7 +1,7 @@
-// Static shape assertions for the live-scoring sandbox image (plan U6
-// base-image rework, 2026-05-18 — debian-trixie-slim / glibc; plan U7
-// follow-up 2026-05-19 — python:3.12-slim-trixie to satisfy aider-chat
-// and similar tools that require Python <3.13).
+// Static shape assertions for the live-scoring sandbox image. Base
+// reworks: 2026-05-18 moved to debian-trixie-slim / glibc; 2026-05-19
+// moved to python:3.12-slim-trixie to satisfy aider-chat and similar
+// tools that require Python <3.13.
 //
 // The image-size + smoke-test verifications require a working Docker
 // daemon (CI doesn't have one) and live in docker/sandbox/README.md as
@@ -95,7 +95,7 @@ describe('docker/sandbox/Dockerfile — no-toolchains invariant (Premise #2)', (
     // Forbidden packages — anything that lets a user input build C/Rust/Go
     // from source. golang-go ships the go toolchain (we rely on `go install`
     // pulling precompiled module artifacts in practice; modules that build
-    // from source bounce at U6 install time). The forbidden set is the
+    // from source bounce at sandbox install time). The forbidden set is the
     // CGO / native-extension surface that would let an attacker stretch
     // exec time past the 60 s budget by triggering long compiles.
     const forbidden = ['build-essential', 'gcc', 'g++', 'clang', 'make', 'cmake', 'rustc', 'cargo', 'rustup'];
@@ -131,7 +131,7 @@ describe('docker/sandbox/Dockerfile — package manager coverage', () => {
     expect(df).toMatch(/cargo-binstall -V/);
   });
 
-  test('all six U4-supported pms have a runtime in the image: cargo-binstall, pip, npm, go, bun, uv', async () => {
+  test('all six supported pms have a runtime in the image: cargo-binstall, pip, npm, go, bun, uv', async () => {
     const df = await loadDockerfile();
     // Python + pip come from the python:3.12-slim-trixie FROM line
     // (2026-05-19), not from an apt python3-pip install. The base image
@@ -219,9 +219,10 @@ describe('docker/sandbox/Dockerfile — sandbox runtime', () => {
   });
 
   test('declares at least one EXPOSE so wrangler dev --local accepts the container binding', async () => {
-    // deep-check.yml unblock — see U6 K-decision in the plan. Port 3000
-    // is reserved by the CF Sandbox SDK's internal Bun server, so any
-    // placeholder must avoid it. 8080 is the U6 choice.
+    // deep-check.yml only schedules containers when wrangler can see an
+    // EXPOSE line. Port 3000 is reserved by the CF Sandbox SDK's internal
+    // Bun server, so any placeholder must avoid it. 8080 is the chosen
+    // placeholder.
     const df = await loadDockerfile();
     const exposeLines = df.split('\n').filter((l) => /^EXPOSE\s+\d+/.test(l));
     expect(exposeLines.length).toBeGreaterThanOrEqual(1);
@@ -258,5 +259,17 @@ describe('docker/sandbox/Dockerfile — supply-chain release-delay gate', () => 
     const uvExcludeNewerIdx = df.search(/^ENV UV_EXCLUDE_NEWER=/m);
     expect(uvInstallIdx).toBeGreaterThan(0);
     expect(uvExcludeNewerIdx).toBeGreaterThan(uvInstallIdx);
+  });
+
+  test('ENV PIP_DISABLE_PIP_VERSION_CHECK=1 suppresses pip upgrade notice in evidence/stderr', async () => {
+    // Without this env var, every `pip install <pkg>` in the sandbox
+    // writes a multi-line "A new release of pip is available" notice to
+    // stderr, which pollutes the scorecard evidence field and the
+    // bounce-panel stderr block. Baked at image build time so future
+    // builds carry it intrinsically; sandbox-exec.ts also prepends it
+    // inline at exec time so the currently-deployed image gets the
+    // suppression before the next image rebuild lands.
+    const df = await loadDockerfile();
+    expect(df).toMatch(/^ENV PIP_DISABLE_PIP_VERSION_CHECK=1$/m);
   });
 });
