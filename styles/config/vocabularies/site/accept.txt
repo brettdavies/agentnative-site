@@ -85,6 +85,7 @@ citeable
 cmake
 codeblock
 coverage_summary
+cron
 culori
 cutover
 denylist
@@ -215,6 +216,7 @@ viewport
 viewports
 vw
 watchexec
+watchpoints
 webfont
 wordmark
 wrangler
