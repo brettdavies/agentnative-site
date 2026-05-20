@@ -966,17 +966,17 @@ tests/
   score-handler.test.ts             # [pending] U5 — handler.ts unit tests
   score-cache.test.ts               # [pending] U7 — R2 cache read/write
   score-response-shape.test.ts      # [pending] U5 — spec_version/anc_version/checker_url triad enforcement
-  score-contract.test.ts            # [pending] U9 — cross-validates /api/score JSON ↔ committed scorecards
+  score-contract.test.ts            # [shipped] U9 — cross-validates /api/score JSON ↔ committed scorecards (PR #101)
   e2e/
     score.e2e.ts                    # [pending] U8 — Playwright form-submit happy path (chromium, mocked API)
-    score-live.e2e.ts               # [pending] U9 — opt-in live sandbox project (excluded from default suite)
+    homepage-score-live.e2e.ts      # [shipped] U7/U8 — opt-in live sandbox project (excluded from default suite); realises the planned score-live.e2e.ts surface
 docs/
   plans/
     2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md  # this file (rewrite)
   research/
     2026-05-04-discovery-chain-hit-rate.md  # [shipped] — Pre-Implementation Validation gate write-up
   runbooks/
-    live-scoring-monitoring.md      # [pending] U9 — cost-watch, alert thresholds, common failures
+    live-scoring-monitoring.md      # [shipped] U9 — cost-watch, alert thresholds, common failures (PR #103)
 scripts/
   measure-discovery-hit-rate.mjs    # [shipped] — gate reproducer (local-only, not deployed)
 wrangler.jsonc                      # [pending] U3 — adds containers, durable_objects, migrations,
@@ -986,7 +986,7 @@ wrangler.jsonc                      # [pending] U3 — adds containers, durable_
                                     #   `image: "./docker/sandbox/Dockerfile"` (no separate push step,
                                     #   no Docker Hub credentials); cache backend (buildx + type=gha
                                     #   vs none) picked by the U3 caching-measurement sub-task
-RELEASES.md                         # [pending] U9 — adds v3 release procedure (image + migration + smoke)
+RELEASES.md                         # [shipped] U9 — adds v3 release procedure (image + migration + smoke) (PR #101)
 README.md                           # [pending] U8 — mentions /score in the user-facing surface map
 ```
 
@@ -1210,8 +1210,8 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 | U6   | [shipped] | PR [#95](https://github.com/brettdavies/agentnative-site/pull/95) — commit `af9f568` (2026-05-18)                                                                                                                                                                                  |
 | U7   | [shipped] | PRs [#96](https://github.com/brettdavies/agentnative-site/pull/96) + [#97](https://github.com/brettdavies/agentnative-site/pull/97) + [#98](https://github.com/brettdavies/agentnative-site/pull/98) + [#99](https://github.com/brettdavies/agentnative-site/pull/99) — 2026-05-19 |
 | U8   | [shipped] | branch `feat/u8-homepage-form` off `dev` commit `37e5375` — head `45b66c6` (16 commits) — PR pending (2026-05-20)                                                                                                                                                                  |
-| U9   | [pending] | cross-cutting; depends on U1-U8 (now ready)                                                                                                                                                                                                                                        |
-| U10  | [pending] | depends on U7 (shipped) + U9 (pending); analytics + billing guardrails                                                                                                                                                                                                             |
+| U9   | [shipped] | PRs [#101](https://github.com/brettdavies/agentnative-site/pull/101) + [#102](https://github.com/brettdavies/agentnative-site/pull/102) + [#103](https://github.com/brettdavies/agentnative-site/pull/103) — 2026-05-20                                                            |
+| U10  | [pending] | depends on U7 + U9 (both shipped); analytics + billing guardrails                                                                                                                                                                                                                  |
 
 **Phases 1, 2, and the user-facing surface of Phase 3 are complete.** U1 through U4 land the foundation (data, image,
 parser, bindings). U5 wires `/api/score` with the abuse-mitigation stack but leaves the DO as a stub. U6 replaces the
@@ -2541,6 +2541,20 @@ largest cost lever and must be tracked).
    count and auto-flipping `scoring_disabled` past a threshold. The pieces (AE dataset + kill switch + cron primitive in
    Workers) all exist, but wiring them is its own discrete change and depends on real traffic patterns to set the
    threshold. Don't speculate.
+
+- **Agent-deterministic checks (design decision to make at U10 kickoff).** The U9 monitoring runbook
+  (`docs/runbooks/live-scoring-monitoring.md`) resolves every check to `wrangler ...`, a dashboard click, or a log
+  eyeball — none parseable by an agent. Two candidate paths surfaced during U9; pick one (or both) here:
+- **JSON wrapper scripts** in `scripts/monitoring/` that emit `{status, evidence}` per check (kill-switch state, R2
+  cache health, recent deploys, error-tier sample). Pattern matches `scripts/smoke-api-score.sh`. Callable by operators,
+  CI, and agents via Bash. Pairs naturally with AE — scripts can call the AE SQL surface for aggregates.
+- **Cloudflare Workers Observability MCP** queries (e.g.,
+  `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability`) documented inline next to each manual
+  check in `docs/runbooks/live-scoring-monitoring.md`. Agent-only (operators stay on `wrangler` / AE SQL). No new code
+  surface; pure docs expansion of the existing runbook.
+- Trade-off: single shell surface (CI-friendly, slower agent loop) vs. two parallel agent surfaces (instant for IDE
+  agents, no CI reach). The U10 author picks; runbook gets updated accordingly. Captured in the runbook's
+  "Agent-deterministic checks (U10 design choice)" subsection.
 
 **Patterns to follow:**
 
