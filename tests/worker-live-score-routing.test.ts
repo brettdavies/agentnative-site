@@ -1,10 +1,9 @@
 // Worker entry routing for /score/live/* paths.
 //
-// Plan U8: live-score URL pattern matches the rest of the site —
-// `/score/live/<binary>` is the canonical no-extension form. `.md` is the
-// markdown twin. `.html` redirects to the canonical form (mirrors the
-// CF Static Assets html_handling=auto-trailing-slash behavior for the
-// curated /score/<tool> static pages).
+// `/score/live/<binary>` is the canonical no-extension form. `.md` is
+// the markdown twin. `.html` redirects to the canonical form (mirrors
+// the CF Static Assets html_handling=auto-trailing-slash behavior for
+// the curated /score/<tool> static pages).
 //
 // Also verifies the homepage's {{TURNSTILE_SITEKEY}} placeholder is
 // substituted at request time so production cuts ship empty (fail-loud)
@@ -138,7 +137,7 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
     expect(res.headers.get('content-type')).toContain('text/markdown');
     const md = await res.text();
     // The markdown twin must not carry the meta-tag placeholder OR the
-    // substituted value. Markdown-twin silence (U8.8) is the build-time
+    // substituted value. Markdown-twin silence is the build-time
     // invariant; this is the runtime mirror.
     expect(md).not.toContain('{{TURNSTILE_SITEKEY}}');
     expect(md).not.toContain('test-key');

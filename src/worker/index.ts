@@ -3,7 +3,7 @@
 // suffix or Accept header) and we're serving an HTML path, rewrite the
 // asset lookup to the `.md` twin before fetching.
 //
-// Contract (docs/DESIGN.md §3.4 + eng review A3, A8, A12):
+// Contract (docs/DESIGN.md §3.4):
 //   - Assets served via env.ASSETS (Workers Static Assets product). Not KV,
 //     not R2, not kv-asset-handler.
 //   - CN branch: path ends with `.md` OR `Accepts(req).type(['text/html',
@@ -44,7 +44,7 @@ export interface Env {
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
   // is a public var the homepage form bakes into the widget render — set
-  // in env.staging only until U10 promotes production. Absent on
+  // in env.staging only while production stays gated. Absent on
   // production means the homepage form refuses to render Turnstile,
   // which is the deliberate fail-loud posture pre-promotion.
   TURNSTILE_SECRET?: string;
@@ -67,9 +67,9 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    // Live-scoring routes (plan U5). Sits ABOVE the asset call so the
-    // asset-first invariant for everything else (every other path proxies
-    // to env.ASSETS) is preserved by exclusion, not by overlap.
+    // Live-scoring routes. Sits ABOVE the asset call so the asset-first
+    // invariant for everything else (every other path proxies to
+    // env.ASSETS) is preserved by exclusion, not by overlap.
     if (isScorePath(pathname)) {
       return handleScore(request, env as ScoreEnv);
     }
@@ -88,8 +88,8 @@ export default {
       });
     }
 
-    // Shareable live-score result page (plan U8). Reads the cached
-    // scorecard from R2 by binary slug, renders an HTML summary view.
+    // Shareable live-score result page. Reads the cached scorecard from
+    // R2 by binary slug, renders an HTML summary view.
     // Strict regex enforced by parseLiveScorePath — slugs must match
     // /^[a-z0-9][a-z0-9-]{0,63}$/, so an attacker can't pivot this
     // route into an arbitrary R2 key read. Accepts both /score/live/<binary>

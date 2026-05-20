@@ -72,8 +72,8 @@ const esc = escHtml;
  */
 /**
  * Emit a placeholder-only version of the shell. Used by the Worker to
- * render dynamic pages (plan U8: /live-score/<binary>) without
- * duplicating the shell layout. The template has four placeholders:
+ * render dynamic pages (/score/live/<binary>) without duplicating the
+ * shell layout. The template has four placeholders:
  *
  *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
  *   {{DESCRIPTION}}      — meta description + og:description

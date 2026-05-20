@@ -1,6 +1,6 @@
 // Response-header policy for the agentnative-site Worker.
 //
-// Contract (docs/DESIGN.md §3.4 + eng review A8, A10, A12, P4):
+// Contract (docs/DESIGN.md §3.4):
 //
 //   HTML responses         Link: </p<n>.md>; rel="alternate"; type="text/markdown"
 //                          X-Llms-Txt: /llms.txt
@@ -36,19 +36,19 @@
 //   Hashed assets          Cache-Control: public, max-age=31536000, immutable
 //   (/fonts/*, /og-image.png)
 //
-//   Staging guard (P4 +    X-Robots-Tag: noindex on every response whose
-//    locked decision #4)   Host ends with `.workers.dev`. Added LAST so it
+//   Staging guard          X-Robots-Tag: noindex on every response whose
+//                          Host ends with `.workers.dev`. Added LAST so it
 //                          composes with the markdown branch (both set
 //                          noindex; last write wins, same value either way).
 
 const SHORT_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 
-// Content-Security-Policy for HTML responses. Plan U8 introduces CSP for the
-// first time on this site — necessary to allow Cloudflare Turnstile's
-// invisible widget script + iframe + siteverify XHR on the homepage form,
-// while keeping the rest of the site locked down. Three directives MUST
-// include `challenges.cloudflare.com` or Turnstile breaks silently:
+// Content-Security-Policy for HTML responses. CSP is required to allow
+// Cloudflare Turnstile's invisible widget script + iframe + siteverify
+// XHR on the homepage form, while keeping the rest of the site locked
+// down. Three directives MUST include `challenges.cloudflare.com` or
+// Turnstile breaks silently:
 //   - script-src  (lazy-loaded api.js)
 //   - frame-src   (invisible widget iframe)
 //   - connect-src (token exchange XHR)

@@ -2,15 +2,15 @@
 //
 // Pipeline (post 2026-05-20 gates-before-discovery reorder):
 //
-//   1. Validate input (U4).
-//   2. Unified scorecard lookup — pre-discovery (U7). One call to
+//   1. Validate input.
+//   2. Unified scorecard lookup — pre-discovery. One call to
 //      lookupScorecard() collapses the registry-fast-path and the R2
 //      cache pre-check into a single tier-resolved decision. `curated`
 //      returns the registry-hit envelope pointing at /score/<slug>;
 //      `cached` returns the inline scorecard JSON; both bypass the
-//      metered gates (kill-switch, Turnstile, rate-limit, DO) per R6
-//      — cached scorecards are functionally identical to curated ones
-//      (no sandbox cost). `miss` falls through to the live path.
+//      metered gates (kill-switch, Turnstile, rate-limit, DO) — cached
+//      scorecards are functionally identical to curated ones (no
+//      sandbox cost). `miss` falls through to the live path.
 //
 //      The pre-discovery cache key is keyed by whatever binary is
 //      cheaply derivable from input alone: install-command's
@@ -185,8 +185,8 @@ export function _resetIndexCache(): void {
 // tier served the response and the pre/post-discovery cache attempt+hit
 // flags so operators can later query "what percentage of cache hits came
 // from pre vs post discovery?" via the observability binding. NOT exposed
-// in the response body — operational signal, not part of the R11 triad
-// contract.
+// in the response body — operational signal, not part of the
+// spec_version + anc_version + checker_url response contract.
 //
 // `tier` records the resolution branch that produced the response:
 //   - `curated`     — registry-fast-path hit
@@ -354,8 +354,8 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
           scorecard_url: lookup.scorecard_url,
           // Surface the curated score so the homepage form can render a
           // "Curated · N% pass rate" reward inline before the redirect.
-          // null when the registry entry predates the U8+ enrichment
-          // (gracefully degrades on the client).
+          // null when the registry entry predates the score_pct
+          // enrichment (gracefully degrades on the client).
           score_pct: typeof lookup.entry.score_pct === 'number' ? lookup.entry.score_pct : null,
         },
         lookup.anc_version,
@@ -597,11 +597,11 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   //    returns either `{scorecard, anc_version}` on success or
   //    `{error, details?}` on failure, mapped below into the typed
   //    ScoreError union. The DO still writes successful scorecards to
-  //    SCORE_CACHE itself (U7), so the next request for the same binary
+  //    SCORE_CACHE itself, so the next request for the same binary
   //    short-circuits at step 2's cache tier.
   //
-  // Pool of MAX_INSTANCES DO instances via getRandom (plan U6
-  // K-decision). Each request picks a random instance — parallel load
+  // Pool of MAX_INSTANCES DO instances via getRandom. Each request
+  // picks a random instance — parallel load
   // spreads across the pool instead of queuing serially behind a
   // single container session. Critical for Show HN spike absorption
   // (singleton bottlenecked at one exec at a time inside the SDK
@@ -640,8 +640,9 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
     );
   }
 
-  // Defense-in-depth: if the binding ever points back at the U3 stub
-  // (botched rollback, misconfigured wrangler.jsonc) the user gets a
+  // Defense-in-depth: if the binding ever points back at the legacy
+  // sandbox-stub class (botched rollback, misconfigured wrangler.jsonc)
+  // the user gets a
   // typed 503 instead of a raw stub error envelope.
   if (isStubError(doPayload)) {
     telemetry.tier = 'error_sandbox_stub_until_u6';
@@ -668,7 +669,9 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   }
 
   // DO returned 2xx but with an unrecognized envelope shape. Fail loud
-  // per R11 rather than synthesize a partial success.
+  // rather than synthesize a partial success — better an honest 500
+  // than a response missing the spec_version / anc_version / checker_url
+  // triad.
   telemetry.tier = 'error_incomplete_response_contract';
   return shapeWithPreference(
     shapeScoreError({
@@ -721,8 +724,8 @@ function shapeWithPreference(
     return new Response(jsonResponse.body, { status, headers });
   }
 
-  // Minimal markdown rendering — U8 may polish, but U5 honors the
-  // content-negotiation contract today.
+  // Minimal markdown rendering — honors the content-negotiation
+  // contract; deeper polish lives in summary-render.ts.
   // Reading the body twice for markdown rendering: clone the response.
   return renderMarkdownVariant(jsonResponse, status, headers);
 }
@@ -800,7 +803,7 @@ function isStubError(payload: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// DO response envelope type guards + error mapping (U6 contract).
+// DO response envelope type guards + error mapping.
 //
 // The DO returns one of two shapes after install + score:
 //   success:  { scorecard: <anc JSON envelope>, anc_version: '0.3.1' }
@@ -809,7 +812,8 @@ function isStubError(payload: unknown): boolean {
 // The handler narrows on the envelope shape, then maps DO error codes to
 // user-facing ScoreError variants. Codes the DO knows about but the user
 // envelope doesn't (anc_check_failed, anc_version_unreadable) collapse to
-// incomplete_response_contract so R11's hard-gate semantics hold.
+// incomplete_response_contract so the hard-gate semantics on the
+// response triad hold.
 
 function isDoSuccess(payload: unknown): payload is { scorecard: unknown; anc_version: string } {
   if (typeof payload !== 'object' || payload === null) return false;
@@ -891,9 +895,10 @@ function mapDoError(payload: { error: string; details?: string }): Response {
       return shapeScoreError({ code: 'timeout', phase: 'score', cta_text: CTA_INSTALL_ANC });
     default:
       // anc_check_failed / anc_version_unreadable / setOutboundHandler
-      // failures land here. R11 demands the response triad; if we can't
-      // deliver scorecard + anc_version, surface the contract gap loudly
-      // rather than synthesize a partial.
+      // failures land here. If we can't deliver scorecard + anc_version,
+      // surface the contract gap loudly rather than synthesize a partial:
+      // a missing-field response shape would leak into the cache and
+      // poison subsequent reads.
       return shapeScoreError({
         code: 'incomplete_response_contract',
         details: `${payload.error}${details ? `: ${details.slice(0, 160)}` : ''}`,

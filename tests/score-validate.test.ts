@@ -123,7 +123,7 @@ describe('validateInput — github URL', () => {
   });
 });
 
-describe('validateInput — branch URL (U8 feature 3)', () => {
+describe('validateInput — branch URL', () => {
   test('/tree/<branch> accepts with branch captured', () => {
     expect(validateInput('https://github.com/foo/bar/tree/main', REGISTRY)).toEqual({
       kind: 'github-url',
@@ -176,7 +176,7 @@ describe('validateInput — branch URL (U8 feature 3)', () => {
   });
 });
 
-describe('validateInput — owner/repo shorthand (U8 feature 2)', () => {
+describe('validateInput — owner/repo shorthand', () => {
   test('basic shorthand: `tobi/qmd` → github-url', () => {
     expect(validateInput('tobi/qmd', REGISTRY)).toEqual({
       kind: 'github-url',
@@ -242,7 +242,7 @@ describe('validateInput — empty / unknown', () => {
 });
 
 // ============================================================================
-// RED TEAM tests (U8 input-handling expansion)
+// RED TEAM tests (input-handling expansion)
 //
 // Each new feature carries its own attack surface. Pin the negative paths
 // so a future regex relaxation doesn't silently widen the gate.

@@ -6,8 +6,9 @@
 //      github-url. Registry + hints miss. Cache tier skipped (no
 //      derivable binary). Live DO runs and returns chain_no_resolve
 //      because nothing on the discovery chain produced a binary. The
-//      handler must bounce 404 with no share_url AND preserve the R11
-//      triad (spec_version + checker_url; anc_version is success-only).
+//      handler must bounce 404 with no share_url AND preserve the
+//      response triad (spec_version + checker_url; anc_version is
+//      success-only).
 //
 //   2. github-url with an explicit branch (`/tree/<branch>`). Per
 //      b295e3b: branch-scoped inputs ALWAYS skip the curated + cache
@@ -322,7 +323,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     // the DO is never dispatched. The compositeFetcher returns 404 for
     // every discovery URL by default, modelling exactly this case.
     //
-    // R11 triad must still be present on the error envelope. share_url
+    // Response triad must still be present on the error envelope. share_url
     // is absent because no binary was derivable.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({ tracker });
@@ -343,12 +344,12 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(tracker.doCalls).toBe(0);
   });
 
-  test('owner/repo shorthand for no-binary repo → 502 chain_resolved_no_binary_produced, R11 triad preserved', async () => {
+  test('owner/repo shorthand for no-binary repo → 502 chain_resolved_no_binary_produced, response triad preserved', async () => {
     // Discovery resolves (Step 2 release asset hit), so the DO is
     // dispatched with the InstallSpec. The DO mock returns the
     // "install ran but no binary appeared on PATH" error — different
     // failure class from chain_no_resolve, different status (502 vs
-    // 404), but the same R11 triad guarantee + no share_url.
+    // 404), but the same response triad guarantee + no share_url.
     const env = makeEnv({
       releaseAssets: {
         'brettdavies/dotfiles': {
@@ -434,7 +435,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.scorecard.tool.name).toBe('gping');
     // Branch-scoped inputs never get a share URL (per deriveShareBinary).
     expect(body.share_url).toBeUndefined();
-    // R11 triad on success.
+    // Response triad on success.
     expect(body.spec_version).toBeTruthy();
     expect(body.checker_url).toBeTruthy();
     expect(body.anc_version).toBe('0.3.1');
@@ -563,7 +564,7 @@ describe('/api/score — github accessibility pre-check', () => {
       checker_url: string;
     };
     expect(body.error.code).toBe('github_repo_not_accessible');
-    // R11 triad on error.
+    // Response triad on error.
     expect(body.spec_version).toBeTruthy();
     expect(body.checker_url).toBeTruthy();
   });

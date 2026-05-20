@@ -5,7 +5,7 @@
 // principle copy — may lag the spec briefly during a release cycle), and
 // writes a TS module the Worker imports at build time. The emitted file is
 // the single source of truth for `SPEC_VERSION`, `SITE_SPEC_VERSION`, and
-// `CHECKER_URL`; `response-shape.ts` consumes it for every R11 triad.
+// `CHECKER_URL`; `response-shape.ts` consumes it for every response triad.
 //
 // Two-file split is load-bearing: spec VERSION and site-principles VERSION
 // are released independently. A spec bump can ship before the site copy

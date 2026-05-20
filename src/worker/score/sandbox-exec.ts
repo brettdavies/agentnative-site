@@ -229,8 +229,9 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
   // scenario (b).
   await sandbox.setOutboundHandler('noHttp');
 
-  // Capture anc_version live (R11 — anc_version from running binary,
-  // never a build-time constant).
+  // Capture anc_version live from the running binary, never a build-time
+  // constant — a cached scorecard must record the anc that actually
+  // produced it so re-deployed sites don't lie about provenance.
   const versionResult = await sandbox.exec('anc --version', { timeout: SHORT_EXEC_TIMEOUT_MS });
   if (!versionResult.success) {
     return { ok: false, error: 'anc_version_unreadable' };

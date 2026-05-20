@@ -1,4 +1,4 @@
-// Playwright e2e: homepage live-scoring form (plan U8).
+// Playwright e2e: homepage live-scoring form.
 //
 // Default chromium project. Mocks `/api/score` via page.route() so the
 // suite runs offline + deterministically. Asserts:
@@ -401,7 +401,7 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
   test('non_https_url shows a distinct https-required message (NOT the generic copy)', async ({ page }) => {
     // The client copy is mapped per error code. The illustrative input
     // here is a non-upgradeable protocol (`javascript:`) — http:// is
-    // silently upgraded to https:// (U8 feature 1) so it no longer
+    // silently upgraded to https:// by validateInput, so it no longer
     // surfaces the non_https_url copy. The mock pins the differentiated
     // message regardless of what the user types.
     await mockTurnstileAndScore(page, {
@@ -425,12 +425,12 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
   });
 
   test('invalid_url_path shows a distinct "paste the repo root" message', async ({ page }) => {
-    // Plan U8 feature 3: `/tree/<branch>` URLs are now ACCEPTED (route
-    // through the git-clone path). The invalid_url_path bounce still
-    // fires for genuinely-malformed URL paths (release-download links,
-    // empty branch, branch-name regex misses). The mock here pins the
-    // copy when the server returns the code; the fill input is a
-    // release-asset URL which the validator still rejects.
+    // `/tree/<branch>` URLs are ACCEPTED (route through the git-clone
+    // path), so the invalid_url_path bounce only fires for genuinely-
+    // malformed URL paths (release-download links, empty branch, branch-
+    // name regex misses). The mock here pins the copy when the server
+    // returns the code; the fill input is a release-asset URL which the
+    // validator still rejects.
     await mockTurnstileAndScore(page, {
       status: 400,
       body: {

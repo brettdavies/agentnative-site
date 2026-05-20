@@ -91,7 +91,7 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toContain('## Scorecards');
   });
 
-  test('/llms-full.txt is served in a single fetch with A5 delimiters', async ({ request }) => {
+  test('/llms-full.txt is served in a single fetch with concatenation delimiters', async ({ request }) => {
     const res = await request.get(`${BASE}/llms-full.txt`);
     expect(res.status()).toBe(200);
     const body = await res.text();

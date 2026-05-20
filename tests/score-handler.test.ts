@@ -2,7 +2,7 @@
 //
 // Exercises the full pipeline against stubbed bindings (ASSETS / DO / KV
 // / rate-limit / Turnstile fetcher). Each test reaches one branch of the
-// handler and asserts on status + envelope shape + R11 triad presence.
+// handler and asserts on status + envelope shape + response-triad presence.
 //
 // DO mock fidelity history (2026-05-15):
 //
@@ -60,11 +60,11 @@ const REGISTRY_INDEX = {
 
 const HINTS_INDEX = {
   by_owner_repo: {
-    // Mirrors the shape U4 emits at dist/discovery-hints-index.json. A
-    // hint tells the live-scoring path which install spec (pm+pkg+binary)
-    // to use for a non-registry github-url, so the discovery chain is
-    // skipped on hit. For U7 cache-tier tests, the `binary` field is the
-    // cache-key derivation source.
+    // Mirrors the shape build/registry-index.mjs emits at
+    // dist/discovery-hints-index.json. A hint tells the live-scoring path
+    // which install spec (pm+pkg+binary) to use for a non-registry
+    // github-url, so the discovery chain is skipped on hit. For cache-
+    // tier tests, the `binary` field is the cache-key derivation source.
     'Aider-AI/aider': { pm: 'pip', package: 'aider-chat', binary: 'aider' },
   },
 };
@@ -281,7 +281,7 @@ describe('/api/score — input validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('/api/score — registry fast-path', () => {
-  test('POST {input: "ripgrep"} → 200 registry_hit with R11 triad', async () => {
+  test('POST {input: "ripgrep"} → 200 registry_hit with response triad', async () => {
     const res = await handleScore(postScore('ripgrep'), makeEnv());
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -360,7 +360,7 @@ describe('/api/score — POST pipeline error paths', () => {
 
   test('DO stub envelope passthrough → 503 sandbox_stub_until_u6 (defense-in-depth)', async () => {
     // Defense-in-depth: if the production DO binding ever points back at
-    // the U3 stub (e.g. via a botched rollback or a misconfigured
+    // the legacy sandbox-stub class (botched rollback, misconfigured
     // wrangler.jsonc), the handler still bounces with the sandbox_stub
     // envelope instead of leaking the raw stub error to the user. The
     // isStubError() check in handler.ts is what makes this safe.
@@ -373,11 +373,11 @@ describe('/api/score — POST pipeline error paths', () => {
     expect(body.error.code).toBe('sandbox_stub_until_u6');
   });
 
-  test('DO returns valid scorecard envelope → 200 with R11 triad', async () => {
-    // Post-U6 success path: DO returns {scorecard, anc_version} from
+  test('DO returns valid scorecard envelope → 200 with response triad', async () => {
+    // Live success path: DO returns {scorecard, anc_version} from
     // sandbox-exec.score(). The handler wraps it into the response shape
     // with spec_version + checker_url. This is the test that pins the
-    // U6 → U5 contract.
+    // DO → handler envelope contract.
     const res = await handleScore(
       postScore('cargo install foo-cli'),
       makeEnv({
@@ -628,8 +628,8 @@ describe('/api/score — R2 cache tier', () => {
 
   test('GET install-command with cached hit returns 200 (unmetered read-only tier)', async () => {
     // GET ?input=<install-command> normally validates fine; the existing
-    // contract was "GET only hits the registry, otherwise 404". With U7
-    // the cache tier is also a read-only/unmetered tier, so a GET that
+    // contract was "GET only hits the registry, otherwise 404". The
+    // cache tier is also a read-only/unmetered tier, so a GET that
     // matches a cached binary returns 200.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
@@ -649,7 +649,7 @@ describe('/api/score — R2 cache tier', () => {
     expect(body.error.code).toBe('chain_no_resolve');
   });
 
-  test('cached scorecard preserves R11 triad', async () => {
+  test('cached scorecard preserves response triad', async () => {
     const env = makeEnv({ cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD } });
     const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     const body = (await res.json()) as {

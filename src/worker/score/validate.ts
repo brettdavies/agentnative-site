@@ -2,12 +2,10 @@
 // kinds (slug | install-command | github-url | unknown) the rest of the
 // scoring pipeline consumes.
 //
-// Plan U4 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// lines 1086-1091). URL validation rules per the rust-url-validation
-// learning referenced in the plan (HTTPS only, github.com host only,
-// homoglyph guard via literal hostname comparison after URL parsing).
+// URL validation rules: HTTPS only, github.com host only, homoglyph
+// guard via literal hostname comparison after URL parsing.
 //
-// Plan U8 input-handling expansion (2026-05-19):
+// Accepted shapes beyond the obvious `https://github.com/owner/repo`:
 //
 //   - http:// is upgraded to https:// silently. The user pasted a tool
 //     URL; the protocol is the wrong scheme but the intent is clear.
@@ -98,8 +96,9 @@ const SHORTHAND_RE = /^([^/\s]+)\/([^/\s]+)$/;
 // validBranchName() catches the path-traversal case clearly.
 const BRANCH_NAME_RE = /^[A-Za-z0-9._/-]{1,250}$/;
 
-// Mirrors the shape U1 emits at dist/registry-index.json. The Worker
-// imports the actual file at request time; here we declare the contract.
+// Mirrors the shape the build emits at dist/registry-index.json. The
+// Worker imports the actual file at request time; here we declare the
+// contract.
 export type RegistryIndexShape = {
   by_slug: Record<string, unknown>;
   by_owner_repo: Record<string, unknown>;

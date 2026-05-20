@@ -211,15 +211,14 @@ describe('discoverBinary — step 3 F1 tightening (repository-field match)', () 
     if (r.ok) expect(r.resolved_step).toBe('3-go');
   });
 
-  test('priority order: crates → npm → pypi → go → brew (U6-supported PMs first, Bug J fix)', async () => {
-    // Original plan said brew → crates → npm → pypi → go, but the U6
-    // install table bounces brew (Linuxbrew non-viable on musl). If a
+  test('priority order: crates → npm → pypi → go → brew (sandbox-installable PMs first)', async () => {
+    // The sandbox image bounces brew (Linuxbrew non-viable on musl). If a
     // tool has both a brew formula AND a working alternative (e.g.
-    // csvlens on brew AND on crates.io), picking brew sends the user
-    // to a guaranteed bounce when scoring was possible. Brew is now
-    // last so brew-only tools still resolve to brew (and bounce
-    // honestly with the brew formula name in the error), but tools
-    // with any other supported PM score successfully.
+    // csvlens on brew AND on crates.io), picking brew sends the user to
+    // a guaranteed bounce when scoring was possible. Brew is now last so
+    // brew-only tools still resolve to brew (and bounce honestly with
+    // the brew formula name in the error), but tools with any other
+    // supported PM score successfully.
     const fetcher = mockFetcher({
       'https://api.github.com/repos/foo/bar/releases/latest': { body: { assets: [] } },
       'https://formulae.brew.sh/api/formula/bar.json': {
@@ -240,7 +239,7 @@ describe('discoverBinary — step 3 F1 tightening (repository-field match)', () 
 
   test('brew wins only when no other distribution matches (last-resort priority)', async () => {
     // No crates, npm, pypi, or go match — brew formula is the only
-    // hit. Discovery picks brew; U6 bounces it as install_unsupported
+    // hit. Discovery picks brew; the sandbox bounces it as install_unsupported
     // with the formula name in the error.
     const fetcher = mockFetcher({
       'https://api.github.com/repos/foo/baz/releases/latest': { body: { assets: [] } },

@@ -5,7 +5,7 @@
 // runs the emitter, but the .gen.ts file is committed so the worker bundle
 // can be type-checked without a build step. This test re-runs the emitter
 // in memory and asserts the on-disk file matches — so an out-of-date
-// committed file fails CI rather than silently shipping a stale R11 triad.
+// committed file fails CI rather than silently shipping a stale triad.
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';

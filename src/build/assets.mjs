@@ -84,8 +84,8 @@ export async function copyAssets({ repoRoot, distDir }) {
     join(repoRoot, 'src/client/leaderboard.ts'),
     join(distDir, 'js/leaderboard.js'),
   );
-  // Plan U8: homepage live-scoring form (Turnstile lazy-load + 2 s theater
-  // + redirect to /live-score/<binary>). Loaded with defer from the
+  // Homepage live-scoring form (Turnstile lazy-load + 2 s theater +
+  // redirect to /live-score/<binary>). Loaded with defer from the
   // homepage shell only.
   const liveScoreJs = await bundleClient(join(repoRoot, 'src/client/live-score.ts'), join(distDir, 'js/live-score.js'));
   // theme-init is inlined into every HTML head — no file emitted.

@@ -2,9 +2,8 @@
 // inline-scorecard success branches; omits it for registry_hit (which
 // carries scorecard_url) and for github-url-without-hint live runs.
 //
-// Plan U8 — shareable result URLs. The share URL is derived from the
-// cache-tier binary, so the same key the DO + cached lookup write to is
-// the key the share page reads from.
+// The share URL is derived from the cache-tier binary, so the same key
+// the DO + cached lookup write to is the key the share page reads from.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
@@ -178,7 +177,8 @@ describe('/api/score — share_url derivation', () => {
   });
 
   test('install-command resolving to a curated tool returns registry_hit, not live (bat fix)', async () => {
-    // `cargo install bat` parses to binary='bat'. With the U8+ cross-check,
+    // `cargo install bat` parses to binary='bat'. With the install-command
+    // binary cross-check against by_slug in lookupRegistry,
     // this should hit by_slug.bat and return registry_hit, NOT fall through
     // to the cache + live path. Pre-fix behavior would have run the
     // sandbox; post-fix is instant.

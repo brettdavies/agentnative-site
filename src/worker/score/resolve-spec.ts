@@ -165,8 +165,9 @@ export async function resolveBrewFallback(
 // `go install <module>@latest` is source-compilation by design — Go
 // modules don't ship binaries. Running it on the sandbox would either
 // require a Go toolchain capable of compiling within the 60 s budget
-// (impossible on CF Containers basic — see 2026-05-18 staging matrix)
-// OR violate U2's binary-only premise. We redirect through the
+// (impossible on CF Containers basic) OR violate the binary-only
+// premise that the rest of the sandbox install path assumes. We redirect
+// through the
 // discovery chain: a module path of the form
 // `github.com/<owner>/<repo>/...` is treated as a GitHub-URL input,
 // and discoverBinary picks the GitHub Releases asset (Step 2) for

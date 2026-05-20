@@ -593,7 +593,7 @@ describe('sandbox-exec.score() — bounce classes', () => {
 
   test('go passed to score() bounces install_unsupported (resolveSpec should translate first)', async () => {
     // Parallel to the brew bounce: `go install` would compile from
-    // source, violating U2's binary-only premise. resolveSpec's
+    // source, violating the binary-only premise. resolveSpec's
     // resolveGoFallback in do.ts redirects github.com/<owner>/<repo>
     // module paths through the discovery chain so a GitHub release
     // binary substitutes for the compile. Direct invocation of

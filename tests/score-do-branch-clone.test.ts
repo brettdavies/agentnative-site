@@ -1,6 +1,6 @@
-// Branch-scoped git-clone install path tests (plan U8 feature 3).
+// Branch-scoped git-clone install path tests.
 //
-// The DO routes github-url-with-branch inputs to a NEW pm: 'git-clone'
+// The DO routes github-url-with-branch inputs to a pm: 'git-clone'
 // install spec that clones the repo at the requested ref and runs
 // `anc check <path>` against the source. The Sandbox SDK only exposes
 // `exec(command: string)` — no argv array — so command-string

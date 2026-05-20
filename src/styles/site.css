@@ -1,4 +1,4 @@
-/* site.css — additive layer on top of foundation.css (docs/DESIGN.md §4 + A2). */
+/* site.css — additive layer on top of foundation.css (docs/DESIGN.md §4). */
 
 @font-face {
   font-family: "Uncut Sans";
@@ -113,7 +113,7 @@ main .anchor-icon {
   vertical-align: -2px;
 }
 
-/* RFC-keyword color pairs (A7 colors live in foundation.css). */
+/* RFC-keyword color pairs (token definitions live in foundation.css). */
 .rfc-must {
   color: var(--must, #af2b25);
 }
@@ -152,7 +152,7 @@ main .anchor-icon {
   letter-spacing: var(--tracking-caps);
 }
 
-/* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6 A7).
+/* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6).
  * Scope `span` matching to Shiki's own syntax tokens (which live under
  * `<pre class="shiki"><code>…spans…</code></pre>`). The previous selector
  * `.shiki span` matched ANY descendant span, including the client-side-
@@ -1221,7 +1221,7 @@ body:has(.leaderboard-hero) main {
 }
 
 /* =============================================================
- * Live-scoring form (plan U8) — homepage paste-input surface.
+ * Live-scoring form — homepage paste-input surface.
  *
  * Integrates with the principle-entry rhythm above the principles
  * list: same `3rem 1fr` grid (kicker | content), same top-border
@@ -1510,7 +1510,7 @@ body:has(.leaderboard-hero) main {
 }
 
 /* =============================================================
- * /live-score/<binary> result page (plan U8 — share surface).
+ * /score/live/<binary> result page — share surface.
  * Reuses the per-tool scorecard score badge component; adds a
  * compact header with version + binary + freshness marker.
  * ============================================================= */

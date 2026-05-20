@@ -1,11 +1,10 @@
 // Live-network e2e for /api/score against the staging Worker.
 //
-// Plan U8 — opt-in suite (project: homepage-score-live). Excluded from
-// the default `bun run test:e2e` run because it hits the real CF
-// staging Worker, the real Sandbox container, real Turnstile siteverify
-// (with the always-passes test secret), and real R2. Use to validate a
-// staging deploy before merging or to triage a regression that mocks
-// can't reproduce.
+// Opt-in suite (project: homepage-score-live). Excluded from the default
+// `bun run test:e2e` run because it hits the real CF staging Worker, the
+// real Sandbox container, real Turnstile siteverify (with the always-
+// passes test secret), and real R2. Use to validate a staging deploy
+// before merging or to triage a regression that mocks can't reproduce.
 //
 // Run with:
 //   ANC_STAGING_BASE_URL=https://agentnative-site-staging.brettdavies.workers.dev \
@@ -38,7 +37,7 @@ if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_C
 }
 
 test.describe('staging /api/score — live round-trip', () => {
-  test('POST {input: "ripgrep"} returns curated registry_hit with R11 triad', async ({ request }) => {
+  test('POST {input: "ripgrep"} returns curated registry_hit with response triad', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/api/score`, {
       headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
       data: JSON.stringify({ input: 'ripgrep', turnstile_token: 'x' }),

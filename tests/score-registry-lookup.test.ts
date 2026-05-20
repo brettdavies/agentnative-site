@@ -131,7 +131,7 @@ describe('lookupRegistry', () => {
   });
 });
 
-describe('deriveShareBinary — branch-aware (U8 feature 3)', () => {
+describe('deriveShareBinary — branch-aware', () => {
   test('github-url WITHOUT branch + matching hint → binary derived from hint', () => {
     const input: ValidatedInput = { kind: 'github-url', owner: 'Aider-AI', repo: 'aider' };
     expect(deriveShareBinary(input, HINTS)).toBe('aider');

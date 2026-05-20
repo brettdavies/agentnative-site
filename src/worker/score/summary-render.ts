@@ -1,8 +1,6 @@
 // Server-side renderer for /score/live/<binary> + markdown twin.
 //
-// Plan U8 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// "summary-render.ts" bullet). Reads the cached scorecard from R2 and
-// emits either:
+// Reads the cached scorecard from R2 and emits either:
 //
 //   - HTML at /score/live/<binary> — top-3 issues + score badge + CTA,
 //     wrapped in the site shell (build-emitted template asset).

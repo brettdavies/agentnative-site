@@ -1,8 +1,7 @@
 // Homepage live-scoring form — paste-input, lazy-loaded Turnstile, 2 s
 // theater floor, redirect on success.
 //
-// Plan U8 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md):
-//
+// Behavior contract:
 //   - Turnstile script (https://challenges.cloudflare.com/turnstile/v0/api.js)
 //     is NOT loaded on every homepage visit. Lazy-load on first focus/click/
 //     paste against the form input. A Playwright regression asserts the
@@ -13,7 +12,7 @@
 //     docs/solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md.
 //   - Response branches:
 //       kind=='registry_hit'  → window.location = scorecard_url
-//       inline scorecard      → window.location = share_url (/live-score/<binary>)
+//       inline scorecard      → window.location = share_url (/score/live/<binary>)
 //       4xx with chain_*       → render class-specific bounce panel
 //       other errors          → inline error message
 //
@@ -544,8 +543,9 @@ function renderCuratedReward(statusEl: HTMLParagraphElement, message: string): v
  * Static "Scoring…" would say nothing about WHAT is taking time, and the
  * brand voice ("authority through precision, engagement through detail")
  * rewards a status line that mirrors the actual phases. The phases are a
- * client-side approximation — real per-step polling is U9 — but the
- * timings approximate the median sandbox run so the text stays honest:
+ * client-side approximation — real per-step polling would need a
+ * dedicated channel — but the timings approximate the median sandbox run
+ * so the text stays honest:
  *
  *   - Queued (until t=900 ms)
  *   - Resolving install path (until t=2.5 s)

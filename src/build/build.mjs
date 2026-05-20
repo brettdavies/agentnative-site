@@ -12,7 +12,7 @@
 //   7. Render check.md + about.md into sub-pages.
 //   8. Scorecard pages — leaderboard + per-tool pages from registry.yaml
 //      + scorecards/*.json.
-//   9. Emit llms.txt + llms-full.txt (A5 format).
+//   9. Emit llms.txt + llms-full.txt.
 //  10. Emit sitemap.xml.
 //  11. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
 //      <a>, locked anchors present on principle pages, md sha256 matches.
@@ -81,7 +81,7 @@ async function ensureDir(dir) {
 }
 
 /**
- * Build the homepage body HTML — hero, live-scoring form section (plan U8),
+ * Build the homepage body HTML — hero, live-scoring form section,
  * principle listing, install-anc CTA. The live-score section sits between
  * hero and principles per the wireframe-first placement; layout polish is
  * deferred to /design-review after the basic surface renders.
@@ -115,12 +115,13 @@ ${entries}
 }
 
 /**
- * Live-scoring paste-input form section (plan U8). Server-rendered shell:
- * the JS at /js/live-score.js (lazy-loaded with the rest of the deferred
- * client bundle) wires submit + Turnstile + theater. The Turnstile sitekey
- * is injected by the Worker at request time via meta[name=turnstile-sitekey]
- * — only set on staging until U10 promotion, so production HTML carries an
- * empty value and the JS disables the form with a "not yet live" message.
+ * Live-scoring paste-input form section. Server-rendered shell: the JS at
+ * /js/live-score.js (lazy-loaded with the rest of the deferred client
+ * bundle) wires submit + Turnstile + theater. The Turnstile sitekey is
+ * injected by the Worker at request time via meta[name=turnstile-sitekey]
+ * — only set on staging until full promotion, so production HTML carries
+ * an empty value and the JS disables the form with a "not yet live"
+ * message.
  *
  * R9 CTA framing: install-anc is the PRIMARY surface, not buried. Visible
  * above the form input so a visitor who never engages the form still sees
@@ -213,7 +214,7 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
     }
   }
 
-  // 5. Markdown-twin silence for the homepage (plan U8). The homepage HTML
+  // 5. Markdown-twin silence for the homepage. The homepage HTML
   // gains the live-scoring form; the markdown twin MUST NOT carry any of
   // that surface (no form markup, no JS reference, no Turnstile mention,
   // no /api/score documentation). Agents pasting `Accept: text/markdown`
@@ -225,7 +226,7 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
   for (const needle of FORBIDDEN_IN_INDEX_MD) {
     if (indexMd.toLowerCase().includes(needle.toLowerCase())) {
       throw new Error(
-        `invariant: dist/index.md leaked live-scoring surface "${needle}". The homepage markdown twin stays silent on the form per plan U8.`,
+        `invariant: dist/index.md leaked live-scoring surface "${needle}". The homepage markdown twin stays silent on the form by design.`,
       );
     }
   }
@@ -299,8 +300,8 @@ export async function build() {
       bodyHtml: indexBody,
       themeInitJs: themeInit,
       isIndex: true,
-      // Plan U8: homepage carries the live-scoring form. /js/live-score.js
-      // is bundled in assets.mjs alongside theme/clipboard/leaderboard and
+      // Homepage carries the live-scoring form. /js/live-score.js is
+      // bundled in assets.mjs alongside theme/clipboard/leaderboard and
       // loads with `defer`. Lazy-loads Turnstile + handles submit/redirect.
       extraScripts: ['/js/live-score.js'],
     }),
@@ -357,11 +358,11 @@ export async function build() {
   // carrying a non-RFC-3339 timestamp aborts the build before producing
   // bad output.
   await runScorecardInvariants(SCORECARDS_DIR, registry);
-  // Scorecard-driven discovery + registry editorial join (U3 inversion).
-  // Both directions of mismatch are warnings, not errors: a scorecard with
-  // no registry entry → excluded; a registry entry with no scorecard →
-  // excluded. The build emits a stable WARNINGS_JSON line so CI can parse
-  // it (U8 PR-comment annotation).
+  // Scorecard-driven discovery + registry editorial join. Both directions
+  // of mismatch are warnings, not errors: a scorecard with no registry
+  // entry → excluded; a registry entry with no scorecard → excluded. The
+  // build emits a stable WARNINGS_JSON line so CI can parse it into a
+  // PR-comment annotation.
   const { tools: toolsWithScorecards, warnings: scorecardWarnings } = await loadScoredTools(SCORECARDS_DIR, registry);
   for (const filename of scorecardWarnings.scorecardOrphans) {
     console.warn(`warning: scorecard ${filename} has no matching registry entry — excluded from leaderboard.`);
@@ -371,14 +372,16 @@ export async function build() {
   }
   console.log(`WARNINGS_JSON: ${JSON.stringify(scorecardWarnings)}`);
 
-  // 8a. Build-time indexes for the live-scoring path (plan U1 + U5):
+  // 8a. Build-time indexes for the live-scoring path:
   //     - dist/registry-index.json (powers /api/score registry-fast-path)
-  //     - dist/discovery-hints-index.json (powers U4's step 0.5 — F1)
+  //     - dist/discovery-hints-index.json (powers discovery's hint
+  //       short-circuit)
   //
-  // U5 augments each registry-index entry with the latest scorecard's
+  // Each registry-index entry is augmented with the latest scorecard's
   // version, the anc binary version that produced it, and the public URL
-  // of the per-tool scorecard page, so /api/score can return the R11
-  // triad without fetching the full scorecard payload.
+  // of the per-tool scorecard page, so /api/score can return the
+  // spec_version + anc_version + checker_url triad without fetching the
+  // full scorecard payload.
   const enrichments = {};
   for (const t of toolsWithScorecards) {
     enrichments[t.tool.name] = {
@@ -429,7 +432,7 @@ export async function build() {
   // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
   // Badge SVGs               → dist/badge/<tool-name>.svg
   // Binary-name redirects    → dist/score/<binary>.html + .md (when
-  //                            registry.binary !== registry.name; U7)
+  //                            registry.binary !== registry.name)
   await ensureDir(join(DIST_DIR, 'score'));
   await ensureDir(join(DIST_DIR, 'badge'));
   // Drop stale per-tool pages and badge SVGs from prior builds. When a tool
@@ -437,9 +440,10 @@ export async function build() {
   // its old html/md/svg would otherwise linger in dist/ and ship as broken
   // links / orphaned badges referencing a tool the leaderboard no longer
   // knows about. The allowlist also includes binary slugs for the
-  // name-vs-binary tools (ripgrep/rg, ast-grep/sg, …) so the redirect pages
-  // U7 emits aren't unlinked on every build (P0: without this the reaper
-  // deletes them every time, defeating the redirect entirely).
+  // name-vs-binary tools (ripgrep/rg, ast-grep/sg, …) so the redirect
+  // pages emitted by emitBinaryRedirects() aren't unlinked on every build
+  // — without this guard the reaper deletes them every time, defeating
+  // the redirect entirely.
   const expectedNames = new Set(leaderboard.map((e) => e.tool.name));
   for (const e of leaderboard) {
     if (e.tool.binary && e.tool.binary !== e.tool.name) {
@@ -621,9 +625,9 @@ export async function build() {
   });
   await writeFile(join(DIST_DIR, 'llms-full.txt'), llmsFull);
 
-  // 9b. Live-score shell template (plan U8). Worker's summary-render.ts
-  // fetches this asset to wrap dynamic `/score/live/<binary>` responses
-  // in the same shell as static pages. The `/_internal/*` namespace is
+  // 9b. Live-score shell template. Worker's summary-render.ts fetches
+  // this asset to wrap dynamic `/score/live/<binary>` responses in the
+  // same shell as static pages. The `/_internal/*` namespace is
   // intercepted by the Worker entry so direct user access returns 404 —
   // the file exists for internal env.ASSETS fetches only. Filename
   // mirrors the URL path so a future reader greps `score-live` and

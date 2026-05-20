@@ -1,8 +1,9 @@
 // Worker route: GET /score/live/<binary>
 //
-// Plan U8 — shareable result URL renders the cached scorecard as HTML.
-// Cache-key share-URL design: the same key the DO writes to (scores/<binary>/<spec>.json)
-// is the key this route reads from. No session minting; the URL is meaningful.
+// The shareable result URL renders the cached scorecard as HTML. Cache-
+// key share-URL design: the same key the DO writes to
+// (scores/<binary>/<spec>.json) is the key this route reads from. No
+// session minting; the URL is meaningful.
 
 import { describe, expect, test } from 'bun:test';
 import {
