@@ -100,46 +100,9 @@ jobs:
 
       - name: Smoke /api/score (registry-fast-path)
         env:
-          ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
-          ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
-        # Smoke exercises the registry-fast-path only: a curated slug
-        # ("ripgrep") short-circuits ahead of the Turnstile + rate-limit
-        # gates per the R6 unmetered contract. Gate behaviour, error
-        # bounces, and live-sandbox dispatch are covered by unit tests
-        # and the opt-in homepage-score-live e2e suite, not this step.
-        # The intent here is fast feedback that the staging deploy is
-        # serving the response triad — not full pipeline coverage.
-        run: |
-          set -euo pipefail
-          # Edge propagation: a fresh wrangler deploy lands in PoPs over a
-          # few seconds. Ten seconds is the empirical floor that survives a
-          # cold-cache POP across runs without flaking. Tune up if regional
-          # latency starts producing intermittent 404s.
-          sleep 10
-          # `turnstile_token: "x"` exploits the staging Turnstile test
-          # secret (CF always-passes 1x0000…AA) so the smoke does not need
-          # a real challenge token. Production uses a real secret and this
-          # bypass does not apply — no production smoke step until U10
-          # promotes live scoring to anc.dev.
-          response="$(curl --silent --show-error --fail-with-body \
-            --max-time 30 \
-            -H "Content-Type: application/json" \
-            -H "CF-Access-Client-Id: ${ANC_STAGING_ACCESS_CLIENT_ID}" \
-            -H "CF-Access-Client-Secret: ${ANC_STAGING_ACCESS_CLIENT_SECRET}" \
-            -d '{"input":"ripgrep","turnstile_token":"x"}' \
-            https://agentnative-site-staging.brettdavies.workers.dev/api/score)"
-          echo "::group::smoke response"
-          echo "${response}" | jq .
-          echo "::endgroup::"
-          # The four-field response triad plus the registry-fast-path kind
-          # are the contract. Missing any of these is a deploy-stop signal.
-          echo "${response}" | jq --exit-status '
-              .scorecard.kind == "registry_hit"
-              and (.spec_version | type) == "string"
-              and (.site_spec_version | type) == "string"
-              and (.anc_version | type) == "string"
-              and (.checker_url | type) == "string"
-            ' > /dev/null
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: scripts/smoke-api-score.sh https://agentnative-site-staging.brettdavies.workers.dev
 
   production:
     name: build + deploy production
