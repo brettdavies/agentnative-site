@@ -98,6 +98,7 @@ import { detectScorePreference } from '../accept';
 import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import * as cache from './cache';
+import type { ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
 import {
@@ -110,6 +111,14 @@ import {
 import { resolveSpec } from './resolve-spec';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
+import {
+  type FreshnessTag,
+  type InputKindTag,
+  type PmTag,
+  recordScoreEvent,
+  type ScoreEventFields,
+  type ScoreTelemetryEnv,
+} from './telemetry';
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
 import { type ValidatedInput, validateInput } from './validate';
 
@@ -126,7 +135,8 @@ const MAX_INSTANCES = 10;
 export type ScoreEnv = KillSwitchEnv &
   SessionEnv &
   TurnstileEnv &
-  CacheEnv & {
+  CacheEnv &
+  ScoreTelemetryEnv & {
     ASSETS: Fetcher;
     SCORE: DurableObjectNamespace;
     SCORE_LIMITER: RateLimit;
@@ -207,6 +217,14 @@ type Telemetry = {
   cache_post_hit: boolean;
   binary: string | null;
   input_kind: string | null;
+  // U10 Analytics Engine fields — see telemetry.ts for the blob/double
+  // slot map. Captured here as the pipeline advances; folded into a
+  // single writeDataPoint call in handleScore's finally block.
+  pm: PmTag | null;
+  freshness: FreshnessTag | null;
+  resolved_step: ResolvedStep | 'registry' | null;
+  install_ms: number | null;
+  anc_check_ms: number | null;
 };
 
 function newTelemetry(): Telemetry {
@@ -218,6 +236,11 @@ function newTelemetry(): Telemetry {
     cache_post_hit: false,
     binary: null,
     input_kind: null,
+    pm: null,
+    freshness: null,
+    resolved_step: null,
+    install_ms: null,
+    anc_check_ms: null,
   };
 }
 
@@ -236,6 +259,46 @@ function emitTelemetry(t: Telemetry): void {
   );
 }
 
+// Map the in-handler Telemetry shape into the AE writeDataPoint
+// payload. Pure function so the telemetry-regression test can pin
+// every slot's derivation. blob1 maps ValidatedInput.kind ('slug' |
+// 'install-command' | 'github-url' | 'unknown') onto the AE input-
+// kind union — 'slug' becomes 'registry' because validate.ts only
+// emits 'slug' for inputs that matched the by_slug index. Error
+// codes are derived by stripping the `error_` prefix the in-handler
+// tier string carries; non-error tiers (curated / cache_pre /
+// cache_post / live / unset) return null in blob3.
+function buildScoreEventFields(t: Telemetry, totalMs: number, status: number): ScoreEventFields {
+  const errorCode = t.tier.startsWith('error_') ? (t.tier.slice('error_'.length) as ScoreError['code']) : null;
+  return {
+    input_kind: mapInputKind(t.input_kind),
+    pm: t.pm,
+    error_code: errorCode,
+    freshness: t.freshness,
+    resolved_step: t.resolved_step,
+    total_ms: totalMs,
+    install_ms: t.install_ms,
+    anc_check_ms: t.anc_check_ms,
+    response_status: status,
+    tool: t.binary,
+  };
+}
+
+function mapInputKind(kind: string | null): InputKindTag | null {
+  switch (kind) {
+    case 'slug':
+      return 'registry';
+    case 'install-command':
+      return 'install-command';
+    case 'github-url':
+      return 'github-url';
+    case 'unknown':
+      return 'invalid';
+    default:
+      return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -244,10 +307,19 @@ const CTA_INSTALL_ANC = CTA.installAnc;
 
 export async function handleScore(request: Request, env: ScoreEnv): Promise<Response> {
   const telemetry = newTelemetry();
+  const start = Date.now();
+  let response: Response | undefined;
   try {
-    return await handleScoreInner(request, env, telemetry);
+    response = await handleScoreInner(request, env, telemetry);
+    return response;
   } finally {
+    const totalMs = Date.now() - start;
+    // Response missing means handleScoreInner threw — treat as 500 for
+    // the AE row so the error-code distribution still sees the
+    // unhandled-exception class as 5xx rather than a missing value.
+    const status = response?.status ?? 500;
     emitTelemetry(telemetry);
+    recordScoreEvent(env, buildScoreEventFields(telemetry, totalMs, status));
   }
 }
 
@@ -298,11 +370,13 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   const hintsIndex = await loadHintsIndex(env);
 
   const validated = validateInput(rawInput, registryIndex);
+  // Set input_kind before the early-return so AE blob1 records `invalid`
+  // for validation rejects rather than leaving the field null.
+  telemetry.input_kind = validated.kind;
   if (validated.kind === 'unknown') {
     telemetry.tier = `error_${validated.error}`;
     return shapeWithPreference(shapeScoreError(validationErrorFor(validated.error, rawInput)), preference);
   }
-  telemetry.input_kind = validated.kind;
 
   // 2. Unified scorecard lookup — registry tier first, then R2 cache
   //    tier when the binary is cheaply derivable. Both hit kinds are
@@ -346,6 +420,8 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   if (lookup.kind === 'curated') {
     telemetry.tier = 'curated';
     telemetry.binary = lookup.entry.binary ?? null;
+    telemetry.freshness = 'registry-hit';
+    telemetry.resolved_step = 'registry';
     return shapeWithPreference(
       shapeScoreSuccess(
         {
@@ -368,6 +444,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   if (lookup.kind === 'cached') {
     telemetry.tier = 'cache_pre';
     telemetry.cache_pre_hit = true;
+    telemetry.freshness = 'cache-hit';
     const shareUrl = shareUrlForInput(validated, hintsIndex);
     telemetry.binary = shareUrl ? shareUrl.replace(/^\/score\/live\//, '') : null;
     return shapeWithPreference(
@@ -550,6 +627,8 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   }
   const spec = resolution.spec;
   telemetry.binary = spec.binary;
+  telemetry.pm = spec.pm;
+  telemetry.resolved_step = resolution.resolved_step ?? null;
 
   // 6.5. Post-discovery cache lookup. Discovery now knows `spec.binary`,
   //      which the step-2 pre-discovery check couldn't derive for
@@ -581,6 +660,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
     if (cached) {
       telemetry.cache_post_hit = true;
       telemetry.tier = 'cache_post';
+      telemetry.freshness = 'cache-hit';
       const shareUrl = shareUrlForInput(validated, hintsIndex);
       return shapeWithPreference(
         shapeScoreSuccess(cached.scorecard, cached.anc_version, 'cache-hit', shareUrl),
@@ -660,6 +740,9 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
 
   if (isDoSuccess(doPayload)) {
     telemetry.tier = 'live';
+    telemetry.freshness = 'live';
+    telemetry.install_ms = typeof doPayload.install_ms === 'number' ? doPayload.install_ms : null;
+    telemetry.anc_check_ms = typeof doPayload.anc_check_ms === 'number' ? doPayload.anc_check_ms : null;
     const shareUrl = shareUrlForInput(validated, hintsIndex);
     return shapeWithPreference(
       shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live', shareUrl),
@@ -815,7 +898,9 @@ function isStubError(payload: unknown): boolean {
 // incomplete_response_contract so the hard-gate semantics on the
 // response triad hold.
 
-function isDoSuccess(payload: unknown): payload is { scorecard: unknown; anc_version: string } {
+function isDoSuccess(
+  payload: unknown,
+): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_check_ms?: number } {
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return 'scorecard' in obj && typeof obj.anc_version === 'string';

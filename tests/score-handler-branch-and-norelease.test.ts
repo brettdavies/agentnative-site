@@ -266,6 +266,7 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
         return { success: true };
       },
     },
+    SCORE_TELEMETRY: { writeDataPoint() {} },
     TURNSTILE_SECRET: 'test-turnstile-secret',
     SESSION_HMAC_SECRET: 'test-hmac-secret-please',
   };

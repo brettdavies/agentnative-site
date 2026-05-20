@@ -96,6 +96,7 @@ function makeEnv(cacheContent: Record<string, unknown> = {}): ScoreEnv & { __cac
         return { success: true };
       },
     },
+    SCORE_TELEMETRY: { writeDataPoint() {} },
     TURNSTILE_SECRET: 'test',
     SESSION_HMAC_SECRET: 'test-hmac-secret-long-enough',
     __cacheStore: cacheStore,

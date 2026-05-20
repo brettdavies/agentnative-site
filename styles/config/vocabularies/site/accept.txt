@@ -47,6 +47,8 @@ Plex
 Polypane
 Pseudocode
 Qamarjafari
+Quantiles
+Queryable
 Reframe
 Resync
 Roboto

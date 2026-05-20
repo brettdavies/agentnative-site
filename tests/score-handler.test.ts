@@ -71,6 +71,8 @@ const HINTS_INDEX = {
 
 type CallTracker = { doCalls: number };
 
+export type TelemetryEvent = { blobs?: (string | null)[]; doubles?: (number | null)[]; indexes?: string[] };
+
 type StubOverrides = Partial<{
   kvDisabled: boolean;
   turnstileSecret: string;
@@ -94,9 +96,20 @@ type StubOverrides = Partial<{
   // handler invocations. The store survives across `handleScore()` calls
   // sharing the same env.
   cacheStore: Map<string, string>;
+  // SCORE_TELEMETRY (Workers Analytics Engine) sink. When provided,
+  // every writeDataPoint call's payload is appended to this array so
+  // assertion-heavy telemetry tests can observe what the handler
+  // recorded. Absent → calls are silently dropped (matches AE's
+  // production write-only behavior).
+  telemetryEvents: TelemetryEvent[];
+  // When true, SCORE_TELEMETRY.writeDataPoint throws. Exercises the
+  // graceful-degradation path in recordScoreEvent.
+  telemetryThrows: boolean;
 }>;
 
-function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
+export type ScoreTestEnvOverrides = StubOverrides;
+
+export function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
   const kvDisabled = overrides.kvDisabled ?? false;
   const turnstileSecret = overrides.turnstileSecret ?? 'test-turnstile-secret';
   const hmacSecret = overrides.hmacSecret ?? 'test-hmac-secret-please';
@@ -206,12 +219,18 @@ function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
         return { success: ipRateLimit };
       },
     },
+    SCORE_TELEMETRY: {
+      writeDataPoint(event: TelemetryEvent) {
+        if (overrides.telemetryThrows) throw new Error('ae_write_failed');
+        if (overrides.telemetryEvents) overrides.telemetryEvents.push(event);
+      },
+    },
     TURNSTILE_SECRET: turnstileSecret,
     SESSION_HMAC_SECRET: hmacSecret,
   };
 }
 
-function postScore(input: string, opts: { token?: string; cookie?: string; pathSuffix?: string } = {}): Request {
+export function postScore(input: string, opts: { token?: string; cookie?: string; pathSuffix?: string } = {}): Request {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (opts.cookie) headers.cookie = opts.cookie;
   return new Request(`https://anc.dev/api/score${opts.pathSuffix ?? ''}`, {
@@ -221,7 +240,7 @@ function postScore(input: string, opts: { token?: string; cookie?: string; pathS
   });
 }
 
-function getScore(input: string | null, pathSuffix = ''): Request {
+export function getScore(input: string | null, pathSuffix = ''): Request {
   const url = new URL(`https://anc.dev/api/score${pathSuffix}`);
   if (input !== null) url.searchParams.set('input', input);
   return new Request(url.toString(), { method: 'GET' });

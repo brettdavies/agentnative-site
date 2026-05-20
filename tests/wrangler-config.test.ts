@@ -126,6 +126,48 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
 });
 
 // ---------------------------------------------------------------------------
+// Analytics Engine bindings (plan U10)
+// ---------------------------------------------------------------------------
+
+// The SCORE_TELEMETRY binding is non-inheritable per env, so both top-level
+// (prod) and env.staging must declare it. Each env writes to a DISTINCT
+// dataset so staging traffic doesn't pollute prod aggregates — a future
+// refactor that merges both onto one dataset would silently corrupt every
+// canonical query in docs/runbooks/live-scoring-analytics.md. This guard
+// fires loudly if either pin moves.
+
+describe('wrangler.jsonc — analytics_engine_datasets bindings (plan U10)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level declares the SCORE_TELEMETRY binding against anc_live_score_prod', () => {
+    expect(config.analytics_engine_datasets).toBeDefined();
+    const ae = config.analytics_engine_datasets as Array<Record<string, unknown>>;
+    const score = ae.find((b) => b.binding === 'SCORE_TELEMETRY');
+    expect(score).toBeDefined();
+    expect(score?.dataset).toBe('anc_live_score_prod');
+  });
+
+  test('env.staging declares the SCORE_TELEMETRY binding against anc_live_score_staging', () => {
+    expect(staging.analytics_engine_datasets).toBeDefined();
+    const ae = staging.analytics_engine_datasets as Array<Record<string, unknown>>;
+    const score = ae.find((b) => b.binding === 'SCORE_TELEMETRY');
+    expect(score).toBeDefined();
+    expect(score?.dataset).toBe('anc_live_score_staging');
+  });
+
+  test('prod and staging point at DISTINCT datasets (no accidental merge)', () => {
+    const prodAe = config.analytics_engine_datasets as Array<Record<string, unknown>>;
+    const stagingAe = staging.analytics_engine_datasets as Array<Record<string, unknown>>;
+    const prodDataset = prodAe.find((b) => b.binding === 'SCORE_TELEMETRY')?.dataset;
+    const stagingDataset = stagingAe.find((b) => b.binding === 'SCORE_TELEMETRY')?.dataset;
+    expect(prodDataset).toBeDefined();
+    expect(stagingDataset).toBeDefined();
+    expect(prodDataset).not.toBe(stagingDataset);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // R2 score-cache lifecycle documentation drift (plan U7)
 // ---------------------------------------------------------------------------
 
