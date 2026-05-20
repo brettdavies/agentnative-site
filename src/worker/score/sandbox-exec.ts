@@ -28,8 +28,15 @@
 // by the same 60 s combined install + score timeout.
 
 import type { Sandbox } from '@cloudflare/sandbox';
-import type { InstallSpec } from './discover-binary';
+import type { GitCloneInstall, InstallSpec } from './discover-binary';
 import { SDIST_TRUSTED_NAMES } from './sdist-allowlist';
+import { validBranchName } from './validate';
+
+// Per-clone destination — fixed name keeps the path predictable for the
+// `anc check <path>` invocation and the cleanup post-score (the warm
+// container session may reuse this DO instance for the next request).
+// Lives under /tmp so it's wiped by the container's tmpfs semantics.
+const CLONE_DEST = '/tmp/anc-clone-target';
 
 // ---------------------------------------------------------------------------
 // Result + error types
@@ -168,12 +175,20 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     };
   }
 
-  // Verify the install produced a runnable binary on PATH. Catches the
-  // pallets/click case (wheel installs cleanly, no console_scripts entry).
-  const whichCmd = `which ${shellQuote(binary)}`;
-  const whichResult = await sandbox.exec(whichCmd, { timeout: SHORT_EXEC_TIMEOUT_MS });
-  if (!whichResult.success || !whichResult.stdout.trim()) {
-    return { ok: false, error: 'chain_resolved_no_binary_produced', details: `binary=${binary}` };
+  // Git-clone source-scoped path (plan U8 feature 3): no binary on PATH
+  // to verify — `anc check <path>` runs against the cloned source.
+  // Skip the `which <binary>` gate, which would always miss because
+  // the repo name is not necessarily a CLI binary the clone produced.
+  const isSourceScoped = spec.pm === 'git-clone';
+
+  if (!isSourceScoped) {
+    // Verify the install produced a runnable binary on PATH. Catches the
+    // pallets/click case (wheel installs cleanly, no console_scripts entry).
+    const whichCmd = `which ${shellQuote(binary)}`;
+    const whichResult = await sandbox.exec(whichCmd, { timeout: SHORT_EXEC_TIMEOUT_MS });
+    if (!whichResult.success || !whichResult.stdout.trim()) {
+      return { ok: false, error: 'chain_resolved_no_binary_produced', details: `binary=${binary}` };
+    }
   }
 
   // Phase 2 — lock down. `anc check` must not reach any host. Setting the
@@ -196,14 +211,21 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     };
   }
 
-  // Run anc check. audit_profile is propagated from a registry entry if
-  // U4 attached one to the install spec (registry-known tools get
-  // category-specific checks); unknown tools omit the flag and `anc`
-  // runs its default check set.
+  // Run anc check. Two invocation shapes:
+  //   - binary install (default): `anc check --command <binary>` scores
+  //     the running binary's behavior against the spec.
+  //   - source clone (git-clone PM, branch-scoped paste): `anc check
+  //     <clone-path>` scores the source layout + project files. The
+  //     clone-path is interpolated via shellQuote and the path itself
+  //     is built from the spec, NOT from user input — the user's input
+  //     only flows in through the validated owner/repo/branch slots
+  //     which are character-class-restricted at validate.ts.
   const auditProfile = (spec as { audit_profile?: string }).audit_profile;
-  const ancCheckCmd = auditProfile
-    ? `anc check --command ${shellQuote(binary)} --output json --audit-profile ${shellQuote(auditProfile)}`
-    : `anc check --command ${shellQuote(binary)} --output json`;
+  const ancCheckCmd = isSourceScoped
+    ? buildAncCheckSourceCmd(spec as GitCloneInstall, auditProfile)
+    : auditProfile
+      ? `anc check --command ${shellQuote(binary)} --output json --audit-profile ${shellQuote(auditProfile)}`
+      : `anc check --command ${shellQuote(binary)} --output json`;
   const checkResult = await sandbox.exec(ancCheckCmd, { timeout: TOTAL_TIMEOUT_MS });
 
   // anc emits a structured envelope on stdout even on non-zero exit when
@@ -332,6 +354,18 @@ function installCommandFor(spec: InstallSpec): string | null {
       // here is a safety net; sandbox-exec wouldn't otherwise know
       // whether to compile (would violate U2 binary-only) or bounce.
       return null;
+    case 'git-clone':
+      // Branch-scoped source clone (plan U8 feature 3). The branch
+      // name was validated at validate.ts (BRANCH_NAME_RE + explicit
+      // `..` reject) AND re-validated at the DO boundary (do.ts
+      // resolveSpec). buildGitCloneCommand() refuses to emit a command
+      // for a branch that fails the validBranchName check — defense
+      // in depth so a future caller that builds an InstallSpec
+      // directly (skipping validate.ts AND resolveSpec) still can't
+      // smuggle shell metacharacters through. Returns null when the
+      // branch fails late-stage validation, which collapses to
+      // install_unsupported with pm=git-clone.
+      return buildGitCloneCommand(spec);
     case 'direct':
       // Archive download + extract to /usr/local/bin. The user-pasted
       // URL is the trust boundary; SHA verification is not done at
@@ -414,6 +448,13 @@ function directInstallCommand(url: string, binary: string): string {
 }
 
 function installHostsFor(spec: InstallSpec): readonly string[] {
+  if (spec.pm === 'git-clone') {
+    // git clone over https hits github.com directly; for some repos the
+    // server-side may 302 to codeload.github.com for the pack file. Both
+    // are in the GITHUB_RELEASE_HOSTS set already, plus the
+    // `*.githubusercontent.com` wildcard covers any future redirect target.
+    return GITHUB_RELEASE_HOSTS;
+  }
   if (spec.pm === 'direct') {
     try {
       const host = new URL(spec.url).hostname;
@@ -472,4 +513,65 @@ function timeoutAfter(ms: number): Promise<ScoreFailure> {
   return new Promise((resolve) => {
     setTimeout(() => resolve({ ok: false, error: 'timeout' }), ms);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Git clone install path (plan U8 feature 3 — branch-scoped scoring)
+// ---------------------------------------------------------------------------
+
+// Build the git-clone install command for a branch-scoped paste.
+//
+// Security shape:
+//
+//   - owner + repo come from validate.ts. Owner matches GitHub's own
+//     username rules (alphanumeric + hyphen, no leading hyphen);
+//     repo matches `[A-Za-z0-9._-]+`. Neither character class includes
+//     shell metacharacters.
+//   - branch is double-validated: validate.ts at the Worker boundary
+//     AND do.ts at the DO boundary (resolveSpec). buildGitCloneCommand
+//     does a THIRD check via validBranchName() before string
+//     interpolation as a final defense — if a future code path
+//     constructs an InstallSpec directly (bypassing both upstream
+//     guards), this layer still refuses unsafe branch values.
+//   - Even with all that, every interpolated value flows through
+//     shellQuote(), which POSIX-single-quote-escapes the value. That's
+//     the load-bearing safety property: a single-quote-wrapped value
+//     with internal `'` rewritten to `'\''` cannot escape the quoted
+//     context regardless of regex coverage.
+//
+// The Sandbox SDK exposes exec(command: string) only — no argv array
+// form — so shellQuote IS the trust boundary at exec time. The strict
+// regex layers above shrink the attack surface; shellQuote closes it.
+//
+// Why `--depth 1 --no-tags --single-branch`: minimize bandwidth + time.
+// A branch-scoped score doesn't need full history or sibling refs;
+// the clone runs inside the 60 s combined install + score budget and
+// every saved second helps the worst-case latency.
+export function buildGitCloneCommand(spec: GitCloneInstall): string | null {
+  if (!validBranchName(spec.branch)) return null;
+  // owner + repo shape is enforced by validate.ts and re-enforced at
+  // the DO layer (validBranchName covers branch; the owner/repo character
+  // classes are enforced before this layer is reached). shellQuote
+  // remains the runtime closer.
+  const repoUrl = `https://github.com/${spec.owner}/${spec.repo}.git`;
+  // `( set -e; ... )` subshell so a failure mid-clone exits the
+  // subshell rather than killing the container's persistent shell
+  // session. `rm -rf` of the destination first handles re-runs on a
+  // warm DO instance (the prior request's clone would otherwise
+  // collide).
+  return (
+    `( set -e; rm -rf ${shellQuote(CLONE_DEST)}; ` +
+    `git clone --depth 1 --no-tags --single-branch ` +
+    `--branch ${shellQuote(spec.branch)} ` +
+    `${shellQuote(repoUrl)} ${shellQuote(CLONE_DEST)} )`
+  );
+}
+
+// Build the `anc check <path>` invocation for a source-scoped score.
+// Mirrors the `--command <binary>` form's audit-profile handling.
+export function buildAncCheckSourceCmd(_spec: GitCloneInstall, auditProfile: string | undefined): string {
+  const path = shellQuote(CLONE_DEST);
+  return auditProfile
+    ? `anc check ${path} --output json --audit-profile ${shellQuote(auditProfile)}`
+    : `anc check ${path} --output json`;
 }

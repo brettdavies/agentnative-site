@@ -26,7 +26,7 @@ import * as cache from './cache';
 import { discoverBinary, type InstallSpec } from './discover-binary';
 import type { DiscoveryHintsIndex } from './registry-lookup';
 import { score as runSandboxScore, type ScoreResult } from './sandbox-exec';
-import type { ValidatedInput } from './validate';
+import { type ValidatedInput, validBranchName } from './validate';
 
 export type BrewFallbackResult =
   | { ok: true; value: InstallSpec }
@@ -160,7 +160,15 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     // round-trip (~30-100 ms typical); the latency cost is paid once per
     // tool per anc bump and saves a full sandbox spawn (~3-20 s) on the
     // next request. The trade is intentional and bounded.
-    await writeCacheBestEffort(this.env, spec.value, result.value);
+    //
+    // Branch-scoped clones skip the cache write: the cache key is
+    // `scores/<binary>/<spec-version>.json` which doesn't include the
+    // branch. Caching a branch-scored result would clobber the
+    // default-branch scorecard for any subsequent request that hits
+    // the same binary. Branch-scoring is intentionally one-off.
+    if (spec.value.pm !== 'git-clone') {
+      await writeCacheBestEffort(this.env, spec.value, result.value);
+    }
 
     return json(result.value, 200);
   }
@@ -225,6 +233,29 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
       return { ok: true, value: input.spec };
     }
     if (input.kind === 'github-url') {
+      // Branch-scoped github URL (plan U8 feature 3): bypass the
+      // discovery chain (which targets RELEASE artifacts, not arbitrary
+      // refs) and route through the git-clone install path so the
+      // sandbox scores the source at THAT branch. Defense-in-depth:
+      // re-validate the branch shape at this layer before the spec
+      // reaches sandbox-exec.ts (which shell-quotes for exec but
+      // benefits from a strict reject one tier up). validate.ts already
+      // enforces the same rules at the Worker boundary; if a future
+      // refactor introduces a path that skips validate.ts, this layer
+      // still refuses unsafe branch names.
+      if (typeof input.branch === 'string') {
+        if (!validBranchName(input.branch)) {
+          return { ok: false, error: 'invalid_url_path' };
+        }
+        const spec: InstallSpec = {
+          pm: 'git-clone',
+          owner: input.owner,
+          repo: input.repo,
+          branch: input.branch,
+          binary: input.repo,
+        };
+        return { ok: true, value: spec };
+      }
       const hints = await this.loadHintsIndex();
       const result = await discoverBinary({
         owner: input.owner,

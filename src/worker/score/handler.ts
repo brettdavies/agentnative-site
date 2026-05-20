@@ -176,11 +176,23 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   //    `?fromCache=false` skips the R2 read tier so an operator can
   //    force a fresh registry consult + live run. The cache WRITE
   //    after the live run still fires (so the next request benefits).
+  //
+  //    Branch-on-github-url SKIPS the curated/cache tiers entirely.
+  //    Curated scorecards are scored against release artifacts, NOT
+  //    arbitrary branches; serving a curated scorecard for a branch
+  //    request would be misleading. The user asked for THIS branch —
+  //    respect that and live-score it. The cache write after the live
+  //    run is also skipped (the live path passes the branch into the
+  //    git clone; caching under the bare binary name would clobber
+  //    the default-branch scorecard).
   const skipCache = url.searchParams.get('fromCache') === 'false';
-  const lookup = await lookupScorecard(validated, env, registryIndex, hintsIndex, {
-    specVersion: SPEC_VERSION,
-    skipCache,
-  });
+  const isBranchScopedUrl = validated.kind === 'github-url' && typeof validated.branch === 'string';
+  const lookup = isBranchScopedUrl
+    ? ({ kind: 'miss' } as const)
+    : await lookupScorecard(validated, env, registryIndex, hintsIndex, {
+        specVersion: SPEC_VERSION,
+        skipCache,
+      });
 
   if (lookup.kind === 'curated') {
     return shapeWithPreference(

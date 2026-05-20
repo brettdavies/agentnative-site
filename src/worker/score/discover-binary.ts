@@ -25,7 +25,25 @@ import { parseInstallCommand } from './parse-install';
 import type { DiscoveryHintsIndex } from './registry-lookup';
 
 export type DirectInstall = { pm: 'direct'; url: string; binary: string };
-export type InstallSpec = ParsedInstall | DirectInstall;
+// Branch-scoped source clone (plan U8 feature 3). When a user pastes a
+// github URL with a `/tree/<branch>` path, the DO routes the request
+// through this install spec instead of the discovery chain: discovery
+// targets release artifacts (which are scored against the release, not
+// a branch), so a branch-scoped paste needs the source at THAT branch.
+// The orchestration in sandbox-exec.ts clones the repo at the specified
+// branch with `--depth 1` (shallow) and runs `anc check` against the
+// cloned directory rather than `anc check --command <binary>`.
+export type GitCloneInstall = {
+  pm: 'git-clone';
+  owner: string;
+  repo: string;
+  branch: string;
+  // The "binary" is the repo name by convention — used as the share-url
+  // slug and the cache key. Branch-scoped scores skip the cache write
+  // (handler.ts), so the binary here is purely a display label.
+  binary: string;
+};
+export type InstallSpec = ParsedInstall | DirectInstall | GitCloneInstall;
 
 export type DiscoveryResult =
   | { ok: true; spec: InstallSpec; resolved_step: ResolvedStep }

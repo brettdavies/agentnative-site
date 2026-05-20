@@ -213,6 +213,12 @@ function deriveCacheBinary(input: ValidatedInput, registry: RegistryLookupResult
 export function deriveShareBinary(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
   if (input.kind === 'install-command') return input.spec.binary;
   if (input.kind === 'github-url') {
+    // Branch-scoped pastes don't get a share URL. The /score/live/<binary>
+    // surface is keyed by binary alone; reusing it for a branch-scoped
+    // score would clobber the default-branch scorecard. The user still
+    // gets the scorecard inline in the response — they just can't bookmark
+    // it. A branch-aware share URL is a future enhancement.
+    if (input.branch) return null;
     const key = `${input.owner}/${input.repo}`;
     const hint = lookupOwnerRepo(hintsIndex.by_owner_repo, key);
     return hint?.binary ?? null;

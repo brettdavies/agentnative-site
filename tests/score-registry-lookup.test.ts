@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { DiscoveryHintsIndex, RegistryIndex } from '../src/worker/score/registry-lookup';
-import { lookupRegistry } from '../src/worker/score/registry-lookup';
+import { deriveShareBinary, lookupRegistry } from '../src/worker/score/registry-lookup';
 import type { ValidatedInput } from '../src/worker/score/validate';
 
 const REGISTRY: RegistryIndex = {
@@ -128,5 +128,30 @@ describe('lookupRegistry', () => {
     const input: ValidatedInput = { kind: 'github-url', owner: 'foo', repo: 'bar' };
     const r = lookupRegistry(input, registry, hints);
     expect(r.kind).toBe('registry');
+  });
+});
+
+describe('deriveShareBinary — branch-aware (U8 feature 3)', () => {
+  test('github-url WITHOUT branch + matching hint → binary derived from hint', () => {
+    const input: ValidatedInput = { kind: 'github-url', owner: 'Aider-AI', repo: 'aider' };
+    expect(deriveShareBinary(input, HINTS)).toBe('aider');
+  });
+
+  test('github-url WITH branch returns null (branch-scoped scores are one-off, no share URL)', () => {
+    // /score/live/<binary> is keyed by binary alone. Returning a share
+    // URL for a branch-scoped score would clobber the default-branch
+    // scorecard at the same key on subsequent lookups. The branch
+    // request returns inline; the user keeps the scorecard, can't
+    // bookmark a branch-scoped URL today.
+    const input: ValidatedInput = { kind: 'github-url', owner: 'Aider-AI', repo: 'aider', branch: 'main' };
+    expect(deriveShareBinary(input, HINTS)).toBeNull();
+  });
+
+  test('install-command kind passes through unchanged (no branch concept)', () => {
+    const input: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'pip', package: 'black', binary: 'black' },
+    };
+    expect(deriveShareBinary(input, HINTS)).toBe('black');
   });
 });

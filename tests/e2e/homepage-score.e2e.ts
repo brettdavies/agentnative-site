@@ -399,11 +399,11 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
   });
 
   test('non_https_url shows a distinct https-required message (NOT the generic copy)', async ({ page }) => {
-    // Pre-fix, non_https_url shared the catch-all "not a recognized
-    // tool, install command, or GitHub URL" copy with unrecognized_input.
-    // The server has always returned the specific code; only the client
-    // mapping was lossy. Pin the differentiated copy so a future
-    // consolidation doesn't silently regress it.
+    // The client copy is mapped per error code. The illustrative input
+    // here is a non-upgradeable protocol (`javascript:`) — http:// is
+    // silently upgraded to https:// (U8 feature 1) so it no longer
+    // surfaces the non_https_url copy. The mock pins the differentiated
+    // message regardless of what the user types.
     await mockTurnstileAndScore(page, {
       status: 400,
       body: {
@@ -413,7 +413,7 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       },
     });
     await page.goto('/');
-    await page.locator('#live-score-input').fill('http://github.com/cli/cli');
+    await page.locator('#live-score-input').fill('javascript://github.com/x/y');
     await page.locator('[data-live-score-submit]').click();
 
     const status = page.locator('[data-live-score-status]');
@@ -425,6 +425,12 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
   });
 
   test('invalid_url_path shows a distinct "paste the repo root" message', async ({ page }) => {
+    // Plan U8 feature 3: `/tree/<branch>` URLs are now ACCEPTED (route
+    // through the git-clone path). The invalid_url_path bounce still
+    // fires for genuinely-malformed URL paths (release-download links,
+    // empty branch, branch-name regex misses). The mock here pins the
+    // copy when the server returns the code; the fill input is a
+    // release-asset URL which the validator still rejects.
     await mockTurnstileAndScore(page, {
       status: 400,
       body: {
@@ -437,7 +443,7 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       },
     });
     await page.goto('/');
-    await page.locator('#live-score-input').fill('https://github.com/cli/cli/tree/main');
+    await page.locator('#live-score-input').fill('https://github.com/cli/cli/releases/download/v1/cli.tar.gz');
     await page.locator('[data-live-score-submit]').click();
 
     const status = page.locator('[data-live-score-status]');
