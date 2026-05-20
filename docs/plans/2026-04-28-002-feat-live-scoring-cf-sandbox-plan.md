@@ -33,7 +33,7 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
 
 ---
 
-## Current state — 2026-05-19
+## Current state — 2026-05-20
 
 ### Shipped to dev (~70% to rollout)
 
@@ -81,6 +81,16 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
   runbook-only (commands, paths, tables), `ARCHITECTURE.md` is a new top-level decision log holding all rationale prose.
   Staging container app now on `:d87ed0a` + `standard-2`. Production is not in scope until U10 ships and the whole plan
   is complete.
+- U8 — Homepage live-scoring form, invisible Turnstile + lazy-load, 2 s theater floor, three class-specific bounce
+  panels, install-anc CTA, CSP allowlist for `challenges.cloudflare.com`, build-emitted
+  `src/worker/spec-version.gen.ts`, markdown-twin silence invariant, shareable result page at `/score/live/<binary>`
+  (HTML + markdown twin) — branch `feat/u8-homepage-form` (off `dev` commit `37e5375`). 16 commits across the chain,
+  head at `45b66c6`. PR pending. Resolves the K-decision on result presentation (option 3, redirect to a shareable
+  subpage) using a cache-key-derived URL rather than a minted session id: the live path already writes through to
+  `scores/<binary>/<spec-version>.json` in R2, so the share URL reads from the same key the cache layer already
+  populated. See "Discovered during U8 execution (2026-05-20)" below for the scope items that grew beyond the original
+  U8 spec (input handling expansions, pipeline gates-before-discovery reorder, post-discovery cache + telemetry,
+  discovery-tier move from DO to Worker).
 
 ### Discovered post-U3 shipment (2026-05-14 audit)
 
@@ -120,19 +130,70 @@ available as a shortcut for low-risk image bumps (base-image patches, dependency
 enforces this discipline per PR target: registry-existence is always checked on both pins; equality is enforced only
 when `base_ref == main`.
 
+### Discovered during U8 execution (2026-05-20)
+
+Scope grew beyond the original U8 spec along five axes; each shipped on the `feat/u8-homepage-form` branch and is
+covered by tests + the full red-team suite. None of these break the U8 acceptance bar — they enlarge what U8 ships
+without weakening the original guarantees.
+
+- **Input handling expansions** (commit `b295e3b`, with red-team coverage in `tests/score-validate.test.ts`):
+- `http://` URLs are silently upgraded to `https://` rather than bounced as `non_https_url` — the validator was the only
+  place `non_https_url` ever fired, and treating http as an honest mistake is friendlier than rejecting.
+- `owner/repo` shorthand (e.g., `tobi/qmd`) is treated as a github-url. Same regex floor as a full URL; same downstream
+  pipeline.
+- `/tree/<branch>` URLs capture the branch and route through a git-clone install path that the sandbox shells with
+  `shellQuote()` on every interpolation. Branch-scoped scores never write to the cache (clobbering the default-branch
+  scorecard would be a correctness regression) and never get a share URL.
+- **GitHub accessibility fast-fail** (commit `119d65c`, `src/worker/score/github-accessibility.ts`). For github-url
+  inputs without a hint or branch, the Worker issues one HEAD probe against `github.com/<owner>/<repo>` before paying
+  the discovery fan-out. A clean 404 short-circuits with `github_repo_not_accessible` (new ScoreError variant). 5-minute
+  in-isolate cache absorbs repeat probes. Fails OPEN on 5xx / timeout / abort so a github outage doesn't break scoring.
+- **Discovery hardening + cost reduction** (commits `b34f0d5`, `ec19fa0`, `db40006`):
+- `discoverBinary` fans out Step 2/3/4 (release asset, registry parse, README parse) concurrently via
+  `Promise.allSettled` with an 8-second deadline; priority pick is release > registry > README. A
+  `diagnostics.agreed_binary` field captures when multiple tiers agreed.
+- The whole discovery chain moved from the Sandbox DO into the Worker via `src/worker/score/resolve-spec.ts`. A
+  `chain_no_resolve` paste (e.g., `brettdavies/dotfiles`) now bounces in ~200 ms at the Worker tier instead of spinning
+  a container to discover the same fact. The DO contract narrowed from `{input, hash}` to `{spec, hash}` with the
+  resolved `InstallSpec` — DO no longer fetches `loadHintsIndex` or runs brew/go fallbacks.
+- Pipeline ordering was corrected (commit `db40006`): metered gates (kill-switch → Turnstile → rate-limit) now fire
+  BEFORE the github HEAD and discovery fan-out. Pre-fix, an unauthenticated caller could fan out the ~5 parallel
+  registry/Releases calls per request at zero rate-limit cost. The R6 unmetered contract (curated + cached hits bypass
+  gates) is preserved because step 2 short-circuits ahead of the gate block.
+- Sandbox `directInstallCommand` auto-detects the binary inside an extracted archive when archive name ≠ tool name
+  (`gogcli` archive ships `gog`, etc.): `find -perm /111`, filter doc filenames + non-binary extensions, awk-score by
+  name proximity, emit `DETECTED_BINARY=<name>` to stdout. Worker whitelist-validates the result against
+  `[A-Za-z0-9._-]{1,64}`.
+- **Post-discovery cache lookup with telemetry** (commit `c042c46`). A second R2 read fires at step 6.5 between
+  `resolveSpec` and DO dispatch, keyed by the resolved `spec.binary` rather than the input-derived binary. Sparing the
+  DO container spawn on github-url-without-hint pastes that miss the round-1 cache but landed in the cache via a prior
+  request. One structured `score.tier` log line per request captures `tier ∈ {curated, cache_pre, cache_post, live,
+  error_<code>}` plus per-tier attempt + hit flags so operators can query "what percentage of cache hits came from pre
+  vs post discovery?" via the observability binding. Cache reshape (maximize round-1 hits) is explicitly out of scope
+  for U8.
+- **Result-presentation K-decision resolved.** Plan listed three candidate shapes (inline / modal / shareable subpage).
+  Implementation picked option 3 with a twist: the share URL is `/score/live/<binary>`, derived from the cache key the
+  live path already populates, rather than a minted session id. Same shape as the rest of the site (HTML + markdown twin
+  under the same path, no `.html` extension). Server-rendered via `src/worker/score/summary-render.ts` re-using the
+  shared scorecard formatter at `src/shared/scorecard-format.mjs`. The slug `live` is reserved in `scorecards.mjs` so no
+  curated tool name can collide with the dynamic share route.
+- **Install-command binary cross-check** (commit `45dd881`). `cargo install bat` and similar input shapes resolve to
+  `binary='bat'` via the parser, then `lookupRegistry` consults `by_slug` directly — landing on the curated scorecard
+  instead of paying the live path for a tool the site already has audited.
+- **Comment hygiene** (commit `45b66c6`, this branch only). 36 branch-touched files had plan-ID anchors (U1-U10, R1-R12,
+  K1-K8, A1-A15, P1-P10 in non-principle context) stripped from comments and JSDoc. Files this branch never touched
+  still carry their anchors; a follow-up sweep is queued separately.
+
 ### Pending (in execution order for the next session)
 
-1. **U8** — paste-input form on the homepage (`/`, NOT a dedicated `/score` subpage), Turnstile invisible mode +
-   lazy-load on form interaction, CSP update for `challenges.cloudflare.com`, client-side polling, summary + top-3 +
-   install-anc CTA, build-emitted `spec-version.gen.ts`. No markdown twin (live-scoring is HTML-only; agents have `anc
-   check` locally). Result-presentation shape (inline / modal / shareable subpage) is an open U8 question.
-2. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
-3. **U10** — analytics + billing guardrails: Workers Analytics Engine telemetry (one event per `/api/score` with pm /
-   error / freshness / latency dimensions), kill-switch flip runbook, Budget Alerts at $5 / $25 / $100. Auto-kill via
-   cron is deferred to U10.1 once real traffic patterns inform the threshold.
+1. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
+   Cross-cutting; should land while U8's surface is fresh.
+2. **U10** — analytics + billing guardrails: Workers Analytics Engine telemetry (one event per `/api/score` with pm /
+   error / freshness / latency / tier dimensions — U8's `score.tier` log already emits the tier+cache flags this
+   pipeline will consume), kill-switch flip runbook, Budget Alerts at $5 / $25 / $100. Auto-kill via cron is deferred to
+   U10.1 once real traffic patterns inform the threshold.
 
-U9 is cross-cutting and should land alongside U8. U10 lands after U7 (cache hit/miss is the largest cost lever and must
-be observable before the analytics dashboards are trustworthy).
+U10 lands after U9 (cache hit/miss + tier telemetry must be observable before analytics dashboards are trustworthy).
 
 ### Risks to design against during U5-U8
 
@@ -160,14 +221,11 @@ be observable before the analytics dashboards are trustworthy).
 
 ### Branch baseline for next session
 
-Continue from `dev` post PR [#99](https://github.com/brettdavies/agentnative-site/pull/99) merge (2026-05-19,
-`eb9cbc7`). U5/U6/U7 are dev-only; nothing about this plan ships to production until the entire plan (through U10) is
-complete. The U5/U6/U7 feature branches (`feat/u5-score-route`, `feat/u6-sandbox-do`, `feat/u7-r2-cache`,
-`feat/u7-red-team-tests`, `fix/u7-lifecycle-doc-syntax`, `fix/sandbox-python-3.12`) were squash-merged and deleted
-locally; their content is on dev.
+U5-U8 are dev-only; nothing about this plan ships to production until the entire plan (through U10) is complete. The
+U5/U6/U7 feature branches were squash-merged and deleted locally; the U8 branch (`feat/u8-homepage-form`, head
+`45b66c6`) is pending PR review at the time of this writing.
 
-Next-session work begins with U8 (item 1 under Pending above). New feature branch off `dev`. See
-`.context/handoffs/2026-05-19-002-u8-homepage-form-handoff.md` for the U8 kickoff brief.
+Next-session work begins with U9 + U10 once U8 merges. New feature branch off `dev` post U8 squash-merge.
 
 ---
 
@@ -1140,7 +1198,7 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-### Shipping Progress (last updated 2026-05-19)
+### Shipping Progress (last updated 2026-05-20)
 
 | Unit | Status    | Shipping refs                                                                                                                                                                                                                                                                      |
 | ---- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1151,20 +1209,21 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 | U5   | [shipped] | PR [#93](https://github.com/brettdavies/agentnative-site/pull/93) — commit `8a03bcb` (2026-05-15)                                                                                                                                                                                  |
 | U6   | [shipped] | PR [#95](https://github.com/brettdavies/agentnative-site/pull/95) — commit `af9f568` (2026-05-18)                                                                                                                                                                                  |
 | U7   | [shipped] | PRs [#96](https://github.com/brettdavies/agentnative-site/pull/96) + [#97](https://github.com/brettdavies/agentnative-site/pull/97) + [#98](https://github.com/brettdavies/agentnative-site/pull/98) + [#99](https://github.com/brettdavies/agentnative-site/pull/99) — 2026-05-19 |
-| U8   | [pending] | depends on U5 (shipped); next-up unit                                                                                                                                                                                                                                              |
-| U9   | [pending] | cross-cutting; depends on U1-U8                                                                                                                                                                                                                                                    |
-| U10  | [pending] | depends on U7 (shipped); analytics + billing guardrails                                                                                                                                                                                                                            |
+| U8   | [shipped] | branch `feat/u8-homepage-form` off `dev` commit `37e5375` — head `45b66c6` (16 commits) — PR pending (2026-05-20)                                                                                                                                                                  |
+| U9   | [pending] | cross-cutting; depends on U1-U8 (now ready)                                                                                                                                                                                                                                        |
+| U10  | [pending] | depends on U7 (shipped) + U9 (pending); analytics + billing guardrails                                                                                                                                                                                                             |
 
-**Phases 1 and 2 are complete.** U1 through U4 land the foundation (data, image, parser, bindings). U5 wires
-`/api/score` with the abuse-mitigation stack but leaves the DO as a stub. U6 replaces the stub with the real
-Sandbox-extending DO, two-phase egress, and the `sandbox-exec.ts` orchestrator. U7 layers the R2 cache (read on hit,
-write on miss) and a unified `lookupScorecard()` so curated and cached results share a single unmetered path; the
-four-PR U7 sequence also covers a documentation drift fix (lifecycle-add syntax), red-team test gaps, a staging cache
-smoke script, Cloudflare Access on the staging Worker, and a sandbox-base swap to `python:3.12-slim-trixie` with sdist
-allowlist, supply-chain release delay, `standard-2` staging instance, and a runbook / decision-log document split. The
-Pre-Implementation Validation gate ([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of
-Phase 1 and conditioned the U1, U4, U6, U8 specs via the F1 and F4 findings (see plan amend commit `08a9a24`). Phase 3
-(UX, tests, and guardrails) covers U8, U9, and U10.
+**Phases 1, 2, and the user-facing surface of Phase 3 are complete.** U1 through U4 land the foundation (data, image,
+parser, bindings). U5 wires `/api/score` with the abuse-mitigation stack but leaves the DO as a stub. U6 replaces the
+stub with the real Sandbox-extending DO, two-phase egress, and the `sandbox-exec.ts` orchestrator. U7 layers the R2
+cache (read on hit, write on miss) and a unified `lookupScorecard()` so curated and cached results share a single
+unmetered path. U8 ships the homepage paste-input form, invisible Turnstile + lazy-load, 2 s theater floor, three
+class-specific bounce panels, install-anc CTA, CSP allowlist, build-emitted `spec-version.gen.ts`, and the shareable
+`/score/live/<binary>` result surface (HTML + markdown twin) — with the scope expansions documented above in "Discovered
+during U8 execution (2026-05-20)". The Pre-Implementation Validation gate
+([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of Phase 1 and conditioned the U1, U4, U6,
+U8 specs via the F1 and F4 findings (see plan amend commit `08a9a24`). Remaining Phase 3 work covers U9 (operational
+tests + runbook + release procedure) and U10 (analytics + billing guardrails).
 
 ---
 
@@ -2157,7 +2216,11 @@ first prod cut.
 
 ---
 
-- U8. **Homepage live-scoring form + Turnstile + summary+top-3 render + install-anc CTA**
+- [x] U8. **Homepage live-scoring form + Turnstile + summary+top-3 render + install-anc CTA** — shipped 2026-05-20 on
+  branch `feat/u8-homepage-form` (head `45b66c6`, 16 commits off `dev`@`37e5375`). PR pending. Scope items beyond the
+  original spec are catalogued in the "Discovered during U8 execution (2026-05-20)" section above; the K-decision on
+  result presentation was resolved to option 3 (redirect to a shareable `/score/live/<binary>` subpage) with a
+  cache-key-derived URL rather than a minted session id.
 
 **Goal:** A live-scoring paste-input form embedded on the homepage (`/`, NOT a dedicated `/score` subpage) with
 invisible Turnstile gate, theater spinner, summary + top-3 issues result render, and prominent install-anc-locally CTA.
