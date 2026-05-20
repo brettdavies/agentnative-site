@@ -304,8 +304,14 @@ function installCommandFor(spec: InstallSpec): string | null {
       // uv accepts relative durations natively. pip support is v26.0+;
       // older pip versions ignore the env var (no-op until upstream
       // lands, then the gate auto-activates on image rebuild).
+      // `PIP_DISABLE_PIP_VERSION_CHECK=1` suppresses the "A new release
+      // of pip is available" stderr notice. It's also baked as an image
+      // ENV in docker/sandbox/Dockerfile so future builds carry it
+      // intrinsically; the inline pass here keeps the
+      // currently-deployed image quiet until the next rebuild lands.
       return (
         `PIP_UPLOADED_PRIOR_TO=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) ` +
+        `PIP_DISABLE_PIP_VERSION_CHECK=1 ` +
         `PIP_NO_COLOR=1 pip install --only-binary=:all:` +
         (SDIST_TRUSTED_NAMES ? ` --no-binary=${SDIST_TRUSTED_NAMES}` : '') +
         ` --no-cache-dir --break-system-packages ${shellQuote(spec.package)}`

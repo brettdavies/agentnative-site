@@ -145,6 +145,16 @@ ENV UV_EXCLUDE_NEWER="7 days"
 # IPv4-precedence fix in /etc/gai.conf above. Force the cgo resolver so
 # `go install` honors the system address-selection policy.
 ENV GODEBUG=netdns=cgo
+# Suppress pip's "A new release of pip is available" notice. Without
+# this, every `pip install <pkg>` writes a multi-line upgrade prompt to
+# stderr, which pollutes the scorecard `evidence` field and the
+# bounce-panel `details` stderr block when a `pip install` user input
+# fails. The site never wants the user to act on the prompt (the
+# sandbox is ephemeral; pip is whatever the image ships), so the notice
+# is pure noise. Mirrored at exec time in sandbox-exec.ts so the
+# currently-deployed image gets the suppression before the next image
+# rebuild lands.
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
 ENV PATH="/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:${PATH}"
 

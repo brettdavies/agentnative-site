@@ -27,6 +27,15 @@ describe('validateInput — slug', () => {
   test('whitespace-trimmed before slug check', () => {
     expect(validateInput('  bat  ', REGISTRY).kind).toBe('slug');
   });
+
+  test('leading + trailing whitespace on a curated slug routes to slug, NOT unrecognized_input', () => {
+    // Front-end trims on submit (live-score.ts), but a user could POST
+    // ` ripgrep ` directly to /api/score via curl. The validator MUST
+    // trim before the slug-and-registry check; otherwise `" ripgrep "`
+    // would fail SLUG_RE and bounce as unrecognized_input.
+    expect(validateInput(' ripgrep ', REGISTRY)).toEqual({ kind: 'slug', slug: 'ripgrep' });
+    expect(validateInput('\tripgrep\n', REGISTRY)).toEqual({ kind: 'slug', slug: 'ripgrep' });
+  });
 });
 
 describe('validateInput — install command', () => {
@@ -48,6 +57,37 @@ describe('validateInput — install command', () => {
       kind: 'unknown',
       error: 'unparseable_install_command',
     });
+  });
+
+  test('looks-like-install-command for unsupported PM → unparseable_install_command (NOT unrecognized_input)', () => {
+    // Without the unsupported-PM branch, `apt-get install foo` would
+    // fall through to `unrecognized_input` and the homepage form would
+    // render the generic "not a recognized tool" copy. The dedicated
+    // bucket lets the client surface "PM isn't supported, try cargo /
+    // brew / npm / pip / bun / uv / go" instead.
+    const unsupportedCases = [
+      'apt-get install foo',
+      'apt install foo',
+      'dnf install foo',
+      'yum install foo',
+      'zypper install foo',
+      'pacman -S foo',
+      'snap install foo',
+      'flatpak install foo',
+      'port install foo',
+      'choco install foo',
+      'scoop install foo',
+      'winget install foo',
+      'gem install foo',
+      'composer require foo',
+      'emerge foo',
+    ];
+    for (const cmd of unsupportedCases) {
+      expect(validateInput(cmd, REGISTRY)).toEqual({
+        kind: 'unknown',
+        error: 'unparseable_install_command',
+      });
+    }
   });
 });
 

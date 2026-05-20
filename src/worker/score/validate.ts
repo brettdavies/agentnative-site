@@ -26,6 +26,15 @@ export type ValidatedInput =
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 const PM_PREFIX_RE = /^(brew|cargo|bun|uv|pip|pip3|pipx|npm|yarn|pnpm|go)\s/;
+// "Looks like an install command for a package manager we don't support."
+// These prefixes are routed to `unparseable_install_command` (not
+// `unrecognized_input`) so the homepage form can render a precise
+// "this kind of install isn't supported" copy with the supported set
+// listed, rather than a generic "not a recognized tool" line. Each
+// entry is a literal head token; `apt-get` is hyphenated so the regex
+// pins the whole word boundary.
+const UNSUPPORTED_PM_PREFIX_RE =
+  /^(apt-get|apt|dnf|yum|zypper|pacman|snap|flatpak|port|choco|scoop|winget|gem|composer|emerge)\s/;
 // Anchored: only repo-root URLs (with optional .git suffix and optional
 // trailing slash). Branch paths like `/tree/main` are rejected.
 const GITHUB_URL_RE = /^https:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/;
@@ -53,6 +62,16 @@ export function validateInput(raw: string, registryIndex: RegistryIndexShape): V
     const parsed = parseInstallCommand(trimmed);
     if (parsed.ok) return { kind: 'install-command', spec: parsed.value };
     return { kind: 'unknown', error: parsed.error };
+  }
+
+  // Looks-like-install-command for an unsupported package manager:
+  // route directly to `unparseable_install_command` so the homepage form
+  // surfaces the "PM isn't supported" copy with the supported set listed,
+  // rather than the generic "not a recognized tool" line. Without this
+  // branch, `apt-get install foo` would fall through to
+  // `unrecognized_input` and read the same as random text.
+  if (UNSUPPORTED_PM_PREFIX_RE.test(trimmed)) {
+    return { kind: 'unknown', error: 'unparseable_install_command' };
   }
 
   // URL paste: must be parseable, https-only, github.com only, repo-root only.

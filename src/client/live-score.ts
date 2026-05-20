@@ -351,10 +351,22 @@ function handleScoreResponse(
         'GitHub redirected us in a loop while resolving releases. Try again, or paste the exact owner/repo URL.',
       );
       return;
-    case 'invalid_url':
     case 'non_https_url':
+      renderInlineError(els.statusEl, "Use https://. The scoring sandbox won't fetch http:// URLs.");
+      return;
     case 'invalid_url_path':
+      renderInlineError(
+        els.statusEl,
+        'Paste the repo root, not a branch or release link. Example: https://github.com/owner/repo.',
+      );
+      return;
     case 'unparseable_install_command':
+      renderInlineError(
+        els.statusEl,
+        "That looks like an install command, but the package manager isn't supported. Try cargo, brew, npm, pip, bun, uv, or go.",
+      );
+      return;
+    case 'invalid_url':
     case 'unrecognized_input':
       renderInlineError(els.statusEl, 'That input is not a recognized tool, install command, or GitHub URL.');
       return;
@@ -407,7 +419,7 @@ function renderInstallUnsupportedBounce(statusEl: HTMLParagraphElement, pm: stri
     case 'brew_only':
       renderBouncePanel(statusEl, {
         headline: "Homebrew installs aren't sandboxed yet.",
-        body: 'Homebrew needs a desktop runtime the sandbox doesn\'t provide. Try a <code>cargo install</code>, <code>pipx install</code>, or <code>npm i -g</code> equivalent, or paste a GitHub URL. <a href="/install">Install anc locally</a> to score brew-only tools.',
+        body: 'Homebrew isn\'t available in the scoring sandbox. Try a <code>cargo install</code>, <code>pipx install</code>, or <code>npm i -g</code> equivalent, or paste a GitHub URL. <a href="/install">Install anc locally</a> to score brew-only tools.',
       });
       return;
     case 'bun':

@@ -397,6 +397,124 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
     const status = page.locator('[data-live-score-status]');
     await expect(status.locator('.live-score__bounce-headline')).toContainText(/library/i);
   });
+
+  test('non_https_url shows a distinct https-required message (NOT the generic copy)', async ({ page }) => {
+    // Pre-fix, non_https_url shared the catch-all "not a recognized
+    // tool, install command, or GitHub URL" copy with unrecognized_input.
+    // The server has always returned the specific code; only the client
+    // mapping was lossy. Pin the differentiated copy so a future
+    // consolidation doesn't silently regress it.
+    await mockTurnstileAndScore(page, {
+      status: 400,
+      body: {
+        error: { code: 'non_https_url', cta_text: 'Use https:// — http:// is not allowed.' },
+        spec_version: '0.4.0',
+        checker_url: 'https://anc.dev/score',
+      },
+    });
+    await page.goto('/');
+    await page.locator('#live-score-input').fill('http://github.com/cli/cli');
+    await page.locator('[data-live-score-submit]').click();
+
+    const status = page.locator('[data-live-score-status]');
+    await expect(status).toBeVisible({ timeout: 5_000 });
+    await expect(status).toContainText(/https:\/\//);
+    await expect(status).toContainText(/http:\/\//);
+    // Must NOT show the generic catch-all copy.
+    await expect(status).not.toContainText(/not a recognized/i);
+  });
+
+  test('invalid_url_path shows a distinct "paste the repo root" message', async ({ page }) => {
+    await mockTurnstileAndScore(page, {
+      status: 400,
+      body: {
+        error: {
+          code: 'invalid_url_path',
+          cta_text: 'Paste the repo root URL (e.g. https://github.com/owner/repo), not a branch or release link.',
+        },
+        spec_version: '0.4.0',
+        checker_url: 'https://anc.dev/score',
+      },
+    });
+    await page.goto('/');
+    await page.locator('#live-score-input').fill('https://github.com/cli/cli/tree/main');
+    await page.locator('[data-live-score-submit]').click();
+
+    const status = page.locator('[data-live-score-status]');
+    await expect(status).toBeVisible({ timeout: 5_000 });
+    await expect(status).toContainText(/repo root/i);
+    await expect(status).toContainText(/branch or release link/i);
+    await expect(status).not.toContainText(/not a recognized/i);
+  });
+
+  test('unparseable_install_command surfaces the supported-PM hint copy', async ({ page }) => {
+    // Server now routes apt-get / dnf / yum / etc. install commands to
+    // unparseable_install_command (was unrecognized_input). The client
+    // copy lists the supported PMs so the user has a concrete next
+    // step instead of staring at a generic "not recognized" line.
+    await mockTurnstileAndScore(page, {
+      status: 400,
+      body: {
+        error: {
+          code: 'unparseable_install_command',
+          details: 'apt-get install foo',
+          cta_text: '...',
+        },
+        spec_version: '0.4.0',
+        checker_url: 'https://anc.dev/score',
+      },
+    });
+    await page.goto('/');
+    await page.locator('#live-score-input').fill('apt-get install foo');
+    await page.locator('[data-live-score-submit]').click();
+
+    const status = page.locator('[data-live-score-status]');
+    await expect(status).toBeVisible({ timeout: 5_000 });
+    await expect(status).toContainText(/install command/i);
+    await expect(status).toContainText(/package manager isn't supported/i);
+    // The supported set must be enumerated so the user can pivot
+    // without checking the docs.
+    await expect(status).toContainText(/cargo/);
+    await expect(status).toContainText(/brew/);
+    await expect(status).toContainText(/npm/);
+    await expect(status).toContainText(/pip/);
+  });
+
+  test('bounce: install_unsupported pm=brew_only does NOT mention "desktop"', async ({ page }) => {
+    // Pre-fix the bounce said "Homebrew needs a desktop runtime the
+    // sandbox doesn't provide" — homebrew doesn't need a desktop. The
+    // copy now reads "Homebrew isn't available in the scoring sandbox",
+    // which is honest about what the sandbox is missing without
+    // inventing a phantom runtime requirement.
+    await mockTurnstileAndScore(page, {
+      status: 502,
+      body: {
+        error: { code: 'install_unsupported', pm: 'brew_only', cta_text: '...' },
+        spec_version: '0.4.0',
+        checker_url: 'https://anc.dev/score',
+      },
+    });
+    await page.goto('/');
+    await page.locator('#live-score-input').fill('brew install some-brew-only-tool');
+    await page.locator('[data-live-score-submit]').click();
+
+    const status = page.locator('[data-live-score-status]');
+    await expect(status).toBeVisible({ timeout: 5_000 });
+    await expect(status).toHaveClass(/live-score__status--bounce/);
+    // Headline still pins the topic.
+    await expect(status.locator('.live-score__bounce-headline')).toContainText(/Homebrew/);
+    // New body copy.
+    await expect(status.locator('.live-score__bounce-body')).toContainText(
+      /Homebrew isn't available in the scoring sandbox/i,
+    );
+    // No phantom "desktop" or "desktop runtime" claim.
+    const bodyText = await status.locator('.live-score__bounce-body').textContent();
+    expect(bodyText ?? '').not.toMatch(/desktop/i);
+    // The cargo / pipx / npm fallback hint must still be present.
+    await expect(status.locator('.live-score__bounce-body')).toContainText(/cargo install/);
+    await expect(status.locator('.live-score__bounce-body')).toContainText(/pipx install/);
+    await expect(status.locator('.live-score__bounce-body')).toContainText(/npm i -g/);
+  });
 });
 
 test.describe('homepage live-scoring form — CSP + markdown-twin regressions', () => {

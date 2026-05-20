@@ -259,4 +259,16 @@ describe('docker/sandbox/Dockerfile — supply-chain release-delay gate', () => 
     expect(uvInstallIdx).toBeGreaterThan(0);
     expect(uvExcludeNewerIdx).toBeGreaterThan(uvInstallIdx);
   });
+
+  test('ENV PIP_DISABLE_PIP_VERSION_CHECK=1 suppresses pip upgrade notice in evidence/stderr', async () => {
+    // Without this env var, every `pip install <pkg>` in the sandbox
+    // writes a multi-line "A new release of pip is available" notice to
+    // stderr, which pollutes the scorecard evidence field and the
+    // bounce-panel stderr block. Baked at image build time so future
+    // builds carry it intrinsically; sandbox-exec.ts also prepends it
+    // inline at exec time so the currently-deployed image gets the
+    // suppression before the next image rebuild lands.
+    const df = await loadDockerfile();
+    expect(df).toMatch(/^ENV PIP_DISABLE_PIP_VERSION_CHECK=1$/m);
+  });
 });

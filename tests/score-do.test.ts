@@ -366,8 +366,14 @@ describe('sandbox-exec.score() — install table per PM', () => {
       // release-delay gate. Date computed at exec time so image age
       // doesn't widen the gate. pip v26.0+ honors the env var; older
       // pip ignores it harmlessly.
+      // PIP_DISABLE_PIP_VERSION_CHECK=1: suppresses pip's "A new release
+      // of pip is available" stderr notice so the scorecard evidence +
+      // bounce-panel details stay clean. Also baked as image ENV in
+      // docker/sandbox/Dockerfile; the inline pass keeps the
+      // currently-deployed image quiet until the next rebuild lands.
       expected:
         "PIP_UPLOADED_PRIOR_TO=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ) " +
+        'PIP_DISABLE_PIP_VERSION_CHECK=1 ' +
         'PIP_NO_COLOR=1 pip install --only-binary=:all: --no-binary=pyperclip,pycparser --no-cache-dir ' +
         "--break-system-packages 'black'",
     },
@@ -427,6 +433,72 @@ describe('sandbox-exec.score() — install table per PM', () => {
         `tar xjf "$tmp/a" -C "$tmp/x"; ` +
         `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
         `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+    },
+    {
+      // .txz alias for .tar.xz — same xJ flag.
+      spec: { pm: 'direct', url: 'https://example.com/foo.txz', binary: 'foo' },
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.txz' -o "$tmp/a"; ` +
+        `tar xJf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+    },
+    {
+      // .tbz2 alias for .tar.bz2 — same xj flag.
+      spec: { pm: 'direct', url: 'https://example.com/foo.tbz2', binary: 'foo' },
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.tbz2' -o "$tmp/a"; ` +
+        `tar xjf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+    },
+    {
+      // .zip — unzip into the tmp dir, then find+install. Mirrors how
+      // GitHub Windows-style release artifacts (and the occasional Linux
+      // tool, e.g. bun) get extracted. The post-extract find+install path
+      // also covers the "binary in a subfolder" case: `unzip` into
+      // $tmp/x/, then `find -name <binary>` walks recursively, so an
+      // archive that expands to `extracted-dir/bin/<tool>` resolves
+      // identically to a flat archive.
+      spec: { pm: 'direct', url: 'https://example.com/foo.zip', binary: 'foo' },
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo.zip' -o "$tmp/a"; ` +
+        `unzip -q "$tmp/a" -d "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+    },
+    {
+      // Unknown / no recognized extension: falls back to `tar xz` so
+      // legacy tar.gz-without-extension URLs keep working. Fails loud
+      // if the archive isn't actually gzip-tar, which surfaces as a
+      // chain_resolved_install_failed bounce with the curl/tar stderr
+      // visible to the user.
+      spec: { pm: 'direct', url: 'https://example.com/foo-release', binary: 'foo' },
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/foo-release' -o "$tmp/a"; ` +
+        `tar xzf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'foo' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'foo'; rm -rf "$tmp" )`,
+    },
+    {
+      // Binary in subfolder coverage: the `find $tmp/x -type f -name
+      // <binary>` shape is recursive (no -maxdepth), so an archive whose
+      // binary lives at `<arch-dir>/bin/<binary>` (or any nesting depth)
+      // resolves identically. The command-shape assertion above pins
+      // the recursive walk; this case pins it explicitly so a future
+      // refactor that adds `-maxdepth 1` breaks here loudly. URL is a
+      // .tar.gz with a binary name that implies a release-folder layout.
+      spec: { pm: 'direct', url: 'https://example.com/nested-binary.tar.gz', binary: 'nested-binary' },
+      expected:
+        `( set -e; tmp=$(mktemp -d); mkdir "$tmp/x"; ` +
+        `curl -fsSL 'https://example.com/nested-binary.tar.gz' -o "$tmp/a"; ` +
+        `tar xzf "$tmp/a" -C "$tmp/x"; ` +
+        `found=$(find "$tmp/x" -type f -name 'nested-binary' -perm /111 -print -quit); ` +
+        `test -n "$found"; install -m 0755 "$found" /usr/local/bin/'nested-binary'; rm -rf "$tmp" )`,
     },
   ];
 
@@ -711,6 +783,27 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     // GNU form: -d '<relative>'.  BSD form (rejected): -v-7d.
     expect(installCmd?.command).toContain("date -u -d '7 days ago'");
     expect(installCmd?.command).not.toContain('date -u -v-7d');
+  });
+
+  test('pip install command carries PIP_DISABLE_PIP_VERSION_CHECK=1 to suppress upgrade notice', async () => {
+    // The Dockerfile bakes this as an image ENV so future builds are
+    // quiet at the OS level, but the currently-deployed image predates
+    // that change. Prepending the env var inline at exec time gives
+    // the currently-deployed sandbox the suppression immediately,
+    // without a rebuild. The companion image-level test lives in
+    // tests/dockerfile-sandbox.test.ts.
+    const { stub, calls } = makeStub();
+    await score(stub, { pm: 'pip', package: 'black', binary: 'black' });
+    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+      | Extract<Call, { kind: 'exec' }>
+      | undefined;
+    expect(installCmd).toBeDefined();
+    expect(installCmd?.command).toContain('PIP_DISABLE_PIP_VERSION_CHECK=1');
+    // Ordering: must precede `pip install` so it applies to the pip
+    // invocation rather than being set as an unused shell variable
+    // afterward.
+    const cmd = installCmd?.command ?? '';
+    expect(cmd.indexOf('PIP_DISABLE_PIP_VERSION_CHECK=1')).toBeLessThan(cmd.indexOf(' pip install '));
   });
 
   test('non-pip install paths do NOT carry PIP_UPLOADED_PRIOR_TO (env-var is pip-scoped only)', async () => {
