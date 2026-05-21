@@ -19,13 +19,13 @@ docker/score/
 
 ## Prerequisites (host)
 
-- **Docker Engine + Compose v2.** Engine only — NOT Docker Desktop. Install via `bash docker/score/setup-host.sh`
+- **Docker Engine + Compose v2.** Engine only, NOT Docker Desktop. Install via `bash docker/score/setup-host.sh`
   (Ubuntu) or follow Docker's apt-repo instructions for your distro.
 - **For `nvidia-smi` scoring:** NVIDIA driver + `nvidia-container-toolkit` configured against the Docker daemon. The
   setup-host.sh script handles this if a host GPU is detected. Without it, `nvidia-smi` falls back to `install-missing`
   and the other 99 tools still score.
 
-`anc` is brew-installed inside the image from `brettdavies/tap/agentnative` — no local CLI checkout required.
+`anc` is brew-installed inside the image from `brettdavies/tap/agentnative`. No local CLI checkout required.
 
 ## One-time host setup
 
@@ -61,28 +61,28 @@ Layer order:
 1. Base Debian-slim + OS essentials (curl, git, jq, sudo, ca-certificates).
 2. Non-root `runner` user.
 3. Linuxbrew (the heaviest single layer; cached aggressively).
-4. Other package managers: `uv`, `bun`, `cargo-binstall` — all installed via brew so they're prebuilt + cached.
+4. Other package managers: `uv`, `bun`, `cargo-binstall`. All installed via brew, so they're prebuilt + cached.
 5. Tooling for the runner: `yq`, `jaq`.
 6. The `anc` binary, brew-installed from `brettdavies/tap/agentnative` (same install path users get on macOS / Linux).
 7. `install-tools.sh` runs once at image build time, reading the build-time registry baked at `/build/registry.yaml` and
-   installing every entry. Failures are logged to `/build/install-log.txt` but do NOT abort the build — tools that fail
-   to install simply end up missing from PATH and the runner records them as `install-missing`.
+   installing every entry. Failures are logged to `/build/install-log.txt` but do NOT abort the build. Tools that fail
+   to install end up missing from PATH and the runner records them as `install-missing`.
 8. `score-anc100.sh` is the entrypoint; iterates the run-time registry at `/work/registry.yaml` (compose bind-mount from
-   the host). If the run-time registry diverges from the baked one, the runner emits a drift warning so the operator
+   the host). If the run-time registry diverges from the baked one, the runner emits a drift warning, so the operator
    knows new tools won't be installed without a rebuild.
 
 ## Failure handling
 
 The runner classifies each registry entry as one of:
 
-- **OK** — installed at build time, scored at run time. Scorecard written to `/work/scorecards/<name>-v<version>.json`
+- **OK**: installed at build time, scored at run time. Scorecard written to `/work/scorecards/<name>-v<version>.json`
   (bind-mounted to host).
-- **install-missing** — install command at build time exited zero but the expected `binary` is not in PATH (or installed
+- **install-missing**: install command at build time exited zero but the expected `binary` is not in PATH (or installed
   cleanly but only as a library, etc.). No scorecard written; the leaderboard renders the registry's existing fallback
   row ("not yet scored").
-- **score-failed** — binary present, but `anc check` produced invalid JSON or exited >1 (real error, not the standard
+- **score-failed**: binary present, but `anc check` produced invalid JSON or exited >1 (real error, not the standard
   "checks failed" exit 1). No scorecard written; entry logged in `/work/scoring-failures.txt`.
-- **skipped** — install method outside the allowed set (e.g., the `included` value used for `nvidia-smi`'s "comes with
+- **skipped**: install method outside the allowed set (e.g., the `included` value used for `nvidia-smi`'s "comes with
   the driver"). The runner records and moves on.
 
 After a successful run, host's `scorecards/` has the new JSONs. Re-run `bun run build` on the host to regenerate
@@ -109,4 +109,4 @@ This image is intentionally a strict subset of the v2 sandbox image. The v2 path
 2. **Registry changed (added/removed/edited a tool):** rerun the same command. The install layer is invalidated for the
    affected tool; brew re-resolves; scoring re-runs.
 3. **Tool released a new version:** the runner's version-extract logic pulls the actually-installed version at score
-   time and writes `<name>-v<NEWVERSION>.json`. The old scorecard file stays on disk — `trash`-clean it manually.
+   time and writes `<name>-v<NEWVERSION>.json`. The old scorecard file stays on disk; `trash`-clean it manually.

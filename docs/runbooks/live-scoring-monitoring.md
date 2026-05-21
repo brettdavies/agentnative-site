@@ -33,11 +33,11 @@ regardless of which tier served the response or which error short-circuited the 
 
 `tier` values:
 
-- `curated` — registry-fast-path hit (in-memory hashmap, no I/O, unmetered).
-- `cache_pre` — step-2 R2 cache hit; binary derivable from input.
-- `cache_post` — step-6.5 R2 cache hit; binary discovered via fan-out, then re-checked against cache.
-- `live` — Sandbox DO dispatched, container spawned, real `anc` check.
-- `error_<code>` — terminal error. `<code>` is one of the 19 `ScoreError` variants from
+- `curated`: registry-fast-path hit (in-memory hashmap, no I/O, unmetered).
+- `cache_pre`: step-2 R2 cache hit; binary derivable from input.
+- `cache_post`: step-6.5 R2 cache hit; binary discovered via fan-out, then re-checked against cache.
+- `live`: Sandbox DO dispatched, container spawned, real `anc` check.
+- `error_<code>`: terminal error. `<code>` is one of the 19 `ScoreError` variants from
   `src/worker/score/response-shape.ts`.
 
 `cache_pre_*` and `cache_post_*` are independent: both can be `true` in a single request that missed pre-discovery
@@ -94,26 +94,26 @@ for sustained tier-mix monitoring; the same row also surfaces `cache_hit_rate` a
 
 Group `error_<code>` lines and break down by `code`. Some codes are user-driven and expected:
 
-- `chain_no_resolve` — input didn't match registry, hints, or GitHub probe. User mis-typed, or the binary genuinely
-  isn't in any registry.
+- `chain_no_resolve`: input didn't match registry, hints, or GitHub probe. User mis-typed, or the binary genuinely isn't
+  in any registry.
 - `invalid_url`, `non_https_url`, `non_github_host`, `invalid_url_path`, `unrecognized_input`,
-  `unparseable_install_command` — input parser rejections. Bounded by what the form lets through.
+  `unparseable_install_command`: input parser rejections. Bounded by what the form lets through.
 
 The signal-bearing codes:
 
-- `turnstile_failed` (HTTP 400) — siteverify rejected the token. A spike means either bot-defense degraded (Cloudflare
+- `turnstile_failed` (HTTP 400): siteverify rejected the token. A spike means either bot-defense degraded (Cloudflare
   siteverify outage) or the homepage form is dispatching tokens incorrectly.
-- `rate_limited` (HTTP 429) — caller burned through 10 distinct-tool requests per session per minute (`SCORE_LIMITER`)
-  or 30 requests per minute per IP (`SCORE_LIMITER_IP`). Spike is abuse or a hot user.
-- `service_misconfigured` (HTTP 500) — a required secret (`TURNSTILE_SECRET`, `SESSION_HMAC_SECRET`) is missing. Always
+- `rate_limited` (HTTP 429): caller burned through 10 distinct-tool requests per session per minute (`SCORE_LIMITER`) or
+  30 requests per minute per IP (`SCORE_LIMITER_IP`). Spike is abuse or a hot user.
+- `service_misconfigured` (HTTP 500): a required secret (`TURNSTILE_SECRET`, `SESSION_HMAC_SECRET`) is missing. Always
   operator-actionable; investigate immediately.
-- `incomplete_response_contract` (HTTP 500) — handler produced a payload missing the response triad. Drift-guard for a
+- `incomplete_response_contract` (HTTP 500): handler produced a payload missing the response triad. Drift-guard for a
   future regression; should be zero.
-- `scoring_disabled` (HTTP 503) — kill-switch is on. Expected during incidents; unexpected otherwise.
-- `timeout` (HTTP 504) — sandbox install or scoring exceeded the budget. Sandbox cold-start drag or a stuck container.
-- `chain_resolved_install_failed`, `chain_resolved_no_binary_produced` (HTTP 502) — the install spec resolved but the
+- `scoring_disabled` (HTTP 503): kill-switch is on. Expected during incidents; unexpected otherwise.
+- `timeout` (HTTP 504): sandbox install or scoring exceeded the budget. Sandbox cold-start drag or a stuck container.
+- `chain_resolved_install_failed`, `chain_resolved_no_binary_produced` (HTTP 502): the install spec resolved but the
   sandbox couldn't produce a usable binary. Image regression or upstream package outage.
-- `discovery_redirect_loop` (HTTP 502) — the discovery chain cycled. Worth investigating individually.
+- `discovery_redirect_loop` (HTTP 502): the discovery chain cycled. Worth investigating individually.
 
 HTTP-status mapping is canonical in `src/worker/score/response-shape.ts:statusForError`.
 
@@ -140,7 +140,7 @@ cheapest path. If post-hit rate consistently dominates, the cache key shape (`sc
 keyed on the discovered binary) isn't catching round-1 traffic. The reshape (key on owner/repo) is a future planning
 call; document the observation here and surface it in the next planning pass rather than acting on each spike.
 
-**Cross-source dependency:** Analytics Engine carries only `freshness` (`live` / `cache-hit` / `registry-hit`) — it does
+**Cross-source dependency:** Analytics Engine carries only `freshness` (`live` / `cache-hit` / `registry-hit`); it does
 NOT carry the `cache_pre_*` / `cache_post_*` booleans, which stay in the `score.tier` console log. To break down
 cache-hit traffic by pre-discovery vs post-discovery, run the manual log-query above and combine the result with the
 Analytics Engine freshness aggregate. See the
@@ -345,8 +345,8 @@ is a backstop, not the primary signal.
 - Post-deploy smoke: [`RELEASES.md` § Post-deploy smoke](../../RELEASES.md#post-deploy-smoke) and
   `scripts/smoke-api-score.sh`.
 - Sandbox image lifecycle and DO migrations:
-  [`ARCHITECTURE.md` § Sandbox image releases](../../ARCHITECTURE.md#sandbox-image-releases) and
-  [§ DO migrations are one-way walls](../../ARCHITECTURE.md#do-migrations-are-one-way-walls).
+  [`RELEASES-RATIONALE.md` § Sandbox image releases](../../RELEASES-RATIONALE.md#sandbox-image-releases) and
+  [§ DO migrations are one-way walls](../../RELEASES-RATIONALE.md#do-migrations-are-one-way-walls).
 - Plan unit: `docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md` (U9 deliverable 5).
 
 ## Still deferred
@@ -368,8 +368,8 @@ MCP) call. No `scripts/monitoring/` wrapper scripts were added; the existing wra
 operator path, and agents reach the same data through native MCP tools.
 
 Rationale: agents already have Cloudflare MCP tools; documenting which call to make for which check costs zero new code
-surface and zero ongoing maintenance. The alternative (shell scripts in `scripts/monitoring/`) was deferred — its unique
-value is GitHub Actions cron reach, which U10's acceptance bar doesn't require. If automated CI monitoring becomes a
-need later, scripts can land as a separate change without unwinding the MCP docs.
+surface and zero ongoing maintenance. The alternative (shell scripts in `scripts/monitoring/`) was deferred because its
+unique value is GitHub Actions cron reach, which U10's acceptance bar doesn't require. If automated CI monitoring
+becomes a need later, scripts can land as a separate change without unwinding the MCP docs.
 
 Until U10 lands, the runbook above is the operator's only playbook.

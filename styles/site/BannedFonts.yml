@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
-# Source: PRODUCT.md § Aesthetic Direction — second-favorite font reflex.
+# Source: PRODUCT.md § Aesthetic Direction: second-favorite font reflex.
 extends: existence
-message: "Banned font name '%s' — second-favorite font reflex per the impeccable font-selection procedure. Cite by category, not by name."
+message: "Banned font name '%s': second-favorite font reflex per the impeccable font-selection procedure. Cite by category, not by name."
 link: https://github.com/brettdavies/agentnative-site/blob/main/styles/site/README.md
 level: warning
 ignorecase: true

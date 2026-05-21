@@ -25,8 +25,8 @@ The principle text, the requirement IDs, the versioning policy. Pressure-tests a
 - [Pressure-test a principle](https://github.com/brettdavies/agentnative/issues/new?template=pressure-test.yml) (Tier 1
   or 2)
 - [Ask a spec question](https://github.com/brettdavies/agentnative/issues/new?template=spec-question.yml) (Tier 1)
-- [Submit a tool for grading](https://github.com/brettdavies/agentnative/issues/new?template=grade-a-cli.yml) (Tier 3,
-  lightweight)
+- [Submit a grading finding](https://github.com/brettdavies/agentnative/issues/new?template=grading-finding.yml) (Tier 1
+  or 2): spec-feedback derived from scoring a real CLI against the standard
 - [`CONTRIBUTING.md`](https://github.com/brettdavies/agentnative/blob/main/CONTRIBUTING.md) ·
   [`principles/AGENTS.md` § Pressure-test protocol](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md)
 
@@ -39,6 +39,11 @@ The principle text, the requirement IDs, the versioning policy. Pressure-tests a
 - [Request a feature](https://github.com/brettdavies/agentnative-cli/issues/new?template=feature-request.yml) (Tier 1 or
   2)
 - [Report a scoring bug](https://github.com/brettdavies/agentnative-cli/issues/new?template=scoring-bug.yml) (Tier 1)
+-
+
+[Add a tool to the registry](https://github.com/brettdavies/agentnative-cli/issues/new?template=add-tool-to-registry.yml)
+(Tier 3): propose a CLI for the anc.dev/scorecards leaderboard
+
 - [Source repo](https://github.com/brettdavies/agentnative-cli)
 
 ### Site: [agentnative-site](https://github.com/brettdavies/agentnative-site)
@@ -60,12 +65,12 @@ detection, the SKILL.md prose.
 This is a solo-maintainer project. The honest framing:
 
 - **Tier 1 and 2** are welcome and get a substantive reply when time allows. A pressure-test that names a specific
-  failure mode and an implementer's reasoning is the contribution shape that lands fastest.
+  failure mode, with the reasoning behind it, is the contribution shape that lands fastest.
 - **Tier 3 PRs** are reviewed when scope and time permit. Real PRs land. No merge-window promise; the queue is what the
   maintainer can actually read.
-- **Status flips** are how the spec records that a finding is being worked on. A principle moves to `status:
-  under-review` when a substantive pressure-test is being processed, then back to `status: active` once the next MINOR
-  release lands. Visible in the principle file's frontmatter.
+- **Status flips** are how the spec records work in progress on a finding. A principle moves to `status: under-review`
+  when a substantive pressure-test is being processed, then back to `status: active` once the next MINOR release lands.
+  Visible in the principle file's frontmatter.
 
 The standard takes positions because positions are useful. Positions held without willingness to revise them are dogma.
 Both halves of that are intentional.
@@ -81,7 +86,7 @@ For a Tier 2 proposal that changes a MUST/SHOULD/MAY tier or adds a new principl
    `active`. Or the finding is closed with a documented `[wontfix]` rationale appended to the principle's pressure-test
    notes section.
 
-The mechanism is described in full at
+Full description lives at
 [`principles/AGENTS.md` § Pressure-test protocol](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md).
 
 ## Adjacent reading

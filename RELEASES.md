@@ -1,6 +1,6 @@
 # Releasing agentnative-site
 
-Operational runbook. Rationale lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Operational runbook. Rationale lives in [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md).
 
 ```text
 feature branch → PR to dev (squash merge)
@@ -24,7 +24,7 @@ Direct commits to `dev` or `main` are not permitted: every change has a PR numbe
 | `feat/*`, `fix/*`, `chore/*` | Feature work.                           | One PR's worth. Auto-deleted on merge.      | None. Squash into dev freely.        |
 | `release/*`                  | The head of a dev → main PR.            | One release's worth. Auto-deleted on merge. | None.                                |
 
-→ Rationale: [`ARCHITECTURE.md` § Branching model](./ARCHITECTURE.md#branching-model).
+→ Rationale: [`RELEASES-RATIONALE.md` § Branching model](./RELEASES-RATIONALE.md#branching-model).
 
 ## Daily development (feature → dev)
 
@@ -57,7 +57,7 @@ Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inve
 - **No AI attribution** in commits or PR bodies.
 - **No hard line wraps**: one logical line per paragraph or bullet.
 
-→ Rationale: [`ARCHITECTURE.md` § PR body conventions](./ARCHITECTURE.md#pr-body-conventions).
+→ Rationale: [`RELEASES-RATIONALE.md` § PR body conventions](./RELEASES-RATIONALE.md#pr-body-conventions).
 
 ## Releasing dev to main
 
@@ -98,7 +98,7 @@ When the PR merges, `deploy.yml` publishes to staging. Auto-delete removes `rele
 `dev` is untouched.
 
 → Rationale + triple-diff false-positive triage:
-[`ARCHITECTURE.md` § Triple-diff verification](./ARCHITECTURE.md#triple-diff-verification).
+[`RELEASES-RATIONALE.md` § Triple-diff verification](./RELEASES-RATIONALE.md#triple-diff-verification).
 
 ## Prose scrubbing
 
@@ -132,7 +132,7 @@ gh pr edit <num> --body-file /tmp/body.md                              # existin
 ```
 
 → Rationale + which artifacts need this:
-[`ARCHITECTURE.md` § Prose scrubbing scope](./ARCHITECTURE.md#prose-scrubbing-scope).
+[`RELEASES-RATIONALE.md` § Prose scrubbing scope](./RELEASES-RATIONALE.md#prose-scrubbing-scope).
 
 ## Deploy
 
@@ -157,13 +157,13 @@ gh workflow run deploy.yml -f environment=staging -f ref=<sha>  # specific SHA t
 
 A `paths-ignore` filter on the `push` trigger skips deploy when a commit only touches paths the build doesn't ingest:
 
-- `docs/**` — all planning, design, and solution docs.
-- Root-level `*.md` — `README.md`, `AGENTS.md`, `RELEASES.md`, `CHANGELOG.md`. The glob doesn't cross `/`, so
+- `docs/**`: all planning, design, and solution docs.
+- Root-level `*.md`: `README.md`, `AGENTS.md`, `RELEASES.md`, `CHANGELOG.md`. The glob doesn't cross `/`, so
   `content/*.md` pages still deploy.
 
 `workflow_dispatch` is unaffected by `paths-ignore`.
 
-→ Rationale: [`ARCHITECTURE.md` § Docs-only deploy filter](./ARCHITECTURE.md#docs-only-deploy-filter).
+→ Rationale: [`RELEASES-RATIONALE.md` § Docs-only deploy filter](./RELEASES-RATIONALE.md#docs-only-deploy-filter).
 
 ### Sandbox image releases (live-scoring)
 
@@ -202,7 +202,7 @@ For low-risk image changes (security patch, dependency-only update with no behav
 feat PR.
 
 → Soak-then-promote rationale, retention discipline, DO migration walls, GHA fallback:
-[`ARCHITECTURE.md` § Sandbox image releases](./ARCHITECTURE.md#sandbox-image-releases).
+[`RELEASES-RATIONALE.md` § Sandbox image releases](./RELEASES-RATIONALE.md#sandbox-image-releases).
 
 #### R2 score-cache lifecycle
 
@@ -230,8 +230,8 @@ buckets, a KV namespace (`SCORE_KV`), and two rate-limit bindings to the static-
 unchanged.
 
 → Rationale and platform constraints:
-[`ARCHITECTURE.md` § Sandbox image releases](./ARCHITECTURE.md#sandbox-image-releases) and
-[§ DO migrations are one-way walls](./ARCHITECTURE.md#do-migrations-are-one-way-walls).
+[`RELEASES-RATIONALE.md` § Sandbox image releases](./RELEASES-RATIONALE.md#sandbox-image-releases) and
+[§ DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls).
 
 ### Image rebuild path
 
@@ -242,7 +242,7 @@ Immutability is per-Worker-version via `wrangler rollback`, not via a `@sha256:`
 ### Migration v1: the rollback recipe
 
 `migrations[].new_sqlite_classes: ["Sandbox"]` (tag `v1`) is a one-way gate; rationale lives in
-[`ARCHITECTURE.md` § DO migrations are one-way walls](./ARCHITECTURE.md#do-migrations-are-one-way-walls). The only path
+[`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls). The only path
 past `v1` is a follow-up migration:
 
 ```jsonc
@@ -316,7 +316,7 @@ response triad (`spec_version`, `site_spec_version`, `anc_version`, `checker_url
 anc.dev.
 
 → Scope rationale (why the smoke covers only the registry-fast-path):
-[`ARCHITECTURE.md` § Post-deploy smoke scope](./ARCHITECTURE.md#post-deploy-smoke-scope).
+[`RELEASES-RATIONALE.md` § Post-deploy smoke scope](./RELEASES-RATIONALE.md#post-deploy-smoke-scope).
 
 ### Cost-watch hand-off
 
@@ -375,7 +375,7 @@ Two distinct datasets keep staging traffic out of production aggregates:
 | Production  | `SCORE_TELEMETRY` | `anc_live_score_prod`    |
 | Staging     | `SCORE_TELEMETRY` | `anc_live_score_staging` |
 
-Datasets are created on first write — no `wrangler analytics-engine create` step needed. Confirm in the Cloudflare
+Datasets are created on first write; no `wrangler analytics-engine create` step needed. Confirm in the Cloudflare
 dashboard under Workers → Analytics Engine after the first post-deploy request.
 
 Sample query (paste into the dashboard's AE SQL editor, replace dataset name per environment):
@@ -421,7 +421,7 @@ Both jobs are named `lint · build · test · wrangler`.
 `ci.yml`'s `paths-ignore:` list and `ci-stub.yml`'s `paths:` list must stay identical.
 
 → Rationale + status-check context pitfall:
-[`ARCHITECTURE.md` § CI workflow split](./ARCHITECTURE.md#ci-workflow-split).
+[`RELEASES-RATIONALE.md` § CI workflow split](./RELEASES-RATIONALE.md#ci-workflow-split).
 
 ## Secrets
 
@@ -440,9 +440,9 @@ Secrets are also mirrored in 1Password for disaster recovery and cross-device us
 
 Rulesets committed under `.github/rulesets/`, applied to the repo via the GitHub API:
 
-- `protect-main.json` — required signatures, linear history, squash-only merges via PR, required status checks (`ci`,
+- `protect-main.json`: required signatures, linear history, squash-only merges via PR, required status checks (`ci`,
   `guard-docs`, `guard-release-branch`), creation/deletion blocked, non-fast-forward blocked.
-- `protect-dev.json` — required signatures, deletion blocked, non-fast-forward blocked. PR-only norm is convention +
+- `protect-dev.json`: required signatures, deletion blocked, non-fast-forward blocked. PR-only norm is convention +
   `guard-release-branch` on the main side.
 
 ### Applying changes
@@ -458,7 +458,7 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 ```
 
 → Status-check context strings (inline vs reusable):
-[`ARCHITECTURE.md` § Status-check context strings](./ARCHITECTURE.md#status-check-context-strings).
+[`RELEASES-RATIONALE.md` § Status-check context strings](./RELEASES-RATIONALE.md#status-check-context-strings).
 
 ## Skill releases
 
@@ -484,7 +484,7 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 6. **Verify**: `curl -s https://anc.dev/skill.json | jq -r .version` matches the new version. Run the Playwright `skill`
    project (`bun x playwright test --project=skill`) against the live host.
 
-→ Rationale: [`ARCHITECTURE.md` § Skill releases](./ARCHITECTURE.md#skill-releases).
+→ Rationale: [`RELEASES-RATIONALE.md` § Skill releases](./RELEASES-RATIONALE.md#skill-releases).
 
 ### Skill-availability probe
 
@@ -495,7 +495,7 @@ public, run `gh workflow run skill-availability.yml` once to seed a green run on
 
 ## Related docs
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — release flow rationale, CI design, status-check pitfalls
-- [`AGENT.md`](./AGENT.md) — onboarding, repo conventions, tool-site sequencing
-- [`DESIGN.md`](./DESIGN.md) — design system and build contract
-- [`docs/TODOS.md`](./docs/TODOS.md) — deferred work (not in v0 scope)
+- [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release flow rationale, CI design, status-check pitfalls
+- [`AGENT.md`](./AGENT.md): onboarding, repo conventions, tool-site sequencing
+- [`DESIGN.md`](./DESIGN.md): design system and build contract
+- [`docs/TODOS.md`](./docs/TODOS.md): deferred work (not in v0 scope)

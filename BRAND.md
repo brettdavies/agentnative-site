@@ -16,7 +16,7 @@ and artifacts in its own `PRODUCT.md`.
   here is the failure mode if you don't, here is the canonical fix." The point of view is what makes the standard worth
   citing.
 - **Precise.** RFC 2119 language. Anchors stable and citable. Numbers measured, not asserted. Where a contract has a
-  canonical realization (a flag spelling, an exit code, a path), it is named explicitly.
+  canonical realization (a flag spelling, an exit code, a path), the standard names it explicitly.
 - **Inviting.** The reader (or agent handler) keeps reading by design. That comes from details: typography that rewards
   a slow read, prose that rewards a fast scan, code blocks that read like reference material a reader can trust.
   Inviting is not "friendly" and it is not "marketing." It rewards engagement.

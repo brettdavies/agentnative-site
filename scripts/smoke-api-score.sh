@@ -6,7 +6,7 @@
 # deploy, and runnable locally for parity. Exercises the registry-fast-path
 # only: gate behaviour and live-sandbox dispatch are covered by unit tests
 # and the opt-in homepage-score-live e2e suite. Rationale lives in
-# ARCHITECTURE.md § Post-deploy smoke scope.
+# RELEASES-RATIONALE.md § Post-deploy smoke scope.
 #
 # Usage:
 #   scripts/smoke-api-score.sh <base-url>

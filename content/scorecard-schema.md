@@ -15,7 +15,7 @@ scorecards/<name>-v<version>.json
 ```
 
 Where `<name>` matches the registry's `name` field (URL slug) and `<version>` is the SemVer string captured at scoring
-time. The filename's `<version>` segment is the **canonical version anchor** — the site reads it directly off disk and
+time. The filename's `<version>` segment is the **canonical version anchor**: the site reads it directly off disk and
 displays it as the scored version on every per-tool page. The scorecard's `tool.version` field (added in schema 0.4) is
 informational; when both are present and disagree, the build aborts with an integrity error. The filename never lies.
 
@@ -67,14 +67,14 @@ registry.
 }
 ```
 
-| Field     | Type           | Meaning                                                                                                                                                                                                                                                                                                                                                            |
-| --------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`    | string         | The literal `--command` argv passed to anc. For tools where the registry name differs from the binary (e.g., registry `ripgrep` → binary `rg`), this is the binary, not the registry slug. The filename slug owns the registry-name side of the join.                                                                                                              |
-| `binary`  | string         | Executable name resolved from `$PATH` at scoring time. Equals `tool.name` for command-mode runs except when a tool ships under an alias.                                                                                                                                                                                                                           |
-| `version` | string \| null | Best-effort version string. The CLI dumps the first line of `<binary> --version` here without further parsing — it may carry the marketing string ("eza - A modern, maintained replacement for ls"), the full multi-line block, or `null` when the binary doesn't print anything parseable. **The filename's `<version>` is canonical**; this field is a courtesy. |
+| Field     | Type           | Meaning                                                                                                                                                                                                                                                                                                                                                           |
+| --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`    | string         | The literal `--command` argv passed to anc. For tools where the registry name differs from the binary (e.g., registry `ripgrep` → binary `rg`), this is the binary, not the registry slug. The filename slug owns the registry-name side of the join.                                                                                                             |
+| `binary`  | string         | Executable name resolved from `$PATH` at scoring time. Equals `tool.name` for command-mode runs except when a tool ships under an alias.                                                                                                                                                                                                                          |
+| `version` | string \| null | Best-effort version string. The CLI dumps the first line of `<binary> --version` here without further parsing; it may carry the marketing string ("eza - A modern, maintained replacement for ls"), the full multi-line block, or `null` when the binary doesn't print anything parseable. **The filename's `<version>` is canonical**; this field is a courtesy. |
 
 **Build-time invariant:** when `tool.version` contains a SemVer-shaped token (`X.Y` or `X.Y.Z`), it must equal the
-filename version. Drift fails the build with a parser-asymmetry error — the regen script's `version_extract` snippet and
+filename version. Drift fails the build with a parser-asymmetry error: the regen script's `version_extract` snippet and
 the CLI's internal probe are the only two places that derive a version from the binary, and they must agree.
 
 ## `anc`
@@ -114,7 +114,7 @@ Run-context: the literal invocation, when it ran, how long it took, and what pla
 | `platform.os`   | string  | OS the binary ran on (`linux`, `darwin`, `windows`).                                                                                                         |
 | `platform.arch` | string  | CPU architecture the binary ran on (`x86_64`, `aarch64`, …).                                                                                                 |
 
-**Security note — `run.invocation`:** for command-mode runs the invocation is the canonical `anc check --command <name>
+**Security note (`run.invocation`):** for command-mode runs the invocation is the canonical `anc check --command <name>
 [--audit-profile <X>] [--output json]` shape, which is safe to embed publicly. For project-mode runs (`target.kind:
 "project"`) the invocation may include a local filesystem path (`anc check ./local/repo`); the site falls back to the
 synthesized form for those runs to avoid leaking machine-local paths into HTML, markdown, and `/llms-full.txt`. Mirror
@@ -138,7 +138,7 @@ What the run was scoring: a command, a binary on disk, or a project tree.
 | `path`    | string \| null | Filesystem path when `kind` is `project` or `binary`; `null` for `command`-mode runs.                                                                                                                                                                      |
 | `command` | string \| null | The `--command` argv string when `kind` is `command`; `null` otherwise. For command-mode runs this equals `tool.name`.                                                                                                                                     |
 
-**Security note — `target.path`:** when `kind` is `project`, this can carry a local directory path (`/home/me/dev/foo`).
+**Security note (`target.path`):** when `kind` is `project`, this can carry a local directory path (`/home/me/dev/foo`).
 It is not currently rendered on any per-tool page (every leaderboard entry today is command-mode), but downstream
 consumers reading the JSON should treat it as machine-local.
 
@@ -161,12 +161,12 @@ Counts of the checks the runner actually executed. Adds up to `total`.
 | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `total` | integer | Number of checks the runner attempted on this tool. Equals `pass + warn + fail + skip + error`.                                                   |
 | `pass`  | integer | Checks that succeeded with no concerns.                                                                                                           |
-| `warn`  | integer | Checks that found a soft signal — partial compliance, deprecated pattern, mild inconsistency.                                                     |
+| `warn`  | integer | Checks that found a soft signal: partial compliance, deprecated pattern, mild inconsistency.                                                      |
 | `fail`  | integer | Checks that found a clear non-compliance.                                                                                                         |
 | `skip`  | integer | Checks the runner correctly judged inapplicable. Either the tool's shape made the check meaningless, or the active `audit_profile` suppressed it. |
 | `error` | integer | The check itself crashed and produced no signal. Not evidence of a defect; not blended into the score.                                            |
 
-The headline score on the leaderboard is `pass / (pass + warn + fail)` — `skip` and `error` are excluded from the
+The headline score on the leaderboard is `pass / (pass + warn + fail)`; `skip` and `error` are excluded from the
 denominator on purpose, as documented on the [methodology page](/methodology#how-a-score-is-computed).
 
 ## `coverage_summary`
@@ -192,7 +192,7 @@ by any implemented check.
 | `may.total`       | integer | Number of MAY-tier requirements in the spec.                                                          |
 | `may.verified`    | integer | MAYs satisfied by passing checks for this tool.                                                       |
 
-If `coverage_summary.must.verified` is below `summary.pass`, that's expected — a single passing check can map to
+If `coverage_summary.must.verified` is below `summary.pass`, that's expected because a single passing check can map to
 multiple MUSTs. If `should.verified` and `may.verified` are zero across the board, that's also expected: those tiers are
 aspirational and will fill in as the runner grows checks mapped to them.
 
@@ -212,33 +212,33 @@ Array of one object per check the runner attempted. Order is stable across runs 
 }
 ```
 
-| Field        | Type           | Meaning                                                                                                                                                  |
-| ------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`         | string         | Stable identifier (e.g., `p3-help`, `p1-non-interactive`). Citeable in commits and PRs.                                                                  |
-| `label`      | string         | Human-readable name for the check.                                                                                                                       |
-| `group`      | string         | Principle group this check belongs to: `P1`–`P8`. Drives the **principles met** column on the leaderboard.                                               |
-| `layer`      | string         | `behavioral`, `project`, or `source`. See [layers](/methodology#layers-behavioral-project-source) on methodology.                                        |
-| `status`     | string         | `pass`, `warn`, `fail`, `skip`, or `error`. Definitions match the [`summary` table](#summary) above.                                                     |
-| `evidence`   | string \| null | Short explanation when status is `skip`, `warn`, or `fail`. Often references the suppressing audit profile or the input that triggered the check.        |
-| `confidence` | string         | `high`, `medium`, or `low`. Reflects how directly the check observed the property — direct flag presence is high; inference from `--help` text is lower. |
+| Field        | Type           | Meaning                                                                                                                                                 |
+| ------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`         | string         | Stable identifier (e.g., `p3-help`, `p1-non-interactive`). Citeable in commits and PRs.                                                                 |
+| `label`      | string         | Human-readable name for the check.                                                                                                                      |
+| `group`      | string         | Principle group this check belongs to: `P1` through `P8`. Drives the **principles met** column on the leaderboard.                                      |
+| `layer`      | string         | `behavioral`, `project`, or `source`. See [layers](/methodology#layers-behavioral-project-source) on methodology.                                       |
+| `status`     | string         | `pass`, `warn`, `fail`, `skip`, or `error`. Definitions match the [`summary` table](#summary) above.                                                    |
+| `evidence`   | string \| null | Short explanation when status is `skip`, `warn`, or `fail`. Often references the suppressing audit profile or the input that triggered the check.       |
+| `confidence` | string         | `high`, `medium`, or `low`. Reflects how directly the check observed the property: direct flag presence is high; inference from `--help` text is lower. |
 
 ### `status` semantics in detail
 
-- `pass` — Check ran, found no issue.
-- `warn` — Check ran, found a soft signal worth noting. Lowers the headline score.
-- `fail` — Check ran, found a hard non-compliance. Lowers the headline score.
-- `skip` — Check did not run, by design. Either the tool's surface made it inapplicable (e.g., a `--help` parser check
-  on a tool with no flags) or the active `audit_profile` suppressed it (`evidence` will name the profile).
-- `error` — Check tried to run and crashed before producing a verdict. Treated as no-signal, not a defect.
+- `pass`: Check ran, found no issue.
+- `warn`: Check ran, found a soft signal worth noting. Lowers the headline score.
+- `fail`: Check ran, found a hard non-compliance. Lowers the headline score.
+- `skip`: Check did not run, by design. Either the tool's surface made it inapplicable (e.g., a `--help` parser check on
+  a tool with no flags) or the active `audit_profile` suppressed it (`evidence` will name the profile).
+- `error`: Check tried to run and crashed before producing a verdict. Treated as no-signal, not a defect.
 
 ## What is *not* in the scorecard (yet)
 
 The site is transparent about gaps that future schema bumps may fill. Schema 0.4 closed the tool-identity / generated-at
 gap (see `tool`, `anc`, `run`, `target` above). Still outstanding today:
 
-- **Per-check timing** — `run.duration_ms` is the wall-clock total for the run, not per-check. Individual check timings
+- **Per-check timing.** `run.duration_ms` is the wall-clock total for the run, not per-check. Individual check timings
   are observable from the runner's stdout but not captured in the JSON.
-- **Editorial fields inside the scorecard** — tier, language, creator, description, install, repo/url remain in the
+- **Editorial fields inside the scorecard.** Tier, language, creator, description, install, repo/url remain in the
   registry. Migrating them into the scorecard would let the registry shrink to a name list; deferred to a future schema
   bump.
 

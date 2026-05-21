@@ -7,7 +7,7 @@ Channel-specific product + design context for the **site channel** of agentnativ
 
 The site channel sits in a three-tier waterfall. Each tier owns a different concern; nothing duplicates.
 
-1. **Universal — [`BRAND.md`](BRAND.md).** Shared identity, voice anchor, audiences, universal anti-patterns. Vendored
+1. **Universal: [`BRAND.md`](BRAND.md).** Shared identity, voice anchor, audiences, universal anti-patterns. Vendored
    from [`agentnative-spec/BRAND.md`](https://github.com/brettdavies/agentnative/blob/main/BRAND.md) alongside the
    prose-check stack via [`scripts/sync-prose-tooling.sh`](scripts/sync-prose-tooling.sh) (re-run after any
    agentnative-spec release that touches the universal voice). Applies across every channel (spec, site, linter, skill
