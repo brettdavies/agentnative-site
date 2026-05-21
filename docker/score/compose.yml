@@ -24,6 +24,12 @@ services:
     build:
       context: ../..
       dockerfile: docker/score/Dockerfile
+      args:
+        # Selects how anc lands in the image: `brew` (default) installs from
+        # brettdavies/tap/agentnative; `inject` copies docker/score/inject/anc
+        # in instead, skipping brew. The wrapper (docker/score/build.sh
+        # --from-source <cli-repo>) toggles this via the ANC_SOURCE env var.
+        ANC_SOURCE: ${ANC_SOURCE:-brew}
     image: anc-scorer:latest
     container_name: anc-scorer
 

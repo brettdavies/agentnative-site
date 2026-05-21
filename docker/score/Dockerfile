@@ -91,19 +91,13 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
 RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
     brew install yq jaq
 
-# ---- The anc binary (glibc, brew-installed from the published tap) ---------
-# Same install path users get on macOS / Linux. The fully-qualified
-# brettdavies/tap/agentnative spec auto-taps the formula (mirrors the
-# oven-sh/bun/bun pattern above). The brewed binary lives in
-# /home/linuxbrew/.linuxbrew/bin and resolves to a release tag's bottle —
-# no local cargo build, no operator-state coupling, no wrong-SHA risk.
-RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
-    brew install brettdavies/tap/agentnative \
-    && anc --version
 # uv tool install drops binaries in ~/.local/bin; bun add -g drops them in
 # ~/.bun/bin; cargo-binstall in ~/.cargo/bin. All three need to be on PATH so
 # the post-install `command -v <binary>` check (in install-tools.sh) and the
-# scoring runtime can resolve them.
+# scoring runtime can resolve them. /home/runner/.local/bin sits first so
+# inject-mode's anc binary at that path wins over anything install-tools.sh
+# later brews into /home/linuxbrew/.linuxbrew/bin (notably the registry's
+# own `anc` entry which runs `brew install brettdavies/tap/agentnative`).
 ENV PATH=/home/runner/.local/bin:/home/runner/.bun/bin:/home/runner/.cargo/bin:$PATH
 
 # ---- Pre-bake every registry tool ------------------------------------------
@@ -113,8 +107,19 @@ ENV PATH=/home/runner/.local/bin:/home/runner/.bun/bin:/home/runner/.cargo/bin:$
 # the two and warns on drift (added/removed tools that didn't make it into
 # the install layer).
 #
-# This layer takes the longest (~20-40 minutes first build); Docker caches
-# it so subsequent rebuilds skip ahead unless registry.yaml changed.
+# This layer takes the longest (~5-7 minutes warm, ~20-40 minutes cold).
+# Docker caches it so subsequent rebuilds skip ahead unless registry.yaml
+# or install-tools.sh changed. The anc-install layer below it intentionally
+# does NOT precede this one — putting anc above install-tools meant every
+# `--from-source` build dirtied install-tools too, paying the full reinstall
+# cost. With install-tools BEFORE anc-install, only the anc layer
+# invalidates on cargo rebuilds.
+#
+# Tool freshness is handled at run time by score-anc100.sh's per-tool
+# update step (brew upgrade / uv tool upgrade / bun add -g re-resolution
+# / cargo binstall --force) rather than by busting this layer's cache.
+# That way the heavy install step runs only when registry.yaml changes,
+# and "always test against latest" still holds via the run-time refresh.
 #
 # BuildKit cache mounts on every package manager's download cache: re-runs
 # (when registry.yaml does change) reuse cached bottles/wheels/tarballs and
@@ -132,6 +137,47 @@ RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
 # 2026-04-28 — the same install commands succeed reliably in a fresh
 # container with no cache). Wall-time cost of redownloading bun packages
 # at build time is small (~5s per package, well under a minute total).
+
+# ---- The anc binary ---------------------------------------------------------
+# Sits AFTER install-tools so cargo-rebuilds (--from-source) only invalidate
+# this layer, not the heavy install-tools layer above. Two modes, selected
+# by build arg ANC_SOURCE (default: brew):
+#
+#   ANC_SOURCE=brew   — brew-install from brettdavies/tap/agentnative. Same
+#                        install path users get on macOS / Linux; the brewed
+#                        binary lives in /home/linuxbrew/.linuxbrew/bin and
+#                        resolves to a release tag's bottle.
+#   ANC_SOURCE=inject — copy a host-built binary from docker/score/inject/anc
+#                        into /home/runner/.local/bin/anc, which is first in
+#                        PATH. Bypasses brew install entirely. Use for
+#                        testing an unreleased anc (feature branch in
+#                        agentnative-cli) without waiting on a tag + bottle.
+#                        docker/score/build.sh --from-source <path-to-cli-repo>
+#                        orchestrates the cargo build + image build in one step.
+#
+# Inject lands at /home/runner/.local/bin/anc because install-tools.sh above
+# may have brewed the registry's `anc` entry, leaving /home/linuxbrew/...bin/anc.
+# /home/runner/.local/bin sits first in PATH, so the inject binary wins.
+ARG ANC_SOURCE=brew
+
+COPY --chown=runner:runner docker/score/inject/ /tmp/anc-inject/
+
+RUN --mount=type=cache,target=/home/runner/.cache/Homebrew,uid=1000,gid=1000 \
+    case "$ANC_SOURCE" in \
+      brew) \
+        brew install brettdavies/tap/agentnative ;; \
+      inject) \
+        if [ ! -f /tmp/anc-inject/anc ]; then \
+          echo "error: ANC_SOURCE=inject but docker/score/inject/anc is missing in build context" >&2; \
+          echo "       run via: docker/score/build.sh --from-source <path-to-cli-repo>" >&2; \
+          exit 1; \
+        fi && \
+        install -m 0755 /tmp/anc-inject/anc /home/runner/.local/bin/anc ;; \
+      *) \
+        echo "error: ANC_SOURCE must be 'brew' or 'inject' (got: $ANC_SOURCE)" >&2; \
+        exit 1 ;; \
+    esac && \
+    anc --version
 
 # ---- Scoring runner --------------------------------------------------------
 COPY --chown=runner:runner docker/score/score-anc100.sh /work/score-anc100.sh

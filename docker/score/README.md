@@ -40,7 +40,7 @@ bash docker/score/setup-host.sh
 ## Usage
 
 ```bash
-# Build only:
+# Build only (brew-installed anc):
 bash docker/score/build.sh
 
 # Build + score all 100 tools (writes scorecards/*.json on host):
@@ -49,6 +49,31 @@ bash docker/score/build.sh --run
 # Inspect the running container interactively:
 docker compose -f docker/score/compose.yml run --rm scorer bash
 ```
+
+### Scoring against an unreleased anc
+
+When you need to test a feature branch in agentnative-cli before it gets tagged and bottled, use `--from-source` to
+cargo-build the binary on the host and inject it into the image (skipping brew install):
+
+```bash
+# Build anc from a local CLI checkout + bake into the image:
+bash docker/score/build.sh --from-source ~/dev/agentnative-cli
+
+# Build + run in one step:
+bash docker/score/build.sh --from-source ~/dev/agentnative-cli --run
+```
+
+Inject mode caveats:
+
+- The host must be Linux with cargo + a glibc that can produce a binary the container's Debian trixie base (glibc 2.41)
+  can load. Recent Debian/Ubuntu hosts satisfy this. macOS-built binaries do not work.
+- The injected binary lives in `docker/score/inject/anc` (gitignored). The directory is tracked via `.gitkeep` so the
+  COPY layer always succeeds.
+- Layer cache invalidates when `ANC_SOURCE` changes or when the injected binary content changes (Docker checksums the
+  COPY source). Switching between brew and inject modes re-runs only the anc-install layer; the heavy install-tools
+  layer stays cached.
+- Inject mode skips the brew tap lookup entirely. The image will report `anc --version` matching whatever your local
+  cargo build produced, regardless of what version is currently published to brew.
 
 ## Image structure
 
@@ -63,7 +88,9 @@ Layer order:
 3. Linuxbrew (the heaviest single layer; cached aggressively).
 4. Other package managers: `uv`, `bun`, `cargo-binstall`. All installed via brew, so they're prebuilt + cached.
 5. Tooling for the runner: `yq`, `jaq`.
-6. The `anc` binary, brew-installed from `brettdavies/tap/agentnative` (same install path users get on macOS / Linux).
+6. The `anc` binary, installed via one of two modes selected by the `ANC_SOURCE` build argument: `brew` (default;
+   installs from `brettdavies/tap/agentnative`, same path users get on macOS / Linux) or `inject` (copies a host-built
+   binary from `docker/score/inject/anc`, used by `build.sh --from-source`).
 7. `install-tools.sh` runs once at image build time, reading the build-time registry baked at `/build/registry.yaml` and
    installing every entry. Failures are logged to `/build/install-log.txt` but do NOT abort the build. Tools that fail
    to install end up missing from PATH and the runner records them as `install-missing`.
