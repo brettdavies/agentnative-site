@@ -1,8 +1,7 @@
 # Check your CLI
 
-`anc` (also installable as `agentnative` — they're aliases for the same binary) is the reference linter for this
-standard. It scores any CLI tool against the eight principles and tells you, by check ID, where it passes and where it
-falls short.
+`anc` is the reference linter for this standard. It scores any CLI tool against the eight principles and tells you, by
+check ID, where it passes and where it falls short.
 
 ## Install
 
@@ -52,12 +51,12 @@ issues, commits, and agent output; they do not change between versions.
 
 ## Three check layers
 
-- **Behavioral** — runs your compiled binary and inspects `--help`, `--version`, `--output json`, SIGPIPE, NO_COLOR, and
+- **Behavioral**: runs your compiled binary and inspects `--help`, `--version`, `--output json`, SIGPIPE, NO_COLOR, and
   exit codes. Language-agnostic.
-- **Source** — ast-grep pattern matching on source code. Catches `.unwrap()`, missing error types, naked `println!`.
-  Rust and Python today; more languages as they land.
-- **Project** — file and manifest inspection. Looks for `AGENTS.md`, recommended dependencies, dedicated error and
-  output modules.
+- **Source**: ast-grep pattern matching on source code. Catches `.unwrap()`, missing error types, naked `println!`. Rust
+  and Python today; more languages as they land.
+- **Project**: file and manifest inspection. Looks for `AGENTS.md`, recommended dependencies, dedicated error and output
+  modules.
 
 Pass `--binary` for behavioral-only (skip source). Pass `--source` for source-only (skip behavioral). Most projects want
 the default, which is "run everything."
@@ -65,7 +64,7 @@ the default, which is "run everything."
 ## What a score means
 
 A `[PASS]` is a requirement met, not a compliment. A `[WARN]` is a SHOULD the tool doesn't satisfy; ignoring it is a
-choice, not a bug. A `[FAIL]` is a MUST the tool doesn't satisfy; agents will hit the edge it describes and the tool
+choice, not a bug. A `[FAIL]` is a MUST the tool doesn't satisfy; agents will hit the edge it describes, and the tool
 will surprise them. Nothing here is a vanity metric — the checks map one-to-one to the requirements on the
 [principles page](/).
 
