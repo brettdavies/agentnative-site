@@ -25,6 +25,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
     '/changelog',
     '/contribute',
     '/methodology',
+    '/scorecard-schema',
     ...extraPaths,
   ];
 
