@@ -417,20 +417,30 @@ registry maintainable and the policy in one place.
 
 **Repo:** `brettdavies/agentnative` (spec).
 
+**Status:** [shipped] [PR brettdavies/agentnative#34](https://github.com/brettdavies/agentnative/pull/34) — 2026-05-21.
+Schema extension, propagation table, worked examples, and conditional-row migrations all landed. The standalone spec
+issue proposing the 7-status taxonomy was dropped (the plan, PR #34, and `principles/AGENTS.md` together carry the
+proposal; a single-repo issue would be redundant). The `VERSION` bump is deferred to the release PR that closes out the
+taxonomy unit, not this feature PR.
+
 **Work:**
 
-- Write a spec issue proposing the 7-status taxonomy (this plan, condensed).
-- Add `applicability.kind: conditional` with `antecedent` shape to the coverage-matrix schema documentation.
-- Update `content/principles/p*.md` for any principle where a requirement is conditional (re-express in "if X then MUST
-  Y" form so the conditional structure is legible in the prose).
-- Bump spec `VERSION` after the conditional re-expressions land.
+- [shipped] Add `applicability.kind: conditional` with `antecedent` shape to the principle frontmatter schema and the
+  coverage-matrix schema documentation (`principles/AGENTS.md` — worked examples for conditional MUST + SHOULD,
+  antecedent-status propagation table, compound-antecedent deferral note).
+- [shipped] Update `content/principles/p*.md` for any principle where a requirement is conditional. Five rows migrated:
+  `p2-must-schema-print` and `p2-should-schema-file` (antecedent `p2-json-output`); `p8-must-bundle-install`,
+  `p8-may-install-all`, `p8-may-bundle-update` (antecedent `p8-bundle-exists`). p8 prose re-expressed in "If X, then it
+  MUST/MAY Y" construction. The remaining 18 `{if: <reason>}` rows across p1, p3, p4, p5, p6, p7 stay as-is until the
+  CLI's verifier catalog grows to cover their prerequisites.
+- Deferred to release PR: Bump spec `VERSION` after the conditional re-expressions land.
 
 **Acceptance:**
 
-- Spec issue merged with the taxonomy specified.
-- `coverage-matrix.json` schema doc reflects the conditional shape.
-- At least one principle's prose explicitly uses the if-X-then-MUST-Y construction.
-- spec `VERSION` bumps; the change is in `CHANGELOG.md`.
+- [met] `coverage-matrix.json` schema doc reflects the conditional shape.
+- [met] At least one principle's prose explicitly uses the if-X-then-MUST-Y construction (p8 across MUST + both MAYs; p2
+  already read conditionally in context and stayed as-is).
+- Deferred to release PR: spec `VERSION` bumps; the change is in `CHANGELOG.md`.
 
 **Dependencies:** None; this is the foundation.
 
