@@ -221,11 +221,13 @@ main .anchor-icon {
 }
 .site-nav {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   font-size: 0.95rem;
 }
 .site-nav a {
   color: inherit;
+  white-space: nowrap;
 }
 
 /* Theme toggle — hidden when JS is off (C6). */
@@ -445,6 +447,46 @@ main .anchor-icon {
   flex-wrap: wrap;
   gap: 0.3rem;
   justify-content: center;
+}
+
+/* Source-of-truth row. Sits between the AI-summary block and the meta
+ * line, mirroring the meta line's centered-flex layout. Renders as
+ * "[GH] Source: spec · cli · site · skill"; the icon is a quiet kicker,
+ * not a primary call-out — sized smaller than the AI-summary icons and
+ * tinted to fg-muted with the same hover lift as the meta links. */
+.site-footer__source {
+  margin: 0 0 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+.site-footer__source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: var(--fg-muted, #525960);
+  margin-right: 0.15rem;
+}
+.site-footer__source-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.site-footer__source-label {
+  color: var(--fg-muted, #525960);
+  letter-spacing: 0.01em;
+}
+.site-footer__source a {
+  color: inherit;
+  transition: color 120ms ease;
+}
+.site-footer__source a:hover {
+  color: var(--fg-body, #1a2026);
 }
 
 /* AI summary CTA — provider icons above the meta line. */

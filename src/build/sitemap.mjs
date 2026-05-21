@@ -23,6 +23,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
     '/check',
     '/about',
     '/changelog',
+    '/contribute',
     '/methodology',
     ...extraPaths,
   ];

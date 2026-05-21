@@ -28,7 +28,7 @@ The principle text, the requirement IDs, the versioning policy. Pressure-tests a
 - [Submit a grading finding](https://github.com/brettdavies/agentnative/issues/new?template=grading-finding.yml) (Tier 1
   or 2): spec-feedback derived from scoring a real CLI against the standard
 - [`CONTRIBUTING.md`](https://github.com/brettdavies/agentnative/blob/main/CONTRIBUTING.md) ·
-  [`principles/AGENTS.md` § Pressure-test protocol](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md)
+  [`principles/AGENTS.md` § Pressure-test protocol](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md#pressure-test-protocol)
 
 ### Linter: [agentnative-cli](https://github.com/brettdavies/agentnative-cli)
 
@@ -39,12 +39,10 @@ The principle text, the requirement IDs, the versioning policy. Pressure-tests a
 - [Request a feature](https://github.com/brettdavies/agentnative-cli/issues/new?template=feature-request.yml) (Tier 1 or
   2)
 - [Report a scoring bug](https://github.com/brettdavies/agentnative-cli/issues/new?template=scoring-bug.yml) (Tier 1)
--
-
-[Add a tool to the registry](https://github.com/brettdavies/agentnative-cli/issues/new?template=add-tool-to-registry.yml)
-(Tier 3): propose a CLI for the anc.dev/scorecards leaderboard
-
+- [Add a tool to the registry][add-tool] (Tier 3): propose a CLI for the anc.dev/scorecards leaderboard
 - [Source repo](https://github.com/brettdavies/agentnative-cli)
+
+[add-tool]: https://github.com/brettdavies/agentnative-cli/issues/new?template=add-tool-to-registry.yml
 
 ### Site: [agentnative-site](https://github.com/brettdavies/agentnative-site)
 
@@ -87,12 +85,13 @@ For a Tier 2 proposal that changes a MUST/SHOULD/MAY tier or adds a new principl
    notes section.
 
 Full description lives at
-[`principles/AGENTS.md` § Pressure-test protocol](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md).
+[`principles/AGENTS.md` § Pressure-test protocol](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md#pressure-test-protocol).
 
 ## Adjacent reading
 
-- [Spec status lifecycle](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md) — the `draft →
-  under-review → active → locked` flow
+-
+  [Spec status lifecycle](https://github.com/brettdavies/agentnative/blob/main/principles/AGENTS.md#pressure-test-protocol)
+  — the `draft → under-review → active → locked` flow
 - [BRAND.md](https://github.com/brettdavies/agentnative/blob/main/BRAND.md): voice and identity
 - [CHANGELOG.md](https://github.com/brettdavies/agentnative/blob/main/CHANGELOG.md): what landed when
 
