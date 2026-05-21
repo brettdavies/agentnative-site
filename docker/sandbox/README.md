@@ -98,7 +98,7 @@ survives.
 ### Build-context exclusions
 
 `docker/sandbox/.dockerignore` lists files that must not enter the build context. The current Dockerfile uses only
-multi-stage `COPY --from=` (no copy from the build context), so `.dockerignore` is forward-looking — it protects any
+multi-stage `COPY --from=` (no copy from the build context), so `.dockerignore` is forward-looking: it protects any
 future change that adds `COPY <ctx> ...` to the Dockerfile. `.ignored-sentinel.txt` is a regression probe: if it ever
 appears in a deployed layer, `.dockerignore` has stopped being read by the builder.
 
@@ -135,7 +135,7 @@ curl -fsSL "https://hub.docker.com/v2/repositories/cloudflare/sandbox/tags/<tag>
 
 For other GitHub-hosted releases (`agentnative-cli`, `cargo-binstall`, `uv`) the sha256 ships next to the binary
 (`sha256sum.txt`, `<asset>.sha256`). For `bun`, the release page ships a `SHASUMS256.txt`. Always read the upstream
-checksum file rather than computing locally — the upstream value is what you're trusting.
+checksum file rather than computing locally, because the upstream value is what you're trusting.
 
 ## What's NOT in the image (and why)
 
@@ -145,7 +145,7 @@ checksum file rather than computing locally — the upstream value is what you'r
   GitHub URL, run the existing `discoverBinary` chain to find an alternative (crates, npm, PyPI, go, direct). Formulae
   without a peer PM bounce as `install_unsupported pm=brew_only`.
 - **C/C++/Rust toolchains.** `apt-get install build-essential gcc rustc` would balloon the image past the size budget
-  AND violate Premise #2 (install-from-binary only). The `cargo install` (compile) path is intentionally absent —
+  AND violate Premise #2 (install-from-binary only). The `cargo install` (compile) path is intentionally absent because
   cargo-binstall's job is precompiled-only.
 - **Specific source-only packages.** Anything that requires compilation during `pip install` (no wheel published) will
   fail at install-time. U6 `pip install --only-binary=:all:` makes that explicit.

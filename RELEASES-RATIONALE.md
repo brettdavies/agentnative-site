@@ -1,7 +1,7 @@
 # Architecture decisions
 
 Companion to [`RELEASES.md`](./RELEASES.md). RELEASES.md is the runbook (commands, paths, decision tables). This file
-holds the WHY behind those rules — branching model, PR conventions, CI design, deploy filter logic, sandbox-image
+holds the WHY behind those rules: branching model, PR conventions, CI design, deploy filter logic, sandbox-image
 lifecycle, status-check pitfalls.
 
 Read this when:
@@ -15,7 +15,7 @@ Read this when:
 ### Forever `dev`, ephemeral release branches
 
 `dev` is never deleted, even after a release. The next release cycle reuses the same `dev`. The repo's
-`deleteBranchOnMerge: true` setting doesn't touch `dev` as long as `dev` is never the head of a PR — using a short-lived
+`deleteBranchOnMerge: true` setting doesn't touch `dev` as long as `dev` is never the head of a PR. Using a short-lived
 `release/*` head is what keeps the setting compatible with a forever integration branch.
 
 Engineering docs (`docs/plans/`, `docs/solutions/`, `docs/brainstorms/`) live on `dev` only. They never reach `main`.
@@ -31,7 +31,7 @@ on both sides with different content. Always branch from `origin/main` and cherr
 ### CalVer release branches
 
 Branch naming `release/<YYYY-MM-DD>-<slug>` (mandatory) makes release branches sortable and unambiguous when multiple
-cuts are in flight. The date prefix is the planned merge date, not the cut date — re-naming on slip is allowed but not
+cuts are in flight. The date prefix is the planned merge date, not the cut date; re-naming on slip is allowed but not
 required. Slug is kebab-case, short, descriptive (3-6 words). Bare `release/<slug>` (no date prefix) is no longer
 permitted.
 
@@ -60,7 +60,7 @@ user-observable effect (config defaults, env vars, default behaviors).
 ### Why required-when-empty sub-headers
 
 `Related Issues/Stories` has four labels (`Story:` / `Issue:` / `Architecture:` / `Related PRs:`). `Files Modified` has
-four sub-headers (`Modified` / `Created` / `Renamed` / `Deleted`). All four must appear in every PR, even when empty —
+four sub-headers (`Modified` / `Created` / `Renamed` / `Deleted`). All four must appear in every PR, even when empty;
 write `- None.` or `n/a` rather than deleting the label. Reason: scanners and humans both rely on a known section shape.
 Conditionally-absent sections force every reader to mentally check "did the author skip this or does it not apply?"
 
@@ -75,7 +75,7 @@ they age poorly as tools shift.
 Author each paragraph and each bullet as one logical line, however long. GitHub soft-wraps for display. Hard wraps
 within prose produce visible mid-sentence breaks in some renderers and interfere with the prose-check pipeline: Vale's
 line-anchored output reports findings against split lines, LanguageTool's input handling can choke on certain
-control-char interactions. The auto-format hook skips `/tmp/` paths so the body keeps its authored shape — don't undo
+control-char interactions. The auto-format hook skips `/tmp/` paths so the body keeps its authored shape; don't undo
 that with manual wrapping during composition. Same rule applies to commit messages composed via heredoc.
 
 ### Why release-PR bodies repeat changelog entries from upstream PRs
@@ -106,7 +106,7 @@ auto-block the release. Expected sources of false positives:
    almost always this.
 2. **Cherry-picks where conflict resolution stripped guarded paths** (`docs/plans/`, `docs/brainstorms/`, etc.) or
    otherwise altered the tree. Same source-code intent, different patch-id.
-3. **Intentionally skipped commits** — docs-only commits, release-prep backports, revert-and-redo prep steps.
+3. **Intentionally skipped commits**: docs-only commits, release-prep backports, revert-and-redo prep steps.
 
 A real miss looks like: a recent feat/fix/chore commit on dev whose *file content* is not yet on main. To triage a `+`
 line:
@@ -117,17 +117,17 @@ git diff origin/main..HEAD -- <those-files> # already on release?
 ```
 
 If every touched file is guarded (`docs/plans/`, `docs/brainstorms/`, etc.) OR the content is already on main via a
-prior squash, it's a false positive — no action. Otherwise cherry-pick the commit and re-run the triple-diff.
+prior squash, it's a false positive: no action. Otherwise cherry-pick the commit and re-run the triple-diff.
 
 ## Prose scrubbing scope
 
 Pre-push covers `*.md` files in the repo via Vale + LanguageTool. Three release-flow artifacts live outside that net and
 need a manual scrub before they ship:
 
-- **PR bodies** — `gh pr create` and `gh pr edit` send body text directly to GitHub; pre-push has no reach there.
-- **Release-PR bodies** — the `release/*` PR to `main` carries contributor-authored wrap-up text composed after the
+- **PR bodies**: `gh pr create` and `gh pr edit` send body text directly to GitHub; pre-push has no reach there.
+- **Release-PR bodies**: the `release/*` PR to `main` carries contributor-authored wrap-up text composed after the
   cherry-picks land, and the same out-of-repo gap applies.
-- **Any future generated changelog** — if a `CHANGELOG.md` flow lands here, it inherits whatever prose its upstream PR
+- **Any future generated changelog**: if a `CHANGELOG.md` flow lands here, it inherits whatever prose its upstream PR
   bodies carry.
 
 Scrub-before-submit (author in `/tmp/`, scrub there, submit via `--body-file`) avoids the round-trip of "submit, scrub,
@@ -142,8 +142,8 @@ and regenerate. Hand-editing the generated artifact directly produces drift the 
 The `paths-ignore` filter on the `push` trigger skips deploy when a commit only touches paths the build doesn't ingest.
 The filter is symmetric across `dev` and `main`. In practice the `main` side is mostly theoretical:
 `guard-main-docs.yml` already blocks `docs/plans|solutions|brainstorms|reviews/**` from reaching `main` via PR, and the
-remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change build output — wrangler would redeploy
-a bit-identical Worker.
+remaining ignored paths (root `*.md`, `DESIGN.md`, `docs/TODOS.md`) don't change build output; wrangler would redeploy a
+bit-identical Worker.
 
 If a future case needs unconditional main-branch deploys, swap the workflow-level filter for a job-level changed-files
 check. The `workflow_dispatch` trigger is unaffected by `paths-ignore`, so manual redeploys always work regardless of
@@ -249,7 +249,7 @@ external infrastructure. The opt-in `homepage-score-live` e2e suite covers the l
 cadence where the cost and the latency are acceptable.
 
 The smoke is therefore a high-leverage tripwire, not a full pipeline test. When it fails, the deploy is wrong; when it
-passes, the deploy is at least serving the response triad to a curated input — not a proof that the live path works.
+passes, the deploy is at least serving the response triad to a curated input, not a proof that the live path works.
 
 ## CI workflow split
 
@@ -286,8 +286,8 @@ gh api repos/brettdavies/agentnative-site/commits/<sha>/check-runs --jq '.check_
 
 Two visual-regression rules apply to any change touching CSS, layout, or rendered output: a "browser-verify before done"
 agent-side rule (working today) and a Playwright snapshot diff in CI (planned, deferred until the design system
-stabilizes). Both live in [`AGENTS.md` § Visual fidelity](./AGENTS.md#visual-fidelity) — that's the source of truth. A
-release that didn't satisfy those gates upstream isn't unblocked by the CI pipeline being green.
+stabilizes). Both live in [`AGENTS.md` § Visual fidelity](./AGENTS.md#visual-fidelity), the source of truth. A release
+that didn't satisfy those gates upstream isn't unblocked by the CI pipeline being green.
 
 ## Skill releases
 
@@ -300,7 +300,7 @@ Update detection at install sites is delegated to the skill bundle's `bin/check-
 bundle's `VERSION` against `main` on GitHub.
 
 The skill repo's branch model: `main` is the published-release pointer (default branch); `dev` is the integration
-branch. The bare `git clone --depth 1` in each install command lands on `main` — so each release requires the skill
+branch. The bare `git clone --depth 1` in each install command lands on `main`, so each release requires the skill
 maintainer to fast-forward `main` to the new tag.
 
 The cache-purge step after a manifest bump exists because users see the manifest via `/skill.json` (24 h `s-maxage`);
@@ -309,7 +309,7 @@ without a purge they'd pick up the old shape for a day. The first-deploy-after-r
 
 ## Related docs
 
-- [`RELEASES.md`](./RELEASES.md) — operational runbook (commands, paths, decision tables)
-- [`AGENT.md`](./AGENT.md) — onboarding, repo conventions, tool-site sequencing
-- [`DESIGN.md`](./DESIGN.md) — design system and build contract
-- [`docs/TODOS.md`](./docs/TODOS.md) — deferred work (not in v0 scope)
+- [`RELEASES.md`](./RELEASES.md): operational runbook (commands, paths, decision tables)
+- [`AGENT.md`](./AGENT.md): onboarding, repo conventions, tool-site sequencing
+- [`DESIGN.md`](./DESIGN.md): design system and build contract
+- [`docs/TODOS.md`](./docs/TODOS.md): deferred work (not in v0 scope)

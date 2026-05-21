@@ -41,8 +41,8 @@ below; the regression test fires loudly if the order moves.
 
 ## Where to run
 
-Cloudflare dashboard → Workers → Analytics Engine → SQL editor. Paste any query and run. Datasets appear on first write
-— no `wrangler analytics-engine create` step.
+Cloudflare dashboard → Workers → Analytics Engine → SQL editor. Paste any query and run. Datasets appear on first write;
+no `wrangler analytics-engine create` step.
 
 Programmatic access via the Cloudflare API is available for the same queries; details in
 [Cloudflare's Analytics Engine SQL API docs](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/).
@@ -114,7 +114,7 @@ FORMAT JSONCompact
 Compare against the [monitoring runbook's threshold table](./live-scoring-monitoring.md#threshold-table) for which codes
 are user-driven (expected) versus signal-bearing (investigate).
 
-### Registry-hit-rate — the cost-efficiency signal
+### Registry-hit-rate: the cost-efficiency signal
 
 Higher is cheaper: registry hits are unmetered (no Turnstile, no rate-limit budget, no DO dispatch). Track this number
 over time; a decline indicates the registry is missing tools the homepage form is being asked to score.
@@ -204,7 +204,7 @@ Workers Analytics Engine samples high-cardinality indexes automatically. `index1
 ≤10k distinct values; beyond that, the dashboard rows carry a `_sample_interval` multiplier and queries should multiply
 by `SUM(_sample_interval)` to reflect the corrected count (see the "Top tools" query above).
 
-Blob columns are not sampled — they're aggregated faithfully regardless of cardinality. The schema kept low-cardinality
+Blob columns are not sampled; they're aggregated faithfully regardless of cardinality. The schema kept low-cardinality
 fields in blobs precisely so the most-queried aggregates (tier mix, error distribution, pm breakdown) stay exact.
 
 If `index1` cardinality grows past 10k in real traffic and sampling becomes a problem (queries get noisier than is

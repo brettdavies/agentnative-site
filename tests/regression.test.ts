@@ -258,7 +258,7 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
     const html = await readFile(join(DIST, 'install.html'), 'utf8');
     const md = await readFile(join(DIST, 'install.md'), 'utf8');
     expect(html).toContain('<h1');
-    expect(md).toMatch(/^#\s+Install agentnative/);
+    expect(md).toMatch(/^#\s+Install anc/);
     await expect(readFile(join(DIST, 'install.json'), 'utf8')).rejects.toThrow(/ENOENT/);
   });
 

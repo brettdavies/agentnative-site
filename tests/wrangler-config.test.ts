@@ -200,14 +200,14 @@ describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', ()
   });
 });
 
-describe('ARCHITECTURE.md — R2 score-cache key shape (plan U7)', () => {
+describe('RELEASES-RATIONALE.md — R2 score-cache key shape (plan U7)', () => {
   // The cache key prefix `scores/{binary}/{anc-version}.json` is the
   // load-bearing fact behind the lifecycle rule's `scores/` filter. The
-  // rationale + key shape live in ARCHITECTURE.md (RELEASES.md is the
+  // rationale + key shape live in RELEASES-RATIONALE.md (RELEASES.md is the
   // runbook). If the prefix moves, the architecture doc must move with
   // it — this drift-guard makes the prefix change visible in CI.
 
-  const architecturePath = join(import.meta.dir, '..', 'ARCHITECTURE.md');
+  const architecturePath = join(import.meta.dir, '..', 'RELEASES-RATIONALE.md');
   const architecture = readFileSync(architecturePath, 'utf8');
 
   test('mentions the canonical cache key prefix so a future audit can grep for it', () => {
