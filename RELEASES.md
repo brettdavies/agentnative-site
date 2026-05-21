@@ -242,8 +242,8 @@ Immutability is per-Worker-version via `wrangler rollback`, not via a `@sha256:`
 ### Migration v1: the rollback recipe
 
 `migrations[].new_sqlite_classes: ["Sandbox"]` (tag `v1`) is a one-way gate; rationale lives in
-[`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls). The only path
-past `v1` is a follow-up migration:
+[`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls).
+The only path past `v1` is a follow-up migration:
 
 ```jsonc
 // wrangler.jsonc

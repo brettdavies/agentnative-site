@@ -103,7 +103,9 @@ Inherits from the spec's AI disclosure policy. See
 
 ## Security
 
-Do not file security issues in the public tracker. Use the [GitHub private security advisories channel](https://github.com/brettdavies/agentnative-site/security/advisories/new). The Sandbox container, the Worker, and the R2 cache are the primary surfaces of concern.
+Do not file security issues in the public tracker. Use the
+[GitHub private security advisories channel](https://github.com/brettdavies/agentnative-site/security/advisories/new).
+The Sandbox container, the Worker, and the R2 cache are the primary surfaces of concern.
 
 ## License
 
