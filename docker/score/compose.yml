@@ -4,8 +4,9 @@
 #   docker compose -f docker/score/compose.yml build
 #   docker compose -f docker/score/compose.yml run --rm scorer
 #
-# The wrapper at docker/score/build.sh does both, plus the prerequisite
-# step of building the `anc` binary from the local CLI dev checkout.
+# The wrapper at docker/score/build.sh does both. The image brew-installs
+# the latest `anc` from `brettdavies/tap/agentnative` at build time (see
+# Dockerfile §"The anc binary"). No local CLI checkout, no cargo build.
 #
 # GPU passthrough notes:
 #   The compose file declares NVIDIA GPU access so `nvidia-smi` (one of
