@@ -238,6 +238,11 @@ inspecting raw JSON cannot tell from `status: "skip"` alone whether the check co
 
 ### Decision 2: Conditional requirements get explicit antecedent metadata
 
+The "optional iff compliance" pattern (a requirement that applies if and only if an antecedent feature is present) needs
+explicit representation in `coverage-matrix.json`. The same machinery handles conditional MUSTs and conditional SHOULDs
+identically; `applicability` is orthogonal to `level`. Without explicit representation, the verifier handles the
+conditional implicitly (probes that find no antecedent emit `skip`), and the conflation problem follows.
+
 Extend `coverage-matrix.json` row schema:
 
 ```yaml
@@ -250,8 +255,12 @@ Extend `coverage-matrix.json` row schema:
   verifiers:
     - check_id: p3-help
       layer: behavioral
+```
 
-# New conditional row shape:
+#### Worked example: conditional MUST
+
+```yaml
+# Reads: "if a CLI ships --output json, it MUST also expose its JSON Schema."
 - id: p2-must-schema-when-json
   principle: 2
   level: must
@@ -259,19 +268,119 @@ Extend `coverage-matrix.json` row schema:
     kind: conditional
     antecedent:
       check_id: p2-json-output
-      requires_status: pass
   verifiers:
     - check_id: p2-schema-print
       layer: behavioral
 ```
 
-The verifier evaluates the antecedent first. If the antecedent's resolved status is not `pass`, the consequent row emits
-`n_a` with `reason: antecedent_unmet`. If the antecedent is met, the consequent runs and emits `pass / warn / fail` per
-its tier in the normal way. The conditional logic lives in the matrix, not buried in verifier code.
+#### Worked example: conditional SHOULD
+
+```yaml
+# Reads: "if a tool ships a --config-file flag, it SHOULD validate the file's
+# schema on load before any mutation."
+- id: p4-should-config-schema-validation
+  principle: 4
+  level: should
+  applicability:
+    kind: conditional
+    antecedent:
+      check_id: p4-config-file-flag
+  verifiers:
+    - check_id: p4-config-schema-validation
+      layer: behavioral
+```
+
+The two examples differ only in `level`. The antecedent-handling machinery is identical. A tool with no `--config-file`
+gets `n_a` on `p4-should-config-schema-validation`; a tool with `--config-file` that does not validate the schema gets
+`warn` (a SHOULD violation, not a MUST violation). The level decides the penalty severity *when* the consequent fires;
+the antecedent decides *whether* it fires at all.
+
+#### Sub-decision 2a: antecedent-status propagation
+
+The antecedent does not need a `requires_status` field. The spec defines a fixed *feature-present* test that all
+conditional rows use by default:
+
+| Antecedent status | Antecedent interpretation                | Consequent emits   |
+| ----------------- | ---------------------------------------- | ------------------ |
+| `pass`            | Feature present and working              | Evaluated normally |
+| `warn`            | Feature present, partially OK            | Evaluated normally |
+| `fail`            | Feature present, broken                  | Evaluated normally |
+| `opt_out`         | Feature deliberately absent              | `n_a`              |
+| `n_a`             | Feature itself was conditional and unmet | `n_a`              |
+| `skip`            | Probe could not measure                  | `skip` (inherits)  |
+| `error`           | Probe raised an exception                | `error` (inherits) |
+
+Rationale: the conditional asks "is the prerequisite feature present at all?" not "is it fully compliant?" A tool with
+broken JSON output still has JSON output; the schema requirement still applies (and may also fail). Indeterminate
+antecedent statuses (`skip`, `error`) propagate to the consequent because the linter cannot meaningfully evaluate a
+dependent check whose prerequisite is unmeasured.
+
+Rows that need stricter or looser propagation than the default can opt in via an explicit `requires_status` field (e.g.,
+`requires_status: pass` to require the prerequisite to be fully working before the consequent applies); the v1 schema
+omits the field so the common case stays minimal. Adding `requires_status` later is backward compatible.
+
+#### Sub-decision 2b: compound antecedents deferred to v2
+
+The v1 schema supports single-antecedent conditionals only. If a requirement reads "if X AND Y, then MUST Z," the v1
+modeling options are:
+
+1. Split into two rows that *both* depend on a single antecedent (Z depends on X with one row; Z' depends on Y with a
+   second row; the spec prose binds them together).
+2. Introduce a synthetic intermediate `check_id` that the verifier composes internally (`check_id: p2-json-and-yaml`
+   returns `pass` iff both formats are supported), then the conditional row points at the synthetic.
+
+When real cases surface that cannot be modeled either way, v2 of the schema gains an `antecedent` array with an `op:
+all_of | any_of` discriminator:
+
+```yaml
+# Sketch only — not in v1.
+applicability:
+  kind: conditional
+  antecedent:
+    op: all_of
+    checks:
+      - check_id: p2-json-output
+      - check_id: p2-yaml-output
+```
+
+Tracked as a follow-up spec issue post-U1; not required for the initial taxonomy.
+
+#### Sub-decision 2c: one result per requirement row, not per check_id
+
+Today's matrix already has shared `check_id` references: `p3-version` is the only verifier for both `p3-must-version`
+(MUST, `--version` works at all) and `p3-should-version-short` (SHOULD, short alias accompanies it). One probe; two
+distinct requirements at different tiers. The scoring layer must evaluate each row independently.
+
+**Decision:** the CLI emits **one result per requirement row** (matrix `id`), not one per `check_id`. Each result entry
+carries the requirement's `id` as `result.id`; the underlying probe (`check_id`) may be shared between multiple results,
+but each result is an independent evaluation against a specific requirement's tier. The result entry also carries an
+explicit `tier` field so the scoring formula does not need a matrix lookup.
+
+```json
+// scorecard fragment — both entries come from the same p3-version probe internally
+"results": [
+  { "id": "p3-must-version",         "status": "pass", "tier": "must",   "evidence": null },
+  { "id": "p3-should-version-short", "status": "warn", "tier": "should", "evidence": "--version present; short alias -V not detected" }
+]
+```
+
+Trade-offs:
+
+- **More verbose JSON.** A single probe that satisfies five requirement rows produces five result entries. For the
+  current matrix shape (~38 distinct check_ids and ~57 requirement rows), the verbosity increase is small.
+- **Scorecard becomes self-contained.** Third-party consumers can compute the score from the scorecard alone — no matrix
+  lookup needed at scoring time. The tier metadata travels in the result.
+- **Verifier internals unchanged.** The verifier still has one probe per `check_id` internally; the result-emitter fans
+  out one probe's output to N matrix rows that reference it.
+- **Per-row evaluation policy lives in the CLI.** The matrix declares the multi-row relationship; the CLI decides how
+  the shared probe's findings translate to each row's status. Each row's emission logic is documented in the verifier
+  source.
 
 **Rationale.** The user identified that "there are optionals within MUST" — conditional MUSTs are the formal
 representation. Per RFC 2119 semantics, a conditional MUST applies with full force when its antecedent is met, and
-simply does not apply otherwise. That is `n_a`, not a free pass and not a violation.
+simply does not apply otherwise. That is `n_a`, not a free pass and not a violation. The same logic generalizes to
+SHOULD and MAY: a conditional SHOULD applies with full SHOULD force when its antecedent is met; a conditional MAY
+applies with full MAY force. The tier is independent of the conditional.
 
 ### Decision 3: Defer the scoring formula choice to a follow-up spec issue
 
@@ -331,18 +440,23 @@ registry maintainable and the policy in one place.
 
 **Work:**
 
+- Switch result emission from per-`check_id` to per-requirement-row (Decision 2c). One probe whose `check_id` appears in
+  N matrix rows now emits N result entries, each carrying the requirement row's `id` as `result.id` and the row's
+  `level` as `result.tier`.
 - Update probe results to emit `opt_out` where the tool clearly has the capability surface but does not ship the feature
   (e.g., `p8-bundle-install` for tools without an `AGENTS.md`).
-- Update probe results to emit `n_a` where a conditional antecedent is unmet (e.g., `p2-schema-print` on tools without
-  `--output json`).
+- Update probe results to emit `n_a` where a conditional antecedent is unmet (e.g., `p2-must-schema-when-json` on tools
+  without `--output json`), driven by the matrix's `applicability.kind: conditional` rows per the propagation table in
+  Decision 2a.
 - Keep `skip` for the residual case: probe limitation.
 - Bump `scorecard.schema.json` from 0.5 to 0.6. Add `opt_out` and `n_a` to the status enum. Add `opt_out` and `n_a`
-  counters to `summary`.
+  counters to `summary`. Add `tier` field to each `results[]` entry.
 - Update `summary.score_pct` to reflect whatever transitional formula the spec lands on (initial: leave the existing
   formula but exclude `opt_out` from the denominator and exclude `n_a` from both — minimal change that respects the new
   semantics without committing to a new formula).
 - Update `anc check`'s text output to render the new statuses (per-check status badges in the terminal).
-- Update CLI tests: add fixtures with the new statuses, assert correct counter aggregation in `summary`.
+- Update CLI tests: add fixtures with the new statuses, assert correct counter aggregation in `summary`, assert per-row
+  emission for shared check_ids like `p3-version`, assert antecedent-status propagation table from Decision 2a.
 
 **Acceptance:**
 
