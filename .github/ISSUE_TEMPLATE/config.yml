@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: "Spec questions, principle edits, or CLI grading"
+  - name: "Spec questions, principle edits, or grading findings"
     url: "https://github.com/brettdavies/agentnative/issues/new/choose"
-    about: "For anything about the standard itself — propose changes, grade a CLI, ask questions — file on the spec repo."
-  - name: "Checker bugs (false positives/negatives)"
+    about: "For anything about the standard itself — propose changes, submit a grading finding, ask questions — file on the spec repo."
+  - name: "Checker bugs, features, or tool-registry submissions"
     url: "https://github.com/brettdavies/agentnative-cli/issues/new/choose"
-    about: "For bugs in the `anc` checker itself, file on the tool repo."
+    about: "For bugs in the `anc` checker, feature requests, or proposing a tool for the leaderboard, file on the linter repo."
+  - name: "Skill bundle issues (bundle content, install paths, host runtimes)"
+    url: "https://github.com/brettdavies/agentnative-skill/issues/new/choose"
+    about: "For bugs or proposals about the agent-facing skill bundle, file on the skill repo."
