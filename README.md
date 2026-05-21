@@ -20,6 +20,15 @@ badge surface, and the agent-native-cli skill bundle distribution endpoint.
 
 Every HTML page has a markdown twin reachable via `.md` suffix or `Accept: text/markdown` content negotiation.
 
+## Scoring
+
+Per-tool scorecards display a percent computed as `pass / (pass + warn + fail)` (skips and errors are excluded so
+inapplicable checks do not drag the score). MUST-tier misses count as `fail`; SHOULD- or MAY-tier misses count as
+`warn`. Badge eligibility starts at 80%. Full formula and tier mapping at [`/methodology`](https://anc.dev/methodology);
+per-field JSON schema at [`/scorecard-schema`](https://anc.dev/scorecard-schema); badge contract at
+[`/badge`](https://anc.dev/badge). The scoring engine itself lives in
+[`agentnative-cli`](https://github.com/brettdavies/agentnative-cli).
+
 ## Stack
 
 Cloudflare Worker over Static Assets. Build pipeline renders markdown in `content/` to HTML at `dist/` via `bun
