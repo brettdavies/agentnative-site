@@ -1,7 +1,7 @@
 # agentnative-site
 
 Source for [anc.dev](https://anc.dev), the public surface for the agent-native CLI standard. The site publishes the
-seven principles of the standard, the ANC 100 leaderboard, per-tool curated scorecards, a live-scoring form, the score
+eight principles of the standard, the ANC 100 leaderboard, per-tool curated scorecards, a live-scoring form, the score
 badge surface, and the agent-native-cli skill bundle distribution endpoint.
 
 ## What it serves
