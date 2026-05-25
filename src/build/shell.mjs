@@ -131,18 +131,32 @@ export function emitShell({
   const canonical = base + canonicalPath;
   const ogImage = `${base}/og-image.png`;
 
+  const orgId = `${base}/#organization`;
   const jsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'TechArticle',
-    headline: title,
-    description,
-    url: canonical,
-    image: ogImage,
-    publisher: {
-      '@type': 'Organization',
-      name: SITE_NAME,
-      url: base,
-    },
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': orgId,
+        name: SITE_NAME,
+        url: base,
+        logo: `${base}/apple-touch-icon-180.png`,
+        sameAs: SOURCE_REPOS.map((r) => r.url),
+      },
+      {
+        '@type': 'TechArticle',
+        headline: title,
+        description,
+        url: canonical,
+        image: ogImage,
+        author: {
+          '@type': 'Person',
+          name: 'Brett Davies',
+          url: 'https://github.com/brettdavies',
+        },
+        publisher: { '@id': orgId },
+      },
+    ],
   };
 
   const miniToc =
