@@ -138,7 +138,12 @@ export type ScoreEnv = KillSwitchEnv &
   CacheEnv &
   ScoreTelemetryEnv & {
     ASSETS: Fetcher;
-    SCORE: DurableObjectNamespace;
+    // Optional because a mid-rollback Worker (between v2-drop-sandbox
+    // and v3-restore-sandbox) deploys cleanly without the SCORE binding.
+    // The binding-presence guard before the DO call returns a typed 503
+    // sandbox_unavailable; without it `getRandom(env.SCORE, ...)` throws
+    // and surfaces as Cloudflare error 1101.
+    SCORE?: DurableObjectNamespace;
     SCORE_LIMITER: RateLimit;
     SCORE_LIMITER_IP?: RateLimit;
   };
@@ -692,6 +697,19 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   // `binding.idFromName('instance-${0..N-1}')` + `binding.get(id)`. IDs
   // are stable across requests so the same instance reuses its warm
   // container session for subsequent requests routed to it.
+  //
+  // Binding-presence guard: a Worker version deployed mid-rollback
+  // (between v2-drop-sandbox and v3-restore-sandbox) has no SCORE
+  // binding. Without this check, getRandom() throws on the undefined
+  // namespace and surfaces as Cloudflare error 1101 (Worker exception).
+  if (!env.SCORE) {
+    telemetry.tier = 'error_sandbox_unavailable';
+    return shapeWithPreference(
+      shapeScoreError({ code: 'sandbox_unavailable', cta_text: CTA_INSTALL_ANC }),
+      preference,
+      { setCookie },
+    );
+  }
   const stub = (await getRandom(
     env.SCORE as unknown as DurableObjectNamespace<Container>,
     MAX_INSTANCES,
