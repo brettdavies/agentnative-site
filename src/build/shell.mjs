@@ -153,6 +153,7 @@ export function emitShell({
           '@type': 'Person',
           name: 'Brett Davies',
           url: 'https://github.com/brettdavies',
+          sameAs: ['https://x.com/brettdavies'],
         },
         publisher: { '@id': orgId },
       },
