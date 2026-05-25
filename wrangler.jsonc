@@ -233,9 +233,23 @@
           }
         ]
       },
+      // env.staging.migrations is append-only: Cloudflare rejects any
+      // deploy whose tag list is a subset of what's already applied to
+      // the env. staging carries the full sequence (v1, v2-drop-sandbox,
+      // v3-restore-sandbox); top-level `migrations` stays at v1 until
+      // prod runs its own rollback. See RELEASES.md § Cross-migration
+      // rollback rehearsal for the procedure that produces a new tag.
       "migrations": [
         {
           "tag": "v1",
+          "new_sqlite_classes": ["Sandbox"]
+        },
+        {
+          "tag": "v2-drop-sandbox",
+          "deleted_classes": ["Sandbox"]
+        },
+        {
+          "tag": "v3-restore-sandbox",
           "new_sqlite_classes": ["Sandbox"]
         }
       ],
