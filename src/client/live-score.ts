@@ -26,7 +26,16 @@ interface TurnstileApi {
     element: HTMLElement | string,
     options: {
       sitekey: string;
-      size?: 'invisible' | 'normal' | 'compact';
+      // `size` is widget dimensions (compact|flexible|normal). `invisible`
+      // is NOT a valid size value — Turnstile throws on render. Invisible
+      // behavior is controlled by the sitekey's mode (set in the CF
+      // dashboard), not by render-time params.
+      size?: 'compact' | 'flexible' | 'normal';
+      // `execution: 'execute'` defers the challenge until execute() is
+      // called explicitly (matches our acquire-on-submit flow). The
+      // default 'render' starts the challenge as soon as the widget
+      // mounts, which races our acquireTurnstileToken caller.
+      execution?: 'render' | 'execute';
       callback?: (token: string) => void;
       'error-callback'?: () => void;
       'expired-callback'?: () => void;
@@ -275,7 +284,7 @@ function acquireTurnstileToken(
     }
     const id = api.render(container, {
       sitekey,
-      size: 'invisible',
+      execution: 'execute',
       callback: (token: string) => settleTurnstile({ token }),
       'error-callback': () => settleTurnstile({ error: new Error('turnstile_error') }),
       'expired-callback': () => settleTurnstile({ error: new Error('turnstile_expired') }),
