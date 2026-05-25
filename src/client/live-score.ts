@@ -224,6 +224,25 @@ function readSitekey(): string | null {
   return value ? value : null;
 }
 
+// Module-scope state for the Turnstile widget. The widget is rendered
+// exactly once per page session; subsequent acquires reset and re-execute
+// the existing widget rather than rendering again. Re-rendering on the
+// same container while a prior execution is still settling triggers
+// Turnstile's "Call to execute() on a widget that is already executing"
+// warning and a 400020 from challenges.cloudflare.com on the second
+// submit. The Turnstile callback is fixed at render time, so the pending
+// resolver/rejector is swapped here per acquire.
+let turnstileWidget: { id: string; container: HTMLDivElement } | null = null;
+let pendingTurnstile: { resolve: (token: string) => void; reject: (err: Error) => void } | null = null;
+
+function settleTurnstile(result: { token: string } | { error: Error }): void {
+  const p = pendingTurnstile;
+  pendingTurnstile = null;
+  if (!p) return;
+  if ('token' in result) p.resolve(result.token);
+  else p.reject(result.error);
+}
+
 function acquireTurnstileToken(
   sitekey: string,
   api: TurnstileApi,
@@ -231,6 +250,22 @@ function acquireTurnstileToken(
   onWidget: (id: string) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Defense-in-depth: if a prior acquire is still pending (submit-button
+    // disable should have prevented this) reject the new caller rather
+    // than dropping the prior resolver on the floor.
+    if (pendingTurnstile) {
+      reject(new Error('turnstile_already_pending'));
+      return;
+    }
+    pendingTurnstile = { resolve, reject };
+
+    if (turnstileWidget) {
+      api.reset(turnstileWidget.id);
+      onWidget(turnstileWidget.id);
+      api.execute(turnstileWidget.id);
+      return;
+    }
+
     let container = formEl.querySelector<HTMLDivElement>('[data-turnstile-mount]');
     if (!container) {
       container = document.createElement('div');
@@ -241,10 +276,11 @@ function acquireTurnstileToken(
     const id = api.render(container, {
       sitekey,
       size: 'invisible',
-      callback: (token: string) => resolve(token),
-      'error-callback': () => reject(new Error('turnstile_error')),
-      'expired-callback': () => reject(new Error('turnstile_expired')),
+      callback: (token: string) => settleTurnstile({ token }),
+      'error-callback': () => settleTurnstile({ error: new Error('turnstile_error') }),
+      'expired-callback': () => settleTurnstile({ error: new Error('turnstile_expired') }),
     });
+    turnstileWidget = { id, container };
     onWidget(id);
     api.execute(id);
   });
