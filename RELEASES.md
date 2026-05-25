@@ -259,8 +259,11 @@ Apply via a normal `wrangler deploy` against a Worker version that no longer ref
 
 ### Cross-migration rollback rehearsal
 
-Run on staging before opening the first `release/*` PR to main. The no-prod-until-U10 rule keeps this from blocking
-today's work; capture the deploy IDs in the evidence table below at the next staging soak window.
+Run on staging before opening the first `release/*` PR to main. The recipe assumes a one-time discovery: the **container
+application binding to the deleted DO namespace is the gotcha**, and a `wrangler containers delete` step between v2 and
+v3 is mandatory. Without it, v3-restore-sandbox uploads the Worker version cleanly but the container-app half of
+`wrangler deploy` refuses with `There is already an application with the name <...> deployed that is associated with a
+different durable object namespace`.
 
 ```bash
 # 1. Confirm migration v1 is live on staging.
@@ -276,30 +279,52 @@ curl -fSsL -H "Content-Type: application/json" \
 
 # 3. Apply the follow-up migration on a throwaway branch.
 #    Edit wrangler.jsonc to add the v2-drop-sandbox migration AND
-#    remove the Sandbox DO binding under env.staging, then:
+#    remove the Sandbox DO binding AND the containers[] block under env.staging
+#    (containers reference Sandbox class_name and will fail validation if the
+#    class no longer exists), then:
 bun x wrangler deploy --env staging
 
 # 4. Verify /api/score now bounces cleanly and non-sandbox routes still serve.
+#    Inputs that match the registry-fast-path still return 200 (no DO call).
+#    Inputs that force the DO-invocation path return CF error 1101 today (no
+#    handler guard); the upcoming fix returns a clean 503 sandbox_unavailable.
 curl -i https://agentnative-site-staging.brettdavies.workers.dev/api/score \
   -H "Content-Type: application/json" -d '{}' | head -20
 curl -fSsL https://agentnative-site-staging.brettdavies.workers.dev/ | head -5
 curl -fSsL https://agentnative-site-staging.brettdavies.workers.dev/scorecards | head -5
 
-# 5. Restore the Sandbox DO with a NEW migration tag (cannot reuse v1).
-#    Edit wrangler.jsonc to add a v3-restore-sandbox migration with
-#    new_sqlite_classes: ["Sandbox"] and re-add the binding, then:
+# 5a. MANDATORY before v3 — delete the staging container application. Its
+#     internal binding to the old (now-deleted) DO namespace blocks the v3
+#     deploy. List first to capture the ID, then delete.
+bun x wrangler containers list
+bun x wrangler containers delete <staging-container-app-id>
+
+# 5b. Restore the Sandbox DO with a NEW migration tag (cannot reuse v1).
+#     Edit wrangler.jsonc to add a v3-restore-sandbox migration with
+#     new_sqlite_classes: ["Sandbox"] and re-add the binding + containers, then:
 bun x wrangler deploy --env staging
 
-# 6. Confirm /api/score works again (step 2 repeated).
+# 6. Confirm /api/score works again (step 2 repeated). The DO-invocation path
+#    (e.g., a real GitHub URL not in the registry) now reaches the sandbox and
+#    returns a real scorecard or a clean handler error, not CF 1101.
 ```
 
-Capture staging deploy IDs and DO instance counts at each step in the rehearsal-evidence block below.
+After the rehearsal, dev's `env.staging.migrations` MUST include all three tags (`v1`, `v2-drop-sandbox`,
+`v3-restore-sandbox`) because Cloudflare DO migrations are append-only — staging will reject future deploys whose
+migration list is a subset of what's already applied. Top-level `migrations` (production) stays at `v1` until prod runs
+its own rollback.
 
 #### Rehearsal evidence
 
-| Step    | Date    | Staging deploy ID | DO instance count | Notes                                          |
-| ------- | ------- | ----------------- | ----------------- | ---------------------------------------------- |
-| pending | pending | pending           | pending           | Rehearsal scheduled before the first prod cut. |
+| Step | Date       | Staging deploy ID                      | Container app / DO namespace                                                                       | Notes                                                                                                                                                                  |
+| ---- | ---------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | 2026-05-24 | `c626ddad-6ac2-4f81-a9ec-4a7a6dd926ec` | container `a0309fd2-9622-4dd8-a6a8-faf95292f08e` / DO namespace `a4fb92ed020241cb802c1d5176a39608` | v1 baseline. `env.SCORE (Sandbox)` + all live-scoring bindings present.                                                                                                |
+| 2    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `/api/score` ripgrep returned 200; triad complete (`spec_version: 0.4.0`, `site_spec_version: 0.4.0`, `anc_version: 0.3.0`, `checker_url`).                            |
+| 3    | 2026-05-24 | `25107ae7-6727-4ea9-90ff-75996cba8cdc` | container unchanged / DO namespace dropped                                                         | v2-drop-sandbox applied. Worker bindings list no longer shows `env.SCORE`.                                                                                             |
+| 4    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `-d '{}'` → 400 clean (`unrecognized_input`). `/` + `/scorecards` → 200. DO-forcing input (`xplr`) → CF 1101 (handler guard gap captured).                             |
+| 5a   | 2026-05-24 | (no deploy)                            | container `a0309fd2-...` deleted                                                                   | `wrangler containers delete` required — first v3 deploy attempt failed with the "different durable object namespace" error.                                            |
+| 5b   | 2026-05-24 | `d88ef7f1-5cd0-4469-a0be-4d8c08d35800` | container `a03d7221-b4ed-4aad-b534-41d7c34461da` / DO namespace `50c9a04e3d4649268d8e8957572e0cd0` | v3-restore-sandbox applied. `env.SCORE (Sandbox)` back; container app recreated fresh at `instances: 0, max_instances: 10`.                                            |
+| 6    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `/api/score` ripgrep → 200 with full triad. DO-forcing input (`xplr`) → 502 `chain_resolved_install_failed` (sandbox ran, real install bug — outside rehearsal scope). |
 
 ### Sandbox image promotion
 
