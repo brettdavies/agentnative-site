@@ -10,6 +10,7 @@ Cheng
 Citeable
 Cloudflare
 Conda
+Crowdsourced
 Desaturate
 Dialogs
 Dinamo
@@ -47,6 +48,8 @@ Plex
 Polypane
 Pseudocode
 Qamarjafari
+Quantiles
+Queryable
 Reframe
 Resync
 Roboto
@@ -85,6 +88,7 @@ citeable
 cmake
 codeblock
 coverage_summary
+cron
 culori
 cutover
 denylist
@@ -215,6 +219,7 @@ viewport
 viewports
 vw
 watchexec
+watchpoints
 webfont
 wordmark
 wrangler
@@ -227,3 +232,21 @@ yazi
 yq
 zoomable
 zoxide
+unauth
+client_secret
+client_id
+non_identity
+CPython
+Trixie
+aider
+litellm
+scipy
+pyperclip
+pycparser
+backports
+hashmap
+misconfigured
+sdist
+siteverify
+uncached
+unmetered

@@ -7,10 +7,11 @@
 // We exercise the handler end-to-end against a stubbed env.ASSETS fetcher —
 // no wrangler dev needed.
 
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { detectPreference } from '../src/worker/accept';
 import { applyHeaders, isStagingHost } from '../src/worker/headers';
 import worker from '../src/worker/index';
+import { _resetIndexCache } from '../src/worker/score/handler';
 
 function req(url: string, accept?: string): Request {
   const headers: Record<string, string> = {};
@@ -340,5 +341,68 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     expect(res.headers.get('X-Echo-Path')).toBe('/skill.json');
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// /api/score routing (plan U5). The handler's own behavior is covered by
+// tests/score-handler.test.ts; these tests confirm:
+//   1. /api/score requests are intercepted BEFORE the asset call (the stub
+//      ASSETS fetcher is never reached for /api/score*).
+//   2. Asset-first invariant for every other path is preserved.
+//   3. q-value content negotiation works on the /api/score* surface.
+//      Plan-required test: `text/markdown;q=0.1, application/json;q=0.9`
+//      must resolve to JSON, not markdown — guards against substring-
+//      match regressions per the `accept-header-q-value` learning.
+// ---------------------------------------------------------------------------
+
+describe('worker.fetch — /api/score routing', () => {
+  // The handler caches the registry + hints indexes at module scope, so
+  // tests that depend on the stubbed env.ASSETS being reached must reset
+  // the cache before each test — otherwise a prior test's data is served
+  // from memory and the stub is never called.
+  beforeEach(() => {
+    _resetIndexCache();
+  });
+
+  test('/api/score response carries the JSON envelope (not asset content)', async () => {
+    // Confirms index.ts routes /api/score to handleScore rather than the
+    // asset path. The handler always returns JSON; the asset path would
+    // return the stubbed asset body. Asserting on the response shape is
+    // both more robust and more meaningful than the previous fragile
+    // assetCalled flag check.
+    const env = makeEnv({
+      '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}',
+      '/discovery-hints-index.json': '{"by_owner_repo":{}}',
+    });
+    const url = 'https://anc.dev/api/score?input=unknown-tool';
+    const res = await worker.fetch(req(url), env);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = (await res.json()) as { error?: unknown; spec_version?: unknown; checker_url?: unknown };
+    expect(body.spec_version).toBeTruthy();
+    expect(body.checker_url).toBeTruthy();
+  });
+
+  test('asset-first invariant: /scorecards/ripgrep still proxies to env.ASSETS', async () => {
+    const env = makeEnv({ '/scorecards/ripgrep': 'scorecard html' });
+    const res = await worker.fetch(req('https://anc.dev/scorecards/ripgrep'), env);
+    expect(res.headers.get('X-Echo-Path')).toBe('/scorecards/ripgrep');
+  });
+
+  test('q-value: Accept: text/markdown;q=0.1, application/json;q=0.9 → JSON content-type', async () => {
+    // Plan-required test (accept-header-q-value learning). Substring
+    // matching would pick markdown because the header *contains*
+    // 'text/markdown'. The accepts package + q-value parsing picks JSON.
+    const env = makeEnv({
+      '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}',
+      '/discovery-hints-index.json': '{"by_owner_repo":{}}',
+    });
+    const url = new URL('https://anc.dev/api/score');
+    url.searchParams.set('input', 'unknown-tool');
+    const res = await worker.fetch(
+      new Request(url.toString(), { headers: { accept: 'text/markdown;q=0.1, application/json;q=0.9' } }),
+      env,
+    );
+    expect(res.headers.get('Content-Type')).toContain('application/json');
   });
 });

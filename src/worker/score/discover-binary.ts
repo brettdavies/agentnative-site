@@ -1,17 +1,13 @@
 // Live GitHub URL discovery chain. Called by the Worker when registry
 // lookup misses on a github-url input.
 //
-// Plan U4 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// lines 1104-1156, with F1 tightening per gate findings).
-//
-// Step 0.5 — discovery-hints lookup (defense in depth; the orchestrator's
-//             registry-lookup also checks hints, but a future caller that
-//             skips registry-lookup still gets the hint short-circuit).
+// Step 0.5 — discovery-hints lookup (zero-cost, in-memory; runs first
+//             so a hint hit short-circuits the network fan-out).
 // Step 2   — GitHub Releases API (linux-x86_64 asset).
 // Step 3   — Parallel distribution lookup (brew/cargo/npm/pypi/go) with
-//             per-registry repository-field match + bin-target check
-//             per gate F1. Without these the chain produces wrong-answer
-//             failures via cross-registry name collisions.
+//             per-registry repository-field match + bin-target check.
+//             Without these the chain produces wrong-answer failures via
+//             cross-registry name collisions.
 // Step 4   — README first-fenced-block install-command parse, with
 //             package-name-matches-repo guard.
 //
@@ -19,17 +15,73 @@
 // only routes repo-root URLs into this module, never release-asset URLs.
 // If a future input shape needs direct-URL paste, that's a validate.ts
 // + this module change.
+//
+// Concurrency model (Fix 2): Steps 2, 3, and 4 fan out in parallel via
+// Promise.allSettled. The wall-clock cost of one slow upstream (e.g.
+// proxy.golang.org occasionally takes 3 s for a cache-cold lookup) no
+// longer blocks the rest. After fan-in, a priority order
+// (hint > release-asset > registry > README-parse) picks the winner.
+// When MULTIPLE sources resolve, the higher-priority spec wins AND the
+// disagreement surfaces as a `discovery_disagreement` event in the
+// returned diagnostics — telemetry for cases where (e.g.) brew formula
+// names binary X but the release artifact ships binary Y. Cross-source
+// AGREEMENT is also surfaced as a `discovery_agreement` event so
+// operations can spot high-confidence resolutions in the field. None of
+// these events affect the API response shape; they're observability for
+// future log queries / regression detection.
+//
+// Why parallel beats serial here: each upstream is a single round-trip
+// against a public registry index (release API, brew formula JSON,
+// crates.io crate JSON, npm registry, pypi JSON, go proxy, raw
+// github.com README). Each is cheap on its own (~100-300 ms warm,
+// occasionally up to 2 s). Serial fan-out makes the chain pay the sum
+// of all the latencies for misses that should bounce in max(latencies).
+// Parallel fan-out + priority pick also gives us cross-validation:
+// when two sources concur, our confidence is higher; when they
+// disagree, we'd rather see it in logs than silently degrade.
 
 import type { ParsedInstall } from './parse-install';
 import { parseInstallCommand } from './parse-install';
 import type { DiscoveryHintsIndex } from './registry-lookup';
 
 export type DirectInstall = { pm: 'direct'; url: string; binary: string };
-export type InstallSpec = ParsedInstall | DirectInstall;
+// Branch-scoped source clone. When a user pastes a github URL with a
+// `/tree/<branch>` path, the DO routes the request through this install
+// spec instead of the discovery chain: discovery targets release
+// artifacts (which are scored against the release, not a branch), so a
+// branch-scoped paste needs the source at THAT branch. The orchestration
+// in sandbox-exec.ts clones the repo at the specified branch with
+// `--depth 1` (shallow) and runs `anc check` against the cloned
+// directory rather than `anc check --command <binary>`.
+export type GitCloneInstall = {
+  pm: 'git-clone';
+  owner: string;
+  repo: string;
+  branch: string;
+  // The "binary" is the repo name by convention — used as the share-url
+  // slug and the cache key. Branch-scoped scores skip the cache write
+  // (handler.ts), so the binary here is purely a display label.
+  binary: string;
+};
+export type InstallSpec = ParsedInstall | DirectInstall | GitCloneInstall;
 
 export type DiscoveryResult =
-  | { ok: true; spec: InstallSpec; resolved_step: ResolvedStep }
+  | { ok: true; spec: InstallSpec; resolved_step: ResolvedStep; diagnostics?: DiscoveryDiagnostics }
   | { ok: false; error: 'chain_no_resolve'; exhausted: ExhaustedSteps };
+
+// Telemetry surface: agreement/disagreement across parallel-fan-out
+// steps. Not user-visible; populated for Workers Logs aggregation so we
+// can see when two registries disagree about a tool's install path.
+// `winners` is the resolved step that won the priority pick. `losers`
+// lists the steps that ALSO produced a hit but lost to priority.
+// `agreed_binary` is true iff every winning + losing source picked the
+// same install path (binary name match). False when (e.g.) brew formula
+// `foo` resolves to a different artifact than the release tarball.
+export type DiscoveryDiagnostics = {
+  winner: ResolvedStep;
+  losers: ResolvedStep[];
+  agreed_binary: boolean;
+};
 
 export type ResolvedStep =
   | '0.5-hints'
@@ -48,8 +100,19 @@ export type ExhaustedSteps = {
   readme: { hit: false; reason: string };
 };
 
-const LINUX_X64_ASSET_RE =
-  /(linux[-_]x86[-_]?64|x86[-_]64[-_]unknown[-_]linux|linux[-_]amd64|amd64[-_]linux|linux64|linux[-_]gnu|linux[-_]musl)/i;
+// Asset must satisfy BOTH conditions:
+//   1. Linux + x86_64/amd64 — the loose substring match below excludes
+//      aarch64 / armhf / i686 by REQUIRING an x86_64 / amd64 token AND a
+//      linux marker in the same name. The legacy regex matched
+//      `aarch64-unknown-linux-gnu` via the `linux-gnu` substring, which
+//      cross-architected installs onto our x86_64 sandbox.
+//   2. A real archive extension. .deb / .rpm / .sha256 / .pkg drop here
+//      because directInstallCommand only knows how to extract tar/zip.
+//      Before this filter, bat releases (which ship .deb files BEFORE
+//      .tar.gz files in the asset list) resolved to a .deb and failed
+//      with `gzip: stdin: not in gzip format`.
+const LINUX_X64_ASSET_RE = /(?=.*(?:x86[-_]?64|amd64))(?=.*linux)/i;
+const LINUX_X64_ARCHIVE_RE = /\.(?:tar\.gz|tar\.xz|tar\.bz2|tgz|txz|tbz2|zip)$/i;
 
 const INSTALL_CMD_RE =
   /^\s*\$?\s*(brew|cargo|bun|uv|pip|pip3|pipx|npm|yarn|pnpm|go)\s+(install|add|i|tool|global|binstall)/i;
@@ -72,7 +135,9 @@ export async function discoverBinary(ctx: DiscoverContext): Promise<DiscoveryRes
   const fetcher = ctx.fetcher ?? globalThis.fetch.bind(globalThis);
   const ownerRepo = `${ctx.owner}/${ctx.repo}`;
 
-  // Step 0.5 — hints
+  // Step 0.5 — hints. Zero-cost, in-memory lookup. Runs synchronously
+  // BEFORE the network fan-out so a hint hit short-circuits before we
+  // pay for the parallel network round-trips.
   const hint = lookupHint(ctx.hintsIndex, ownerRepo);
   if (hint) {
     return {
@@ -84,30 +149,67 @@ export async function discoverBinary(ctx: DiscoverContext): Promise<DiscoveryRes
 
   const deadline = Date.now() + TOTAL_TIMEOUT_MS;
 
-  // Step 2 — GitHub Releases asset
-  const releases = await step2_releasesAsset(ctx, fetcher, deadline);
+  // Parallel fan-out (Fix 2): Steps 2, 3, 4 fire concurrently. Each
+  // step carries its own internal timeout via the shared deadline so
+  // one slow upstream can't blow the total budget. allSettled keeps
+  // one step's rejection from cancelling the others.
+  const [releasesResult, distributionsResult, readmeResult] = await Promise.allSettled([
+    step2_releasesAsset(ctx, fetcher, deadline),
+    step3_distributions(ctx, fetcher, deadline),
+    step4_readmeParse(ctx, fetcher, deadline),
+  ]);
+
+  // Settled-to-value normalization. A rejected promise (network
+  // exception we didn't catch internally) becomes a synthetic "miss"
+  // so downstream priority logic doesn't have to wrangle the union
+  // type discriminant from allSettled.
+  const releases: Step2Hit | Step2Miss =
+    releasesResult.status === 'fulfilled' ? releasesResult.value : { hit: false, reason: 'fetch_threw' };
+  const distributions: Step3Hit | Step3Miss =
+    distributionsResult.status === 'fulfilled' ? distributionsResult.value : { hit: false, per_registry: {} };
+  const readme: Step4Hit | Step4Miss =
+    readmeResult.status === 'fulfilled' ? readmeResult.value : { hit: false, reason: 'fetch_threw' };
+
+  // Priority pick: release-asset > registry > README-parse. Collect
+  // every winning + losing step into the diagnostics record so
+  // disagreement is observable in logs without changing the API.
+  type Candidate = { step: ResolvedStep; spec: InstallSpec; binaryName: string };
+  const candidates: Candidate[] = [];
   if (releases.hit) {
-    return {
-      ok: true,
+    candidates.push({
+      step: '2-releases-asset',
+      // Binary name is the repo by default — Fix 1's auto-detect path
+      // in directInstallCommand corrects it post-extract if the
+      // archive ships a differently-named executable (gogcli → gog).
       spec: { pm: 'direct', url: releases.url, binary: ctx.repo },
-      resolved_step: '2-releases-asset',
-    };
+      binaryName: ctx.repo,
+    });
+  }
+  if (distributions.hit) {
+    candidates.push({
+      step: distributions.step,
+      spec: { pm: distributions.pm, package: ctx.repo, binary: ctx.repo },
+      binaryName: ctx.repo,
+    });
+  }
+  if (readme.hit) {
+    candidates.push({
+      step: '4-readme-parse',
+      spec: readme.spec,
+      binaryName: readme.spec.binary,
+    });
   }
 
-  // Step 3 — distributions (F1-tightened, parallel)
-  const distributions = await step3_distributions(ctx, fetcher, deadline);
-  if (distributions.hit) {
+  if (candidates.length > 0) {
+    const winner = candidates[0];
+    const losers = candidates.slice(1).map((c) => c.step);
+    const agreed_binary = candidates.every((c) => c.binaryName === winner.binaryName);
     return {
       ok: true,
-      spec: { pm: distributions.pm, package: ctx.repo, binary: ctx.repo },
-      resolved_step: distributions.step,
+      spec: winner.spec,
+      resolved_step: winner.step,
+      diagnostics: { winner: winner.step, losers, agreed_binary },
     };
-  }
-
-  // Step 4 — README parse
-  const readme = await step4_readmeParse(ctx, fetcher, deadline);
-  if (readme.hit) {
-    return { ok: true, spec: readme.spec, resolved_step: '4-readme-parse' };
   }
 
   return {
@@ -115,9 +217,12 @@ export async function discoverBinary(ctx: DiscoverContext): Promise<DiscoveryRes
     error: 'chain_no_resolve',
     exhausted: {
       hints: { hit: false },
-      releases: { hit: false, reason: releases.reason },
-      distributions: { hit: false, per_registry: distributions.per_registry },
-      readme: { hit: false, reason: readme.reason },
+      releases: { hit: false, reason: releases.hit ? '' : (releases as Step2Miss).reason },
+      distributions: {
+        hit: false,
+        per_registry: distributions.hit ? {} : (distributions as Step3Miss).per_registry,
+      },
+      readme: { hit: false, reason: readme.hit ? '' : (readme as Step4Miss).reason },
     },
   };
 }
@@ -201,7 +306,7 @@ async function step2_releasesAsset(
   );
   if (!release) return { hit: false, reason: 'no_release_or_404' };
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  const match = assets.find((a) => a.name && LINUX_X64_ASSET_RE.test(a.name));
+  const match = assets.find((a) => a.name && LINUX_X64_ASSET_RE.test(a.name) && LINUX_X64_ARCHIVE_RE.test(a.name));
   if (match?.browser_download_url) return { hit: true, url: match.browser_download_url };
   return { hit: false, reason: assets.length > 0 ? 'no_linux_x64_asset' : 'release_has_no_assets' };
 }
@@ -295,12 +400,21 @@ async function step3_distributions(
   const goLoose = !!goRes?.ok;
   const goTight = goLoose;
 
-  // Priority order matches the plan: brew -> crates -> npm -> pypi -> go.
-  if (brewTight) return { hit: true, pm: 'brew', step: '3-brew' };
+  // Priority order: sandbox-installable PMs first (crates / npm / pypi /
+  // go), brew last. Brew is unconditionally bounced as install_unsupported
+  // inside the sandbox image (Linuxbrew is non-viable on musl). If a tool
+  // has both a brew formula AND a working
+  // alternative (e.g. csvlens is in brew AND on crates.io), picking
+  // brew sends the user to a guaranteed bounce when scoring was
+  // possible. Brew is kept as the last resort so brew-only tools still
+  // bounce honestly rather than degrading to chain_no_resolve and
+  // hitting Step 4 README parse — the bounce message at least names
+  // the brew formula.
   if (cratesTight) return { hit: true, pm: 'cargo-binstall', step: '3-crates' };
   if (npmTight) return { hit: true, pm: 'npm', step: '3-npm' };
   if (pypiTight) return { hit: true, pm: 'pip', step: '3-pypi' };
   if (goTight) return { hit: true, pm: 'go', step: '3-go' };
+  if (brewTight) return { hit: true, pm: 'brew', step: '3-brew' };
 
   return {
     hit: false,
@@ -354,7 +468,9 @@ async function step4_readmeParse(
           if (parsed.ok) return { hit: true, spec: parsed.value };
         }
       }
-      // Per plan: only the first non-comment line of each fenced block.
+      // Only the first non-comment line of each fenced block — most
+      // READMEs lead with the canonical install command and follow with
+      // alternatives we'd otherwise mis-resolve to.
       break;
     }
   }

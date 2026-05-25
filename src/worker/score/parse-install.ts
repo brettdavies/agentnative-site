@@ -7,7 +7,7 @@
 // Inputs that don't match any row return `unparseable_install_command`.
 // Test-first per the plan's Execution note: the test suite IS the spec.
 
-export type PM = 'brew' | 'cargo-binstall' | 'bun' | 'pip' | 'npm' | 'go';
+export type PM = 'brew' | 'cargo-binstall' | 'bun' | 'pip' | 'uv' | 'npm' | 'go';
 
 export type ParsedInstall = {
   pm: PM;
@@ -72,10 +72,17 @@ export function parseInstallCommand(raw: string): ParseResult {
     }
     case 'uv': {
       // uv tool install <pkg>
+      //
+      // Split from pm=pip in the 2026-05-18 U6 rework: the sandbox image
+      // now ships native uv (pinned tarball + sha256), so uv-shape inputs
+      // run through `uv tool install <pkg>` end-to-end rather than being
+      // silently downgraded to `pip install <pkg>`. The resolver and
+      // wheel-fetch paths differ enough that conflating them masked the
+      // pip metadata 403 (Bug M) that uv does not exhibit.
       if (tokens[1] !== 'tool' || tokens[2] !== 'install') return FAIL;
       const pkg = firstPositional(tokens, 3);
       if (!pkg) return FAIL;
-      return { ok: true, value: { pm: 'pip', package: pkg, binary: pkg } };
+      return { ok: true, value: { pm: 'uv', package: pkg, binary: pkg } };
     }
     case 'pip':
     case 'pip3':

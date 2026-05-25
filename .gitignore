@@ -1,6 +1,12 @@
 .DS_Store
 node_modules/
 .env
+# wrangler's local-secrets file (per-env variants also covered). Holds
+# secrets like TURNSTILE_SECRET for `wrangler dev --local`. Never commit
+# even when the value is a public Cloudflare test secret — keeping the
+# habit tight beats explaining the exception.
+.dev.vars
+.dev.vars.*
 .context/
 # docs/solutions/ is a symlink to ~/dev/solutions-docs (see AGENT.md).
 # Ignore that specific subpath; docs/design/ and any other future docs/
@@ -23,9 +29,8 @@ playwright-report/
 .gstack/
 .aider*
 
-# Docker batch-scorer staging area — the anc binary is built per-run from
-# the local CLI checkout (not committed); per-run logs land in out/.
-/docker/score/anc
+# Docker batch-scorer staging area — per-run logs land in out/. The
+# inject binary (docker/score/inject/anc) is gitignored separately above.
 /docker/score/out/
 
 # Vale baseline packs — downloaded by `vale sync` from the URLs in .vale.ini's
@@ -34,3 +39,7 @@ playwright-report/
 /styles/proselint/
 /styles/write-good/
 /styles/.vale-config/
+
+# Injected anc binary (docker/score/build.sh --from-source). Populated at
+# build time, never committed.
+docker/score/inject/anc

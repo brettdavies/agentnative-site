@@ -28,14 +28,27 @@ test('index has OG + Twitter card meta with 1200×630 image', async ({ page }) =
   expect(await meta('twitter:image')).toContain('/og-image.png');
 });
 
-test('JSON-LD TechArticle present and parses', async ({ page }) => {
+test('JSON-LD @graph carries Organization and TechArticle with author', async ({ page }) => {
   await page.goto('/');
   const raw = await page.locator('script[type="application/ld+json"]').first().textContent();
   expect(raw).toBeTruthy();
   const data = JSON.parse(raw ?? '{}');
-  expect(data['@type']).toBe('TechArticle');
-  expect(data.headline).toBeTruthy();
-  expect(data.url).toContain('anc.dev');
+  expect(data['@context']).toBe('https://schema.org');
+  expect(Array.isArray(data['@graph'])).toBe(true);
+
+  const org = data['@graph'].find((n: { '@type': string }) => n['@type'] === 'Organization');
+  expect(org).toBeTruthy();
+  expect(org.name).toBe('anc.dev');
+  expect(org['@id']).toContain('#organization');
+  expect(Array.isArray(org.sameAs)).toBe(true);
+
+  const article = data['@graph'].find((n: { '@type': string }) => n['@type'] === 'TechArticle');
+  expect(article).toBeTruthy();
+  expect(article.headline).toBeTruthy();
+  expect(article.url).toContain('anc.dev');
+  expect(article.author?.['@type']).toBe('Person');
+  expect(article.author?.name).toBe('Brett Davies');
+  expect(article.publisher?.['@id']).toBe(org['@id']);
 });
 
 test('principle pages inherit the same OG shape', async ({ page }) => {

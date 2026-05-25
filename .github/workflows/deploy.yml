@@ -98,6 +98,12 @@ jobs:
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: deploy --env staging
 
+      - name: Smoke /api/score (registry-fast-path)
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: scripts/smoke-api-score.sh https://agentnative-site-staging.brettdavies.workers.dev
+
   production:
     name: build + deploy production
     if: >-

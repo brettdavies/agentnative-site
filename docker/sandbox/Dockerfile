@@ -1,95 +1,166 @@
 # syntax=docker/dockerfile:1.7
 #
-# Live-scoring sandbox image (plan U2).
+# Live-scoring sandbox image. Carries the CF Sandbox SDK server plus
+# package managers (cargo-binstall, pip, uv, npm, bun, go runtime) and
+# a pre-built `anc` binary. No compilers — install paths must produce
+# precompiled binaries or wheels.
 #
-# Goal: Alpine + musl image carrying CF Sandbox 0.9.x-musl, package managers
-# (cargo-binstall, pip, npm, go runtime), and a pre-built musl `anc` baked
-# in from agentnative-cli v0.3.1. NO COMPILERS, NO TOOLCHAINS — install
-# paths are: cargo binstall (precompiled), pip (wheels only), npm
-# (--ignore-scripts), go install (downloads a precompiled artifact in
-# practice for most modules; modules that build from source will fail
-# install at U6 and bounce). Per Premise #2 of the 2026-04-17 CEO design.
+# brew is NOT installed; `brew install <pkg>` user inputs are translated
+# to an alternative PM via the discovery fallback in
+# src/worker/score/do.ts:resolveSpec(). Brew-only formulae bounce as
+# install_unsupported with pm=brew_only.
 #
-# Image budget: <=350 MB compressed. Fits CF Containers `basic` instance
-# type (1 GiB RAM / 4 GB disk). Verify locally:
+# Python version: the FINAL base is `python:3.12-slim-trixie` rather than
+# the bare `debian:trixie-slim` because aider-chat (and many other
+# Python-ecosystem tools) constrain Python to `<3.13,>=3.10`. Debian
+# Trixie defaults to Python 3.13, which makes pip's resolver back off to
+# ancient package versions trying to find a compatible wheel — see
+# docs/solutions/tooling-decisions/cloudflare-sandbox-python-3.12-base-2026-05-19.md
+# for the full investigation. Otherwise the environment is identical
+# Trixie (same glibc, same apt repos, same Node 22, same anc/bun/uv/go
+# binary versions).
+#
+# Image budget: <=350 MB compressed. Verify locally:
 #   docker build -f docker/sandbox/Dockerfile -t anc-sandbox .
 #   docker image inspect anc-sandbox --format '{{.Size}}'
-#
-# Two-phase egress (R7) is enforced at the Worker / DO layer in U6; this
-# image just provides the install + run substrate. PATH covers every
-# location a binary might land after install via the supported pms.
-#
-# brew is intentionally OMITTED. Linuxbrew on Alpine + musl is not a
-# supported configuration (linuxbrew assumes glibc symbols). User inputs
-# that resolve to `pm: brew` via U4's chain hit U6's
-# `chain_resolved_install_failed` bounce class and surface the
-# install-anc-locally CTA. See plan U2 lines 945-988 for the rationale.
 
-# ----------------------------------------------------------------------
-# Stage 1: pull the CF Sandbox SDK server binary + its glibcxx dependency.
-# Pinned to a digest so a forced re-tag of `0.9.2-musl` upstream cannot
-# silently change what we're shipping.
-# ----------------------------------------------------------------------
-FROM docker.io/cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d6996fa6be43bb4966bf3666db2d434f4d2a24dfb75e1d5e08194c5bd0a AS sandbox-base
+FROM docker.io/cloudflare/sandbox:0.9.2@sha256:3a8626db5d3d838d947abadd37b818e48628b17f12cf2e87d89b8e83a6676482 AS sandbox-base
 
-# ----------------------------------------------------------------------
-# Stage 2: Alpine 3.21 final image with pms + anc baked in.
 # Multi-arch index digest pinned; Docker resolves to the amd64 child at
-# pull time.
-# ----------------------------------------------------------------------
-FROM docker.io/library/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d AS final
+# pull time. The official Python image installs CPython 3.12 + pip +
+# setuptools + wheel into /usr/local/, which lands ahead of /usr/bin on
+# PATH — so our existing `pip install` command picks up the 3.12 pip
+# without code changes. We DROP `python3` and `python3-pip` from the
+# apt install below because the base image already provides them.
+FROM docker.io/library/python:3.12-slim-trixie@sha256:bf73779de6dbd030f3d189eeeb246286965832761ace318c1518300f76c0840d AS final
 
-# Sandbox runtime: server binary + libstdc++ (the SDK server's only C++
-# runtime dep). If Cloudflare drops the libstdc++ dep in a future SDK
-# rev, the second COPY can be removed; the SDK server warns at startup
-# if the lib is missing.
 COPY --from=sandbox-base /container-server/sandbox /sandbox
-COPY --from=sandbox-base /usr/lib/libstdc++.so.6 /usr/lib/libstdc++.so.6
 
-# Package managers + interpreters. NO compilers (no build-base, no gcc,
-# no rust toolchain, no go build-tools — just the go runtime so `go
-# install` can download precompiled module artifacts).
-#
-# Why each:
-# - bash: cargo-binstall + npm install scripts assume bash for $(...)
-#   substitution; sh-only would surface as cryptic syntax errors.
-# - ca-certificates: TLS for U6 Phase 1 outbound to ecosystem registries.
-# - curl: U6 `direct` install path (curl ... | tar xz).
-# - git: `go install` / npm postinstall fallback resolution.
-# - go: `go install <module>@latest` requires the toolchain on PATH.
-# - nodejs + npm: `npm i -g --ignore-scripts <pkg>`.
-# - py3-pip + python3: `pip install --only-binary=:all: <pkg>`.
-RUN apk add --no-cache \
+# bzip2 / unzip / xz-utils back the per-extension dispatch in
+# sandbox-exec.ts directInstallCommand() for .tar.bz2 / .zip / .tar.xz
+# releases. libstdc++6 satisfies the sandbox-server runtime dep. Python
+# + pip are provided by the base image (see FROM line above) so neither
+# `python3` nor `python3-pip` is in this apt install list.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
         bash \
+        bzip2 \
         ca-certificates \
         curl \
         git \
-        go \
+        libstdc++6 \
         nodejs \
         npm \
-        py3-pip \
-        python3
+        unzip \
+        xz-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-# cargo-binstall standalone (musl). Pinned URL + sha256.
+# Upstream Go (NOT Debian's golang-go). Debian builds Go with
+# CGO_ENABLED=0, which makes GODEBUG=netdns=cgo silently fall back to
+# Go's pure-Go resolver. The pure-Go resolver's IPv6 dual-stack
+# behavior hangs on CF Containers (outbound IPv6 is unreliable),
+# producing 60 s timeouts on `go install`. The official tarball ships
+# with CGO enabled, so cgo resolver works and honors /etc/gai.conf's
+# IPv4 precedence.
+RUN set -eux; \
+    curl -fsSL -o /tmp/go.tgz \
+        https://go.dev/dl/go1.26.3.linux-amd64.tar.gz; \
+    echo '2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556  /tmp/go.tgz' | sha256sum -c -; \
+    tar xzf /tmp/go.tgz -C /usr/local/; \
+    rm /tmp/go.tgz; \
+    /usr/local/go/bin/go version
+
+# Force IPv4 precedence in glibc's getaddrinfo. CF Containers' outbound
+# IPv6 path is unreliable for many upstream endpoints; tools whose HTTP
+# clients default to AAAA-first (cargo-binstall, go module proxy, curl,
+# uv) otherwise hang on the IPv6 attempt before falling back to A.
+# Python urllib3, npm, and bun happen to prefer A records and work
+# without this. Uncomment the IPv4-mapped precedence line in
+# /etc/gai.conf — glibc treats this as "rank IPv4 addresses above IPv6".
+RUN sed -i 's/^#\(precedence ::ffff:0:0\/96  100\)/\1/' /etc/gai.conf
+
 RUN set -eux; \
     curl -fsSL -o /tmp/cb.tgz \
-        https://github.com/cargo-bins/cargo-binstall/releases/download/v1.19.0/cargo-binstall-x86_64-unknown-linux-musl.full.tgz; \
-    echo '15432865784b4aea8749673e7faf0f2939207f73f58c6aca4ba1b6b1e536df6a  /tmp/cb.tgz' | sha256sum -c -; \
+        https://github.com/cargo-bins/cargo-binstall/releases/download/v1.19.0/cargo-binstall-x86_64-unknown-linux-gnu.full.tgz; \
+    echo '651492fa1a5a57a8d5d8de38556c3cbb464d40fa82eda124780a61373783c157  /tmp/cb.tgz' | sha256sum -c -; \
     tar xzf /tmp/cb.tgz -C /usr/local/bin/ cargo-binstall; \
     rm /tmp/cb.tgz; \
     cargo-binstall -V
 
-# `anc` musl bottle from agentnative-cli v0.3.1. Pinned URL + sha256
-# from the release's sha256sum.txt.
 RUN set -eux; \
     curl -fsSL -o /tmp/anc.tgz \
-        https://github.com/brettdavies/agentnative-cli/releases/download/v0.3.1/agentnative-x86_64-unknown-linux-musl.tar.gz; \
-    echo '90361f5bade856cfce3fc9e66703980f04f68e6f4fb86d48dfdb34f92e3b5785  /tmp/anc.tgz' | sha256sum -c -; \
+        https://github.com/brettdavies/agentnative-cli/releases/download/v0.4.0/agentnative-x86_64-unknown-linux-gnu.tar.gz; \
+    echo '67a5a41c68fd6852352b99e13ceb54bce5c043f45a936cab70f4e6d560a6e085  /tmp/anc.tgz' | sha256sum -c -; \
     tar xzf /tmp/anc.tgz -C /tmp/; \
-    install -m 0755 /tmp/agentnative-x86_64-unknown-linux-musl/anc /usr/local/bin/anc; \
-    rm -rf /tmp/anc.tgz /tmp/agentnative-x86_64-unknown-linux-musl; \
+    install -m 0755 /tmp/agentnative-x86_64-unknown-linux-gnu/anc /usr/local/bin/anc; \
+    rm -rf /tmp/anc.tgz /tmp/agentnative-x86_64-unknown-linux-gnu; \
     anc --version
 
-ENV PATH="/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:/root/.local/bin:${PATH}"
+# `unzip -j` flattens the archive's `bun-linux-x64/` directory so the
+# binary lands directly on PATH instead of in $HOME/.bun/bin.
+RUN set -eux; \
+    curl -fsSL -o /tmp/bun.zip \
+        https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip; \
+    echo '951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f  /tmp/bun.zip' | sha256sum -c -; \
+    unzip -j /tmp/bun.zip 'bun-linux-x64/bun' -d /usr/local/bin/; \
+    chmod 0755 /usr/local/bin/bun; \
+    rm /tmp/bun.zip; \
+    bun --version
+
+# `uv tool install <pkg>` symlinks the installed binary into
+# /root/.local/bin/<binary> (default UV_TOOL_BIN_DIR); the PATH below
+# covers that directory.
+RUN set -eux; \
+    curl -fsSL -o /tmp/uv.tgz \
+        https://github.com/astral-sh/uv/releases/download/0.11.15/uv-x86_64-unknown-linux-gnu.tar.gz; \
+    echo 'b03e572f010bea94a4a52d42671ba72981e12894f71576181a1d26ff68546da7  /tmp/uv.tgz' | sha256sum -c -; \
+    tar xzf /tmp/uv.tgz -C /tmp/; \
+    install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv; \
+    install -m 0755 /tmp/uv-x86_64-unknown-linux-gnu/uvx /usr/local/bin/uvx; \
+    rm -rf /tmp/uv.tgz /tmp/uv-x86_64-unknown-linux-gnu; \
+    uv --version
+
+# Every PM's install destination redirected to /usr/local/bin so the
+# post-install `which <binary>` gate in sandbox-exec.ts always looks in
+# the same place. Mirrors the per-command flags
+# (cargo-binstall --install-path, GOBIN=...) for the ENV-configurable
+# package managers (bun, uv) so the convention is consistent across
+# the entire install table.
+ENV BUN_INSTALL=/usr/local
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+
+# Supply-chain release-delay gate: refuse to install any uv/uvx package
+# published less than 7 days ago. A malicious tag-overwrite or
+# fresh-publish attack has at minimum a 7-day detection window before
+# our sandbox would install it. uv handles relative durations natively
+# (v0.9.17+); pip's equivalent (PIP_UPLOADED_PRIOR_TO, v26.0+) requires
+# an absolute date, so the pip path computes it at exec time in
+# src/worker/score/sandbox-exec.ts rather than baking a stale value
+# here. npm + bun are not gated yet because user inputs through those
+# PMs pass through the registry / discovery hint vetting layer; pip and
+# uv take raw user-typed package names so the unmediated attack surface
+# is higher.
+ENV UV_EXCLUDE_NEWER="7 days"
+# Go's runtime DNS resolver bypasses glibc by default and ignores the
+# IPv4-precedence fix in /etc/gai.conf above. Force the cgo resolver so
+# `go install` honors the system address-selection policy.
+ENV GODEBUG=netdns=cgo
+# Suppress pip's "A new release of pip is available" notice. Without
+# this, every `pip install <pkg>` writes a multi-line upgrade prompt to
+# stderr, which pollutes the scorecard `evidence` field and the
+# bounce-panel `details` stderr block when a `pip install` user input
+# fails. The site never wants the user to act on the prompt (the
+# sandbox is ephemeral; pip is whatever the image ships), so the notice
+# is pure noise. Mirrored at exec time in sandbox-exec.ts so the
+# currently-deployed image gets the suppression before the next image
+# rebuild lands.
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+ENV PATH="/usr/local/bin:/usr/local/cargo/bin:/usr/local/go/bin:${PATH}"
+
+# Port 3000 is reserved by the CF Sandbox SDK; pick a different port so
+# `wrangler dev --local` accepts the container binding without
+# colliding with the SDK's internal HTTP server.
+EXPOSE 8080
 
 ENTRYPOINT ["/sandbox"]

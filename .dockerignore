@@ -8,6 +8,7 @@
 # Files COPYed by docker/score/Dockerfile (anything Dockerfile needs to see).
 !registry.yaml
 !docker/score/Dockerfile
-!docker/score/anc
+!docker/score/inject
+!docker/score/inject/anc
 !docker/score/install-tools.sh
 !docker/score/score-anc100.sh

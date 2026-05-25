@@ -81,7 +81,7 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toMatch(/^>\s+/m);
     expect(body).toContain('## Principles');
     const bullets = body.match(/^-\s+\[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
-    expect(bullets.length).toBe(7);
+    expect(bullets.length).toBe(8);
     // Sub-pages (check, about) present under ## Pages.
     expect(body).toContain('## Pages');
     const pageLinks = body.match(/^-\s+\[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
@@ -91,7 +91,7 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toContain('## Scorecards');
   });
 
-  test('/llms-full.txt is served in a single fetch with A5 delimiters', async ({ request }) => {
+  test('/llms-full.txt is served in a single fetch with concatenation delimiters', async ({ request }) => {
     const res = await request.get(`${BASE}/llms-full.txt`);
     expect(res.status()).toBe(200);
     const body = await res.text();

@@ -1,4 +1,4 @@
-/* site.css — additive layer on top of foundation.css (docs/DESIGN.md §4 + A2). */
+/* site.css — additive layer on top of foundation.css (docs/DESIGN.md §4). */
 
 @font-face {
   font-family: "Uncut Sans";
@@ -113,7 +113,7 @@ main .anchor-icon {
   vertical-align: -2px;
 }
 
-/* RFC-keyword color pairs (A7 colors live in foundation.css). */
+/* RFC-keyword color pairs (token definitions live in foundation.css). */
 .rfc-must {
   color: var(--must, #af2b25);
 }
@@ -152,7 +152,7 @@ main .anchor-icon {
   letter-spacing: var(--tracking-caps);
 }
 
-/* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6 A7).
+/* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6).
  * Scope `span` matching to Shiki's own syntax tokens (which live under
  * `<pre class="shiki"><code>…spans…</code></pre>`). The previous selector
  * `.shiki span` matched ANY descendant span, including the client-side-
@@ -221,11 +221,13 @@ main .anchor-icon {
 }
 .site-nav {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
   font-size: 0.95rem;
 }
 .site-nav a {
   color: inherit;
+  white-space: nowrap;
 }
 
 /* Theme toggle — hidden when JS is off (C6). */
@@ -445,6 +447,46 @@ main .anchor-icon {
   flex-wrap: wrap;
   gap: 0.3rem;
   justify-content: center;
+}
+
+/* Source-of-truth row. Sits between the AI-summary block and the meta
+ * line, mirroring the meta line's centered-flex layout. Renders as
+ * "[GH] Source: spec · cli · site · skill"; the icon is a quiet kicker,
+ * not a primary call-out — sized smaller than the AI-summary icons and
+ * tinted to fg-muted with the same hover lift as the meta links. */
+.site-footer__source {
+  margin: 0 0 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  justify-content: center;
+  font-size: 0.85rem;
+}
+.site-footer__source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: var(--fg-muted, #525960);
+  margin-right: 0.15rem;
+}
+.site-footer__source-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.site-footer__source-label {
+  color: var(--fg-muted, #525960);
+  letter-spacing: 0.01em;
+}
+.site-footer__source a {
+  color: inherit;
+  transition: color 120ms ease;
+}
+.site-footer__source a:hover {
+  color: var(--fg-body, #1a2026);
 }
 
 /* AI summary CTA — provider icons above the meta line. */
@@ -1218,4 +1260,382 @@ body:has(.leaderboard-hero) main {
     animation-duration: 0.01ms;
     transition-duration: 0.01ms;
   }
+}
+
+/* =============================================================
+ * Live-scoring form — homepage paste-input surface.
+ *
+ * Integrates with the principle-entry rhythm above the principles
+ * list: same `3rem 1fr` grid (kicker | content), same top-border
+ * separator, same numbered-prefix-in-accent-mono treatment. The
+ * kicker reads "Try" — telling the visitor this row is a
+ * pre-principles entry point, not principle 0.
+ *
+ * Restraint over decoration: no card grid, no bordered widget,
+ * no uppercase-tracked labels. The input IS the centerpiece — the
+ * Score button carries the only solid color in the form so the
+ * eye lands there without ambient ornament.
+ *
+ * Tokens: --accent for focus + submit + kicker, --bg-code for the
+ * input field, --border for the hairline separator, --must for
+ * error and bounce-panel keyword color. No side-stripe borders,
+ * no glassmorphism, no gradient text.
+ * ============================================================= */
+
+.live-score {
+  border-top: 1px solid var(--border-subtle, var(--border));
+  /* Match the principle-entry enter-stagger so the form lands as the
+   * first row of the homepage's content rhythm, not as a separate
+   * widget below the hero. */
+  animation: principle-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 80ms;
+}
+
+.live-score__row {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  grid-template-rows: auto;
+  column-gap: 1.25rem;
+  padding: 1.5rem 0.75rem 1.75rem;
+  margin: 0 -0.75rem;
+}
+
+.live-score__kicker {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 350;
+  color: var(--accent);
+  line-height: 1.15;
+  padding-top: 0.15rem;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  /* "Try" sits where the principle numbers sit — same column, same
+   * font, same weight, same color. Visual continuity with the list
+   * below; no decoration needed. */
+}
+
+.live-score__content {
+  display: grid;
+  /* Generous gap between heading + lede; tighter cluster lower down
+   * (form input + chips). The varied rhythm is intentional. */
+  gap: 0.35rem;
+}
+
+.live-score__title {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: var(--fg-heading);
+  line-height: 1.35;
+  letter-spacing: -0.005em;
+}
+
+.live-score__lede {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+  max-inline-size: 65ch;
+}
+
+.live-score__lede code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-code);
+  padding: 0 0.3em;
+  border-radius: 3px;
+}
+
+.live-score__form {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.live-score__input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.live-score__input {
+  font-family: var(--font-mono);
+  /* Fluid larger size so the input reads as the centerpiece — bigger
+   * than body type, smaller than h1. Matches the visual weight of
+   * the principle title that follows it. */
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  line-height: 1.4;
+  padding: 0.7rem 0.85rem;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-body);
+  min-inline-size: 0;
+}
+
+.live-score__input::placeholder {
+  color: var(--fg-muted);
+}
+
+.live-score__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.live-score__input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.live-score__submit {
+  font-family: var(--font-sans);
+  /* Match the input's fluid size step so they read as a pair, not a
+   * size jump. */
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  font-weight: 600;
+  padding: 0.7rem 1.25rem;
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+  /* The only solid-color surface in the form. Restrained color
+   * strategy + one accent ≤10% works here because the form occupies
+   * less than 10% of the homepage real estate. */
+}
+
+.live-score__submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.live-score__submit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.live-score__submit:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* Chips render as inline prose: "or try <code>ripgrep</code>, <code>...</code>".
+ * Buttons under the hood (keyboard + ARIA), but visually they look
+ * like clickable code spans, not action buttons. Differentiates from
+ * the submit button so the eye lands on Score, not the chips. */
+.live-score__help {
+  margin: 0.1rem 0 0;
+  font-size: 0.88rem;
+  color: var(--fg-secondary);
+  line-height: 1.6;
+}
+
+.live-score__chip {
+  display: inline;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.live-score__chip code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+}
+
+.live-score__chip:hover {
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent);
+}
+
+.live-score__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/* Single-line status — JS swaps in prose like "Resolving install
+ * path..." during a live run. Replaces the 4-tile progress grid
+ * (slop: identical card grid). No fake animation; the 2 s theater
+ * floor itself is the wait signal. */
+.live-score__status {
+  margin: 0.6rem 0 0;
+  font-size: 0.92rem;
+  color: var(--fg-body);
+  /* Inherits monospace from code descendants when JS injects bounce
+   * panels; for plain status text the sans body font is fine. */
+}
+
+.live-score__status--error {
+  color: var(--must);
+}
+
+/* Curated-hit reward: the user pasted a tool we've already audited.
+ * Identity-color the status text via --accent so the moment lands as
+ * "you found one of ours" without a banner, badge, or animation. The
+ * reward is visible for the remainder of the 2 s theater floor before
+ * the redirect to /score/<slug>; mid-dot separators in the copy mirror
+ * the footer rhythm. */
+.live-score__status--curated {
+  color: var(--accent);
+  font-weight: 600;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+}
+
+.live-score__status--bounce .live-score__bounce-headline {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--must);
+}
+
+.live-score__status--bounce .live-score__bounce-body {
+  margin: 0 0 0.6rem;
+  color: var(--fg-body);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.live-score__status--bounce .live-score__bounce-body code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-code);
+  padding: 0 0.3em;
+  border-radius: 3px;
+}
+
+.live-score__status--bounce .live-score__bounce-stderr {
+  margin: 0 0 0.6rem;
+  max-block-size: 16rem;
+  overflow: auto;
+  font-size: 0.82rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* Narrow viewports: collapse the principle-rhythm grid so the kicker
+ * sits inline with the content. Avoids the awkward 3rem orphan column
+ * on phones. (max-width vs max-inline-size: the latter is CSS MQ L5 and
+ * not yet broadly supported / not yet in biome's recognized spec list.
+ * max-width is functionally equivalent for this LTR site.) */
+@media (max-width: 36rem) {
+  .live-score__row {
+    grid-template-columns: 1fr;
+    row-gap: 0.4rem;
+    padding: 1.25rem 0.75rem 1.5rem;
+  }
+  .live-score__kicker {
+    font-size: 1rem;
+    line-height: 1.4;
+    padding-top: 0;
+  }
+  .live-score__input-row {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  .live-score__submit {
+    /* Full-width on narrow viewports — the input and button stack and
+     * each spans the full content column. */
+    justify-self: stretch;
+  }
+}
+
+/* =============================================================
+ * /score/live/<binary> result page — share surface.
+ * Reuses the per-tool scorecard score badge component; adds a
+ * compact header with version + binary + freshness marker.
+ * ============================================================= */
+
+.live-score-summary__header {
+  margin-block-end: var(--space-5);
+}
+
+.live-score-summary__header h1 {
+  margin: 0;
+  font-size: var(--text-h1);
+  letter-spacing: -0.01em;
+}
+
+.live-score-summary__version {
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  font-weight: 400;
+  color: var(--fg-secondary);
+  margin-inline-start: var(--space-3);
+}
+
+.live-score-summary__meta {
+  margin-block: var(--space-3) 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+
+.live-score-summary__meta code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-code);
+  padding: 0 0.35em;
+  border-radius: 3px;
+}
+
+.live-score-summary__freshness {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  margin-inline-start: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: lowercase;
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--fg-muted);
+}
+
+.live-score-summary__freshness--live {
+  color: var(--may);
+  border-color: var(--may);
+}
+
+.live-score-summary__score {
+  margin-block: var(--space-5);
+}
+
+.live-score-summary__issues {
+  margin-block: var(--space-5);
+}
+
+.live-score-summary__issues h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+}
+
+.live-score-summary__cta {
+  margin-block: var(--space-6) var(--space-5);
+  padding-block-start: var(--space-5);
+  border-top: 1px solid var(--border);
+}
+
+.live-score-summary__cta h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-h3);
+}
+
+.live-score-summary__cta p {
+  color: var(--fg-secondary);
+  max-inline-size: var(--measure);
+}
+
+.live-score-summary__cta-aside {
+  font-size: var(--text-secondary);
 }

@@ -27,12 +27,12 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
-  // Live-scoring path (plan U3-U7) — first-ever stateful bindings on
-  // this Worker: DO + Container + R2 + rate-limit. The migrations entry
-  // below is a one-way gate: `new_sqlite_classes` MUST be used (not the
-  // legacy `new_classes`) so the DO is created with SQLite-backed
-  // storage. Reverting needs a follow-up migration with
-  // `deleted_classes`; documented in RELEASES.md once U9 lands.
+  // Live-scoring path — first-ever stateful bindings on this Worker:
+  // DO + Container + R2 + rate-limit. The migrations entry below is a
+  // one-way gate: `new_sqlite_classes` MUST be used (not the legacy
+  // `new_classes`) so the DO is created with SQLite-backed storage.
+  // Reverting needs a follow-up migration with `deleted_classes`;
+  // documented in RELEASES.md.
   "containers": [
     {
       "class_name": "Sandbox",
@@ -64,11 +64,10 @@
       // keeps pointing at the previous staging-soaked image until the
       // release explicitly promotes.
       //
-      // Account ID in the URI is acceptable per U3-followup spec:
-      // Wrangler resolves it from auth at push time, so the literal
-      // committed here is the auth-time-generated tag rather than a
-      // pre-shared identifier.
-      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
+      // Account ID in the URI is committed deliberately: Wrangler
+      // resolves it from auth at push time, so the literal here is the
+      // auth-time-generated tag rather than a pre-shared identifier.
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:9aed5c3",
       "instance_type": "basic",
       "max_instances": 3
     }
@@ -94,12 +93,59 @@
     }
   ],
   "ratelimits": [
+    // SCORE_LIMITER — keyed on `<session-id>:<sha256(input)>` inside the
+    // handler (see src/worker/score/handler.ts). 10 distinct-tool requests
+    // per session per minute. Same-tool requests within a session do not
+    // burn budget, which is cache-friendly and lets the registry-fast-path
+    // and R2 caches do their job. New sessions require a Turnstile solve.
     {
       "name": "SCORE_LIMITER",
       "namespace_id": "1001",
       "simple": { "limit": 10, "period": 60 }
+    },
+    // SCORE_LIMITER_IP — coarse per-IP fallback that catches clients
+    // swapping the session cookie to dodge SCORE_LIMITER. Per plan
+    // "Cost ceiling and abuse mitigation" step 2: 30 requests / 60 s / IP.
+    // Distinct namespace so the per-session and per-IP windows don't share
+    // counters.
+    {
+      "name": "SCORE_LIMITER_IP",
+      "namespace_id": "1003",
+      "simple": { "limit": 30, "period": 60 }
     }
   ],
+  // SCORE_KV — operator-flippable `scoring_disabled` kill switch (plan
+  // "Cost ceiling and abuse mitigation" step 3). Flip via:
+  //   wrangler kv key put --binding=SCORE_KV scoring_disabled true
+  // The Worker reads + caches the flag in-memory for 30 s; propagates to
+  // every isolate within one KV-read TTL.
+  "kv_namespaces": [
+    {
+      "binding": "SCORE_KV",
+      "id": "5a05224968404e5f96471f1bd007d87a"
+    }
+  ],
+  // SCORE_TELEMETRY — Workers Analytics Engine dataset for /api/score
+  // observability. Handler emits one writeDataPoint per request with the
+  // canonical field shape documented in docs/runbooks/live-scoring-analytics.md.
+  // Two distinct dataset names (top-level vs env.staging) keep staging
+  // noise out of prod aggregates. Dataset is created on first write — no
+  // wrangler analytics-engine create step. Field-shape contract is pinned
+  // by tests/score-telemetry.test.ts; reordering blobs/doubles silently
+  // breaks saved AE SQL queries, so the regression guard fires loudly.
+  "analytics_engine_datasets": [
+    {
+      "binding": "SCORE_TELEMETRY",
+      "dataset": "anc_live_score_prod"
+    }
+  ],
+  // Production Turnstile sitekey deferred until production promotion. The
+  // homepage form template reads TURNSTILE_SITEKEY from this env var to
+  // render the invisible widget. Absent here so a misconfigured prod cut
+  // fails loudly rather than silently shipping a staging-test sitekey to
+  // production users. The TURNSTILE_SECRET (real) lives in wrangler
+  // secrets, not committed.
+  // "vars": { "TURNSTILE_SITEKEY": "..." },
   // Production (top-level): anc.dev custom domain, no .workers.dev URL.
   // Deployed via `wrangler deploy` (no --env flag) on push to main.
   // Cloudflare auto-provisions SSL cert + DNS CNAME for the custom domain.
@@ -174,9 +220,9 @@
           // version histories) and may legitimately diverge.
           //
           // See RELEASES.md § Sandbox image releases for the full flow.
-          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
-          "instance_type": "basic",
-          "max_instances": 3
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:9aed5c3",
+          "instance_type": "standard-2",
+          "max_instances": 10
         }
       ],
       "durable_objects": {
@@ -187,9 +233,23 @@
           }
         ]
       },
+      // env.staging.migrations is append-only: Cloudflare rejects any
+      // deploy whose tag list is a subset of what's already applied to
+      // the env. staging carries the full sequence (v1, v2-drop-sandbox,
+      // v3-restore-sandbox); top-level `migrations` stays at v1 until
+      // prod runs its own rollback. See RELEASES.md § Cross-migration
+      // rollback rehearsal for the procedure that produces a new tag.
       "migrations": [
         {
           "tag": "v1",
+          "new_sqlite_classes": ["Sandbox"]
+        },
+        {
+          "tag": "v2-drop-sandbox",
+          "deleted_classes": ["Sandbox"]
+        },
+        {
+          "tag": "v3-restore-sandbox",
           "new_sqlite_classes": ["Sandbox"]
         }
       ],
@@ -204,8 +264,35 @@
           "name": "SCORE_LIMITER",
           "namespace_id": "1002",
           "simple": { "limit": 10, "period": 60 }
+        },
+        {
+          "name": "SCORE_LIMITER_IP",
+          "namespace_id": "1004",
+          "simple": { "limit": 30, "period": 60 }
         }
-      ]
+      ],
+      "kv_namespaces": [
+        {
+          "binding": "SCORE_KV",
+          "id": "10a0fb8031864421a3ba358e28189317"
+        }
+      ],
+      "analytics_engine_datasets": [
+        {
+          "binding": "SCORE_TELEMETRY",
+          "dataset": "anc_live_score_staging"
+        }
+      ],
+      // Cloudflare's "always passes" test sitekey (public, documented at
+      // https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
+      // Pairs with the corresponding always-passes test SECRET wired into
+      // `wrangler secret put TURNSTILE_SECRET --env staging` so staging
+      // verification accepts any token without minting real bot-defense
+      // signal. Production sitekey lives at the top-level (deferred to
+      // production promotion); never inherit this staging value into prod.
+      "vars": {
+        "TURNSTILE_SITEKEY": "1x00000000000000000000AA"
+      }
     }
   }
   // Smart Placement intentionally NOT set: this is a static-asset + CN

@@ -55,6 +55,23 @@ const AI_PROVIDERS = [
   },
 ];
 
+// Official GitHub mark (Simple Icons). currentColor + aria-hidden so the
+// SVG inherits link color and screen readers fall through to the link
+// text ("spec", "cli", etc.).
+const GITHUB_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>';
+
+// Source-of-truth repos linked from the footer. Order: spec first (the
+// canonical SoT), then the three channel implementations in increasing
+// audience reach (cli for tool authors, site for visitors, skill for
+// agents). Names match the repo slugs on github.com/brettdavies.
+const SOURCE_REPOS = [
+  { name: 'spec', url: 'https://github.com/brettdavies/agentnative' },
+  { name: 'cli', url: 'https://github.com/brettdavies/agentnative-cli' },
+  { name: 'site', url: 'https://github.com/brettdavies/agentnative-site' },
+  { name: 'skill', url: 'https://github.com/brettdavies/agentnative-skill' },
+];
+
 const esc = escHtml;
 
 /**
@@ -70,6 +87,35 @@ const esc = escHtml;
  * @param {string=} args.baseUrl             — absolute base (default prod).
  * @returns {string} full HTML document.
  */
+/**
+ * Emit a placeholder-only version of the shell. Used by the Worker to
+ * render dynamic pages (/score/live/<binary>) without duplicating the
+ * shell layout. The template has four placeholders:
+ *
+ *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
+ *   {{DESCRIPTION}}      — meta description + og:description
+ *   {{CANONICAL_PATH}}   — site-relative canonical path (no trailing extension)
+ *   {{BODY}}             — already-rendered body HTML (pre-escaped by caller)
+ *
+ * Same shell layout as the static pages; the only difference is the
+ * placeholders for the four dynamic fields. The markdown-twin link in
+ * the footer substitutes to `{{CANONICAL_PATH}}.md` so live-score pages
+ * carry the same markdown-twin affordance as every other page.
+ */
+export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
+  return emitShell({
+    title: '{{TITLE}}',
+    description: '{{DESCRIPTION}}',
+    canonicalPath: '{{CANONICAL_PATH}}',
+    bodyHtml: '{{BODY}}',
+    themeInitJs: themeInitJs ?? '',
+    isIndex: false,
+    principles: [],
+    baseUrl,
+    extraScripts: [],
+  });
+}
+
 export function emitShell({
   title,
   description,
@@ -85,18 +131,33 @@ export function emitShell({
   const canonical = base + canonicalPath;
   const ogImage = `${base}/og-image.png`;
 
+  const orgId = `${base}/#organization`;
   const jsonLd = {
     '@context': 'https://schema.org',
-    '@type': 'TechArticle',
-    headline: title,
-    description,
-    url: canonical,
-    image: ogImage,
-    publisher: {
-      '@type': 'Organization',
-      name: SITE_NAME,
-      url: base,
-    },
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': orgId,
+        name: SITE_NAME,
+        url: base,
+        logo: `${base}/apple-touch-icon-180.png`,
+        sameAs: SOURCE_REPOS.map((r) => r.url),
+      },
+      {
+        '@type': 'TechArticle',
+        headline: title,
+        description,
+        url: canonical,
+        image: ogImage,
+        author: {
+          '@type': 'Person',
+          name: 'Brett Davies',
+          url: 'https://github.com/brettdavies',
+          sameAs: ['https://x.com/brettdavies'],
+        },
+        publisher: { '@id': orgId },
+      },
+    ],
   };
 
   const miniToc =
@@ -120,6 +181,7 @@ ${principles
     <title>${esc(title)}</title>
     <meta name="description" content="${esc(description)}" />
     <link rel="canonical" href="${canonical}" />
+${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
     <meta property="og:title" content="${esc(title)}" />
@@ -160,9 +222,11 @@ ${principles
         <a href="/scorecards">Leaderboard</a>
         <a href="/install">Install</a>
         <a href="/check">Check your CLI</a>
+        <a href="/skill">Skill</a>
         <a href="/methodology">Methodology</a>
         <a href="/coverage">Coverage</a>
         <a href="/about">About</a>
+        <a href="/contribute">Contribute</a>
       </nav>
       <div class="theme-toggle" role="group" aria-label="Theme">
         <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
@@ -184,6 +248,14 @@ ${AI_PROVIDERS.map(
 ).join('\n')}
         </div>
       </div>
+      <p class="site-footer__source">
+        <span class="site-footer__source-icon" aria-hidden="true">${GITHUB_SVG}</span>
+        <span class="site-footer__source-label">Source:</span>
+${SOURCE_REPOS.map(
+  (r, i) =>
+    `        ${i > 0 ? '<span aria-hidden="true"> · </span>\n        ' : ''}<a href="${r.url}" rel="noopener noreferrer">${r.name}</a>`,
+).join('\n')}
+      </p>
       <p class="site-footer__meta">
         <span>${SITE_NAME}</span>
         <span> · </span>

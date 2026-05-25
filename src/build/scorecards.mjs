@@ -54,8 +54,9 @@ export async function loadRegistry(registryPath) {
     throw new Error('registry.yaml: expected top-level "tools" array');
   }
 
-  // Binary-name collision guard (U7 redirects): for tools where binary !==
-  // name, the binary slug must not appear as ANY other tool's `name`.
+  // Binary-name collision guard for `/score/<binary>` redirects: for tools
+  // where binary !== name, the binary slug must not appear as ANY other
+  // tool's `name`.
   // Without this, a future registry addition `name: rg, binary: rg` would
   // silently overwrite the `/score/rg` redirect page that ripgrep emits, or
   // vice versa. Build the binary set first so we can detect collisions in
@@ -77,6 +78,11 @@ export async function loadRegistry(registryPath) {
     }
     if (t.name === 'scorecards') {
       throw new Error('registry.yaml: "scorecards" is reserved — slug collision with the leaderboard page');
+    }
+    if (t.name === 'live') {
+      throw new Error(
+        'registry.yaml: "live" is reserved — slug collision with the /score/live/<binary> dynamic share-URL namespace',
+      );
     }
     if (seen.has(t.name)) {
       throw new Error(`registry.yaml: duplicate name "${t.name}"`);
@@ -163,7 +169,7 @@ function indexScorecardsByName(filenames) {
 /**
  * Discover scorecards on disk and join each to its registry editorial entry.
  *
- * Iteration is **scorecard-driven** (post-U3 inversion): the build reads
+ * Iteration is **scorecard-driven**: the build reads
  * `<name>-v*.json` from the scorecards/ directory, picks the highest version
  * per slug, and joins to `registry.tools[name=slug]` for editorial fields
  * (tier, language, creator, description, install, repo/url).
@@ -178,10 +184,10 @@ function indexScorecardsByName(filenames) {
  *     `name` on disk. Excluded from the leaderboard. Supports
  *     editorial-PR-first contribution flow.
  *
- * The orchestrator logs both lists; CI surfaces them as a PR comment (U8).
- * R5(b)'s structural invariant — "every scorecard's filename slug must
- * match a registry entry" — is intentionally NOT enforced here; it lives
- * in `runScorecardInvariants()`. Splitting the contracts lets a contributor
+ * The orchestrator logs both lists; CI surfaces them as a PR comment.
+ * The structural invariant — "every scorecard's filename slug must match
+ * a registry entry" — is intentionally NOT enforced here; it lives in
+ * `runScorecardInvariants()`. Splitting the contracts lets a contributor
  * land a scorecard PR + editorial PR in either order without the build
  * blowing up mid-merge.
  *
@@ -438,9 +444,9 @@ export function extractTopIssues(scorecard, limit = 3) {
 }
 
 /**
- * Sort tools by primary score descending. Post-U3 inversion every tool has
- * a scorecard; the unscored-tools-sort-to-bottom branch is gone with the
- * pre-inversion code path that allowed null scorecards.
+ * Sort tools by primary score descending. Every tool has a scorecard, so
+ * the unscored-tools-sort-to-bottom branch is gone with the pre-inversion
+ * code path that allowed null scorecards.
  *
  * @param {Array<{ tool: object, scorecard: object }>} tools
  * @returns {Array<{ tool: object, scorecard: object, rank: number, principleScore: object }>}

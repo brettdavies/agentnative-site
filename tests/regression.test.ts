@@ -258,7 +258,7 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
     const html = await readFile(join(DIST, 'install.html'), 'utf8');
     const md = await readFile(join(DIST, 'install.md'), 'utf8');
     expect(html).toContain('<h1');
-    expect(md).toMatch(/^#\s+Install agentnative/);
+    expect(md).toMatch(/^#\s+Install anc/);
     await expect(readFile(join(DIST, 'install.json'), 'utf8')).rejects.toThrow(/ENOENT/);
   });
 
@@ -386,5 +386,58 @@ describe('regression #7 — live-scoring build indexes (plan U1)', () => {
     const hints = JSON.parse(await readFile(join(DIST, 'discovery-hints-index.json'), 'utf8'));
     const overlap = Object.keys(hints.by_owner_repo).filter((k) => k in reg.by_owner_repo);
     expect(overlap).toEqual([]);
+  });
+});
+
+describe('regression #8 — /api/score response triad + spec-version exports + name coverage', () => {
+  test('shapeScoreSuccess emits the four-field response triad', async () => {
+    // Cheap smoke for the contract enforced by response-shape.ts. The
+    // full handler-dispatch variant lives in tests/score-contract.test.ts;
+    // this one fails fast in the regression suite without spinning up the
+    // pipeline stubs.
+    const { shapeScoreSuccess } = await import('../src/worker/score/response-shape');
+    const res = shapeScoreSuccess({ kind: 'registry_hit' }, '0.3.0', 'live');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toHaveProperty('scorecard');
+    expect(typeof body.spec_version).toBe('string');
+    expect(typeof body.site_spec_version).toBe('string');
+    expect(typeof body.anc_version).toBe('string');
+    expect(typeof body.checker_url).toBe('string');
+  });
+
+  test('shapeScoreSuccess refuses to emit a partial response when anc_version is missing', async () => {
+    // Mirror image of the triad contract: a missing anc_version forces
+    // a 500 incomplete_response_contract, not a quiet omission.
+    const { shapeScoreSuccess } = await import('../src/worker/score/response-shape');
+    const res = shapeScoreSuccess({ kind: 'registry_hit' }, null, 'live');
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('incomplete_response_contract');
+  });
+
+  test('every registry.yaml tools[].name appears in by_slug', async () => {
+    // Cheap overlap smoke; the full join (anc_version, scorecard_url,
+    // version, score_pct) lives in tests/score-contract.test.ts.
+    const yaml = await import('js-yaml');
+    const raw = await readFile(join(REPO_ROOT, 'registry.yaml'), 'utf8');
+    const doc = yaml.load(raw) as { tools: Array<{ name: string }> };
+    const idx = JSON.parse(await readFile(join(DIST, 'registry-index.json'), 'utf8'));
+    const missing = doc.tools.map((t) => t.name).filter((name) => !(name in idx.by_slug));
+    expect(missing).toEqual([]);
+  });
+
+  test('src/worker/spec-version.gen.ts exports SPEC_VERSION + SITE_SPEC_VERSION + CHECKER_URL as non-empty strings', async () => {
+    // Existence guard on the build-emitted constants the response-shape
+    // depends on. tests/spec-version-gen.test.ts already covers freshness
+    // against the source VERSION files; this assertion only catches the
+    // export-shape regression (renamed or removed symbol).
+    const mod = await import('../src/worker/spec-version.gen');
+    expect(typeof mod.SPEC_VERSION).toBe('string');
+    expect(mod.SPEC_VERSION.length).toBeGreaterThan(0);
+    expect(typeof mod.SITE_SPEC_VERSION).toBe('string');
+    expect(mod.SITE_SPEC_VERSION.length).toBeGreaterThan(0);
+    expect(typeof mod.CHECKER_URL).toBe('string');
+    expect(mod.CHECKER_URL.length).toBeGreaterThan(0);
   });
 });

@@ -20,7 +20,7 @@
 #                       reads tokens from styles/site/BannedFonts.yml)
 #   7. prose-check    — bash scripts/prose-check.sh
 #                       (Vale + LanguageTool over *.md in scope; LT skips
-#                       cleanly when pool is unreachable)
+#                       cleanly when LanguageTool is unreachable)
 #
 # Stages 5-7 each redirect child stdin to </dev/null. The branch-deletion
 # short-circuit at the top of the hook consumes the hook-protocol bytes
@@ -71,6 +71,9 @@ bold '==> Banned-font deployment scan'
 bash scripts/check-banned-fonts.sh </dev/null
 
 bold '==> prose-check (Vale + LanguageTool)'
-bash scripts/prose-check.sh </dev/null
+# Scope to files changed vs PROSE_CHECK_BASE (default origin/dev) so untracked
+# or pre-existing prose drift outside the pushed branch's diff can't block the
+# push. Full-scope check remains available via `bash scripts/prose-check.sh`.
+bash scripts/prose-check.sh --changed-only </dev/null
 
 bold '==> pre-push checks passed'
