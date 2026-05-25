@@ -9,12 +9,10 @@
   // public repo. See RELEASES.md § Secrets.
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
-  // Project-scoped opt-out of wrangler telemetry. Belt-and-suspenders with
-  // the user-level `WRANGLER_SEND_METRICS=false` env var (see dotfiles
-  // config/shell/telemetry.sh) and the per-machine `wrangler telemetry
-  // disable` setting. This one travels with the repo so CI runs and any
-  // contributor's local wrangler invocations stay opted out regardless of
-  // their shell environment.
+  // Project-scoped opt-out of wrangler telemetry. Travels with the repo so
+  // CI runs and contributor invocations stay opted out regardless of
+  // per-user `WRANGLER_SEND_METRICS` or per-machine `wrangler telemetry
+  // disable` state.
   "send_metrics": false,
   "assets": {
     "directory": "./dist",
@@ -27,42 +25,20 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
-  // Live-scoring path — first-ever stateful bindings on this Worker:
-  // DO + Container + R2 + rate-limit. The migrations entry below is a
-  // one-way gate: `new_sqlite_classes` MUST be used (not the legacy
-  // `new_classes`) so the DO is created with SQLite-backed storage.
-  // Reverting needs a follow-up migration with `deleted_classes`;
-  // documented in RELEASES.md.
+  // Live-scoring stateful bindings: DO + Container + R2 + rate-limit.
+  // The migrations entry below is a one-way gate: `new_sqlite_classes`
+  // MUST be used (not `new_classes`) so the DO is created with SQLite-
+  // backed storage. Reverting needs a follow-up migration with
+  // `deleted_classes`; see RELEASES.md § Migration v1: the rollback
+  // recipe.
   "containers": [
     {
       "class_name": "Sandbox",
-      // PRODUCTION pin — this is the image deployed to anc.dev.
-      // Advances only at release time. The staging pin
-      // (env.staging.containers[0].image) advances independently
-      // during development; release PRs to main promote this pin to
-      // match staging after the soak.
-      //
-      // Promotion procedure (release PR, main-targeting):
-      //   1. Confirm the env.staging tag is the one to ship to prod
-      //   2. Replace this tag with env.staging's tag
-      //   3. CI on the main-targeting PR asserts both pins are aligned
-      //      AND that the tag exists in the CF managed registry
-      //   4. Merge; CI deploys prod
-      //
-      // For low-risk image bumps (base-image security patch, no
-      // behavior delta), the shortcut is to update BOTH pins on the
-      // same feat PR — CI on dev-targeting PRs accepts lockstep too.
-      // Use soak-then-promote whenever the change touches sandbox
-      // behavior (anc bump, package manager addition, runtime change).
-      // See RELEASES.md § Sandbox image releases for the full flow.
-      //
-      // Image-retention discipline: never delete a tag that backed a
-      // shipped Worker version. Deletion silently breaks `wrangler
-      // rollback` for any version that referenced the deleted image
-      // (cite https://developers.cloudflare.com/containers/platform-details/limits/).
-      // Retention is what makes soak-then-promote safe: the prod pin
-      // keeps pointing at the previous staging-soaked image until the
-      // release explicitly promotes.
+      // PRODUCTION pin: the image deployed to anc.dev. Advances only at
+      // release time; staging pin (env.staging.containers[0].image)
+      // leads during development. Full promotion / soak / lockstep flow
+      // and image-retention discipline: RELEASES.md § Sandbox image
+      // releases and RELEASES-RATIONALE.md § Sandbox image releases.
       //
       // Account ID in the URI is committed deliberately: Wrangler
       // resolves it from auth at push time, so the literal here is the
@@ -104,8 +80,7 @@
       "simple": { "limit": 10, "period": 60 }
     },
     // SCORE_LIMITER_IP — coarse per-IP fallback that catches clients
-    // swapping the session cookie to dodge SCORE_LIMITER. Per plan
-    // "Cost ceiling and abuse mitigation" step 2: 30 requests / 60 s / IP.
+    // swapping the session cookie to dodge SCORE_LIMITER. 30 req/60 s/IP.
     // Distinct namespace so the per-session and per-IP windows don't share
     // counters.
     {
@@ -114,9 +89,8 @@
       "simple": { "limit": 30, "period": 60 }
     }
   ],
-  // SCORE_KV — operator-flippable `scoring_disabled` kill switch (plan
-  // "Cost ceiling and abuse mitigation" step 3). Flip via:
-  //   wrangler kv key put --binding=SCORE_KV scoring_disabled true
+  // SCORE_KV — operator-flippable `scoring_disabled` kill switch. Flip
+  // procedure: RELEASES.md § Cost guardrails / Manual kill switch.
   // The Worker reads + caches the flag in-memory for 30 s; propagates to
   // every isolate within one KV-read TTL.
   "kv_namespaces": [
@@ -139,30 +113,29 @@
       "dataset": "anc_live_score_prod"
     }
   ],
-  // Production Turnstile sitekey deferred until production promotion. The
-  // homepage form template reads TURNSTILE_SITEKEY from this env var to
-  // render the invisible widget. Absent here so a misconfigured prod cut
-  // fails loudly rather than silently shipping a staging-test sitekey to
-  // production users. The TURNSTILE_SECRET (real) lives in wrangler
-  // secrets, not committed.
-  // "vars": { "TURNSTILE_SITEKEY": "..." },
+  // Production Turnstile sitekey. The homepage form template reads
+  // TURNSTILE_SITEKEY from this env var to render the invisible widget;
+  // an empty value disables the form with a "not yet live" message. The
+  // sitekey is public-by-design (embedded in HTML at request time;
+  // anyone viewing the page source sees it); the matching
+  // TURNSTILE_SECRET is set via `wrangler secret put` and is not
+  // committed. env.staging.vars carries Cloudflare's always-pass test
+  // sitekey for CLI verification flows.
+  "vars": { "TURNSTILE_SITEKEY": "ff0x4AAAAAADQFMBoVm56-OPuQ" },
   // Production (top-level): anc.dev custom domain, no .workers.dev URL.
   // Deployed via `wrangler deploy` (no --env flag) on push to main.
   // Cloudflare auto-provisions SSL cert + DNS CNAME for the custom domain.
   "routes": [{ "pattern": "anc.dev", "custom_domain": true }],
   "workers_dev": false,
-  // Staging: separate Worker (agentnative-site-staging) deployed from dev.
-  // workers.dev only — no custom domain. The staging-noindex guard in
-  // src/worker/headers.ts adds X-Robots-Tag: noindex on *.workers.dev.
-  // Deploy with: wrangler deploy --env staging
+  // Staging: separate Worker (agentnative-site-staging) deployed from
+  // dev. workers.dev only — no custom domain. The staging-noindex guard
+  // in src/worker/headers.ts adds X-Robots-Tag: noindex on
+  // *.workers.dev so staging never gets crawled.
   //
-  // Wrangler env semantics: SOME keys inherit from top-level, others
-  // (durable_objects, containers, migrations, ratelimits, r2_buckets)
-  // do NOT — wrangler warns when they're missing under an env. Mirror
-  // every live-scoring binding under env.staging explicitly. The
-  // staging Worker name (agentnative-site-staging) namespaces the DO
-  // instances away from prod automatically; the R2 bucket name + the
-  // rate-limit namespace_id need explicit staging suffixes.
+  // Inheritance rules (which keys inherit from top-level, which need
+  // explicit mirroring or override, REPLACE-vs-merge semantics) and
+  // the 2026-04-30 routing-drift incident that informed them: see
+  // RELEASES-RATIONALE.md § Wrangler env inheritance traps.
   "env": {
     "staging": {
       // Explicit name needed under env.staging because the containers
@@ -173,53 +146,29 @@
       // `agentnative-site-sandbox`.
       "name": "agentnative-site-staging",
       "workers_dev": true,
-      // CRITICAL: explicitly override `routes` to an empty array. Per the
-      // wrangler config docs, `routes` is an INHERITABLE key — if absent
-      // here, env.staging silently inherits the top-level
-      // `routes: [{ pattern: "anc.dev", custom_domain: true }]`. That
-      // inheritance is what produced the routing-drift bug observed since
-      // 2026-04-30: every `wrangler deploy --env staging` was re-attaching
-      // anc.dev to the staging Worker because env.staging was inheriting
-      // the prod route. Explicit empty array breaks the inheritance.
-      // Removing this line will reintroduce the bug. See the CHANGELOG /
-      // PR description for the full investigation.
+      // Load-bearing override: `routes` is an inheritable key. An empty
+      // array breaks inheritance from the top-level
+      // `[{pattern: "anc.dev", custom_domain: true}]`, which would
+      // otherwise re-attach anc.dev to the staging Worker on every
+      // staging deploy. See RELEASES-RATIONALE.md § Wrangler env
+      // inheritance traps.
       "routes": [],
-      // PROPHYLACTIC: same inheritance footgun as `routes` above. `triggers`
-      // (cron) is an INHERITABLE key. If a future change adds cron schedules
-      // at the top level (e.g., a daily registry refresh on the production
-      // Worker), env.staging would silently inherit them and double-fire
-      // every scheduled invocation. We don't currently have any crons, but
-      // setting `triggers.crons` to an empty array here makes the staging
-      // override explicit, so a future cron addition forces a deliberate
-      // decision about whether to mirror to staging. Same audit pattern
-      // applied to all inheritable keys at top-level.
+      // Prophylactic override: `triggers` is an inheritable key. Empty
+      // `crons` here forces a deliberate decision when a top-level cron
+      // is added, rather than silent double-fire on staging. See
+      // RELEASES-RATIONALE.md § Wrangler env inheritance traps.
       "triggers": { "crons": [] },
       "containers": [
         {
           "class_name": "Sandbox",
-          // STAGING pin — advances independently from the top-level
-          // (prod) pin during development. This is the "leading" side
-          // of the soak-then-promote workflow: new images land here
-          // first, soak on the staging Worker, then get promoted to
-          // the top-level pin via a release PR to main.
-          //
-          // Image bump procedure (feat PR, dev-targeting):
-          //   1. From clean tree on dev: GIT_SHA=$(git rev-parse --short HEAD)
-          //   2. wrangler containers build -p -t anc-sandbox:$GIT_SHA docker/sandbox/
-          //   3. Update THIS pin only (leave top-level alone). For low-
-          //      risk bumps, update both pins; CI accepts lockstep on
-          //      dev-targeting PRs.
-          //   4. PR to dev; CI verifies the tag exists in the registry
-          //      and (for divergent pins) allows the lead.
-          //   5. Merge; CI deploys the staging Worker
-          //      (agentnative-site-staging) to the new image. Soak.
-          //
-          // `containers` is non-inheritable per-env, so each env block
-          // needs its own copy of the image URI. The two pins are
-          // independent CF resources (separate container apps, separate
-          // version histories) and may legitimately diverge.
-          //
-          // See RELEASES.md § Sandbox image releases for the full flow.
+          // STAGING pin — the "leading" side of the soak-then-promote
+          // workflow. Advances independently from the top-level (prod)
+          // pin during development; the two pins are independent CF
+          // resources (separate container apps, separate version
+          // histories) and may legitimately diverge during a soak.
+          // `containers` is non-inheritable per-env, so this duplicate
+          // URI is required. Bump procedure: RELEASES.md § Image bump
+          // (feat PR to dev).
           "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:9aed5c3",
           "instance_type": "standard-2",
           "max_instances": 10
@@ -285,11 +234,12 @@
       ],
       // Cloudflare's "always passes" test sitekey (public, documented at
       // https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
-      // Pairs with the corresponding always-passes test SECRET wired into
-      // `wrangler secret put TURNSTILE_SECRET --env staging` so staging
-      // verification accepts any token without minting real bot-defense
-      // signal. Production sitekey lives at the top-level (deferred to
-      // production promotion); never inherit this staging value into prod.
+      // Pairs with the corresponding always-pass test SECRET on the
+      // staging Worker so verification accepts any token without minting
+      // real bot-defense signal. Production sitekey lives at the
+      // top-level `vars` block. REPLACE-not-merge inheritance and the
+      // future-vars-mirroring requirement: RELEASES-RATIONALE.md §
+      // Wrangler env inheritance traps.
       "vars": {
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA"
       }

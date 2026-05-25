@@ -251,6 +251,48 @@ cadence where the cost and the latency are acceptable.
 The smoke is therefore a high-leverage tripwire, not a full pipeline test. When it fails, the deploy is wrong; when it
 passes, the deploy is at least serving the response triad to a curated input, not a proof that the live path works.
 
+## Wrangler env inheritance traps
+
+Wrangler's per-env config inherits some keys from the top-level and not others. Mismatched expectations on either side
+produced a real production incident on this repo (the 2026-04-30 routing-drift bug: every `wrangler deploy --env
+staging` was silently re-attaching `anc.dev` to the staging Worker because `env.staging` inherited the top-level
+`routes` array). The current `env.staging` block carries explicit overrides for every inheritable key so the inheritance
+behavior is deliberate and visible, not silent.
+
+### Inheritable keys: explicit override required
+
+These keys inherit from top-level when absent under `env.staging`. The current block overrides each one.
+
+- **`routes`** (load-bearing): empty `[]` array breaks the inheritance. Without the override, `env.staging` inherits the
+  top-level `[{pattern: "anc.dev", custom_domain: true}]` and every `wrangler deploy --env staging` re-attaches anc.dev
+  to the staging Worker. This is the 2026-04-30 routing-drift incident; the explicit `routes: []` under env.staging is
+  the fix.
+- **`triggers`** (prophylactic): empty `{crons: []}` override. There are no production cron schedules today, but
+  `triggers.crons` inherits the same way `routes` does. The empty array forces a deliberate decision when a top-level
+  schedule is added.
+- **`vars`** (REPLACE semantics): when `env.staging.vars` exists, it fully replaces the top-level `vars`, not
+  deep-merged. Staging carries the always-pass Turnstile test `sitekey` (`1x...AA`), which correctly isolates staging
+  from the real production `sitekey`. Any future top-level `vars` addition must be mirrored under `env.staging.vars` or
+  staging won't see it.
+
+### Non-inheritable keys: mirror under env.staging
+
+These keys do NOT inherit; `wrangler` warns when they're absent under an env. The staging block mirrors each one with
+staging-specific values:
+
+- `durable_objects`, `containers`, `migrations`, `ratelimits`, `r2_buckets`, `kv_namespaces`,
+  `analytics_engine_datasets`.
+- Staging-side values diverge from prod on resource identifiers (R2 bucket suffix `-staging`, distinct rate-limit
+  namespace IDs `1002`/`1004`, distinct Analytics Engine dataset `anc_live_score_staging`) so prod and staging traffic
+  stay isolated.
+
+### Container app naming
+
+The container app name doesn't follow wrangler's automatic `<worker>-<env>` env-suffix convention; the staging block
+needs an explicit `name: "agentnative-site-staging"` so the container app derives as `agentnative-site-staging-sandbox`
+and is distinct from prod's `agentnative-site-sandbox`. Without the explicit name, the derivation collides and a
+`wrangler deploy --env staging` would target the production container app.
+
 ## CI workflow split
 
 ### Why the stub workflow exists
