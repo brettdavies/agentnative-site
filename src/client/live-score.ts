@@ -26,7 +26,16 @@ interface TurnstileApi {
     element: HTMLElement | string,
     options: {
       sitekey: string;
-      size?: 'invisible' | 'normal' | 'compact';
+      // `size` is widget dimensions (compact|flexible|normal). `invisible`
+      // is NOT a valid size value — Turnstile throws on render. Invisible
+      // behavior is controlled by the sitekey's mode (set in the CF
+      // dashboard), not by render-time params.
+      size?: 'compact' | 'flexible' | 'normal';
+      // `execution: 'execute'` defers the challenge until execute() is
+      // called explicitly (matches our acquire-on-submit flow). The
+      // default 'render' starts the challenge as soon as the widget
+      // mounts, which races our acquireTurnstileToken caller.
+      execution?: 'render' | 'execute';
       callback?: (token: string) => void;
       'error-callback'?: () => void;
       'expired-callback'?: () => void;
@@ -112,6 +121,18 @@ function initLiveScore(els: {
   // curated-reward or phase-progression text from the previous submit.
   // Reset to a clean state so the form is immediately usable again.
   // Standard a11y pattern, no copy change needed.
+  //
+  // Also tear down the Turnstile widget on pagehide so a bfcache-restored
+  // page doesn't reuse a half-dead widget instance. On the next
+  // acquireTurnstileToken the module-scope state is empty and a fresh
+  // widget is rendered.
+  window.addEventListener('pagehide', () => {
+    if (turnstileWidget && window.turnstile) {
+      window.turnstile.remove(turnstileWidget.id);
+    }
+    turnstileWidget = null;
+    pendingTurnstile = null;
+  });
   window.addEventListener('pageshow', (event) => {
     if (!event.persisted) return;
     setSubmitting(els, false);
@@ -275,7 +296,7 @@ function acquireTurnstileToken(
     }
     const id = api.render(container, {
       sitekey,
-      size: 'invisible',
+      execution: 'execute',
       callback: (token: string) => settleTurnstile({ token }),
       'error-callback': () => settleTurnstile({ error: new Error('turnstile_error') }),
       'expired-callback': () => settleTurnstile({ error: new Error('turnstile_expired') }),
