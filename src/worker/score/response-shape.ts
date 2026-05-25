@@ -43,6 +43,7 @@ export type ScoreError =
   | { code: 'turnstile_failed'; cta_text: string }
   | { code: 'scoring_disabled'; cta_text: string }
   | { code: 'sandbox_stub_until_u6'; cta_text: string }
+  | { code: 'sandbox_unavailable'; cta_text: string }
   | { code: 'incomplete_response_contract'; details: string; cta_text: string }
   | { code: 'service_misconfigured'; details: string; cta_text: string };
 
@@ -104,6 +105,7 @@ export function statusForError(error: ScoreError): number {
       return 502;
     case 'scoring_disabled':
     case 'sandbox_stub_until_u6':
+    case 'sandbox_unavailable':
       return 503;
     case 'incomplete_response_contract':
     case 'service_misconfigured':

@@ -105,6 +105,13 @@ type StubOverrides = Partial<{
   // When true, SCORE_TELEMETRY.writeDataPoint throws. Exercises the
   // graceful-degradation path in recordScoreEvent.
   telemetryThrows: boolean;
+  // When true, env.SCORE is omitted from the returned ScoreEnv.
+  // Mirrors the mid-rollback Worker state (post v2-drop-sandbox, pre
+  // v3-restore-sandbox) where the DO binding is gone. Exercises the
+  // binding-presence guard in handler.ts that returns a typed
+  // sandbox_unavailable 503 instead of letting getRandom() throw and
+  // surface as Cloudflare error 1101.
+  noScoreBinding: boolean;
 }>;
 
 export type ScoreTestEnvOverrides = StubOverrides;
@@ -192,7 +199,7 @@ export function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
     },
   };
 
-  return {
+  const env: ScoreEnv = {
     ASSETS: {
       async fetch(req: Request | string): Promise<Response> {
         const url = typeof req === 'string' ? req : req.url;
@@ -206,7 +213,6 @@ export function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
         return new Response('not found', { status: 404 });
       },
     } as Fetcher,
-    SCORE: stubDo as unknown as DurableObjectNamespace,
     SCORE_KV: stubKv as unknown as KVNamespace,
     SCORE_CACHE: cacheStub as unknown as R2Bucket,
     SCORE_LIMITER: {
@@ -227,7 +233,11 @@ export function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
     },
     TURNSTILE_SECRET: turnstileSecret,
     SESSION_HMAC_SECRET: hmacSecret,
-  };
+  } as ScoreEnv;
+  if (!overrides.noScoreBinding) {
+    env.SCORE = stubDo as unknown as DurableObjectNamespace;
+  }
+  return env;
 }
 
 export function postScore(input: string, opts: { token?: string; cookie?: string; pathSuffix?: string } = {}): Request {
@@ -390,6 +400,19 @@ describe('/api/score — POST pipeline error paths', () => {
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe('sandbox_stub_until_u6');
+  });
+
+  test('missing env.SCORE binding → 503 sandbox_unavailable (mid-rollback guard)', async () => {
+    // Mirrors the 2026-05-24 cross-migration rollback rehearsal finding:
+    // a Worker version deployed between v2-drop-sandbox and v3-restore-
+    // sandbox has no SCORE binding. Without this guard, getRandom() throws
+    // and Cloudflare surfaces error 1101 (Worker JS exception) to the user.
+    const res = await handleScore(postScore('cargo install foo-cli'), makeEnv({ noScoreBinding: true }));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string }; spec_version: string; checker_url: string };
+    expect(body.error.code).toBe('sandbox_unavailable');
+    expect(body.spec_version).toBeDefined();
+    expect(body.checker_url).toBeDefined();
   });
 
   test('DO returns valid scorecard envelope → 200 with response triad', async () => {
