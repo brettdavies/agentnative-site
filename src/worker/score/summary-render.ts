@@ -235,8 +235,8 @@ const LIVE_SCORE_CSP =
   'frame-src https://challenges.cloudflare.com; ' +
   "connect-src 'self' https://challenges.cloudflare.com; " +
   "img-src 'self' data:; " +
-  "style-src 'self' 'unsafe-inline'; " +
-  "font-src 'self'; " +
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src 'self' https://fonts.gstatic.com; " +
   "base-uri 'self'; " +
   "form-action 'self'; " +
   "object-src 'none'; " +

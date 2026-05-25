@@ -121,6 +121,18 @@ function initLiveScore(els: {
   // curated-reward or phase-progression text from the previous submit.
   // Reset to a clean state so the form is immediately usable again.
   // Standard a11y pattern, no copy change needed.
+  //
+  // Also tear down the Turnstile widget on pagehide so a bfcache-restored
+  // page doesn't reuse a half-dead widget instance. On the next
+  // acquireTurnstileToken the module-scope state is empty and a fresh
+  // widget is rendered.
+  window.addEventListener('pagehide', () => {
+    if (turnstileWidget && window.turnstile) {
+      window.turnstile.remove(turnstileWidget.id);
+    }
+    turnstileWidget = null;
+    pendingTurnstile = null;
+  });
   window.addEventListener('pageshow', (event) => {
     if (!event.persisted) return;
     setSubmitting(els, false);
