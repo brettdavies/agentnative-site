@@ -99,7 +99,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p1-defaults-in-help",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p1-may-rich-tui",
@@ -109,7 +114,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p1-rich-tui",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p2-must-output-flag",
@@ -230,7 +240,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p2-more-formats",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p2-may-raw-flag",
@@ -240,7 +255,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p2-raw-flag",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p3-must-subcommand-examples",
@@ -316,7 +336,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p3-about-long-about",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p3-may-examples-subcommand",
@@ -326,7 +351,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p3-examples-subcommand",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p4-must-try-parse",
@@ -615,7 +645,12 @@
         "kind": "conditional",
         "condition": "CLI has commands that accept input data"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p6-stdin-input",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p6-should-consistent-naming",
@@ -626,7 +661,12 @@
         "kind": "conditional",
         "condition": "CLI uses subcommands"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p6-consistent-naming",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p6-should-tier-gating",
@@ -657,7 +697,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p6-color-flag",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p6-may-standard-names",
@@ -714,7 +759,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p7-verbose",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p7-should-limit",
@@ -725,7 +775,12 @@
         "kind": "conditional",
         "condition": "CLI has list-style commands"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p7-limit",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p7-should-timeout",
@@ -735,7 +790,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p7-timeout-behavioral",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p7-may-cursor-pagination",
@@ -746,7 +806,12 @@
         "kind": "conditional",
         "condition": "CLI returns paginated results"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "check_id": "p7-cursor-pagination",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p7-may-auto-verbosity",
@@ -783,6 +848,10 @@
         "kind": "universal"
       },
       "verifiers": [
+        {
+          "check_id": "p6-agents-md",
+          "layer": "project"
+        },
         {
           "check_id": "p8-bundle-exists",
           "layer": "project"
@@ -824,20 +893,20 @@
   ],
   "summary": {
     "total": 59,
-    "covered": 32,
-    "uncovered": 27,
-    "dual_layer": 9,
+    "covered": 45,
+    "uncovered": 14,
+    "dual_layer": 10,
     "must": {
       "total": 28,
       "covered": 22
     },
     "should": {
       "total": 21,
-      "covered": 7
+      "covered": 14
     },
     "may": {
       "total": 10,
-      "covered": 3
+      "covered": 9
     }
   },
   "audit_profiles": [
