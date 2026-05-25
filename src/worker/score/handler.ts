@@ -138,9 +138,9 @@ export type ScoreEnv = KillSwitchEnv &
   CacheEnv &
   ScoreTelemetryEnv & {
     ASSETS: Fetcher;
-    // Optional because a mid-rollback Worker (post v2-drop-sandbox,
-    // pre v3-restore-sandbox) deploys cleanly without the SCORE binding.
-    // The guard before the DO call (see step 7) returns a typed 503
+    // Optional because a mid-rollback Worker (between v2-drop-sandbox
+    // and v3-restore-sandbox) deploys cleanly without the SCORE binding.
+    // The binding-presence guard before the DO call returns a typed 503
     // sandbox_unavailable; without it `getRandom(env.SCORE, ...)` throws
     // and surfaces as Cloudflare error 1101.
     SCORE?: DurableObjectNamespace;
@@ -699,7 +699,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   // container session for subsequent requests routed to it.
   //
   // Binding-presence guard: a Worker version deployed mid-rollback
-  // (post v2-drop-sandbox, pre v3-restore-sandbox) has no SCORE
+  // (between v2-drop-sandbox and v3-restore-sandbox) has no SCORE
   // binding. Without this check, getRandom() throws on the undefined
   // namespace and surfaces as Cloudflare error 1101 (Worker exception).
   if (!env.SCORE) {

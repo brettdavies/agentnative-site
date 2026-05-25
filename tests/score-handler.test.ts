@@ -106,7 +106,7 @@ type StubOverrides = Partial<{
   // graceful-degradation path in recordScoreEvent.
   telemetryThrows: boolean;
   // When true, env.SCORE is omitted from the returned ScoreEnv.
-  // Mirrors the mid-rollback Worker state (post v2-drop-sandbox, pre
+  // Mirrors the mid-rollback Worker state (between v2-drop-sandbox and
   // v3-restore-sandbox) where the DO binding is gone. Exercises the
   // binding-presence guard in handler.ts that returns a typed
   // sandbox_unavailable 503 instead of letting getRandom() throw and
@@ -403,10 +403,10 @@ describe('/api/score — POST pipeline error paths', () => {
   });
 
   test('missing env.SCORE binding → 503 sandbox_unavailable (mid-rollback guard)', async () => {
-    // Mirrors the 2026-05-24 cross-migration rollback rehearsal finding:
-    // a Worker version deployed between v2-drop-sandbox and v3-restore-
-    // sandbox has no SCORE binding. Without this guard, getRandom() throws
-    // and Cloudflare surfaces error 1101 (Worker JS exception) to the user.
+    // Without the binding-presence guard, getRandom() throws on the
+    // undefined env.SCORE namespace and the Worker exception surfaces
+    // as Cloudflare error 1101 (a generic page, no JSON envelope). The
+    // guard converts that into a typed 503.
     const res = await handleScore(postScore('cargo install foo-cli'), makeEnv({ noScoreBinding: true }));
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string }; spec_version: string; checker_url: string };
