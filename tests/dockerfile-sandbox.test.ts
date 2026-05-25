@@ -81,9 +81,9 @@ describe('docker/sandbox/Dockerfile — SHA-pin discipline', () => {
     expect(df).toMatch(/echo '[0-9a-f]{64} {2}\/tmp\/uv\.tgz' \| sha256sum -c -/);
   });
 
-  test('pinned anc release matches v0.3.1 (the one whose sha256 is in the file)', async () => {
+  test('pinned anc release matches v0.4.0 (the one whose sha256 is in the file)', async () => {
     const df = await loadDockerfile();
-    expect(df).toContain('agentnative-cli/releases/download/v0.3.1/');
+    expect(df).toContain('agentnative-cli/releases/download/v0.4.0/');
   });
 });
 

@@ -220,7 +220,7 @@
           // version histories) and may legitimately diverge.
           //
           // See RELEASES.md § Sandbox image releases for the full flow.
-          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:d87ed0a",
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:9aed5c3",
           "instance_type": "standard-2",
           "max_instances": 10
         }
