@@ -1,6 +1,6 @@
 // Response-header policy for the agentnative-site Worker.
 //
-// Contract (docs/DESIGN.md §3.4 + eng review A8, A10, A12, P4):
+// Contract (docs/DESIGN.md §3.4):
 //
 //   HTML responses         Link: </p<n>.md>; rel="alternate"; type="text/markdown"
 //                          X-Llms-Txt: /llms.txt
@@ -36,13 +36,47 @@
 //   Hashed assets          Cache-Control: public, max-age=31536000, immutable
 //   (/fonts/*, /og-image.png)
 //
-//   Staging guard (P4 +    X-Robots-Tag: noindex on every response whose
-//    locked decision #4)   Host ends with `.workers.dev`. Added LAST so it
+//   Staging guard          X-Robots-Tag: noindex on every response whose
+//                          Host ends with `.workers.dev`. Added LAST so it
 //                          composes with the markdown branch (both set
 //                          noindex; last write wins, same value either way).
 
 const SHORT_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
+
+// Content-Security-Policy for HTML responses. CSP is required to allow
+// Cloudflare Turnstile's invisible widget script + iframe + siteverify
+// XHR on the homepage form, while keeping the rest of the site locked
+// down. Three directives MUST include `challenges.cloudflare.com` or
+// Turnstile breaks silently:
+//   - script-src  (lazy-loaded api.js)
+//   - frame-src   (invisible widget iframe)
+//   - connect-src (token exchange XHR)
+//
+// `'unsafe-inline'` is required for:
+//   - script-src: shell.mjs inlines the theme-init bootstrap (`<script>${themeInit}</script>`)
+//                 so dark/light mode is set BEFORE first paint, no FOUC.
+//   - style-src:  Shiki emits inline `style="color: #..."` on every code-block
+//                 token (the dual-theme bridge in DESIGN.md §4.6 depends on it).
+//
+// img-src includes `data:` for inline SVG icons; font-src `'self'` because
+// the woff2 files self-host from /fonts/. base-uri + form-action + object-src
+// lock down classic exfil/click-jack vectors that no part of this site needs.
+//
+// Applied to every HTML response (not just /), so a CSP regression test
+// hitting any page surfaces drift on every directive.
+const CSP_HTML =
+  "default-src 'self'; " +
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+  'frame-src https://challenges.cloudflare.com; ' +
+  "connect-src 'self' https://challenges.cloudflare.com; " +
+  "img-src 'self' data:; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "font-src 'self'; " +
+  "base-uri 'self'; " +
+  "form-action 'self'; " +
+  "object-src 'none'; " +
+  "frame-ancestors 'self'";
 
 export interface ApplyHeadersOptions {
   request: Request;
@@ -101,6 +135,10 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     headers.set('Link', `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`);
     headers.set('X-Llms-Txt', '/llms.txt');
     headers.set('Cache-Control', SHORT_CACHE);
+    // CSP applies to HTML responses only — the markdown / JSON / SVG
+    // branches above MUST stay free of HTML-only directives like
+    // frame-ancestors (Cloudflare WAF flags inconsistent enforcement).
+    headers.set('Content-Security-Policy', CSP_HTML);
   }
 
   // Staging guard — three-line check per locked decision #4. Applied LAST so

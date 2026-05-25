@@ -51,10 +51,10 @@ describe('parseInstallCommand — happy paths from plan U4 table', () => {
     });
   });
 
-  test('uv tool install <pkg> normalizes to pip', () => {
+  test('uv tool install <pkg> resolves to pm=uv (split from pip in U6 rework)', () => {
     expect(parseInstallCommand('uv tool install black')).toEqual({
       ok: true,
-      value: { pm: 'pip', package: 'black', binary: 'black' },
+      value: { pm: 'uv', package: 'black', binary: 'black' },
     });
   });
 

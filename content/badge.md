@@ -10,7 +10,7 @@ when a tool's score changes.
 ## What the badge looks like
 
 The badge is rendered at build time and served as a static SVG. The site does not use shields.io, has no third-party
-render dependency, and requires no account — the renderer is [`badge-maker`](https://www.npmjs.com/package/badge-maker),
+render dependency, and requires no account. The renderer is [`badge-maker`](https://www.npmjs.com/package/badge-maker),
 the same library shields.io uses internally. Visually identical output, fully self-hosted.
 
 For a tool named `<tool>`:
@@ -28,24 +28,24 @@ percent score; the color tracks the same green / yellow / red bands the [leaderb
 [![agent-native](https://anc.dev/badge/<tool>.svg)](https://anc.dev/score/<tool>)
 ```
 
-Replace `<tool>` with the tool's slug — the same name that appears on the leaderboard and in the registry. The badge
+Replace `<tool>` with the tool's slug: the same name that appears on the leaderboard and in the registry. The badge
 links to the tool's per-tool scorecard page so a reader who clicks lands on the live evidence.
 
 Per-tool scorecard pages whose tool clears the eligibility floor render this snippet inline, ready to copy.
 
-## Eligibility — the floor
+## Eligibility: the floor
 
 A tool may legitimately embed the badge when its score is **80% or higher**.
 
 The floor is the brightline at the top quartile of the launch corpus. It captures tools that took agent-readiness
-seriously, not tools that scored marginally. A tool below the floor can still link to its scorecard page — that is the
-public-by-default posture of the standard — but should not embed the badge as a quality signal until it clears 80%.
+seriously, not tools that scored marginally. A tool below the floor can still link to its scorecard page (that is the
+public-by-default posture of the standard), but should not embed the badge as a quality signal until it clears 80%.
 
 The floor is enforced by the per-tool scorecard page, not by the SVG endpoint. The SVG is rendered for every scored tool
 regardless of score. This is intentional: a tool that already embedded the badge should see the visual color shift if
 its score regresses, not a 404.
 
-## Score format — `XX%`
+## Score format: `XX%`
 
 The score on the badge is the same pass-rate the leaderboard reports: `pass / (pass + warn + fail)`, rounded to the
 nearest integer percent.
@@ -57,13 +57,13 @@ matches the leaderboard's score column so a reader sees the same number across s
 
 | Range     | Color       | What it means                                                |
 | --------- | ----------- | ------------------------------------------------------------ |
-| 80–100%   | brightgreen | Eligible — meets or exceeds the badge floor                  |
+| 80–100%   | brightgreen | Eligible; meets or exceeds the badge floor                   |
 | 60–79%    | yellow      | Decent agent-readiness with meaningful gaps                  |
 | Below 60% | red         | Significant gaps; the per-tool page lists the failing checks |
 
 Tools below the floor still receive a rendered SVG so an embedded badge stays honest after a regression.
 
-## Version pinning — the URL is always-latest, the label cites the spec
+## Version pinning: URL always-latest, label cites the spec
 
 The URL `/badge/<tool>.svg` always reflects the tool's most recent score against the most recent published spec. The
 spec version baseline is carried in the badge **label** (e.g., `agent-native v0.3`), not in the URL.
@@ -87,7 +87,7 @@ In practice this means:
 - The scorecard must be a real `anc check --output json` run, committed under
   [`scorecards/`](https://github.com/brettdavies/agentnative-site/tree/main/scorecards).
 - Anyone reading the badge can run `anc check --command <binary>` locally and arrive at the same number, modulo
-  scorecard-staleness — see the regression policy below.
+  scorecard-staleness. See the regression policy below.
 
 If the live re-run produces a different score than the badge, the live re-run wins. The badge is a pointer, not an
 authority.
@@ -104,7 +104,7 @@ your work continuously, not a one-time award.
 
 ## Claiming the badge
 
-1. Get on the [leaderboard](/scorecards) — file a registry entry per
+1. Get on the [leaderboard](/scorecards): file a registry entry per
    [the registry README](https://github.com/brettdavies/agentnative-site/blob/main/registry.yaml). The site
    auto-discovers the latest scorecard for each registry entry on every build.
 2. Run `anc check --command <binary> --output json > scorecards/<tool>-v<version>.json` and commit the result.
@@ -115,7 +115,7 @@ That is the whole flow. The convention is intentionally narrow.
 
 ## Related
 
-- [Methodology](/methodology) — how scores are computed and what the audience signal does and does not claim
-- [Scorecard schema](/scorecard-schema) — the shape of the underlying JSON
-- [Leaderboard](/scorecards) — every scored tool, sortable
-- [Install `anc`](/install) — the CLI that produces scorecards
+- [Methodology](/methodology): how scores are computed and what the audience signal does and does not claim
+- [Scorecard schema](/scorecard-schema): the shape of the underlying JSON
+- [Leaderboard](/scorecards): every scored tool, sortable
+- [Install `anc`](/install): the CLI that produces scorecards

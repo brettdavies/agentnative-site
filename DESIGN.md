@@ -5,17 +5,17 @@ feedback. Supersedes the tentative stack and visual placeholders in the CEO plan
 
 Companion artifacts split by role. Shipped artifacts (those a release of the site needs to build/render) live with the
 rest of the shipped tree under `src/` and `scripts/`. Show-your-work research artifacts (palette analysis report,
-preview HTML, concept variants) live under `docs/research/design/` on the `dev` branch only — they are intentionally
-gated off `main` by `guard-main-docs.yml` so production stays free of engineering working notes. Research-only paths
-below are referenced by name; check out `dev` to read them locally.
+preview HTML, concept variants) live under `docs/research/design/` on the `dev` branch only. `guard-main-docs.yml` gates
+them off `main` so production stays free of engineering working notes. Research-only paths below are referenced by name;
+check out `dev` to read them locally.
 
 **Shipped — consumed by the site build, present on `main`:**
 
-- [`src/styles/foundation.css`](src/styles/foundation.css) — generated drop-in stylesheet. Contains palette custom
+- [`src/styles/foundation.css`](src/styles/foundation.css): generated drop-in stylesheet. Contains palette custom
   properties (light default, dark via `prefers-color-scheme`, explicit `[data-theme]` overrides), typography tokens
   (`--font-sans`, `--font-mono`, scale), and the shipped 7b inline-keyword rules. `@font-face` declarations are
-  deliberately NOT in this file (see §4.3 — they live in the site build so the stylesheet is safe to load from any
-  origin without phantom 404s). Copied byte-for-byte to `dist/css/foundation.css` by `src/build/assets.mjs`.
+  deliberately NOT in this file (see §4.3). They live in the site build so the stylesheet is safe to load from any
+  origin without phantom 404s. Copied byte-for-byte to `dist/css/foundation.css` by `src/build/assets.mjs`.
 - [`scripts/og/og.html`](scripts/og/og.html) + [`scripts/og/og.css`](scripts/og/og.css) — production source-of- truth
   for the social card. Rendered to `public/og-image.png` by `scripts/og/generate.ts` (Playwright + Sharp, ≤150 KB PNG).
 
@@ -42,7 +42,7 @@ below are referenced by name; check out `dev` to read them locally.
 
 The agentnative spec site is the first proof-of-concept for an **agent-native documentation surface**. Every decision
 here ladders up to one question: does this choice make the site more agent-legible without making it less human-legible?
-When they conflict we default to agent-legibility — the human case survives simple HTML, the agent case does not survive
+When they conflict we default to agent-legibility. The human case survives simple HTML; the agent case does not survive
 hidden state or heavy client runtimes.
 
 **Decision A (tech stack): static-site generation from markdown via a small custom build pipeline, served by a thin
@@ -55,18 +55,18 @@ requires a Worker regardless of framework. Astro without Starlight is the credib
 concrete and documented below.
 
 **Decision B (visual system): cool-neutral palette at hue 250, navy accent in the same family, deliberately-designed
-dark mode (not inverted), Pangram Pangram's Uncut Sans (body + display) paired with GitHub Next's Monaspace Xenon (code)
-— both OFL, self-hosted, chosen via the impeccable font-selection procedure to avoid the reflex-defaults (Inter, IBM
-Plex, Fraunces, etc.), code as a first-class visual element, `prefers-color-scheme` *plus* a visible user toggle, sticky
-mini-TOC on desktop.** Palette and contrast work is backed by a reproducible tool run — see
-`docs/research/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value; the
+dark mode (not inverted), Pangram Pangram's Uncut Sans (body + display) paired with GitHub Next's Monaspace Xenon
+(code), both OFL, self-hosted, chosen via the impeccable font-selection procedure to avoid the reflex-defaults (Inter,
+IBM Plex, Fraunces, etc.), code as a first-class visual element, `prefers-color-scheme` *plus* a visible user toggle,
+sticky mini-TOC on desktop.** A reproducible tool run backs palette and contrast work; see
+`docs/research/design/color-analysis.md` for inputs, outputs, WCAG + APCA numbers, and every clamped value. The
 foundation stylesheet (palette + typography tokens + keyword rules) lives at `src/styles/foundation.css`. `@font-face`
-declarations live in the site build, not the foundation — see §4.3. MUST / SHOULD / MAY keywords ship option 7b (inline
-color only) — the originally-proposed 7b-plus side-stripe variant was pulled after it hit impeccable's banned-pattern
+declarations live in the site build, not the foundation (see §4.3). MUST / SHOULD / MAY keywords ship option 7b (inline
+color only). The originally-proposed 7b-plus side-stripe variant was pulled after it hit impeccable's banned-pattern
 list, with block-level alternatives (leading tag, background fill) deferred to live-site iteration. Preview at
 `docs/research/design/must-should-may-preview.html`.
 
-**JS posture.** Pragmatic. JS is fine — the total homepage budget is 2 MB. We still reject shipping a framework runtime
+**JS posture.** Pragmatic. JS is fine; the total homepage budget is 2 MB. We still reject shipping a framework runtime
 for state the site does not use, we still do syntax highlighting at build time, and we still treat every new dependency
 as an opt-in that needs a one-line justification in this file. But the bar is "does it earn its place," not "is it under
 a byte count." Use the native Clipboard API directly (which needs no library), and when a browser-quirk floor genuinely
@@ -98,7 +98,7 @@ not a person); the code blocks under-index on density (we will be code-heavier).
 how to build CLIs." Tech: Jekyll-ish static; effectively plain HTML.
 
 **github.com/brettdavies/lmgroktfy.** Vibe-calibration only. Borrow: honest product copy, minimal chrome, the "it is
-obvious what this is" feel. Avoid: the product-landing gradient and form-forward layout — this is a spec site, not a
+obvious what this is" feel. Avoid: the product-landing gradient and form-forward layout; this is a spec site, not a
 product page. One-line vibe: "single-purpose, confident." Tech: not directly knowable from the surface.
 
 ### Group 2 — other spec and standards surfaces
@@ -111,8 +111,8 @@ One-line vibe: "a standard that has aged like a standard, honestly." Tech: stati
 **rust-lang.org/book.** The code-heavy reference point. Borrow: generous code-block padding; mono that actually renders
 as mono on every platform; syntax highlighting that prefers readability over rainbow; left sidebar `<details>`-style TOC
 on desktop; the way inline `code` and block code share a visual family. Avoid: the mdBook default chrome (print button,
-in-header search, theme switcher) — we do not need them; the slightly heavy dark theme. One-line vibe: "a textbook that
-wants to be referenced." Tech: mdBook; static HTML with a small client-side search bundle.
+in-header search, theme switcher) since we do not need them; the slightly heavy dark theme. One-line vibe: "a textbook
+that wants to be referenced." Tech: mdBook; static HTML with a small client-side search bundle.
 
 **json-schema.org** and **semver.org** as a pair. Both tiny, authoritative, text-first. Borrow from semver: the
 near-absurd simplicity of a single page with an anchored list of MUST/SHOULD statements, readable in a single scroll,
@@ -135,7 +135,7 @@ Tech: static; plain HTML.
 
 ### Reference benchmark, not a candidate
 
-**Mintlify.** Commercial platform; ships the full agent-native documentation surface natively — auto `/llms.txt`,
+**Mintlify.** Commercial platform; ships the full agent-native documentation surface natively: auto `/llms.txt`,
 `/llms-full.txt`, `.md` URL suffix, `Accept: text/markdown` content negotiation, `Link` and `X-Llms-Txt` response
 headers, and a `noindex` hint on the markdown variant so search engines don't double-index. If we were publishing a
 product docs site for a for-profit tool we would seriously evaluate it. For a standard we own end-to-end and publish
@@ -153,7 +153,7 @@ edge storage via a Worker for routing. This is non-negotiable for three reasons:
 2. **Tail-risk floor.** The site stays reachable even if the build pipeline breaks. Last good commit is always a
    deployable artifact.
 3. **Thesis fit.** The `Accept: text/markdown` and `.md` suffix behavior become trivial when the markdown source **is**
-   the artifact — the Worker serves bytes, it doesn't synthesize them.
+   the artifact: the Worker serves bytes, it doesn't synthesize them.
 
 SSR is out because it adds a runtime dependency (on every request) for content that does not change between deployments.
 CSR is out because it puts the single most important thing on the site (the spec text) behind a client runtime, which
@@ -166,9 +166,9 @@ defeats the agent case entirely.
 3. **Astro without Starlight**
 4. **Hugo + Cloudflare Worker shim** for content negotiation
 5. **Eleventy + Cloudflare Worker shim**
-6. **Writing HTML by hand** (no markdown source) — listed to reject
+6. **Writing HTML by hand** (no markdown source); listed to reject
 
-Explicitly NOT a candidate: Cheng Lou's Pretext (per session spec — no image-wrapping need).
+Explicitly NOT a candidate: Cheng Lou's Pretext (per session spec; no image-wrapping need).
 
 ### 3.3 Scored table
 
@@ -214,10 +214,10 @@ content index, emit `dist/sitemap.xml` and `dist/og-image.png` (copied from `pub
 
 The Worker is ~80 lines: static assets from `env.ASSETS`, content-negotiation branch on `url.pathname.endsWith(".md")
 || Accepts(req).type(['text/html', 'text/markdown']) === 'text/markdown'` (proper RFC 7231 q-value parsing via the
-[`accepts`](https://www.npmjs.com/package/accepts) npm package — bare `includes("text/markdown")` mishandles `q=0`
-rejections, comma-separated media ranges, and the standard browser `*/*` fallback), `Link` and `X-Llms-Txt` response
-headers on every HTML response (copying the Mintlify pattern), `X-Robots-Tag: noindex` on the markdown variant so search
-engines do not double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
+[`accepts`](https://www.npmjs.com/package/accepts) npm package, because bare `includes("text/markdown")` mishandles
+`q=0` rejections, comma-separated media ranges, and the standard browser `*/*` fallback), `Link` and `X-Llms-Txt`
+response headers on every HTML response (copying the Mintlify pattern), `X-Robots-Tag: noindex` on the markdown variant
+so search engines do not double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
 
 **Static-asset binding (A12).** `env.ASSETS` is the
 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/) binding, configured in
@@ -232,7 +232,7 @@ engines do not double-index. Deploy is `wrangler deploy`. Rollback is `wrangler 
 
 **Cache strategy (P4).** HTML and `.md` responses carry `Cache-Control: public, max-age=300, s-maxage=86400,
 stale-while-revalidate=60` (short browser cache, long edge cache, SWR for the deploy-between-fetches window). Hashed
-immutable assets — fonts at `/fonts/*`, the content-hashed `/og-image.png` — carry `Cache-Control: public,
+immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry `Cache-Control: public,
 max-age=31536000, immutable`.
 
 **404 handling (A10).** Uses the Workers Static Assets default 404 body; no custom 404 page in v0.
@@ -242,8 +242,8 @@ max-age=31536000, immutable`.
 - **Nine pages.** Everything a framework provides by default (sidebar nav, search indexing, component library,
   multi-version switcher) is either unused or faintly in the way.
 - **Content-negotiation semantics stay in one file we own.** Even with Starlight's plugin ecosystem, `Accept:
-  text/markdown` on the same URL is not a plugin — it is a Worker concern. If the Worker exists regardless, the
-  framework's incremental value for this site is reduced to "it generates the HTML shell" — which we can do in ~40 lines
+  text/markdown` on the same URL is not a plugin; it is a Worker concern. If the Worker exists regardless, the
+  framework's incremental value for this site collapses to "it generates the HTML shell," which we can do in ~40 lines
   of templating.
 - **Plugin supply chain.** With Astro + Starlight + three agent-native plugins, we depend on four moving parts
   maintained by different humans on different release cadences. Each Starlight major-version upgrade risks plugin lag.
@@ -253,7 +253,7 @@ max-age=31536000, immutable`.
 - **Upgrade cost over a decade.** HTML does not churn. CommonMark and Shiki are reasonable to pin and replace.
 
 **Cost honestly stated.** We write ~200 lines of build script. We write ~80 lines of Worker. We do not get Starlight's
-prebuilt components free — specifically, we hand-wire click-to-copy (native Clipboard API, ~40 lines), anchor-copy
+prebuilt components free. Specifically, we hand-wire click-to-copy (native Clipboard API, ~40 lines), anchor-copy
 buttons (~30 lines), and CSS-only tabbed code (radio/`:checked`, ~60 lines CSS, no JS). The theme toggle (§4.9) is ~40
 lines of JS + CSS. Total hand-rolled surface ≈ 450 lines across HTML template + Worker + JS + CSS, plus the build
 script. Auditable in one sitting.
@@ -267,7 +267,7 @@ markdownlint-cli2  →  bun run build  →  bun test  →  bun x playwright test
 
 Each stage gates the next. `bun test` includes the three CRITICAL regression snapshots (anchor-slug, `llms.txt` shape,
 markdown byte-equivalence) from the eng review. Lighthouse CI asserts the 800 KB page-payload regression gate on `/p1`
-(§4.8.1) — merge-blocking, scoped to catch runaway growth, not enforce an absolute target. `wrangler deploy --dry-run`
+(§4.8.1); merge-blocking, scoped to catch runaway growth, not enforce an absolute target. `wrangler deploy --dry-run`
 validates the Worker + assets bundle without publishing. A separate `.github/workflows/deploy.yml` runs on push-to-main
 and performs the real `wrangler deploy` via `cloudflare/wrangler-action@v3`.
 
@@ -296,7 +296,7 @@ content/
 
 Filename convention for principles is load-bearing: `p<n>-<slug>.md` where `<slug>` matches the locked anchor IDs in
 §3.5. The build derives per-principle URLs (`/p<n>`), anchor slugs (`#p<n>-<slug>`), and the order of concatenation from
-the filename — no separate manifest file, no frontmatter ordering key.
+the filename. No separate manifest file, no frontmatter ordering key.
 
 **Build-step outputs (`dist/`):**
 
@@ -318,7 +318,7 @@ the filename — no separate manifest file, no frontmatter ordering key.
 | `src/styles/foundation.css` | `dist/css/foundation.css`                   | Byte-for-byte copy (C3). `cmp -s src/styles/foundation.css dist/css/foundation.css` passes. Source of truth for palette + type tokens + RFC-keyword color rules.                                                                        |
 | templated `site.css`        | `dist/css/site.css`                         | Additive-only: `@font-face` (Uncut Sans + Monaspace Xenon), layout (grid, measure, mini-TOC sticky), code-block chrome, theme-toggle widget, copy-button widget, Shiki dual-theme CSS bridge (§4.6). No overrides of foundation tokens. |
 | `public/fonts/*.woff2`      | `dist/fonts/*.woff2`                        | Self-hosted variable woff2 files per §4.3. Served under `/fonts/`, not `/assets/fonts/`. `@font-face` in `site.css` references `/fonts/…`.                                                                                              |
-| `src/client/theme-init.ts`  | inline `<script>` in `<head>` of every HTML | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint — no dark-mode flash.                                                                           |
+| `src/client/theme-init.ts`  | inline `<script>` in `<head>` of every HTML | Compiled + minified by `bun build`, then INLINED (not `<script src>`) so the `[data-theme]` attribute is on `<html>` before first paint, preventing dark-mode flash.                                                                    |
 | `src/client/theme.ts`       | `dist/js/theme.js`                          | Loaded via `<script defer>` in `<body>` close. Handles toggle clicks, `localStorage` writes, `matchMedia` change events.                                                                                                                |
 | `src/client/clipboard.ts`   | `dist/js/clipboard.js`                      | Loaded via `<script defer>`. Click-to-copy on every `<pre>` + copy-anchor on every heading. Uses `navigator.clipboard.writeText` with the pre-2022 Safari fallback from §4.8.                                                           |
 
@@ -329,25 +329,25 @@ The HTML shell emits exactly two `<link rel="stylesheet">` tags in `<head>`, in 
 <link rel="stylesheet" href="/css/site.css">
 ```
 
-Foundation first, site second — cascade order is load-bearing. `site.css` additive rules override nothing in
+Foundation first, site second; cascade order is load-bearing. `site.css` additive rules override nothing in
 `foundation.css`; it supplies what foundation deliberately omits (see §4.3 `@font-face` rationale).
 
 **Asset resolution (A4).** Under `html_handling: "auto-trailing-slash"` + flat layout (all nine HTML files at `dist/`
 root alongside their `.md` twins):
 
-| Request path | Resolution                                                      |
-| ------------ | --------------------------------------------------------------- |
-| `/p3`        | 200 → serves `dist/p3.html`                                     |
-| `/check`     | 200 → serves `dist/check.html`                                  |
-| `/about`     | 200 → serves `dist/about.html`                                  |
-| `/check/`    | 307 → redirects to `/check`                                     |
-| `/p3.html`   | 307 → redirects to `/p3`                                        |
-| `/p3.md`     | 200 → serves `dist/p3.md` (no html_handling applies — not HTML) |
+| Request path | Resolution                                                     |
+| ------------ | -------------------------------------------------------------- |
+| `/p3`        | 200 → serves `dist/p3.html`                                    |
+| `/check`     | 200 → serves `dist/check.html`                                 |
+| `/about`     | 200 → serves `dist/about.html`                                 |
+| `/check/`    | 307 → redirects to `/check`                                    |
+| `/p3.html`   | 307 → redirects to `/p3`                                       |
+| `/p3.md`     | 200 → serves `dist/p3.md` (no html_handling applies; not HTML) |
 
 Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/check`,
 `/about`). No `check/index.html` / `about/index.html` asymmetry.
 
-**`llms-full.txt` per-section format (A5).** Each section — `_intro`, p1…p7, `check`, `about` — is emitted in this exact
+**`llms-full.txt` per-section format (A5).** Each section (`_intro`, p1…p7, `check`, `about`) is emitted in this exact
 shape, concatenated in source order, separated by a bare `---` line:
 
 ```text
@@ -371,13 +371,13 @@ or the markdown twin.
 - **Order is by filename.** `p1-...md` ships first, `p7-...md` last. Files sort lex-numerically. Introducing `p8-...` in
   a future revision extends the list without any manifest edit.
 - **Markdown source round-trip is byte-equivalent.** The `/p3.md` endpoint serves exactly the bytes of
-  `content/principles/p3-progressive-help-discovery.md` — no re-rendering, no re-wrapping. The HTML path at `/p3` and
-  `/` is a derivative. If the site render ever drifts from the source (e.g., adds presentational markup the source does
-  not have), the markdown channel wins.
+  `content/principles/p3-progressive-help-discovery.md`: no re-rendering, no re-wrapping. The HTML path at `/p3` and `/`
+  is a derivative. If the site render ever drifts from the source (e.g., adds presentational markup the source does not
+  have), the markdown channel wins.
 - **`content/_intro.md` is the only hand-authored framing text.** Everything else is either principle content or
   sub-page content. No site-render concerns leak into `_intro.md` (no chrome, no TOC fragments, no header duplicates).
 - **Shiki + remark plugins** (the inline-keyword pass from §4.7) run during HTML render only. The source `.md` stays
-  untouched — the `/p3.md` response has `MUST` / `SHOULD` / `MAY` as plain uppercase, no class wrappers.
+  untouched: the `/p3.md` response has `MUST` / `SHOULD` / `MAY` as plain uppercase, no class wrappers.
 
 A ~200-line Node build script implements this. Pseudocode sketch (not the final code, lives in `scripts/build/` once the
 implementation session starts):
@@ -414,7 +414,7 @@ text/markdown`, and `/llms-full.txt`. `llms.txt` + `llms-full.txt` at site root 
 `#p2-structured-parseable-output`, `#p3-progressive-help-discovery`, `#p4-fail-fast-actionable-errors`,
 `#p5-safe-retries-mutation-boundaries`, `#p6-composable-predictable-command-structure`,
 `#p7-bounded-high-signal-responses`. No tier keyword (MUST/SHOULD/MAY) in the slug. Once shipped these are permanent
-citation primitives — any rename breaks every inbound link, blog quote, HN comment, or agent citation. If a principle is
+citation primitives. Any rename breaks every inbound link, blog quote, HN comment, or agent citation. If a principle is
 merged or split in the upstream `principles/` source, follow the propagation protocol in `principles/AGENTS.md` and
 treat the old slug as a permanent 301 target. Version and date in footer. Deploy on Cloudflare Workers with Static
 Assets. SSG hard. Mobile-first. A11y baseline: skip-link, semantic landmarks, `prefers-reduced-motion`,
@@ -428,7 +428,7 @@ Scores 44/50 and is the credible fallback. Gives us a tested markdown pipeline, 
 Shiki integration via `@astrojs/markdown-remark`, and the Astro CLI/dev-server ergonomics a hand-rolled build lacks. It
 loses to plain+Worker on thesis fit (we still ship a framework) and on CN story parity (Astro emits `/p1/index.html`; we
 either adopt a slightly non-conventional URL shape, configure output to flatten to `/p1.html`, or implement the `.md`
-suffix in the Worker the same way as plain-HTML — in which case we kept the Worker work and paid for Astro anyway). Good
+suffix in the Worker the same way as plain-HTML, in which case we kept the Worker work and paid for Astro anyway). Good
 choice if Brett wants the dev-server comfort and the community-maintained markdown pipeline.
 
 ### 3.7 Flip conditions (what would change the recommendation)
@@ -454,12 +454,12 @@ documentation surface pattern at
 ### 3.9 Skill distribution — `/skill` and `/skill.json`
 
 Two surfaces, one source. Agents fetch `/skill.json` (canonical, machine-primary). Humans fetch `/skill` (HTML render,
-identical commands). Both derive from `src/data/skill.json` at build time — drift is structurally impossible because
+identical commands). Both derive from `src/data/skill.json` at build time, so drift is structurally impossible because
 there's only one source.
 
 **Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships singular `/skill`
 for the single advertised skill (`agent-native-cli`); per-skill `/skill/<name>` URLs remain deferred until N>1. When a
-second skill ships, `/skill` becomes an index and per-skill content moves under `/skill/<name>` — the Worker's
+second skill ships, `/skill` becomes an index and per-skill content moves under `/skill/<name>`. The Worker's
 JSON-extension dispatch is already shape-agnostic, so no Worker code change is anticipated for that transition.
 
 **Source repo coupling.** This site vendors the skill manifest's per-host install commands and metadata at site build
@@ -495,7 +495,7 @@ for the repo-name asymmetry: the skill repo is named `agentnative-skill` but the
 `agent-native-cli`; a bare `git clone` lands on the repo name and breaks every host's skill-discovery convention.
 
 **Header contract (`src/worker/headers.ts`).** The Worker's HTML/markdown branches are joined by a JSON-extension branch
-detected by URL ending in `.json` (extension, not prefix — any `/<slug>.json` endpoint reuses the branch, so the v2
+detected by URL ending in `.json` (extension, not prefix; any `/<slug>.json` endpoint reuses the branch, so the v2
 per-skill `/skill/<name>.json` lands on the same code path with no Worker change):
 
 ```text
@@ -505,7 +505,7 @@ Access-Control-Allow-Origin: *
 X-Robots-Tag:                noindex
 ```
 
-No `Link: rel="alternate"` and no `X-Llms-Txt` on JSON paths — there's no markdown twin for `.json`. The `Accept:
+No `Link: rel="alternate"` and no `X-Llms-Txt` on JSON paths, because there's no markdown twin for `.json`. The `Accept:
 text/markdown` content-negotiation rewrite in `src/worker/index.ts` short-circuits on `.json` paths so `Accept:
 text/markdown` against `/skill.json` returns the JSON unchanged rather than 404'ing on a non-existent `/skill.json.md`
 twin.
@@ -527,16 +527,16 @@ against the Cloudflare cache-purge API after deploy). Update detection at instal
 ### 3.10 CLI install — `/install`
 
 Different surface, same dispatch mechanism. `/install` is the human-facing install page for the `agentnative` CLI tool
-itself — `brew install brettdavies/tap/agentnative`, `cargo install agentnative`, platform archives. Two
-representations: HTML (`/install`) and the markdown twin (`/install.md` or `Accept: text/markdown` against `/install`).
-**No JSON manifest.** The CLI is human-installable via the package managers documented on the page; an agent-friendly
-install manifest is not in scope today, and `/install.json` returns 404 by simply not emitting the asset.
+itself: `brew install brettdavies/tap/agentnative`, `cargo install agentnative`, platform archives. Two representations:
+HTML (`/install`) and the markdown twin (`/install.md` or `Accept: text/markdown` against `/install`). **No JSON
+manifest.** The CLI is human-installable via the package managers documented on the page; an agent-friendly install
+manifest is not in scope today, and `/install.json` returns 404 by not emitting the asset.
 
 The page is content-driven from `content/install.md` and runs through the same `subPages` pipeline as `/methodology` and
-`/scorecard-schema` — no dedicated emitter. The 404 contract for `/install.json` is upheld by asset absence:
-Cloudflare's `not_found_handling: "404-page"` (`wrangler.jsonc`) returns the standard 404 page for any path that has no
-asset. A build-time regression test (`tests/regression.test.ts` regression #6) asserts `dist/install.json` is not
-emitted, so a future edit can't accidentally re-create it.
+`/scorecard-schema`; no dedicated emitter. The 404 contract for `/install.json` is upheld by asset absence: Cloudflare's
+`not_found_handling: "404-page"` (`wrangler.jsonc`) returns the standard 404 page for any path that has no asset. A
+build-time regression test (`tests/regression.test.ts` regression #6) asserts `dist/install.json` is not emitted, so a
+future edit can't accidentally re-create it.
 
 `/install` is the canonical home for the brew/cargo install lines. Three places that previously inlined those commands
 now link here instead:
@@ -558,11 +558,11 @@ One direction. The CEO plan's stated preference ("simple and traditional with mo
 Cool-neutral base, hue 250, one accent in the same hue family, three semantic warm-or-cool accents for MUST / SHOULD /
 MAY. The choice of cool over warm is load-bearing for spec adoption: research summarized below lands decisively on cool
 neutrals for technical documentation. The full ramps, WCAG ratios, APCA Lc values, and gamut-clamping record live in
-`docs/research/design/color-analysis.md` — all generated by `scripts/design/generate-palette.mjs` using `culori` and
+`docs/research/design/color-analysis.md`, all generated by `scripts/design/generate-palette.mjs` using `culori` and
 `apca-w3`.
 
-**Why cool, not warm — color psychology for spec adoption.** Synthesized from 2026 industry sources (see sources
-appendix at end of file). Three findings drive the call:
+**Why cool, not warm: color psychology for spec adoption.** Synthesized from 2026 industry sources (see sources appendix
+at end of file). Three findings drive the call:
 
 1. **Cool neutrals read as credible and logical in developer-facing contexts.** Blue-tinged grays and cool off-whites
    are the consistent pattern across enterprise dev tools, design systems (Material, Fluent, Carbon), and long-form
@@ -580,26 +580,26 @@ courting developer adoption.
 
 **Emitted token summary** (full table with OKLCH, hex, and contrast in `docs/research/design/color-analysis.md`):
 
-| Role             | Light (hex) | Dark (hex) | Notes                                                                                                                                          |
-| ---------------- | ----------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--bg`           | `#fafbfd`   | `#060a0e`  | Page background.                                                                                                                               |
-| `--bg-code`      | `#f0f4f7`   | `#0d1218`  | Inline + block code background.                                                                                                                |
-| `--border`       | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.                                                                                                          |
-| `--fg-muted`     | `#7d848a`   | `#8d949c`  | Decorative/large-only captions (≥1.125rem). Below 4.5:1 small-text contrast by design — use `--fg-secondary` for anything readable under 18px. |
-| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1.                                 |
-| `--fg-body`      | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.                                                                                                       |
-| `--fg-heading`   | `#070c11`   | `#f3f2ed`  | Headings.                                                                                                                                      |
-| `--accent`       | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.                                                                                                          |
-| `--must`         | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                                                                                                                             |
-| `--should`       | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                                                                                                                           |
-| `--may`          | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                                                                                                                              |
+| Role             | Light (hex) | Dark (hex) | Notes                                                                                                                                         |
+| ---------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--bg`           | `#fafbfd`   | `#060a0e`  | Page background.                                                                                                                              |
+| `--bg-code`      | `#f0f4f7`   | `#0d1218`  | Inline + block code background.                                                                                                               |
+| `--border`       | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.                                                                                                         |
+| `--fg-muted`     | `#7d848a`   | `#8d949c`  | Decorative/large-only captions (≥1.125rem). Below 4.5:1 small-text contrast by design; use `--fg-secondary` for anything readable under 18px. |
+| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1.                                |
+| `--fg-body`      | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.                                                                                                      |
+| `--fg-heading`   | `#070c11`   | `#f3f2ed`  | Headings.                                                                                                                                     |
+| `--accent`       | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.                                                                                                         |
+| `--must`         | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                                                                                                                            |
+| `--should`       | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                                                                                                                          |
+| `--may`          | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                                                                                                                             |
 
 All body pairs (`--fg-body`, `--fg-secondary`, `--fg-heading`, `--accent`) pass WCAG AA (≥4.5:1) **and** APCA body
 minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` deliberately sits below AA 4.5:1 in both modes
-(≈4.3:1) — it is a decorative caption tier reserved for text ≥1.125rem where the AA large-text threshold (3:1) applies;
-use `--fg-secondary` for any small body-size secondary text. Two dark-mode tokens (`must`, `accent-subtle`) required a
-tuning pass after the first APCA run flagged them below the 60 threshold; the tuning is recorded in the script as a
-comment, and the second-pass contrast table in the report shows all body pairs clearing thresholds.
+(≈4.3:1) because it is a decorative caption tier reserved for text ≥1.125rem where the AA large-text threshold (3:1)
+applies; use `--fg-secondary` for any small body-size secondary text. Two dark-mode tokens (`must`, `accent-subtle`)
+required a tuning pass after the first APCA run flagged them below the 60 threshold; the tuning is recorded in the
+script as a comment, and the second-pass contrast table in the report shows all body pairs clearing thresholds.
 
 ### 4.2 Dark mode is deliberately designed (not inverted)
 
@@ -607,7 +607,7 @@ Per user direction ("inverted neutrals are acceptable only if they are what woul
 palette was designed independently, not derived by flipping lightness. Four deliberate deviations from a pure inversion:
 
 1. **Background at L=14, not L=0.** Near-black, not pitch-black. Pitch-black produces halation around body text on LCDs.
-   L=14 is approximately GitHub-dark and VS Code-dark — the level the industry has converged on.
+   L=14 is approximately GitHub-dark and VS Code-dark, the level the industry has converged on.
 2. **Mid-range chroma slightly higher (up to 0.02) than light-mode mid-range.** Low-chroma grays on dark backgrounds
    read dead; a hint of hue keeps the UI from feeling Kindle-adjacent.
 3. **Text top tones warm-shift to hue 95** (warm off-white), not hue 250 (cool near-white). Cool text on a cool dark
@@ -623,12 +623,12 @@ reviewer sees the *why* alongside the numbers.
 
 **Ship Pangram Pangram's [Uncut Sans](https://fontshare.com/fonts/uncut-sans) for body + display, and GitHub Next's
 [Monaspace Xenon](https://monaspace.githubnext.com/) for code.** Both OFL. Chosen via the full font-selection procedure
-in [impeccable's typography reference](.claude/skills/impeccable/reference/typography.md) — not from the training-data
-defaults (Inter, IBM Plex, Fraunces, Space Grotesk, Instrument Serif, all of which impeccable ships a
-reflex-fonts-to-reject list for). See session notes in [`PRODUCT.md`](PRODUCT.md) for the 3-word brand voice
-("opinionated, precise, inviting") that drove the pick.
+in [impeccable's typography reference](.claude/skills/impeccable/reference/typography.md), not from the training-data
+defaults (Inter, IBM Plex, Fraunces, Space Grotesk, Instrument Serif, which impeccable ships a reflex-fonts-to-reject
+list for). See session notes in [`PRODUCT.md`](PRODUCT.md) for the 3-word brand voice ("opinionated, precise, inviting")
+that drove the pick.
 
-**Stacks emitted in [`src/styles/foundation.css`](src/styles/foundation.css)** — reproduced here for review; do not
+**Stacks emitted in [`src/styles/foundation.css`](src/styles/foundation.css)**, reproduced here for review; do not
 hand-edit the CSS, change the generator:
 
 ```css
@@ -645,14 +645,14 @@ hand-edit the CSS, change the generator:
 ```
 
 Ligatures and contextual alternates are OFF in mono so spec operators (`>=`, `!=`, `->`, `|>`, `->|`) render with
-explicit character shapes — critical for a document whose correctness depends on the reader seeing exactly what is
+explicit character shapes, critical for a document whose correctness depends on the reader seeing exactly what is
 written. Body ligatures stay on because common ligatures (fi, fl, ffi) improve Latin prose readability with no operator
 risk.
 
 **Production loading.** The `@font-face` declarations live in the **site build's** CSS, not in `foundation.css`. Keeping
 them out of `foundation.css` means the generated stylesheet is safe to load from any origin without phantom 404s against
-missing `/fonts/` paths — relevant for design previews, demos, and any consumer that loads `foundation.css` without the
-site around it. At site-build time, emit the following (into the site's `site.css` or inlined in the HTML shell):
+missing `/fonts/` paths, which matters for design previews, demos, and any consumer that loads `foundation.css` without
+the surrounding site. At site-build time, emit the following (into the site's `site.css` or inlined in the HTML shell):
 
 ```css
 @font-face {
@@ -672,14 +672,14 @@ site around it. At site-build time, emit the following (into the site's `site.cs
 ```
 
 Also emit `<link rel="preload" as="font" crossorigin>` for both files in the HTML `<head>` so the swap happens on first
-paint rather than mid-render. Total shipped: ~35–50 KB gz per family (Latin subset, variable axis) — well inside the 1–2
+paint rather than mid-render. Total shipped: ~35–50 KB gz per family (Latin subset, variable axis), well inside the 1–2
 MB page-payload ceiling.
 
-**Metric-matched fallbacks — TO CALIBRATE AT IMPLEMENTATION.** The `@font-face` block above deliberately omits
+**Metric-matched fallbacks (TO CALIBRATE AT IMPLEMENTATION).** The `@font-face` block above deliberately omits
 `ascent-override` / `descent-override` / `size-adjust`. These reduce layout shift during the font-display swap but
 require real metric measurement. Before ship: run [Fontaine](https://github.com/unjs/fontaine) (or read tables directly
 with `fontkit`) against the shipped woff2 files, compute the overrides, and commit them into the site build's
-`@font-face` block. Do not guess — wrong overrides cause visible shift, worse than the default.
+`@font-face` block. Do not guess; wrong overrides cause visible shift, worse than the default.
 
 **Preview behavior.** `docs/research/design/must-should-may-preview.html` loads both families via CDN `<link>` tags so
 nothing needs to be self-hosted for a design review:
@@ -694,13 +694,13 @@ nothing needs to be self-hosted for a design review:
 
 Both CDN packages register their `@font-face` rules under the exact family names `foundation.css` references, so the
 preview needs no `--font-*` overrides. If either CDN is blocked (offline demo, strict network), the preview falls back
-through the `--font-sans` / `--font-mono` fallback stacks to system fonts. Production does NOT rely on either CDN — it
+through the `--font-sans` / `--font-mono` fallback stacks to system fonts. Production does NOT rely on either CDN; it
 self-hosts both woff2 files from `/fonts/` using the variable font from GitHub Next's repo directly (checked in to the
 site's own assets), per the `@font-face` block documented above.
 
 #### Font supply chain (A11, C4)
 
-Variable woff2 files are checked in to `public/fonts/` and served from `dist/fonts/` — no runtime CDN dependency. Vendor
+Variable woff2 files are checked in to `public/fonts/` and served from `dist/fonts/`: no runtime CDN dependency. Vendor
 sources and integrity hashes are pinned and verified by a one-shot script.
 
 | Family              | Source                                                                      | License | Checked-in path                               |
@@ -714,17 +714,18 @@ already-checked-in files re-runs the hash check without re-downloading. CI runs 
 hashes fails the build. Hash bumps are deliberate: refresh the files, regenerate `hashes.txt`, commit both together.
 
 **Preview vs production (C4).** `docs/research/design/must-should-may-preview.html` loads fonts via CDN (see "Preview
-behavior" above) — fast, zero-local-asset design review. Production self-hosts from `/fonts/` with the checked-in woff2
-files. The two surfaces are NOT guaranteed byte-identical across versions: Fontshare can push a new Uncut Sans revision
-at any time, and the checked-in production file is pinned by hash. Final visual signoff before the HN launch MUST run
-against the production-hosted fonts (via `bun run dev` against the real `dist/` or the staging workers.dev URL), not the
-CDN preview, because metric drift between vendor revisions can shift leading and break the §4.4 type-scale calibration.
+behavior" above) for fast, zero-local-asset design review. Production self-hosts from `/fonts/` with the checked-in
+woff2 files. The two surfaces are NOT guaranteed byte-identical across versions: Fontshare can push a new Uncut Sans
+revision at any time, and the checked-in production file is pinned by hash. Final visual signoff before the HN launch
+MUST run against the production-hosted fonts (via `bun run dev` against the real `dist/` or the staging workers.dev
+URL), not the CDN preview, because metric drift between vendor revisions can shift leading and break the §4.4 type-scale
+calibration.
 
 ### 4.4 Type scale
 
 Modular scale, 1.25 ratio (major third), fluid body via `clamp()` from 17px at 360px viewport up to 18px at ~1100px. H1
 also clamps. H2–H4 stay fixed (impeccable's guidance: "Fixed `rem` scales for app UIs, fluid for marketing/content page
-headings" — this site is content-page, so body + h1 flex, inner headings do not).
+headings"; this site is content-page, so body + h1 flex, inner headings do not).
 
 All values emitted as tokens in `foundation.css`:
 
@@ -771,7 +772,7 @@ Section gap: `--space-7`. Code block margin-block: `--space-5`.
 
 Most visually load-bearing element. All code authored in markdown with language tags. Highlighted at **build time** via
 Shiki using a dual-theme configuration (`github-light` + `github-dark-dimmed`). One rendered `<pre>` serves both modes
-via inline CSS custom properties — no client-side theme JS, no FOUC on mode switch.
+via inline CSS custom properties: no client-side theme JS, no FOUC on mode switch.
 
 Treatment:
 
@@ -802,7 +803,7 @@ Shiki config (passed to `codeToHtml` / `@shikijs/rehype` in the build pipeline):
 }
 ```
 
-CSS bridge (lives in `site.css`, not `foundation.css` — it depends on Shiki-emitted class shape):
+CSS bridge (lives in `site.css`, not `foundation.css`, because it depends on Shiki-emitted class shape):
 
 ```css
 /* Default: light. Shiki's emitted `color:` wins. */
@@ -830,8 +831,8 @@ preference of dark does not override an explicit user choice of light (mirrors t
 
 ### 4.7 RFC-keyword treatment — ship 7b (inline), defer block
 
-**Ships: option 7b (inline keyword color only).** The block-level callout variant — originally spec'd as 7b-plus with a
-3px left-edge accent stripe — was pulled after impeccable's `<absolute_bans>` rule flagged `border-left > 1px` on
+**Ships: option 7b (inline keyword color only).** The block-level callout variant (originally spec'd as 7b-plus with a
+3px left-edge accent stripe) was pulled after impeccable's `<absolute_bans>` rule flagged `border-left > 1px` on
 callouts as the #1 most-overused AI-slop pattern. The ban applies regardless of semantic color, radius, opacity, or
 variable-name intent. Even a semantic MUST/SHOULD/MAY stripe is banned. The only non-controversial keyword treatment
 that survives the ban is the inline color on the word itself.
@@ -846,7 +847,7 @@ The shipped CSS (three rules, emitted by `foundation.css`):
 
 Preview at `docs/research/design/must-should-may-preview.html` (dev branch only) shows 7a (plain bold, baseline) vs 7b
 (inline color) side by side in both color modes. Contrast validated against APCA body minimum (|Lc| ≥
-60) in both modes — see `docs/research/design/color-analysis.md`.
+60) in both modes; see `docs/research/design/color-analysis.md`.
 
 **How the build applies the markup.** A small remark plugin runs a single inline pass at render time. It replaces
 bare-word occurrences of `MUST` / `MUST NOT` / `SHOULD` / `SHOULD NOT` / `MAY` in prose text nodes with `<strong
@@ -875,7 +876,7 @@ Explicit test cases (wired into `tests/build.test.ts`):
 | `` Call `MUST` explicitly. ``             | No match (inlineCode ancestor disqualifies).                                           |
 | `[MUST](https://example.com/must)`        | No match (link ancestor disqualifies; link body + href both skipped).                  |
 | `## MUST support --json` (heading)        | Match (heading is not an excluded ancestor).                                           |
-| `**MUST:** Use try_parse() …` (list item) | Annotate-parent case — see A6 below; no second `<strong>` wrap.                        |
+| `**MUST:** Use try_parse() …` (list item) | Annotate-parent case (see A6 below); no second `<strong>` wrap.                        |
 
 **Nested-strong handling (A6).** In the principle source files the tier markers are authored as `**MUST:**`,
 `**SHOULD:**`, `**MAY:**` at the start of requirement list items. After mdast parsing those render as `<strong>MUST:
@@ -893,17 +894,17 @@ parent is `listItem`/`paragraph`/etc.) uses the default wrap-in-new-`<strong>` b
 #### Deferred: block-level treatment (decide once the site is live)
 
 The inline keyword color handles mid-sentence references ("Tools MUST detect invalid state early") well. The *tiered
-information architecture* of the principles — `**MUST:**` / `**SHOULD:**` / `**MAY:**` section headers followed by
-bullet lists — will probably want additional visual chunking so a scroll-speed reader can see which tier a given bullet
-belongs to. The ban forecloses the side-stripe; two post-ban candidates remain, both to be evaluated against real
-principle content after the site is rendering:
+information architecture* of the principles (`**MUST:**` / `**SHOULD:**` / `**MAY:**` section headers followed by bullet
+lists) wants extra visual chunking so a scroll-speed reader can see which tier a given bullet belongs to. The ban
+forecloses the side-stripe; two post-ban candidates remain, both to be evaluated against real principle content after
+the site is rendering:
 
 1. **Leading RFC tag.** Render each requirement-list item with a colored, bold keyword tag as a left prefix: `MUST Use
    try_parse() instead of parse().` The tag carries the color; no border, no background fill. Reads like a rendered RFC
    draft. Implementation: remark plugin's second pass inserts `<span class="rfc-tag rfc-must">MUST</span>` before the
    `<li>` text; a small CSS rule sets fixed-width inline-block. Cost: ~40 lines of plugin + ~8 lines of CSS.
 2. **Full background tint.** Wrap each requirement-list paragraph with `class="callout must"` (or `should` / `may`);
-   foundation.css adds `.callout.* { background: var(--must-wash); padding: ... }` — flat fill, no border. Reads as a
+   foundation.css adds `.callout.* { background: var(--must-wash); padding: ... }`: flat fill, no border. Reads as a
    tinted panel, more visual weight than the leading tag. Cost: ~20 lines of plugin + ~6 lines of CSS + three wash
    tokens (the generator knows how to produce them; currently omitted from `foundation.css`). See the generator comment
    where `light["must-wash"]` used to live.
@@ -964,27 +965,27 @@ The site degrades cleanly when JS is disabled or fails to load:
 ```
 
 The `.js` class is set by the inline script (same one that also reads `localStorage` and sets `[data-theme]`) before
-first paint. CSS-only widgets — the tabbed multi-language code blocks (hidden radio + `:checked ~ .panel`), `:target`
-highlighting, `prefers-color-scheme` dark mode — continue to work with zero JS. Prose, code blocks, anchors, and
+first paint. CSS-only widgets (the tabbed multi-language code blocks via hidden radio + `:checked ~ .panel`, `:target`
+highlighting, `prefers-color-scheme` dark mode) continue to work with zero JS. Prose, code blocks, anchors, and
 navigation are fully functional without the deferred scripts.
 
 ### 4.8.1 Performance budget (C1)
 
 Budgets are regression gates, not absolute targets. A Cloudflare edge POP serves each asset in parallel from the nearest
 region; the Monaspace woff2 that dominates page weight is cached hard on second hit. Chasing a small absolute page-size
-number isn't the meaningful signal for this site — catching a PR that silently doubles the payload is.
+number isn't the meaningful signal for this site; catching a PR that silently doubles the payload is.
 
 | Tier                                   | Budget          | Enforcement                                                                     |
 | -------------------------------------- | --------------- | ------------------------------------------------------------------------------- |
-| Client JS — target                     | ≤ 5 KB gzipped  | Build script asserts total of `dist/js/*.js` + inline `theme-init`. PR review.  |
-| Client JS — hard ceiling               | ≤ 20 KB gzipped | Build script fails if exceeded.                                                 |
-| Initial page payload — regression gate | ≤ 2 MB          | `.lighthouserc.json` fires `resource-summary:total:size` error. Merge-blocking. |
+| Client JS (target)                     | ≤ 5 KB gzipped  | Build script asserts total of `dist/js/*.js` + inline `theme-init`. PR review.  |
+| Client JS (hard ceiling)               | ≤ 20 KB gzipped | Build script fails if exceeded.                                                 |
+| Initial page payload (regression gate) | ≤ 2 MB          | `.lighthouserc.json` fires `resource-summary:total:size` error. Merge-blocking. |
 
 "Initial page payload" is HTML + CSS + fonts + JS + any inline SVG on the first render. Total homepage budget is 2 MB.
-PRs that legitimately add payload bump the ceiling in the same commit — explicit movement, recorded in the diff.
+PRs that legitimately add payload bump the ceiling in the same commit: explicit movement, recorded in the diff.
 
 Client-JS ceilings stay tight (5 KB / 20 KB) because JS bytes run on the main thread and dominate interaction latency in
-a way raw page weight does not. The shipped `theme.js` + `clipboard.js` are ~2.5 KB combined gz — room to spare.
+a way raw page weight does not. The shipped `theme.js` + `clipboard.js` are ~2.5 KB combined gz, with room to spare.
 
 Font-subsetting Monaspace to Latin glyphs is tracked as TODOS P3. When it lands, drop the page-payload ceiling to match
 the new reality (~200 KB + 60 KB headroom ≈ 260 KB).
@@ -1044,12 +1045,12 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - `<article>` at `max-inline-size: 68ch`, horizontally centered.
 - Page padding: `--space-5` mobile, `--space-7` desktop.
 - **Header (Terse package)**: wordmark `agentnative` on the left in Uncut Sans Semibold; no link (already on the
-  homepage — clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/check`, `/about`,
+  homepage, so clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/check`, `/about`,
   `llms.txt`. The `llms.txt` link carries `title="Machine-readable index for AI agents"` for hover context. No nav tree,
   no version pill, no search. Header is one line tall; does not duplicate the mini-TOC's role.
 - **Footer (Terse package)**: a single line. `v0.1 · 2026-04-14 · source on GitHub`. Separator is a middot (`·`) with
   tabular-figure spacing. Version uses `font-variant-numeric: tabular-nums` so cross-version renders align. No personal
-  attribution on the spec site — the spec-is-bigger-than-the-author stance; `davies.fyi` owns the named surface.
+  attribution on the spec site: the spec-is-bigger-than-the-author stance; `davies.fyi` owns the named surface.
 - **Mini-TOC ships on desktop ≥ 1100px** (resolving open question 5.2). Sticky right-rail `<aside>` in a 2-column grid
   with the article. Lists the 7 principle anchors. Collapses to an inline `<nav>` at the top of the article below
   1100px. Always visible in one form or the other.
@@ -1082,8 +1083,8 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
 - Dark-mode background (`--bg`).
 - Brand row at top, 28pt: `anc.dev` (mono Monaspace Xenon, `--accent`) + 32×1px rule + "the agent-native CLI standard"
   (sans Uncut Sans, `--fg-muted`).
-- Manifesto block, 60pt (display Uncut Sans), `align-self: end` — sits in the lower half with breathing room above.
-  Three lines, each governed by a color-coded RFC 2119 keyword (700-weight) followed by a 500-weight verb-phrase:
+- Manifesto block, 60pt (display Uncut Sans), `align-self: end`, sits in the lower half with breathing room above. Three
+  lines, each governed by a color-coded RFC 2119 keyword (700-weight) followed by a 500-weight verb-phrase:
 - **MUST** run without prompting. *(P1's foundational rule, `--must`)*
 - **SHOULD** speak machine-first. *(P2's worldview, `--should`)*
 - **MAY** decorate when a TTY is open. *(P1's safety valve, `--may`)*
@@ -1094,20 +1095,20 @@ The card design landed on 2026-04-30 via a `/design-shotgun` → `/impeccable` �
 - `og:image:alt` + `twitter:image:alt` are emitted by `src/build/shell.mjs` (`OG_IMAGE_ALT` constant): "agent-native CLI
   standard — anc.dev — seven principles for CLIs that agents can operate".
 
-**Future extension — per-page OG cards.** The current model uses one shared `/og-image.png` for every page. The
-generator architecture (`Playwright → Sharp → palette PNG`, deterministic, foundation-token-driven) is reusable for
-per-principle (`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape:
-`bun run og --input scripts/og/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v` — the script's existing
-`[data-version]` injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's
-"Deferred to Separate Tasks" alongside favicon decoupling.
+**Future extension: per-page OG cards.** The current model uses one shared `/og-image.png` for every page. The generator
+architecture (`Playwright → Sharp → palette PNG`, deterministic, foundation-token-driven) is reusable for per-principle
+(`/p1`-`/p7`) and per-scorecard (`/scorecards/<tool>`) cards when those land. Concrete extension shape: `bun run og
+--input scripts/og/og-<kind>.html --output public/og/<slug>.png --data k=v,k=v`. The script's existing `[data-version]`
+injection seam already prefigures the data-injection step. Out of scope for v0.1; tracked in the plan's "Deferred to
+Separate Tasks" alongside favicon decoupling.
 
 ### 4.14 Schema.org / SEO surface
 
 Schema.org `TechArticle` JSON-LD in `<head>` per page, `isPartOf` pointing to a parent `TechArticle` for the full spec.
 Per the agent-native documentation surface pattern. Twitter card `summary_large_image`. Open Graph: `og:title`,
-`og:description`, `og:image`, `og:url`, `og:type="article"`, `article:published_time`, `article:modified_time`. Pre-
-purchase domain: canonical + og:url use the staging `workers.dev` host until production cut-over; swap via a single
-constant in the HTML shell. Documented in `wrangler.toml` per CEO plan (resolving open question 5.6 — "yes").
+`og:description`, `og:image`, `og:url`, `og:type="article"`, `article:published_time`, `article:modified_time`. Before
+domain purchase: canonical + og:url use the staging `workers.dev` host until production cut-over; swap via a single
+constant in the HTML shell. Documented in `wrangler.toml` per CEO plan (resolving open question 5.6 with "yes").
 
 ## 5. Open questions for Brett — status
 
@@ -1120,7 +1121,7 @@ Revision 1 open questions with current status:
    narrative); full palette and contrast in `docs/research/design/color-analysis.md`.
 4. **Colorize MUST / SHOULD / MAY** → RESOLVED: ship option 7b (inline keyword color only). The stronger 7b-plus
    side-stripe variant was rejected per impeccable's `<absolute_bans>` (border-left >1px on callouts is the #1 AI-slop
-   pattern). Block-level alternatives — leading RFC tag, background-tint fill — deferred to live-site iteration (§4.7).
+   pattern). Block-level alternatives (leading RFC tag, background-tint fill) deferred to live-site iteration (§4.7).
    Preview at `docs/research/design/must-should-may-preview.html`.
 5. **`llms.txt` link in header** → RESOLVED: ship it, recall if it reads cute (§4.11).
 6. **`og:url` pre-domain purchase** → RESOLVED: stage on `workers.dev` host, swap constant at cutover (§4.14).
@@ -1131,12 +1132,12 @@ Revision 1 open questions with current status:
   single `<button>` that cycles, smaller footprint, slightly worse discoverability. Default ships the three-button
   pattern; swap is trivial.
 - **MUST/SHOULD/MAY transform scope.** The remark plugin rewrites bare `MUST` / `SHOULD` / `MAY` in certain block
-  contexts (§4.7). Question: should it also run inside code comments? Current answer: no — highlighted code should not
-  acquire new colors from outside the syntax-highlight theme. Worth re-confirming during implementation.
+  contexts (§4.7). Question: should it also run inside code comments? Current answer: no, because highlighted code
+  should not gain new colors from outside the syntax-highlight theme. Worth re-confirming during implementation.
 - **Header `llms.txt` link label.** "llms.txt" as bare text (literal wink) vs. "for agents" (explanatory). Default ships
   bare-text; `title="Machine-readable index for AI agents"` on hover.
-- **`X-Robots-Tag: noindex` on `.md` variant.** Mintlify ships this and it is probably correct — we do not want search
-  engines to index the markdown (duplicate content). Proposal: ship it. Confirm in `/plan-eng-review`.
+- **`X-Robots-Tag: noindex` on `.md` variant.** Mintlify ships this and it is probably correct, because search engines
+  should not index the markdown (duplicate content). Proposal: ship it. Confirm in `/plan-eng-review`.
 
 ## 6. Sources
 

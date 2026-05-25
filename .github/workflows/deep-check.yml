@@ -34,8 +34,17 @@
 # Not a PR gate — PR merge is governed by ci.yml. Failures here show up
 # in the Actions tab and (for dispatch-with-ref runs) as a commit status.
 #
-# Secrets: none required. The LHCI step uses the default GITHUB_TOKEN so
-# it can post a commit status (requires statuses:write, granted below).
+# Secrets:
+#   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID — passed to `wrangler dev`
+#     (used by both Playwright's webServer and lighthouse-ci). wrangler 4.x
+#     authenticates to the Cloudflare managed registry to read the
+#     container image manifest even under `--local`, so without these the
+#     dev server fails with "Not logged in". The same secrets that
+#     `deploy.yml` already passes — no new provisioning. Introduced after
+#     the container image moved off Docker Hub to the CF managed
+#     registry in PR #84 (U3-followup); the LHCI step uses the default
+#     GITHUB_TOKEN to post a commit status (requires statuses:write,
+#     granted below).
 
 name: deep-check
 
@@ -171,6 +180,14 @@ jobs:
         run: bun run build
 
       - name: End-to-end tests (all projects)
+        # CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID let `wrangler dev`
+        # (spun up by playwright.config.ts's webServer) read the
+        # container image manifest from the CF managed registry. Without
+        # them, wrangler 4.x errors with "Not logged in" before Playwright
+        # can connect.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: bun run test:e2e
 
       - name: Upload Playwright artifacts on failure
@@ -218,3 +235,8 @@ jobs:
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
           LHCI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `wrangler dev` (started by lighthouserc as the local server)
+          # needs CF auth to read the container image manifest from the
+          # CF managed registry, same as the e2e job above.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

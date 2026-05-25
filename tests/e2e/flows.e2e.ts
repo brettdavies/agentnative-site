@@ -6,11 +6,11 @@ import { expect, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
 
 test.describe('cold HN land → browse principles → theme dark → reload still dark', () => {
-  test('landing on / shows hero + principle listing with 7 entries', async ({ page }) => {
+  test('landing on / shows hero + principle listing with 8 entries', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.hero__title')).toBeVisible();
     const entries = page.locator('.principle-entry');
-    await expect(entries).toHaveCount(7);
+    await expect(entries).toHaveCount(8);
   });
 
   test('clicking a principle entry navigates to its detail page', async ({ page }) => {
@@ -143,10 +143,10 @@ test.describe('code-copy + anchor-copy', () => {
 });
 
 test.describe('principle listing', () => {
-  test('index page has a principle listing with 7 entries', async ({ page }) => {
+  test('index page has a principle listing with 8 entries', async ({ page }) => {
     await page.goto('/');
     const entries = page.locator('.principle-entry');
-    await expect(entries).toHaveCount(7);
+    await expect(entries).toHaveCount(8);
   });
 
   test('principle entry links to its detail page', async ({ page }) => {

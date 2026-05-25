@@ -1,12 +1,12 @@
-// Build-time indexes for the live-scoring path (plan U1):
+// Build-time indexes for the live-scoring path:
 //
-// - dist/registry-index.json: dual-keyed (slug, owner/repo) lookup of every
-//   committed-scorecard tool. Powers U4's registry-fast-path so the Worker
-//   does O(1) lookups whether the input was a slug or a GitHub URL.
+// - dist/registry-index.json: dual-keyed (slug, owner/repo) lookup of
+//   every committed-scorecard tool. Powers the Worker's registry-fast-
+//   path with O(1) lookups whether the input was a slug or a GitHub URL.
 // - dist/discovery-hints-index.json: owner/repo -> {pm, package, binary}
 //   hints for tools the discovery chain would otherwise bounce due to
-//   incomplete or non-canonical ecosystem metadata. Powers U4's step 0.5
-//   (per Pre-Implementation Validation gate finding F1).
+//   incomplete or non-canonical ecosystem metadata. Powers the hint
+//   short-circuit at the front of the discovery chain.
 //
 // Pure data emit; no network, no side effects beyond writeFile.
 
@@ -14,10 +14,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
 
-// Mirrors U4's parse-install.ts table (plan lines 1092-1103). Adding a new
-// pm here requires a matching parser entry; keeping these in sync is the
-// typo guard. `direct` is reserved for URL-paste paths (step 1 of U4) and
-// is not a valid hint pm — hints always name an ecosystem package.
+// Mirrors parse-install.ts's pm table. Adding a new pm here requires a
+// matching parser entry; keeping these in sync is the typo guard.
+// `direct` is reserved for URL-paste paths and is not a valid hint pm —
+// hints always name an ecosystem package.
 export const KNOWN_PM = new Set(['brew', 'cargo-binstall', 'bun', 'pip', 'npm', 'go']);
 
 const OWNER_REPO_RE = /^[^/]+\/[^/]+$/;
@@ -31,7 +31,7 @@ export function deriveOwnerRepo(tool) {
   return null;
 }
 
-function projectRegistryEntry(tool) {
+function projectRegistryEntry(tool, enrichment) {
   const out = {
     name: tool.name,
     binary: tool.binary,
@@ -39,15 +39,33 @@ function projectRegistryEntry(tool) {
   };
   if (tool.audit_profile) out.audit_profile = tool.audit_profile;
   if (tool.repo) out.repo = tool.repo;
+  // The registry-fast-path response carries the latest scorecard's
+  // version + anc_version + URL so the Worker can build the response
+  // triad (spec_version + anc_version + checker_url) and route the user
+  // to /score/<slug> without fetching the scorecard JSON. Also carry
+  // score_pct so the registry_hit envelope can show a "Curated - N% pass
+  // rate" reward inline on the homepage form without a second round-trip.
+  if (enrichment) {
+    if (enrichment.version) out.version = enrichment.version;
+    if (enrichment.anc_version) out.anc_version = enrichment.anc_version;
+    if (enrichment.scorecard_url) out.scorecard_url = enrichment.scorecard_url;
+    if (typeof enrichment.score_pct === 'number') out.score_pct = enrichment.score_pct;
+  }
   return out;
 }
 
-export function buildRegistryIndex(registry) {
+/**
+ * @param {Array<object>} registry
+ * @param {Record<string, { version?: string, anc_version?: string, scorecard_url?: string }>} [enrichments]
+ *   Per-tool-name lookup of scored-build metadata. Tools without an entry
+ *   here still appear in the index (no scorecard committed yet).
+ */
+export function buildRegistryIndex(registry, enrichments = {}) {
   const by_slug = {};
   const by_owner_repo = {};
   const warnings = [];
   for (const tool of registry) {
-    const projected = projectRegistryEntry(tool);
+    const projected = projectRegistryEntry(tool, enrichments[tool.name]);
     by_slug[tool.name] = projected;
     const ownerRepo = deriveOwnerRepo(tool);
     if (!ownerRepo) {
@@ -109,8 +127,8 @@ export async function loadDiscoveryHints(hintsPath) {
   return hints;
 }
 
-export async function emitBuildIndexes({ registry, hintsPath, distDir }) {
-  const { index: registryIndex, warnings: rWarnings } = buildRegistryIndex(registry);
+export async function emitBuildIndexes({ registry, hintsPath, distDir, enrichments }) {
+  const { index: registryIndex, warnings: rWarnings } = buildRegistryIndex(registry, enrichments);
   const hints = await loadDiscoveryHints(hintsPath);
   const { index: hintsIndex, warnings: hWarnings } = buildDiscoveryHintsIndex(hints, registryIndex);
 

@@ -14,20 +14,20 @@ which tools are in the set.
 Adding a tool means filing a registry entry. Removing a tool means filing a registry deletion. There is no other
 inclusion criterion.
 
-### Contributor flow — registry PR and scorecard PR may land in either order
+### Contributor flow: registry PR and scorecard PR may land in either order
 
 A tool needs two artifacts to appear on the leaderboard: a registry entry (`registry.yaml`) and a scorecard
 (`scorecards/<name>-v<version>.json`). The build accepts these in either order:
 
-- **Editorial-PR-first.** A registry entry without a matching scorecard is a "registry orphan" — the build emits a
+- **Editorial-PR-first.** A registry entry without a matching scorecard is a "registry orphan": the build emits a
   warning and excludes the entry from the leaderboard until a scorecard PR lands. This is the expected steady-state for
   a freshly-nominated tool.
-- **Scorecard-PR-first.** A scorecard whose filename slug has no registry entry is a "scorecard orphan" — the build
-  emits the symmetric warning and excludes the scorecard from the leaderboard until the editorial PR lands.
+- **Scorecard-PR-first.** A scorecard whose filename slug has no registry entry is a "scorecard orphan": the build emits
+  the symmetric warning and excludes the scorecard from the leaderboard until the editorial PR lands.
 
 Both directions surface as a structured CI annotation on the PR (`WARNINGS_JSON: { scorecardOrphans, registryOrphans }`)
-so reviewers see drift without grepping logs. The build still passes in either orphaned state — the warning is the
-nudge, not a blocker. Once both halves land, the tool appears on the leaderboard at the next deploy.
+so reviewers see drift without grepping logs. The build still passes in either orphaned state; the warning is the nudge,
+not a blocker. Once both halves land, the tool appears on the leaderboard at the next deploy.
 
 ## How a score is computed
 
@@ -45,27 +45,27 @@ Neither is evidence of a defect, so neither moves the score.
 headline number. Per RFC 2119 those are categorically different — a `fail` means non-conformance with the standard; a
 `warn` means a missed default. The headline is a deliberate simplification chosen so a single number is comparable
 across tools; the **principles met** column is where conformance lives. A tool with one `fail` and zero `warn` will
-score higher than a tool with zero `fail` and three `warn`, but only the first tool is non-conformant — read both
-columns together. The per-tool page is the ground truth.
+score higher than a tool with zero `fail` and three `warn`, but only the first tool is non-conformant. Read both columns
+together. The per-tool page is the ground truth.
 
-The **principles met** column counts how many of the eight principles (P1–P8) have *all* their checks passing — no
+The **principles met** column counts how many of the eight principles (P1–P8) have *all* their checks passing: no
 warnings, no failures. A tool can have a 90% pass rate and still meet only four of eight principles, if the warnings
 cluster inside three principle groups. Both numbers are surfaced because either, alone, hides the shape of the result.
 
-Bonus checks — `CodeQuality` and `ProjectStructure` — are listed on each tool's page but not blended into the primary
+Bonus checks (`CodeQuality` and `ProjectStructure`) are listed on each tool's page but not blended into the primary
 score. They are language-specific and would create unfair comparisons across tools.
 
 ## What the audience signal is, and is not
 
 `anc` v0.1.3+ classifies each scored tool as one of:
 
-- `agent-optimized` — the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or
-  warn at most once. (One warn allowance reflects the reality that the four signal checks are correlated — a
-  near-conformant tool may miss on one edge, e.g., honoring `NO_COLOR` but not `NO_COLOR=0`; requiring zero warns would
-  over-penalize otherwise-conformant tools.)
-- `mixed` — two of the four signal checks warn.
-- `human-primary` — three or more of the four signal checks warn.
-- `null` with `audience_reason: "suppressed"` — when the active audit profile suppresses one or more of the four signal
+- `agent-optimized`: the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or warn
+  at most once. (One warn allowance reflects the reality that the four signal checks are correlated; a near-conformant
+  tool may miss on one edge, e.g., honoring `NO_COLOR` but not `NO_COLOR=0`. Requiring zero warns would over-penalize
+  otherwise-conformant tools.)
+- `mixed`: two of the four signal checks warn.
+- `human-primary`: three or more of the four signal checks warn.
+- `null` with `audience_reason: "suppressed"`: when the active audit profile suppresses one or more of the four signal
   checks, the classifier has insufficient input and refuses to label. The per-tool page surfaces the reason so a reader
   can see *why* the field is empty rather than guessing.
 
@@ -74,7 +74,7 @@ behavioral checks. The per-check evidence shown alongside is the ground truth. A
 be safe to use from an agent in narrow, well-bounded ways. A tool labeled `agent-optimized` may still surprise an agent
 on a check the classifier does not look at.
 
-When the classifier disagrees with intuition — for example, a tool you consider agent-hostile gets `agent-optimized` —
+When the classifier disagrees with intuition (for example, a tool you consider agent-hostile gets `agent-optimized`),
 the fix lives in one of two places:
 
 1. The tool fits an exception category that should suppress some checks → file a registry update adding an
@@ -87,8 +87,8 @@ Patching the *site* to override a CLI verdict is never the answer. The site rend
 ## Audit profiles: scoping the standard to a tool's category
 
 Some tools intentionally do not satisfy parts of the standard because the standard does not apply to their category.
-Lazygit is interactive on purpose — it is a TUI. `find` does not emit JSON because POSIX utilities don't. Holding these
-tools to checks that punish their core design produces a misleading score and a hostile leaderboard.
+Lazygit is interactive on purpose because it is a TUI. `find` does not emit JSON because POSIX utilities don't. Holding
+these tools to checks that punish their core design produces a misleading score and a hostile leaderboard.
 
 `anc` v0.1.3 exposes four exception categories via `--audit-profile`. The exact suppression set lives in
 [`SUPPRESSION_TABLE`](https://github.com/brettdavies/agentnative-cli/blob/main/src/principles/registry.rs) in the CLI
@@ -112,12 +112,12 @@ its work.
 
 | Tool        | Profile          | Why                                                                                 |
 | ----------- | ---------------- | ----------------------------------------------------------------------------------- |
-| `lazygit`   | `human-tui`      | Git TUI — primary mode is full-screen interactive UI                                |
-| `gitui`     | `human-tui`      | Git TUI — parallel project to lazygit                                               |
-| `tmux`      | `human-tui`      | Terminal multiplexer — bare invocation attaches/starts an interactive session       |
+| `lazygit`   | `human-tui`      | Git TUI - primary mode is full-screen interactive UI                                |
+| `gitui`     | `human-tui`      | Git TUI - parallel project to lazygit                                               |
+| `tmux`      | `human-tui`      | Terminal multiplexer - bare invocation attaches/starts an interactive session       |
 | `fzf`       | `human-tui`      | Interactive fuzzy-match picker over stdin                                           |
 | `broot`     | `human-tui`      | Interactive directory-tree browser                                                  |
-| `yazi`      | `human-tui`      | Interactive file manager — full-screen browse is the primary mode                   |
+| `yazi`      | `human-tui`      | Interactive file manager - full-screen browse is the primary mode                   |
 | `bottom`    | `human-tui`      | Interactive process/system monitor (htop-class)                                     |
 | `bandwhich` | `human-tui`      | Interactive network bandwidth monitor                                               |
 | `atuin`     | `human-tui`      | Interactive shell-history search; bare-binary mode and `atuin search` are TUI-first |
@@ -127,25 +127,25 @@ its work.
 
 Profiles **not** currently applied to any tool, with the criteria a future entry must meet:
 
-- `posix-utility` — Tool predates structured output and follows POSIX-style stdin/stdout conventions. Modern stream
+- `posix-utility`: Tool predates structured output and follows POSIX-style stdin/stdout conventions. Modern stream
   processors (`jq`, `yq`, `dasel`, `miller`, etc.) already pass P1 non-interactive checks vacuously, so the suppression
   is unnecessary and `posix-utility` is not applied.
-- `diagnostic-only` — Tool can never mutate state by design. Suppresses only P5 dry-run. The current registry's
-  read-only candidates (`procs`, `dust`, `tree`) all pass P5 already, so the profile would be a no-op annotation. It
-  will become useful when P5 grows checks beyond dry-run that warrant skipping for read-only diagnostics.
+- `diagnostic-only`: Tool can never mutate state by design. Suppresses only P5 dry-run. The current registry's read-only
+  candidates (`procs`, `dust`, `tree`) all pass P5 already, so the profile would be a no-op annotation. It will become
+  useful when P5 grows checks beyond dry-run that warrant skipping for read-only diagnostics.
 
 The general rule for adding a profile: **apply it only when an unsuppressed check is fighting the tool's category, not
 its design quality**. A TUI legitimately blocks on a TTY; that's a category fact, not a defect. A CLI that *could* be
-non-interactive but isn't is a defect — no profile applies.
+non-interactive but isn't is a defect; no profile applies.
 
 ## Layers: behavioral, project, source
 
 `anc` runs three layers of checks:
 
-- **Behavioral** — invokes the binary, inspects `--help`, `--version`, `--output json`, SIGPIPE, NO_COLOR, exit codes.
+- **Behavioral**: invokes the binary, inspects `--help`, `--version`, `--output json`, SIGPIPE, NO_COLOR, exit codes.
   Language-agnostic. Every tool on the leaderboard is scored at this layer.
-- **Project** — inspects the project tree: `AGENTS.md`, manifest files, recommended dependencies. Language-agnostic.
-- **Source** — runs ast-grep patterns against source code. Catches `unwrap()`, naked `println!`, missing error types.
+- **Project**: inspects the project tree: `AGENTS.md`, manifest files, recommended dependencies. Language-agnostic.
+- **Source**: runs ast-grep patterns against source code. Catches `unwrap()`, naked `println!`, missing error types.
   Rust + Python today; more languages as they ship.
 
 The headline score combines behavioral and project. Source-layer results, when available, are reported separately on the
@@ -170,10 +170,10 @@ Re-scoring is manual at launch. When a tool ships a release that changes its age
 
 - File an issue on [`agentnative-site`](https://github.com/brettdavies/agentnative-site/issues/new) titled `re-score:
   <tool>` and link the release notes. The committed scorecard will be regenerated against the new version.
-- If a tool's category is misclassified — e.g., a TUI is being scored as a general-purpose CLI — file an issue titled
+- If a tool's category is misclassified (e.g., a TUI is being scored as a general-purpose CLI), file an issue titled
   `audit-profile: <tool> <category>` with the rationale. Audit-profile changes are registry edits; they ship with the
   next site deploy.
-- If a check itself is wrong — false positives, weak signal, missing edge case — file the issue against the
+- If a check itself is wrong (false positives, weak signal, missing edge case), file the issue against the
   [`agentnative` CLI](https://github.com/brettdavies/agentnative-cli/issues), not this site. Site renders; CLI judges.
 
 ## Constructive framing

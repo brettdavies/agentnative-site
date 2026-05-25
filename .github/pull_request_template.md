@@ -6,7 +6,7 @@
 
 <!-- CRITICAL: This section is the source of truth for CHANGELOG.md.
      generate-changelog.sh extracts these categorized bullets verbatim
-     into the release changelog. Write carefully — this IS the changelog.
+     into the release changelog. Write carefully. This IS the changelog.
 
      AUDIENCE: Users and operators. Write from their perspective.
 
@@ -20,7 +20,7 @@
 
      RULES:
 - 1-5 bullets per PR. Fewer is better. One-line fixes get one bullet.
-- Delete empty ### sections entirely — don't leave blank categories.
+- Delete empty ### sections entirely; don't leave blank categories.
 - Each bullet starts with a verb: Add, Fix, Change, Remove, Deprecate.
 - Don't duplicate the PR title — expand on it or provide context.
 - If the PR has NO user-facing changes (pure refactor, test-only, CI), leave this section empty or omit it. The PR still

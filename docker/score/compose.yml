@@ -4,8 +4,9 @@
 #   docker compose -f docker/score/compose.yml build
 #   docker compose -f docker/score/compose.yml run --rm scorer
 #
-# The wrapper at docker/score/build.sh does both, plus the prerequisite
-# step of building the `anc` binary from the local CLI dev checkout.
+# The wrapper at docker/score/build.sh does both. The image brew-installs
+# the latest `anc` from `brettdavies/tap/agentnative` at build time (see
+# Dockerfile §"The anc binary"). No local CLI checkout, no cargo build.
 #
 # GPU passthrough notes:
 #   The compose file declares NVIDIA GPU access so `nvidia-smi` (one of
@@ -23,6 +24,12 @@ services:
     build:
       context: ../..
       dockerfile: docker/score/Dockerfile
+      args:
+        # Selects how anc lands in the image: `brew` (default) installs from
+        # brettdavies/tap/agentnative; `inject` copies docker/score/inject/anc
+        # in instead, skipping brew. The wrapper (docker/score/build.sh
+        # --from-source <cli-repo>) toggles this via the ANC_SOURCE env var.
+        ANC_SOURCE: ${ANC_SOURCE:-brew}
     image: anc-scorer:latest
     container_name: anc-scorer
 
