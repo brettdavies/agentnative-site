@@ -233,13 +233,12 @@
           }
         ]
       },
-      // Migration history captures the 2026-05-24 cross-migration rollback
-      // rehearsal: v2 dropped the Sandbox class, v3 recreated it under a
-      // new DO namespace. Cloudflare DO migrations are append-only — staging
-      // has all three tags applied and will reject any deploy whose migration
-      // list is a subset. Production (top-level `migrations`) stays at `v1`
-      // until prod runs its own rollback. See RELEASES.md § Cross-migration
-      // rollback rehearsal for the full procedure and evidence table.
+      // env.staging.migrations is append-only: Cloudflare rejects any
+      // deploy whose tag list is a subset of what's already applied to
+      // the env. staging carries the full sequence (v1, v2-drop-sandbox,
+      // v3-restore-sandbox); top-level `migrations` stays at v1 until
+      // prod runs its own rollback. See RELEASES.md § Cross-migration
+      // rollback rehearsal for the procedure that produces a new tag.
       "migrations": [
         {
           "tag": "v1",
