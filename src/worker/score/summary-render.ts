@@ -28,6 +28,7 @@ import { detectPreference } from '../accept';
 import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { get as cacheGet, keyFor as cacheKeyFor } from './cache';
+import { SHARE_URL_BINARY_RE } from './registry-lookup';
 
 // Lazy-cached shell template — fetched on the first /score/live request
 // in each isolate and held for the lifetime of the isolate. Workers re-
@@ -274,8 +275,10 @@ function substituteShell(
 
 type LiveScoreEnv = CacheEnv & { ASSETS: Fetcher };
 
-/** Strict slug shape — matches registry-name validation in scorecards.mjs. */
-const BINARY_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// Strict slug shape — shared with the handler's share-URL minting site
+// (registry-lookup.ts) so a share_url the handler emits can never miss
+// this route. Mirrors the registry-name validation in scorecards.mjs.
+const BINARY_SLUG_RE = SHARE_URL_BINARY_RE;
 
 export type LiveScorePathMatch = {
   binary: string;
