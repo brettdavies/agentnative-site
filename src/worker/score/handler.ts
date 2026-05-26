@@ -104,6 +104,7 @@ import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
 import {
   type DiscoveryHintsIndex,
   deriveShareBinary,
+  deriveShareBinaryFromSpec,
   lookupRegistry,
   lookupScorecard,
   type RegistryIndex,
@@ -666,7 +667,10 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
       telemetry.cache_post_hit = true;
       telemetry.tier = 'cache_post';
       telemetry.freshness = 'cache-hit';
-      const shareUrl = shareUrlForInput(validated, hintsIndex);
+      // Post-discovery share URL — derives from the resolved spec.binary
+      // (same key the DO wrote the cache under), so github-url inputs
+      // without an upfront hint still get a shareable result page.
+      const shareUrl = shareUrlForSpec(spec);
       return shapeWithPreference(
         shapeScoreSuccess(cached.scorecard, cached.anc_version, 'cache-hit', shareUrl),
         preference,
@@ -761,7 +765,12 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
     telemetry.freshness = 'live';
     telemetry.install_ms = typeof doPayload.install_ms === 'number' ? doPayload.install_ms : null;
     telemetry.anc_check_ms = typeof doPayload.anc_check_ms === 'number' ? doPayload.anc_check_ms : null;
-    const shareUrl = shareUrlForInput(validated, hintsIndex);
+    // Post-discovery share URL — same derivation as the cache_post tier:
+    // spec.binary IS the cache key the DO just wrote under, so the share
+    // URL and the R2 entry stay in lockstep. github-url-without-hint
+    // inputs that previously returned no share_url now get one as soon
+    // as discovery resolved a slug-shaped binary.
+    const shareUrl = shareUrlForSpec(spec);
     return shapeWithPreference(
       shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live', shareUrl),
       preference,
@@ -1049,19 +1058,37 @@ async function sha256(input: string): Promise<string> {
 }
 
 /**
- * Build the shareable HTML URL for an inline-scorecard response. Reads the
- * cache-tier binary derivation from registry-lookup so the share URL and
- * the cache key the DO writes to stay in lockstep. The `/score/live/`
+ * Build the shareable HTML URL for an inline-scorecard response BEFORE
+ * discovery has run. Used by the pre-discovery cache-hit branch (step 2,
+ * `lookup.kind === 'cached'`), where only the input-derived binary
+ * (install-command spec or hinted github-url) is known. The `/score/live/`
  * prefix nests under the existing `/score/<tool>` curated namespace; the
  * string "live" is reserved in the registry (scorecards.mjs) so no
  * curated tool can collide.
  *
- * Returns null when the binary isn't derivable upfront (github-url without
- * a hint). In that case the JSON response ships without `share_url`; the
- * user still has the scorecard inline and can re-paste to re-score.
+ * Returns null for github-url-without-hint inputs (no upfront binary;
+ * `shareUrlForSpec` handles those after discovery) and for branch-scoped
+ * pastes (no shareable surface by design).
  */
 function shareUrlForInput(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
   const binary = deriveShareBinary(input, hintsIndex);
+  return binary ? `/score/live/${binary}` : null;
+}
+
+/**
+ * Build the shareable HTML URL once discovery has resolved an `InstallSpec`.
+ * Used by the post-discovery cache-hit branch (step 6.5) and the live-success
+ * branch (DO returned a scorecard) so github-url-without-hint inputs still
+ * get a `share_url` keyed by the discovered binary. The derivation uses the
+ * same value the DO writes the R2 cache under, so the share URL and the
+ * /score/live/<binary> read path stay in lockstep.
+ *
+ * Returns null for branch-scoped (git-clone) specs and for any binary that
+ * fails the public slug regex — see `deriveShareBinaryFromSpec` for the
+ * rationale.
+ */
+function shareUrlForSpec(spec: import('./discover-binary').InstallSpec): string | null {
+  const binary = deriveShareBinaryFromSpec(spec);
   return binary ? `/score/live/${binary}` : null;
 }
 
