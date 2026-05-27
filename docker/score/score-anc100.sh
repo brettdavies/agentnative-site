@@ -97,8 +97,6 @@ if [[ -f "$BUILD_REGISTRY" ]] && ! diff -q "$BUILD_REGISTRY" "$REGISTRY" >/dev/n
   echo
 fi
 
-today=$(date -u +%Y-%m-%d)
-
 mapfile -t entries < <(
   # Use join("\t") instead of @tsv so embedded `"` in version_extract scripts
   # aren't CSV-quoted (`foo"bar` → `"foo""bar"`), which would survive into the
