@@ -616,15 +616,15 @@ PR landing.
 - **Failure handling:** any blocker (HTTPS error, page-load 5xx, broken nav, missing OG tag) blocks the post. Decide
   ship-without-fixing only if the issue is clearly cosmetic and limited in blast radius.
 - **Skill-distribution surfaces (`/skill`, `/skill.json`, `/skill.md`):** included in the smoke pass post-cut. Live
-  verification of `curl -s https://anc.dev/skill.json | jq -e '.source.commit | length == 40'` per the cutover ops
-  checklist.
+  verification of `curl -s https://anc.dev/skill.json | jq -e .schema_version` per the cutover ops checklist.
 
 **Test scenarios:**
 
 - Cold phone (no recent visits, cache cleared) loads the homepage in <2s on cellular.
 - `https://anc.dev/p1` through `/p7` all 200; HTML renders; theme toggle works; copy-buttons work.
 - `https://anc.dev/skill` 200; per-host commands visible; copy-button works (light + dark mode).
-- `https://anc.dev/skill.json` 200; `Content-Type: application/json`; JSON parseable; `source.commit` is 40-char hex.
+- `https://anc.dev/skill.json` 200; `Content-Type: application/json`; JSON parseable; `schema_version` and `source.url`
+  present.
 - OG-tag preview in a fresh-share text shows the correct image + title + description.
 
 **Verification:**
@@ -680,8 +680,8 @@ correct on launch morning). Spec `v0.3.0` tag must be live (CLI's U1.5 hard-bloc
    legacy eviction:** also purge `/install`, `/install.json`, `/install.md` once on this first deploy after PR #44 — the
    bundle no longer lives at those paths, but the CDN may still cache pre-split bundle responses. Verify with `curl -sI
    https://anc.dev/skill.json | grep cf-cache-status` returns `MISS` on the first request after purge. d. Smoke-check
-   live: `curl -s https://anc.dev/skill.json | jq -e '.source.commit | length == 40'`. Expect `true`. e. Seed daily
-   probe: `gh workflow run skill-availability.yml`. Confirm green run within 5 minutes.
+   live: `curl -s https://anc.dev/skill.json | jq -e .schema_version`. Expect a string. e. Seed daily probe: `gh
+   workflow run skill-availability.yml`. Confirm green run within 5 minutes.
 8. **Cold-device prod smoke (U5 second pass):** phone on cellular hits `https://anc.dev/` and walks the same checklist.
 9. **Update central tracker:** record this entry in the Day-1 Status Log with the gates flipped to `done`. Commit as
    `chore: update launch tracker — pre-launch release cut`.
@@ -746,7 +746,7 @@ Run this checklist Wednesday 2026-04-29 PT evening, in order. Do not skip steps.
 
 ### Post-merge cutover (immediately after deploy lands)
 
-- [ ] `curl -s https://anc.dev/skill.json | jq -e '.source.commit | length == 40'` returns `true`.
+- [ ] `curl -s https://anc.dev/skill.json | jq -e .schema_version` returns a string.
 - [ ] `curl -sI https://anc.dev/skill.json | grep -i 'content-type: application/json'` matches.
 - [ ] `bun x playwright test --project=skill` against `https://anc.dev/skill` — all 4 host clones green.
 - [ ] **Cache-purge** `/skill`, `/skill.json`, `/skill.md` via Cloudflare API. Use the 1Password token by name, DO NOT
