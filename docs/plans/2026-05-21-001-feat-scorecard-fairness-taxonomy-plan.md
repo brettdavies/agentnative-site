@@ -417,11 +417,37 @@ registry maintainable and the policy in one place.
 
 **Repo:** `brettdavies/agentnative` (spec).
 
-**Status:** [shipped] [PR brettdavies/agentnative#34](https://github.com/brettdavies/agentnative/pull/34) — 2026-05-21.
-Schema extension, propagation table, worked examples, and conditional-row migrations all landed. The standalone spec
-issue proposing the 7-status taxonomy was dropped (the plan, PR #34, and `principles/AGENTS.md` together carry the
-proposal; a single-repo issue would be redundant). The `VERSION` bump is deferred to the release PR that closes out the
-taxonomy unit, not this feature PR.
+**Status:** [shipped to dev only — NOT released]
+[PR brettdavies/agentnative#34](https://github.com/brettdavies/agentnative/pull/34) — 2026-05-21. Schema extension,
+propagation table, worked examples, and conditional-row migrations all landed. The standalone spec issue proposing the
+7-status taxonomy was dropped (the plan, PR #34, and `principles/AGENTS.md` together carry the proposal; a single-repo
+issue would be redundant). The `VERSION` bump is deferred to the release PR that closes out the taxonomy unit, not this
+feature PR.
+
+**Source location (where U1 lives today, as of 2026-05-26):**
+
+- Branch: `agentnative-spec` `dev`, head commit `b4f4d02` (PR #34 squash-merge).
+- `main`: does NOT contain U1. Latest `main` commit is `1625416` (release: PRODUCT.md migration), predates PR #34.
+- Tags: latest is `v0.4.0` (tagged 2026-05-07), which predates U1. There is no `v0.5.0` or `v0.5.0-rc.*` tag.
+
+**Downstream-consumer impact:** Both `agentnative-cli` and `agentnative-site` vendor the spec via their respective
+`scripts/sync-spec.sh`. The default resolution path returns the latest `v*` tag (currently `v0.4.0`), so a blind
+`sync-spec.sh` rerun re-pulls pre-U1 content. To consume U1 ahead of a spec release, use the `--ref` flag (or the
+`SPEC_REF` env var) added to both scripts alongside this plan unit:
+
+```bash
+# Pull U1 by branch HEAD (recommended for early iteration):
+bash scripts/sync-spec.sh --ref dev
+
+# Pull U1 by explicit commit SHA (recommended for any PR that vendors mid-flight spec work,
+# so the PR body can record the exact pin):
+bash scripts/sync-spec.sh --ref b4f4d02
+```
+
+`--ref` accepts branches, tags, and commit SHAs uniformly via the GitHub contents API (`gh api`). The resolved short SHA
+is printed every run so the user knows exactly what landed; record that SHA in any consumer PR body that vendors
+non-released content so the pin is traceable post-merge. When U1 cuts as `v0.5.0` (or `v0.5.0-rc.*`), downstream
+consumers can drop `--ref` and return to the default-tag path.
 
 **Work:**
 
@@ -446,7 +472,35 @@ taxonomy unit, not this feature PR.
 
 ### U2. CLI — emit new statuses, bump schema (agentnative-cli repo)
 
+**Status:** [ready to start] — gated only on `agentnative-cli` `feat/sync-spec-ref-flag` landing on `dev` (the `--ref`
+flag this unit consumes; see Pre-flight). All other inputs (U1 on spec `dev`, decision tables in this plan) are in place
+as of 2026-05-26.
+
 **Repo:** `brettdavies/agentnative-cli`.
+
+**Upstream basis:** Consumes U1 from `agentnative-spec` `dev` (commit `b4f4d02`) via `bash scripts/sync-spec.sh --ref
+dev` (or `--ref b4f4d02` for a pinned SHA in the U2 PR body). After spec `v0.5.0` cuts, re-run with no `--ref` to pick
+up the released tag.
+
+**Pre-flight (first commits on the U2 feature branch):**
+
+1. Confirm `agentnative-cli` `dev` carries the `--ref` flag in `scripts/sync-spec.sh` (PR feat/sync-spec-ref-flag must
+   be merged). Verify with `bash scripts/sync-spec.sh --help` — the help banner must list `--ref` and `SPEC_REF`.
+2. Cut `feat/u2-7-status-emission` (or similar) from `agentnative-cli` `dev`.
+3. First commit on the branch: vendor U1.
+
+   ```bash
+   bash scripts/sync-spec.sh --ref b4f4d02
+   git add src/principles/spec
+   git commit -m "chore(spec): vendor agentnative-spec dev @ b4f4d02 for U2"
+   ```
+
+   Use a pinned SHA (not `--ref dev`) so the PR body records what U2 was built against; if spec `dev` advances during
+   U2 development, the cut is reproducible. Record the resolved short SHA the script prints in the U2 PR body's
+   "Spec basis" line.
+4. From here forward, all U2 work (probe code, schema bump, tests) consumes the vendored U1 artifacts via the normal
+   `cargo build` / `build.rs` path. The vendored tree's `VERSION` file will still read `0.4.0` until spec cuts `v0.5.0`
+   — this is expected; the spec-side `VERSION` bump is deferred to spec's release PR per U1's notes.
 
 **Work:**
 
@@ -482,6 +536,10 @@ taxonomy unit, not this feature PR.
 
 **Repo:** `brettdavies/agentnative` (spec).
 
+**Upstream basis:** Lands on `agentnative-spec` `dev`, same branch as U1. The sandbox-rescore step consumes U2's CLI
+output from `agentnative-cli` `dev` (or a U2 feature branch); run the rescore against a `cargo build` of that branch. No
+spec-side vendoring change needed for this unit.
+
 **Work:**
 
 - Open a separate spec issue: "Scoring formula choice now that inputs are disambiguated."
@@ -499,6 +557,12 @@ taxonomy unit, not this feature PR.
 ### U4. Site — renderer updates for 7-status output (this repo)
 
 **Repo:** `brettdavies/agentnative-site` (this repo).
+
+**Upstream basis:** Consumes U2 from `agentnative-cli` (the schema 0.6 fixture shape). During development, `cargo build`
+the CLI's U2 feature branch locally and run `anc check --output json` to produce schema-0.6 fixtures for the site's
+renderer unit tests. The release-side dependency (published CLI via the Homebrew tap for the docker/score image) is U6's
+gate, not U4's; U4 can complete against local-build fixtures alone. No `sync-spec.sh` change needed here; the site's
+vendored spec only matters for U5.
 
 **Work:**
 
@@ -523,6 +587,10 @@ taxonomy unit, not this feature PR.
 
 **Repo:** `brettdavies/agentnative-site`.
 
+**Upstream basis:** Consumes U3 (spec formula choice) from `agentnative-spec`. Pull the spec via `bash
+scripts/sync-spec.sh --ref dev` (or the U3 feature-branch SHA) until spec `v0.5.0` cuts; then drop `--ref`. The vendored
+`src/data/spec/principles/p*-*.md` carries the formula and methodology language the site mirrors.
+
 **Work:**
 
 - Rewrite `content/methodology.md` to document the 7-status taxonomy, the conditional-requirement mechanism, and the
@@ -542,6 +610,11 @@ taxonomy unit, not this feature PR.
 ### U6. Site — registry rescore against post-change CLI (this repo)
 
 **Repo:** `brettdavies/agentnative-site`.
+
+**Upstream basis:** Requires the published `anc` CLI via the `brettdavies/homebrew-tap` formula (the docker/score image
+installs `anc` via brew, not from a local build). U6 is gated on the CLI release (v0.5.0 or whatever ships U2), not on
+any sync-spec flag. Also pull the spec at the same release tag via `bash scripts/sync-spec.sh` (default path, no
+`--ref`) so the leaderboard's vendored spec matches the CLI's spec.
 
 **Work:**
 
