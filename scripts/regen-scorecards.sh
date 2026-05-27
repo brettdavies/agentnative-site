@@ -103,8 +103,6 @@ if [[ $ALLOW_DEV_BUILD -eq 0 ]]; then
   fi
 fi
 
-today="$(date -u +%Y-%m-%d)"
-
 # --- helpers --------------------------------------------------------------
 
 # Extract the actually-installed version of $binary. If $override is non-

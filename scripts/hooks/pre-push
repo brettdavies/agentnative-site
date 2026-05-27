@@ -18,11 +18,15 @@
 #   6. banned-fonts   — bash scripts/check-banned-fonts.sh
 #                       (deployment-layer scan: CSS, TS, build scripts;
 #                       reads tokens from styles/site/BannedFonts.yml)
-#   7. prose-check    — bash scripts/prose-check.sh
+#   7. shellcheck     — shellcheck --severity=warning over every tracked
+#                       *.sh plus scripts/hooks/* (catches SC2034 / SC2086
+#                       / SC2155 class bugs; skips with a one-line note
+#                       when shellcheck isn't installed)
+#   8. prose-check    — bash scripts/prose-check.sh
 #                       (Vale + LanguageTool over *.md in scope; LT skips
 #                       cleanly when LanguageTool is unreachable)
 #
-# Stages 5-7 each redirect child stdin to </dev/null. The branch-deletion
+# Stages 5-8 each redirect child stdin to </dev/null. The branch-deletion
 # short-circuit at the top of the hook consumes the hook-protocol bytes
 # from stdin (`while read -r local_ref local_sha …`); a child that read
 # stdin would either swallow protocol bytes or fight for them.
@@ -69,6 +73,23 @@ bun scripts/generate-pack-readme.mjs site --check </dev/null
 
 bold '==> Banned-font deployment scan'
 bash scripts/check-banned-fonts.sh </dev/null
+
+bold '==> shellcheck (severity=warning)'
+# Lint every tracked *.sh plus the pre-push hook itself. Severity threshold
+# "warning" catches real bugs (unused vars, quoting, missing exits) while
+# ignoring info/style noise. Skip silently if shellcheck isn't installed —
+# install via `brew install shellcheck` or `apt install shellcheck`.
+if command -v shellcheck &>/dev/null; then
+  mapfile -t shell_files < <({
+    git ls-files '*.sh' 2>/dev/null
+    git ls-files 'scripts/hooks/*' 2>/dev/null
+  } | sort -u)
+  if [ ${#shell_files[@]} -gt 0 ]; then
+    shellcheck --severity=warning "${shell_files[@]}" </dev/null
+  fi
+else
+  echo "  - shellcheck (skipped: install via \`brew install shellcheck\` or \`apt install shellcheck\`)"
+fi
 
 bold '==> prose-check (Vale + LanguageTool)'
 # Scope to files changed vs PROSE_CHECK_BASE (default origin/dev) so untracked
