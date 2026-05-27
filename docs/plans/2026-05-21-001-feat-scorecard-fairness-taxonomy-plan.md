@@ -472,11 +472,35 @@ consumers can drop `--ref` and return to the default-tag path.
 
 ### U2. CLI — emit new statuses, bump schema (agentnative-cli repo)
 
+**Status:** [ready to start] — gated only on `agentnative-cli` `feat/sync-spec-ref-flag` landing on `dev` (the `--ref`
+flag this unit consumes; see Pre-flight). All other inputs (U1 on spec `dev`, decision tables in this plan) are in place
+as of 2026-05-26.
+
 **Repo:** `brettdavies/agentnative-cli`.
 
 **Upstream basis:** Consumes U1 from `agentnative-spec` `dev` (commit `b4f4d02`) via `bash scripts/sync-spec.sh --ref
 dev` (or `--ref b4f4d02` for a pinned SHA in the U2 PR body). After spec `v0.5.0` cuts, re-run with no `--ref` to pick
 up the released tag.
+
+**Pre-flight (first commits on the U2 feature branch):**
+
+1. Confirm `agentnative-cli` `dev` carries the `--ref` flag in `scripts/sync-spec.sh` (PR feat/sync-spec-ref-flag must
+   be merged). Verify with `bash scripts/sync-spec.sh --help` — the help banner must list `--ref` and `SPEC_REF`.
+2. Cut `feat/u2-7-status-emission` (or similar) from `agentnative-cli` `dev`.
+3. First commit on the branch: vendor U1.
+
+   ```bash
+   bash scripts/sync-spec.sh --ref b4f4d02
+   git add src/principles/spec
+   git commit -m "chore(spec): vendor agentnative-spec dev @ b4f4d02 for U2"
+   ```
+
+   Use a pinned SHA (not `--ref dev`) so the PR body records what U2 was built against; if spec `dev` advances during
+   U2 development, the cut is reproducible. Record the resolved short SHA the script prints in the U2 PR body's
+   "Spec basis" line.
+4. From here forward, all U2 work (probe code, schema bump, tests) consumes the vendored U1 artifacts via the normal
+   `cargo build` / `build.rs` path. The vendored tree's `VERSION` file will still read `0.4.0` until spec cuts `v0.5.0`
+   — this is expected; the spec-side `VERSION` bump is deferred to spec's release PR per U1's notes.
 
 **Work:**
 
