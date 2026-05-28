@@ -472,73 +472,67 @@ consumers can drop `--ref` and return to the default-tag path.
 
 ### U2. CLI — emit new statuses, bump schema (agentnative-cli repo)
 
-**Status:** [ready to start] — gated only on `agentnative-cli` `feat/sync-spec-ref-flag` landing on `dev` (the `--ref`
-flag this unit consumes; see Pre-flight). All other inputs (U1 on spec `dev`, decision tables in this plan) are in place
-as of 2026-05-26.
+**Status:** [shipped to dev only — NOT released]
+[PR brettdavies/agentnative-cli#62](https://github.com/brettdavies/agentnative-cli/pull/62) — squash-merged to
+`agentnative-cli` `dev` at `3839696`. 7-status emission, per-row results, antecedent propagation, and the schema 0.6
+bump all landed. The CHANGELOG entry, `Cargo.toml` bump, and tag publish are deferred to the release PR that closes out
+U2 (same pattern as U1's spec `VERSION`).
 
 **Repo:** `brettdavies/agentnative-cli`.
 
-**Upstream basis:** Consumes U1 from `agentnative-spec` `dev` (commit `b4f4d02`) via `bash scripts/sync-spec.sh --ref
-dev` (or `--ref b4f4d02` for a pinned SHA in the U2 PR body). After spec `v0.5.0` cuts, re-run with no `--ref` to pick
-up the released tag.
+**Source location:**
 
-**Pre-flight (first commits on the U2 feature branch):**
-
-1. Confirm `agentnative-cli` `dev` carries the `--ref` flag in `scripts/sync-spec.sh` (PR feat/sync-spec-ref-flag must
-   be merged). Verify with `bash scripts/sync-spec.sh --help` — the help banner must list `--ref` and `SPEC_REF`.
-2. Cut `feat/u2-7-status-emission` (or similar) from `agentnative-cli` `dev`.
-3. First commit on the branch: vendor U1.
-
-   ```bash
-   bash scripts/sync-spec.sh --ref b4f4d02
-   git add src/principles/spec
-   git commit -m "chore(spec): vendor agentnative-spec dev @ b4f4d02 for U2"
-   ```
-
-   Use a pinned SHA (not `--ref dev`) so the PR body records what U2 was built against; if spec `dev` advances during
-   U2 development, the cut is reproducible. Record the resolved short SHA the script prints in the U2 PR body's
-   "Spec basis" line.
-4. From here forward, all U2 work (probe code, schema bump, tests) consumes the vendored U1 artifacts via the normal
-   `cargo build` / `build.rs` path. The vendored tree's `VERSION` file will still read `0.4.0` until spec cuts `v0.5.0`
-   — this is expected; the spec-side `VERSION` bump is deferred to spec's release PR per U1's notes.
+- `dev`: contains U2 at squash commit `3839696`. `SCHEMA_VERSION` reads `0.6`.
+- `main`: does NOT contain U2.
+- Tags: latest is `v0.4.0`; no `v0.5.0` or `v0.5.0-rc.*` yet. `Cargo.toml` on `dev` still reads `0.4.0`.
+- Vendored spec basis: pinned at `b4f4d02` (U1). Vendored `VERSION` reads `0.4.0` — expected; the spec-side `VERSION`
+  bump is deferred to spec's release PR per U1.
 
 **Work:**
 
-- Switch result emission from per-`check_id` to per-requirement-row (Decision 2c). One probe whose `check_id` appears in
-  N matrix rows now emits N result entries, each carrying the requirement row's `id` as `result.id` and the row's
-  `level` as `result.tier`.
-- Update probe results to emit `opt_out` where the tool clearly has the capability surface but does not ship the feature
-  (e.g., `p8-bundle-install` for tools without an `AGENTS.md`).
-- Update probe results to emit `n_a` where a conditional antecedent is unmet (e.g., `p2-must-schema-when-json` on tools
-  without `--output json`), driven by the matrix's `applicability.kind: conditional` rows per the propagation table in
-  Decision 2a.
-- Keep `skip` for the residual case: probe limitation.
-- Bump `scorecard.schema.json` from 0.5 to 0.6. Add `opt_out` and `n_a` to the status enum. Add `opt_out` and `n_a`
-  counters to `summary`. Add `tier` field to each `results[]` entry.
-- Update `summary.score_pct` to reflect whatever transitional formula the spec lands on (initial: leave the existing
-  formula but exclude `opt_out` from the denominator and exclude `n_a` from both — minimal change that respects the new
-  semantics without committing to a new formula).
-- Update `anc check`'s text output to render the new statuses (per-check status badges in the terminal).
-- Update CLI tests: add fixtures with the new statuses, assert correct counter aggregation in `summary`, assert per-row
-  emission for shared check_ids like `p3-version`, assert antecedent-status propagation table from Decision 2a.
+- [shipped] Result emission switched from per-`check_id` to per-requirement-row (Decision 2c). One probe whose
+  `check_id` appears in N matrix rows now emits N result entries, each carrying the requirement row's `id` as
+  `result.id` and the row's `level` as `result.tier`. Concrete example in code: `src/checks/behavioral/version.rs`
+  declares `covers: &["p3-must-version", "p3-should-version-short"]`; the scorecard emitter fans out both rows.
+- [shipped] Probe results emit `opt_out` where the tool clearly has the capability surface but does not ship the feature
+  (e.g., `p8-bundle-install` for tools without an `AGENTS.md`; see
+  `src/checks/project/bundle_exists.rs::opt_out_no_bundle`).
+- [shipped] Probe results emit `n_a` where a conditional antecedent is unmet, driven by the matrix's
+  `applicability.kind: conditional` rows per the propagation table in Decision 2a. Propagation logic in
+  `src/principles/registry.rs`.
+- [shipped] `skip` retained for the residual case: probe limitation.
+- [shipped] `scorecard.schema.json` bumped from 0.5 to 0.6. `opt_out` and `n_a` added to the status enum, matching
+  counters in `summary`, `tier` field on each `results[]` entry.
+- [shipped] `summary.score_pct` uses the transitional formula: existing pass/(pass+warn+fail) shape, with `opt_out`
+  excluded from the denominator and `n_a` excluded from both. Documented in `src/scorecard/mod.rs` as transitional
+  pending U3.
+- [shipped] `anc check` text output renders the new statuses (per-check status badges in terminal output).
+- [shipped] CLI tests: fixtures cover each new status; counter aggregation asserted in `summary`; per-row emission
+  asserted for shared check_ids (`p3-version` produces both `p3-must-version` and `p3-should-version-short`);
+  antecedent-status propagation table from Decision 2a asserted; red-team test pass added in `12c1d32` covers parser,
+  propagation, score, and schema drift.
 
 **Acceptance:**
 
-- `cargo test` green.
-- A test fixture exists for each new status.
-- `anc check --command <test-binary> --output json` emits valid 0.6-schema output.
-- CHANGELOG documents the new statuses + the schema bump.
-- CLI version bumps; the bump is published.
+- [met] `cargo test` green (PR #62 CI clean, mergeStateStatus CLEAN).
+- [met] Test fixture exists for each new status.
+- [met] `anc check --command <test-binary> --output json` emits valid 0.6-schema output (schema embedded via
+  `include_str!`; tests assert `schema_version == "0.6"`).
+- Deferred to release PR: CHANGELOG entry for the new statuses + schema bump.
+- Deferred to release PR: `Cargo.toml` version bump and tag publish.
 
-**Dependencies:** U1 (spec defines the statuses).
+**Dependencies:** U1 (spec defines the statuses). [met — vendored at `b4f4d02`.]
 
 ### U3. Spec — scoring formula choice (agentnative repo, follow-up)
+
+**Status:** [ready to start] — both dependencies met (U1 on spec `dev`, U2 on CLI `dev` at `3839696`). The sandbox
+rescore can run against a `cargo build` of CLI `dev`.
 
 **Repo:** `brettdavies/agentnative` (spec).
 
 **Upstream basis:** Lands on `agentnative-spec` `dev`, same branch as U1. The sandbox-rescore step consumes U2's CLI
-output from `agentnative-cli` `dev` (or a U2 feature branch); run the rescore against a `cargo build` of that branch. No
-spec-side vendoring change needed for this unit.
+output from `agentnative-cli` `dev`; run the rescore against a `cargo build` of that branch. No spec-side vendoring
+change needed for this unit.
 
 **Work:**
 
@@ -556,13 +550,16 @@ spec-side vendoring change needed for this unit.
 
 ### U4. Site — renderer updates for 7-status output (this repo)
 
+**Status:** [ready to start] — U2 is on CLI `dev` at `3839696`, so the schema 0.6 fixture shape is settled. U4 can
+proceed against a local `cargo build` of CLI `dev`; no published release needed.
+
 **Repo:** `brettdavies/agentnative-site` (this repo).
 
 **Upstream basis:** Consumes U2 from `agentnative-cli` (the schema 0.6 fixture shape). During development, `cargo build`
-the CLI's U2 feature branch locally and run `anc check --output json` to produce schema-0.6 fixtures for the site's
-renderer unit tests. The release-side dependency (published CLI via the Homebrew tap for the docker/score image) is U6's
-gate, not U4's; U4 can complete against local-build fixtures alone. No `sync-spec.sh` change needed here; the site's
-vendored spec only matters for U5.
+CLI `dev` locally and run `anc check --output json` to produce schema-0.6 fixtures for the site's renderer unit tests.
+The release-side dependency (published CLI via the Homebrew tap for the docker/score image) is U6's gate, not U4's; U4
+can complete against local-build fixtures alone. No `sync-spec.sh` change needed here; the site's vendored spec only
+matters for U5.
 
 **Work:**
 
