@@ -543,10 +543,41 @@ change needed for this unit.
 **Acceptance:**
 
 - Formula documented in spec.
-- The CLI's `summary.score_pct` matches the spec's formula.
+- CLI implementation of the formula is owned by U3b — a spec PR cannot edit the CLI's Rust. U3 closes when the formula
+  is documented; U3b closes when `score_pct` computes it.
 - The methodology section of the spec explains the rationale.
 
 **Dependencies:** U1, U2 (the input must be clean before the formula is chosen).
+
+### U3b. CLI — implement final scoring formula (agentnative-cli repo)
+
+**Status:** [blocked on U3] — cannot start until U3 chooses the tier weights and the opt_out-in-or-out-of-denominator
+question. This unit swaps the transitional formula shipped in U2 for the final one.
+
+**Repo:** `brettdavies/agentnative-cli`.
+
+**Upstream basis:** Lands on `agentnative-cli` `dev`. Re-vendor the spec at the U3 commit (or `v0.5.0` once cut) so the
+CLI's formula matches the spec's documented formula. The transitional formula shipped in U2 lives in
+`src/scorecard/mod.rs`, flagged transitional pending U3.
+
+**Work:**
+
+- Replace the transitional `summary.score_pct` (pass/(pass+warn+fail), `opt_out` excluded from the denominator, `n_a`
+  excluded from both) with the U3-chosen formula: apply the chosen tier weights and the chosen `opt_out` denominator
+  treatment.
+- Remove the "transitional pending U3" marker in `src/scorecard/mod.rs`.
+- Update CLI tests: assert `score_pct` against hand-computed expected values for the chosen formula across the existing
+  status fixtures.
+- Update the CLI README's scoring section / dogfood numbers to reflect the final formula.
+
+**Acceptance:**
+
+- The CLI's `summary.score_pct` computes the U3 formula.
+- `cargo test` green; `score_pct` fixtures assert the chosen formula.
+- Deferred to release PR: CHANGELOG entry for the formula change; `Cargo.toml` bump and tag publish (bundled with the U2
+  release or a follow-on, per release sequencing).
+
+**Dependencies:** U3 (the formula must be chosen before the CLI can implement it).
 
 ### U4. Site — renderer updates for 7-status output (this repo)
 
@@ -630,7 +661,8 @@ any sync-spec flag. Also pull the spec at the same release tag via `bash scripts
 - PR open against `dev`; CI green.
 - Score delta summary in the PR body.
 
-**Dependencies:** U2, U3 (CLI must ship the new statuses and the new formula must be specified).
+**Dependencies:** U2, U3, U3b (CLI must ship the new statuses, the formula must be specified in U3, and the CLI must
+compute the final formula in U3b — the rescore is only meaningful against the final formula, not the transitional one).
 
 ---
 
@@ -646,6 +678,7 @@ The handoff happens at version-bump boundaries:
 - spec VERSION bump after U1 lands (signals the taxonomy is decided)
 - CLI version bump after U2 ships (signals the new statuses are emitted)
 - spec VERSION bump again after U3 (signals the formula is chosen)
+- CLI version bump after U3b (signals `score_pct` computes the final formula)
 - site rescore PR after U6 (closes the loop)
 
 ### Backward compatibility
@@ -713,8 +746,8 @@ should produce small movements, not large ones.
 If the CLI ships the new statuses before the site renders them, the live leaderboard may show garbled output. If the
 site updates its renderer before the CLI ships, the renderer has nothing to render against.
 
-**Mitigation:** ship in strict order (U1 → U2 → U4 → U3 → U5 → U6). Each step is a separate PR with its own review.
-Defensive rendering on the site side (fall back to `skip` rendering for any unknown status) is acceptable cost.
+**Mitigation:** ship in strict order (U1 → U2 → U4 → U3 → U3b → U5 → U6). Each step is a separate PR with its own
+review. Defensive rendering on the site side (fall back to `skip` rendering for any unknown status) is acceptable cost.
 
 ### Risk: schema_version bump misses a consumer
 
