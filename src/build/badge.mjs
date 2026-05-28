@@ -12,25 +12,33 @@
 import { makeBadge } from 'badge-maker';
 import { SPEC_VERSION } from './util.mjs';
 
-// Color thresholds — applied against the rounded percent score (0–100).
-// Brightline green at the badge floor (80) so a reader instantly sees
-// "this tool clears the bar". Yellow band covers the 60–79 mid-tier;
-// red is reserved for genuinely off-target tools so the visual stays
-// honest when a tool regresses.
-const COLOR_GREEN = 'brightgreen';
-const COLOR_YELLOW = 'yellow';
-const COLOR_RED = 'red';
+// Cohort-band fills, ascending. Bands and thresholds are the spec-side
+// contract (principles/scoring.md, docs/badge.md); this maps each to a hex
+// fill. The four eligible bands sit on the standard's own accent hues
+// (foundation.css --should/--may/--accent); orange and red are the
+// below-floor warm alarm. Warm→cool reads as upward progress, and the navy
+// --accent crowns Exemplary. Every fill clears WCAG AA against white badge
+// text (≥ 4.75:1).
+const BAND_EXEMPLARY = '#005da1'; // navy   — oklch(47% 0.16 250), --accent
+const BAND_STRONG = '#007b80'; //    teal   — oklch(53% 0.11 200), --may
+const BAND_SOLID = '#0a7e3a'; //     green  — oklch(52% 0.14 150)
+const BAND_QUALIFIED = '#976200'; // ochre  — oklch(54% 0.13 72),  --should
+const BAND_BELOW = '#bf5200'; //     orange — oklch(57% 0.16 47)
+const BAND_CRITICAL = '#af2b25'; //  red    — oklch(50% 0.17 28),  --must
 
 /**
- * Map a 0–100 percent score to a shields-style color name.
+ * Map a 0–100 percent score to its cohort-band hex fill.
  *
  * @param {number} pct — integer percent (0–100)
- * @returns {string}
+ * @returns {string} hex color
  */
 export function badgeColor(pct) {
-  if (pct >= 80) return COLOR_GREEN;
-  if (pct >= 60) return COLOR_YELLOW;
-  return COLOR_RED;
+  if (pct >= 85) return BAND_EXEMPLARY;
+  if (pct >= 80) return BAND_STRONG;
+  if (pct >= 75) return BAND_SOLID;
+  if (pct >= 70) return BAND_QUALIFIED;
+  if (pct >= 50) return BAND_BELOW;
+  return BAND_CRITICAL;
 }
 
 /**
