@@ -12,6 +12,9 @@ What lives here:
   target only.** Nothing in the site build consumes these for rendering. Site rendering of `/p1`–`/p7` reads from
   `content/principles/`, which is human-written site copy that exists alongside (not derived from) the spec prose.
 
+For the full spec landing page — leaderboard, badge convention, and acknowledgements — see [anc.dev](https://anc.dev) or
+the upstream [`README`](https://github.com/brettdavies/agentnative#readme).
+
 ## Three distinct spec-version concepts on this site
 
 The site shows version labels in three places. **Each pulls from a different source by design** — they can legitimately
