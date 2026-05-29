@@ -567,11 +567,18 @@ CLI output from `agentnative-cli` `dev`. No spec-side vendoring change needed fo
 
 ### U3b. CLI — implement final scoring formula (agentnative-cli repo)
 
-**Status:** [ready to start] — U3 shipped on spec `dev` (PR #39, `972c9d3`); `principles/scoring.md` defines the final
-formula. This unit swaps the transitional formula shipped in U2 for that formula. The transitional `score_pct` lives in
-`src/scorecard/mod.rs` (`fn score_pct`, flagged transitional pending U3).
+**Status:** [shipped to dev only — NOT released]
+[PR brettdavies/agentnative-cli#64](https://github.com/brettdavies/agentnative-cli/pull/64) — squash-merged to
+`agentnative-cli` `dev` at `43d4f7c`. The behavioral-only credit-weighted formula, the 80→70 floor drop, and the README
+/ CLAUDE.md doc sync all landed. The CHANGELOG entry, `Cargo.toml` bump, and tag publish are deferred to the release PR
+that closes out U2/U3b (same pattern as U1, U2, and U3).
 
 **Repo:** `brettdavies/agentnative-cli`.
+
+**Source location:** `dev` at squash commit `43d4f7c`. `score_pct` in `src/scorecard/mod.rs` is behavioral-only and
+credit-weighted; `BADGE_ELIGIBILITY_FLOOR_PCT` reads `70`. `Cargo.toml` still reads `0.4.0` (bump deferred). No spec
+re-vendor was performed — `scoring.md` is not a vendored file (see Upstream basis); formula authority is cited as
+`agentnative-spec@972c9d3` in the PR body.
 
 **Upstream basis:** Lands on `agentnative-cli` `dev`. **No spec re-vendor and no version bump are required for this
 unit.** The formula is Rust code in `score_pct`, not a vendored artifact: `scripts/sync-spec.sh` vendors only `VERSION`,
@@ -594,24 +601,31 @@ the formula's authority; the clean spec resync happens when `v0.5.0` cuts (U6's 
 
 **Work:**
 
-- Rewrite `fn score_pct` in `src/scorecard/mod.rs`: restrict to behavioral-layer rows; denominator set `D = {pass, warn,
-  fail, opt_out}`; credit-weighted numerator (`pass` 1.0, `warn` 0.5, `fail`/`opt_out` 0.0); tier weights applied as
-  named consts in the general `Σ w·credit / Σ w` form; empty `D` → 0.
-- Lower `BADGE_ELIGIBILITY_FLOOR_PCT` from `80` to `70`.
-- Replace the "transitional pending U3" docstring on `score_pct` with a doc comment citing `scoring.md` as the formula
-  authority.
-- Update CLI tests: hand-compute expected `score_pct` for each existing status fixture under the new formula; assert a
-  source/project-layer `fail` does not move the score (behavioral-only); assert the 70-floor boundary in
-  `compute_badge`; add the `scoring.md` worked-example fixture (20 pass / 7 warn / 0 fail / 1 opt_out / 1 n_a / 14 skip
-  → 84).
-- Update the CLI README's scoring section + dogfood numbers to reflect the final formula and the behavioral-only scope.
+- [shipped] Rewrote `fn score_pct` in `src/scorecard/mod.rs`: restricted to behavioral-layer rows; denominator set `D =
+  {pass, warn, fail, opt_out}`; credit-weighted numerator (`pass` 1.0, `warn` 0.5, `fail`/`opt_out` 0.0); tier weights
+  applied as named consts (`W_MUST`/`W_SHOULD`/`W_MAY`) in the general `Σ w·credit / Σ w` form via the new `tier_weight`
+  - `status_credit` helpers; empty `D` → 0.
+- [shipped] Lowered `BADGE_ELIGIBILITY_FLOOR_PCT` from `80` to `70`.
+- [shipped] Replaced the "transitional pending U3" docstring on `score_pct` with a doc comment citing `scoring.md` as
+  the formula authority.
+- [shipped] CLI tests: hand-computed expected `score_pct` per status fixture under the new formula; behavioral-only
+  exclusion asserted (a source/project-layer `fail` does not move the score); 70-floor boundary asserted in
+  `compute_badge`; `scoring.md` worked-example fixture added (20 pass / 7 warn / 0 fail / 1 opt_out / 1 n_a / 14 skip →
+  84). Reworked the at-floor, opt_out-in-denominator, and full-pipeline propagation cases.
+- [shipped] Updated the CLI README's Scoring section, dogfood table, and badge field reference (and the CLAUDE.md
+  scorecard reference) to the final formula and the behavioral-only scope.
 
 **Acceptance:**
 
-- The CLI's `summary.score_pct` (and `badge.score_pct`) compute the `scoring.md` formula over behavioral-layer rows.
-- `cargo test` green; `score_pct` fixtures assert the chosen formula, the behavioral-only exclusion, and the 70 floor.
+- [met] The CLI's `badge.score_pct` computes the `scoring.md` formula over behavioral-layer rows.
+- [met] `cargo test` green (793 passing); `score_pct` fixtures assert the chosen formula, the behavioral-only exclusion,
+  and the 70 floor.
 - Deferred to release PR: CHANGELOG entry for the formula change; `Cargo.toml` bump and tag publish (bundled with the U2
   release or a follow-on, per release sequencing).
+
+**Consequence to flag for U4/U6:** under behavioral-only scope, `anc audit . --source` scores `0%` / ineligible by
+design (empty `D`). `anc` dogfoods to 100% in `--binary` and full mode (34/34 behavioral pass; 9 behavioral skips
+excluded).
 
 **Dependencies:** U3 (the formula must be chosen before the CLI can implement it). [met — `972c9d3`.]
 
