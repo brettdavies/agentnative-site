@@ -525,59 +525,95 @@ U2 (same pattern as U1's spec `VERSION`).
 
 ### U3. Spec — scoring formula choice (agentnative repo, follow-up)
 
-**Status:** [ready to start] — both dependencies met (U1 on spec `dev`, U2 on CLI `dev` at `3839696`). The sandbox
-rescore can run against a `cargo build` of CLI `dev`.
+**Status:** [shipped to dev only — NOT released]
+[PR brettdavies/agentnative#39](https://github.com/brettdavies/agentnative/pull/39) — squash-merged to
+`agentnative-spec` `dev` at `972c9d3`. The spec `VERSION` bump is deferred to the release PR that closes out the
+taxonomy work (same pattern as U1 and U2).
 
 **Repo:** `brettdavies/agentnative` (spec).
 
-**Upstream basis:** Lands on `agentnative-spec` `dev`, same branch as U1. The sandbox-rescore step consumes U2's CLI
-output from `agentnative-cli` `dev`; run the rescore against a `cargo build` of that branch. No spec-side vendoring
-change needed for this unit.
+**Source location:** `agentnative-spec` `dev`, head commit `972c9d3` (PR #39). `principles/scoring.md` is the new single
+source of truth for the formula; `docs/badge.md` carries the floor and band edits. `main` does NOT contain U3 (latest
+tag `v0.4.0` predates it); it lands on `main` via the deferred release PR.
 
-**Work:**
+**Chosen formula (`principles/scoring.md`):**
 
-- Open a separate spec issue: "Scoring formula choice now that inputs are disambiguated."
-- Rerun `scripts/score-sandbox.py` from the site repo against the U2-rescored data; surface the eligibility shifts.
-- Decide tier weights and the formula. Update the spec to document them.
+- **Scope: shipped-binary behavior only.** Only behavioral-layer requirement rows enter the formula. Source-layer and
+  project-layer checks are excluded from the public score (reserved for a future advisory mode). This holds uniformly,
+  including `anc` scoring itself.
+- **Denominator set `D`** = rows whose status is in `{pass, warn, fail, opt_out}`. `n_a`, `skip`, `error` are excluded
+  from both sides. `opt_out` counts in the denominator (deliberate non-adoption counts against).
+- **Credit-weighted numerator:** `credit(pass) = 1.0`, `credit(warn) = 0.5`, `credit(fail) = credit(opt_out) = 0.0`.
+- **Tier weights:** a tunable published parameter, currently flat (`w(must) = w(should) = w(may) = 1`). General form is
+  `score_pct = round(100 × Σ_{i∈D} w(tier_i)·credit(status_i) / Σ_{i∈D} w(tier_i))`; under flat weights this reduces to
+  `round(100 × (n_pass + 0.5·n_warn) / (n_pass + n_warn + n_fail + n_opt_out))`. Empty `D` scores 0.
+- **Eligibility floor: 70** (lowered from 80).
+- **Cohort bands:** Exemplary `≥ 85`, Strong `80–84`, Solid `75–79`, Qualified `70–74`, below-floor `< 70`. Band
+  thresholds are the spec-side contract; rendered colors are site-owned (U4).
+- **Stability commitment:** formula, weights, floor, and band thresholds held stable ≥ 6 months from publication.
+
+**Upstream basis:** Landed on `agentnative-spec` `dev`, same branch as U1. The sandbox-rescore exploration consumed U2's
+CLI output from `agentnative-cli` `dev`. No spec-side vendoring change needed for this unit.
 
 **Acceptance:**
 
-- Formula documented in spec.
+- [met] Formula documented in spec (`principles/scoring.md`).
 - CLI implementation of the formula is owned by U3b — a spec PR cannot edit the CLI's Rust. U3 closes when the formula
   is documented; U3b closes when `score_pct` computes it.
-- The methodology section of the spec explains the rationale.
+- [met] The methodology section of the spec explains the rationale (binary-behavior scope, opt_out-counts rationale,
+  flat-weights rationale, low-floor-plus-bands rationale).
 
-**Dependencies:** U1, U2 (the input must be clean before the formula is chosen).
+**Dependencies:** U1, U2 (the input must be clean before the formula is chosen). [met.]
 
 ### U3b. CLI — implement final scoring formula (agentnative-cli repo)
 
-**Status:** [blocked on U3] — cannot start until U3 chooses the tier weights and the opt_out-in-or-out-of-denominator
-question. This unit swaps the transitional formula shipped in U2 for the final one.
+**Status:** [ready to start] — U3 shipped on spec `dev` (PR #39, `972c9d3`); `principles/scoring.md` defines the final
+formula. This unit swaps the transitional formula shipped in U2 for that formula. The transitional `score_pct` lives in
+`src/scorecard/mod.rs` (`fn score_pct`, flagged transitional pending U3).
 
 **Repo:** `brettdavies/agentnative-cli`.
 
-**Upstream basis:** Lands on `agentnative-cli` `dev`. Re-vendor the spec at the U3 commit (or `v0.5.0` once cut) so the
-CLI's formula matches the spec's documented formula. The transitional formula shipped in U2 lives in
-`src/scorecard/mod.rs`, flagged transitional pending U3.
+**Upstream basis:** Lands on `agentnative-cli` `dev`. **No spec re-vendor and no version bump are required for this
+unit.** The formula is Rust code in `score_pct`, not a vendored artifact: `scripts/sync-spec.sh` vendors only `VERSION`,
+`CHANGELOG.md`, and `principles/p*-*.md` — `principles/scoring.md` is not in the glob, so a resync would not pull the
+formula doc regardless. Spec `dev`'s `VERSION` still reads `0.4.0` (bump deferred to the spec release PR), so vendoring
+from the SHA would change no version number. Per-row `tier` inputs come from `src/principles/registry.rs`
+(hand-maintained), not the vendored tree. Cite `agentnative-spec@972c9d3 / principles/scoring.md` in the U3b PR body as
+the formula's authority; the clean spec resync happens when `v0.5.0` cuts (U6's gate, not U3b's).
+
+**Scope decisions (resolved against `scoring.md`, 2026-05-28):**
+
+- **Behavioral-only score.** `score_pct` filters to `layer == Behavioral`; source- and project-layer rows still emit in
+  the scorecard but do not contribute to `score_pct` or the badge. Matches `scoring.md`'s shipped-binary-behavior scope.
+  This shifts `anc`'s own dogfood number.
+- **Bands stay site-side.** The CLI emits `score_pct` + `eligible` only; the site maps score → band → color in U4. No
+  `band` field on `BadgeInfo`; scorecard schema stays `0.6`.
+- **Tier weights as named consts in the general weighted form.** Implement `Σ w·credit / Σ w` with `W_MUST = W_SHOULD =
+  W_MAY = 1` as named constants, so a future non-flat re-tune is a one-line change (matches `scoring.md`'s "parameter,
+  not constant" framing).
 
 **Work:**
 
-- Replace the transitional `summary.score_pct` (pass/(pass+warn+fail), `opt_out` excluded from the denominator, `n_a`
-  excluded from both) with the U3-chosen formula: apply the chosen tier weights and the chosen `opt_out` denominator
-  treatment.
-- Remove the "transitional pending U3" marker in `src/scorecard/mod.rs`.
-- Update CLI tests: assert `score_pct` against hand-computed expected values for the chosen formula across the existing
-  status fixtures.
-- Update the CLI README's scoring section / dogfood numbers to reflect the final formula.
+- Rewrite `fn score_pct` in `src/scorecard/mod.rs`: restrict to behavioral-layer rows; denominator set `D = {pass, warn,
+  fail, opt_out}`; credit-weighted numerator (`pass` 1.0, `warn` 0.5, `fail`/`opt_out` 0.0); tier weights applied as
+  named consts in the general `Σ w·credit / Σ w` form; empty `D` → 0.
+- Lower `BADGE_ELIGIBILITY_FLOOR_PCT` from `80` to `70`.
+- Replace the "transitional pending U3" docstring on `score_pct` with a doc comment citing `scoring.md` as the formula
+  authority.
+- Update CLI tests: hand-compute expected `score_pct` for each existing status fixture under the new formula; assert a
+  source/project-layer `fail` does not move the score (behavioral-only); assert the 70-floor boundary in
+  `compute_badge`; add the `scoring.md` worked-example fixture (20 pass / 7 warn / 0 fail / 1 opt_out / 1 n_a / 14 skip
+  → 84).
+- Update the CLI README's scoring section + dogfood numbers to reflect the final formula and the behavioral-only scope.
 
 **Acceptance:**
 
-- The CLI's `summary.score_pct` computes the U3 formula.
-- `cargo test` green; `score_pct` fixtures assert the chosen formula.
+- The CLI's `summary.score_pct` (and `badge.score_pct`) compute the `scoring.md` formula over behavioral-layer rows.
+- `cargo test` green; `score_pct` fixtures assert the chosen formula, the behavioral-only exclusion, and the 70 floor.
 - Deferred to release PR: CHANGELOG entry for the formula change; `Cargo.toml` bump and tag publish (bundled with the U2
   release or a follow-on, per release sequencing).
 
-**Dependencies:** U3 (the formula must be chosen before the CLI can implement it).
+**Dependencies:** U3 (the formula must be chosen before the CLI can implement it). [met — `972c9d3`.]
 
 ### U4. Site — renderer updates for 7-status output (this repo)
 
