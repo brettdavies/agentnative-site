@@ -123,7 +123,8 @@ export async function emitScorecardSurface({
   const leaderboard = computeLeaderboard(toolsWithScorecards);
 
   const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.
-  The <strong>score</strong> column is the pass rate <code>pass / (pass + warn + fail)</code>;
+  The <strong>score</strong> column is the behavioral-layer compliance score: requirement checks,
+  credit-weighted by outcome (a met requirement counts full, a missed SHOULD or MAY counts half);
   the <strong>principles met</strong> column counts how many of the eight principles have every
   check passing. The <strong>audience</strong> classification — when present — is informational,
   not authoritative; the per-tool page's evidence list is the ground truth.</p>

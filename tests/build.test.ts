@@ -1296,20 +1296,22 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
 });
 
 describe('computePrincipleScore', () => {
-  test('maps P1-P7 groups correctly, excludes CodeQuality/ProjectStructure', () => {
+  test('maps P1-P8 groups correctly, excludes CodeQuality/ProjectStructure', () => {
     const sc = makeScorecard();
     const ps = computePrincipleScore(sc);
-    expect(ps.total).toBe(7);
-    // P1=pass, P2=fail, P3=pass, P4=pass, P5=skip(no checks), P6=partial(has warn), P7=pass
+    expect(ps.total).toBe(8);
+    // P1=pass, P2=fail, P3=pass, P4=pass, P5=skip(no checks), P6=partial(has warn),
+    // P7=pass, P8=skip(no checks)
     expect(ps.met).toBe(4); // P1, P3, P4, P7
     expect(ps.details.find((d: any) => d.group === 'P2')?.status).toBe('fail');
     expect(ps.details.find((d: any) => d.group === 'P6')?.status).toBe('partial');
+    expect(ps.details.find((d: any) => d.group === 'P8')?.status).toBe('skip');
   });
 
-  test('returns 0/7 for null scorecard', () => {
+  test('returns 0/8 for null scorecard', () => {
     const ps = computePrincipleScore(null);
     expect(ps.met).toBe(0);
-    expect(ps.total).toBe(7);
+    expect(ps.total).toBe(8);
   });
 });
 
@@ -1347,7 +1349,7 @@ describe('computeLeaderboard', () => {
     return {
       ...makeScorecard(),
       badge: {
-        eligible: scorePct >= 80,
+        eligible: scorePct >= 70,
         score_pct: scorePct,
         embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
         scorecard_url: `https://anc.dev/score/${name}`,
@@ -1959,7 +1961,7 @@ describe('buildScorecardBody — embed-snippet gating', () => {
       summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
       results,
       badge: {
-        eligible: score_pct >= 80,
+        eligible: score_pct >= 70,
         score_pct,
         embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
         scorecard_url: 'https://anc.dev/score/rg',
@@ -1980,32 +1982,32 @@ describe('buildScorecardBody — embed-snippet gating', () => {
     expect(html).toContain('alt="agent-native badge for rg"');
   });
 
-  test('eligible at exactly the floor (score=0.80) — brightline check, >= not >', () => {
-    const html = buildScorecardBody(tool('rg'), sc(8, 2), [], { met: 5, total: 7, details: [] });
+  test('eligible at exactly the floor (score=0.70) — brightline check, >= not >', () => {
+    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 5, total: 8, details: [] });
     expect(html).toContain('scorecard-embed--eligible');
     expect(html).not.toContain('scorecard-embed--below');
   });
 
-  test('one point below the floor (score=0.79) renders the below-floor hint', () => {
-    const sc79 = sc(79, 21);
+  test('one point below the floor (score=0.69) renders the below-floor hint', () => {
+    const sc69 = sc(69, 31);
     const issues = [{ id: 'f0', label: 'fail0', group: 'P2', status: 'fail', evidence: 'no flag' }];
-    const html = buildScorecardBody(tool('rg'), sc79, issues, { met: 4, total: 7, details: [] });
+    const html = buildScorecardBody(tool('rg'), sc69, issues, { met: 4, total: 8, details: [] });
     expect(html).toContain('scorecard-embed--below');
     expect(html).not.toContain('scorecard-embed--eligible');
     expect(html).not.toContain('<img src="/badge/rg.svg"'); // no preview image below the floor
-    expect(html).toContain('1 point below'); // singular for a 1-point gap (80 - 79 = 1)
+    expect(html).toContain('1 point below'); // singular for a 1-point gap (70 - 69 = 1)
     expect(html).toContain('top issues above are the place to start'); // points at existing issues section
   });
 
   test('below-floor with no top issues references the full check list instead', () => {
-    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 4, total: 7, details: [] });
+    const html = buildScorecardBody(tool('rg'), sc(6, 4), [], { met: 4, total: 8, details: [] });
     expect(html).toContain('See the full check results below for the gaps.');
     expect(html).not.toContain('top issues above are the place to start');
   });
 
-  test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
-    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] });
-    expect(html).toContain('15 points below');
+  test('below-floor gap math: 65% scorecard is 5 points below the 70% floor (plural)', () => {
+    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 8, details: [] });
+    expect(html).toContain('5 points below');
   });
 });
 
@@ -2096,7 +2098,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
       results,
       badge: {
-        eligible: score_pct >= 80,
+        eligible: score_pct >= 70,
         score_pct,
         embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
         scorecard_url: 'https://anc.dev/score/rg',
@@ -2428,7 +2430,7 @@ describe('buildLeaderboardBody — badge callout', () => {
       scorecard: {
         summary: { pass: 1, warn: 0, fail: 0 },
         badge: {
-          eligible: score_pct >= 80,
+          eligible: score_pct >= 70,
           score_pct,
           embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
           scorecard_url: `https://anc.dev/score/${name}`,
@@ -2445,8 +2447,8 @@ describe('buildLeaderboardBody — badge callout', () => {
     const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3)];
     const html = buildLeaderboardBody(lb as any, '<p>m</p>');
     expect(html).toContain('leaderboard-badge-callout');
-    expect(html).toContain('above 80%');
-    // Two of four entries clear 0.80; denominator is the audited corpus.
+    expect(html).toContain('above 70%');
+    // Two of four entries clear 0.70; denominator is the audited corpus.
     expect(html).toContain('2 of 4 listed tools');
   });
 
