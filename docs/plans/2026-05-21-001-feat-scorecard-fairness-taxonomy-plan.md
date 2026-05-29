@@ -604,7 +604,7 @@ the formula's authority; the clean spec resync happens when `v0.5.0` cuts (U6's 
 - [shipped] Rewrote `fn score_pct` in `src/scorecard/mod.rs`: restricted to behavioral-layer rows; denominator set `D =
   {pass, warn, fail, opt_out}`; credit-weighted numerator (`pass` 1.0, `warn` 0.5, `fail`/`opt_out` 0.0); tier weights
   applied as named consts (`W_MUST`/`W_SHOULD`/`W_MAY`) in the general `Σ w·credit / Σ w` form via the new `tier_weight`
-  - `status_credit` helpers; empty `D` → 0.
+- `status_credit` helpers; empty `D` → 0.
 - [shipped] Lowered `BADGE_ELIGIBILITY_FLOOR_PCT` from `80` to `70`.
 - [shipped] Replaced the "transitional pending U3" docstring on `score_pct` with a doc comment citing `scoring.md` as
   the formula authority.
@@ -631,8 +631,11 @@ excluded).
 
 ### U4. Site — renderer updates for 7-status output (this repo)
 
-**Status:** [ready to start] — U2 is on CLI `dev` at `3839696`, so the schema 0.6 fixture shape is settled. U4 can
-proceed against a local `cargo build` of CLI `dev`; no published release needed.
+**Status:** [shipped to dev only — NOT released]
+[PR brettdavies/agentnative-site#128](https://github.com/brettdavies/agentnative-site/pull/128) — squash-merged to
+`agentnative-site` `dev` at `6241b69`. Renderer support for the 7-status taxonomy plus side-by-side loading of schema
+0.5 and 0.6 scorecards. Built against a hand-authored 0.6 fixture validated against the published scorecard 0.6 JSON
+Schema; no published CLI release was needed (that is U6's gate). The live corpus stays 0.5 until the U6 rescore.
 
 **Repo:** `brettdavies/agentnative-site` (this repo).
 
@@ -644,20 +647,30 @@ matters for U5.
 
 **Work:**
 
-- Update `src/build/scorecards.mjs` per-check icon mapping to handle `opt_out` and `n_a` distinct from `skip`.
-- Update the leaderboard table column rendering to use the new statuses (currently aggregates skip + error in one visual
-  bucket; split into the new categories).
-- Update `src/build/badge.mjs` color logic if the new score range needs different bands (decision depends on U3).
-- Add Vale accept-list entries if the new status names trip the spelling check (`opt_out`, `n_a`).
-- Update build-time schema validation in `src/build/scorecards.mjs` to expect schema_version 0.6.
-- Update regression tests to cover the new statuses.
+- [done] Per-check status rendering routes through a shared `statusLabel()` map (`src/shared/scorecard-format.mjs`); the
+  HTML rows (`src/build/scorecards-render.mjs`) emit `check--opt_out` / `check--n_a` classes distinct from
+  `check--skip`, and the markdown twin reuses the same labels (`OPT-OUT`, `N/A`).
+- [n/a] The leaderboard table has no skip+error visual bucket to split — it renders score and principles only
+  (`src/build/scorecards-render.mjs`, `src/client/leaderboard.ts`). Per-status rendering lives in the per-tool "All
+  Checks" table, covered by the per-check work above.
+- [shipped in #126] Badge cohort-band colors already landed on the spec-side band thresholds in `src/build/badge.mjs`
+  (Exemplary / Strong / Solid / Qualified / below-floor); no further color change was needed for U4.
+- [deferred to U5] Vale accept-list entries for `opt_out` / `n_a` are not needed yet: the terms enter prose only in the
+  U5 methodology rewrite, not in U4's code.
+- [done] Build-time schema gate widened from the single `0.5` string to the supported set `{0.5, 0.6}` so the migration
+  window loads both side by side; anything outside the set still fails the build.
+- [done] Regression + unit tests cover the new statuses (HTML render classes/labels, markdown rows, `statusLabel` map,
+  and the 0.5 / 0.6 / mixed / out-of-set load paths).
 
 **Acceptance:**
 
-- `bun test` green.
-- `bun run build` produces dist/ with no warnings.
-- The rendered `/score/<tool>` page shows distinct visual treatment for each of the new statuses.
-- Schema validation passes against a 0.6 fixture.
+- [met] `bun test` green (765 passing).
+- [met] `bun run build` produces dist/ (97 scorecard pages, 96 badges); the only warnings are the pre-existing
+  registry-index owner/repo notes for `make` / `nvidia-smi` / `cf`, unrelated to U4.
+- [met] The rendered `/score/<tool>` page shows distinct treatment for `opt_out`, `n_a`, and `skip` (asserted by the
+  7-status render test).
+- [met] A schema 0.6 fixture loads through the build invariants; the fixture validates against the published scorecard
+  0.6 JSON Schema.
 
 **Dependencies:** U2 (CLI must emit the new statuses before the site can render them).
 
