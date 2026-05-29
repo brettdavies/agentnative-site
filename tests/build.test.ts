@@ -1609,29 +1609,42 @@ describe('loadSkillData — fail-fast validation', () => {
 // badge-maker rendering — color thresholds, label format, SVG output
 // -------------------------------------------------------------------
 
-describe('badgeColor — threshold mapping', () => {
-  test('100% → brightgreen', () => {
-    expect(badgeColor(100)).toBe('brightgreen');
+describe('badgeColor — cohort-band mapping', () => {
+  const EXEMPLARY = '#005da1';
+  const STRONG = '#007b80';
+  const SOLID = '#0a7e3a';
+  const QUALIFIED = '#976200';
+  const BELOW = '#bf5200';
+  const CRITICAL = '#af2b25';
+
+  test('≥ 85 → navy (Exemplary)', () => {
+    expect(badgeColor(100)).toBe(EXEMPLARY);
+    expect(badgeColor(85)).toBe(EXEMPLARY);
   });
 
-  test('80% (floor) → brightgreen — brightline at the eligibility floor', () => {
-    expect(badgeColor(80)).toBe('brightgreen');
+  test('80–84 → teal (Strong)', () => {
+    expect(badgeColor(84)).toBe(STRONG);
+    expect(badgeColor(80)).toBe(STRONG);
   });
 
-  test('79% → yellow — one point below floor flips color', () => {
-    expect(badgeColor(79)).toBe('yellow');
+  test('75–79 → green (Solid)', () => {
+    expect(badgeColor(79)).toBe(SOLID);
+    expect(badgeColor(75)).toBe(SOLID);
   });
 
-  test('60% → yellow — bottom of mid band', () => {
-    expect(badgeColor(60)).toBe('yellow');
+  test('70–74 → ochre (Qualified — at the eligibility floor)', () => {
+    expect(badgeColor(74)).toBe(QUALIFIED);
+    expect(badgeColor(70)).toBe(QUALIFIED);
   });
 
-  test('59% → red', () => {
-    expect(badgeColor(59)).toBe('red');
+  test('69 → orange — one point below the floor flips the color', () => {
+    expect(badgeColor(69)).toBe(BELOW);
+    expect(badgeColor(50)).toBe(BELOW);
   });
 
-  test('0% → red', () => {
-    expect(badgeColor(0)).toBe('red');
+  test('< 50 → red (critical)', () => {
+    expect(badgeColor(49)).toBe(CRITICAL);
+    expect(badgeColor(0)).toBe(CRITICAL);
   });
 });
 
@@ -1659,12 +1672,13 @@ describe('badgeFormat — label, message, color contract', () => {
     expect(badgeFormat(0).message).toBe('0%');
   });
 
-  test('color follows badgeColor of the rounded percent — green at floor', () => {
-    // 0.8 mirrors the CLI eligibility floor (the rendering boundary that
-    // keeps a tool's badge readable as "passing" once embedded).
-    expect(badgeFormat(0.8).color).toBe('brightgreen');
-    expect(badgeFormat(0.79).color).toBe('yellow');
-    expect(badgeFormat(0.59).color).toBe('red');
+  test('color follows badgeColor of the rounded percent across the bands', () => {
+    expect(badgeFormat(0.91).color).toBe('#005da1'); // Exemplary
+    expect(badgeFormat(0.8).color).toBe('#007b80'); //  Strong
+    expect(badgeFormat(0.77).color).toBe('#0a7e3a'); // Solid
+    expect(badgeFormat(0.7).color).toBe('#976200'); //  Qualified (floor)
+    expect(badgeFormat(0.69).color).toBe('#bf5200'); // below floor
+    expect(badgeFormat(0.42).color).toBe('#af2b25'); // critical
   });
 
   test('style is flat — visually identical to shields.io defaults', () => {
@@ -1681,14 +1695,15 @@ describe('renderBadgeSvg — SVG output', () => {
     expect(svg).toContain('</svg>');
   });
 
-  test('100% badge uses brightgreen fill (#4c1)', () => {
+  test('Exemplary badge uses the navy fill (#005da1)', () => {
     const svg = renderBadgeSvg(1.0, '0.3.0');
-    expect(svg).toContain('#4c1');
+    expect(svg).toContain('#005da1');
   });
 
-  test('below-floor badge does NOT use brightgreen — visual signal stays honest on regression', () => {
+  test('below-floor badge renders the orange fill, not a top-band color — regression stays honest', () => {
     const svg = renderBadgeSvg(0.5, '0.3.0');
-    expect(svg).not.toContain('#4c1');
+    expect(svg).toContain('#bf5200');
+    expect(svg).not.toContain('#005da1');
   });
 });
 
