@@ -75,6 +75,7 @@ argv
 atuin
 audit_profile
 bandwhich
+boolean
 breakpoint
 brightline
 broot

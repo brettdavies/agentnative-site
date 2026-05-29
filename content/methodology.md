@@ -29,35 +29,123 @@ Both directions surface as a structured CI annotation on the PR (`WARNINGS_JSON:
 so reviewers see drift without grepping logs. The build still passes in either orphaned state; the warning is the nudge,
 not a blocker. Once both halves land, the tool appears on the leaderboard at the next deploy.
 
+## The seven outcomes
+
+Each check resolves to one of seven statuses. Whether a status counts in the denominator is the load-bearing
+distinction: it decides whether the check moves the score at all.
+
+| Status    | Credit | In denominator | Meaning                                                                                  |
+| --------- | ------ | -------------- | ---------------------------------------------------------------------------------------- |
+| `pass`    | full   | yes            | Requirement met.                                                                         |
+| `warn`    | half   | yes            | A requirement was only partially satisfied.                                              |
+| `fail`    | none   | yes            | A MUST-tier requirement was not satisfied.                                               |
+| `opt_out` | none   | yes            | The tool could implement the requirement but deliberately does not.                      |
+| `n_a`     | —      | no             | A conditional requirement whose antecedent is absent: it does not apply to this tool.    |
+| `skip`    | —      | no             | The probe could not measure the property. A linter limitation, not a tool defect.        |
+| `error`   | —      | no             | The check raised an exception inside `anc`. A bug on the linter side, not a tool defect. |
+
+`pass`, `warn`, `fail`, and `opt_out` all count toward the denominator, so a tool is measured against everything it
+could reasonably be expected to do. `n_a`, `skip`, and `error` drop out of both sides of the ratio, so a check that does
+not apply or could not be measured never moves the number in either direction.
+
+`opt_out`, `n_a`, and `skip` separate three situations that a single status would blur together: a tool that chose not
+to ship a feature (`opt_out`), a requirement that does not apply to this tool (`n_a`), and a property the probe could
+not see (`skip`). Whether a missing feature is a deliberate `opt_out` or a genuine `n_a` is decided per check by `anc`'s
+verifier and documented in its source; a disagreement about that call is filed against the
+[`agentnative` CLI](https://github.com/brettdavies/agentnative-cli/issues), not this site.
+
 ## How a score is computed
 
-The headline number on each tool's row is a pass rate:
+The headline number on each tool's row scores how the shipped binary behaves against the requirements that apply to it.
+
+**Scope: behavioral checks only.** Only behavioral-layer requirements, the ones that invoke the binary and observe what
+it does, enter the headline score. Source-layer and project-layer results are reported on the per-tool page but do not
+move the number (see [Layers](#layers-behavioral-project-source)). A behavioral score compares every tool on the same
+ground: what an agent observes when it runs the tool, independent of implementation language.
+
+**The denominator** is every behavioral check whose status is `pass`, `warn`, `fail`, or `opt_out`. `n_a`, `skip`, and
+`error` are excluded from both numerator and denominator.
+
+**The numerator credits each outcome.** A `pass` earns full credit (1.0); a `warn` earns half (0.5), because a partial
+satisfaction is worth more than none; a `fail` and an `opt_out` earn nothing (0.0). The score is the credit earned over
+the credit available:
 
 ```text
-score = pass / (pass + warn + fail)
+score = round(100 × (pass + 0.5 × warn) / (pass + warn + fail + opt_out))
 ```
 
-`skip` and `error` outcomes are excluded from the denominator. A `skip` means the check was not applicable to this tool
-(e.g., a flag-parsing check on a tool with no flags). An `error` means the check itself crashed and produced no signal.
-Neither is evidence of a defect, so neither moves the score.
+When no behavioral check applies, the denominator is empty and the score is 0.
 
-**A note on weighting.** The pass rate weighs MUST violations (`fail`) and SHOULD violations (`warn`) equally in the
-headline number. Per RFC 2119 those are categorically different — a `fail` means non-conformance with the standard; a
-`warn` means a missed default. The headline is a deliberate simplification chosen so a single number is comparable
-across tools; the **principles met** column is where conformance lives. A tool with one `fail` and zero `warn` will
-score higher than a tool with zero `fail` and three `warn`, but only the first tool is non-conformant. Read both columns
-together. The per-tool page is the ground truth.
+**Worked example.** A tool with 20 `pass`, 7 `warn`, 0 `fail`, 1 `opt_out`, 1 `n_a`, and 14 `skip` behavioral checks:
+the denominator is the 28 checks that count, since the `n_a` and the 14 `skip`s drop out. The numerator is 20 + 0.5 × 7
+= 23.5. The score is round(100 × 23.5 / 28) = 84.
+
+The formula also carries a per-tier weight (see [Requirement tiers](#requirement-tiers)). It is flat today, so it does
+not change the arithmetic above; it is a published parameter rather than a hard-coded constant, so re-tuning it later is
+a documented change rather than a silent one. The formula, the tier weights, and the badge floor are held stable for at
+least six months from publication.
+
+## Requirement tiers
+
+RFC 2119 defines three requirement levels, and each scored requirement carries its tier in the scorecard:
+
+- **MUST** — required for conformance. A missed MUST is a `fail` (no credit).
+- **SHOULD** — strongly recommended absent a good reason. A missed SHOULD is a `warn` (half credit).
+- **MAY** — genuinely optional. A missed MAY is a `warn` (half credit).
+
+The status already encodes severity: a missed MUST is scored `fail` (no credit), and a missed SHOULD or MAY is scored
+`warn` (half credit). The separate per-tier weight is the lever for valuing the tiers differently in the denominator;
+while it stays flat, missing a SHOULD and missing a MAY move the score by the same amount.
+
+## Conditional requirements
+
+Some requirements bind only when an antecedent feature is present. "If a CLI ships `--output json`, it MUST also expose
+its schema" is a MUST, but only for tools that ship JSON output. The standard models these as conditional requirements
+with a named antecedent check.
+
+When the antecedent is present, the requirement is evaluated normally. When the antecedent is absent, the requirement is
+`n_a` and drops out of the score. A tool is never penalized for skipping a requirement whose precondition it never met.
+The antecedent's own outcome decides what the dependent requirement emits:
+
+| Antecedent outcome               | Dependent requirement     |
+| -------------------------------- | ------------------------- |
+| `pass`, `warn`, `fail` (present) | evaluated normally        |
+| `opt_out`, `n_a` (absent)        | `n_a`                     |
+| `skip`, `error` (unmeasured)     | inherits `skip` / `error` |
+
+The tier is independent of the condition. A conditional MUST applies with full MUST force when its antecedent is met; a
+conditional SHOULD applies with full SHOULD force. The antecedent decides *whether* the requirement fires; the tier
+decides *how much* a miss costs once it does.
+
+## Cohort bands and the badge floor
+
+A tool clears the badge floor at a score of **70**. At or above the floor, scores fall into named cohort bands:
+
+| Band        | Score    |
+| ----------- | -------- |
+| Exemplary   | 85–100   |
+| Strong      | 80–84    |
+| Solid       | 75–79    |
+| Qualified   | 70–74    |
+| Below floor | under 70 |
+
+The band thresholds are part of the standard; the color the site renders for each band is a site choice. A tool at or
+above 70 may embed the [agent-native badge](/badge); below 70 it can still link to its scorecard but should not display
+the badge as a quality signal. See the [badge convention](/badge) for the embed contract.
+
+## Principles met
 
 The **principles met** column counts how many of the eight principles (P1–P8) have *all* their checks passing: no
-warnings, no failures. A tool can have a 90% pass rate and still meet only four of eight principles, if the warnings
-cluster inside three principle groups. Both numbers are surfaced because either, alone, hides the shape of the result.
+warnings, no failures. A tool can post a 90% score and still meet only four of eight principles, if the misses cluster
+inside a few principle groups. Both numbers are surfaced because either, alone, hides the shape of the result. The
+per-tool page is the ground truth.
 
-Bonus checks (`CodeQuality` and `ProjectStructure`) are listed on each tool's page but not blended into the primary
-score. They are language-specific and would create unfair comparisons across tools.
+Bonus checks (`CodeQuality` and `ProjectStructure`) are listed on each tool's page but not blended into the score. They
+are language-specific and would create unfair comparisons across tools.
 
 ## What the audience signal is, and is not
 
-`anc` v0.1.3+ classifies each scored tool as one of:
+`anc` classifies each scored tool as one of:
 
 - `agent-optimized`: the four signal checks (P1 non-interactive, P2 JSON output, P6 NO_COLOR, P7 quiet) all pass or warn
   at most once. (One warn allowance reflects the reality that the four signal checks are correlated; a near-conformant
@@ -142,15 +230,20 @@ non-interactive but isn't is a defect; no profile applies.
 
 `anc` runs three layers of checks:
 
-- **Behavioral**: invokes the binary, inspects `--help`, `--version`, `--output json`, SIGPIPE, NO_COLOR, exit codes.
-  Language-agnostic. Every tool on the leaderboard is scored at this layer.
+- **Behavioral**: invokes the binary and observes what it does — `--help`, `--version`, `--output json`, SIGPIPE,
+  NO_COLOR, exit codes. Language-agnostic. This is the only layer that feeds the headline score.
 - **Project**: inspects the project tree: `AGENTS.md`, manifest files, recommended dependencies. Language-agnostic.
+  Reported on the per-tool page, not scored.
 - **Source**: runs ast-grep patterns against source code. Catches `unwrap()`, naked `println!`, missing error types.
-  Rust + Python today; more languages as they ship.
+  Rust and Python today, more languages as they ship. Reported on the per-tool page, not scored.
 
-The headline score combines behavioral and project. Source-layer results, when available, are reported separately on the
-per-tool page. They are not blended into the primary score because doing so would penalize Go, Node, and Java tools for
-the absence of language coverage in the linter, not for any property of the tool.
+Only behavioral results move the headline number. Project- and source-layer results are shown on the per-tool page for
+context but stay out of the score: blending them would penalize a tool for how many languages the linter covers, or for
+a project-tree convention, rather than for how the shipped binary behaves to an agent. A behavioral-only score keeps
+every tool measured on the same ground.
+
+Note that P8 (discoverable skill bundles) spans both layers: its bundle-install and related behavioral checks count
+toward the score, while the presence of the bundle file itself is a project-layer check that does not.
 
 ## Re-running the same checks locally
 
