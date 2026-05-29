@@ -16,7 +16,7 @@
 #      `version_extract` shell snippet in registry.yaml. The extracted
 #      version determines the scorecard filename, so the filename can
 #      never lie about which release was actually scored.
-#   3. Runs `anc check --command <binary> [--audit-profile <category>]
+#   3. Runs `anc audit --command <binary> [--audit-profile <category>]
 #      --output json` and writes to scorecards/<name>-v<extracted>.json.
 #      Older `<name>-v<old>.json` files are left on disk; the build's
 #      auto-discovery picks the highest-versioned scorecard per slug, so
@@ -207,17 +207,17 @@ for name in "${scored_names[@]}"; do
   echo "  ${name} v${actual} → $(basename "$out")${profile_label}"
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    echo "    would run: anc check --command $binary $profile_flag --output json"
+    echo "    would run: anc audit --command $binary $profile_flag --output json"
     continue
   fi
 
-  # `anc check` is a linter — it exits non-zero whenever any check fails or
+  # `anc audit` is a linter — it exits non-zero whenever any check fails or
   # warns, even on a successful run. The JSON output is still well-formed.
   # Allow non-zero exit and validate the result instead.
   # shellcheck disable=SC2086 # profile_flag must word-split on the space
-  anc check --command "$binary" $profile_flag --output json >"$out" || true
+  anc audit --command "$binary" $profile_flag --output json >"$out" || true
   if ! jaq -e '.schema_version' "$out" >/dev/null 2>&1; then
-    echo "error: anc check did not produce valid JSON for $name (file: $out)" >&2
+    echo "error: anc audit did not produce valid JSON for $name (file: $out)" >&2
     exit 1
   fi
 done

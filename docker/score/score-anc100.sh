@@ -252,7 +252,7 @@ for line in "${entries[@]}"; do
   profile_flag=""
   if [[ -n "$profile" ]]; then profile_flag="--audit-profile $profile"; fi
 
-  # `anc check` exit-code contract:
+  # `anc audit` exit-code contract:
   #   0 — every check passed
   #   1 — at most warn-severity results (no failures)
   #   2 — at least one fail-severity result (JSON is still well-formed)
@@ -260,10 +260,10 @@ for line in "${entries[@]}"; do
   # Treat 0/1/2 as scoreable; let JSON validation below catch missing/empty
   # output even on rc <= 2.
   # shellcheck disable=SC2086 # profile_flag must word-split on the space
-  anc check --command "$binary" $profile_flag --output json >"$out" 2>/dev/null
+  anc audit --command "$binary" $profile_flag --output json >"$out" 2>/dev/null
   rc=$?
   if (( rc > 2 )); then
-    echo "  [fail] anc check exited $rc"
+    echo "  [fail] anc audit exited $rc"
     echo "$name anc-check-error-rc=$rc" >> "$FAILURES"
     rm -f "$out"
     score_failed=$((score_failed + 1))
@@ -272,7 +272,7 @@ for line in "${entries[@]}"; do
 
   # Validate the JSON output.
   if ! jaq -e '.schema_version' "$out" >/dev/null 2>&1; then
-    echo "  [fail] anc check did not produce valid JSON"
+    echo "  [fail] anc audit did not produce valid JSON"
     echo "$name invalid-json" >> "$FAILURES"
     rm -f "$out"
     score_failed=$((score_failed + 1))
