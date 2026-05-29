@@ -28,9 +28,10 @@ BUCKETS: tuple[tuple[int, int], ...] = (
     (0, 49),
 )
 
-# Where the 0.6 scorecards live. SANDBOX_DATA (absolute or repo-relative) overrides.
-# Defaults to the local-rescore scratch dir; point at "scorecards" once the
-# committed cards are regenerated at schema 0.6 (U6).
-DATA_SUBDIR: str = ".context/u3-rescore/scratch"
+# Where the 0.6 scorecards live. Defaults to the committed registry scorecards;
+# SANDBOX_DATA (absolute or repo-relative) overrides. The committed cards read as
+# schema 0.6 once the registry rescore lands; until then, point SANDBOX_DATA at a
+# scratch dir of 0.6 cards (e.g. the docker/score harness output).
+DATA_SUBDIR: str = "scorecards"
 DATA_DIR = REPO / os.environ.get("SANDBOX_DATA", DATA_SUBDIR)
 OUT_DIR = REPO / ".context/score-sandbox"
