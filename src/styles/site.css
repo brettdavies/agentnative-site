@@ -1109,6 +1109,18 @@ body:has(.leaderboard-hero) main {
 .check--error .check__status {
   color: var(--must, #af2b25);
 }
+/* opt_out: deliberate non-adoption — counts against the score, so it reads in
+   the caution family (--should), distinguished from warn by its OPT-OUT label. */
+.check--opt_out .check__status {
+  color: var(--should, #a16100);
+}
+/* n_a: conditional antecedent unmet — excluded from the score entirely, so it
+   reads in the muted not-applicable family with skip, set apart by the italic
+   label, the same way suppressed Skips are de-emphasized. */
+.check--n_a .check__status {
+  color: var(--fg-muted, #525960);
+  font-style: italic;
+}
 
 /* Suppressed-by-audit-profile checks: distinct from organic Skips. The row is
    muted to signal "intentionally excluded by category" rather than "didn't run". */

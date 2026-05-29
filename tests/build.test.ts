@@ -427,6 +427,122 @@ function makeV04Scorecard(overrides: Record<string, any> = {}) {
   };
 }
 
+// Schema 0.6 fixture — the 7-status taxonomy. results[] carry per-row `id`,
+// `tier`, `check_id`, `confidence`; summary gains opt_out/n_a counters; `anc`
+// drops `commit`. This object validates against the CLI's published 0.6
+// scorecard JSON Schema (agentnative-cli/schema/scorecard.schema.json).
+function makeV06Scorecard(overrides: Record<string, any> = {}) {
+  const results = overrides.results ?? [
+    {
+      id: 'p1-must-no-interactive',
+      label: 'Non-interactive by default',
+      group: 'P1',
+      layer: 'behavioral',
+      status: 'pass',
+      evidence: null,
+      confidence: 'high',
+      tier: 'must',
+      check_id: 'p1-non-interactive',
+    },
+    {
+      id: 'p2-must-schema-when-json',
+      label: 'Exposes JSON Schema when --output json is supported',
+      group: 'P2',
+      layer: 'behavioral',
+      status: 'n_a',
+      evidence: 'antecedent p2-json-output is opt_out; consequent not applicable',
+      confidence: 'high',
+      tier: 'must',
+      check_id: 'p2-schema-print',
+    },
+    {
+      id: 'p2-json-output',
+      label: 'Structured output support',
+      group: 'P2',
+      layer: 'behavioral',
+      status: 'opt_out',
+      evidence: 'no --output/--format flag detected',
+      confidence: 'high',
+      tier: 'should',
+      check_id: 'p2-json-output',
+    },
+    {
+      id: 'p3-must-version',
+      label: 'Version flag works',
+      group: 'P3',
+      layer: 'behavioral',
+      status: 'pass',
+      evidence: null,
+      confidence: 'high',
+      tier: 'must',
+      check_id: 'p3-version',
+    },
+    {
+      id: 'p3-should-version-short',
+      label: 'Short version alias',
+      group: 'P3',
+      layer: 'behavioral',
+      status: 'warn',
+      evidence: '--version present; short alias -V not detected',
+      confidence: 'medium',
+      tier: 'should',
+      check_id: 'p3-version',
+    },
+    {
+      id: 'p6-no-pager-behavioral',
+      label: 'Does not spawn a pager',
+      group: 'P6',
+      layer: 'behavioral',
+      status: 'skip',
+      evidence: 'could not measure via safe probes',
+      confidence: 'medium',
+      tier: 'may',
+      check_id: 'p6-no-pager',
+    },
+  ];
+  const tally = (s: string) => results.filter((r: any) => r.status === s).length;
+  return {
+    schema_version: '0.6',
+    results,
+    summary: {
+      total: results.length,
+      pass: tally('pass'),
+      warn: tally('warn'),
+      fail: tally('fail'),
+      opt_out: tally('opt_out'),
+      n_a: tally('n_a'),
+      skip: tally('skip'),
+      error: tally('error'),
+    },
+    coverage_summary: {
+      must: { total: 23, verified: 17 },
+      should: { total: 14, verified: 9 },
+      may: { total: 7, verified: 3 },
+    },
+    audience: 'mixed',
+    audit_profile: null,
+    spec_version: '0.4.0',
+    tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
+    anc: { version: '0.4.0' },
+    run: {
+      invocation: 'anc --command fixture',
+      started_at: '2026-05-21T17:03:00Z',
+      duration_ms: 1240,
+      platform: { os: 'linux', arch: 'x86_64' },
+    },
+    target: { kind: 'command', path: null, command: 'fixture' },
+    badge: {
+      eligible: false,
+      score_pct: 62,
+      embed_markdown: null,
+      scorecard_url: 'https://anc.dev/score/fixture',
+      badge_url: 'https://anc.dev/badge/fixture.svg',
+      convention_url: 'https://anc.dev/badge',
+    },
+    ...overrides,
+  };
+}
+
 describe('loadRegistry', () => {
   test('parses valid YAML with all required fields', async () => {
     const dir = join(tmpdir(), `registry-${Date.now()}`);
@@ -856,12 +972,12 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
     }
   });
 
-  test('rejects scorecards below the supported schema version (no synthesis fallback)', async () => {
-    // Schema 0.5 is the supported floor. The site reads `scorecard.badge.*`
-    // and `scorecard.{tool,anc,run,target}` directly from each scorecard;
-    // a scorecard without these blocks would fail render. The load-time
-    // invariant fails the build immediately rather than silently render
-    // wrong data via a synthesized fallback.
+  test('rejects scorecards outside the supported schema set (no synthesis fallback)', async () => {
+    // Schemas 0.5 and 0.6 are supported during the migration window. The site
+    // reads `scorecard.badge.*` and `scorecard.{tool,anc,run,target}` directly
+    // from each scorecard; a scorecard without these blocks would fail render.
+    // The load-time invariant fails the build immediately rather than silently
+    // render wrong data via a synthesized fallback.
     const dir = join(tmpdir(), `scorecards-invariant-${Date.now()}`);
     await mkdir(dir, { recursive: true });
     const stale = {
@@ -886,7 +1002,95 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
         },
       ];
       await expect(loadScoredTools(dir, registry)).rejects.toThrow(
-        /schema_version "0\.4" not supported.*Site requires schema 0\.5/,
+        /schema_version "0\.4" not supported.*Site supports schema 0\.5, 0\.6/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loads a schema 0.6 scorecard (7-status taxonomy migration window)', async () => {
+    const dir = join(tmpdir(), `scorecards-v06-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard()));
+    try {
+      const registry = [
+        {
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+        },
+      ];
+      const { tools, warnings } = await loadScoredTools(dir, registry);
+      expect(tools).toHaveLength(1);
+      expect(tools[0].scorecard.schema_version).toBe('0.6');
+      expect(tools[0].scorecard.badge.score_pct).toBe(62);
+      expect(tools[0].metadata.anc.version).toBe('0.4.0');
+      expect(warnings.scorecardOrphans).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loads schema 0.5 and 0.6 scorecards side by side', async () => {
+    const dir = join(tmpdir(), `scorecards-mixed-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'alpha-v1.0.0.json'), JSON.stringify(makeV04Scorecard()));
+    await writeFile(
+      join(dir, 'beta-v1.2.3.json'),
+      JSON.stringify(makeV06Scorecard({ tool: { name: 'beta', binary: 'beta', version: 'beta 1.2.3' } })),
+    );
+    try {
+      const registry = [
+        {
+          name: 'alpha',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'x',
+        },
+        {
+          name: 'beta',
+          repo: 'c/d',
+          binary: 'beta',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'y',
+        },
+      ];
+      const { tools } = await loadScoredTools(dir, registry);
+      const versions = tools.map((t: any) => t.scorecard.schema_version).sort();
+      expect(versions).toEqual(['0.5', '0.6']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a schema version above the supported set (e.g. 0.7)', async () => {
+    const dir = join(tmpdir(), `scorecards-future-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard({ schema_version: '0.7' })));
+    try {
+      const registry = [
+        {
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+        },
+      ];
+      await expect(loadScoredTools(dir, registry)).rejects.toThrow(
+        /schema_version "0\.7" not supported.*Site supports schema 0\.5, 0\.6/,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1802,6 +2006,50 @@ describe('buildScorecardBody — embed-snippet gating', () => {
   test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
     const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] });
     expect(html).toContain('15 points below');
+  });
+});
+
+describe('buildScorecardBody — 7-status taxonomy rendering (schema 0.6)', () => {
+  function tool(name = 'fixture') {
+    return {
+      name,
+      binary: name,
+      description: 'a fixture',
+      tier: 'workhorse',
+      language: 'rust',
+      creator: 'me',
+      install: `brew install ${name}`,
+      repo: `me/${name}`,
+    };
+  }
+
+  function render() {
+    const scorecard = makeV06Scorecard();
+    const metadata = { tool: scorecard.tool, anc: scorecard.anc, run: scorecard.run, target: scorecard.target };
+    return buildScorecardBody(tool(), scorecard, [], { met: 5, total: 7, details: [] }, '1.2.3', metadata);
+  }
+
+  test('opt_out renders its own class + OPT-OUT label, distinct from skip', () => {
+    const html = render();
+    expect(html).toContain('check check--opt_out');
+    expect(html).toMatch(/check--opt_out">\s*<td class="check__status">OPT-OUT</);
+    // Never the raw snake_case the underscore status would produce under a bare toUpperCase.
+    expect(html).not.toContain('>OPT_OUT<');
+  });
+
+  test('n_a renders its own class + N/A label, distinct from skip', () => {
+    const html = render();
+    expect(html).toContain('check check--n_a');
+    expect(html).toMatch(/check--n_a">\s*<td class="check__status">N\/A</);
+    expect(html).not.toContain('>N_A<');
+  });
+
+  test('skip stays its own bucket alongside the two new statuses', () => {
+    const html = render();
+    expect(html).toContain('check check--skip');
+    // All three excluded-from-numerator statuses are visually separate classes.
+    const classes = ['check--opt_out', 'check--n_a', 'check--skip'];
+    for (const c of classes) expect(html).toContain(c);
   });
 });
 

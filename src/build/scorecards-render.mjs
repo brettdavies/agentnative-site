@@ -9,6 +9,7 @@ import {
   groupToPrincipleNum,
   PRINCIPLE_GROUPS,
   PRINCIPLE_NAMES,
+  statusLabel,
 } from '../shared/scorecard-format.mjs';
 
 // Display-only mirror of the CLI's badge eligibility floor (80%). All
@@ -83,6 +84,11 @@ function suppressionCategory(check) {
  * a `check--suppressed` class and an "N/A by &lt;category&gt;" status pill,
  * distinguishing category-scoped exclusions from organic Skips (e.g., "no flags exposed").
  *
+ * The 7-status taxonomy (schema 0.6) routes `opt_out` and `n_a` through their
+ * own `check--opt_out` / `check--n_a` classes and the shared statusLabel map,
+ * so they render distinct from `skip`. Older 0.5 cards carry none of these and
+ * are unaffected.
+ *
  * @param {Array<{ status: string, label: string, evidence: string | null }>} checks
  * @returns {string}
  */
@@ -91,10 +97,10 @@ function renderCheckRows(checks) {
     .map((check) => {
       const category = suppressionCategory(check);
       const rowClass = category ? 'check check--skip check--suppressed' : `check check--${check.status}`;
-      const statusLabel = category ? `N/A by ${escHtml(category)}` : escHtml(check.status.toUpperCase());
+      const label = category ? `N/A by ${escHtml(category)}` : escHtml(statusLabel(check.status));
       const evidence = check.evidence ? escHtml(check.evidence) : '';
       return `        <tr class="${rowClass}">
-          <td class="check__status">${statusLabel}</td>
+          <td class="check__status">${label}</td>
           <td class="check__label">${escHtml(check.label)}</td>
           <td class="check__evidence">${evidence}</td>
         </tr>`;
