@@ -707,6 +707,15 @@ installs `anc` via brew, not from a local build). U6 is gated on the CLI release
 any sync-spec flag. Also pull the spec at the same release tag via `bash scripts/sync-spec.sh` (default path, no
 `--ref`) so the leaderboard's vendored spec matches the CLI's spec.
 
+**Production-promotion gate (carried from U5).** U5 already landed on `dev`: the badge eligibility floor renders at 70,
+the principles-met column counts P1-P8, the scoring documentation describes the behavioral-only credit-weighted formula,
+and `principles/scoring.md` is vendored. The live scorecard corpus is still schema 0.5, scored under the prior formula
+and floor, so on `dev` the floor copy and the principles-met column describe the new model while the displayed scores
+are still the prior values. This rescore is what reconciles the data to the documented model. **Do not promote `dev` to
+`main` until this unit lands** — production must not show floor-70 copy and P1-P8 columns over prior-formula scores. The
+U6 PR body and the leaderboard scaffolding note (see Communication, below) carry the "scores moved" messaging when the
+reconciled data goes live.
+
 **Work:**
 
 - Wait until the v0.5.0 (or whatever version ships with the new statuses) CLI is published via Homebrew tap.
