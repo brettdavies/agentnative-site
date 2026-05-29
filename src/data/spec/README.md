@@ -11,6 +11,9 @@ What lives here:
 - `principles/p*-*.md` — the spec's structured principle files (frontmatter-heavy, machine-readable). **Currently a diff
   target only.** Nothing in the site build consumes these for rendering. Site rendering of `/p1`–`/p7` reads from
   `content/principles/`, which is human-written site copy that exists alongside (not derived from) the spec prose.
+- `principles/scoring.md` — the spec's scoring-formula authority (denominator set, credit weights, eligibility floor,
+  cohort bands). **Reference only**; nothing in the site build consumes it. The `/methodology` page mirrors this formula
+  by hand, the same way `content/principles/` mirrors the principle prose.
 
 For the full spec landing page — leaderboard, badge convention, and acknowledgements — see [anc.dev](https://anc.dev) or
 the upstream [`README`](https://github.com/brettdavies/agentnative#readme).
