@@ -676,6 +676,15 @@ matters for U5.
 
 ### U5. Site — methodology rewrite (this repo)
 
+**Status:** [shipped to dev only — NOT released]
+[PR brettdavies/agentnative-site#129](https://github.com/brettdavies/agentnative-site/pull/129) — squash-merged to
+`agentnative-site` `dev` at `ccb5844`. The methodology, scorecard-schema, and badge pages plus the README `## Scoring`
+section now document the 7-status taxonomy, the conditional-requirement mechanism, and the behavioral-only
+credit-weighted formula. Beyond the original doc scope, U5 also lowered the badge eligibility floor display to 70,
+expanded the principles-met column to P1-P8 (`PRINCIPLE_NAMES` was missing P8, so it read `N/7`), and vendored
+`principles/scoring.md` (`sync-spec.sh` now pulls it) with the reference tree resynced to `agentnative-spec` `dev` at
+`972c9d3`. The live corpus stays schema 0.5 until the U6 rescore; see U6's production-promotion gate.
+
 **Repo:** `brettdavies/agentnative-site`.
 
 **Upstream basis:** Consumes U3 (spec formula choice) from `agentnative-spec`. Pull the spec via `bash
@@ -684,17 +693,18 @@ scripts/sync-spec.sh --ref dev` (or the U3 feature-branch SHA) until spec `v0.5.
 
 **Work:**
 
-- Rewrite `content/methodology.md` to document the 7-status taxonomy, the conditional-requirement mechanism, and the
-  scoring formula chosen in U3.
-- Rewrite `content/scorecard-schema.md` to document the new status enum and the new summary counters.
-- Update `content/badge.md` if the eligibility floor shifted.
-- Update the README's `## Scoring` section (just landed in PR #108) to point at the new methodology.
+- [shipped] `content/methodology.md` documents the 7-status taxonomy, the conditional-requirement mechanism, and the U3
+  scoring formula (behavioral-only, credit-weighted, flat tier weights, floor 70, cohort bands) with a worked example.
+- [shipped] `content/scorecard-schema.md` documents the new status enum, the new summary counters, the per-row `tier`
+  field, and the previously-undocumented `badge` object.
+- [shipped] `content/badge.md` reflects the 70 floor and the cohort-band color table.
+- [shipped] The README's `## Scoring` section points at the new methodology and formula.
 
 **Acceptance:**
 
-- `bash scripts/prose-check.sh` green.
-- `unslop` score 0 on the rewritten pages.
-- The methodology page explains the new statuses with worked examples.
+- [met] `bash scripts/prose-check.sh` green (0 blocking).
+- [met] `unslop` score 0 on the rewritten pages.
+- [met] The methodology page explains the new statuses with worked examples.
 
 **Dependencies:** U3 (the formula must be chosen before the methodology can document it accurately).
 
