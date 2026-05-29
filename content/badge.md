@@ -92,9 +92,9 @@ Self-grading is acceptable. The badge URL must resolve to a scorecard that anyon
 In practice this means:
 
 - The tool must be listed in the [registry](https://github.com/brettdavies/agentnative-site/blob/main/registry.yaml).
-- The scorecard must be a real `anc check --output json` run, committed under
+- The scorecard must be a real `anc audit --output json` run, committed under
   [`scorecards/`](https://github.com/brettdavies/agentnative-site/tree/main/scorecards).
-- Anyone reading the badge can run `anc check --command <binary>` locally and arrive at the same number, modulo
+- Anyone reading the badge can run `anc audit --command <binary>` locally and arrive at the same number, modulo
   scorecard-staleness. See the regression policy below.
 
 If the live re-run produces a different score than the badge, the live re-run wins. The badge is a pointer, not an
@@ -107,7 +107,7 @@ render a below-floor color in place of the eligible band, and the per-tool score
 with a "top issues to address" hint. There is no maintainer takedown, no embargo, no retroactive edit of historical
 commits in the tool's README.
 
-This is the core promise: the badge is an outbound link, not a stamp. Embedding it is permission for the world to check
+This is the core promise: the badge is an outbound link, not a stamp. Embedding it is permission for the world to audit
 your work continuously, not a one-time award.
 
 ## Claiming the badge
@@ -115,7 +115,7 @@ your work continuously, not a one-time award.
 1. Get on the [leaderboard](/scorecards): file a registry entry per
    [the registry README](https://github.com/brettdavies/agentnative-site/blob/main/registry.yaml). The site
    auto-discovers the latest scorecard for each registry entry on every build.
-2. Run `anc check --command <binary> --output json > scorecards/<tool>-v<version>.json` and commit the result.
+2. Run `anc audit --command <binary> --output json > scorecards/<tool>-v<version>.json` and commit the result.
 3. When your tool's row on the leaderboard reads 70% or higher, the per-tool page at `/score/<tool>` renders the embed
    snippet inline. Copy it into your README.
 

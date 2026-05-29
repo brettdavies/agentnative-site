@@ -59,5 +59,5 @@ durably register what it learned, and re-pays the discovery cost on every fresh 
   different cadence than the binary itself, naming flags or subcommands that no longer exist.
 
 Requirement IDs `p8-must-bundle-install`, `p8-should-bundle-exists`, `p8-may-install-all`, and `p8-may-bundle-update`
-define the contract; behavioral checks land as the linter grows P8 coverage. Run `anc check --principle 8 .` against
+define the contract; behavioral audits land as the linter grows P8 coverage. Run `anc audit --principle 8 .` against
 your CLI to see what's measured today.

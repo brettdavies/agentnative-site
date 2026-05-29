@@ -330,7 +330,7 @@ wall-clock but otherwise behave identically. go + direct unchanged.
 mapDoError flow.
 
 **Requirements:** R11 (response triad). User-visible response envelope must carry `spec_version`, `anc_version` (well,
-N/A for bounces — only success), `checker_url` AND the new error code with PM-specific details.
+N/A for bounces — only success), `auditor_url` AND the new error code with PM-specific details.
 
 **Dependencies:** U2.
 
@@ -350,7 +350,7 @@ Straight type-union extension. Once the new variant is added to ScoreError, mapD
 
 - DO returns `{error: 'chain_resolved_library_not_cli', details: 'pm=pip pkg=requests reason=no_console_scripts'}` →
   handler returns 502 with envelope `{error: {code: 'chain_resolved_library_not_cli', details: '...', cta_text: '...'},
-  spec_version, checker_url}`.
+  spec_version, auditor_url}`.
 - ScoreError union compile check: removing the new variant should be a TypeScript error (assertNever exhaustiveness).
 
 **Verification:** Handler tests pass. Response shape carries the new error code; status is 502.

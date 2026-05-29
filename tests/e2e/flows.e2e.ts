@@ -84,8 +84,8 @@ test.describe('code-copy + anchor-copy', () => {
   test('copy button on <pre> writes code to clipboard', async ({ page, context, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit does not support clipboard permission grants');
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    // /check has 4 code blocks. /p3 has none (no shell snippets in p3 prose).
-    await page.goto('/check');
+    // /audit has 4 code blocks. /p3 has none (no shell snippets in p3 prose).
+    await page.goto('/audit');
     // The copy button is injected by src/client/clipboard.ts: each <pre> is
     // wrapped in <div class="code-wrap"> and the <button class="copy-button">
     // is appended to the wrap as a SIBLING of <pre> (not a child). Visibility

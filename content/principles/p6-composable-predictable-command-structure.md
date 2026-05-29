@@ -88,5 +88,5 @@ tool a building block rather than a dead end.
 - A `completions` command that requires auth or config to run.
 - No stdin support on commands where piped input is a natural use case.
 
-Measured by check IDs `p6-sigpipe`, `p6-no-color-behavioral`, and `p6-no-pager-behavioral` today, with `p6-completions`,
-`p6-timeout`, and `p6-agents-md` planned. Run `anc check --principle 6 .` against your CLI to see current coverage.
+Measured by audit IDs `p6-sigpipe`, `p6-no-color-behavioral`, and `p6-no-pager-behavioral` today, with `p6-completions`,
+`p6-timeout`, and `p6-agents-md` planned. Run `anc audit --principle 6 .` against your CLI to see current coverage.

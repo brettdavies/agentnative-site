@@ -56,7 +56,7 @@ deadlock.
 
 ## Scope
 
-"Agent" in this specification means a process invoking the CLI as a subprocess. This spec's automated checks verify
+"Agent" in this specification means a process invoking the CLI as a subprocess. This spec's automated audits verify
 behavior under non-TTY stdin. TTY-driving agents (tmux panes, `ssh -t` sandbox shells, `expect` automation, computer-use
 desktop agents) are affected by the same MUSTs — but `anc` currently does not allocate a PTY during verification. Pass
 verdicts for TTY-driving-agent scenarios are probable-but-not-verified; see [/coverage](/coverage) for the gap.
@@ -83,5 +83,5 @@ verdicts for TTY-driving-agent scenarios are probable-but-not-verified; see [/co
 - A `--password <value>` flag with no stdin or file alternative — every invocation leaks the secret into process
   listings.
 
-Measured by check IDs `p1-non-interactive`, `p1-flag-existence`, and `p1-env-hints` today. Run `anc check --principle 1
+Measured by audit IDs `p1-non-interactive`, `p1-flag-existence`, and `p1-env-hints` today. Run `anc audit --principle 1
 .` against your CLI to see current coverage.

@@ -31,7 +31,7 @@ parents:
 >
 > **Surface #5 update (2026-04-30):** CLI post-pass hint shipped in `agentnative-cli` PR
 > [#36](https://github.com/brettdavies/agentnative-cli/pull/36) on `feat/badge-embed-hint`. After a passing
-> `anc check .`, the CLI prints the embed snippet for the running tool. Scorecard `schema_version` bumped `0.4` → `0.5`
+> `anc audit .`, the CLI prints the embed snippet for the running tool. Scorecard `schema_version` bumped `0.4` → `0.5`
 > with a new top-level `badge` block (`eligible`, `score_pct`, `embed_markdown`, `scorecard_url`, `badge_url`,
 > `convention_url`). Eligibility floor (`80`) and base URL (`https://anc.dev`) are duplicated as named consts in the
 > CLI (`BADGE_ELIGIBILITY_FLOOR_PCT`, `BADGE_BASE_URL` in `src/scorecard/mod.rs`); authority remains `content/badge.md`
@@ -147,7 +147,7 @@ surfaces 1, 2, and 3; CLI owns surface 5.
 | 2   | Leaderboard callout linking to /badge | `agentnative-site` (this plan, U6)    | yes                  | ✅ shipped 2026-04-29                          |
 | 3   | `/badge` convention page              | `agentnative-site` (this plan, U4)    | yes                  | ✅ shipped 2026-04-29                          |
 | 4   | `docs/badge.md` doctrinal convention  | `agentnative-spec` (this plan, U1+U2) | **no** — post-launch | ✅ merged to spec `dev` 2026-05-04 (PR #18)    |
-| 5   | `anc check` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5) |
+| 5   | `anc audit` post-pass embed hint      | `agentnative-cli` (todo #017)         | **no** — post-launch | ✅ shipped 2026-04-30 (CLI PR #36, schema 0.5) |
 
 > Site-side units U3–U7 (added during the 2026-04-29 implementation) cover surfaces 1–3 plus the build-time SVG render
 > (`badge-maker`) and the worker `image/svg+xml` content-type wiring. Spec-side U1+U2 shipped 2026-05-04 in
@@ -235,7 +235,7 @@ shipped 2026-04-30 in CLI PR [#36](https://github.com/brettdavies/agentnative-cl
 - ✅ **Version-pinning convention** — resolved 2026-04-29: `/badge/<tool>.svg` always-latest; spec version surfaces in
   the badge label (`agent-native vMAJOR.MINOR`), not the URL path. See locked-decisions block above.
 - Whether to require a minimum `anc` CLI version scored against — **still open.** Not resolved by spec-side U1; the
-  shipped `docs/badge.md` says "any reader can re-run the linter locally with `anc check .` against the cited spec
+  shipped `docs/badge.md` says "any reader can re-run the linter locally with `anc audit .` against the cited spec
   version" without specifying a floor. Filed as a future follow-up if a sufficiently old `anc` produces materially
   different scores against the same spec version.
 

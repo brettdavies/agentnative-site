@@ -15,8 +15,8 @@ superseded_by:
 ## Overview
 
 Establish a formal governance model for the agent-native CLI standard by splitting concerns across three repos:
-`agentnative` (spec), `agentnative-cli` (checker tool), and `agentnative-site` (website). Adds per-principle calver,
-per-check calver, AI-native contribution requirements, cross-repo routing, and a coupled release protocol.
+`agentnative` (spec), `agentnative-cli` (auditor tool), and `agentnative-site` (website). Adds per-principle calver,
+per-audit calver, AI-native contribution requirements, cross-repo routing, and a coupled release protocol.
 
 ## Problem Frame
 
@@ -30,9 +30,9 @@ the policy layer. (see origin: `docs/brainstorms/spec-governance-requirements.md
 - R1. Spec repo holds canonical principle text, governance docs, issue templates, CC BY 4.0 license
 - R2. Site repo consumes spec content via committed copy with sync script, scopes templates to site concerns, updates
   /about routing
-- R3. Tool repo scopes templates to checker concerns, links to spec repo for governance
+- R3. Tool repo scopes templates to auditor concerns, links to spec repo for governance
 - R4. Per-principle calver with `last-revised` dates displayed on site and changelog
-- R5. Per-check calver with revision dates in `anc check --output json` and displayed on scorecard pages
+- R5. Per-check calver with revision dates in `anc audit --output json` and displayed on scorecard pages
 - R6. Coupled release protocol — principle PRs must reference check review PRs (documented norm + PR template field)
 - R7. AI-native contributions — disclosure always (R7.1-R7.2 all repos), human co-sign for spec changes and PRs
   (R7.3-R7.4 spec repo), follow-up comment disclosure as documented norm (R7.5)
@@ -41,7 +41,7 @@ the policy layer. (see origin: `docs/brainstorms/spec-governance-requirements.md
 ## Scope Boundaries
 
 - Full governance implementation across all three repos
-- Per-principle and per-check calver metadata
+- Per-principle and per-audit calver metadata
 - AI disclosure fields on all issue/PR templates across all three repos
 - Cross-repo routing infrastructure
 - Coupled release enforcement via PR template and documented protocol
@@ -52,7 +52,7 @@ the policy layer. (see origin: `docs/brainstorms/spec-governance-requirements.md
 - Automated cross-repo issue transfer (manual transfer for now, same-org)
 - Formal RFC process with stages (explicitly rejected — single-author spec, single gate)
 - GitHub Discussions on any repo (explicitly rejected)
-- Principle revision dates in `anc check --output json` (requires cross-repo content dependency; deferred until sync
+- Principle revision dates in `anc audit --output json` (requires cross-repo content dependency; deferred until sync
   mechanism is proven)
 
 ## Context & Research
@@ -201,7 +201,7 @@ window before the new spec repo claims the `agentnative` name.
 - Modify: tool repo `README.md` (badge URLs, clone instructions)
 - Modify: tool repo `AGENT.md` (any self-references)
 - Modify: site repo `content/about.md` (contributing links → `agentnative-cli`)
-- Modify: site repo `content/check.md` (repo link → `agentnative-cli`)
+- Modify: site repo `content/audit.md` (repo link → `agentnative-cli`)
 - Modify: site repo `registry.yaml` (`anc` entry repo field → `brettdavies/agentnative-cli`)
 - Modify: site repo `README.md` (any tool repo references)
 - Modify: site repo `AGENT.md` (any tool repo references)
@@ -300,7 +300,7 @@ existing link will accidentally resolve here)
 
 ---
 
-- [ ] **Unit 3: Add per-check calver to tool repo and render on scorecard pages**
+- [ ] **Unit 3: Add per-audit calver to tool repo and render on scorecard pages**
 
 **Goal:** Add `last-revised` metadata to each check, include revision dates and spec version in JSON output, and render
 check dates on the site's scorecard pages.
@@ -328,7 +328,7 @@ check dates on the site's scorecard pages.
 - Schema version bumped to "1.2" to signal new fields
 - Site-side: `scorecards.mjs` reads `check_last_revised` from each result and renders it as a subtle date label beside
   the check result. Graceful fallback: if field is missing (older JSON), show nothing.
-- Re-run `anc check` for all scored registry tools to regenerate scorecard JSON with new fields
+- Re-run `anc audit` for all scored registry tools to regenerate scorecard JSON with new fields
 
 **Patterns to follow:**
 
@@ -339,7 +339,7 @@ check dates on the site's scorecard pages.
 
 **Test scenarios:**
 
-- Happy path: `anc check --output json` includes `spec_version` in envelope
+- Happy path: `anc audit --output json` includes `spec_version` in envelope
 - Happy path: Each check result in JSON includes `check_last_revised` date string
 - Happy path: `check_last_revised` matches the date in the check's definition
 - Happy path: Scorecard page for a tool shows revision date next to each check
@@ -350,8 +350,8 @@ check dates on the site's scorecard pages.
 
 **Verification:**
 
-- `anc check --command <tool> --output json | jq '.spec_version'` returns a version string
-- `anc check --command <tool> --output json | jq '.results[0].check_last_revised'` returns a date
+- `anc audit --command <tool> --output json | jq '.spec_version'` returns a version string
+- `anc audit --command <tool> --output json | jq '.results[0].check_last_revised'` returns a date
 - `/score/<tool>` page shows check revision dates
 - Schema version is "1.2"
 
@@ -487,7 +487,7 @@ cross-repo routing across all three repos.
 - Remove: site repo `.github/ISSUE_TEMPLATE/grade-a-cli.yml` (moved to spec repo in Unit 2)
 - Remove: site repo `.github/ISSUE_TEMPLATE/false-positive.yml` (replaced by contact link in config.yml per R2.5)
 - Modify: site repo `.github/ISSUE_TEMPLATE/config.yml` (contact links: spec repo for governance, tool repo for false
-  positives and checker bugs)
+  positives and auditor bugs)
 - Create: site repo `.github/ISSUE_TEMPLATE/site-bug.yml` (site-specific: build, design, performance, deployment;
   includes R7.1 AI disclosure + R7.2 agent instructions)
 - Modify: site repo `content/about.md` (contributing section rewritten: brief intro + links to spec repo CONTRIBUTING.md
@@ -528,7 +528,7 @@ cross-repo routing across all three repos.
 **Verification:**
 
 - `gh issue create --web` on site repo shows only site-scoped template
-- `gh issue create --web` on tool repo shows three checker-scoped templates
+- `gh issue create --web` on tool repo shows three auditor-scoped templates
 - Contact links in all three repos' config.yml resolve correctly
 - /about page contributing section verified end-to-end
 
@@ -589,7 +589,7 @@ the site footer.
   points to a non-existent URL (between publish and rename). This is minimized by doing both in the same session. After
   spec repo creation, the old `agentnative` name resolves to the spec repo — all site references are already updated in
   Unit 1 so no link breaks.
-- **API surface parity:** The `anc check --output json` schema change (new fields: `spec_version`, `check_last_revised`)
+- **API surface parity:** The `anc audit --output json` schema change (new fields: `spec_version`, `check_last_revised`)
   is additive and backward-compatible. Schema version bumps from "1.1" to "1.2". Consumers parsing JSON will not break
   (new fields ignored by old parsers).
 - **Integration coverage:** The sync script `--check` mode needs testing with intentional drift (modify spec repo, don't
@@ -655,7 +655,7 @@ multi-step concern with cross-repo timing nuances. Splitting was the right call.
 - **Unit 5 — `sync-spec.sh`.** Re-homed to sync-spec plan. That plan now owns the script, vendoring policy, `--check`
   mode, CI integration end-to-end.
 - **Unit 6 — Issue templates + routing.** Shipped. Site has only `config.yml` + `site-bug.yml`; `config.yml` routes
-  governance to the spec repo and checker bugs to the CLI repo. Spec repo carries the governance templates; CLI repo
+  governance to the spec repo and auditor bugs to the CLI repo. Spec repo carries the governance templates; CLI repo
   carries CLI-scoped templates (`false-positive`, `feature-request`, `scoring-bug`). The CLI repo also still carries
   some governance templates as a transitional artifact — cleanup is cosmetic, not blocking.
 - **Unit 7 — Changelog page + dynamic footer version.** Re-homed to sync-spec plan. The footer's `v0.1.0` stub in

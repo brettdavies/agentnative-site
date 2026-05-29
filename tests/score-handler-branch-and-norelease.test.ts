@@ -7,7 +7,7 @@
 //      derivable binary). Live DO runs and returns chain_no_resolve
 //      because nothing on the discovery chain produced a binary. The
 //      handler must bounce 404 with no share_url AND preserve the
-//      response triad (spec_version + checker_url; anc_version is
+//      response triad (spec_version + auditor_url; anc_version is
 //      success-only).
 //
 //   2. github-url with an explicit branch (`/tree/<branch>`). Per
@@ -333,12 +333,12 @@ describe('/api/score — branch URLs + no-release repos', () => {
     const body = (await res.json()) as {
       error: { code: string };
       spec_version: string;
-      checker_url: string;
+      auditor_url: string;
       share_url?: string;
     };
     expect(body.error.code).toBe('chain_no_resolve');
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
     expect(body.share_url).toBeUndefined();
     // The Worker bounced before the DO — no compute billed, no metered-
     // gate budget burned.
@@ -368,13 +368,13 @@ describe('/api/score — branch URLs + no-release repos', () => {
     const body = (await res.json()) as {
       error: { code: string; details?: string };
       spec_version: string;
-      checker_url: string;
+      auditor_url: string;
       share_url?: string;
     };
     expect(body.error.code).toBe('chain_resolved_no_binary_produced');
     expect(body.error.details).toContain('install ran but no binary');
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
     expect(body.share_url).toBeUndefined();
   });
 
@@ -429,7 +429,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
       share_url?: string;
       anc_version: string;
       spec_version: string;
-      checker_url: string;
+      auditor_url: string;
     };
     // NOT registry_hit — branch-scoped inputs never wear the curated kind.
     expect(body.scorecard.kind).toBeUndefined();
@@ -438,7 +438,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.share_url).toBeUndefined();
     // Response triad on success.
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
     expect(body.anc_version).toBe('0.3.1');
   });
 
@@ -562,12 +562,12 @@ describe('/api/score — github accessibility pre-check', () => {
     const body = (await res.json()) as {
       error: { code: string };
       spec_version: string;
-      checker_url: string;
+      auditor_url: string;
     };
     expect(body.error.code).toBe('github_repo_not_accessible');
     // Response triad on error.
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
   });
 
   // -------------------------------------------------------------------------

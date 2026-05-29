@@ -101,7 +101,7 @@ Site-specific surface registers (1a homepage lede vs 1b principle page, 2 task p
 - **Stack (decided).** Static site generation; plain HTML from markdown via a 200-line Node build; Cloudflare Worker (80
   lines) for routing, `Accept: text/markdown`, `.md` URL suffix, `Link` and `X-Llms-Txt` response headers, and
   `X-Robots-Tag: noindex` on the markdown variant. See `DESIGN.md` §3.
-- **Scope (decided).** Index plus 7 principle anchors on one page, plus `/check` and `/about`. Nine surfaces total.
+- **Scope (decided).** Index plus 7 principle anchors on one page, plus `/audit` and `/about`. Nine surfaces total.
   `DESIGN.md` §3.1 locks SSG as non-negotiable.
 - **Accessibility.** WCAG 2.1 AA and APCA Lc ≥ 60 body minimum both pass in both modes, verified in
   `docs/research/design/color-analysis.md`. Smaller sizes or lower-contrast weights MUST be re-checked on any typography

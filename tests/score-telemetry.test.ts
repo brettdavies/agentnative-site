@@ -131,7 +131,7 @@ describe('AE telemetry — emits exactly one event per /api/score request', () =
     expect(evt.doubles?.[SLOT.DOUBLE_STATUS]).toBe(429);
   });
 
-  test('POST live success → 1 event with blob4=live, install_ms + anc_check_ms populated', async () => {
+  test('POST live success → 1 event with blob4=live, install_ms + anc_audit_ms populated', async () => {
     const events: TelemetryEvent[] = [];
     await handleScore(
       postScore('cargo install foo-cli'),
@@ -141,7 +141,7 @@ describe('AE telemetry — emits exactly one event per /api/score request', () =
           scorecard: { tool: { name: 'foo-cli', version: '1.0.0' } },
           anc_version: '0.3.1',
           install_ms: 1234,
-          anc_check_ms: 567,
+          anc_audit_ms: 567,
         },
       }),
     );
@@ -184,9 +184,9 @@ describe('AE telemetry — write failure swallowed', () => {
   test('writeDataPoint throws on success path → handler still returns 200', async () => {
     const res = await handleScore(getScore('ripgrep'), makeEnv({ telemetryThrows: true }));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { spec_version: string; checker_url: string };
+    const body = (await res.json()) as { spec_version: string; auditor_url: string };
     expect(body.spec_version).toBeDefined();
-    expect(body.checker_url).toBeDefined();
+    expect(body.auditor_url).toBeDefined();
   });
 
   test('writeDataPoint throws on error path → handler still returns the error envelope', async () => {

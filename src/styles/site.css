@@ -1040,52 +1040,52 @@ body:has(.leaderboard-hero) main {
   padding-left: 0;
 }
 
-/* All checks section */
-.scorecard-checks {
+/* All audits section */
+.scorecard-audits {
   padding: 0.5rem 0;
 }
-.scorecard-checks h2 {
+.scorecard-audits h2 {
   margin-top: 1.5rem;
   margin-bottom: 1rem;
 }
 
-.check-group {
+.audit-group {
   margin-bottom: 1.5rem;
 }
 
-.check-group__title {
+.audit-group__title {
   font-size: 0.95rem;
   font-weight: 600;
   margin: 0 0 0.5rem;
 }
 
-.check-group__title a {
+.audit-group__title a {
   color: var(--accent, #0058aa);
   text-decoration: none;
 }
-.check-group__title a:hover {
+.audit-group__title a:hover {
   text-decoration: underline;
 }
 
-.check-group--bonus {
+.audit-group--bonus {
   margin-top: 2rem;
   padding-top: 1.5rem;
   border-top: 1px solid var(--border-subtle, #e5e8eb);
 }
 
-.check-table {
+.audit-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.88rem;
 }
 
-.check-table td {
+.audit-table td {
   padding: 0.35rem 0.6rem;
   border-bottom: 1px solid var(--border-subtle, #e5e8eb);
   vertical-align: top;
 }
 
-.check__status {
+.audit__status {
   font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
   font-size: 0.72rem;
   font-weight: 600;
@@ -1094,19 +1094,19 @@ body:has(.leaderboard-hero) main {
   white-space: nowrap;
 }
 
-.check--pass .check__status {
+.audit--pass .audit__status {
   color: var(--may, #007980);
 }
-.check--warn .check__status {
+.audit--warn .audit__status {
   color: var(--should, #a16100);
 }
-.check--fail .check__status {
+.audit--fail .audit__status {
   color: var(--must, #af2b25);
 }
-.check--skip .check__status {
+.audit--skip .audit__status {
   color: var(--fg-muted, #525960);
 }
-.check--error .check__status {
+.audit--error .audit__status {
   color: var(--must, #af2b25);
 }
 /* opt_out: deliberate non-adoption — counts against the score, so it reads in
@@ -1124,25 +1124,25 @@ body:has(.leaderboard-hero) main {
 
 /* Suppressed-by-audit-profile checks: distinct from organic Skips. The row is
    muted to signal "intentionally excluded by category" rather than "didn't run". */
-.check--suppressed {
+.audit--suppressed {
   opacity: 0.65;
 }
-.check--suppressed .check__status {
+.audit--suppressed .audit__status {
   color: var(--fg-muted, #525960);
   font-size: 0.7rem;
   white-space: nowrap;
   width: auto;
   padding-right: 0.75rem;
 }
-.check__label {
+.audit__label {
   color: var(--fg-body, #1a2026);
 }
-.check--suppressed .check__label {
+.audit--suppressed .audit__label {
   font-style: italic;
   color: var(--fg-muted, #525960);
 }
 
-.check__evidence {
+.audit__evidence {
   color: var(--fg-muted, #525960);
   font-size: 0.82rem;
 }

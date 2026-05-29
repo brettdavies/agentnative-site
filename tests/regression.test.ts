@@ -93,7 +93,7 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
 
     // Contains ## Pages with check, install, and about sub-pages.
     expect(llms).toContain('## Pages');
-    expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/check\.md\)$/m);
+    expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/audit\.md\)$/m);
     expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/install\.md\)$/m);
     expect(llms).toMatch(/^- \[[^\]]+\]\([^)]*\/about\.md\)$/m);
 
@@ -403,7 +403,7 @@ describe('regression #8 — /api/score response triad + spec-version exports + n
     expect(typeof body.spec_version).toBe('string');
     expect(typeof body.site_spec_version).toBe('string');
     expect(typeof body.anc_version).toBe('string');
-    expect(typeof body.checker_url).toBe('string');
+    expect(typeof body.auditor_url).toBe('string');
   });
 
   test('shapeScoreSuccess refuses to emit a partial response when anc_version is missing', async () => {
@@ -427,7 +427,7 @@ describe('regression #8 — /api/score response triad + spec-version exports + n
     expect(missing).toEqual([]);
   });
 
-  test('src/worker/spec-version.gen.ts exports SPEC_VERSION + SITE_SPEC_VERSION + CHECKER_URL as non-empty strings', async () => {
+  test('src/worker/spec-version.gen.ts exports SPEC_VERSION + SITE_SPEC_VERSION + AUDITOR_URL as non-empty strings', async () => {
     // Existence guard on the build-emitted constants the response-shape
     // depends on. tests/spec-version-gen.test.ts already covers freshness
     // against the source VERSION files; this assertion only catches the
@@ -437,7 +437,7 @@ describe('regression #8 — /api/score response triad + spec-version exports + n
     expect(mod.SPEC_VERSION.length).toBeGreaterThan(0);
     expect(typeof mod.SITE_SPEC_VERSION).toBe('string');
     expect(mod.SITE_SPEC_VERSION.length).toBeGreaterThan(0);
-    expect(typeof mod.CHECKER_URL).toBe('string');
-    expect(mod.CHECKER_URL.length).toBeGreaterThan(0);
+    expect(typeof mod.AUDITOR_URL).toBe('string');
+    expect(mod.AUDITOR_URL.length).toBeGreaterThan(0);
   });
 });

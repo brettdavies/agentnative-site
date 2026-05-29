@@ -3,7 +3,7 @@
 #
 # H6 Unit 0 procedure: once `anc` v0.1.3+ is on the box, running this refreshes
 # scorecards/<name>-v<version>.json against the new binary so the audience
-# banner / suppressed-check rendering / agent-optimized filter all light up
+# banner / suppressed-audit rendering / agent-optimized filter all light up
 # with real CLI output instead of falling through the v1.1/v1.2 null path.
 #
 # For each registry entry the script:
@@ -211,7 +211,7 @@ for name in "${scored_names[@]}"; do
     continue
   fi
 
-  # `anc audit` is a linter — it exits non-zero whenever any check fails or
+  # `anc audit` is a linter — it exits non-zero whenever any audit fails or
   # warns, even on a successful run. The JSON output is still well-formed.
   # Allow non-zero exit and validate the result instead.
   # shellcheck disable=SC2086 # profile_flag must word-split on the space

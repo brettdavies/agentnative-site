@@ -20,7 +20,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
   const paths = [
     '/',
     ...principleNumbers.map((n) => `/p${n}`),
-    '/check',
+    '/audit',
     '/about',
     '/changelog',
     '/contribute',

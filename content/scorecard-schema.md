@@ -1,6 +1,6 @@
 # Scorecard schema
 
-A scorecard is the structured output of `anc check <binary> --output json`. The site reads scorecards under
+A scorecard is the structured output of `anc audit <binary> --output json`. The site reads scorecards under
 [`scorecards/`](https://github.com/brettdavies/agentnative-site/tree/main/scorecards) and renders them at
 [/scorecards](/scorecards) and at each tool's `/score/<name>` page. This page documents every field that appears in a
 scorecard, what it means, and where it comes from. It is intentionally exhaustive: anything in the JSON should be
@@ -51,7 +51,7 @@ informational; when both are present and disagree, the build aborts with an inte
 | `audience`         | string \| null      | `anc` emitted | One-line audience classification. See [audience signal](/methodology#what-the-audience-signal-is-and-is-not).    |
 | `audience_reason`  | string \| null      | `anc` emitted | Set to `"suppressed"` when an active audit profile blanks the audience signal. Otherwise null.                   |
 | `audit_profile`    | string \| null      | registry      | Exception category passed to anc via `--audit-profile`. See [audit profiles](/methodology#audit-profiles).       |
-| `summary`          | object              | derived       | Tally of how the runner's checks finished. See [summary](#summary) below.                                        |
+| `summary`          | object              | derived       | Tally of how the runner's audits finished. See [summary](#summary) below.                                        |
 | `coverage_summary` | object              | derived       | Tally of how many spec requirements the run verified. See [coverage_summary](#coverage_summary) below.           |
 | `badge`            | object              | derived       | Score, eligibility, and the copy-paste embed snippet for this tool. See [badge](#badge) below. **Added in 0.5.** |
 | `results`          | array of result obj | `anc` emitted | One entry per evaluated requirement row. See [results](#results) below.                                          |
@@ -101,7 +101,7 @@ Run-context: the literal invocation, when it ran, how long it took, and what pla
 
 ```json
 "run": {
-  "invocation": "anc check --command rg --output json",
+  "invocation": "anc audit --command rg --output json",
   "started_at": "2026-04-30T04:18:53.099683344Z",
   "duration_ms": 53,
   "platform": { "os": "linux", "arch": "x86_64" }
@@ -116,9 +116,9 @@ Run-context: the literal invocation, when it ran, how long it took, and what pla
 | `platform.os`   | string  | OS the binary ran on (`linux`, `darwin`, `windows`).                                                                                                         |
 | `platform.arch` | string  | CPU architecture the binary ran on (`x86_64`, `aarch64`, …).                                                                                                 |
 
-**Security note (`run.invocation`):** for command-mode runs the invocation is the canonical `anc check --command <name>
+**Security note (`run.invocation`):** for command-mode runs the invocation is the canonical `anc audit --command <name>
 [--audit-profile <X>] [--output json]` shape, which is safe to embed publicly. For project-mode runs (`target.kind:
-"project"`) the invocation may include a local filesystem path (`anc check ./local/repo`); the site falls back to the
+"project"`) the invocation may include a local filesystem path (`anc audit ./local/repo`); the site falls back to the
 synthesized form for those runs to avoid leaking machine-local paths into HTML, markdown, and `/llms-full.txt`. Mirror
 this gate downstream if you fetch the JSON directly.
 
@@ -146,7 +146,7 @@ consumers reading the JSON should treat it as machine-local.
 
 ## `summary`
 
-Counts of how the runner's checks finished, one per evaluated requirement row. Adds up to `total`.
+Counts of how the runner's audits finished, one per evaluated requirement row. Adds up to `total`.
 
 ```json
 "summary": {
@@ -169,8 +169,8 @@ Counts of how the runner's checks finished, one per evaluated requirement row. A
 | `fail`    | integer | MUST-tier requirements not satisfied.                                                                                             |
 | `opt_out` | integer | Requirements the tool could implement but deliberately does not. **Added in 0.6.**                                                |
 | `n_a`     | integer | Requirements that do not apply to this tool (conditional antecedent absent, or scoped out by an audit profile). **Added in 0.6.** |
-| `skip`    | integer | Checks the probe could not measure. A linter limitation, not a tool defect.                                                       |
-| `error`   | integer | The check crashed and produced no signal. Not evidence of a defect.                                                               |
+| `skip`    | integer | Audits the probe could not measure. A linter limitation, not a tool defect.                                                       |
+| `error`   | integer | The audit crashed and produced no signal. Not evidence of a defect.                                                               |
 
 The leaderboard score counts `pass`, `warn`, `fail`, and `opt_out` in the denominator and credits `pass` full and `warn`
 half; `n_a`, `skip`, and `error` are excluded from both sides, and only behavioral-layer rows are scored. The full
@@ -179,8 +179,8 @@ formula is on the [methodology page](/methodology#how-a-score-is-computed).
 ## `coverage_summary`
 
 Tally of how much of the agentnative **spec** the run verified. Distinct from `summary`, which counts the runner's
-checks. One implemented check can verify zero, one, or many spec requirements; many spec requirements aren't yet covered
-by any implemented check.
+audits. One implemented audit can verify zero, one, or many spec requirements; many spec requirements aren't yet covered
+by any implemented audit.
 
 ```json
 "coverage_summary": {
@@ -193,15 +193,15 @@ by any implemented check.
 | Field             | Type    | Meaning                                                                                               |
 | ----------------- | ------- | ----------------------------------------------------------------------------------------------------- |
 | `must.total`      | integer | Number of MUST-tier requirements in the active spec version. Same for every tool scored at that spec. |
-| `must.verified`   | integer | MUSTs satisfied by passing checks for *this* tool.                                                    |
+| `must.verified`   | integer | MUSTs satisfied by passing audits for *this* tool.                                                    |
 | `should.total`    | integer | Number of SHOULD-tier requirements in the spec.                                                       |
-| `should.verified` | integer | SHOULDs satisfied by passing checks for this tool.                                                    |
+| `should.verified` | integer | SHOULDs satisfied by passing audits for this tool.                                                    |
 | `may.total`       | integer | Number of MAY-tier requirements in the spec.                                                          |
-| `may.verified`    | integer | MAYs satisfied by passing checks for this tool.                                                       |
+| `may.verified`    | integer | MAYs satisfied by passing audits for this tool.                                                       |
 
-If `coverage_summary.must.verified` is below `summary.pass`, that's expected because a single passing check can map to
+If `coverage_summary.must.verified` is below `summary.pass`, that's expected because a single passing audit can map to
 multiple MUSTs. If `should.verified` and `may.verified` are zero across the board, that's also expected: those tiers are
-aspirational and will fill in as the runner grows checks mapped to them.
+aspirational and will fill in as the runner grows audits mapped to them.
 
 ## `badge`
 
@@ -254,13 +254,13 @@ independently and carries its own `tier`.
 | Field        | Type           | Meaning                                                                                                                                                          |
 | ------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`         | string         | Stable identifier for the requirement row (e.g., `p3-must-help`). Citeable in commits and PRs.                                                                   |
-| `label`      | string         | Human-readable name for the check.                                                                                                                               |
-| `group`      | string         | Principle group this check belongs to: `P1` through `P8`. Drives the **principles met** column on the leaderboard.                                               |
+| `label`      | string         | Human-readable name for the audit.                                                                                                                               |
+| `group`      | string         | Principle group this audit belongs to: `P1` through `P8`. Drives the **principles met** column on the leaderboard.                                               |
 | `layer`      | string         | `behavioral`, `project`, or `source`. Only `behavioral` rows feed the score. See [layers](/methodology#layers-behavioral-project-source).                        |
 | `tier`       | string         | `must`, `should`, or `may`. The requirement's RFC 2119 level, carried per row so the score is computable from the scorecard alone. **Added in 0.6.**             |
 | `status`     | string         | `pass`, `warn`, `fail`, `opt_out`, `n_a`, `skip`, or `error`. Definitions match the [`summary` table](#summary) above. `opt_out` and `n_a` added in 0.6.         |
-| `evidence`   | string \| null | Short explanation when the status is not a clean `pass`. Often names the suppressing audit profile, the unmet antecedent, or the input that triggered the check. |
-| `confidence` | string         | `high`, `medium`, or `low`. Reflects how directly the check observed the property: direct flag presence is high; inference from `--help` text is lower.          |
+| `evidence`   | string \| null | Short explanation when the status is not a clean `pass`. Often names the suppressing audit profile, the unmet antecedent, or the input that triggered the audit. |
+| `confidence` | string         | `high`, `medium`, or `low`. Reflects how directly the audit observed the property: direct flag presence is high; inference from `--help` text is lower.          |
 
 ### `status` semantics in detail
 
@@ -271,15 +271,15 @@ independently and carries its own `tier`.
 - `n_a`: The requirement does not apply: a conditional antecedent is absent, or an audit profile scopes it out. Excluded
   from the score.
 - `skip`: The probe could not measure the property: a linter limitation, not a tool defect (for example, a JSON-output
-  check that detected `--output` but could not validate the payload through safe probes). `evidence` says why.
-- `error`: Check tried to run and crashed before producing a verdict. Treated as no-signal, not a defect.
+  audit that detected `--output` but could not validate the payload through safe probes). `evidence` says why.
+- `error`: Audit tried to run and crashed before producing a verdict. Treated as no-signal, not a defect.
 
 ## What is *not* in the scorecard (yet)
 
 The site is transparent about gaps that future schema bumps may fill. Schema 0.4 closed the tool-identity / generated-at
 gap (see `tool`, `anc`, `run`, `target` above). Still outstanding today:
 
-- **Per-check timing.** `run.duration_ms` is the wall-clock total for the run, not per-check. Individual check timings
+- **Per-audit timing.** `run.duration_ms` is the wall-clock total for the run, not per-audit. Individual audit timings
   are observable from the runner's stdout but not captured in the JSON.
 - **Editorial fields inside the scorecard.** Language, creator, description, install, and repo/url remain in the
   registry. Migrating them into the scorecard would let the registry shrink to a name list; deferred to a future schema
@@ -290,7 +290,7 @@ bump.
 
 ## Why is `audience` `null` for some tools?
 
-When a tool is scored with `audit_profile: human-tui`, anc suppresses one or more of the four signal checks the audience
+When a tool is scored with `audit_profile: human-tui`, anc suppresses one or more of the four signal audits the audience
 classifier consumes. With incomplete inputs, the classifier emits `audience: null` and sets `audience_reason:
 "suppressed"` rather than guess. This is correct, intentional, and shared across every TUI on the leaderboard. The
 [methodology page](/methodology#what-the-audience-signal-is-and-is-not) covers the full classifier definition.

@@ -5,7 +5,7 @@
 import {
   BONUS_GROUPS,
   escHtml,
-  formatCheckTableMarkdownLines,
+  formatAuditTableMarkdownLines,
   groupToPrincipleNum,
   PRINCIPLE_GROUPS,
   PRINCIPLE_NAMES,
@@ -79,31 +79,31 @@ function suppressionCategory(check) {
 }
 
 /**
- * Render an array of checks as `<tr>` rows for a check-table.
+ * Render an array of checks as `<tr>` rows for a audit-table.
  *
  * Skips emitted with evidence `"suppressed by audit_profile: <category>"` get
- * a `check--suppressed` class and an "N/A by &lt;category&gt;" status pill,
+ * a `audit--suppressed` class and an "N/A by &lt;category&gt;" status pill,
  * distinguishing category-scoped exclusions from organic Skips (e.g., "no flags exposed").
  *
  * The 7-status taxonomy (schema 0.6) routes `opt_out` and `n_a` through their
- * own `check--opt_out` / `check--n_a` classes and the shared statusLabel map,
+ * own `audit--opt_out` / `audit--n_a` classes and the shared statusLabel map,
  * so they render distinct from `skip`. Older 0.5 cards carry none of these and
  * are unaffected.
  *
  * @param {Array<{ status: string, label: string, evidence: string | null }>} checks
  * @returns {string}
  */
-function renderCheckRows(checks) {
+function renderAuditRows(checks) {
   return checks
     .map((check) => {
       const category = suppressionCategory(check);
-      const rowClass = category ? 'check check--skip check--suppressed' : `check check--${check.status}`;
+      const rowClass = category ? 'audit audit--skip audit--suppressed' : `audit audit--${check.status}`;
       const label = category ? `N/A by ${escHtml(category)}` : escHtml(statusLabel(check.status));
       const evidence = check.evidence ? escHtml(check.evidence) : '';
       return `        <tr class="${rowClass}">
-          <td class="check__status">${label}</td>
-          <td class="check__label">${escHtml(check.label)}</td>
-          <td class="check__evidence">${evidence}</td>
+          <td class="audit__status">${label}</td>
+          <td class="audit__label">${escHtml(check.label)}</td>
+          <td class="audit__evidence">${evidence}</td>
         </tr>`;
     })
     .join('\n');
@@ -271,13 +271,13 @@ const AUDIENCE_COPY = {
 // CLI v0.1.3 — keep this in sync when the table changes upstream.
 const AUDIT_PROFILE_COPY = {
   'human-tui':
-    'Scored as a TUI: the non-interactive checks (P1) and the SIGPIPE check (P6) have been suppressed — TUI apps intercept the TTY by design and install their own signal handlers.',
+    'Scored as a TUI: the non-interactive audits (P1) and the SIGPIPE audit (P6) have been suppressed — TUI apps intercept the TTY by design and install their own signal handlers.',
   'file-traversal':
-    'Scored as a file-traversal tool: subcommand-shape applicability filters already produce the expected Skip outcomes for fd/find-style tools, so no checks are explicitly suppressed by this profile today.',
+    'Scored as a file-traversal tool: subcommand-shape applicability filters already produce the expected Skip outcomes for fd/find-style tools, so no audits are explicitly suppressed by this profile today.',
   'posix-utility':
-    'Scored as a POSIX utility: the non-interactive checks (P1) have been suppressed — POSIX utilities use stdin as their primary input, satisfying the no-prompt requirement vacuously.',
+    'Scored as a POSIX utility: the non-interactive audits (P1) have been suppressed — POSIX utilities use stdin as their primary input, satisfying the no-prompt requirement vacuously.',
   'diagnostic-only':
-    'Scored as a diagnostic-only tool: the dry-run check (P5) has been suppressed — read-only tools perform no writes, so the write-safety mutation-boundary requirement does not apply.',
+    'Scored as a diagnostic-only tool: the dry-run audit (P5) has been suppressed — read-only tools perform no writes, so the write-safety mutation-boundary requirement does not apply.',
 };
 
 /**
@@ -315,7 +315,7 @@ export function renderAudienceBanner(audience, auditProfile) {
     );
   }
   lines.push(
-    '<p class="audience-banner__note">This is an informational signal, not an authoritative verdict — see <a href="/methodology#what-the-audience-signal-is-and-is-not">methodology</a>. The per-check evidence below is the ground truth.</p>',
+    '<p class="audience-banner__note">This is an informational signal, not an authoritative verdict — see <a href="/methodology#what-the-audience-signal-is-and-is-not">methodology</a>. The per-audit evidence below is the ground truth.</p>',
   );
 
   return `<section class="scorecard-audience-banner">
@@ -339,7 +339,7 @@ export function renderAudienceBanner(audience, auditProfile) {
  * Render the embed snippet section for an eligible tool's scorecard page.
  * The snippet markdown comes verbatim from `scorecard.badge.embed_markdown`
  * (schema 0.5) — the CLI is canonical for the URL convention so the embed
- * a tool author copies from anc.dev matches the embed `anc check` prints
+ * a tool author copies from anc.dev matches the embed `anc audit` prints
  * after a passing run.
  *
  * @param {object} tool — registry entry (for the SVG preview alt text)
@@ -372,7 +372,7 @@ function renderBelowFloorHint(pct, hasIssues) {
   const gap = floor - pct;
   const issuesPointer = hasIssues
     ? ' The top issues above are the place to start.'
-    : ' See the full check results below for the gaps.';
+    : ' See the full audit results below for the gaps.';
   return `<section class="scorecard-embed scorecard-embed--below">
   <h2>Embed the badge</h2>
   <p>The <a href="/badge">badge floor</a> is ${floor}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.${issuesPointer}</p>
@@ -470,8 +470,8 @@ ${issueItems}
   }
 
   // Full check results grouped by principle
-  html += `<section class="scorecard-checks">
-  <h2>All Checks</h2>
+  html += `<section class="scorecard-audits">
+  <h2>All Audits</h2>
 `;
 
   // Principle groups
@@ -482,11 +482,11 @@ ${issueItems}
     const groupName = PRINCIPLE_NAMES[group] || group;
     const groupLink = pNum ? `/p${pNum}` : null;
 
-    html += `  <div class="check-group">
-    <h3 class="check-group__title">${groupLink ? `<a href="${groupLink}">` : ''}${escHtml(group)}: ${escHtml(groupName)}${groupLink ? '</a>' : ''}</h3>
-    <table class="check-table">
+    html += `  <div class="audit-group">
+    <h3 class="audit-group__title">${groupLink ? `<a href="${groupLink}">` : ''}${escHtml(group)}: ${escHtml(groupName)}${groupLink ? '</a>' : ''}</h3>
+    <table class="audit-table">
       <tbody>
-${renderCheckRows(checks)}
+${renderAuditRows(checks)}
       </tbody>
     </table>
   </div>
@@ -496,11 +496,11 @@ ${renderCheckRows(checks)}
   // Bonus groups (CodeQuality, ProjectStructure)
   const bonusChecks = scorecard.results.filter((r) => BONUS_GROUPS.includes(r.group));
   if (bonusChecks.length > 0) {
-    html += `  <div class="check-group check-group--bonus">
-    <h3 class="check-group__title">Code Quality</h3>
-    <table class="check-table">
+    html += `  <div class="audit-group audit-group--bonus">
+    <h3 class="audit-group__title">Code Quality</h3>
+    <table class="audit-table">
       <tbody>
-${renderCheckRows(bonusChecks)}
+${renderAuditRows(bonusChecks)}
       </tbody>
     </table>
   </div>
@@ -559,12 +559,12 @@ ${renderCheckRows(bonusChecks)}
     reproCommand = escHtml(meta.run.invocation);
   } else {
     const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
-    reproCommand = `anc check --command ${escHtml(tool.binary)}${profileFlag}`;
+    reproCommand = `anc audit --command ${escHtml(tool.binary)}${profileFlag}`;
   }
   const ctaText =
     topIssues.length === 0
       ? `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally:`
-      : `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally and inspect the failing checks:`;
+      : `Reproduce this scorecard for <code>${escHtml(tool.name)}</code> locally and inspect the failing audits:`;
   html += `<section class="scorecard-cta">
   <p>${ctaText}</p>
   <pre><code>${reproCommand}</code></pre>
@@ -659,7 +659,7 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
   // Empty `baseUrl` produces site-relative links (`/p3`); the build's
   // absolutifyMarkdownLinks pass rewrites those to absolute anc.dev URLs
   // for the twin output (matches the other markdown pages in this file).
-  for (const row of formatCheckTableMarkdownLines(scorecard.results)) {
+  for (const row of formatAuditTableMarkdownLines(scorecard.results)) {
     lines.push(row);
   }
   lines.push('');
@@ -699,7 +699,7 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     reproMd = meta.run.invocation;
   } else {
     const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
-    reproMd = `anc check --command ${tool.binary}${profileFlag}`;
+    reproMd = `anc audit --command ${tool.binary}${profileFlag}`;
   }
   lines.push('## Reproduce locally');
   lines.push('');

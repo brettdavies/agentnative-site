@@ -36,7 +36,7 @@ export type RegistryEntry = {
   audit_profile?: string;
   repo?: string;
   // Present when the tool has a committed scorecard. The Worker uses
-  // these to build the spec_version + anc_version + checker_url triad
+  // these to build the spec_version + anc_version + auditor_url triad
   // and route to /score/<slug> without fetching the scorecard JSON.
   // Tools without a scorecard ship the
   // metadata-only entry; the registry-fast-path treats them as a miss.

@@ -239,7 +239,7 @@ The CI smoke step after staging deploys (`/api/score` with the `ripgrep` slug, a
 `registry_hit`) deliberately covers the registry-fast-path only. The motivation is two-sided.
 
 First, the registry-fast-path is the surface every other branch of the pipeline depends on: if the curated
-`/api/score?input=ripgrep` doesn't return `{ scorecard, spec_version, site_spec_version, anc_version, checker_url }`, no
+`/api/score?input=ripgrep` doesn't return `{ scorecard, spec_version, site_spec_version, anc_version, auditor_url }`, no
 downstream tier works either. Failing the deploy on this surface catches the broadest class of regressions in the
 shortest run time.
 

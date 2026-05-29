@@ -49,5 +49,5 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 - No `--dry-run` option on bulk operations, where a preview prevents costly mistakes.
 - Operations that fail on retry because the first attempt partially succeeded — non-idempotent writes without rollback.
 
-Behavioral checks for P5 are planned (`p5-dry-run`, `p5-destructive-guard`) but not yet shipped — `anc check --principle
+Behavioral audits for P5 are planned (`p5-dry-run`, `p5-destructive-guard`) but not yet shipped — `anc audit --principle
 5 .` returns no results today. P5 conformance is currently assessed by reading source and `--help`.

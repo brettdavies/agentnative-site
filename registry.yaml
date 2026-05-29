@@ -21,7 +21,7 @@
 #
 # Fields (regen-pipeline inputs — optional):
 #   audit_profile   — one of human-tui | file-traversal | posix-utility |
-#                     diagnostic-only. Passed to `anc check
+#                     diagnostic-only. Passed to `anc audit
 #                     --audit-profile <profile>` so the category-exempt
 #                     checks are suppressed in the scored output.
 #   version_extract — shell snippet that prints the bare version. Used by
@@ -931,7 +931,7 @@ tools:
     tier: notable
     creator: Brett Davies
     install: brew install brettdavies/tap/agentnative
-    description: Check CLI tools against the agent-native standard
+    description: Audit CLI tools against the agent-native standard
 
   - name: bird
     repo: brettdavies/bird

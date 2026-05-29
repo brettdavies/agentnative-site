@@ -2,10 +2,10 @@
 
 You are writing for **the agent-native CLI standard**, a specification published at `anc.dev`. The site has two
 first-class audiences: developers evaluating the standard (often arriving from a Show HN post) and AI agents consuming
-the spec programmatically. Copy runs on the principle-page index, `/check`, `/about`, the header wordmark, the footer
+the spec programmatically. Copy runs on the principle-page index, `/audit`, `/about`, the header wordmark, the footer
 colophon, the OG social card, and any future surface. Voice is third-person — the site speaks as a standard, not a
 person. There is no "we," no "our team," no first-person singular. When a requirement has an actor, the actor is "tools"
-or "the CLI," not "you." Second-person is allowed only on `/check`, where the reader IS the actor.
+or "the CLI," not "you." Second-person is allowed only on `/audit`, where the reader IS the actor.
 
 Structure adapted from
 [Anh-Tho Chuong / Lago's voice-skill template](https://github.com/getlago/inside-lago-voice-skill).
@@ -50,8 +50,8 @@ words like "furthermore" or "in addition." One-sentence paragraphs are allowed w
 5. **The code speaks for itself.** End-of-section links carry the path or command as their link text — not "learn more,"
    not "read more." A reader who wants the proof clicks; a reader who doesn't has already gotten the requirement.
 6. **No first-person singular on spec surfaces.** The site has no `I`. Third-person descriptions of requirements and
-   tools. Second-person only on `/check`, where it maps to a real action the reader is taking.
-7. **Cite check IDs as the permanent citation primitive.** When copy refers to a specific check, it names the ID
+   tools. Second-person only on `/audit`, where it maps to a real action the reader is taking.
+7. **Cite audit IDs as the permanent citation primitive.** When copy refers to a specific check, it names the ID
    (`p4-process-exit`, `p1-non-interactive`). IDs survive reformatting; adjectival descriptions do not.
 
 ## Anti-Filler Checklist
@@ -67,7 +67,7 @@ AI drafts reliably ship with these patterns. Delete them on sight.
 - **The recap.** A closing paragraph that summarizes the section. The reader was there. Delete.
 - **The duplicate.** Two consecutive sentences saying the same thing in different words. Keep the sharper one.
 - **Appeal-to-authority adjectives.** "Industry-leading," "best-in-class," "modern," "robust." The code is the
-  authority. Let scorecards and check IDs demonstrate it.
+  authority. Let scorecards and audit IDs demonstrate it.
 - **Marketing interjections.** 🚀 ✅ 🎯 — not one of these ships. Ever. On any surface.
 - **Transition-by-bridge-word.** "Furthermore," "moreover," "in addition," "that said." If two paragraphs don't flow
   without a bridge, rewrite them until they do.
@@ -85,7 +85,7 @@ technical content; the principle page IS the technical content. Conflating their
 into a dry-RFC failure mode (no reader makes it to a principle page) or softens the principle page into prose-vibes
 where a contract belongs.
 
-#### Register 1a: Site lede (`/`, `/about`, `/install` opener, `/check` opener)
+#### Register 1a: Site lede (`/`, `/about`, `/install` opener, `/audit` opener)
 
 The reader arrived from a link and is deciding, in seconds, whether the standard is serious. Lead with concrete reality
 that names what the reader already knows — git, the cloud, a TUI that hangs forever — before naming the thing the spec
@@ -102,7 +102,7 @@ of the Definition. RFC-keyword blocks (`**MUST:**`, `**SHOULD:**`, `**MAY:**`) a
 Code samples carry weight a paragraph cannot. The five-section shape is locked (see Surface-Specific Notes below). No
 narrative analogies in the Definition or Requirements — analogies belong on the lede that brought the reader here.
 
-### Register 2: Developers running the tool (`/check`)
+### Register 2: Developers running the tool (`/audit`)
 
 Second-person, imperative, task-oriented. The reader is installing and running `agentnative` right now. Short
 paragraphs. Code fences do most of the work. No narration between the install block and the usage block.
@@ -141,10 +141,10 @@ applicability boundary needs naming). No intro paragraph above the Definition �
 Definition's first sentence names the failure mode, not the artifact ("A CLI tool that blocks on an interactive prompt
 is invisible to an agent — the agent hangs…" beats "A non-interactive CLI is one that…"). Link-text convention for
 templates: the path itself (`templates/output-format.rs`) or the flag (`--no-interactive`), never "this pattern" or "the
-reference." Closes with one line citing the check IDs that measure this principle today and an `anc check --principle
+reference." Closes with one line citing the audit IDs that measure this principle today and an `anc audit --principle
 <n>` invocation a reader can copy.
 
-### `/check`
+### `/audit`
 
 Second-person. One sentence framing → install block → first-run block → example output → one line on how to read the
 output. Every code fence uses a real, runnable invocation. No pseudo-code.
@@ -169,7 +169,7 @@ section is one terse sentence pointing agents at `/skill.json`.
 
 Register 2 imperative throughout. Section headings name the package manager (Homebrew, Cargo, GitHub Releases); each
 body is one paragraph plus a real command in a code fence. No "we", no marketing voice, no comparative claims about
-which install path is best. Closes with one short paragraph pointing to `/check` for usage and to `/skill` for the
+which install path is best. Closes with one short paragraph pointing to `/audit` for usage and to `/skill` for the
 companion skill bundle.
 
 ### Footer
@@ -196,9 +196,9 @@ better calibration. Each entry names the surface, the draft, the send, and the l
 - **Lesson**: A spec voice that defaults to minimal reads as uncommitted, not confident. "Restraint is not austerity"
   (Design Principle 3 in `PRODUCT.md`) is the tight formulation.
 
-### Example 2 — `/check` install stanza framing (session 2026-04-14)
+### Example 2 — `/audit` install stanza framing (session 2026-04-14)
 
-- *(empty — populate the first time a draft of `/check` content is edited)*
+- *(empty — populate the first time a draft of `/audit` content is edited)*
 
 ### Example 3 — `/about` attribution line (session 2026-04-14)
 
@@ -216,7 +216,7 @@ Every time copy ships after an edit, add an entry. The site voice lives in these
   publish it.
 - Install instructions lead with `brew install brettdavies/tap/agentnative`. Mention `cargo install agentnative` and
   `cargo binstall agentnative` as alternatives.
-- Check output uses check IDs (`p4-process-exit`). Copy that references specific checks names the ID.
+- Check output uses audit IDs (`p4-process-exit`). Copy that references specific checks names the ID.
 
 ### How to describe the relationship to `davies.fyi`
 

@@ -240,14 +240,14 @@ describe('score-contract — /api/score registry-fast-path response shape', () =
       spec_version?: string;
       site_spec_version?: string;
       anc_version?: string;
-      checker_url?: string;
+      auditor_url?: string;
     };
     expect(body.scorecard.kind).toBe('registry_hit');
     expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
     expect(typeof body.spec_version).toBe('string');
     expect(typeof body.site_spec_version).toBe('string');
     expect(typeof body.anc_version).toBe('string');
-    expect(typeof body.checker_url).toBe('string');
+    expect(typeof body.auditor_url).toBe('string');
   });
 });
 

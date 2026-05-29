@@ -31,9 +31,9 @@ resource people return to and an invitation for tool authors to improve.
 
 **Pre-Computed Scoring (Known Tools)**
 
-- R4. The 100 registry tools are scored locally on Brett's machine using `anc check <binary> --output json`. Scorecard
+- R4. The 100 registry tools are scored locally on Brett's machine using `anc audit <binary> --output json`. Scorecard
   JSON is committed to `scorecards/` in the site repo. No CI pipeline needed at launch.
-- R5. Scoring uses the behavioral + project check layers (language-agnostic). Source checks run as a bonus for
+- R5. Scoring uses the behavioral + project audit layers (language-agnostic). Source checks run as a bonus for
   Rust/Python tools when source is available, displayed as a separate column — not blended into the primary score.
 - R6. Re-scoring happens manually when tools release new versions. Automation (GitHub Actions cron, webhook) is a future
   enhancement, not a launch requirement.
@@ -41,7 +41,7 @@ resource people return to and an invitation for tool authors to improve.
 **Live Scoring (Unknown Tools)**
 
 - R7. When a user pastes a GitHub URL not in the registry, a CF Sandbox container scores the tool live. The Sandbox
-  clones the repo, attempts binary installation from a trusted package registry, and runs `anc check`. Results are
+  clones the repo, attempts binary installation from a trusted package registry, and runs `anc audit`. Results are
   cached in R2 keyed by (repo, version) with a 24-hour TTL.
 - R8. Known tools (in the registry) are served from pre-computed cache with a 2-3 second cosmetic spinner. The container
   does not run for known tools.
@@ -67,7 +67,7 @@ resource people return to and an invitation for tool authors to improve.
 **Narrative & Framing**
 
 - R16. The leaderboard page includes a brief methodology section explaining: what checks are run, what layers apply, how
-  scoring works, and how tool authors can re-test locally (`cargo install agentnative && anc check .`).
+  scoring works, and how tool authors can re-test locally (`cargo install agentnative && anc audit .`).
 - R17. Each tool's scorecard page links to the specific principle page for each check, creating a natural discovery path
   from "my tool failed P2" to "what does P2 require?"
 - R18. Framing is constructive: scores are presented as "current state" with actionable improvement paths, not as
@@ -81,8 +81,8 @@ resource people return to and an invitation for tool authors to improve.
 
 **Security & Abuse Prevention**
 
-- R21. The CF Sandbox container runs `anc check` as the sole entry point. `anc` spawns the target binary as a subprocess
-  for behavioral checks (e.g., `<binary> --help`, `<binary> --version`). A malicious binary could ignore `--help` and
+- R21. The CF Sandbox container runs `anc audit` as the sole entry point. `anc` spawns the target binary as a subprocess
+  for behavioral audits (e.g., `<binary> --help`, `<binary> --version`). A malicious binary could ignore `--help` and
   execute arbitrary code for up to the timeout duration. The following layers limit the blast radius:
 - R22. **Network lockdown.** Dynamic outbound handlers block all egress after the initial `git clone`. During clone,
   only `github.com` is allowed. During scoring, all network is disabled via `setOutboundHandler("noHttp")`. A malicious
@@ -115,7 +115,7 @@ resource people return to and an invitation for tool authors to improve.
 
 ## Scope Boundaries
 
-- **Not in scope:** Expanding `anc` source checks to Go/Node/other languages. Behavioral + project layer is the
+- **Not in scope:** Expanding `anc` source audits to Go/Node/other languages. Behavioral + project layer is the
   universal baseline.
 - **Not in scope:** Community voting, comments, or social features on the leaderboard.
 - **Not in scope:** Comparing tools against each other (e.g., "gh vs glab"). Ranks against the standard, not peers.
@@ -148,7 +148,7 @@ resource people return to and an invitation for tool authors to improve.
 
 - `anc` v0.1 must be published to crates.io before launch (existing dependency from tool-site sequencing).
 - `anc` must cross-compile to musl target (`x86_64-unknown-linux-musl`) for the Alpine container image.
-- `anc check` must support scoring arbitrary binaries via `--binary <path>` (verify during planning).
+- `anc audit` must support scoring arbitrary binaries via `--binary <path>` (verify during planning).
 - The CF Sandbox SDK musl variant (`cloudflare/sandbox:0.7.4-musl`) works on Alpine 3.21.
 - Pre-baked tools survive container sleep because they're part of the Docker image (verified in CF docs).
 
@@ -160,7 +160,7 @@ resource people return to and an invitation for tool authors to improve.
 
 ### Deferred to Planning
 
-- (Affects R4) [Needs research] Can `anc check` accept `--binary <path>` for scoring a pre-installed binary separate
+- (Affects R4) [Needs research] Can `anc audit` accept `--binary <path>` for scoring a pre-installed binary separate
   from its source repo? If not, what mode does it support?
 - (Affects R7) [Needs research] Verify `anc` cross-compiles to `x86_64-unknown-linux-musl` (Alpine target). Check if
   `ast-grep-core` / tree-sitter grammars have musl compatibility issues.

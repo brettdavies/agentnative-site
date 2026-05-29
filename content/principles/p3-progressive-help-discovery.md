@@ -52,5 +52,5 @@ The principle is framework-agnostic — `clap`'s `after_help` is the worked exam
 - Examples buried in a README or man page but absent from `--help` output.
 - `after_help` text that describes the flags in prose instead of demonstrating them in code.
 
-Measured by check IDs `p3-help` and `p3-version` today, with `p3-after-help` planned. Run `anc check --principle 3 .`
+Measured by audit IDs `p3-help` and `p3-version` today, with `p3-after-help` planned. Run `anc audit --principle 3 .`
 against your CLI to see current coverage.

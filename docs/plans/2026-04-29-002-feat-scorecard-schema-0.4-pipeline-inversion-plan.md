@@ -143,7 +143,7 @@ skip.
   lives in U2 directly via `compareVersions()`; no `ANC_VERSION_FLOOR` constant in v1 (the anc-version floor invariant
   is dropped per doc-review).
 - `scripts/regen-scorecards.sh` — current regen pipeline. Uses `version_extract` from registry, derives filename
-  version, runs `anc check`, writes `scored_at` back into registry. The `scored_at` writeback (lines 200–238) gets
+  version, runs `anc audit`, writes `scored_at` back into registry. The `scored_at` writeback (lines 200–238) gets
   removed.
 - `docker/score/score-anc100.sh` — docker variant of the regen pipeline. Same writeback patterns.
 - `content/scorecard-schema.md` — public docs page. Currently describes v0.3 fields; needs v0.4 expansion.
@@ -202,10 +202,10 @@ skip.
   (corpus-descriptor framing, not "showing N" which would mislead under client-side filtering); the redundant `(N)`
   count drops from the `All` tier-filter button.
 - **Reproduce-locally CTA uses `run.invocation` verbatim for command-mode scorecards only.** Project-mode invocations
-  may include local filesystem paths (`anc check ./local/repo`), which are user/machine-specific and could leak. For
+  may include local filesystem paths (`anc audit ./local/repo`), which are user/machine-specific and could leak. For
   command-mode (every leaderboard entry today), `run.invocation` is safe and authoritative. The CTA renders
   `run.invocation` directly when `target.kind === "command"`; for `target.kind === "project"` or `"binary"`, it falls
-  back to the synthesized `anc check --command <tool.name>` shape used today.
+  back to the synthesized `anc audit --command <tool.name>` shape used today.
 - **`anc.version` floor is a constant in `src/build/util.mjs`, not a hardcoded literal.** Same pattern as `BADGE_FLOOR`
   and `SPEC_VERSION`. Initial value: whatever `anc.version` shows in the regenerated v0.4 scorecards (likely `"0.1.0"`
   from the local dev build, bumping to `"0.2.0"` after the next regen post-CLI-release).
@@ -226,7 +226,7 @@ skip.
   `src/build/scorecards-render.mjs:76,85,528,530`; this plan's U3 is what removes that code path.) This plan confirms
   the decision.
 - **Can `audit_profile` be dropped from the registry?** No. The regen pipeline reads it as input to pass
-  `--audit-profile X` when invoking `anc check`. Same shape as today; not a redundancy v0.4 unlocks.
+  `--audit-profile X` when invoking `anc audit`. Same shape as today; not a redundancy v0.4 unlocks.
 - **Can `version_extract` be dropped?** No. The regen script needs an external `--version` probe to derive the
   filename's version BEFORE invoking `anc` (the scorecard's `tool.version` exists only after the scorecard does). Tools
   with non-default `--version` output rely on `version_extract`. Stays in the registry.
@@ -344,7 +344,7 @@ pipeline at it, commit the resulting scorecards).
 4. `cargo install --path . --force` — make the freshly-built `anc` the one `command -v anc` resolves to (the regen
    script reads `command -v anc` at line 76, so a stale `cargo install`'d release on `$PATH` would silently produce v0.3
    scorecards otherwise).
-5. `anc check --command rg --output json | jaq -r .schema_version` — **hard gate**: must return `"0.4"` or abort.
+5. `anc audit --command rg --output json | jaq -r .schema_version` — **hard gate**: must return `"0.4"` or abort.
 6. **Lower the regen-script floor for this one-shot refresh** (refined from doc-review pass 2 — P0 blocker):
    `scripts/regen-scorecards.sh:42` hardcodes `MIN_ANC_VERSION="0.1.3"`, which rejects the dev-branch binary's `0.1.0`
    self-report and aborts the regen at the script's own preflight. Either edit line 42 to `"0.1.0"` for the duration of
@@ -674,7 +674,7 @@ scorecards.
   CSS.
 - Reproduce CTA: when `target.kind === "command"`, render `<pre><code>${escHtml(run.invocation)}</code></pre>` (refined
   from doc-review pass 2 — `escHtml` is mandatory per the existing convention in `scorecards-render.mjs:491`; the
-  earlier draft said "directly" which would skip escaping). Otherwise, render the synthesized `anc check --command
+  earlier draft said "directly" which would skip escaping). Otherwise, render the synthesized `anc audit --command
   <tool.name>` form (today's behavior). The earlier draft of this plan added a discrepancy display for when
   `tool.version` and filename-version disagree — that's now an R5(e) build invariant instead (refined from doc-review
   pass 2 per user reasoning: drift only occurs via parser-asymmetry, which is a data error not a runtime UI state).
@@ -702,7 +702,7 @@ scorecards.
 
 - Happy path: a v0.4 scorecard renders with all six new metadata rows in the HTML page; markdown twin matches.
 - Happy path: `target.kind === "command"` page renders `run.invocation` verbatim in the reproduce CTA.
-- Happy path: `target.kind === "project"` page renders the synthesized `anc check --command <tool.name>` form.
+- Happy path: `target.kind === "project"` page renders the synthesized `anc audit --command <tool.name>` form.
 - Edge case: `anc.commit: null` renders the version without a commit link (no broken link).
 - Edge case: `tool.version: null` falls back to the filename version; the per-tool page renders only the filename
   version (no discrepancy display — drift is now an R5(e) invariant, not a UI surface).
@@ -749,7 +749,7 @@ registry header).
 - Modify: `content/scorecard-schema.md` — add sections describing `tool`, `anc`, `run`, `target`. Include a
   representative full-document example block (one of the regenerated scorecards, copy-pasted). **Critical (security):
   the example must be drawn from a command-mode scorecard — verify `target.kind: "command"` and `target.path: null`
-  before commit; redact `run.invocation` if it embeds anything beyond the canonical `anc check --command <name>
+  before commit; redact `run.invocation` if it embeds anything beyond the canonical `anc audit --command <name>
   [--audit-profile X] [--output json]` shape.** Cross-link to the contributor-flow section in CONTRIBUTING.md.
 - Modify: `CONTRIBUTING.md` — add (or extend) a "Adding a tool" section that documents the editorial-PR / scorecard-PR
   ordering: "Either order works. Editorial-only PR (registry entry without a scorecard) emits a build warning and the

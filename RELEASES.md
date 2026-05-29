@@ -324,7 +324,7 @@ its own rollback.
 | Step | Date       | Staging deploy ID                      | Container app / DO namespace                                                                       | Notes                                                                                                                                                                  |
 | ---- | ---------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | 2026-05-24 | `c626ddad-6ac2-4f81-a9ec-4a7a6dd926ec` | container `a0309fd2-9622-4dd8-a6a8-faf95292f08e` / DO namespace `a4fb92ed020241cb802c1d5176a39608` | v1 baseline. `env.SCORE (Sandbox)` + all live-scoring bindings present.                                                                                                |
-| 2    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `/api/score` ripgrep returned 200; triad complete (`spec_version: 0.4.0`, `site_spec_version: 0.4.0`, `anc_version: 0.3.0`, `checker_url`).                            |
+| 2    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `/api/score` ripgrep returned 200; triad complete (`spec_version: 0.4.0`, `site_spec_version: 0.4.0`, `anc_version: 0.3.0`, `auditor_url`).                            |
 | 3    | 2026-05-24 | `25107ae7-6727-4ea9-90ff-75996cba8cdc` | container unchanged / DO namespace dropped                                                         | v2-drop-sandbox applied. Worker bindings list no longer shows `env.SCORE`.                                                                                             |
 | 4    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `-d '{}'` → 400 clean (`unrecognized_input`). `/` + `/scorecards` → 200. DO-forcing input (`xplr`) → CF 1101 (handler guard gap captured).                             |
 | 5a   | 2026-05-24 | (no deploy)                            | container `a0309fd2-...` deleted                                                                   | `wrangler containers delete` required — first v3 deploy attempt failed with the "different durable object namespace" error.                                            |
@@ -342,7 +342,7 @@ in the CF managed registry AND both pins point at the same tag.
 
 `.github/workflows/deploy.yml` runs a smoke step against staging after every successful staging deploy. POSTs to
 `/api/score` for the `ripgrep` slug with the CF Access service-token headers and a Turnstile test token; asserts the
-response triad (`spec_version`, `site_spec_version`, `anc_version`, `checker_url`) plus `scorecard.kind ===
+response triad (`spec_version`, `site_spec_version`, `anc_version`, `auditor_url`) plus `scorecard.kind ===
 "registry_hit"`. Fails the deploy on a missing field. No production smoke step runs until U10 promotes live scoring to
 anc.dev.
 
