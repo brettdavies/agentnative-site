@@ -2,8 +2,9 @@
 # Vendor agentnative-spec into src/data/spec/.
 #
 # Default behavior: resolves the latest v* tag of agentnative-spec via the
-# GitHub API and pulls VERSION, CHANGELOG.md, and principles/p*-*.md at
-# that tag. The vendored tree is the build-time input for
+# GitHub API and pulls VERSION, CHANGELOG.md, principles/p*-*.md, and
+# principles/scoring.md (the scoring-formula SoT the methodology page
+# mirrors) at that tag. The vendored tree is the build-time input for
 # src/build/util.mjs (SPEC_VERSION read), which feeds the site footer, OG
 # card, and badge URLs.
 #
@@ -220,15 +221,23 @@ fetch_file "VERSION" "$DEST_DIR/VERSION"
 fetch_file "CHANGELOG.md" "$DEST_DIR/CHANGELOG.md"
 
 # Enumerate principle files at the ref and extract each one. Filter to
-# p*-*.md so principles/AGENTS.md (spec-side design context, not consumed
-# by the site) is skipped.
+# p*-*.md (the principle bodies) plus scoring.md (the scoring-formula SoT
+# the methodology page mirrors). principles/AGENTS.md (spec-side design
+# context, not consumed by the site) is skipped. scoring.md is driven off
+# the directory listing so refs predating it (before the scoring unit) sync
+# cleanly without a hard failure.
 copied=0
+scoring_found=false
 while IFS= read -r name; do
     [[ -z "$name" ]] && continue
     case "$name" in
         p[0-9]-*.md|p[0-9][0-9]-*.md)
             fetch_file "principles/$name" "$DEST_PRINCIPLES/$name"
             copied=$((copied + 1))
+            ;;
+        scoring.md)
+            fetch_file "principles/$name" "$DEST_PRINCIPLES/$name"
+            scoring_found=true
             ;;
     esac
 done < <(list_dir "principles")
@@ -239,6 +248,7 @@ if [[ "$copied" -eq 0 ]]; then
 fi
 
 echo "wrote $copied principle file(s) to $DEST_PRINCIPLES"
+$scoring_found && echo "wrote principles/scoring.md to $DEST_PRINCIPLES"
 echo "wrote VERSION + CHANGELOG.md to $DEST_DIR"
 echo
 echo "next: review \`git diff\` for unexpected changes, then commit."

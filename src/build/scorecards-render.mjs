@@ -11,14 +11,15 @@ import {
   PRINCIPLE_NAMES,
   statusLabel,
 } from '../shared/scorecard-format.mjs';
+import { BADGE_ELIGIBILITY_FLOOR_PCT } from './badge.mjs';
 
-// Display-only mirror of the CLI's badge eligibility floor (80%). All
-// eligibility decisions read `scorecard.badge.eligible` (canonical source
-// per schema 0.5). This constant only feeds human-readable copy ("badge
-// floor is 80%"). If the CLI ever changes the floor, only the displayed
-// number drifts; functional gating stays correct because it reads
-// scorecard.badge.eligible directly.
-const BADGE_FLOOR_DISPLAY_PCT = 80;
+// Display-only mirror of the badge eligibility floor, imported from
+// badge.mjs so the rendered floor and the color bands share one source.
+// All eligibility decisions read `scorecard.badge.eligible` (canonical,
+// CLI-emitted per schema 0.5/0.6); this constant only feeds human-readable
+// copy ("badge floor is N%"). Functional gating stays correct regardless
+// because it reads scorecard.badge.eligible directly.
+const BADGE_FLOOR_DISPLAY_PCT = BADGE_ELIGIBILITY_FLOOR_PCT;
 
 // groupToPrincipleNum lives in src/shared/scorecard-format.mjs (single source
 // of truth shared with the Worker). Imported above.

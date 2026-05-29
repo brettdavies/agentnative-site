@@ -26,6 +26,14 @@ const BAND_QUALIFIED = '#976200'; // ochre  — oklch(54% 0.13 72),  --should
 const BAND_BELOW = '#bf5200'; //     orange — oklch(57% 0.16 47)
 const BAND_CRITICAL = '#af2b25'; //  red    — oklch(50% 0.17 28),  --must
 
+// Badge eligibility floor (percent). A score at or above this clears the
+// floor; the lowest eligible cohort band (Qualified) opens here. Single
+// source of truth for the floor: the spec-side contract is
+// principles/scoring.md, and scorecards-render.mjs imports this constant
+// for the "badge floor is N%" copy so the rendered floor and the color
+// bands never drift apart.
+export const BADGE_ELIGIBILITY_FLOOR_PCT = 70;
+
 /**
  * Map a 0–100 percent score to its cohort-band hex fill.
  *
@@ -36,7 +44,7 @@ export function badgeColor(pct) {
   if (pct >= 85) return BAND_EXEMPLARY;
   if (pct >= 80) return BAND_STRONG;
   if (pct >= 75) return BAND_SOLID;
-  if (pct >= 70) return BAND_QUALIFIED;
+  if (pct >= BADGE_ELIGIBILITY_FLOOR_PCT) return BAND_QUALIFIED;
   if (pct >= 50) return BAND_BELOW;
   return BAND_CRITICAL;
 }

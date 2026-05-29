@@ -38,6 +38,7 @@ export const PRINCIPLE_NAMES = {
   P5: 'Safe Retries & Mutation Boundaries',
   P6: 'Composable, Predictable Command Structure',
   P7: 'Bounded, High-Signal Responses',
+  P8: 'Discoverable Through Agent Skill Bundles',
 };
 
 export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);

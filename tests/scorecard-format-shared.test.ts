@@ -31,8 +31,8 @@ describe('escHtml', () => {
 });
 
 describe('PRINCIPLE_GROUPS + PRINCIPLE_NAMES', () => {
-  test('covers P1..P7', () => {
-    expect(PRINCIPLE_GROUPS).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7']);
+  test('covers P1..P8', () => {
+    expect(PRINCIPLE_GROUPS).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8']);
     for (const g of PRINCIPLE_GROUPS) {
       expect(PRINCIPLE_NAMES[g]).toBeTruthy();
     }

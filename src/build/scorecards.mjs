@@ -376,14 +376,16 @@ export async function runScorecardInvariants(scorecardsDir, registry) {
 // -------------------------------------------------------------------
 
 /**
- * Map P1–P7 groups to pass/partial/fail and return "N/7 principles met".
- * CodeQuality and ProjectStructure are excluded from the N/7 count.
+ * Map the principle groups (P1–P8) to pass/partial/fail and return
+ * "N/total principles met". CodeQuality and ProjectStructure are bonus
+ * groups, excluded from the count. `total` tracks PRINCIPLE_GROUPS so the
+ * count follows the standard as principles are added.
  *
  * @param {object | null} scorecard
- * @returns {{ met: number, total: 7, details: Array<{ group: string, status: string }> }}
+ * @returns {{ met: number, total: number, details: Array<{ group: string, status: string }> }}
  */
 export function computePrincipleScore(scorecard) {
-  if (!scorecard) return { met: 0, total: 7, details: [] };
+  if (!scorecard) return { met: 0, total: PRINCIPLE_GROUPS.length, details: [] };
 
   const details = [];
   for (const group of PRINCIPLE_GROUPS) {
@@ -400,7 +402,7 @@ export function computePrincipleScore(scorecard) {
   }
 
   const met = details.filter((d) => d.status === 'pass').length;
-  return { met, total: 7, details };
+  return { met, total: PRINCIPLE_GROUPS.length, details };
 }
 
 /**
