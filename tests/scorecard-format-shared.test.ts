@@ -16,6 +16,7 @@ import {
   groupToPrincipleNum,
   PRINCIPLE_GROUPS,
   PRINCIPLE_NAMES,
+  statusLabel,
 } from '../src/shared/scorecard-format.mjs';
 
 describe('escHtml', () => {
@@ -82,6 +83,23 @@ describe('extractTopIssues', () => {
   });
 });
 
+describe('statusLabel (7-status taxonomy, schema 0.6)', () => {
+  test('maps the five historic statuses to their uppercase label', () => {
+    expect(statusLabel('pass')).toBe('PASS');
+    expect(statusLabel('warn')).toBe('WARN');
+    expect(statusLabel('fail')).toBe('FAIL');
+    expect(statusLabel('skip')).toBe('SKIP');
+    expect(statusLabel('error')).toBe('ERROR');
+  });
+  test('maps the two new statuses to punctuated labels a bare uppercase cannot produce', () => {
+    expect(statusLabel('opt_out')).toBe('OPT-OUT');
+    expect(statusLabel('n_a')).toBe('N/A');
+  });
+  test('unknown status falls back to uppercase so a future CLI status still renders', () => {
+    expect(statusLabel('quarantined')).toBe('QUARANTINED');
+  });
+});
+
 describe('formatCheckRowMarkdown', () => {
   test('emits canonical row shape with site-relative link', () => {
     const row = formatCheckRowMarkdown({
@@ -129,6 +147,22 @@ describe('formatCheckRowMarkdown', () => {
       evidence: null,
     });
     expect(row).toBe('| PASS | ok | [P1](/p1) |  |');
+  });
+  test('renders 0.6 opt_out / n_a statuses with their display labels', () => {
+    const optOut = formatCheckRowMarkdown({
+      status: 'opt_out',
+      label: 'Structured output support',
+      group: 'P2',
+      evidence: 'no --output flag detected',
+    });
+    expect(optOut).toBe('| OPT-OUT | Structured output support | [P2](/p2) | no --output flag detected |');
+    const na = formatCheckRowMarkdown({
+      status: 'n_a',
+      label: 'JSON Schema when --output json is supported',
+      group: 'P2',
+      evidence: 'antecedent unmet',
+    });
+    expect(na).toBe('| N/A | JSON Schema when --output json is supported | [P2](/p2) | antecedent unmet |');
   });
 });
 

@@ -44,6 +44,32 @@ export const PRINCIPLE_GROUPS = Object.keys(PRINCIPLE_NAMES);
 
 export const BONUS_GROUPS = ['CodeQuality', 'ProjectStructure'];
 
+// Display labels for the 7-status taxonomy (scorecard schema 0.6). Two values
+// carry punctuation a bare `.toUpperCase()` can't produce: `opt_out` → `OPT-OUT`
+// and `n_a` → `N/A`. Both the HTML check rows (scorecards-render.mjs) and the
+// markdown twin (formatCheckRowMarkdown) read from here so the two surfaces
+// stay byte-aligned. Unknown statuses fall back to uppercase, so a future CLI
+// status renders legibly before this map learns about it.
+const STATUS_LABELS = {
+  pass: 'PASS',
+  warn: 'WARN',
+  fail: 'FAIL',
+  opt_out: 'OPT-OUT',
+  n_a: 'N/A',
+  skip: 'SKIP',
+  error: 'ERROR',
+};
+
+/**
+ * Map a check status to its display label.
+ *
+ * @param {string} status
+ * @returns {string}
+ */
+export function statusLabel(status) {
+  return STATUS_LABELS[status] ?? String(status).toUpperCase();
+}
+
 /**
  * Map a check group string like "P3" to a principle number (3), or null
  * for bonus groups (CodeQuality / ProjectStructure).
@@ -101,7 +127,7 @@ export function formatCheckRowMarkdown(check, opts = {}) {
   const groupLabel = pNum ? `[${check.group}](${baseUrl}/p${pNum})` : check.group;
   const evidence = (check.evidence ?? '').replaceAll('|', '\\|');
   const label = check.label.replaceAll('|', '\\|');
-  return `| ${check.status.toUpperCase()} | ${label} | ${groupLabel} | ${evidence} |`;
+  return `| ${statusLabel(check.status)} | ${label} | ${groupLabel} | ${evidence} |`;
 }
 
 /**

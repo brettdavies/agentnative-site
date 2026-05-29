@@ -55,12 +55,14 @@ export function _resetShellTemplateCache(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Scorecard shape — minimal subset the summary renderer reads. Aligned with
-// schema 0.5 emitted by `anc check` (see content/scorecard-schema.md).
+// Scorecard shape — minimal subset the summary renderer reads. Status covers
+// the schema 0.6 7-status taxonomy; only `fail`/`warn` reach the issue
+// renderer (via extractTopIssues), so the extra values are accepted but never
+// surfaced here. See content/scorecard-schema.md.
 // ---------------------------------------------------------------------------
 
 type CheckResult = {
-  status: 'pass' | 'fail' | 'warn' | 'skip';
+  status: 'pass' | 'warn' | 'fail' | 'opt_out' | 'n_a' | 'skip' | 'error';
   label: string;
   group: string;
   evidence: string | null;
