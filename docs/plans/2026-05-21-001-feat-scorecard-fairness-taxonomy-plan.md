@@ -1,7 +1,7 @@
 ---
 title: 'feat: Scorecard status taxonomy + scoring fairness (Path 2)'
 type: feat
-status: proposed
+status: in-progress
 date: 2026-05-21
 origin: anc v0.4.0 rescore session, 2026-05-21 — sandbox-driven fairness analysis triggered by the v0.4.0 behavioral audit expansion (11 → 18 checks) widening the denominator and exposing the existing scoring algorithm's conflations
 ---
@@ -713,9 +713,13 @@ scripts/sync-spec.sh --ref dev` (or the U3 feature-branch SHA) until spec `v0.5.
 **Repo:** `brettdavies/agentnative-site`.
 
 **Upstream basis:** Requires the published `anc` CLI via the `brettdavies/homebrew-tap` formula (the docker/score image
-installs `anc` via brew, not from a local build). U6 is gated on the CLI release (v0.5.0 or whatever ships U2), not on
-any sync-spec flag. Also pull the spec at the same release tag via `bash scripts/sync-spec.sh` (default path, no
-`--ref`) so the leaderboard's vendored spec matches the CLI's spec.
+installs `anc` via brew in its default mode, not from a local build). That release is tracked as U7 below; U6 cannot run
+until U7 publishes. The release must carry **both** the taxonomy work (schema-0.6 statuses + the behavioral-only
+formula, U2 / U3b) **and** the `check`→`audit` rename (agentnative-cli #65, `ff1275f`): the site shipped its half of the
+rename in #131 (`5073bd7`), so `docker/score/score-anc100.sh` and the live-scoring worker now invoke `anc audit`, which
+the current published `v0.4.0` (ships `anc check`, schema 0.5) does not provide. U6 is gated on that release, not on any
+sync-spec flag. Also pull the spec at the same release tag via `bash scripts/sync-spec.sh` (default path, no `--ref`) so
+the leaderboard's vendored spec matches the CLI's spec.
 
 **Production-promotion gate (carried from U5).** U5 already landed on `dev`: the badge eligibility floor renders at 70,
 the principles-met column counts P1-P8, the scoring documentation describes the behavioral-only credit-weighted formula,
@@ -725,6 +729,12 @@ are still the prior values. This rescore is what reconciles the data to the docu
 `main` until this unit lands** — production must not show floor-70 copy and P1-P8 columns over prior-formula scores. The
 U6 PR body and the leaderboard scaffolding note (see Communication, below) carry the "scores moved" messaging when the
 reconciled data goes live.
+
+Promotion is additionally gated on the `check`→`audit` rename coupling. `dev` now carries the site half of the rename
+(#131, `5073bd7`): the live-scoring worker and `docker/score/score-anc100.sh` invoke `anc audit`, and the production
+sandbox container pin in `wrangler.jsonc` must run an audit-capable published `anc` before `dev` reaches `main`. The
+published `v0.4.0` ships `anc check` only, so promoting before U7 publishes would break both the leaderboard rescore and
+live scoring in production.
 
 **Work:**
 
@@ -743,8 +753,75 @@ reconciled data goes live.
 - PR open against `dev`; CI green.
 - Score delta summary in the PR body.
 
-**Dependencies:** U2, U3, U3b (CLI must ship the new statuses, the formula must be specified in U3, and the CLI must
-compute the final formula in U3b — the rescore is only meaningful against the final formula, not the transitional one).
+**Dependencies:** U2, U3, U3b, U7 (CLI must ship the new statuses, the formula must be specified in U3, and the CLI must
+compute the final formula in U3b — the rescore is only meaningful against the final formula, not the transitional one —
+and U7 must publish a release carrying that work plus the `audit` rename, since docker/score brew-mode installs the
+published tap formula). U7 gates this unit.
+
+### U7. Release train — publish the audit-capable `anc` (spec → skill → cli)
+
+**Status:** [not started — gates U6 and the live-scoring staging path]
+
+**Repos (release strictly in this order):** `brettdavies/agentnative` (spec) → `brettdavies/agentnative-skill` (skill) →
+`brettdavies/agentnative-cli` (cli). The site is the fourth and final stage — U6's rescore lands on `dev`, then `dev`
+promotes to `main`. The full train is **spec → skill → cli → website.** The order is load-bearing: each stage vendors or
+installs the stage before it, so releasing out of order ships a downstream artifact against content that is not yet
+published.
+
+**Why this is a unit.** U1–U3b each landed on `dev` with their `VERSION` / `Cargo.toml` bump, CHANGELOG entry, and tag
+publish explicitly deferred to "the release PR that closes out the taxonomy unit." U6 cannot run until the cli release
+exists: `docker/score/build.sh` default (`ANC_SOURCE=brew`) installs `anc` from the `brettdavies/homebrew-tap` formula,
+so the rescore scores against a *published* binary, not a local build. The same release also clears the live-scoring
+staging red — the sandbox image's pinned `anc` release and the worker's `anc audit` invocation both need an
+audit-capable published CLI (tracked in the live-scoring plan, but the release artifact is shared).
+
+**Why this order:**
+
+- **Spec first** — source of truth for the taxonomy and principle text; both the skill and the cli vendor it via their
+  `sync-spec.sh`. Nothing downstream can pin a tag that does not exist yet.
+- **Skill second** — vendors the spec, and its bundle prose references `anc audit` (the `check`→`audit` rename shipped
+  as agentnative-skill #19). It ships after the spec tag it pins so the published guidance matches the released
+  vocabulary, and before the cli so the skill never points users at an `anc audit` a published binary lacks.
+- **CLI third** — vendors the spec, implements the statuses + formula, and is the published binary the site installs via
+  brew (U6) and pins in the sandbox image (live scoring). This is the stage U6 blocks on.
+- **Website last** — U6 rescores against the published cli + matching spec tag, lands on `dev`, then `dev`→`main` (the
+  production-promotion gate above).
+
+**What the release train must carry:**
+
+- **Spec:** the conditional-schema + taxonomy content (U1 — spec `dev` `b4f4d02`) and the scoring-formula doc (U3 — spec
+  `dev` `972c9d3`), tagged so `scripts/sync-spec.sh` default-path resolves it instead of pre-taxonomy `v0.4.0`.
+- **Skill:** the `check`→`audit` rename (agentnative-skill #19 — skill `dev` `e6bf388`) plus a spec re-vendor at the new
+  spec tag. #19 re-vendored spec `v0.4.0` (pre-taxonomy), so the release must re-vendor *forward* to the new spec tag,
+  not stay at `v0.4.0`, so the published bundle's `anc audit` examples match the released cli and the released spec.
+- **CLI:** schema-0.6 / 7-status emission (U2 — cli `dev` `3839696`), behavioral-only credit-weighted `score_pct` +
+  floor 70 (U3b — cli `dev` `43d4f7c`), the `check`→`audit` rename (agentnative-cli #65 — cli `dev` `ff1275f`), and a
+  spec re-vendor at the new spec tag. The published `anc` must expose the `audit` subcommand: the site shipped its half
+  of the rename in #131 (`5073bd7`), so the live-scoring worker and `docker/score/score-anc100.sh` now invoke `anc
+  audit`, which the current published `v0.4.0` (ships `anc check`, schema 0.5) does not provide.
+
+**Work (in release order):**
+
+1. **Spec release:** bump `agentnative` `VERSION`, finalize `CHANGELOG.md`, merge `dev`→`main`, tag (e.g. `v0.5.0`).
+2. **Skill release:** re-vendor the spec at the new tag, bump the skill `VERSION`, finalize `CHANGELOG.md`, merge
+   `dev`→`main`, tag.
+3. **CLI release:** re-vendor the spec at the new tag, bump `Cargo.toml`, finalize `CHANGELOG.md` (new statuses, schema
+   0.6, final formula, `audit` rename), merge `dev`→`main`, tag, let CI publish the linux + macos artifacts.
+4. Confirm the cli release workflow's `repository_dispatch` updates the `brettdavies/homebrew-tap` `agentnative` formula
+   to the new tag; verify a clean `brew install brettdavies/tap/agentnative` reports the new `anc --version` and that
+   `anc audit --help` resolves.
+
+**Acceptance:**
+
+- Spec released at the new tag; `sync-spec.sh` default path (no `--ref`) pulls the taxonomy content.
+- Skill released at the new tag with the spec re-vendored and `anc audit` examples published.
+- `agentnative-cli` tagged at the new version; release artifacts published.
+- Homebrew tap formula points at the new tag; `anc audit` resolves from a clean brew install.
+- `anc audit --command <tool> --output json` emits schema-0.6 output from the published binary.
+
+**Dependencies:** U2, U3, U3b (the cli work being released), plus the `check`→`audit` rename across spec (#40 —
+`283a306`), skill (#19 — `e6bf388`), and cli (#65 — `ff1275f`). The spec (U1 + U3 content) is cut first, the skill
+second, the cli third; the website (U6) is gated on the cli stage.
 
 ---
 
@@ -752,16 +829,26 @@ compute the final formula in U3b — the rescore is only meaningful against the 
 
 ### Cross-repo coordination
 
-The change touches three repos in sequence: spec defines the input shape, CLI implements it, site consumes it. The
-sequence is non-negotiable; skipping the spec step means the CLI and site implement against a moving target.
+The change touches four repos. During development the dependency chain is spec → CLI → site (spec defines the input
+shape, CLI implements it, site consumes it); the skill joins at release time because its bundle prose references `anc
+audit`. The sequence is non-negotiable; skipping the spec step means the CLI and site implement against a moving target.
 
-The handoff happens at version-bump boundaries:
+The dev-phase handoff happens at `dev`-merge boundaries:
 
-- spec VERSION bump after U1 lands (signals the taxonomy is decided)
-- CLI version bump after U2 ships (signals the new statuses are emitted)
-- spec VERSION bump again after U3 (signals the formula is chosen)
-- CLI version bump after U3b (signals `score_pct` computes the final formula)
-- site rescore PR after U6 (closes the loop)
+- spec U1 lands on `dev` (taxonomy + conditional schema decided)
+- CLI U2 lands on `dev` (the new statuses are emitted)
+- spec U3 lands on `dev` (the formula is chosen)
+- CLI U3b lands on `dev` (`score_pct` computes the final formula)
+- site U4 / U5 land on `dev` (renderer + methodology)
+
+The release handoff (U7) is a strict train — **spec → skill → cli → website:**
+
+- spec releases first (tagged; carries U1 + U3 content)
+- skill releases second (re-vendors the new spec tag; ships the `anc audit` rename, agentnative-skill #19)
+- cli releases third (re-vendors the new spec tag; carries U2 + U3b + the `audit` rename, agentnative-cli #65; publishes
+  via the Homebrew tap). The site shipped its rename half in #131, so the published `anc` must expose `audit` before the
+  rescore or live scoring can run.
+- website is last: U6 rescores against the published cli + matching spec tag on `dev`, then `dev`→`main` closes the loop
 
 ### Backward compatibility
 
@@ -828,7 +915,7 @@ should produce small movements, not large ones.
 If the CLI ships the new statuses before the site renders them, the live leaderboard may show garbled output. If the
 site updates its renderer before the CLI ships, the renderer has nothing to render against.
 
-**Mitigation:** ship in strict order (U1 → U2 → U4 → U3 → U3b → U5 → U6). Each step is a separate PR with its own
+**Mitigation:** ship in strict order (U1 → U2 → U4 → U3 → U3b → U5 → U7 → U6). Each step is a separate PR with its own
 review. Defensive rendering on the site side (fall back to `skip` rendering for any unknown status) is acceptable cost.
 
 ### Risk: schema_version bump misses a consumer
