@@ -417,7 +417,7 @@ function handleScoreResponse(
     case 'sandbox_stub_until_u6':
       renderInlineError(
         els.statusEl,
-        'Live scoring is still rolling out for this input shape. Run anc locally for the full check.',
+        'Live scoring is still rolling out for this input shape. Run anc locally for the full audit.',
       );
       return;
     case 'non_github_host':
@@ -607,7 +607,7 @@ function renderCuratedReward(statusEl: HTMLParagraphElement, message: string): v
  *   - Queued (until t=900 ms)
  *   - Resolving install path (until t=2.5 s)
  *   - Installing in sandbox (until t=18 s)
- *   - Running anc check (until response)
+ *   - Running anc audit (until response)
  *
  * Cancelling the cycle when the response arrives keeps the user from
  * ever seeing a phase that's obviously past the work. No CSS animation,
@@ -618,7 +618,7 @@ function startPhaseProgression(statusEl: HTMLParagraphElement): PhaseTimer {
   const schedule: { atMs: number; text: string }[] = [
     { atMs: 900, text: 'Resolving install path…' },
     { atMs: 2500, text: 'Installing in sandbox…' },
-    { atMs: 18000, text: 'Running anc check…' },
+    { atMs: 18000, text: 'Running anc audit…' },
   ];
   const handles: number[] = [];
   for (const phase of schedule) {

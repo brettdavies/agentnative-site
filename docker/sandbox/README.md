@@ -74,7 +74,7 @@ End-to-end install probe (cargo-binstall path):
 
 ```sh
 docker run --rm "anc-sandbox:$GIT_SHA" sh -c \
-  'cargo-binstall --no-confirm ripgrep && rg --version && anc check --command rg --output json | head -50'
+  'cargo-binstall --no-confirm ripgrep && rg --version && anc audit --command rg --output json | head -50'
 ```
 
 ### List, verify, retain
@@ -153,5 +153,5 @@ checksum file rather than computing locally, because the upstream value is what 
 ## Two-phase egress
 
 This image's role ends at "binary on PATH." Two-phase egress (Phase 1 allow-list to ecosystem hosts during install,
-Phase 2 `noHttp` during `anc check`) is enforced at the Worker / DO layer in U6, not here. The sandbox SDK server
+Phase 2 `noHttp` during `anc audit`) is enforced at the Worker / DO layer in U6, not here. The sandbox SDK server
 provides the `setOutbound*` primitives this image's `/sandbox` ENTRYPOINT exposes.

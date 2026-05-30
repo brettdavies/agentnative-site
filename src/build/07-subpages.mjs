@@ -28,7 +28,7 @@ import { absolutifyMarkdownLinks } from './util.mjs';
  */
 export async function emitSubPages({ distDir, contentDir, themeInit }) {
   const subPages = [
-    { name: 'check', path: join(contentDir, 'check.md') },
+    { name: 'audit', path: join(contentDir, 'audit.md') },
     { name: 'install', path: join(contentDir, 'install.md') },
     { name: 'about', path: join(contentDir, 'about.md') },
     { name: 'badge', path: join(contentDir, 'badge.md') },

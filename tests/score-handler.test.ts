@@ -317,13 +317,13 @@ describe('/api/score — registry fast-path', () => {
       scorecard: { kind: string; scorecard_url: string };
       spec_version: string;
       anc_version: string;
-      checker_url: string;
+      auditor_url: string;
     };
     expect(body.scorecard.kind).toBe('registry_hit');
     expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
     expect(body.anc_version).toBe('0.3.0');
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
   });
 
   test('GET ?input=ripgrep → 200 (read-only path) with cache-friendly headers', async () => {
@@ -409,16 +409,16 @@ describe('/api/score — POST pipeline error paths', () => {
     // guard converts that into a typed 503.
     const res = await handleScore(postScore('cargo install foo-cli'), makeEnv({ noScoreBinding: true }));
     expect(res.status).toBe(503);
-    const body = (await res.json()) as { error: { code: string }; spec_version: string; checker_url: string };
+    const body = (await res.json()) as { error: { code: string }; spec_version: string; auditor_url: string };
     expect(body.error.code).toBe('sandbox_unavailable');
     expect(body.spec_version).toBeDefined();
-    expect(body.checker_url).toBeDefined();
+    expect(body.auditor_url).toBeDefined();
   });
 
   test('DO returns valid scorecard envelope → 200 with response triad', async () => {
     // Live success path: DO returns {scorecard, anc_version} from
     // sandbox-exec.score(). The handler wraps it into the response shape
-    // with spec_version + checker_url. This is the test that pins the
+    // with spec_version + auditor_url. This is the test that pins the
     // DO → handler envelope contract.
     const res = await handleScore(
       postScore('cargo install foo-cli'),
@@ -433,12 +433,12 @@ describe('/api/score — POST pipeline error paths', () => {
     const body = (await res.json()) as {
       spec_version: string;
       anc_version: string;
-      checker_url: string;
+      auditor_url: string;
       scorecard: { tool: { name: string } };
     };
     expect(body.scorecard.tool.name).toBe('bar');
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
   });
 });
 
@@ -585,7 +585,7 @@ describe('/api/score — R2 cache tier', () => {
       scorecard: { tool: { name: string }; score: { value: number } };
       anc_version: string;
       spec_version: string;
-      checker_url: string;
+      auditor_url: string;
     };
     expect(body.scorecard.tool.name).toBe('uncurated-tool');
     expect(body.scorecard.score.value).toBe(92);
@@ -697,11 +697,11 @@ describe('/api/score — R2 cache tier', () => {
     const body = (await res.json()) as {
       spec_version: string;
       anc_version: string;
-      checker_url: string;
+      auditor_url: string;
     };
     expect(body.spec_version).toBeTruthy();
     expect(body.anc_version).toBe('0.3.1');
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
   });
 
   // -------------------------------------------------------------------------
@@ -909,7 +909,7 @@ describe('/api/score — R2 cache tier', () => {
   // The cache key (`scores/{binary}/{SPEC_VERSION}.json`) intentionally
   // OMITS the package-manager dimension. The reasoning: a binary with
   // the same name + same anc_version produces the same scorecard
-  // regardless of which PM installed it, because `anc check` evaluates
+  // regardless of which PM installed it, because `anc audit` evaluates
   // the binary on PATH and doesn't care how it got there. So `pip
   // install foo`, `cargo binstall foo`, and `bun add -g foo` all
   // SHOULD share a cache entry for binary='foo'.

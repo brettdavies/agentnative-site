@@ -29,7 +29,7 @@ The site already runs on Cloudflare Workers.
 
 ## Key Insight: Behavioral Checks Don't Require Compiling From Source
 
-The original framing assumed behavioral checks require compiling the target project from source — making live scoring
+The original framing assumed behavioral audits require compiling the target project from source — making live scoring
 expensive (install toolchains, compile, then test). This is wrong.
 
 **Behavioral checks need an installed binary, not a compiled-from-source binary.** For any tool available via a standard
@@ -91,7 +91,7 @@ install fails.
 ### Container Image Strategy
 
 **Pre-bake the top 100 tools** into the Docker/Sandbox image. These are already installed — scoring them is instant
-(just run `anc check <binary>`). The pre-computed leaderboard is just a scheduled run of `anc check` against every
+(just run `anc audit <binary>`). The pre-computed leaderboard is just a scheduled run of `anc audit` against every
 pre-installed binary.
 
 **For new tools**: the container has all package managers installed (brew, cargo, pip, go, npm). When a user submits a
@@ -107,7 +107,7 @@ top of Containers with `exec()`, file ops, sessions). Both use the same underlyi
 
 Sandbox SDK is the right pick because:
 
-- `sandbox.exec('anc check /usr/bin/rg --output json')` is a single API call
+- `sandbox.exec('anc audit /usr/bin/rg --output json')` is a single API call
 - Built-in session management, file I/O, streaming output
 - Dynamic outbound handlers for network security (allow github.com during clone, lock down during scoring)
 - Base images extend Ubuntu with common tools already installed (`docker.io/cloudflare/sandbox:0.7.0`)
@@ -224,7 +224,7 @@ Sandbox containers sleep after configurable inactivity (default 10 minutes). On 
 - **Runtime state is lost** — cloned repos, temp files, running processes are gone
 - **Cold start: 1-3 seconds** depending on image size
 
-This is exactly what we want. The container wakes, `anc check /usr/bin/rg --output json` runs against a pre-installed
+This is exactly what we want. The container wakes, `anc audit /usr/bin/rg --output json` runs against a pre-installed
 binary, returns in 2-5 seconds, then the container sleeps again. No wasted idle cost.
 
 For sustained traffic (Show HN spike), the container stays warm and scoring is instant — no cold start.
@@ -242,7 +242,7 @@ await sandbox.exec("git clone https://github.com/user/repo /tmp/repo");
 
 // During scoring: lock down network entirely
 await sandbox.setOutboundHandler("noHttp");
-const result = await sandbox.exec("anc check /tmp/repo --output json");
+const result = await sandbox.exec("anc audit /tmp/repo --output json");
 ```
 
 This prevents supply-chain attacks during scoring — cloned code cannot phone home.
@@ -290,14 +290,14 @@ export default {
       sleepAfter: "15m",
     });
 
-    // Clone the repo for source checks
+    // Clone the repo for source audits
     await sandbox.exec(`git clone --depth 1 https://github.com/${repo} /tmp/repo`);
 
     // Look up pre-installed binary from registry
     const binary = REGISTRY[repo]?.binary;
     const cmd = binary
-      ? `anc check --binary /usr/bin/${binary} --repo /tmp/repo --output json`
-      : `anc check /tmp/repo --output json`; // source+project only
+      ? `anc audit --binary /usr/bin/${binary} --repo /tmp/repo --output json`
+      : `anc audit /tmp/repo --output json`; // source+project only
 
     const result = await sandbox.exec(cmd, { timeout: 60_000 });
     return Response.json(JSON.parse(result.stdout));
@@ -312,7 +312,7 @@ export default {
 | **Pre-computed leaderboard**   | GitHub Actions nightly cron. Scores all 100 registry tools. Commits JSON. | Free                   | Async   |
 | **Live scoring (known tools)** | CF Sandbox `standard-1`. Binary pre-installed in image.                   | Free tier for <100/day | 2-5s    |
 | **Live scoring (new tools)**   | Same Sandbox. Clone repo, detect install path, install, score.            | ~$5-10/mo at 500/day   | 15-120s |
-| **Fallback (install fails)**   | Same Sandbox. Source+project checks only (no binary).                     | Same                   | 5-15s   |
+| **Fallback (install fails)**   | Same Sandbox. Source+project audits only (no binary).                     | Same                   | 5-15s   |
 | **Cache**                      | R2. Keyed by (repo, version). 24h TTL. Free egress.                       | Free tier              | Instant |
 
 ### Prerequisites
@@ -371,7 +371,7 @@ The key differences from ACFS:
 - **We don't need the full VPS setup** — no user management, filesystem layout, shell config, systemd timers, SSH,
   Tailscale, PostgreSQL, or Vault. Just the tool installs.
 - **We add ANC-specific fields** — `binary` (the executable name), `tier` (workhorse/agent/notable), `repo` (GitHub URL
-  for source checks), `language` (for source check applicability).
+  for source audits), `language` (for source audit applicability).
 - **Our container is ephemeral** — ACFS builds a persistent VPS; our Sandbox container spins up, scores, and dies. No
   state persistence needed.
 

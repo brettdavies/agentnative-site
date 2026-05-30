@@ -327,7 +327,7 @@ describe('emitShell — OG image alt text', () => {
 // Scorecards module
 // -------------------------------------------------------------------
 
-// Reusable scorecard fixture matching the anc check --output json schema.
+// Reusable scorecard fixture matching the anc audit --output json schema.
 function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}) {
   const results = overrides.results ?? [
     {
@@ -409,7 +409,7 @@ function makeV04Scorecard(overrides: Record<string, any> = {}) {
     tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
     anc: { version: '0.1.0', commit: 'abc1234' },
     run: {
-      invocation: 'anc check --command fixture --output json',
+      invocation: 'anc audit --command fixture --output json',
       started_at: '2026-04-30T04:00:00.000000000Z',
       duration_ms: 42,
       platform: { os: 'linux', arch: 'x86_64' },
@@ -1225,7 +1225,7 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
           name: 'fixture-v1.2.3.json',
           content: makeV04Scorecard({
             run: {
-              invocation: 'anc check',
+              invocation: 'anc audit',
               started_at: 'not-a-timestamp',
               duration_ms: 1,
               platform: { os: 'linux', arch: 'x86_64' },
@@ -1453,7 +1453,7 @@ describe('renderAudienceBanner', () => {
 });
 
 // -------------------------------------------------------------------
-// renderCheckRows (via buildScorecardBody) — suppressed-check rendering
+// renderAuditRows (via buildScorecardBody) — suppressed-check rendering
 // -------------------------------------------------------------------
 
 describe('suppressed-check rendering', () => {
@@ -1512,22 +1512,22 @@ describe('suppressed-check rendering', () => {
     repo: 'jesseduffield/lazygit',
   };
 
-  test('audit_profile-suppressed Skip gets check--suppressed class and "N/A by <category>" status', () => {
+  test('audit_profile-suppressed Skip gets audit--suppressed class and "N/A by <category>" status', () => {
     const sc = suppressedScorecard();
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
-    expect(html).toContain('check--suppressed');
+    expect(html).toContain('audit--suppressed');
     expect(html).toContain('N/A by human-tui');
   });
 
-  test('organic Skip retains check--skip without check--suppressed', () => {
+  test('organic Skip retains audit--skip without audit--suppressed', () => {
     const sc = suppressedScorecard();
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
     // The organic skip row's status cell still shows "SKIP" uppercase.
     expect(html).toContain('>SKIP<');
     // And it must NOT carry the suppressed class.
-    const organicSkipMatch = html.match(/<tr class="([^"]*)">\s*<td class="check__status">SKIP<\/td>/);
+    const organicSkipMatch = html.match(/<tr class="([^"]*)">\s*<td class="audit__status">SKIP<\/td>/);
     expect(organicSkipMatch).not.toBeNull();
-    expect(organicSkipMatch?.[1]).not.toContain('check--suppressed');
+    expect(organicSkipMatch?.[1]).not.toContain('audit--suppressed');
   });
 
   test('non-suppression Skip evidence is preserved verbatim', () => {
@@ -1567,7 +1567,7 @@ describe('suppressed-check rendering', () => {
       },
     };
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
-    expect(html).not.toContain('check--suppressed');
+    expect(html).not.toContain('audit--suppressed');
     expect(html).not.toContain('N/A by');
     // The status cell stays as the regular SKIP pill.
     expect(html).toContain('>SKIP<');
@@ -2001,7 +2001,7 @@ describe('buildScorecardBody — embed-snippet gating', () => {
 
   test('below-floor with no top issues references the full check list instead', () => {
     const html = buildScorecardBody(tool('rg'), sc(6, 4), [], { met: 4, total: 8, details: [] });
-    expect(html).toContain('See the full check results below for the gaps.');
+    expect(html).toContain('See the full audit results below for the gaps.');
     expect(html).not.toContain('top issues above are the place to start');
   });
 
@@ -2033,24 +2033,24 @@ describe('buildScorecardBody — 7-status taxonomy rendering (schema 0.6)', () =
 
   test('opt_out renders its own class + OPT-OUT label, distinct from skip', () => {
     const html = render();
-    expect(html).toContain('check check--opt_out');
-    expect(html).toMatch(/check--opt_out">\s*<td class="check__status">OPT-OUT</);
+    expect(html).toContain('audit audit--opt_out');
+    expect(html).toMatch(/audit--opt_out">\s*<td class="audit__status">OPT-OUT</);
     // Never the raw snake_case the underscore status would produce under a bare toUpperCase.
     expect(html).not.toContain('>OPT_OUT<');
   });
 
   test('n_a renders its own class + N/A label, distinct from skip', () => {
     const html = render();
-    expect(html).toContain('check check--n_a');
-    expect(html).toMatch(/check--n_a">\s*<td class="check__status">N\/A</);
+    expect(html).toContain('audit audit--n_a');
+    expect(html).toMatch(/audit--n_a">\s*<td class="audit__status">N\/A</);
     expect(html).not.toContain('>N_A<');
   });
 
   test('skip stays its own bucket alongside the two new statuses', () => {
     const html = render();
-    expect(html).toContain('check check--skip');
+    expect(html).toContain('audit audit--skip');
     // All three excluded-from-numerator statuses are visually separate classes.
-    const classes = ['check--opt_out', 'check--n_a', 'check--skip'];
+    const classes = ['audit--opt_out', 'audit--n_a', 'audit--skip'];
     for (const c of classes) expect(html).toContain(c);
   });
 });
@@ -2113,7 +2113,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
       anc: { version: '0.1.0', commit: 'fff3f13' },
       run: {
-        invocation: 'anc check --command rg --output json',
+        invocation: 'anc audit --command rg --output json',
         started_at: '2026-04-30T04:18:53.099683344Z',
         duration_ms: 53,
         platform: { os: 'linux', arch: 'x86_64' },
@@ -2214,7 +2214,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
 
   test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
     const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
-    expect(html).toContain('<pre><code>anc check --command rg --output json</code></pre>');
+    expect(html).toContain('<pre><code>anc audit --command rg --output json</code></pre>');
   });
 
   test('reproduce CTA falls back to synthesized form for project-mode runs', () => {
@@ -2228,10 +2228,10 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({
         target: { kind: 'project', path: '/home/secret/repo', command: null },
-        run: { ...v04Meta().run, invocation: 'anc check /home/secret/repo' },
+        run: { ...v04Meta().run, invocation: 'anc audit /home/secret/repo' },
       }),
     );
-    expect(html).toContain('<pre><code>anc check --command rg</code></pre>');
+    expect(html).toContain('<pre><code>anc audit --command rg</code></pre>');
     expect(html).not.toContain('/home/secret/repo');
   });
 
@@ -2243,7 +2243,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       { met: 7, total: 7, details: [] },
       '15.1.0',
       v04Meta({
-        run: { ...v04Meta().run, invocation: 'anc check --command "<rg>" --output json' },
+        run: { ...v04Meta().run, invocation: 'anc audit --command "<rg>" --output json' },
       }),
     );
     expect(html).not.toContain('<rg>');
@@ -2306,7 +2306,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
         anc: { version: '0.1.0', commit: 'fff3f13' },
         run: {
-          invocation: 'anc check --command rg --output json',
+          invocation: 'anc audit --command rg --output json',
           started_at: '2026-04-30T04:18:53.099683344Z',
           duration_ms: 53,
           platform: { os: 'linux', arch: 'x86_64' },
@@ -2315,11 +2315,11 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
       },
     );
     expect(md).toContain('## Reproduce locally');
-    expect(md).toContain('anc check --command rg --output json');
+    expect(md).toContain('anc audit --command rg --output json');
     // The repro fence is tagged `bash` so renderers (Shiki, GitHub markdown,
     // hosted previews) syntax-highlight the command instead of treating it
     // as plain text.
-    expect(md).toContain('```bash\nanc check --command rg --output json\n```');
+    expect(md).toContain('```bash\nanc audit --command rg --output json\n```');
   });
 
   test('project-mode invocation falls back to the synthesized form (no path leak)', () => {
@@ -2353,7 +2353,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
         anc: { version: '0.1.0', commit: 'fff3f13' },
         run: {
-          invocation: 'anc check /home/secret/repo',
+          invocation: 'anc audit /home/secret/repo',
           started_at: '2026-04-30T04:18:53.099683344Z',
           duration_ms: 53,
           platform: { os: 'linux', arch: 'x86_64' },
@@ -2362,7 +2362,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
       },
     );
     expect(md).not.toContain('/home/secret/repo');
-    expect(md).toContain('anc check --command rg');
+    expect(md).toContain('anc audit --command rg');
   });
 
   test('mirrors the v0.4 metadata fields the HTML Details block carries', () => {
@@ -2396,7 +2396,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
         anc: { version: '0.1.0', commit: 'fff3f13' },
         run: {
-          invocation: 'anc check --command rg --output json',
+          invocation: 'anc audit --command rg --output json',
           started_at: '2026-04-30T04:18:53.099683344Z',
           duration_ms: 53,
           platform: { os: 'linux', arch: 'x86_64' },

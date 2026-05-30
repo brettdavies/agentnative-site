@@ -8,8 +8,8 @@ makes that loop tractable or it does not.
 
 This is the specification for CLIs that make it tractable. Eight principles, each expressing a requirement with
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) tiers: **MUST** for the contract, **SHOULD** for the default, **MAY**
-for the optional affordance. The companion linter, [`anc`](/check), scores any CLI against them and reports results by
-stable check ID (`p1-non-interactive`, `p2-json-output`, `p6-sigpipe`, …). Cite a principle by its anchor slug
+for the optional affordance. The companion linter, [`anc`](/audit), scores any CLI against them and reports results by
+stable audit ID (`p1-non-interactive`, `p2-json-output`, `p6-sigpipe`, …). Cite a principle by its anchor slug
 (`#p1-non-interactive-by-default` through `#p8-discoverable-skill-bundle`); those are permanent.
 
 Each of the eight principles below has its own page (`/p1` through `/p8`) for deep-linking, and the same text is

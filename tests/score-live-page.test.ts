@@ -178,9 +178,9 @@ describe('handleLiveScorePage — happy path', () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
     const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
-    expect(html).not.toContain('scorecard-checks');
+    expect(html).not.toContain('scorecard-audits');
     expect(html).not.toContain('scorecard-meta');
-    expect(html).not.toContain('All Checks');
+    expect(html).not.toContain('All Audits');
   });
 
   test('renders cached freshness marker', async () => {

@@ -3,7 +3,7 @@ title: 'feat: Scorecard status taxonomy + scoring fairness (Path 2)'
 type: feat
 status: proposed
 date: 2026-05-21
-origin: anc v0.4.0 rescore session, 2026-05-21 — sandbox-driven fairness analysis triggered by the v0.4.0 behavioral check expansion (11 → 18 checks) widening the denominator and exposing the existing scoring algorithm's conflations
+origin: anc v0.4.0 rescore session, 2026-05-21 — sandbox-driven fairness analysis triggered by the v0.4.0 behavioral audit expansion (11 → 18 checks) widening the denominator and exposing the existing scoring algorithm's conflations
 ---
 
 # feat: Scorecard status taxonomy + scoring fairness (Path 2)
@@ -109,7 +109,7 @@ cause.
   shape)
 - CLI changes to emit the new statuses from the verifier
 - Scorecard `schema_version` bump from 0.5 to 0.6
-- Site renderer updates to handle the new statuses (per-check icons, badge color logic)
+- Site renderer updates to handle the new statuses (per-audit icons, badge color logic)
 - Full registry rescore against the post-change CLI
 - Methodology page rewrite to document the new statuses
 
@@ -183,7 +183,7 @@ of skip-bucket statuses moves it far more.
 
 - `src/data/coverage-matrix.json` — current per-requirement metadata: `level` (must/should/may), `applicability.kind`
   (universal/conditional — already declared but conditional handling is incomplete), `verifiers[]` (check-id + layer).
-  Read by the site at build time to render per-check tier badges.
+  Read by the site at build time to render per-audit tier badges.
 - `scripts/score-sandbox.py` — host-side sandbox; not in build pipeline. Loads all scorecards, joins with matrix tiers,
   runs candidate algorithms, emits markdown report plus parquet/CSV for notebook follow-up.
 - `scorecards/*.json` — 96 latest-version files, schema_version 0.5. Each has `results[]` (id, status, evidence,
@@ -195,13 +195,13 @@ of skip-bucket statuses moves it far more.
 
 ### Institutional learnings
 
-- The v0.4.0 dogfood analysis in the CLI README (`anc check . --binary` = 18 checks, 15 pass / 1 warn / 0 fail / 2 skip
+- The v0.4.0 dogfood analysis in the CLI README (`anc audit . --binary` = 18 checks, 15 pass / 1 warn / 0 fail / 2 skip
   / 0 error) was the first hint of the conflation. The two skips for anc itself (`p1-flag-existence`,
   `p6-no-pager-behavioral`) are arguably inapplicable rather than opt-out, but the README treats them generically.
 - The `coverage_summary` block in each scorecard already exposes per-tier verified counts. The data exists; the scoring
   formula just does not use it directly.
-- Audit profiles (`anc check . --audit-profile <category>`) already let the operator narrow scope. They are the closest
-  existing mechanism to "this check does not apply to this tool"; the `opt_out` status is the natural per-check
+- Audit profiles (`anc audit . --audit-profile <category>`) already let the operator narrow scope. They are the closest
+  existing mechanism to "this check does not apply to this tool"; the `opt_out` status is the natural per-audit
   generalization.
 
 ### External references
@@ -253,7 +253,7 @@ Extend `coverage-matrix.json` row schema:
   applicability:
     kind: universal
   verifiers:
-    - check_id: p3-help
+    - audit_id: p3-help
       layer: behavioral
 ```
 
@@ -267,9 +267,9 @@ Extend `coverage-matrix.json` row schema:
   applicability:
     kind: conditional
     antecedent:
-      check_id: p2-json-output
+      audit_id: p2-json-output
   verifiers:
-    - check_id: p2-schema-print
+    - audit_id: p2-schema-print
       layer: behavioral
 ```
 
@@ -284,9 +284,9 @@ Extend `coverage-matrix.json` row schema:
   applicability:
     kind: conditional
     antecedent:
-      check_id: p4-config-file-flag
+      audit_id: p4-config-file-flag
   verifiers:
-    - check_id: p4-config-schema-validation
+    - audit_id: p4-config-schema-validation
       layer: behavioral
 ```
 
@@ -326,7 +326,7 @@ modeling options are:
 
 1. Split into two rows that *both* depend on a single antecedent (Z depends on X with one row; Z' depends on Y with a
    second row; the spec prose binds them together).
-2. Introduce a synthetic intermediate `check_id` that the verifier composes internally (`check_id: p2-json-and-yaml`
+2. Introduce a synthetic intermediate `audit_id` that the verifier composes internally (`audit_id: p2-json-and-yaml`
    returns `pass` iff both formats are supported), then the conditional row points at the synthetic.
 
 When real cases surface that cannot be modeled either way, v2 of the schema gains an `antecedent` array with an `op:
@@ -339,20 +339,20 @@ applicability:
   antecedent:
     op: all_of
     checks:
-      - check_id: p2-json-output
-      - check_id: p2-yaml-output
+      - audit_id: p2-json-output
+      - audit_id: p2-yaml-output
 ```
 
 Tracked as a follow-up spec issue post-U1; not required for the initial taxonomy.
 
-#### Sub-decision 2c: one result per requirement row, not per check_id
+#### Sub-decision 2c: one result per requirement row, not per audit_id
 
-Today's matrix already has shared `check_id` references: `p3-version` is the only verifier for both `p3-must-version`
+Today's matrix already has shared `audit_id` references: `p3-version` is the only verifier for both `p3-must-version`
 (MUST, `--version` works at all) and `p3-should-version-short` (SHOULD, short alias accompanies it). One probe; two
 distinct requirements at different tiers. The scoring layer must evaluate each row independently.
 
-**Decision:** the CLI emits **one result per requirement row** (matrix `id`), not one per `check_id`. Each result entry
-carries the requirement's `id` as `result.id`; the underlying probe (`check_id`) may be shared between multiple results,
+**Decision:** the CLI emits **one result per requirement row** (matrix `id`), not one per `audit_id`. Each result entry
+carries the requirement's `id` as `result.id`; the underlying probe (`audit_id`) may be shared between multiple results,
 but each result is an independent evaluation against a specific requirement's tier. The result entry also carries an
 explicit `tier` field so the scoring formula does not need a matrix lookup.
 
@@ -367,10 +367,10 @@ explicit `tier` field so the scoring formula does not need a matrix lookup.
 Trade-offs:
 
 - **More verbose JSON.** A single probe that satisfies five requirement rows produces five result entries. For the
-  current matrix shape (~38 distinct check_ids and ~57 requirement rows), the verbosity increase is small.
+  current matrix shape (~38 distinct audit_ids and ~57 requirement rows), the verbosity increase is small.
 - **Scorecard becomes self-contained.** Third-party consumers can compute the score from the scorecard alone — no matrix
   lookup needed at scoring time. The tier metadata travels in the result.
-- **Verifier internals unchanged.** The verifier still has one probe per `check_id` internally; the result-emitter fans
+- **Verifier internals unchanged.** The verifier still has one probe per `audit_id` internally; the result-emitter fans
   out one probe's output to N matrix rows that reference it.
 - **Per-row evaluation policy lives in the CLI.** The matrix declares the multi-row relationship; the CLI decides how
   the shared probe's findings translate to each row's status. Each row's emission logic is documented in the verifier
@@ -404,7 +404,7 @@ it as `skip` (the conservative bucket). A major bump (1.0) would imply a deeper 
 
 ### Decision 5: opt_out audit policy lives in the CLI, not in the registry
 
-Each verifier decides whether a missing feature is `opt_out` or `n_a` based on probe results plus per-check policy
+Each verifier decides whether a missing feature is `opt_out` or `n_a` based on probe results plus per-audit policy
 encoded in the verifier code. The registry stays clean; it does not need per-tool annotations like "fzf has no skill
 bundle, treat as opt_out." The CLI's verifier examines the tool's surface and routes appropriately. This keeps the
 registry maintainable and the policy in one place.
@@ -490,8 +490,8 @@ U2 (same pattern as U1's spec `VERSION`).
 
 **Work:**
 
-- [shipped] Result emission switched from per-`check_id` to per-requirement-row (Decision 2c). One probe whose
-  `check_id` appears in N matrix rows now emits N result entries, each carrying the requirement row's `id` as
+- [shipped] Result emission switched from per-`audit_id` to per-requirement-row (Decision 2c). One probe whose
+  `audit_id` appears in N matrix rows now emits N result entries, each carrying the requirement row's `id` as
   `result.id` and the row's `level` as `result.tier`. Concrete example in code: `src/checks/behavioral/version.rs`
   declares `covers: &["p3-must-version", "p3-should-version-short"]`; the scorecard emitter fans out both rows.
 - [shipped] Probe results emit `opt_out` where the tool clearly has the capability surface but does not ship the feature
@@ -506,9 +506,9 @@ U2 (same pattern as U1's spec `VERSION`).
 - [shipped] `summary.score_pct` uses the transitional formula: existing pass/(pass+warn+fail) shape, with `opt_out`
   excluded from the denominator and `n_a` excluded from both. Documented in `src/scorecard/mod.rs` as transitional
   pending U3.
-- [shipped] `anc check` text output renders the new statuses (per-check status badges in terminal output).
+- [shipped] `anc audit` text output renders the new statuses (per-audit status badges in terminal output).
 - [shipped] CLI tests: fixtures cover each new status; counter aggregation asserted in `summary`; per-row emission
-  asserted for shared check_ids (`p3-version` produces both `p3-must-version` and `p3-should-version-short`);
+  asserted for shared audit_ids (`p3-version` produces both `p3-must-version` and `p3-should-version-short`);
   antecedent-status propagation table from Decision 2a asserted; red-team test pass added in `12c1d32` covers parser,
   propagation, score, and schema drift.
 
@@ -516,7 +516,7 @@ U2 (same pattern as U1's spec `VERSION`).
 
 - [met] `cargo test` green (PR #62 CI clean, mergeStateStatus CLEAN).
 - [met] Test fixture exists for each new status.
-- [met] `anc check --command <test-binary> --output json` emits valid 0.6-schema output (schema embedded via
+- [met] `anc audit --command <test-binary> --output json` emits valid 0.6-schema output (schema embedded via
   `include_str!`; tests assert `schema_version == "0.6"`).
 - Deferred to release PR: CHANGELOG entry for the new statuses + schema bump.
 - Deferred to release PR: `Cargo.toml` version bump and tag publish.
@@ -640,7 +640,7 @@ Schema; no published CLI release was needed (that is U6's gate). The live corpus
 **Repo:** `brettdavies/agentnative-site` (this repo).
 
 **Upstream basis:** Consumes U2 from `agentnative-cli` (the schema 0.6 fixture shape). During development, `cargo build`
-CLI `dev` locally and run `anc check --output json` to produce schema-0.6 fixtures for the site's renderer unit tests.
+CLI `dev` locally and run `anc audit --output json` to produce schema-0.6 fixtures for the site's renderer unit tests.
 The release-side dependency (published CLI via the Homebrew tap for the docker/score image) is U6's gate, not U4's; U4
 can complete against local-build fixtures alone. No `sync-spec.sh` change needed here; the site's vendored spec only
 matters for U5.
@@ -652,7 +652,7 @@ matters for U5.
   `check--skip`, and the markdown twin reuses the same labels (`OPT-OUT`, `N/A`).
 - [n/a] The leaderboard table has no skip+error visual bucket to split — it renders score and principles only
   (`src/build/scorecards-render.mjs`, `src/client/leaderboard.ts`). Per-status rendering lives in the per-tool "All
-  Checks" table, covered by the per-check work above.
+  Checks" table, covered by the per-audit work above.
 - [shipped in #126] Badge cohort-band colors already landed on the spec-side band thresholds in `src/build/badge.mjs`
   (Exemplary / Strong / Solid / Qualified / below-floor); no further color change was needed for U4.
 - [deferred to U5] Vale accept-list entries for `opt_out` / `n_a` are not needed yet: the terms enter prose only in the
@@ -802,7 +802,7 @@ Some checks straddle the line. Example: a tool that accepts secrets via env vars
 `p1-secret-non-leaky-path` (a MUST in the flag context) `n_a` because there are no secret flags? Or `opt_out` because
 the tool chose env-only? Reasonable people will disagree.
 
-**Mitigation:** the CLI's per-check policy is the policy authority. Each verifier has a docstring documenting the
+**Mitigation:** the CLI's per-audit policy is the policy authority. Each verifier has a docstring documenting the
 heuristic it uses. Disagreements file as CLI repo issues; the verifier policy gets adjusted; the next rescore picks up
 the new behavior. Treat the first wave of disagreements as calibration data.
 
@@ -833,7 +833,7 @@ review. Defensive rendering on the site side (fall back to `skip` rendering for 
 
 ### Risk: schema_version bump misses a consumer
 
-The CLI's `scorecard.schema.json` is consumed by the site at build time, by agent integrations that parse `anc check
+The CLI's `scorecard.schema.json` is consumed by the site at build time, by agent integrations that parse `anc audit
 --output json`, and potentially by third parties (badge embedders, leaderboard consumers).
 
 **Mitigation:** the schema bump from 0.5 to 0.6 is backward compatible by design (new statuses optional, existing fields
@@ -855,7 +855,7 @@ schema reference; the site is one such consumer and is updated in U4.
 
 **CLI repo (`brettdavies/agentnative-cli`):**
 
-- `src/checks/*.rs` (or wherever the verifier policy lives) — per-check status disambiguation
+- `src/checks/*.rs` (or wherever the verifier policy lives) — per-audit status disambiguation
 - `src/scorecard.rs` (or similar) — schema 0.5 → 0.6 bump
 - `src/scoring.rs` — formula update per U3
 - `Cargo.toml`, `CHANGELOG.md`
@@ -900,7 +900,7 @@ It uses inline-deps via PEP 723; no environment setup required. Invocation: `uv 
 - **Long-form dataframe:** `.context/score-sandbox/long.parquet` (regenerable)
 - **Per-tool table:** `.context/score-sandbox/tools.csv` (regenerable)
 - **v0.4.0 rescore output:** held on `feat/rescore-v0.4.0` branch, not yet merged
-- **CLI README v0.4.0 dogfood section:** `anc check . --binary` = 18 checks, 15 pass / 1 warn / 0 fail / 2 skip / 0
+- **CLI README v0.4.0 dogfood section:** `anc audit . --binary` = 18 checks, 15 pass / 1 warn / 0 fail / 2 skip / 0
   error → 94% under current formula
 - **RFC 2119** (key words for requirement levels)
 - **RFC 8174** (uppercase vs lowercase ambiguity)

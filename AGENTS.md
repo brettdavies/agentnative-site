@@ -50,7 +50,7 @@ anchors, and semantic HTML. Keep this framing in every decision.
 ## Structure
 
 - `index.html` — single-page surface for the 7 principles, anchor-linked (`#p1-...` through `#p7-...`)
-- `/check` — usage for the `anc` CLI (flags, output shapes, check-ID conventions)
+- `/audit` — usage for the `anc` CLI (flags, output shapes, audit-ID conventions)
 - `/install` — human-facing install page for the `agentnative` CLI itself (HTML + markdown twin only — no JSON manifest;
   `brew`, `cargo`, and platform archives, sourced from `content/install.md`)
 - `/about` — attribution, versioning, credits (subtle: the site does not lead with Brett's name)
@@ -190,7 +190,7 @@ agent-side browser-verify rule above is the working gate.
 
 ## Tool-site sequencing (do not violate)
 
-The site's "Check your CLI" CTA runs `cargo install agentnative`. That command only succeeds once the tool's v0.1 ships
+The site's "Audit your CLI" CTA runs `cargo install agentnative`. That command only succeeds once the tool's v0.1 ships
 to crates.io. Until then:
 
 - Local development and `workers.dev` staging deploys are fine.

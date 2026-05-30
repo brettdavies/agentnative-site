@@ -75,5 +75,5 @@ Rust reference implementation:
 - `process::exit()` in library code, bypassing structured error propagation.
 - Human-formatted tables as the only output mode with no JSON alternative.
 
-Measured by check ID `p2-json-output` today, with format-specific and stderr-discipline checks planned. Run `anc check
+Measured by audit ID `p2-json-output` today, with format-specific and stderr-discipline audits planned. Run `anc audit
 --principle 2 .` against your CLI to see current coverage.

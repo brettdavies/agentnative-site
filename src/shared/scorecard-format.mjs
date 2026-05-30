@@ -72,7 +72,7 @@ export function statusLabel(status) {
 }
 
 /**
- * Map a check group string like "P3" to a principle number (3), or null
+ * Map an audit group string like "P3" to a principle number (3), or null
  * for bonus groups (CodeQuality / ProjectStructure).
  *
  * @param {string} group
@@ -84,7 +84,7 @@ export function groupToPrincipleNum(group) {
 }
 
 /**
- * Extract the top failing/warning checks from a scorecard, FAIL before WARN.
+ * Extract the top failing/warning audits from a scorecard, FAIL before WARN.
  * Used by both the build (per-tool page top-issues block) and the Worker
  * (live-score summary top-issues block).
  *
@@ -102,8 +102,8 @@ export function extractTopIssues(scorecard, limit = 3) {
 }
 
 /**
- * Format a single check as a markdown table row. Both the static
- * `/score/<tool>.md` (full check table) and the live `/live-score/<binary>.md`
+ * Format a single audit as a markdown table row. Both the static
+ * `/score/<tool>.md` (full audit table) and the live `/live-score/<binary>.md`
  * (top-3 issues table) emit the same row shape, so this is the single
  * source of truth.
  *
@@ -122,7 +122,7 @@ export function extractTopIssues(scorecard, limit = 3) {
  * @param {{ baseUrl?: string }} [opts]
  * @returns {string}
  */
-export function formatCheckRowMarkdown(check, opts = {}) {
+export function formatAuditRowMarkdown(check, opts = {}) {
   const baseUrl = (opts.baseUrl ?? '').replace(/\/$/, '');
   const pNum = groupToPrincipleNum(check.group);
   const groupLabel = pNum ? `[${check.group}](${baseUrl}/p${pNum})` : check.group;
@@ -132,7 +132,7 @@ export function formatCheckRowMarkdown(check, opts = {}) {
 }
 
 /**
- * Emit a complete markdown check table (header + rows). When `checks` is
+ * Emit a complete markdown audit table (header + rows). When `checks` is
  * empty, returns an empty array so the caller can decide what to put in
  * its place (e.g., a "no issues" message).
  *
@@ -140,11 +140,11 @@ export function formatCheckRowMarkdown(check, opts = {}) {
  * @param {{ baseUrl?: string }} [opts]
  * @returns {string[]} markdown lines
  */
-export function formatCheckTableMarkdownLines(checks, opts = {}) {
+export function formatAuditTableMarkdownLines(checks, opts = {}) {
   if (checks.length === 0) return [];
   return [
-    '| Status | Check | Principle | Evidence |',
+    '| Status | Audit | Principle | Evidence |',
     '|--------|-------|-----------|----------|',
-    ...checks.map((c) => formatCheckRowMarkdown(c, opts)),
+    ...checks.map((c) => formatAuditRowMarkdown(c, opts)),
   ];
 }

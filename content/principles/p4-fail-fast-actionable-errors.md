@@ -69,5 +69,5 @@ errors at the exit-code layer — this standard adopts `sysexits.h` numbering so
 - Error messages that state the symptom without the cause or fix ("Error: request failed").
 - Panics (`unwrap()`, `expect()`) on recoverable errors in production code paths.
 
-Measured by check ID `p4-bad-args` today, with `p4-process-exit`, `p4-unwrap`, and `p4-exit-codes` planned. Run `anc
-check --principle 4 .` against your CLI to see current coverage.
+Measured by audit ID `p4-bad-args` today, with `p4-process-exit`, `p4-unwrap`, and `p4-exit-codes` planned. Run `anc
+audit --principle 4 .` against your CLI to see current coverage.

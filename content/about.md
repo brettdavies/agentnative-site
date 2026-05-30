@@ -2,7 +2,7 @@
 
 The agent-native CLI standard is a specification for command-line tools that behave predictably under agent control.
 Eight principles, enforced by RFC 2119 requirement tiers (MUST / SHOULD / MAY), and measured by a companion linter
-([`anc`](/check)) that scores any CLI against them.
+([`anc`](/audit)) that scores any CLI against them.
 
 ## Provenance
 
@@ -66,13 +66,13 @@ Pressure-testing is how the spec evolves. Three ways to contribute:
 2.
 
 **[Report a false positive or false negative](https://github.com/brettdavies/agentnative-cli/issues/new?template=false-positive.yml):**
-in the `anc` checker. Include the command, the output, and the check ID.
+in the `anc` auditor. Include the command, the output, and the audit ID.
 3. **[Propose a principle edit](https://github.com/brettdavies/agentnative/issues/new?template=pressure-test.yml):**
    merge, split, rewording, demotion of a MUST to a SHOULD. Describe the problem before proposing a solution.
 4.
 **[Add a tool to the registry](https://github.com/brettdavies/agentnative-cli/issues/new?template=add-tool-to-registry.yml):**
 propose a CLI for inclusion on the anc.dev/scorecards leaderboard. Include the install command, the source repo, and
-(optionally) the result of a fresh `anc check` run.
+(optionally) the result of a fresh `anc audit` run.
 
 For full routing guidance, see the spec repo's
 [CONTRIBUTING.md](https://github.com/brettdavies/agentnative/blob/main/CONTRIBUTING.md).

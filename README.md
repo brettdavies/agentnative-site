@@ -12,7 +12,7 @@ badge surface, and the agent-native-cli skill bundle distribution endpoint.
 | `/scorecards`                                                       | The ANC 100 leaderboard (every curated tool, sortable)                  |
 | `/score/<tool>`                                                     | Per-tool curated scorecards (renders from `scorecards/<tool>.json`)     |
 | `/score/live/<binary>`                                              | Shareable live-score result pages backed by the R2 score cache          |
-| `/check`, `/install`, `/methodology`, `/badge`, `/scorecard-schema` | Supporting pages on usage, install, scoring methodology, badge, schema  |
+| `/audit`, `/install`, `/methodology`, `/badge`, `/scorecard-schema` | Supporting pages on usage, install, scoring methodology, badge, schema  |
 | `/contribute`, `/about`                                             | Contribution map and attribution                                        |
 | `/skill`                                                            | Human-facing install for the `agent-native-cli` skill bundle            |
 | `/skill.json`                                                       | Canonical machine-primary skill manifest                                |

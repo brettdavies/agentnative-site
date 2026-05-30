@@ -32,7 +32,7 @@ down; this runbook covers the AE side.
 | `blob5`   | resolved step | `0.5-hints` \| `2-releases-asset` \| `3-crates` \| ...             | Set when discovery ran; `registry` for curated hits; null otherwise                                  |
 | `double1` | total ms      | number                                                             | Worker handler wall clock                                                                            |
 | `double2` | install ms    | number                                                             | Sandbox install exec duration; null on non-live paths                                                |
-| `double3` | anc check ms  | number                                                             | Sandbox anc-check exec duration; null on non-live paths                                              |
+| `double3` | anc audit ms  | number                                                             | Sandbox anc-audit exec duration; null on non-live paths                                              |
 | `double4` | status        | number                                                             | HTTP status code                                                                                     |
 | `index1`  | tool          | string                                                             | Tool name or slug; cardinality target ≤10k. AE samples high-cardinality indexes automatically (1:N). |
 
@@ -72,7 +72,7 @@ ORDER BY requests DESC
 FORMAT JSONCompact
 ```
 
-### p50 and p99 install + anc check latency by pm
+### p50 and p99 install + anc audit latency by pm
 
 Quantiles on the sandbox-side timings (live paths only — registry hits and cache hits have null timings). Surfaces the
 "which PM is the long tail?" question without leaving the dashboard.
@@ -82,8 +82,8 @@ SELECT
   blob2 AS pm,
   quantileTDigest(0.5)(double2) AS install_p50_ms,
   quantileTDigest(0.99)(double2) AS install_p99_ms,
-  quantileTDigest(0.5)(double3) AS anc_check_p50_ms,
-  quantileTDigest(0.99)(double3) AS anc_check_p99_ms,
+  quantileTDigest(0.5)(double3) AS anc_audit_p50_ms,
+  quantileTDigest(0.99)(double3) AS anc_audit_p99_ms,
   COUNT() AS live_runs
 FROM anc_live_score_staging
 WHERE timestamp > NOW() - INTERVAL '24' HOUR

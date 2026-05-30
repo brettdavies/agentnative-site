@@ -460,8 +460,8 @@ re-commit (no private-repo history import).
 - Happy path: `shellcheck scripts/*.sh scripts/checks/*.sh` exits zero.
 - Edge case: a fresh Claude Code session can read `SKILL.md` from `~/.claude/skills/agent-native-cli/` after `git clone
   --depth 1 ... ~/.claude/skills/agent-native-cli`.
-- Test expectation: `scripts/check-compliance.sh` is a Rust-CLI checker (requires `Cargo.toml` in target path);
-  structural verification is `--help` exits zero, NOT running the checker against the skill repo itself.
+- Test expectation: `scripts/check-compliance.sh` is a Rust-CLI auditor (requires `Cargo.toml` in target path);
+  structural verification is `--help` exits zero, NOT running the auditor against the skill repo itself.
 - Edge case: branch protection prevents force-push to `main` (verified by attempting and expecting refusal).
 - Edge case: tag protection prevents `v0.1.0` tag deletion or move.
 

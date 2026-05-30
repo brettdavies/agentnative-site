@@ -28,7 +28,7 @@ only — full source/project depth lives in `anc` running locally. The site's pr
 scorer is the proof-of-life that gets shared. Registry-known inputs serve committed scorecards from disk with a
 theatrical spinner (no sandbox spawn). Unknown inputs that resolve to an installable binary spawn an Alpine + musl
 sandbox container, install via the appropriate package manager (apk / cargo binstall / pip wheel / npm / go install /
-downloaded tarball), run `anc check --command <name> --output json`, write through to R2, return to the user. Anything
+downloaded tarball), run `anc audit --command <name> --output json`, write through to R2, return to the user. Anything
 that doesn't resolve to an installable binary bounces out with the install-anc-locally CTA.
 
 ---
@@ -61,7 +61,7 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
   further plumbing.
 - U6 — Sandbox DO install + score with two-phase egress (`allowedInstall` → `noHttp`) — shipped 2026-05-18 via PR
   [#95](https://github.com/brettdavies/agentnative-site/pull/95) (commit `af9f568`). Real `@cloudflare/sandbox` DO
-  replaces the stub; `sandbox-exec.ts` orchestrator handles per-PM install + `anc check --output json`.
+  replaces the stub; `sandbox-exec.ts` orchestrator handles per-PM install + `anc audit --output json`.
 - U7 — R2 cache (read-on-hit, write-on-miss) + unified `lookupScorecard()` returning a tagged-union (`curated | cached |
   miss`); cache key `scores/{binary}/{anc-version}.json`; 7-day TTL via R2 bucket lifecycle rule — shipped across four
   PRs 2026-05-19:
@@ -207,7 +207,7 @@ U10 lands after U9 (cache hit/miss + tier telemetry must be observable before an
 - **Abuse.** Anonymous + unauthenticated GitHub API path means the discovery chain hits `api.github.com` at the unauth
   60/hr/IP ceiling: IP exhaustion is shared across users. Consider a server-side GitHub PAT for discovery, or
   token-the-user.
-- **Correctness.** Plan currently assumes `anc check --command <binary> --output json` matches local `anc check` output.
+- **Correctness.** Plan currently assumes `anc audit --command <binary> --output json` matches local `anc audit` output.
   PATH composition inside the container is also deferred. Specify both as part of U6 acceptance criteria.
 - **Failure modes.** No `installSpec` for unsupported PMs (e.g., brew on Alpine): bounce-out is the design but the
   bounce-out UX isn't built. Sandbox cold-start, container crash, network timeout, two-phase egress misconfig are all
@@ -289,7 +289,7 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
   matches the repo. If none resolve to an installable binary: bounce out with R9's CTA. Each step is bounded by a soft
   timeout (≤2 s/step, ≤8 s total) before falling through.
 - **R4. Live sandbox path (unknown but installable).** Spawn the Alpine + musl sandbox; install via the appropriate
-  package manager OR direct binary download; run `anc check --command <binary> --output json`; parse + return. Total
+  package manager OR direct binary download; run `anc audit --command <binary> --output json`; parse + return. Total
   budget 30-60 s including cold start.
 - **R5. Memoization.** R2 cache on `scores/{tool-slug}/{anc-version}/{tool-version-or-sha7}.json`. Repeat live runs for
   the same triple return from R2 in sub-100 ms. Cache key includes `anc-version` so binary upgrades auto-invalidate.
@@ -302,7 +302,7 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
   sandbox via the SDK 0.9.x `outboundHandlers` mechanism. Phase 1: `setOutboundHandler("allowedInstall", {
   allowedHostnames: hosts })` — runs the inline `allowedInstall` async function (declared on the Sandbox DO class as a
   static `outboundHandlers` map), which checks `ctx.params.allowedHostnames` and either passes through via `fetch(req)`
-  or returns 403. Phase 2: `setOutboundHandler("noHttp")` before `anc check` runs — runs the inline `noHttp` async
+  or returns 403. Phase 2: `setOutboundHandler("noHttp")` before `anc audit` runs — runs the inline `noHttp` async
   function, which returns 403 for every request. Handlers are inline functions in the same Worker bundle, NOT separate
   sub-Workers (no service bindings needed in `wrangler.jsonc`). TLS interception is on by default per-instance (CF
   Sandbox SDK 0.9.x).
@@ -312,14 +312,14 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
   package is the full toolchain — Alpine doesn't split runtime/toolchain; see `go install` K-decision for the
   reconciliation). Tools that require source compilation MUST bounce out with R9's CTA.
 - **R9. Install-anc-locally CTA is primary.** The web result is summary + top-3 issues + a one-line install command
-  (`brew install agentnative` or `cargo install agentnative`) + a "run `anc check .` in your project" snippet. Full
-  scorecard depth (source checks, project checks, all checks) lives in local `anc` only. The web is the demo, not the
+  (`brew install agentnative` or `cargo install agentnative`) + a "run `anc audit .` in your project" snippet. Full
+  scorecard depth (source audits, project audits, all checks) lives in local `anc` only. The web is the demo, not the
   product.
 - **R10. Agent-native content negotiation.** `/api/score` honors `Accept: text/markdown` (rendered scorecard markdown),
   `Accept: application/json` (default), `.md` / `.json` URL-suffix twins, mirroring `/skill` (`src/build/skill.mjs`).
   `.json`-suffix paths bypass the existing CN markdown rewrite per the triple-emit pattern.
-- **R11. Response contract.** Every `/api/score` response includes `spec_version`, `anc_version`, `checker_url` (link to
-  the running checker — `https://anc.dev/score`) per the SoT contract for spec-repo downstream consumers. Missing any of
+- **R11. Response contract.** Every `/api/score` response includes `spec_version`, `anc_version`, `auditor_url` (link to
+  the running auditor — `https://anc.dev/score`) per the SoT contract for spec-repo downstream consumers. Missing any of
   the three is a fail-fast 5xx, not a quiet omission.
 - **R12. Cost ceiling (honest derivation).** Two cache layers exist; conflating them gives wrong cost numbers.
 - **Registry fast-path hit ratio** (registry-known input → committed scorecard from `dist/` via `env.ASSETS`): high in
@@ -345,7 +345,7 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
 
 - v3 covers tools installable from a pre-built binary path. Compilation-only tools (no published binary in any package
   manager AND no `cargo binstall` / Releases binary asset) bounce out with the install-anc-locally CTA.
-- v3 does NOT clone repositories. Source/project checks are a local-`anc` capability, surfaced through R9's CTA.
+- v3 does NOT clone repositories. Source/project audits are a local-`anc` capability, surfaced through R9's CTA.
 - v3 does NOT replace the batch-scoring pipeline. The 96-tool leaderboard at `/scorecards` is still served from
   committed `scorecards/*.json`. v3 augments with on-demand scoring for not-yet-scored tools.
 - v3 covers GitHub-hosted repos for URL input. Bitbucket, GitLab, self-hosted git → out of scope.
@@ -388,9 +388,9 @@ inputs, this bet may need to flip to leaderboard-first. That's the explicit fall
   canonical JSON" precedent. (Note: `src/build/install.mjs` does NOT exist — `/install` is a plain content sub-page from
   `content/install.md`. The skill module is the right model to mirror.)
 - **`src/build/scorecards-render.mjs:buildScorecardBody`** — current renderer composes header + score badge + audience
-  banner + `<section class="scorecard-checks">` (full check tables) + `<section class="scorecard-meta">`. v3 needs a new
+  banner + `<section class="scorecard-audits">` (full check tables) + `<section class="scorecard-meta">`. v3 needs a new
   `buildScoreSummaryBody(scorecard, topIssues)` that reuses the header/score/issues blocks and SKIPS the
-  scorecard-checks and scorecard-meta sections. The "top 3 issues" projection already exists as
+  scorecard-audits and scorecard-meta sections. The "top 3 issues" projection already exists as
   `extractTopIssues(scorecard, limit=3)` in `src/build/scorecards.mjs:431` — reuse, don't reinvent.
 - **`registry.yaml` + `src/build/scorecards.mjs:loadRegistry()`** — per-tool fields: `name` (slug), `binary`,
   `language`, `tier`, `creator`, `install` (free-text install command), `description`, plus one of `repo` or `url`,
@@ -431,7 +431,7 @@ Write`. -
 — R2 key includes `anc-version`. An `anc` upgrade auto-invalidates without manual purging. Refuse to cache if
 `target_version` or `anc_version` is missing. -
 [docs/solutions/best-practices/sot-contract-for-spec-repos-with-downstream-consumers-2026-04-22.md](../solutions/best-practices/sot-contract-for-spec-repos-with-downstream-consumers-2026-04-22.md)
-— every live `/api/score` response MUST include `spec_version`, `anc_version`, `checker_url`. R11 in this plan; enforced
+— every live `/api/score` response MUST include `spec_version`, `anc_version`, `auditor_url`. R11 in this plan; enforced
 via regression test, not code review. -
 [docs/solutions/best-practices/agentnative-version-model-2026-05-01.md](../solutions/best-practices/agentnative-version-model-2026-05-01.md)
 — six version concepts across four repos. Live response uses `scorecard.spec_version` (the version `anc` was compiled
@@ -454,7 +454,7 @@ RFC1918 + link-local + cloud-metadata + IPv6 ULA reject. ASCII-only host (homogl
 in production. Sandbox `setOutboundHandler` is defense-in-depth, not the primary check. -
 [docs/solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md](../solutions/architecture-patterns/anc-cli-output-envelope-pattern-2026-04-29.md)
 — the `anc --output json` envelope shape the container's stdout produces. Worker passes through verbatim, only adding
-`checker_url` and confirming `spec_version`/`anc_version` are present (5xx if not — fail fast, don't fabricate). -
+`auditor_url` and confirming `spec_version`/`anc_version` are present (5xx if not — fail fast, don't fabricate). -
 [docs/solutions/build-errors/rustup-target-add-pinned-toolchain-2026-04-16.md](../solutions/build-errors/rustup-target-add-pinned-toolchain-2026-04-16.md)
 — `dtolnay/rust-toolchain` action does not auto-install matrix targets after `rust-toolchain.toml` pin. The upstream
 agentnative-cli PR adding `x86_64-unknown-linux-musl` MUST add `rustup target add x86_64-unknown-linux-musl` as an
@@ -523,7 +523,7 @@ after the Container build step is added.
   post-v1 version but NOT to a pre-v1 version. Cross-migration rollback requires a follow-up migration with
   `deleted_classes`, which is the documented recipe in the runbook. **Pool of 3 instances** via `getRandom(env.SCORE,
   3)` (NOT a singleton). Local measurement (2026-05-05, dev hardware): ripgrep install + score = 3 s total (cargo-
-  binstall 3 s, anc check <1 s). On CF Containers `basic` (1/4 vCPU, network egress different from local) project
+  binstall 3 s, anc audit <1 s). On CF Containers `basic` (1/4 vCPU, network egress different from local) project
   conservative ~5x slowdown → ~15 s per request, so per-instance throughput is ~4 req/min sustained, 3 instances yield
   ~12 req/min sustained. The earlier estimate of "1-2 req/min per instance, 10-30 s install, 5-15 s score" was
   pessimistic. Larger packages (npm with many deps, pip with no wheel) will trend slower; rerun the measurement on CF
@@ -566,7 +566,7 @@ after the Container build step is added.
   await sandbox.setOutboundHandler("allowedInstall", { allowedHostnames: hosts });
   await sandbox.exec(installCmd);
   await sandbox.setOutboundHandler("noHttp");
-  await sandbox.exec("anc check ...");
+  await sandbox.exec("anc audit ...");
   ```
 
   Install hosts are whichever the resolver picked (`formulae.brew.sh`, `crates.io` + `static.crates.io`,
@@ -595,7 +595,7 @@ after the Container build step is added.
   type-checks, and emits machine code — it does NOT execute user code at compile time (unlike `pip` sdist `setup.py` or
   Rust `build.rs`). Phase 1 egress to `proxy.golang.org` lets attacker source pull arbitrary transitive Go modules, but
   those deps are also Go source, also compiled, also not executed at compile time. The first attacker-controlled
-  execution surface is the produced binary running under `anc check --command <binary>`, which runs under Phase 2
+  execution surface is the produced binary running under `anc audit --command <binary>`, which runs under Phase 2
   (`noHttp`, 60 s combined `install + score` timeout) — same trust boundary as `cargo binstall` / `pip --only-binary` /
   `direct`. Compile-cost attack vector (deep dep tree, pathological generics) is bounded by the same 60 s timeout.
   Outcome: net blast radius for `go install` is not materially worse than other PMs in the table; the only meaningful
@@ -626,8 +626,8 @@ after the Container build step is added.
   (acceptable for abuse protection). Initial config: `simple: { limit: 10, period: 60 }` per IP. Upgrade to DO-based
   global counter (Option B) only if rotating-PoP abuse appears.
 - **Web result: summary + top-3 issues only.** New `buildScoreSummaryBody(scorecard, topIssues)` renderer reusing
-  `extractTopIssues` (already in `src/build/scorecards.mjs:431`). Skips `scorecard-checks` and `scorecard-meta`
-  sections. Primary CTA renders as the prominent action: "Run `anc check .` in your project for source + project depth."
+  `extractTopIssues` (already in `src/build/scorecards.mjs:431`). Skips `scorecard-audits` and `scorecard-meta`
+  sections. Primary CTA renders as the prominent action: "Run `anc audit .` in your project for source + project depth."
   Secondary footer: "Install `anc`: `brew install agentnative` or `cargo install agentnative`."
 - **Headers in Worker code, not `_headers`.** Live JSON: `Cache-Control: no-store`. Cache-hit JSON: `public,
   max-age=300`. Both: `Access-Control-Allow-Origin: *`, `X-Robots-Tag: noindex`, `application/json; charset=utf-8`.
@@ -647,7 +647,7 @@ after the Container build step is added.
 - Redirect chain depth is capped at 3 hops; further redirects fail with `discovery_redirect_loop`.
 - Sandbox-side install fetches (`cargo binstall`, `pip install`, `npm install`, `apk add`, `curl -L`) follow each tool's
   default redirect handling. The sandbox is the blast-radius limiter; the Worker is the SSRF gatekeeper. The
-  architectural line: Worker enforces SSRF, sandbox enforces egress (two-phase egress, `noHttp` before `anc check`).
+  architectural line: Worker enforces SSRF, sandbox enforces egress (two-phase egress, `noHttp` before `anc audit`).
 - Test scenario added to U5 (response-shape) and U4 (discover-binary): "Worker rejects discovery fetch that redirects to
   an RFC1918 address with a documented error code, never follows."
 - **Container image registry: Cloudflare managed registry via inline build (Way 1).** `image:
@@ -670,7 +670,7 @@ after the Container build step is added.
 - **Registry-index emission at build time.** `src/build/registry-index.mjs` emits `dist/registry-index.json`. Includes
   BOTH a tool-slug index (`{ "ripgrep": { ... } }`) and a `owner/repo` index (`{ "BurntSushi/ripgrep": { ... } }`) so
   the Worker can do an O(1) lookup whether the input was a slug or a URL. `audit_profile` is included so the live path
-  can pass it to `anc check --audit-profile <category>`.
+  can pass it to `anc audit --audit-profile <category>`.
 - **`spec_version` in responses: build-time injection.** The Worker bundle has no filesystem access. Build emits
   `src/worker/spec-version.gen.ts` exporting `SPEC_VERSION` (read from `src/data/spec/VERSION`) and `SITE_SPEC_VERSION`
   (read from `content/principles/VERSION`). The Worker imports these at module load and surfaces them in responses.
@@ -679,7 +679,7 @@ after the Container build step is added.
 - **`anc_version` in responses: read from the running binary at exec time.** For live responses, capture from `anc
   --version` stdout in the sandbox; persist into the cache payload. For cached responses, read from the payload. Never
   from a build-time constant.
-- **`checker_url` in responses: hard-coded to `https://anc.dev/score`.** That IS the running checker. R11 is satisfied;
+- **`auditor_url` in responses: hard-coded to `https://anc.dev/score`.** That IS the running auditor. R11 is satisfied;
   if anc.dev domain ever moves, this string updates with it.
 
 ---
@@ -751,9 +751,9 @@ files have been deleted; this plan is the source of truth.
 
 ### Deferred to Implementation
 
-- **Exact `anc check` invocation flags for the live path.** Plan assumes `anc check --command <binary> --output json
+- **Exact `anc audit` invocation flags for the live path.** Plan assumes `anc audit --command <binary> --output json
   [--audit-profile <category>]` (verified against `anc --help` for v0.3.0 — `--command <NAME>` resolves a command from
-  `PATH` and runs behavioral checks). Confirm at implementation time that the resolved binary on `PATH` matches what the
+  `PATH` and runs behavioral audits). Confirm at implementation time that the resolved binary on `PATH` matches what the
   install path produced (cargo binstall puts binaries in `~/.cargo/bin`; brew in `$HOMEBREW_PREFIX/bin`; etc.) and that
   PATH is set accordingly inside the sandbox.
 - **Install-command parser grammar.** The set of commands to parse (`brew install <pkg>`, `brew <pkg>` shorthand, `cargo
@@ -806,7 +806,7 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
   between Phase 1 and Phase 2, but the SDK's behavior on in-flight TCP streams from the install phase is not documented
   in cited solutions docs. Before U6 ships: confirm via SDK source or CF support; if streams are NOT killed, layer
   `pkill curl wget` between phases. Add an integration test that opens a long-poll during install and asserts it dies
-  before `anc check` runs.
+  before `anc audit` runs.
 
 #### Feasibility / engineering (P1, 5 items)
 
@@ -874,7 +874,7 @@ review pass. Each names the source reviewer and a one-line resolution suggestion
   defer?
 - **Binary discovery first-match without signing/provenance** (adversarial). Step 2 (GitHub Releases asset matching)
   picks "first asset matching repo+platform". Attacker publishes `repo/cli` with malware named to match the platform
-  suffix → sandbox dutifully downloads + executes via `anc check --command`. Mitigations: require exact repo-name
+  suffix → sandbox dutifully downloads + executes via `anc audit --command`. Mitigations: require exact repo-name
   prefix; prefer signed assets when present (cosign/sigstore); for direct download, refuse repos with <N stars or <M
   months age (cheap heuristic that defeats easy attack). Address during U4 implementation.
 - **Discovery chain is GitHub-shaped; v4 multi-provider is refactor not extension** (product-lens). Note in
@@ -943,8 +943,8 @@ src/
       handler.ts                    # [pending] U5 — /api/score route entry; URL validate + rate limit + cache + DO
       cache.ts                      # [pending] U7 — R2 read/write keyed by scores/{slug}/{anc-v}/{tool-v}.json
       do.ts                         # [pending] U6 (stub at U3) — Sandbox DO class (extends Sandbox)
-      sandbox-exec.ts               # [pending] U6 — two-phase egress + install + anc check + result parsing
-      response-shape.ts             # [pending] U5 — spec_version + anc_version + checker_url triad
+      sandbox-exec.ts               # [pending] U6 — two-phase egress + install + anc audit + result parsing
+      response-shape.ts             # [pending] U5 — spec_version + anc_version + auditor_url triad
       content-negotiation.ts        # [pending] U5 — /api/score.md vs /api/score.json branching
       summary-render.ts             # [pending] U8 — buildScoreSummaryBody (header + score + top-3 + CTA)
 dist/
@@ -965,7 +965,7 @@ tests/
   score-registry-lookup.test.ts     # [shipped] — registry+hints lookup ordering + case-insensitive (10 tests)
   score-handler.test.ts             # [pending] U5 — handler.ts unit tests
   score-cache.test.ts               # [pending] U7 — R2 cache read/write
-  score-response-shape.test.ts      # [pending] U5 — spec_version/anc_version/checker_url triad enforcement
+  score-response-shape.test.ts      # [pending] U5 — spec_version/anc_version/auditor_url triad enforcement
   score-contract.test.ts            # [shipped] U9 — cross-validates /api/score JSON ↔ committed scorecards (PR #101)
   e2e/
     score.e2e.ts                    # [pending] U8 — Playwright form-submit happy path (chromium, mocked API)
@@ -1019,7 +1019,7 @@ sequenceDiagram
     W->>A: lookup registry-index.json (slug + owner/repo)
     alt registry hit + scorecard exists
         W->>A: read dist/scorecards/<name>-v<v>.json
-        W-->>U: 200 scorecard + spec_version + anc_version + checker_url (≥2s theater)
+        W-->>U: 200 scorecard + spec_version + anc_version + auditor_url (≥2s theater)
     else registry miss
         W->>L: limit({key: ipAddress})
         alt rate-limited
@@ -1044,7 +1044,7 @@ sequenceDiagram
         W->>R: get scores/{slug}/{anc-v}/{tool-v}.json
         alt R2 cache hit
             R-->>W: cached scorecard
-            W-->>U: 200 scorecard + (spec_version, anc_version, checker_url) (sub-100ms)
+            W-->>U: 200 scorecard + (spec_version, anc_version, auditor_url) (sub-100ms)
         else R2 miss
             W->>D: getSandbox(env.SCORE, "anc-scorer")
             D->>S: container.start() (cold start 1-3s)
@@ -1053,12 +1053,12 @@ sequenceDiagram
             P-->>S: pre-built binary on $PATH
             D->>S: setOutboundHandler("noHttp")
             S->>S: anc --version → capture anc_version
-            S->>S: anc check --command <binary> --output json [--audit-profile <p>]
+            S->>S: anc audit --command <binary> --output json [--audit-profile <p>]
             S-->>D: scorecard JSON (envelope per anc-output-envelope-pattern)
             D->>R: put scores/{slug}/{anc-v}/{tool-v}.json (best-effort)
             D-->>W: scorecard + anc_version
-            W->>W: shape response (add spec_version, checker_url; validate triad)
-            W-->>U: 200 scorecard + (spec_version, anc_version, checker_url) (15-60s)
+            W->>W: shape response (add spec_version, auditor_url; validate triad)
+            W-->>U: 200 scorecard + (spec_version, anc_version, auditor_url) (15-60s)
         end
     end
 ```
@@ -1116,7 +1116,7 @@ publishes a release that includes the `x86_64-unknown-linux-musl` target.
   rises, retry semantics handle it.
 - **Runtime behavior differences (musl vs glibc).** musl libc differs from glibc in DNS resolution (no NSS), threading
   (smaller default stack), locale handling. `anc` is a CLI linter that reads files and emits JSON — it doesn't depend on
-  these subsystems. Add a smoke test in `release.yml` that runs `anc --version` and `anc check --output json` against a
+  these subsystems. Add a smoke test in `release.yml` that runs `anc --version` and `anc audit --output json` against a
   fixture inside an Alpine container.
 
 **Re-plan trigger (NOT a fallback).** If the upstream PR is rejected for technical reasons OR stalls beyond the
@@ -1267,7 +1267,7 @@ Pure build-step change; no CF dependencies; lands first because it unblocks U4 +
   }
   ```
 
-- Include `audit_profile` so the live path can pass it to `anc check --audit-profile <category>`.
+- Include `audit_profile` so the live path can pass it to `anc audit --audit-profile <category>`.
 - Tools with neither `repo:` nor `url:` → entry skipped, build warning emitted (not a failure).
 - Tools with same `owner/repo` (fork) → second wins, build warning.
 - Read `discovery-hints.yaml` (top-level `hints:` array) and emit `dist/discovery-hints-index.json` with shape:
@@ -1845,7 +1845,7 @@ rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Sha
 - `content-negotiation.ts` extends `accept.ts`. New helper: `detectScorePreference(request)` returns `'json' |
   'markdown'`. JSON is default; markdown when `Accept: text/markdown` OR `.md` suffix.
 - `response-shape.ts`: `shapeScoreResponse(scorecard, env): Response` — adds `spec_version` (from `SPEC_VERSION` build
-  constant for live; from cached scorecard for cache hits), `anc_version` (from cache or live exec), `checker_url`
+  constant for live; from cached scorecard for cache hits), `anc_version` (from cache or live exec), `auditor_url`
   (constant `https://anc.dev/score`). Asserts all three present; throws (→ 500) if any missing.
 - `response-shape.ts` also owns the **`ScoreError` discriminated union** — single source of truth for every error code
   the `/api/score` endpoint can return. U4, U5, U6 import this type; nobody hand-rolls error response shapes. The U9
@@ -1863,7 +1863,7 @@ rate limiter → R2 cache (U7) → DO route (U6). Apply content negotiation. Sha
     | { code: "chain_resolved_no_binary_produced"; details: string; cta_text: string }
     | { code: "timeout"; phase: "install" | "score"; cta_text: string };
 
-  export type ScoreErrorResponse = { error: ScoreError; spec_version: string; checker_url: string };
+  export type ScoreErrorResponse = { error: ScoreError; spec_version: string; auditor_url: string };
   ```
 
   HTTP status mapping is handled in `handler.ts`: 400 for input errors, 404 for chain_no_resolve, 429 for
@@ -1887,7 +1887,7 @@ text/markdown`); `/api/score.md` is the explicit markdown twin.
 **Test scenarios:**
 
 - **Happy path (registry hit):** `POST /api/score {input: "ripgrep"}` → 200, scorecard matches
-  `dist/scorecards/ripgrep-v<v>.json`, response includes `spec_version` + `anc_version` + `checker_url`.
+  `dist/scorecards/ripgrep-v<v>.json`, response includes `spec_version` + `anc_version` + `auditor_url`.
 - **Happy path (R2 hit):** registry-miss but cache-hit → 200, sub-100 ms in test.
 - **Happy path (R2 miss):** registry-miss + cache-miss → DO route stub asserts called.
 - **Happy path (markdown):** `GET /api/score.md` or `Accept: text/markdown` → markdown response with same triad.
@@ -1905,7 +1905,7 @@ unmodified). Triad enforcement is a hard gate, not a code-review check.
 
 ---
 
-- [x] U6. **Sandbox-side: install + score (two-phase egress, anc check)** — shipped 2026-05-18 via PR
+- [x] U6. **Sandbox-side: install + score (two-phase egress, anc audit)** — shipped 2026-05-18 via PR
   [#95](https://github.com/brettdavies/agentnative-site/pull/95) (commit `af9f568`).
 
 **Goal:** Implement the Sandbox DO class and the install + score flow. Two-phase egress is mandatory (R7). Pool of
@@ -1927,7 +1927,7 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
   `Sandbox.outboundHandlers` map has both `allowedInstall` and `noHttp` keys before any `setOutboundHandler` call —
   catches misnamed-key regressions silently degrading egress policy; (b) order assertion via stubbed handler call log —
   `setOutboundHandler("allowedInstall", {...})` fires BEFORE `exec(installCmd)` AND `setOutboundHandler("noHttp")` fires
-  BEFORE `exec("anc check ...")`; (c) per-request log lines emitted by handlers match expected `{phase, host,
+  BEFORE `exec("anc audit ...")`; (c) per-request log lines emitted by handlers match expected `{phase, host,
   allowed|blocked}` shape (the per-request observability that justified Pattern Y).
 - Test: `tests/score-do-brew-fallback.test.ts` (brew formula → discoverBinary redirect path).
 - Test: `tests/score-do-go-fallback.test.ts` (go module → discoverBinary redirect path).
@@ -2020,7 +2020,7 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
    handler (returns 403 for any HTTP egress).
 3. `sandbox.exec("anc --version")` → capture `anc_version` (parsed from stdout).
 4. Look up registry entry by tool name to get `audit_profile` if known; else omit.
-5. `sandbox.exec("anc check --command <binary> --output json [--audit-profile <p>]")` → parse JSON.
+5. `sandbox.exec("anc audit --command <binary> --output json [--audit-profile <p>]")` → parse JSON.
 6. Return `{scorecard, anc_version}` to the Worker. DO writes-through to R2 via U7.
 
 - Total budget: 60 s timeout on `sandbox.exec()` (install + score combined). Hard fail beyond returns 504 to user.
@@ -2050,7 +2050,7 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
 - **Happy path (brew via fallback):** `brew install bat` → discoverBinary picks a non-brew spec → installed and scored.
 - **Happy path (go via fallback):** `go install github.com/charmbracelet/glow@latest` → discoverBinary picks the GitHub
   release asset → installed via `direct` → scored. No source compile runs.
-- **Edge case (`audit_profile` from registry):** known tool → `anc check --audit-profile <profile> ...` invoked.
+- **Edge case (`audit_profile` from registry):** known tool → `anc audit --audit-profile <profile> ...` invoked.
 - **Bounce (brew formula has no peer PM):** `brew install <fake>` → `install_unsupported pm=brew_only`.
 - **Bounce (go module without GitHub release binary):** `go install rsc.io/quote/v3@latest` → `install_unsupported
   pm=go_no_binary`.
@@ -2058,11 +2058,11 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
   with details; Worker returns 502.
 - **Bounce (binary not on PATH after install):** `which` check misses; DO returns `chain_resolved_no_binary_produced`;
   Worker returns 502. (The `pallets/click` failure mode — wheel installs cleanly but no `console_scripts` entry.)
-- **Error path (anc check exits non-zero):** preserve and forward the parsed error JSON if available.
+- **Error path (anc audit exits non-zero):** preserve and forward the parsed error JSON if available.
 - **Error path (60 s timeout):** DO returns `{error: "timeout"}`; Worker returns 504.
 - **Error path (`setOutboundHandler` call fails):** DO returns 500; user-visible error message scrubs internals.
 - **Integration:** assert egress ordering: `setOutboundHandler('allowedInstall', ...)` fires BEFORE install exec, AND
-  `setOutboundHandler('noHttp')` fires BEFORE `anc check` exec. Safety invariant.
+  `setOutboundHandler('noHttp')` fires BEFORE `anc audit` exec. Safety invariant.
 - **Integration:** stdout/stderr captured by `sandbox.exec` does not contain any host name from outside `installHosts ∪
   {"localhost"}` after Phase 2 (defense in depth).
 - **Integration:** response includes `anc_version` populated from the running binary (not from a constant).
@@ -2070,7 +2070,7 @@ short-lived containers (per design Premise #6, evolved from singleton to 10-inst
   dev --local` as the test webServer; the Dockerfile's `EXPOSE 8080` lets `wrangler dev` accept the container binding.
 
 **Verification:** Two-phase egress is provably enforced (test asserts the second handler call is `noHttp` BEFORE `anc
-check` is exec'd). Timeout is honored. `anc_version` is captured live, never hard-coded. `deep-check.yml` is green on
+audit` is exec'd). Timeout is honored. `anc_version` is captured live, never hard-coded. `deep-check.yml` is green on
 the U6 merge SHA. Staging end-to-end matrix passes 11/11 across all PMs (npm, cargo, pip, uv, bun, go-fallback,
 brew-fallback, direct in flat + nested archive layouts, and the two intentional bounces).
 
@@ -2225,7 +2225,7 @@ first prod cut.
 **Goal:** A live-scoring paste-input form embedded on the homepage (`/`, NOT a dedicated `/score` subpage) with
 invisible Turnstile gate, theater spinner, summary + top-3 issues result render, and prominent install-anc-locally CTA.
 Build also emits `src/worker/spec-version.gen.ts` constants. No markdown twin: live-scoring is HTML-only because agents
-already have `anc check` locally and don't need a Worker round-trip; `/index.md` stays silent on the feature.
+already have `anc audit` locally and don't need a Worker round-trip; `/index.md` stays silent on the feature.
 
 **Scope change (2026-05-14, per Q4.1 follow-up):** the form lives on the homepage rather than a dedicated `/score` page.
 This pulls the live demo into the highest-traffic surface and removes one layer of navigation from the share loop. Two
@@ -2266,7 +2266,7 @@ implementation reuses the existing per-tool scorecard page header/score/issues b
   install → score) that fills in for live runs. Below: result area (see "Result presentation" below).
 - **CTA framing.** Adjacent to (or above) the form, render the install-anc CTA: "Install `anc` and run it in your
   project for source + project depth: `brew install agentnative` or `cargo install agentnative`. The web demo shows
-  binary/behavioral checks only." R9 framing. Exact placement is a design decision; the install-anc-locally framing must
+  binary/behavioral audits only." R9 framing. Exact placement is a design decision; the install-anc-locally framing must
   remain primary, not buried below the form.
 - **Turnstile integration (invisible mode + lazy-load, per spike 04 + Q4.1 follow-up).** Use Cloudflare Turnstile in
   Invisible mode (no visible widget; JS API only) — appropriate for an embedded form on a content page. Do NOT load the
@@ -2303,24 +2303,24 @@ implementation reuses the existing per-tool scorecard page header/score/issues b
    whether `summary-render.ts` is invoked from a Worker route (option 3) or from the client only (options 1, 2).
 
 - **`summary-render.ts`:** new function `buildScoreSummaryBody(scorecard, topIssues)` reuses `buildScorecardHeader`,
-  `buildScoreBadge`, the existing top-issues block — and SKIPS `<section class="scorecard-checks">` and `<section
-  class="scorecard-meta">`. Below the top-3 issues block, append a CTA card: "Run `anc check .` locally for source +
-  project checks (`brew install agentnative` or `cargo install agentnative`)."
+  `buildScoreBadge`, the existing top-issues block — and SKIPS `<section class="scorecard-audits">` and `<section
+  class="scorecard-meta">`. Below the top-3 issues block, append a CTA card: "Run `anc audit .` locally for source +
+  project audits (`brew install agentnative` or `cargo install agentnative`)."
 - **Bounce-state CTA copy (gate F4 — three classes, distinct messaging).** When `/api/score` returns a 4xx with one of
   the three bounce error tags, render a class-specific CTA panel instead of the score body. Each class deserves
   different framing because the user's correctness model is different in each case:
 
 | Error tag                           | Headline                                        | Sub-copy                                                                                                                                                               |
 | ----------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chain_no_resolve`                  | "We couldn't find a pre-built binary for that." | "anc only scores tools with a published binary release. Run `anc check .` locally for source + project depth: `brew install agentnative`."                             |
-| `chain_resolved_install_failed`     | "Found an install path, but it didn't run."     | Show the install command we tried and its non-zero exit excerpt (truncated). "Try `anc check .` locally — it has more flexible install options."                       |
+| `chain_no_resolve`                  | "We couldn't find a pre-built binary for that." | "anc only scores tools with a published binary release. Run `anc audit .` locally for source + project depth: `brew install agentnative`."                             |
+| `chain_resolved_install_failed`     | "Found an install path, but it didn't run."     | Show the install command we tried and its non-zero exit excerpt (truncated). "Try `anc audit .` locally — it has more flexible install options."                       |
 | `chain_resolved_no_binary_produced` | "That looks like a library, not a CLI."         | "We installed it, but no command-line entry point appeared on PATH. anc only scores binaries. If this is wrong, paste the actual binary name as `<command>` to retry." |
 
   All three keep the install-anc-locally CTA as a secondary surface; they differ in headline + diagnostic copy.
 
 - **Markdown twin policy.** `/index.md` (the homepage's markdown twin) carries no form, no JS, no Turnstile reference,
   and no API documentation for `/api/score`. Live-scoring is HTML-only by design. Agents pasting `/api/score` URLs is a
-  non-goal; agents are expected to run `anc check` locally. The markdown homepage stays silent on the feature.
+  non-goal; agents are expected to run `anc audit` locally. The markdown homepage stays silent on the feature.
 - **`spec-version-gen.mjs`** emits:
 
   ```ts
@@ -2406,7 +2406,7 @@ mention. Operational readiness for the v3 deploy.
 
 **Approach:**
 
-- **Regression:** `/api/score` response shape = `{ schema_version, spec_version, anc_version, checker_url, ...scorecard
+- **Regression:** `/api/score` response shape = `{ schema_version, spec_version, anc_version, auditor_url, ...scorecard
   }`. All four mandatory.
 - **Regression:** `dist/registry-index.json` `by_slug` contains every `tools[].name` from `registry.yaml`.
 - **Cross-validation:** every `dist/scorecards/<name>-v<v>.json` is reachable via `/api/score` registry-fast-path
@@ -2431,7 +2431,7 @@ mention. Operational readiness for the v3 deploy.
 - **Runbook contents:**
 - Cost-watch for first 30 days: daily R2 storage, DO requests, Container vCPU-seconds. Thresholds: R2 >$1/mo, Container
   >$15/mo trigger a review.
-- Common failures: install timeout (network), `anc check` exit non-zero (real fail vs runner bug), R2 write fail
+- Common failures: install timeout (network), `anc audit` exit non-zero (real fail vs runner bug), R2 write fail
   (best-effort, alert if sustained), discovery chain false-negative (README parse missed an obvious install — capture
   for v3.1 LLM upgrade evidence).
 - Alert: 5xx rate >1% over 10 min → page (whatever paging we wire up).
@@ -2519,7 +2519,7 @@ largest cost lever and must be tracked).
 - `doubles` (numbers, ≤20 per dataset):
 - `double1`: total ms (Worker handler wall clock)
 - `double2`: install ms (from `sandbox.exec` install duration; null on registry hit / error before install)
-- `double3`: anc check ms (null on registry hit / error before anc check)
+- `double3`: anc audit ms (null on registry hit / error before anc audit)
 - `double4`: response HTTP status
 - `indexes` (one per dataset, used for AE sampling):
 - `index1`: tool name OR slug (whichever the input resolved to; null on validation errors). Cardinality target ≤10k; AE
@@ -2595,9 +2595,9 @@ writes don't measurably affect `/api/score` p99 (target: <5 ms added per request
 - **Interaction graph.** New entry point: `/api/score` (Worker) → `SCORE_LIMITER` (binding) → `ASSETS` (registry-index
   JSON) → `SCORE_CACHE` (R2) → `SCORE` (DO singleton) → `Sandbox` (Container, Alpine+musl) → package registries
   (`formulae.brew.sh`, `crates.io`, `registry.npmjs.org`, `pypi.org`, `github.com` releases). Static surface unchanged:
-  `/`, `/scorecards`, `/install`, `/check`, `/about`, `/changelog`, `/methodology`, `/score/<name>` (per-tool pages,
+  `/`, `/scorecards`, `/install`, `/audit`, `/about`, `/changelog`, `/methodology`, `/score/<name>` (per-tool pages,
   distinct from the new `/score` form), `/skill`, `/badge` continue to be served from `dist/`.
-- **Error propagation.** Worker → user: 400 (validation), 404 (no installable binary OR `anc check` says `not_a_cli`),
+- **Error propagation.** Worker → user: 400 (validation), 404 (no installable binary OR `anc audit` says `not_a_cli`),
   429 (rate-limit), 502 (install failed / binary not on PATH after install), 504 (timeout), 500 (response triad missing
   — fail-fast). Sandbox failures are caught in DO, returned as JSON; never raw exceptions.
 - **State lifecycle risks.** Container disk resets on sleep — installed binaries do NOT survive sleep. DO state (SQLite)
@@ -2608,8 +2608,8 @@ writes don't measurably affect `/api/score` p99 (target: <5 ms added per request
   `/score`. Headers (CORS, noindex, short cache for hits / no-store for live) inherited from existing `applyHeaders`
   JSON branch where possible; explicit otherwise.
 - **Integration coverage.** Three integration scenarios mocks alone cannot prove: (a) two-phase egress sequence
-  (`allowedInstall` → `noHttp` BEFORE `anc check`); (b) `anc_version` is read from the running binary, not a constant;
-  (c) the response triad (`spec_version`, `anc_version`, `checker_url`) is enforced as a fail-fast gate, not a quiet
+  (`allowedInstall` → `noHttp` BEFORE `anc audit`); (b) `anc_version` is read from the running binary, not a constant;
+  (c) the response triad (`spec_version`, `anc_version`, `auditor_url`) is enforced as a fail-fast gate, not a quiet
   omission. All three have integration tests with stubbed-but-realistic Sandbox SDK behavior; the `score-live`
   Playwright project exercises the real path nightly.
 - **Unchanged invariants.** Asset-first invariant of the existing Worker (every non-`/api/score` request hits
@@ -2692,12 +2692,12 @@ only.
 | Image deletion silently breaks rollback                                              | Med        | High     | Per spike 03 + Containers Limits footnote (<https://developers.cloudflare.com/containers/platform-details/limits/>): "Delete container images with `wrangler containers delete` to free up space. If you delete a container image and then roll back your Worker to a previous version, this version may no longer work." Account-wide image cap is 50 GB with no auto-GC. Pruning to stay under cap silently severs rollback paths. Discipline: never delete images that backed shipped versions; inventory via `wrangler containers images list` quarterly; pair every git release tag with the registry image URI in RELEASES.md. Pruning is a quarterly manual exercise paired with explicit "what versions become unrollback-able" review. |
 | Multi-env image identity (containers is non-inheritable)                             | Low        | Med      | Per spike 01: default `containers` config is non-inheritable per-env (cite <https://developers.cloudflare.com/workers/wrangler/environments/>); without the prebuild-once + shared-tag-pin pattern, prod and staging produce two distinct container apps with two builds and double the registry footprint. The U3-followup primary path explicitly uses the shared-tag-pin pattern (`wrangler containers build -p -t <git-sha>` once, both env blocks pin the resulting `registry.cloudflare.com/<acct>/anc-sandbox:<git-sha>` URI). Verify on first staging+prod deploy via `wrangler containers images list` that exactly the expected image footprint exists.                                                                               |
 | Cloudflare changes Sandbox SDK API mid-flight                                        | Low        | Med      | Pin `@cloudflare/sandbox` exact version (added at U6 import time); image already pins `cloudflare/sandbox:0.9.2-musl@sha256:b4cb1d69…` per `docker/sandbox/Dockerfile`. Review CF changelog before each version bump; SHA-pin discipline guards against forced re-tags upstream.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `anc check` flag mismatch (e.g., `--command` semantics change in v0.4)               | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `anc audit` flag mismatch (e.g., `--command` semantics change in v0.4)               | Low        | Med      | Pin `anc` to a tagged release in the image build. Plan a v3.0.1 to consume each new `anc` after launch settles.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | GitHub anonymous API rate limit (60/hr/IP) bites discovery chain                     | Med        | Med      | Pooled CF egress IPs amortize. R6 rate-limit caps at ~14k/day at 100% miss → ~580/hr peak (well under aggregate egress IP allotment). If bites: add GitHub App token via Outbound Worker as v3.1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | README parse heuristic misses installable tools (false-negative)                     | Med        | Low      | Failure mode is bounce-out with R9 CTA — never wrong-answer, only missed-opportunity. Capture misses for v3.1 LLM upgrade evidence (runbook).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Smart Tiered Cache + R2 + custom-domain misconfig serves stale data                  | Low        | Med      | Content-addressed keys (`anc-version` + `tool-version`); stale-by-construction is impossible. Cache TTL 24 h + version-suffixed key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Two-phase egress race: `noHttp` not applied before `anc check` execs                 | Low        | Critical | Sequential `await` between the two `setOutboundHandler` calls. Integration test asserts the order by capturing the per-request `console.log` lines emitted by `allowedInstall` and `noHttp` handlers (the per-request observability is the reason for picking Pattern Y over Pattern X — see two-phase egress K-decision). Separate Risk row covers handler-map registration. Separate P1 backlog item covers in-flight TCP-stream kill semantics between phases.                                                                                                                                                                                                                                                                               |
-| User pastes a private repo → 404 surface unhelpful                                   | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc check .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Two-phase egress race: `noHttp` not applied before `anc audit` execs                 | Low        | Critical | Sequential `await` between the two `setOutboundHandler` calls. Integration test asserts the order by capturing the per-request `console.log` lines emitted by `allowedInstall` and `noHttp` handlers (the per-request observability is the reason for picking Pattern Y over Pattern X — see two-phase egress K-decision). Separate Risk row covers handler-map registration. Separate P1 backlog item covers in-flight TCP-stream kill semantics between phases.                                                                                                                                                                                                                                                                               |
+| User pastes a private repo → 404 surface unhelpful                                   | Med        | Low      | Friendly 404: "anc.dev only scores public repos. Run `anc audit .` locally for private code."                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Discovery chain timeouts cascade and block the whole request                         | Low        | Med      | Each step bounded ≤2 s; total ≤8 s. After 8 s: bounce out with R9 CTA. Surface this as a "took too long to find an installable binary" message, not a generic 500.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Worker bundle size growth                                                            | Low        | Low      | Pre-push `wrangler deploy --dry-run` already prints the upload size on every push. Current bundle: 237 KiB / 28 KiB gzipped (measured 2026-05-05, before U5-U8). Realistic projection after live-scoring code + Workers-side `@cloudflare/sandbox` helpers: ~487 KiB. Headroom: 2x on free tier (1 MiB), 21x on paid (10 MiB). Any 5x regression would be obvious in commit output; no CI gate needed unless trend changes. If a single unit ever pushes total over 800 KiB, treat as a refactor smell.                                                                                                                                                                                                                                         |
 | `audit_profile` from registry doesn't apply when scoring an unknown tool             | High       | Low      | Unknown tools get no `--audit-profile` flag; `anc` defaults to no profile (all checks). Document in runbook; add `audit_profile` to the discovery-chain output if we can infer it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

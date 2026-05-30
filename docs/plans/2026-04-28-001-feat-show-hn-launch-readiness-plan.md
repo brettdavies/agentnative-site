@@ -163,7 +163,7 @@ cut clean." The substantive remaining items split four ways:
    `release/<YYYY-MM-DD>-show-hn-cut` PR already includes everything on `dev`, so this gate clears automatically as long
    as the cherry-pick scope is "all of `dev`." Codified in the Pre-launch release PR checklist below.
 
-4. **Gate 11 — site-copy red-team pass.** Adversarial review of every visible string on `/`, `/p1`–`/p7`, `/check`,
+4. **Gate 11 — site-copy red-team pass.** Adversarial review of every visible string on `/`, `/p1`–`/p7`, `/audit`,
    `/about`, `/methodology`, `/scorecards`, `/score/<tool>`, `/install`, plus the OG image text and footer. Spec-side
    already shipped via PR #13 (`ca1e4f6` on spec `dev`). Site-side is the remaining slice. Catches "but the spec
    contradicts itself at X" comments BEFORE they land on the public HN thread.
@@ -277,7 +277,7 @@ commits. Two specific must-include items:
   **Out of scope for this launch.** Stays active through launch.
 - `docs/plans/2026-04-23-002-feat-badge-surface-plan.md` — `status: active`. Cross-repo badge surface; site-side units
   U3–U7 shipped on `dev` 2026-04-29 evening (PRs #49, #50, #51). Rides the `release/<YYYY-MM-DD>-show-hn-cut`
-  cherry-pick automatically. Surface #4 (spec `docs/badge.md`) and surface #5 (CLI `anc check` post-pass hint,
+  cherry-pick automatically. Surface #4 (spec `docs/badge.md`) and surface #5 (CLI `anc audit` post-pass hint,
   `agentnative-cli` todo #017) are deferred post-launch. Plan stays active through launch and flips to `complete` at the
   post-launch retro.
 
@@ -439,7 +439,7 @@ tiers), and pick the right mix of batch-scoring vs. fallback rows.
 - Categorize the gap by tier (workhorse / agent / notable). Per `feedback_no_soft_fail_gates.md`: do NOT ship a silent
   gap — every missing scorecard surfaces in some form.
 - Decide between:
-- **(a) Full batch-scoring pass** — run `anc check` against every binary in the registry, regenerate scorecards.
+- **(a) Full batch-scoring pass** — run `anc audit` against every binary in the registry, regenerate scorecards.
   Plausible if the gap is small (<10 entries) and all binaries are installable on the dev machine.
 - **(b) Fallback-row-only** — render every registry entry, skipped entries get a `skipped` badge with a one-line reason.
   No scorecard regeneration.
@@ -541,7 +541,7 @@ overclaiming," or "the spec contradicts itself at Y" comments land in the public
 - Modify: `content/_intro.md` — homepage hero + lede.
 - Modify: `content/principles/p[1-7]-*.md` — each principle's prose. (Adversarial review covers Definition / Why /
   Evidence / Anti-Patterns sections; Requirements section stays untouched per the locked principle-page shape.)
-- Modify: `content/check.md` — `/check` page copy.
+- Modify: `content/audit.md` — `/audit` page copy.
 - Modify: `content/methodology.md` — methodology page.
 - Modify: `content/about.md` — about page.
 - Modify: `src/build/skill.mjs` (if needed) — `buildSkillMarkdown` prose template (trust-model paragraph, programmatic
@@ -555,7 +555,7 @@ overclaiming," or "the spec contradicts itself at Y" comments land in the public
 
 - Dispatch `compound-engineering:ce-adversarial-document-reviewer` in parallel across the 7 principle files (mirrors
   spec-side PR #13's pattern).
-- For non-principle pages (`/check`, `/about`, `/methodology`, `/install`), single-pass adversarial review without
+- For non-principle pages (`/audit`, `/about`, `/methodology`, `/install`), single-pass adversarial review without
   parallel dispatch — they're shorter and have less internal cross-reference.
 - Apply prose edits inline that pass the "would I defend this in an HN comment?" test.
 - Capture deferred edits (registry-affecting changes, larger restructure) as `[later]` notes for a post-launch v0.2.0
@@ -831,7 +831,7 @@ All `applied` items shipped via PR #48 (`feat/red-team-pass-launch-content`, squ
 
 - **Site-spec drift caught up.** P5 Definition + Why and P7 Why-Agents-Need-It paragraphs ported from spec PR #13's
   resolved wording (`agentnative` `ca1e4f6`, never propagated to site since no sync-spec mechanism is wired yet).
-- **Check-ID truthing across all 7 principle pages.** Every "Measured by check IDs" trailer verified against
+- **Check-ID truthing across all 7 principle pages.** Every "Measured by audit IDs" trailer verified against
   `scorecards/*.json` and rewritten. Real ship-set:
 - P1: `p1-non-interactive`, `p1-flag-existence`, `p1-env-hints`
 - P2: `p2-json-output` only
@@ -840,9 +840,9 @@ All `applied` items shipped via PR #48 (`feat/red-team-pass-launch-content`, squ
 - P5: none ship; trailer now says so
 - P6: `p6-sigpipe`, `p6-no-color-behavioral`, `p6-no-pager-behavioral`
 - P7: `p7-quiet` only
-- **Fake check IDs in `/check.md` example output** (`p3-after-help`, `p4-process-exit`, `p1-non-interactive-source`)
+- **Fake audit IDs in `/audit.md` example output** (`p3-after-help`, `p4-process-exit`, `p1-non-interactive-source`)
   replaced with real ones; "Rust today" → "Rust and Python today".
-- **Binary-name standardization:** `agentnative` → `anc` across `/check`, `/install`, `_intro`, with one-line "(`anc`
+- **Binary-name standardization:** `agentnative` → `anc` across `/audit`, `/install`, `_intro`, with one-line "(`anc`
   and `agentnative` are aliases)" callout where the longer form survives.
 - **`/install` platform coverage corrected** to actual reality (Apple Silicon macOS 14/15 + x86_64 Linux bottles only;
   Intel Mac and arm64 Linux compile from source). "Signed bottles" claim removed — Homebrew uses SHA256 integrity
@@ -870,7 +870,7 @@ All `applied` items shipped via PR #48 (`feat/red-team-pass-launch-content`, squ
   softened to "tens of thousands"; "high-signal" defined explicitly in Definition; "falsey-value parser" clap-jargon
   replaced with explicit override semantics.
 - **`_intro.md`**: "shells out to a binary" → "frequently shells out … the lowest-common-denominator interface where
-  APIs don't exist or don't compose"; "every popular CLI tool" → "100 widely-used CLI tools"; example check IDs in
+  APIs don't exist or don't compose"; "every popular CLI tool" → "100 widely-used CLI tools"; example audit IDs in
   trailer text (`p1-non-interactive`, `p2-json-output`, `p6-sigpipe`) updated to real ones.
 - **`about.md`**: new `## Provenance` section ("authored and maintained in the open by Brett Davies … pressure-tested in
   public, not a ratified industry standard"); new `## Prior art` section citing **clig.dev**, **12factor.net**, **IETF

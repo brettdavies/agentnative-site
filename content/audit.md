@@ -1,7 +1,7 @@
-# Check your CLI
+# Audit your CLI
 
 `anc` is the reference linter for this standard. It scores any CLI tool against the eight principles and tells you, by
-check ID, where it passes and where it falls short.
+audit ID, where it passes and where it falls short.
 
 ## Install
 
@@ -12,16 +12,16 @@ this page is what to do with it.
 
 ```bash
 # Against the current project (cargo workspace, binary, or source tree)
-anc check .
+anc audit .
 
 # Against a compiled binary directly
-anc check ./target/release/mycli
+anc audit ./target/release/mycli
 
 # Agent-friendly output
-anc check . --output json
+anc audit . --output json
 
 # Narrow to one principle
-anc check . --principle 3
+anc audit . --principle 3
 ```
 
 ## Read the output
@@ -46,10 +46,10 @@ P7 — Bounded, High-Signal Responses
   [PASS] Has --quiet flag (p7-quiet)
 ```
 
-Each line ends with a stable check ID (`p1-non-interactive`, `p2-json-output`, `p6-sigpipe`, etc.). Cite those IDs in
+Each line ends with a stable audit ID (`p1-non-interactive`, `p2-json-output`, `p6-sigpipe`, etc.). Cite those IDs in
 issues, commits, and agent output; they do not change between versions.
 
-## Three check layers
+## Three audit layers
 
 - **Behavioral**: runs your compiled binary and inspects `--help`, `--version`, `--output json`, SIGPIPE, NO_COLOR, and
   exit codes. Language-agnostic.
@@ -65,13 +65,13 @@ the default, which is "run everything."
 
 A `[PASS]` is a requirement met, not a compliment. A `[WARN]` is a SHOULD the tool doesn't satisfy; ignoring it is a
 choice, not a bug. A `[FAIL]` is a MUST the tool doesn't satisfy; agents will hit the edge it describes, and the tool
-will surprise them. Nothing here is a vanity metric — the checks map one-to-one to the requirements on the
+will surprise them. Nothing here is a vanity metric — the audits map one-to-one to the requirements on the
 [principles page](/).
 
 ## See how widely-used CLIs score
 
-The [**ANC 100 leaderboard**](/scorecards) is what running `anc check` produces at scale: every popular CLI tool, scored
-against the same eight principles, with full per-check evidence under `/score/<name>`. The scoring rules are documented
+The [**ANC 100 leaderboard**](/scorecards) is what running `anc audit` produces at scale: every popular CLI tool, scored
+against the same eight principles, with full per-audit evidence under `/score/<name>`. The scoring rules are documented
 on the [methodology page](/methodology); the underlying JSON schema is enumerated at
 [/scorecard-schema](/scorecard-schema).
 

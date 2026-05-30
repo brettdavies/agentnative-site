@@ -338,13 +338,13 @@ root alongside their `.md` twins):
 | Request path | Resolution                                                     |
 | ------------ | -------------------------------------------------------------- |
 | `/p3`        | 200 → serves `dist/p3.html`                                    |
-| `/check`     | 200 → serves `dist/check.html`                                 |
+| `/audit`     | 200 → serves `dist/audit.html`                                 |
 | `/about`     | 200 → serves `dist/about.html`                                 |
-| `/check/`    | 307 → redirects to `/check`                                    |
+| `/audit/`    | 307 → redirects to `/audit`                                    |
 | `/p3.html`   | 307 → redirects to `/p3`                                       |
 | `/p3.md`     | 200 → serves `dist/p3.md` (no html_handling applies; not HTML) |
 
-Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/check`,
+Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/audit`,
 `/about`). No `check/index.html` / `about/index.html` asymmetry.
 
 **`llms-full.txt` per-section format (A5).** Each section (`_intro`, p1…p7, `check`, `about`) is emitted in this exact
@@ -402,7 +402,7 @@ await writeHtml("dist/index.html", indexHtml);
 await writeFile("dist/index.md", concat("content/_intro.md", ...principles));
 
 await writeFile("dist/llms.txt",      buildLlmsIndex(principles));
-await writeFile("dist/llms-full.txt", buildLlmsFull(principles, "content/check.md", "content/about.md"));
+await writeFile("dist/llms-full.txt", buildLlmsFull(principles, "content/audit.md", "content/about.md"));
 await writeFile("dist/sitemap.xml",   buildSitemap([...principles, "check", "about"]));
 ```
 
@@ -541,7 +541,7 @@ future edit can't accidentally re-create it.
 `/install` is the canonical home for the brew/cargo install lines. Three places that previously inlined those commands
 now link here instead:
 
-- `content/check.md`'s `## Install` section — collapsed to a one-line link to `/install`.
+- `content/audit.md`'s `## Install` section — collapsed to a one-line link to `/install`.
 - `src/build/build.mjs`'s leaderboard methodology HTML — links to `/install` instead of inlining brew/cargo.
 - `src/build/scorecards-render.mjs`'s per-tool scorecard CTA — links to `/install` instead of inlining brew.
 
@@ -1045,7 +1045,7 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - `<article>` at `max-inline-size: 68ch`, horizontally centered.
 - Page padding: `--space-5` mobile, `--space-7` desktop.
 - **Header (Terse package)**: wordmark `agentnative` on the left in Uncut Sans Semibold; no link (already on the
-  homepage, so clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/check`, `/about`,
+  homepage, so clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/audit`, `/about`,
   `llms.txt`. The `llms.txt` link carries `title="Machine-readable index for AI agents"` for hover context. No nav tree,
   no version pill, no search. Header is one line tall; does not duplicate the mini-TOC's role.
 - **Footer (Terse package)**: a single line. `v0.1 · 2026-04-14 · source on GitHub`. Separator is a middot (`·`) with
@@ -1054,7 +1054,7 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - **Mini-TOC ships on desktop ≥ 1100px** (resolving open question 5.2). Sticky right-rail `<aside>` in a 2-column grid
   with the article. Lists the 7 principle anchors. Collapses to an inline `<nav>` at the top of the article below
   1100px. Always visible in one form or the other.
-- `/check` and `/about` use the same header + footer chrome, minus the mini-TOC.
+- `/audit` and `/about` use the same header + footer chrome, minus the mini-TOC.
 
 ### 4.12 Accessibility baseline
 

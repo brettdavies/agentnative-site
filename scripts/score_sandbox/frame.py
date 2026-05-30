@@ -34,11 +34,11 @@ def profile(rows: list[dict]) -> dict[str, int]:
 
 
 def long_frame(cards: dict[str, list[dict]]) -> pl.DataFrame:
-    """One row per check per tool: slug, check_id, status, layer, tier."""
+    """One row per audit per tool: slug, audit_id, status, layer, tier."""
     rows = [
         {
             "slug": slug,
-            "check_id": r.get("id", ""),
+            "audit_id": r.get("id", ""),
             "status": r["status"],
             "layer": r.get("layer", ""),
             "tier": r.get("tier") or "must",

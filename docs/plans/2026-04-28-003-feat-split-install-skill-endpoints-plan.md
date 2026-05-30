@@ -47,11 +47,11 @@ triple-emit pattern and what made the split clean. Not yet written; track as a P
 ## Overview
 
 The current `/install` triple-emit (HTML + JSON + MD) serves the **skill distribution** surface — the agent-native-cli
-skill bundle. The CLI tool itself has no dedicated install URL; its install commands live inside `/check`'s prose. This
+skill bundle. The CLI tool itself has no dedicated install URL; its install commands live inside `/audit`'s prose. This
 plan splits the surface so each artefact has a focused home:
 
 - **`/install`** becomes the agentnative **CLI** install page. HTML + markdown twin only — no `/install.json`. Built
-  from a new `content/install.md` extracted from the install section currently embedded in `content/check.md`.
+  from a new `content/install.md` extracted from the install section currently embedded in `content/audit.md`.
 - **`/skill`** becomes the **skill** distribution endpoint. Direct migration of today's `/install` triple-emit:
   `/skill.html` + `/skill.json` + `/skill.md`. Same data, same renderer, new URL prefix.
 
@@ -72,7 +72,7 @@ bundle), so a user searching for the CLI install command lands somewhere that ta
 
 Meanwhile the CLI's install copy is duplicated in three places:
 
-- `content/check.md` lines 6–13 (canonical authored copy).
+- `content/audit.md` lines 6–13 (canonical authored copy).
 - `src/build/build.mjs` lines 260–269 (inline HTML in the leaderboard's "reproduce a row locally" block).
 - `src/build/scorecards-render.mjs` lines 412, 422 (per-tool scorecard repro command + cargo install hint).
 
@@ -161,7 +161,7 @@ manifest gets its own honest URL at `/skill`.
 - `src/build/build.mjs:260–269` — leaderboard "reproduce locally" block.
 - `src/build/scorecards-render.mjs:412` — `reproCommand` for per-tool scorecard pages.
 - `src/build/scorecards-render.mjs:422` — "Cargo install" hint.
-- `content/check.md:6–13` — canonical authored copy.
+- `content/audit.md:6–13` — canonical authored copy.
 
 ### Institutional Learnings
 
@@ -217,7 +217,7 @@ External research skipped (per Phase 1.2 decision). The `/install` triple-emit p
 - **Field rename `install_page_html` → `skill_page_html`** in `src/data/skill.json`: pre-launch hard cut, schema_version
   stays at `1`. Renames the field for honesty without burdening any consumer with a parsing change beyond the
   already-required URL flip.
-- **STAR-compliant install copy via dedup**: harvest `content/check.md:6–13` to a new `content/install.md`. Update
+- **STAR-compliant install copy via dedup**: harvest `content/audit.md:6–13` to a new `content/install.md`. Update
   `check.md` to link to `/install`. Refactor inline install HTML in `src/build/build.mjs:260–269` and
   `src/build/scorecards-render.mjs:412,422` to link to `/install` instead of repeating the brew/cargo lines. Three
   duplications collapse to one source.
@@ -235,7 +235,7 @@ External research skipped (per Phase 1.2 decision). The `/install` triple-emit p
 - **Backward compat (Q2)**: hard cut, pre-launch, no communication needed. → Locked.
 - **URL granularity (Q3)**: singular `/skill`, not `/skill/<name>`. → Locked.
 - **Where does the CLI install copy live?**: a new `content/install.md` (Option 1 from research). The `## Install`
-  section in `content/check.md` shrinks to a one-line link to `/install`. Inline duplications in `src/build/build.mjs`
+  section in `content/audit.md` shrinks to a one-line link to `/install`. Inline duplications in `src/build/build.mjs`
   and `src/build/scorecards-render.mjs` flip to links.
 - **Field rename `install_page_html` → `skill_page_html`**: yes, take the rename — pre-launch, no consumer parsing
   beyond the producer-repo README which is co-edited.
@@ -244,9 +244,9 @@ External research skipped (per Phase 1.2 decision). The `/install` triple-emit p
 ### Deferred to Implementation
 
 - **Exact wording of the new `content/install.md` body beyond the brew/cargo commands**: copy currently lives at
-  `content/check.md:6–13` and is six lines. The implementer may extend with a one-paragraph intro framing what
-  `agentnative` is, mirroring the voice of `/check`'s opening paragraph. The plan does not pre-write the prose.
-- **Whether `content/check.md` retains a one-line link to `/install` or removes the section entirely**: the implementer
+  `content/audit.md:6–13` and is six lines. The implementer may extend with a one-paragraph intro framing what
+  `agentnative` is, mirroring the voice of `/audit`'s opening paragraph. The plan does not pre-write the prose.
+- **Whether `content/audit.md` retains a one-line link to `/install` or removes the section entirely**: the implementer
   decides at the moment of edit based on whether the surrounding `## Run it` section reads naturally without the `##
   Install` predecessor. Both outcomes satisfy R1.
 - **Whether to extract a small helper in `src/build/scorecards-render.mjs`** for the now-link-only repro hint: at most a
@@ -261,7 +261,7 @@ External research skipped (per Phase 1.2 decision). The `/install` triple-emit p
                             BEFORE                                         AFTER
                             ──────                                         ─────
 
-content/check.md ──┬── /check.html                       content/check.md ── /check.html
+content/audit.md ──┬── /audit.html                       content/audit.md ── /audit.html
                    │                                                            │
                    └── (inline) brew + cargo                                    └── link → /install
                                                          content/install.md ── /install.html
@@ -397,7 +397,7 @@ flipped, Worker comments refreshed. End state: `/skill.{html,json,md}` serves th
 - [x] **Unit 2: New `/install` (CLI) page; collapse three duplicate install copies**
 
 **Goal:** Stand up the CLI install page at `/install` (HTML + MD only — no JSON). Harvest the install copy from
-`content/check.md` to a new `content/install.md` source. Refactor the two inline-duplicated install blocks (in
+`content/audit.md` to a new `content/install.md` source. Refactor the two inline-duplicated install blocks (in
 `src/build/build.mjs` and `src/build/scorecards-render.mjs`) to link to `/install` instead of restating the commands.
 Add `/install` to primary nav, sitemap, and llms.txt.
 
@@ -408,10 +408,10 @@ building Unit 2 on top of Unit 1's tree avoids merge conflicts in `src/build/bui
 
 **Files:**
 
-- Create: `content/install.md`. Body harvested from `content/check.md:6–13` (the `## Install` section). Add a short
+- Create: `content/install.md`. Body harvested from `content/audit.md:6–13` (the `## Install` section). Add a short
   intro paragraph framing what `agentnative` is and why a user would install it. Link out to the principles spec (`/`)
-  and to `/check` ("once installed, here's how to use it").
-- Modify: `content/check.md`. Lines 6–13 (`## Install` section) shrink to a single sentence + link to `/install` (or are
+  and to `/audit` ("once installed, here's how to use it").
+- Modify: `content/audit.md`. Lines 6–13 (`## Install` section) shrink to a single sentence + link to `/install` (or are
   removed entirely if the surrounding `## Run it` reads naturally without the predecessor — implementer's call). Keep
   the canonical authored copy in one place: `content/install.md`.
 - Modify: `src/build/build.mjs`. Add `{ name: 'install', path: join(CONTENT_DIR, 'install.md') }` to the `subPages`
@@ -419,10 +419,10 @@ building Unit 2 on top of Unit 1's tree avoids merge conflicts in `src/build/bui
   `methodology` and `scorecard-schema` — no new emitter needed.
 - Modify: `src/build/build.mjs`. Lines 260–269 (the leaderboard's "reproduce locally" inline HTML block): replace the
   `<pre><code>brew install …</code></pre>` and the `cargo install` paragraph with a one-line link: "To reproduce any row
-  locally, install `anc` ([see /install](/install)) and run `anc check <binary>`."
+  locally, install `anc` ([see /install](/install)) and run `anc audit <binary>`."
 - Modify: `src/build/scorecards-render.mjs`. Lines 412 (`reproCommand` template literal) and 422 (Cargo install hint):
   replace the inline command construction with text that points readers to `/install`. The reproduction hint becomes
-  "Install `anc` (see [/install](/install)) and run `anc check <binary>` (with `--audit-profile <category>` if
+  "Install `anc` (see [/install](/install)) and run `anc audit <binary>` (with `--audit-profile <category>` if
   applicable)." Same change applied to the markdown-twin equivalent at line 506.
 - Modify: `src/build/build.mjs`. Sitemap `extraPaths` (line 415) adds `/install` alongside `/skill`. Both are
   human-indexable; both belong in the sitemap.
@@ -434,7 +434,7 @@ building Unit 2 on top of Unit 1's tree avoids merge conflicts in `src/build/bui
   re-introduces an `installLinks` (or equivalent) for the CLI surface — see "Decision deferred to implementation" note
   below.
 - Modify: `src/build/shell.mjs`. Lines 146–152 (primary nav): add `<a href="/install">Install</a>` between `<a
-  href="/scorecards">Leaderboard</a>` and `<a href="/check">Check your CLI</a>`. Order rationale: launch flow is "see
+  href="/scorecards">Leaderboard</a>` and `<a href="/check">Audit your CLI</a>`. Order rationale: launch flow is "see
   the leaderboard → install the CLI → check your own."
 - Modify: `content/_intro.md`. Add a short callout paragraph linking to `/install` for readers who want to install
   agentnative locally (parallel to the existing skill bundle reference, which points to `/skill` after Unit 1).
@@ -458,7 +458,7 @@ building Unit 2 on top of Unit 1's tree avoids merge conflicts in `src/build/bui
   frontmatter).
 - Pattern reference: PR #42 (`feat(nav): expose leaderboard + methodology + scorecard-schema in nav and body`) for the
   primary-nav addition pattern. Follow the same ordering rationale (launch-relevance leads).
-- Pattern reference: `content/check.md:6–13` for the canonical authored install copy that becomes the seed for
+- Pattern reference: `content/audit.md:6–13` for the canonical authored install copy that becomes the seed for
   `content/install.md`.
 
 **Test scenarios:**
@@ -476,7 +476,7 @@ building Unit 2 on top of Unit 1's tree avoids merge conflicts in `src/build/bui
   scorecard, the leaderboard) shows `Install` in the primary nav.
 - *Regression* — `src/build/scorecards-render.mjs:412,422,506` no longer hard-codes `brew install
   brettdavies/tap/agentnative`. The repro hint is a link to `/install`. Same for `src/build/build.mjs:260–269`.
-- *Regression* — `content/check.md` no longer contains the brew/cargo command lines (or contains only a single link to
+- *Regression* — `content/audit.md` no longer contains the brew/cargo command lines (or contains only a single link to
   `/install`). The canonical copy lives in one place.
 - *Worker handler test* — `GET /install` returns HTML; `GET /install.md` returns markdown twin; `GET /install.json`
   returns 404.
@@ -522,7 +522,7 @@ live site).
   its content source (`content/install.md`), and its non-JSON shape (HTML + MD only).
 - Modify: `docs/VOICE.md`. Lines 126–134 (Surface-Specific Notes): heading `### /install and /install.json` → `###
   /skill and /skill.json`. Update body to reflect new URL. **Add a new register entry** for `/install` (CLI install
-  page) — register: imperative voice, parallel to `/check`. The new entry can be brief.
+  page) — register: imperative voice, parallel to `/audit`. The new entry can be brief.
 - Modify: `content/_intro.md`. Replace any reference to `anc.dev/install` (skill installer) with `anc.dev/skill`.
   Already partly done in Unit 2 (the new CLI `/install` callout) — Unit 3 finishes the skill-side flip if the intro
   currently mentions the skill bundle install URL.
@@ -625,7 +625,7 @@ live site).
 - `src/build/install.mjs`, `src/data/install.json`, `src/build/build.mjs` (step 8c), `src/build/llms.mjs`,
   `src/worker/headers.ts`, `src/worker/index.ts`, `tests/regression.test.ts`, `tests/build.test.ts`,
   `tests/worker.test.ts`, `tests/e2e/install.e2e.ts`, `playwright.config.ts`.
-- **Related docs:** `README.md`, `AGENTS.md`, `RELEASES.md`, `docs/DESIGN.md` §3.9, `docs/VOICE.md`, `content/check.md`,
+- **Related docs:** `README.md`, `AGENTS.md`, `RELEASES.md`, `docs/DESIGN.md` §3.9, `docs/VOICE.md`, `content/audit.md`,
   `content/_intro.md`, `.github/workflows/skill-availability.yml`.
 - **Institutional learnings:**
 - `docs/solutions/architecture-patterns/agent-native-documentation-surface-2026-04-13.md`

@@ -95,7 +95,7 @@
 import type { Container } from '@cloudflare/containers';
 import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
-import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
+import { AUDITOR_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import * as cache from './cache';
 import type { ResolvedStep } from './discover-binary';
@@ -202,7 +202,7 @@ export function _resetIndexCache(): void {
 // flags so operators can later query "what percentage of cache hits came
 // from pre vs post discovery?" via the observability binding. NOT exposed
 // in the response body — operational signal, not part of the
-// spec_version + anc_version + checker_url response contract.
+// spec_version + anc_version + auditor_url response contract.
 //
 // `tier` records the resolution branch that produced the response:
 //   - `curated`     — registry-fast-path hit
@@ -230,7 +230,7 @@ type Telemetry = {
   freshness: FreshnessTag | null;
   resolved_step: ResolvedStep | 'registry' | null;
   install_ms: number | null;
-  anc_check_ms: number | null;
+  anc_audit_ms: number | null;
 };
 
 function newTelemetry(): Telemetry {
@@ -246,7 +246,7 @@ function newTelemetry(): Telemetry {
     freshness: null,
     resolved_step: null,
     install_ms: null,
-    anc_check_ms: null,
+    anc_audit_ms: null,
   };
 }
 
@@ -284,7 +284,7 @@ function buildScoreEventFields(t: Telemetry, totalMs: number, status: number): S
     resolved_step: t.resolved_step,
     total_ms: totalMs,
     install_ms: t.install_ms,
-    anc_check_ms: t.anc_check_ms,
+    anc_audit_ms: t.anc_audit_ms,
     response_status: status,
     tool: t.binary,
   };
@@ -764,7 +764,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
     telemetry.tier = 'live';
     telemetry.freshness = 'live';
     telemetry.install_ms = typeof doPayload.install_ms === 'number' ? doPayload.install_ms : null;
-    telemetry.anc_check_ms = typeof doPayload.anc_check_ms === 'number' ? doPayload.anc_check_ms : null;
+    telemetry.anc_audit_ms = typeof doPayload.anc_audit_ms === 'number' ? doPayload.anc_audit_ms : null;
     // Post-discovery share URL — same derivation as the cache_post tier:
     // spec.binary IS the cache key the DO just wrote under, so the share
     // URL and the R2 entry stay in lockstep. github-url-without-hint
@@ -780,7 +780,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
 
   // DO returned 2xx but with an unrecognized envelope shape. Fail loud
   // rather than synthesize a partial success — better an honest 500
-  // than a response missing the spec_version / anc_version / checker_url
+  // than a response missing the spec_version / anc_version / auditor_url
   // triad.
   telemetry.tier = 'error_incomplete_response_contract';
   return shapeWithPreference(
@@ -874,7 +874,7 @@ function markdownHeaders(base: Headers): Headers {
 function renderJsonAsMarkdown(payload: Record<string, unknown>): string {
   const triad = [
     `**spec_version:** ${String(payload.spec_version ?? 'unknown')}`,
-    `**checker_url:** ${String(payload.checker_url ?? CHECKER_URL)}`,
+    `**auditor_url:** ${String(payload.auditor_url ?? AUDITOR_URL)}`,
   ];
   if (payload.error) {
     const err = payload.error as { code: string; details?: string; cta_text?: string };
@@ -921,13 +921,13 @@ function isStubError(payload: unknown): boolean {
 //
 // The handler narrows on the envelope shape, then maps DO error codes to
 // user-facing ScoreError variants. Codes the DO knows about but the user
-// envelope doesn't (anc_check_failed, anc_version_unreadable) collapse to
+// envelope doesn't (anc_audit_failed, anc_version_unreadable) collapse to
 // incomplete_response_contract so the hard-gate semantics on the
 // response triad hold.
 
 function isDoSuccess(
   payload: unknown,
-): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_check_ms?: number } {
+): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_audit_ms?: number } {
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return 'scorecard' in obj && typeof obj.anc_version === 'string';
@@ -1003,10 +1003,10 @@ function mapDoError(payload: { error: string; details?: string }): Response {
     case 'timeout':
       // DO doesn't differentiate install-phase vs score-phase timeout
       // (the 60 s budget covers both). Defaulting to 'score' matches the
-      // common case: install completes quickly, anc check is the long pole.
+      // common case: install completes quickly, anc audit is the long pole.
       return shapeScoreError({ code: 'timeout', phase: 'score', cta_text: CTA_INSTALL_ANC });
     default:
-      // anc_check_failed / anc_version_unreadable / setOutboundHandler
+      // anc_audit_failed / anc_version_unreadable / setOutboundHandler
       // failures land here. If we can't deliver scorecard + anc_version,
       // surface the contract gap loudly rather than synthesize a partial:
       // a missing-field response shape would leak into the cache and

@@ -74,7 +74,7 @@ function buildLiveScoreSection() {
     <div class="live-score__content">
       <h2 id="live-score-heading" class="live-score__title">Score a binary, live.</h2>
       <p class="live-score__lede">
-        <a href="/install">Install <code>anc</code> locally</a> for source + project depth. The demo here is binary and behavioral checks only.
+        <a href="/install">Install <code>anc</code> locally</a> for source + project depth. The demo here is binary and behavioral audits only.
       </p>
       <form class="live-score__form" method="post" action="/api/score" novalidate data-live-score-form>
         <div class="live-score__input-row">

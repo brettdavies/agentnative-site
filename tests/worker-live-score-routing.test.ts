@@ -148,8 +148,8 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: 'should-not-leak' });
     // A non-homepage asset that doesn't carry the placeholder shouldn't
     // be rewritten — the substitution path is scoped to / and /index.html.
-    const res = await worker.fetch(new Request('https://anc.dev/check'), env);
-    // ASSETS returns 404 in this stub (no /check.html fixture), so just
+    const res = await worker.fetch(new Request('https://anc.dev/audit'), env);
+    // ASSETS returns 404 in this stub (no /audit.html fixture), so just
     // confirm the path didn't blow up.
     expect(res.status).toBeLessThan(500);
   });

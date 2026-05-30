@@ -20,7 +20,7 @@
 
 import {
   extractTopIssues,
-  formatCheckTableMarkdownLines,
+  formatAuditTableMarkdownLines,
   groupToPrincipleNum,
   escHtml as sharedEscHtml,
 } from '../../shared/scorecard-format.mjs';
@@ -161,7 +161,7 @@ ${issues
 ${issuesBlock}
 <section class="live-score-summary__cta">
   <h2>Get the full picture locally</h2>
-  <p>This is a binary/behavioral summary. <a href="/install">Install <code>anc</code></a> and run <code>anc check .</code> in your project for source-level and project-level checks too.</p>
+  <p>This is a binary/behavioral summary. <a href="/install">Install <code>anc</code></a> and run <code>anc audit .</code> in your project for source-level and project-level audits too.</p>
   <p class="live-score-summary__cta-aside">Re-score this tool from a fresh paste on the <a href="/">homepage</a>, or browse the curated <a href="/scorecards">leaderboard</a>.</p>
 </section>`;
 }
@@ -202,7 +202,7 @@ export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
     // Absolute baseUrl because /score/live/<binary>.md is consumed by
     // agents via Accept negotiation and must self-resolve cross-origin
     // (no absolutifyMarkdownLinks pass like the static .md twins get).
-    for (const row of formatCheckTableMarkdownLines(issues, { baseUrl: 'https://anc.dev' })) {
+    for (const row of formatAuditTableMarkdownLines(issues, { baseUrl: 'https://anc.dev' })) {
       lines.push(row);
     }
     lines.push('');
@@ -211,7 +211,7 @@ export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
   lines.push('## Get the full picture locally');
   lines.push('');
   lines.push(
-    'This is a binary/behavioral summary. [Install `anc`](https://anc.dev/install) and run `anc check .` in your project for source-level and project-level checks too.',
+    'This is a binary/behavioral summary. [Install `anc`](https://anc.dev/install) and run `anc audit .` in your project for source-level and project-level audits too.',
   );
   lines.push('');
   lines.push(
@@ -409,7 +409,7 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
       '',
       'Paste the tool name, install command, or GitHub URL on the [homepage](https://anc.dev/) to score it. Once it scores, the share URL works.',
       '',
-      `Or [install \`anc\`](https://anc.dev/install) and run \`anc check ${binary}\` locally.`,
+      `Or [install \`anc\`](https://anc.dev/install) and run \`anc audit ${binary}\` locally.`,
       '',
     ];
     return new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS });
@@ -422,11 +422,11 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
 <section class="live-score-summary__cta">
   <h2>Score it now</h2>
   <p>Paste the tool name, install command, or GitHub URL on the <a href="/">homepage</a> to score it. Once it scores, the share URL works.</p>
-  <p>Or <a href="/install">install <code>anc</code></a> and run <code>anc check ${esc(binary)}</code> locally.</p>
+  <p>Or <a href="/install">install <code>anc</code></a> and run <code>anc audit ${esc(binary)}</code> locally.</p>
 </section>`;
 
   const title = `Not yet scored — anc.dev`;
-  const description = `No cached live scorecard for ${binary}. Score it on the homepage or run anc check locally.`;
+  const description = `No cached live scorecard for ${binary}. Score it on the homepage or run anc audit locally.`;
   const canonicalPath = `/score/live/${binary}`;
 
   let template: string;

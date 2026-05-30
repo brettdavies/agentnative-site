@@ -32,14 +32,14 @@ docs/brainstorms/anc-100-audit-requirements.md)
 - R2. Three tiers: Workhorse (~60), Agent (~15), Notable (~25) with per-creator caps
 - R3. Registry is the single source of truth
 - R4. Pre-computed scorecards scored locally, committed to `scorecards/`
-- R5. Behavioral + project as primary score; source checks as bonus column
+- R5. Behavioral + project as primary score; source audits as bonus column
 - (R6–R9 are in the origin document under Live Scoring / Security — Plan 2 scope)
 - R10. `/scorecards` leaderboard page, sortable/filterable
 - R11. Per-tool pages at `/score/<tool-name>` with summary, top issues, principle links
 - R12. Content negotiation: HTML default, markdown via `.md` suffix or Accept header
 - R13. Scorecard data in `llms-full.txt`
 - R14. Shareable URLs at `/score/<tool-name>`
-- R15. Brett's tools (anc, bird, xr) scored identically (policy constraint — same `anc check` methodology, no code-level
+- R15. Brett's tools (anc, bird, xr) scored identically (policy constraint — same `anc audit` methodology, no code-level
   special-casing. Tier assignment is an editorial decision separate from scoring.)
 - R16. Methodology section on leaderboard page
 - R17. Check-to-principle links on scorecard pages
@@ -49,7 +49,7 @@ docs/brainstorms/anc-100-audit-requirements.md)
 
 - **Not in scope:** Live scoring via CF Sandbox (Plan 2, separate plan)
 - **Not in scope:** The actual scoring of 100 tools (manual process by Brett, not a code unit)
-- **Not in scope:** Expanding `anc` source checks to Go/Node
+- **Not in scope:** Expanding `anc` source audits to Go/Node
 - **Not in scope:** Version tracking / score diffs over time
 - **Not in scope:** Community submission flow (GitHub issue template) and re-score request process — future enhancement
   (origin R19, R20)
@@ -58,7 +58,7 @@ docs/brainstorms/anc-100-audit-requirements.md)
 
 - Live scorer container + Worker endpoint: Plan 2 (separate plan)
 - Compiling the definitive 100-tool list: manual curation task, prerequisite to this plan
-- Scoring all tools locally: manual `anc check` runs by Brett, prerequisite to this plan
+- Scoring all tools locally: manual `anc audit` runs by Brett, prerequisite to this plan
 
 ## Context & Research
 
@@ -108,8 +108,8 @@ Not needed — the codebase has strong local patterns for every aspect of this p
   separate "Code Quality" section below the principle summary on scorecard pages (per R5).
 - **escHtml extraction:** Move the duplicated HTML-escape function from `build.mjs` and `shell.mjs` into
   `src/build/util.mjs` as a shared export. `scorecards.mjs` imports it from there.
-- **Scorecard JSON schema matches `anc check --output json`:** The JSON files committed to `scorecards/` are the raw
-  output of `anc check`. No transformation or custom schema — what `anc` produces is what the build reads. This means
+- **Scorecard JSON schema matches `anc audit --output json`:** The JSON files committed to `scorecards/` are the raw
+  output of `anc audit`. No transformation or custom schema — what `anc` produces is what the build reads. This means
   the scorecard format is governed by the `anc` tool, not the site.
 - **Leaderboard is a hand-built HTML builder, not markdown-rendered:** The sortable/filterable table needs structured
   HTML (data attributes for sorting, tier/language filters). This follows the `buildHomepageBody()` pattern — a JS
@@ -148,8 +148,8 @@ Not needed — the codebase has strong local patterns for every aspect of this p
   excluded. Groups `"P1"`-`"P7"` map to principles; `"CodeQuality"`/`"ProjectStructure"` are bonus. See Key Technical
   Decisions.
 - **escHtml extraction:** Resolved in review. Move to `util.mjs` as shared export. See Unit 3.
-- **`anc check` invocation for pre-installed binaries:** Verified. `anc check --command gh --output json` resolves from
-  PATH and runs 8 behavioral checks. `anc check <dir> --source --output json` runs 22 source+project checks. Groups
+- **`anc audit` invocation for pre-installed binaries:** Verified. `anc audit --command gh --output json` resolves from
+  PATH and runs 8 behavioral audits. `anc audit <dir> --source --output json` runs 22 source+project audits. Groups
   serialize as `"P1"`-`"P7"`, `"CodeQuality"`, `"ProjectStructure"` (confirmed). For the scoring pipeline: use
   `--command <binary>` for behavioral, `--source` on the cloned repo for source+project, or default mode for all.
 
@@ -223,7 +223,7 @@ three tiers for build pipeline development.
 
 - [x] **Unit 2: Seed scorecard JSON files**
 
-**Goal:** Commit sample scorecard JSON files matching the `anc check --output json` format. These are the build-time
+**Goal:** Commit sample scorecard JSON files matching the `anc audit --output json` format. These are the build-time
 data inputs for the leaderboard and scorecard pages.
 
 **Requirements:** R4, R5
@@ -236,7 +236,7 @@ data inputs for the leaderboard and scorecard pages.
 
 **Approach:**
 
-- Run `anc check` against each seed tool locally and capture the JSON output
+- Run `anc audit` against each seed tool locally and capture the JSON output
 - If `anc` is not yet ready, create representative sample JSON matching the `Scorecard` struct from
   `~/dev/agentnative/src/scorecard.rs`: `{ results: [...], summary: { total, pass, warn, fail, skip, error } }`
 - Each result has: `id`, `label`, `group` (P1-P7/CodeQuality/ProjectStructure), `layer` (behavioral/source/project),
@@ -299,7 +299,7 @@ page generation. Pure functions for data loading/scoring; HTML builder functions
 - Happy path: `loadScorecards` reads JSON files, matches to registry entries by name
 - Happy path: `computeLeaderboard` sorts tools by descending pass rate
 - Happy path: `computePrincipleScore` maps `"P1"`-`"P7"` groups correctly, excludes `"CodeQuality"`/`"ProjectStructure"`
-- Happy path: `computeLayerScore` separates behavioral+project from source checks
+- Happy path: `computeLayerScore` separates behavioral+project from source audits
 - Edge case: tool in registry but no scorecard file → marked as "not yet scored", not an error
 - Edge case: scorecard JSON with all checks skipped → score is 0/(0) = 0, sorts to bottom (no NaN)
 - Edge case: empty registry → returns empty leaderboard, no crash
@@ -384,7 +384,7 @@ dependency — both extend the same build step in `build.mjs` and must not confl
 - For each scored tool, generate `dist/score/<tool-name>.html` and `dist/score/<tool-name>.md`
 - The HTML page contains: score badge ("N/7 principles met"), top 3 issues with severity and links to principle pages
   (`/p<N>`), full check results grouped by principle, tool metadata (repo link, language, version scored, audit date),
-  CTA ("Run `anc check .` locally for the full report")
+  CTA ("Run `anc audit .` locally for the full report")
 - Each failing check links to the relevant principle page: check group P3 → `/p3`
 - Constructive framing: "current state" language, fix guidance via principle links
 - Wrap in `emitShell()` per-tool
@@ -406,7 +406,7 @@ dependency — both extend the same build step in `build.mjs` and must not confl
 - Happy path: build produces `dist/score/gh.html` and `dist/score/gh.md` for a scored tool
 - Happy path: scorecard HTML links to principle pages (`/p1` through `/p7`) for each check group
 - Happy path: top issues section shows FAIL checks before WARN checks
-- Happy path: CTA contains `cargo install agentnative && anc check .`
+- Happy path: CTA contains `cargo install agentnative && anc audit .`
 - Integration: `/score/gh.md` is valid markdown with structured scorecard data
 - Edge case: tool with all checks passing → "7/7 principles met", no issues section
 
@@ -579,7 +579,7 @@ step, not the first.
 - **Error propagation:** Build failures in the scorecard step should fail the entire build (same as invariant checks). A
   missing scorecard JSON for a registry entry is a warning, not an error (tool is "not yet scored").
 - **State lifecycle risks:** None — all data is static and committed to git. No caching, no stale data. Re-scoring
-  requires re-running `anc check` locally and committing updated JSON.
+  requires re-running `anc audit` locally and committing updated JSON.
 - **API surface parity:** The content negotiation contract extends automatically to new pages — no changes needed. The
   `Link: rel="alternate"` header and `X-Llms-Txt` header are already applied to all responses by the Worker.
 - **Integration coverage:** E2E tests should verify that `/scorecards` and `/score/<tool-name>` serve both HTML and
@@ -591,7 +591,7 @@ step, not the first.
 
 | Risk | Mitigation |
 |------|------------|
-| `anc check --output json` format changes before launch | Pin to the schema from the `Scorecard` struct in `anc` v0.1. If format changes, the build module adapts — no site-wide impact. |
+| `anc audit --output json` format changes before launch | Pin to the schema from the `Scorecard` struct in `anc` v0.1. If format changes, the build module adapts — no site-wide impact. |
 | 100 tools × 2 files each = 200 new files in dist/ | CF static assets handles this fine. Sitemap stays under the 50,000 URL limit. Build time increase is negligible (JSON reads, string concatenation). |
 | Leaderboard table performance with 100 rows | 100 rows is trivial for any browser. Client-side sort/filter is fine without virtualization. |
 | llms-full.txt gets very large with 100 scorecard summaries | Include only the leaderboard summary in llms-full.txt, not all 100 individual scorecards. Keep the file focused. |
