@@ -10,10 +10,8 @@ feature branch → PR to dev (squash merge)
               → deploy.yml publishes to production (anc.dev)
 ```
 
-Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message.
-
-**Exception** for `docs/plans/`, `docs/brainstorms/`, `docs/solutions/`: commit directly to `dev` with `docs(plans):`
-(or similar) message. No feature branch, no PR. These paths never reach `main` (`guard-main-docs.yml`).
+Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message. The
+[dev-direct exception](#dev-direct-exception) below names the path categories that may be committed directly to `dev`.
 
 ## Branches
 
@@ -40,6 +38,18 @@ gh pr create --base dev --title "feat(scope): what changed"
 - **Commit style**: [Conventional Commits](https://www.conventionalcommits.org/).
 - **PR body**: follow `.github/pull_request_template.md`. See [§ PR body](#pr-body).
 - **PR body prose scrub**: see [§ Prose scrubbing](#prose-scrubbing).
+
+### Dev-direct exception
+
+Paths that live only on `dev` and never ship to `main` can be committed directly to `dev` without a feature branch or
+PR. The `guard-main-docs` workflow blocks them from `main` PRs regardless. The exception applies to:
+
+- Engineering docs: `docs/brainstorms/`, `docs/ideation/`, `docs/plans/`, `docs/research/`, `docs/reviews/`,
+  `docs/solutions/`, and anything under `.context/`.
+- Prose-check stack: `styles/`, `.vale.ini`, `scripts/prose-check.sh`.
+
+The standard feature → PR → squash-merge flow remains required for everything else, including consumer-facing markdown
+(README, AGENTS, CONTRIBUTING, the release runbook).
 
 ## PR body
 
