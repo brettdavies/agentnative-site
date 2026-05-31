@@ -417,12 +417,11 @@ registry maintainable and the policy in one place.
 
 **Repo:** `brettdavies/agentnative` (spec).
 
-**Status:** [shipped to dev only — NOT released]
-[PR brettdavies/agentnative#34](https://github.com/brettdavies/agentnative/pull/34) — 2026-05-21. Schema extension,
-propagation table, worked examples, and conditional-row migrations all landed. The standalone spec issue proposing the
-7-status taxonomy was dropped (the plan, PR #34, and `principles/AGENTS.md` together carry the proposal; a single-repo
-issue would be redundant). The `VERSION` bump is deferred to the release PR that closes out the taxonomy unit, not this
-feature PR.
+**Status:** [released — shipped in spec v0.5.0 on 2026-05-30 via PR brettdavies/agentnative#44 → `d5d4086`; see U7 step
+1] [PR brettdavies/agentnative#34](https://github.com/brettdavies/agentnative/pull/34) — 2026-05-21. Schema extension,
+propagation table, worked examples, and conditional-row migrations all landed on `dev`; the v0.5.0 release rolled them
+to `main` and tagged. The standalone spec issue proposing the 7-status taxonomy was dropped (the plan, PR #34, and
+`principles/AGENTS.md` together carry the proposal; a single-repo issue would be redundant).
 
 **Source location (where U1 lives today, as of 2026-05-26):**
 
@@ -459,14 +458,15 @@ consumers can drop `--ref` and return to the default-tag path.
   `p8-may-install-all`, `p8-may-bundle-update` (antecedent `p8-bundle-exists`). p8 prose re-expressed in "If X, then it
   MUST/MAY Y" construction. The remaining 18 `{if: <reason>}` rows across p1, p3, p4, p5, p6, p7 stay as-is until the
   CLI's verifier catalog grows to cover their prerequisites.
-- Deferred to release PR: Bump spec `VERSION` after the conditional re-expressions land.
+- [released] Spec `VERSION` bumped to `0.5.0` and `CHANGELOG.md` entry landed via PR brettdavies/agentnative#44 on
+  2026-05-30.
 
 **Acceptance:**
 
 - [met] `coverage-matrix.json` schema doc reflects the conditional shape.
 - [met] At least one principle's prose explicitly uses the if-X-then-MUST-Y construction (p8 across MUST + both MAYs; p2
   already read conditionally in context and stayed as-is).
-- Deferred to release PR: spec `VERSION` bumps; the change is in `CHANGELOG.md`.
+- [met] Spec `VERSION` bump and `CHANGELOG.md` entry shipped in v0.5.0 (PR #44).
 
 **Dependencies:** None; this is the foundation.
 
@@ -475,8 +475,8 @@ consumers can drop `--ref` and return to the default-tag path.
 **Status:** [shipped to dev only — NOT released]
 [PR brettdavies/agentnative-cli#62](https://github.com/brettdavies/agentnative-cli/pull/62) — squash-merged to
 `agentnative-cli` `dev` at `3839696`. 7-status emission, per-row results, antecedent propagation, and the schema 0.6
-bump all landed. The CHANGELOG entry, `Cargo.toml` bump, and tag publish are deferred to the release PR that closes out
-U2 (same pattern as U1's spec `VERSION`).
+bump all landed. The CHANGELOG entry, `Cargo.toml` bump, and tag publish are deferred to the cli release PR (U7 step 2)
+that closes out U2 + U3b together.
 
 **Repo:** `brettdavies/agentnative-cli`.
 
@@ -485,8 +485,8 @@ U2 (same pattern as U1's spec `VERSION`).
 - `dev`: contains U2 at squash commit `3839696`. `SCHEMA_VERSION` reads `0.6`.
 - `main`: does NOT contain U2.
 - Tags: latest is `v0.4.0`; no `v0.5.0` or `v0.5.0-rc.*` yet. `Cargo.toml` on `dev` still reads `0.4.0`.
-- Vendored spec basis: pinned at `b4f4d02` (U1). Vendored `VERSION` reads `0.4.0` — expected; the spec-side `VERSION`
-  bump is deferred to spec's release PR per U1.
+- Vendored spec basis: pinned at `b4f4d02` on cli `dev` (the in-flight U1 SHA at vendor time). Vendored `VERSION` reads
+  `0.4.0`. Spec v0.5.0 has since shipped (2026-05-30); the cli release PR (U7 step 2) re-vendors forward to v0.5.0.
 
 **Work:**
 
@@ -525,16 +525,15 @@ U2 (same pattern as U1's spec `VERSION`).
 
 ### U3. Spec — scoring formula choice (agentnative repo, follow-up)
 
-**Status:** [shipped to dev only — NOT released]
-[PR brettdavies/agentnative#39](https://github.com/brettdavies/agentnative/pull/39) — squash-merged to
-`agentnative-spec` `dev` at `972c9d3`. The spec `VERSION` bump is deferred to the release PR that closes out the
-taxonomy work (same pattern as U1 and U2).
+**Status:** [released — shipped in spec v0.5.0 on 2026-05-30 via PR brettdavies/agentnative#44 → `d5d4086`; see U7 step
+1] [PR brettdavies/agentnative#39](https://github.com/brettdavies/agentnative/pull/39) — squash-merged to
+`agentnative-spec` `dev` at `972c9d3` and rolled to `main` as part of v0.5.0.
 
 **Repo:** `brettdavies/agentnative` (spec).
 
-**Source location:** `agentnative-spec` `dev`, head commit `972c9d3` (PR #39). `principles/scoring.md` is the new single
-source of truth for the formula; `docs/badge.md` carries the floor and band edits. `main` does NOT contain U3 (latest
-tag `v0.4.0` predates it); it lands on `main` via the deferred release PR.
+**Source location:** `agentnative-spec` `main` at v0.5.0 (`d5d4086`); the formula PR's pre-release squash was at
+`972c9d3` on `dev`. `principles/scoring.md` is the single source of truth for the formula; `docs/badge.md` carries the
+floor and band edits.
 
 **Chosen formula (`principles/scoring.md`):**
 
@@ -570,8 +569,8 @@ CLI output from `agentnative-cli` `dev`. No spec-side vendoring change needed fo
 **Status:** [shipped to dev only — NOT released]
 [PR brettdavies/agentnative-cli#64](https://github.com/brettdavies/agentnative-cli/pull/64) — squash-merged to
 `agentnative-cli` `dev` at `43d4f7c`. The behavioral-only credit-weighted formula, the 80→70 floor drop, and the README
-/ CLAUDE.md doc sync all landed. The CHANGELOG entry, `Cargo.toml` bump, and tag publish are deferred to the release PR
-that closes out U2/U3b (same pattern as U1, U2, and U3).
+/ CLAUDE.md doc sync all landed. The CHANGELOG entry, `Cargo.toml` bump, and tag publish are deferred to the cli release
+PR (U7 step 2) that closes out U2 + U3b together.
 
 **Repo:** `brettdavies/agentnative-cli`.
 
@@ -687,9 +686,10 @@ expanded the principles-met column to P1-P8 (`PRINCIPLE_NAMES` was missing P8, s
 
 **Repo:** `brettdavies/agentnative-site`.
 
-**Upstream basis:** Consumes U3 (spec formula choice) from `agentnative-spec`. Pull the spec via `bash
-scripts/sync-spec.sh --ref dev` (or the U3 feature-branch SHA) until spec `v0.5.0` cuts; then drop `--ref`. The vendored
-`src/data/spec/principles/p*-*.md` carries the formula and methodology language the site mirrors.
+**Upstream basis:** Consumes U3 (spec formula choice) from `agentnative-spec`. The U5 dev landing vendored spec `dev` at
+`972c9d3` via `bash scripts/sync-spec.sh --ref 972c9d3`; spec v0.5.0 has since shipped (2026-05-30), so any follow-up
+resync (notably the U6 rescore) should use the default `sync-spec.sh` path (no `--ref`) to pin to the released tag. The
+vendored `src/data/spec/principles/p*-*.md` carries the formula and methodology language the site mirrors.
 
 **Work:**
 
@@ -758,15 +758,17 @@ compute the final formula in U3b — the rescore is only meaningful against the 
 and U7 must publish a release carrying that work plus the `audit` rename, since docker/score brew-mode installs the
 published tap formula). U7 gates this unit.
 
-### U7. Release train — publish the audit-capable `anc` (spec → skill → cli)
+### U7. Release train — publish the audit-capable `anc` (spec → cli → skill)
 
-**Status:** [not started — gates U6 and the live-scoring staging path]
+**Status:** [in-progress — spec stage shipped 2026-05-30 as v0.5.0 (PR brettdavies/agentnative#44 → `d5d4086`); cli
+stage next, then skill, then website]
 
-**Repos (release strictly in this order):** `brettdavies/agentnative` (spec) → `brettdavies/agentnative-skill` (skill) →
-`brettdavies/agentnative-cli` (cli). The site is the fourth and final stage — U6's rescore lands on `dev`, then `dev`
-promotes to `main`. The full train is **spec → skill → cli → website.** The order is load-bearing: each stage vendors or
-installs the stage before it, so releasing out of order ships a downstream artifact against content that is not yet
-published.
+**Repos (release strictly in this order):** `brettdavies/agentnative` (spec) → `brettdavies/agentnative-cli` (cli) →
+`brettdavies/agentnative-skill` (skill). The site is the fourth and final stage — U6's rescore lands on `dev`, then
+`dev` promotes to `main`. The full train is **spec → cli → skill → website.** The order is load-bearing: each stage
+vendors or references published content from the stage before it (the skill vendors spec but its prose references the
+cli's published `anc audit` surface), so releasing out of order ships a downstream artifact against content that is not
+yet published.
 
 **Why this is a unit.** U1–U3b each landed on `dev` with their `VERSION` / `Cargo.toml` bump, CHANGELOG entry, and tag
 publish explicitly deferred to "the release PR that closes out the taxonomy unit." U6 cannot run until the cli release
@@ -777,51 +779,64 @@ audit-capable published CLI (tracked in the live-scoring plan, but the release a
 
 **Why this order:**
 
-- **Spec first** — source of truth for the taxonomy and principle text; both the skill and the cli vendor it via their
-  `sync-spec.sh`. Nothing downstream can pin a tag that does not exist yet.
-- **Skill second** — vendors the spec, and its bundle prose references `anc audit` (the `check`→`audit` rename shipped
-  as agentnative-skill #19). It ships after the spec tag it pins so the published guidance matches the released
-  vocabulary, and before the cli so the skill never points users at an `anc audit` a published binary lacks.
-- **CLI third** — vendors the spec, implements the statuses + formula, and is the published binary the site installs via
-  brew (U6) and pins in the sandbox image (live scoring). This is the stage U6 blocks on.
+- **Spec first** — source of truth for the taxonomy and principle text; both the cli and the skill vendor it via their
+  `sync-spec.sh`. Nothing downstream can pin a tag that does not exist yet. [shipped: spec v0.5.0, PR #44 → `d5d4086`,
+  2026-05-30.]
+- **CLI second** — vendors the spec, implements the statuses + formula, and is the published binary the site installs
+  via brew (U6) and pins in the sandbox image (live scoring). Ships before the skill so the skill's prose lands against
+  an installable `anc audit`, not against a release that does not yet exist. This is the stage U6 blocks on.
+- **Skill third** — vendors the spec, and its bundle prose references `anc audit` and `anc skill install <host>` (the
+  `check`→`audit` rename shipped as agentnative-skill #19). The skill does **not** vendor the cli; the ordering
+  constraint is the prose reference, not a vendoring relationship. Releasing after the cli means a user who follows the
+  published skill's commands hits a brew-installed `anc` that responds to `audit` rather than a v0.4.0 `anc check`. A
+  notional alternative is to release the skill earlier and reference cli capabilities that exist only on the cli's `dev`
+  branch, but that produces a published-skill window where the documented commands fail against the installable binary,
+  so the cli-first sequence is preferred.
 - **Website last** — U6 rescores against the published cli + matching spec tag, lands on `dev`, then `dev`→`main` (the
   production-promotion gate above).
 
 **What the release train must carry:**
 
-- **Spec:** the conditional-schema + taxonomy content (U1 — spec `dev` `b4f4d02`) and the scoring-formula doc (U3 — spec
-  `dev` `972c9d3`), tagged so `scripts/sync-spec.sh` default-path resolves it instead of pre-taxonomy `v0.4.0`.
-- **Skill:** the `check`→`audit` rename (agentnative-skill #19 — skill `dev` `e6bf388`) plus a spec re-vendor at the new
-  spec tag. #19 re-vendored spec `v0.4.0` (pre-taxonomy), so the release must re-vendor *forward* to the new spec tag,
-  not stay at `v0.4.0`, so the published bundle's `anc audit` examples match the released cli and the released spec.
+- **Spec:** [shipped as v0.5.0 — PR brettdavies/agentnative#44, merge commit `d5d4086`, tag `d765b7b`, GitHub Release
+  331986638 published 2026-05-30 18:29:42Z, publish.yml run 26691600422 green.] Carries the conditional-schema +
+  taxonomy content (U1 — was on spec `dev` at `b4f4d02`) and the scoring-formula doc (U3 — was on spec `dev` at
+  `972c9d3`). `scripts/sync-spec.sh` default-path now resolves `v0.5.0` instead of pre-taxonomy `v0.4.0`.
 - **CLI:** schema-0.6 / 7-status emission (U2 — cli `dev` `3839696`), behavioral-only credit-weighted `score_pct` +
   floor 70 (U3b — cli `dev` `43d4f7c`), the `check`→`audit` rename (agentnative-cli #65 — cli `dev` `ff1275f`), and a
-  spec re-vendor at the new spec tag. The published `anc` must expose the `audit` subcommand: the site shipped its half
-  of the rename in #131 (`5073bd7`), so the live-scoring worker and `docker/score/score-anc100.sh` now invoke `anc
-  audit`, which the current published `v0.4.0` (ships `anc check`, schema 0.5) does not provide.
+  spec re-vendor at `v0.5.0`. The published `anc` must expose the `audit` subcommand: the site shipped its half of the
+  rename in #131 (`5073bd7`), so the live-scoring worker and `docker/score/score-anc100.sh` now invoke `anc audit`,
+  which the current published `v0.4.0` (ships `anc check`, schema 0.5) does not provide.
+- **Skill:** the `check`→`audit` rename (agentnative-skill #19 — skill `dev` `e6bf388`) plus a spec re-vendor at
+  `v0.5.0`. #19 re-vendored spec `v0.4.0` (pre-taxonomy), so the release must re-vendor *forward* to the new spec tag,
+  not stay at `v0.4.0`, so the published bundle's `anc audit` examples match the released cli and the released spec.
 
 **Work (in release order):**
 
-1. **Spec release:** bump `agentnative` `VERSION`, finalize `CHANGELOG.md`, merge `dev`→`main`, tag (e.g. `v0.5.0`).
-2. **Skill release:** re-vendor the spec at the new tag, bump the skill `VERSION`, finalize `CHANGELOG.md`, merge
-   `dev`→`main`, tag.
-3. **CLI release:** re-vendor the spec at the new tag, bump `Cargo.toml`, finalize `CHANGELOG.md` (new statuses, schema
-   0.6, final formula, `audit` rename), merge `dev`→`main`, tag, let CI publish the linux + macos artifacts.
-4. Confirm the cli release workflow's `repository_dispatch` updates the `brettdavies/homebrew-tap` `agentnative` formula
+1. **Spec release** [shipped]: spec v0.5.0 tagged 2026-05-30 (commit `d5d4086`, tag `d765b7b`, Release 331986638);
+   publish.yml run 26691600422 green; `VERSION` on `main` reads `0.5.0`. Downstream `repository_dispatch` to cli/site is
+   non-blocking by design and the warning ("Dispatch to $repo failed (may not have a handler yet); continuing.") is
+   expected — the cli and skill release flows are driven manually.
+2. **CLI release:** re-vendor the spec at the `v0.5.0` tag, bump `Cargo.toml`, finalize `CHANGELOG.md` (new statuses,
+   schema 0.6, final formula, `audit` rename), merge `dev`→`main`, tag, let CI publish the linux + macos artifacts.
+3. Confirm the cli release workflow's `repository_dispatch` updates the `brettdavies/homebrew-tap` `agentnative` formula
    to the new tag; verify a clean `brew install brettdavies/tap/agentnative` reports the new `anc --version` and that
    `anc audit --help` resolves.
+4. **Skill release:** re-vendor the spec at the `v0.5.0` tag, bump the skill `VERSION`, finalize `CHANGELOG.md`, merge
+   `dev`→`main`, tag. Skill prose pointing at `anc audit` / `anc skill install <host>` is now backed by a
+   brew-installable cli that exposes those subcommands.
 
 **Acceptance:**
 
-- Spec released at the new tag; `sync-spec.sh` default path (no `--ref`) pulls the taxonomy content.
-- Skill released at the new tag with the spec re-vendored and `anc audit` examples published.
+- [met] Spec released at the new tag; `sync-spec.sh` default path (no `--ref`) pulls the taxonomy content. (Spec v0.5.0
+  shipped 2026-05-30; verified via tag `d765b7b` and publish.yml run 26691600422.)
 - `agentnative-cli` tagged at the new version; release artifacts published.
 - Homebrew tap formula points at the new tag; `anc audit` resolves from a clean brew install.
+- Skill released at the new tag with the spec re-vendored and `anc audit` examples published.
 - `anc audit --command <tool> --output json` emits schema-0.6 output from the published binary.
 
 **Dependencies:** U2, U3, U3b (the cli work being released), plus the `check`→`audit` rename across spec (#40 —
-`283a306`), skill (#19 — `e6bf388`), and cli (#65 — `ff1275f`). The spec (U1 + U3 content) is cut first, the skill
-second, the cli third; the website (U6) is gated on the cli stage.
+`283a306`, shipped in v0.5.0), skill (#19 — `e6bf388`), and cli (#65 — `ff1275f`). The spec (U1 + U3 content) is cut
+first, the cli second, the skill third; the website (U6) is gated on the cli stage.
 
 ---
 
@@ -841,13 +856,15 @@ The dev-phase handoff happens at `dev`-merge boundaries:
 - CLI U3b lands on `dev` (`score_pct` computes the final formula)
 - site U4 / U5 land on `dev` (renderer + methodology)
 
-The release handoff (U7) is a strict train — **spec → skill → cli → website:**
+The release handoff (U7) is a strict train — **spec → cli → skill → website:**
 
-- spec releases first (tagged; carries U1 + U3 content)
-- skill releases second (re-vendors the new spec tag; ships the `anc audit` rename, agentnative-skill #19)
-- cli releases third (re-vendors the new spec tag; carries U2 + U3b + the `audit` rename, agentnative-cli #65; publishes
-  via the Homebrew tap). The site shipped its rename half in #131, so the published `anc` must expose `audit` before the
-  rescore or live scoring can run.
+- spec releases first (tagged; carries U1 + U3 content). [shipped: v0.5.0, PR #44 → `d5d4086`, 2026-05-30.]
+- cli releases second (re-vendors the new spec tag; carries U2 + U3b + the `audit` rename, agentnative-cli #65;
+  publishes via the Homebrew tap). The site shipped its rename half in #131, so the published `anc` must expose `audit`
+  before the rescore or live scoring can run.
+- skill releases third (re-vendors the new spec tag; ships the `anc audit` rename, agentnative-skill #19). The skill
+  vendors spec, not cli, but its prose references `anc audit` and `anc skill install <host>`, so it ships after the cli
+  so a brew-installed `anc` already responds to the documented subcommands.
 - website is last: U6 rescores against the published cli + matching spec tag on `dev`, then `dev`→`main` closes the loop
 
 ### Backward compatibility
