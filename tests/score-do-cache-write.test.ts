@@ -15,6 +15,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { extractToolVersion, type ScoreSandboxEnv, writeCacheBestEffort } from '../src/worker/score/do';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // R2 stub mirroring the cache.ts test stub
@@ -121,9 +122,11 @@ describe('writeCacheBestEffort — happy path', () => {
     const { env, writes } = makeR2Stub();
     await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: '0.3.1' });
     expect(writes).toHaveLength(1);
-    // SPEC_VERSION as the partition slot — handoff Decision 2 + gotcha
-    // 3. Currently 0.4.0; if it bumps, update this expectation.
-    expect(writes[0].key).toBe('scores/cowsay/0.4.0.json');
+    // SPEC_VERSION as the partition slot — handoff Decision 2 + gotcha 3
+    // in .context/handoffs/2026-05-19-001-feat-live-scoring-cf-sandbox.md.
+    // The expectation tracks SPEC_VERSION via the gen.ts import so it
+    // moves automatically when the spec advances.
+    expect(writes[0].key).toBe(`scores/cowsay/${SPEC_VERSION}.json`);
   });
 
   test('payload carries spec_version, anc_version, tool_version, scorecard', async () => {
@@ -136,7 +139,7 @@ describe('writeCacheBestEffort — happy path', () => {
       tool_version: string;
       scorecard: { tool: { name: string } };
     };
-    expect(parsed.spec_version).toBe('0.4.0');
+    expect(parsed.spec_version).toBe(SPEC_VERSION);
     expect(parsed.anc_version).toBe('0.3.1');
     expect(parsed.tool_version).toBe('1.6.0');
     expect(parsed.scorecard.tool.name).toBe('cowsay');
@@ -150,7 +153,7 @@ describe('writeCacheBestEffort — happy path', () => {
       { pm: 'cargo-binstall', package: 'ripgrep', binary: 'rg' },
       { scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } }, anc_version: '0.3.1' },
     );
-    expect(writes.map((w) => w.key)).toEqual(['scores/cowsay/0.4.0.json', 'scores/rg/0.4.0.json']);
+    expect(writes.map((w) => w.key)).toEqual([`scores/cowsay/${SPEC_VERSION}.json`, `scores/rg/${SPEC_VERSION}.json`]);
   });
 
   test('parser-driven binary derivation does not alias to curated slug (cargo binstall ripgrep → scores/ripgrep/...)', async () => {
@@ -168,8 +171,8 @@ describe('writeCacheBestEffort — happy path', () => {
       { pm: 'cargo-binstall', package: 'ripgrep', binary: 'ripgrep' },
       { scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } }, anc_version: '0.3.1' },
     );
-    expect(writes[0].key).toBe('scores/ripgrep/0.4.0.json');
-    expect(writes[0].key).not.toBe('scores/rg/0.4.0.json');
+    expect(writes[0].key).toBe(`scores/ripgrep/${SPEC_VERSION}.json`);
+    expect(writes[0].key).not.toBe(`scores/rg/${SPEC_VERSION}.json`);
   });
 });
 

@@ -20,9 +20,11 @@
 //   for the full pattern + prevention recipe.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { keyFor } from '../src/worker/score/cache';
 import type { Sandbox } from '../src/worker/score/do';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -543,9 +545,9 @@ describe('/api/score — content negotiation', () => {
 // R2 cache tier
 // ---------------------------------------------------------------------------
 
-// The cache key uses SPEC_VERSION (build-time constant) as the
-// anc-version proxy. The constant currently reads 0.4.0 from
-// src/worker/spec-version.gen.ts; if it bumps, update the keys here.
+// The cache key uses SPEC_VERSION (build-time constant from gen.ts) as
+// the anc-version proxy. Tests construct keys via keyFor() + the gen.ts
+// import so they auto-track when SPEC_VERSION advances.
 //
 // `uncurated-tool` is a deliberately-fictional package name used as the
 // cache-tier exemplar — clearly NOT in the test fixture's
@@ -557,10 +559,10 @@ describe('/api/score — content negotiation', () => {
 // into pasting it as a live-demo example where it would either fail
 // (no real package) or run a slow install. Fictional name = self-
 // documenting "this is fixture data, not a real package".
-const CACHE_KEY_UNCURATED = 'scores/uncurated-tool/0.4.0.json';
+const CACHE_KEY_UNCURATED = keyFor('uncurated-tool', SPEC_VERSION);
 
 const CACHED_UNCURATED_PAYLOAD = {
-  spec_version: '0.4.0',
+  spec_version: SPEC_VERSION,
   anc_version: '0.3.1',
   tool_version: '3.04',
   scorecard: { tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '3.04' }, score: { value: 92 } },
@@ -642,7 +644,7 @@ describe('/api/score — R2 cache tier', () => {
     const env = makeEnv({
       // Pre-seed the cache under the slug's binary key. The registry
       // already has ripgrep with scorecard_url + anc_version.
-      cacheContent: { 'scores/rg/0.4.0.json': CACHED_UNCURATED_PAYLOAD },
+      cacheContent: { [keyFor('rg', SPEC_VERSION)]: CACHED_UNCURATED_PAYLOAD },
       tracker,
     });
     const res = await handleScore(postScore('ripgrep'), env);
@@ -712,9 +714,9 @@ describe('/api/score — R2 cache tier', () => {
   // the cache tier entirely.
   // -------------------------------------------------------------------------
 
-  const CACHE_KEY_AIDER = 'scores/aider/0.4.0.json';
+  const CACHE_KEY_AIDER = keyFor('aider', SPEC_VERSION);
   const CACHED_AIDER_PAYLOAD = {
-    spec_version: '0.4.0',
+    spec_version: SPEC_VERSION,
     anc_version: '0.3.1',
     tool_version: '0.93.0',
     scorecard: { tool: { name: 'aider', binary: 'aider', version: '0.93.0' }, score: { value: 81 } },
@@ -768,7 +770,7 @@ describe('/api/score — R2 cache tier', () => {
 
   test('install-command with unrelated R2 entry → cache tier scoped to derived binary, live path runs', async () => {
     // `cargo install foo-cli` parses to binary='foo-cli', cache key
-    // `scores/foo-cli/0.4.0.json`. A prefilled entry under a DIFFERENT
+    // `scores/foo-cli/<SPEC_VERSION>.json`. A prefilled entry under a DIFFERENT
     // binary's key (scores/bar/...) is unreachable from this input and
     // the live path runs.
     //
@@ -780,7 +782,7 @@ describe('/api/score — R2 cache tier', () => {
     // pass-through path in resolveSpec.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
-      cacheContent: { 'scores/bar/0.4.0.json': CACHED_AIDER_PAYLOAD },
+      cacheContent: { [keyFor('bar', SPEC_VERSION)]: CACHED_AIDER_PAYLOAD },
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'bar', version: '0.1.0' } },
@@ -812,7 +814,7 @@ describe('/api/score — R2 cache tier', () => {
       // Pre-seed under the slug name — should NOT be served because
       // deriveCacheBinary returns null for non-curated slugs.
       cacheContent: {
-        'scores/no-card-tool/0.4.0.json': CACHED_AIDER_PAYLOAD,
+        [keyFor('no-card-tool', SPEC_VERSION)]: CACHED_AIDER_PAYLOAD,
       },
       tracker,
     });
@@ -833,15 +835,15 @@ describe('/api/score — R2 cache tier', () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       // Pre-seed ONLY under the curated 'rg' key.
-      cacheContent: { 'scores/rg/0.4.0.json': CACHED_UNCURATED_PAYLOAD },
+      cacheContent: { [keyFor('rg', SPEC_VERSION)]: CACHED_UNCURATED_PAYLOAD },
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
         anc_version: '0.3.1',
       },
     });
-    // POST install-command — key derives to scores/ripgrep/0.4.0.json,
-    // which is empty. The pre-seeded scores/rg/0.4.0.json must NOT be
+    // POST install-command — key derives to scores/ripgrep/<SPEC_VERSION>,
+    // which is empty. The pre-seeded scores/rg/<SPEC_VERSION> must NOT be
     // served (it's the curated path's key, not the install-command path's).
     const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.status).toBe(200);
@@ -849,21 +851,21 @@ describe('/api/score — R2 cache tier', () => {
   });
 
   test('anc-version partition: reads under SPEC_VERSION slot, stale entries under a different slot are unreachable', async () => {
-    // SPEC_VERSION is currently '0.4.0'. A stale entry under
-    // scores/uncurated-tool/0.3.0.json (older spec) must be unreachable when
-    // the running Worker computes the key from SPEC_VERSION='0.4.0'.
-    // This pins the partition-by-version property so a future change
-    // that strips the version from the key surfaces here.
+    // A stale entry under scores/uncurated-tool/0.0.1.json (an arbitrary
+    // older spec version) must be unreachable when the running Worker
+    // computes the key from the current SPEC_VERSION via gen.ts. This
+    // pins the partition-by-version property so a future change that
+    // strips the version from the key surfaces here.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       cacheContent: {
-        'scores/uncurated-tool/0.3.0.json': {
-          spec_version: '0.3.0',
-          anc_version: '0.2.5',
+        'scores/uncurated-tool/0.0.1.json': {
+          spec_version: '0.0.1',
+          anc_version: '0.0.1',
           tool_version: '1.5.0',
           scorecard: { tool: { name: 'uncurated-tool', version: '1.5.0' } },
         },
-        // NO entry under 0.4.0 → cache miss.
+        // NO entry under the current SPEC_VERSION key → cache miss.
       },
       tracker,
       doResponse: {
@@ -919,18 +921,18 @@ describe('/api/score — R2 cache tier', () => {
   // it'd waste cache budget) surfaces here.
 
   test('cache-key aliasing: same binary across different PMs shares the same cache entry', async () => {
-    // Pre-seed under scores/foo/0.4.0.json. Both `pip install foo`
-    // (binary='foo') and `cargo binstall foo` (binary='foo') derive
+    // Pre-seed under scores/foo/<SPEC_VERSION>.json. Both `pip install
+    // foo` (binary='foo') and `cargo binstall foo` (binary='foo') derive
     // the same key, so both reads hit the same prefilled entry.
     const cachedFooPayload = {
-      spec_version: '0.4.0',
+      spec_version: SPEC_VERSION,
       anc_version: '0.3.1',
       tool_version: '1.0.0',
       scorecard: { tool: { name: 'foo', binary: 'foo', version: '1.0.0' }, score: { value: 75 } },
     };
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
-      cacheContent: { 'scores/foo/0.4.0.json': cachedFooPayload },
+      cacheContent: { [keyFor('foo', SPEC_VERSION)]: cachedFooPayload },
       tracker,
     });
 
@@ -1000,9 +1002,9 @@ describe('/api/score — R2 cache tier', () => {
     // by injecting it into the shared cacheStore — this is what
     // writeCacheBestEffort would do after a successful score.
     cacheStore.set(
-      'scores/uncurated-tool/0.4.0.json',
+      keyFor('uncurated-tool', SPEC_VERSION),
       JSON.stringify({
-        spec_version: '0.4.0',
+        spec_version: SPEC_VERSION,
         anc_version: '0.3.1',
         tool_version: '1.6.0',
         scorecard: {

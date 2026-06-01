@@ -28,6 +28,7 @@ import {
   type ExecLike,
   score,
 } from '../src/worker/score/sandbox-exec';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Stub — mirrors the shape in score-do.test.ts so tests run offline.
@@ -40,7 +41,7 @@ type Call =
 type ExecResponder = (command: string) => ExecLike;
 
 const ANC_CHECK_OK = JSON.stringify({
-  spec_version: '0.4.0',
+  spec_version: SPEC_VERSION,
   anc_version: '0.3.1',
   tool: { name: 'qmd', version: '0.1.0' },
   score: { value: 70 },

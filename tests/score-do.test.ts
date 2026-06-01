@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { handlers, Sandbox } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Stub Sandbox — records every setOutboundHandler + exec call.
@@ -50,7 +51,7 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
 }
 
 const ANC_CHECK_OK = JSON.stringify({
-  spec_version: '0.4.0',
+  spec_version: SPEC_VERSION,
   anc_version: '0.3.1',
   tool: { name: 'ripgrep', version: '14.1.0' },
   score: { value: 87 },
@@ -739,8 +740,7 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
   // ago. Date computed at exec time via shell substitution so a long-
   // running image doesn't widen the gate. pip v26.0+ honors the env
   // var; older pip versions ignore it (no-op). The companion uv gate
-  // (UV_EXCLUDE_NEWER) is asserted at the image layer in
-  // tests/dockerfile-sandbox.test.ts.
+  // (UV_EXCLUDE_NEWER) lives at the image layer.
 
   test('pip install command prepends PIP_UPLOADED_PRIOR_TO with a 7-day shell-computed date', async () => {
     const { stub, calls } = makeStub();
@@ -795,8 +795,7 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     // quiet at the OS level, but the currently-deployed image predates
     // that change. Prepending the env var inline at exec time gives
     // the currently-deployed sandbox the suppression immediately,
-    // without a rebuild. The companion image-level test lives in
-    // tests/dockerfile-sandbox.test.ts.
+    // without a rebuild.
     const { stub, calls } = makeStub();
     await score(stub, { pm: 'pip', package: 'black', binary: 'black' });
     const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
