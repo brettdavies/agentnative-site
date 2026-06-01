@@ -1043,13 +1043,22 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
     }
   });
 
-  test('loads schema 0.5 and 0.6 scorecards side by side', async () => {
+  test('loads schema 0.5, 0.6, and 0.7 scorecards side by side', async () => {
     const dir = join(tmpdir(), `scorecards-mixed-${Date.now()}`);
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, 'alpha-v1.0.0.json'), JSON.stringify(makeV04Scorecard()));
     await writeFile(
       join(dir, 'beta-v1.2.3.json'),
       JSON.stringify(makeV06Scorecard({ tool: { name: 'beta', binary: 'beta', version: 'beta 1.2.3' } })),
+    );
+    await writeFile(
+      join(dir, 'gamma-v2.0.0.json'),
+      JSON.stringify(
+        makeV06Scorecard({
+          schema_version: '0.7',
+          tool: { name: 'gamma', binary: 'gamma', version: 'gamma 2.0.0' },
+        }),
+      ),
     );
     try {
       const registry = [
@@ -1071,19 +1080,28 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
           creator: 'me',
           description: 'y',
         },
+        {
+          name: 'gamma',
+          repo: 'e/f',
+          binary: 'gamma',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'z',
+        },
       ];
       const { tools } = await loadScoredTools(dir, registry);
       const versions = tools.map((t: any) => t.scorecard.schema_version).sort();
-      expect(versions).toEqual(['0.5', '0.6']);
+      expect(versions).toEqual(['0.5', '0.6', '0.7']);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  test('rejects a schema version above the supported set (e.g. 0.7)', async () => {
+  test('rejects a schema version above the supported set (e.g. 0.8)', async () => {
     const dir = join(tmpdir(), `scorecards-future-${Date.now()}`);
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard({ schema_version: '0.7' })));
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard({ schema_version: '0.8' })));
     try {
       const registry = [
         {
@@ -1097,7 +1115,7 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
         },
       ];
       await expect(loadScoredTools(dir, registry)).rejects.toThrow(
-        /schema_version "0\.7" not supported.*Site supports schema 0\.5, 0\.6/,
+        /schema_version "0\.8" not supported.*Site supports schema 0\.5, 0\.6, 0\.7/,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
