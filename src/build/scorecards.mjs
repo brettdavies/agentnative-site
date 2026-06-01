@@ -8,7 +8,11 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
-import { PRINCIPLE_GROUPS } from './util.mjs';
+import { computePrincipleScore as sharedComputePrincipleScore } from '../shared/scorecard-format.mjs';
+
+// Re-exported from shared so the Worker live-score renderer reads from
+// the same implementation. Public surface unchanged for existing callers.
+export const computePrincipleScore = sharedComputePrincipleScore;
 
 const TOOL_NAME_RE = /^[a-z0-9-]+$/;
 
@@ -377,36 +381,6 @@ export async function runScorecardInvariants(scorecardsDir, registry) {
 // -------------------------------------------------------------------
 // Scoring
 // -------------------------------------------------------------------
-
-/**
- * Map the principle groups (P1–P8) to pass/partial/fail and return
- * "N/total principles met". CodeQuality and ProjectStructure are bonus
- * groups, excluded from the count. `total` tracks PRINCIPLE_GROUPS so the
- * count follows the standard as principles are added.
- *
- * @param {object | null} scorecard
- * @returns {{ met: number, total: number, details: Array<{ group: string, status: string }> }}
- */
-export function computePrincipleScore(scorecard) {
-  if (!scorecard) return { met: 0, total: PRINCIPLE_GROUPS.length, details: [] };
-
-  const details = [];
-  for (const group of PRINCIPLE_GROUPS) {
-    const checks = scorecard.results.filter((r) => r.group === group);
-    if (checks.length === 0) {
-      details.push({ group, status: 'skip' });
-      continue;
-    }
-    const hasFail = checks.some((r) => r.status === 'fail');
-    const hasWarn = checks.some((r) => r.status === 'warn');
-    if (hasFail) details.push({ group, status: 'fail' });
-    else if (hasWarn) details.push({ group, status: 'partial' });
-    else details.push({ group, status: 'pass' });
-  }
-
-  const met = details.filter((d) => d.status === 'pass').length;
-  return { met, total: PRINCIPLE_GROUPS.length, details };
-}
 
 /**
  * Compute layer scores: primary (behavioral + project) vs source.

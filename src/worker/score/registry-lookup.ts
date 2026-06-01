@@ -55,6 +55,58 @@ export type RegistryIndex = {
   by_owner_repo: Record<string, RegistryEntry>;
 };
 
+// Module-scope promise cache. Workers re-instantiate isolates frequently
+// so the staleness window is bounded; the singleton avoids re-parsing the
+// JSON on every request inside the same isolate. Shared with handler.ts
+// (was duplicated there) so /api/score and /score/live/<binary> read from
+// the same in-memory copy.
+let registryIndexPromise: Promise<RegistryIndex> | null = null;
+
+type AssetEnv = { ASSETS: Fetcher };
+
+/**
+ * Fetch + cache `/registry-index.json` for the lifetime of the isolate.
+ * Resets to null on fetch failure so the next request retries.
+ */
+export function loadRegistryIndex(env: AssetEnv): Promise<RegistryIndex> {
+  if (!registryIndexPromise) {
+    registryIndexPromise = (async () => {
+      const res = await env.ASSETS.fetch(new Request('https://assets.internal/registry-index.json'));
+      if (!res.ok) throw new Error(`registry-index fetch failed (status ${res.status})`);
+      return (await res.json()) as RegistryIndex;
+    })().catch((err) => {
+      registryIndexPromise = null;
+      throw err;
+    });
+  }
+  return registryIndexPromise;
+}
+
+/** Test-only — drop the cached registry-index promise. */
+export function _resetRegistryIndexCache(): void {
+  registryIndexPromise = null;
+}
+
+/**
+ * Map a binary slug to its canonical registry name, or null when no
+ * curated entry matches. Tries the fast `by_slug[binary]` path first
+ * (catches tools where binary === name, the common case), then scans
+ * for tools where the registry-entry's `binary` field matches (handles
+ * ripgrep/rg, ast-grep/sg, bottom/btm, and similar alias cases).
+ *
+ * Used by /score/live/<binary> to refuse rendering at the live path
+ * when the binary maps to a registry-curated tool — that tool has a
+ * canonical /score/<slug> page, which is what the user should see.
+ */
+export function resolveCuratedSlug(binary: string, registryIndex: RegistryIndex): string | null {
+  const direct = registryIndex.by_slug[binary];
+  if (direct) return direct.name;
+  for (const entry of Object.values(registryIndex.by_slug)) {
+    if (entry.binary === binary) return entry.name;
+  }
+  return null;
+}
+
 export type DiscoveryHint = ParsedInstall & { note?: string };
 
 export type DiscoveryHintsIndex = {
