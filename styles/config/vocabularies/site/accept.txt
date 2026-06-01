@@ -251,3 +251,4 @@ sdist
 siteverify
 uncached
 unmetered
+rollout

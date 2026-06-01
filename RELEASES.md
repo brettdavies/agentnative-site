@@ -76,6 +76,11 @@ Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inve
 
 ## Releasing dev to main
 
+**Step 0 — run the preflight checklist.** [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md) gates the cut of every
+`release/*` branch. Every box must be checked, including the **mandatory live-scoring DO smoke** against a fresh
+non-registry binary (the surface CI cannot cover and the one that caused the 2026-06-01 rename / container coordination
+incident). Do not proceed to step 1 until preflight is green.
+
 ```bash
 # 1. Branch from main, NOT dev.
 git fetch origin
@@ -205,6 +210,11 @@ bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 
 Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Commit Dockerfile change +
 staging-pin update together. PR to `dev`.
+
+After the deploy completes, the staging container app rolls instances asynchronously — wait for `wrangler containers
+list` to show `STATE = ready` before running any smoke that exercises the live container path. Smokes that race the
+rollout will hit warm OLD-image instances and look identical to a real bug. Full pattern:
+[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md).
 
 #### Promotion (release PR to main)
 
@@ -362,64 +372,14 @@ anc.dev.
 ### Pre-release live-path smoke (manual)
 
 The CI post-deploy smoke above exercises the registry-fast-path only. The live DO path (install + `anc audit` inside the
-Sandbox container) is not exercised by automation. Before opening a `release/*` PR to main, run this smoke manually
-against staging to catch coordination drift between the Worker's CLI invocation and the container's baked-in `anc`
-binary.
+Sandbox container) is not exercised by automation and gates every `release/*` PR via the manual preflight checklist.
 
-Background: this gap was found on 2026-06-01 when a non-registry binary returned a 500 (`incomplete_response_contract:
-anc_audit_failed`). Root cause was a coordination mismatch — PR #131 (2026-05-29) renamed the Worker invocation from
-`anc check` to `anc audit`, but the staging container image was still pinned at the pre-rename `anc v0.4.0` binary,
-which only understood `check`. The registry-fast-path smoke stayed green because it never invoked the container.
-Reproduction recipe and remediation in
+→ Procedure:
+[`RELEASES-PREFLIGHT.md` § Live-scoring Sandbox DO path (mandatory)](./RELEASES-PREFLIGHT.md#live-scoring-sandbox-do-path-mandatory).
+→ Why it stays manual (cost / flakiness tradeoff):
+[`RELEASES-RATIONALE.md` § Post-deploy smoke scope](./RELEASES-RATIONALE.md#post-deploy-smoke-scope). → The 2026-06-01
+incident that motivates the check:
 [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md).
-
-Steps:
-
-```bash
-# 1. Pick a non-registry binary. `cowsay` (npm) is the fixture used historically — any
-#    GitHub URL or install command that resolves to a binary NOT in registry.yaml works.
-#    Verify the binary is not registry-curated first:
-grep -E '^- name: cowsay$' registry.yaml || echo "ok, cowsay not in registry"
-
-# 2. POST to staging /api/score with the live-path input. Staging Turnstile uses the
-#    CF always-passes test secret, so turnstile_token:"x" is accepted.
-curl -fSsL -H "Content-Type: application/json" \
-  -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-  -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-  -d '{"input":"https://github.com/piuccio/cowsay","turnstile_token":"x"}' \
-  https://agentnative-site-staging.brettdavies.workers.dev/api/score \
-  | jq '{
-      ok: (.scorecard != null and .scorecard.tool.binary != null),
-      tier: (if .scorecard then "live-or-cache" else "error" end),
-      error: .error.code,
-      details: .error.details,
-      spec_version, anc_version, auditor_url, share_url
-    }'
-```
-
-Green outcome:
-
-- `ok: true`
-- `tier: "live-or-cache"`
-- `error: null`
-- Response triad (`spec_version`, `anc_version`, `auditor_url`) all present.
-- `share_url` shaped as `/score/live/<binary>` (the share URL the cache wrote under).
-
-Red outcome (block the release PR):
-
-- HTTP 500 with `error.code: "incomplete_response_contract"`. Inspect `error.details` for the underlying DO error:
-- `anc_audit_failed: error: ...` → CLI invocation incompatible with the container's `anc` binary (the 2026-06-01 case
-    above). Fix: rebuild the container image with the correct `anc` release, bump the staging pin in `wrangler.jsonc`,
-    redeploy. See § Sandbox image releases.
-- `chain_resolved_install_failed: pm=<pm>` → install pipeline broke for that package manager inside the sandbox. Fix:
-    investigate the install layer.
-- `timeout` → DO budget exceeded. Fix: investigate install or audit duration in observability.
-- HTTP 503 `sandbox_unavailable` → container app not bound. Fix: verify staging `containers[]` block in `wrangler.jsonc`
-  and `wrangler containers list`.
-
-The smoke is purposely manual rather than CI-automated: running a real install + sandbox spawn on every deploy would add
-cost and flakiness for a check that only needs to run before a production promotion. CI-automating this requires a
-separate kill-switch + cost ceiling (see [§ Cost guardrails](#cost-guardrails)).
 
 ### Cost-watch hand-off
 
@@ -598,6 +558,7 @@ public, run `gh workflow run skill-availability.yml` once to seed a green run on
 
 ## Related docs
 
+- [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md): pre-release verification checklist. Gates every `release/*` PR.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release flow rationale, CI design, status-check pitfalls
 - [`AGENT.md`](./AGENT.md): onboarding, repo conventions, tool-site sequencing
 - [`DESIGN.md`](./DESIGN.md): design system and build contract
