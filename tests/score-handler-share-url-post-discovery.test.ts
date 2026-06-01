@@ -30,7 +30,7 @@ import type { Sandbox } from '../src/worker/score/do';
 import { _resetAccessibilityCache } from '../src/worker/score/github-accessibility';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REGISTRY_INDEX = {
   by_slug: {},
@@ -230,7 +230,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
         tracker,
         doResponse: {
           scorecard: { tool: { name: 'hexyl', binary: 'hexyl', version: '0.16.0' }, badge: { score_pct: 70 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/sharkdp/hexyl'), env);
@@ -255,7 +255,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
         tracker,
         doResponse: {
           scorecard: { tool: { name: 'onefetch', binary: 'onefetch', version: '2.22.0' }, badge: { score_pct: 65 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/o2sh/onefetch'), env);
@@ -286,7 +286,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
             tool: { name: 'hexyl', binary: 'something-else', version: '0.16.0' },
             badge: { score_pct: 70 },
           },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/sharkdp/hexyl'), env);
@@ -312,7 +312,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
         cacheContent: {
           [keyFor('hexyl', SPEC_VERSION)]: {
             spec_version: SPEC_VERSION,
-            anc_version: '0.3.1',
+            anc_version: ANC_VERSION,
             tool_version: '0.16.0',
             scorecard: { tool: { name: 'hexyl', binary: 'hexyl' }, badge: { score_pct: 70 } },
           },
@@ -347,7 +347,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
           // 'MyTool' (mixed case, which validate.ts allows because GitHub
           // repos can be mixed-case), the binary leaks through.
           scorecard: { tool: { name: 'MyTool', binary: 'MyTool' }, badge: { score_pct: 50 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/some-org/MyTool'), env);
@@ -370,7 +370,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
         tracker,
         doResponse: {
           scorecard: { tool: { name: 'my_tool', binary: 'my_tool' }, badge: { score_pct: 50 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/some-org/my_tool'), env);
@@ -392,7 +392,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
         tracker,
         doResponse: {
           scorecard: { tool: { name: 'tool.js', binary: 'tool.js' }, badge: { score_pct: 50 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/some-org/tool.js'), env);
@@ -411,7 +411,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
       const env = makeEnv({
         doResponse: {
           scorecard: { tool: { name: '-bad', binary: '-bad' }, badge: { score_pct: 0 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/some-org/-bad-repo'), env);
@@ -437,7 +437,7 @@ describe('/api/score — branch-scoped pastes (existing behavior unchanged)', ()
         tracker,
         doResponse: {
           scorecard: { tool: { name: 'hexyl', binary: 'hexyl', version: 'branch' }, badge: { score_pct: 70 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       });
       const res = await handleScore(postScore('https://github.com/sharkdp/hexyl/tree/feature/foo'), env);

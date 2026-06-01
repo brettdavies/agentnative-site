@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { _resetIndexCache, handleScore } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
+import { ANC_VERSION } from '../src/worker/spec-version.gen';
 import { getScore, makeEnv, postScore, type TelemetryEvent } from './score-handler.test';
 
 beforeEach(() => {
@@ -139,7 +140,7 @@ describe('AE telemetry — emits exactly one event per /api/score request', () =
         telemetryEvents: events,
         doResponse: {
           scorecard: { tool: { name: 'foo-cli', version: '1.0.0' } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           install_ms: 1234,
           anc_audit_ms: 567,
         },

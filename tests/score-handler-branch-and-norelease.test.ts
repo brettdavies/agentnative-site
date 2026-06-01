@@ -30,7 +30,7 @@ import { _resetAccessibilityCache } from '../src/worker/score/github-accessibili
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { validateInput } from '../src/worker/score/validate';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // Snapshot globalThis.fetch BEFORE the first makeEnv() override so afterAll
 // can restore it. Bun runs tests in a single process; if this file leaves
@@ -407,7 +407,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
           badge: { score_pct: 50, eligible: false },
           score: { value: 50 },
         },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
@@ -441,7 +441,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     // Response triad on success.
     expect(body.spec_version).toBeTruthy();
     expect(body.auditor_url).toBeTruthy();
-    expect(body.anc_version).toBe('0.3.1');
+    expect(body.anc_version).toBe(ANC_VERSION);
   });
 
   // -------------------------------------------------------------------------
@@ -461,7 +461,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
           badge: { score_pct: 88, eligible: true },
           score: { value: 88 },
         },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/BurntSushi/ripgrep/tree/master'), env);
@@ -483,7 +483,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.scorecard.score?.value).toBe(88);
     // No share_url — branch-scoped, even for curated.
     expect(body.share_url).toBeUndefined();
-    expect(body.anc_version).toBe('0.3.1');
+    expect(body.anc_version).toBe(ANC_VERSION);
   });
 
   test('branch URL on curated repo bypasses R2 cache too (prefilled curated key unreachable)', async () => {
@@ -497,14 +497,14 @@ describe('/api/score — branch URLs + no-release repos', () => {
       cacheContent: {
         [keyFor('rg', SPEC_VERSION)]: {
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           tool_version: '15.1.0',
           scorecard: { tool: { name: 'ripgrep', binary: 'rg', version: '15.1.0' }, score: { value: 99 } },
         },
       },
       doResponse: {
         scorecard: { tool: { name: 'ripgrep', binary: 'rg', version: '15.1.0' }, score: { value: 77 } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/BurntSushi/ripgrep/tree/master'), env);
@@ -602,7 +602,7 @@ describe('/api/score — github accessibility pre-check', () => {
       },
       doResponse: {
         scorecard: { tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('brettdavies/dotfiles'), env);
@@ -631,7 +631,7 @@ describe('/api/score — github accessibility pre-check', () => {
       // tried to probe github here, and the test would fail loudly.
       doResponse: {
         scorecard: { tool: { name: 'gping', binary: 'gping', version: null } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
@@ -660,7 +660,7 @@ describe('/api/score — github accessibility pre-check', () => {
       githubFetchTracker: headTracker,
       doResponse: {
         scorecard: { tool: { name: 'aider', binary: 'aider', version: '0.50.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const envWithHints: ScoreEnv = {
@@ -1052,7 +1052,7 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
       cacheContent: {
         [keyFor('dotfiles', SPEC_VERSION)]: {
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           tool_version: '1.0.0',
           scorecard: {
             tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' },
@@ -1188,7 +1188,7 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
       },
       doResponse: {
         scorecard: { tool: { name: 'gog', binary: 'gog', version: '0.4.2' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
@@ -1226,7 +1226,7 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'gping', binary: 'gping', version: null } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
@@ -1274,7 +1274,7 @@ describe('/api/score — Worker-side discovery (post 2026-05-20 move)', () => {
       },
       doResponse: {
         scorecard: { tool: { name: 'gog', binary: 'gog', version: '0.4.2' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
@@ -1334,7 +1334,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
       cacheContent: {
         [keyFor('gogcli', SPEC_VERSION)]: {
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           tool_version: '0.4.2',
           scorecard: {
             tool: { name: 'gog', binary: 'gog', version: '0.4.2' },
@@ -1346,7 +1346,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
       // but the test asserts doCalls==0, so this is unreachable.
       doResponse: {
         scorecard: { tool: { name: 'should-not-see-this', binary: 'x' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
@@ -1359,7 +1359,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
     };
     expect(body.scorecard.score.value).toBe(91);
     expect(body.scorecard.tool.name).toBe('gog');
-    expect(body.anc_version).toBe('0.3.1');
+    expect(body.anc_version).toBe(ANC_VERSION);
     // DO not dispatched.
     expect(tracker.doCalls).toBe(0);
     // Two cache GETs fired: the round-1 attempt inside lookupScorecard
@@ -1383,7 +1383,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
       cacheContent: {
         [keyFor('dotfiles', SPEC_VERSION)]: {
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           tool_version: '1.0.0',
           scorecard: {
             tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' },
@@ -1418,7 +1418,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
       },
       doResponse: {
         scorecard: { tool: { name: 'gog', binary: 'gog', version: '0.4.2' }, score: { value: 88 } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
@@ -1468,14 +1468,14 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
       cacheContent: {
         [keyFor('gping', SPEC_VERSION)]: {
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           tool_version: '1.0.0',
           scorecard: { tool: { name: 'gping', binary: 'gping', version: '1.0.0' }, score: { value: 99 } },
         },
       },
       doResponse: {
         scorecard: { tool: { name: 'gping', binary: 'gping', version: null }, score: { value: 50 } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/orf/gping/tree/master'), env);
@@ -1508,14 +1508,14 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
       cacheContent: {
         [keyFor('gogcli', SPEC_VERSION)]: {
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           tool_version: '0.4.2',
           scorecard: { tool: { name: 'gog', binary: 'gog' }, score: { value: 91 } },
         },
       },
       doResponse: {
         scorecard: { tool: { name: 'gog', binary: 'gog' }, score: { value: 42 } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const req = new Request('https://anc.dev/api/score?fromCache=false', {
@@ -1560,7 +1560,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
           cacheContent: {
             [keyFor('gogcli', SPEC_VERSION)]: {
               spec_version: SPEC_VERSION,
-              anc_version: '0.3.1',
+              anc_version: ANC_VERSION,
               tool_version: '0.4.2',
               scorecard: { tool: { name: 'gog', binary: 'gog' }, score: { value: 91 } },
             },
@@ -1595,7 +1595,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
           cacheContent: {
             [keyFor('dotfiles', SPEC_VERSION)]: {
               spec_version: SPEC_VERSION,
-              anc_version: '0.3.1',
+              anc_version: ANC_VERSION,
               tool_version: '1.0.0',
               scorecard: { tool: { name: 'dotfiles', binary: 'dotfiles', version: '1.0.0' } },
             },

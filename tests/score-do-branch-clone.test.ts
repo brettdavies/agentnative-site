@@ -28,7 +28,7 @@ import {
   type ExecLike,
   score,
 } from '../src/worker/score/sandbox-exec';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Stub — mirrors the shape in score-do.test.ts so tests run offline.
@@ -42,7 +42,7 @@ type ExecResponder = (command: string) => ExecLike;
 
 const ANC_CHECK_OK = JSON.stringify({
   spec_version: SPEC_VERSION,
-  anc_version: '0.3.1',
+  anc_version: ANC_VERSION,
   tool: { name: 'qmd', version: '0.1.0' },
   score: { value: 70 },
 });
@@ -53,7 +53,7 @@ function defaultResponder(command: string): ExecLike {
     return { success: true, stdout: '', stderr: '' };
   }
   if (command === 'anc --version') {
-    return { success: true, stdout: 'anc 0.3.1\n', stderr: '' };
+    return { success: true, stdout: `anc ${ANC_VERSION}\n`, stderr: '' };
   }
   if (command.startsWith('anc audit ')) {
     return { success: true, stdout: ANC_CHECK_OK, stderr: '' };
@@ -311,7 +311,7 @@ describe('score() — git-clone orchestration', () => {
     const result = await score(stub, CLI_SPEC);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.anc_version).toBe('0.3.1');
+    expect(result.value.anc_version).toBe(ANC_VERSION);
     expect(result.value.scorecard).toMatchObject({ tool: { name: 'qmd' } });
   });
 });
