@@ -21,7 +21,7 @@ Usage: $0 [--env staging|production]
 
 Counts scores/ prefix objects via wrangler r2 object list and confirms
 the scores-7day-ttl lifecycle rule is intact. Emits a JSON verdict.
-Exit: 0 ok, 1 warn, 2 alarm, 3 prereq missing, 4 error.
+Exit: 0 ok, 1 warn, 2 alarm, 3 prerequisite missing, 4 error.
 EOF
       exit 0
       ;;

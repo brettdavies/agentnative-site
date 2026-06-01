@@ -16,13 +16,13 @@ single JSON object to stdout in the shape:
 
 Exit codes:
 
-| Code | Meaning         |
-| ---- | --------------- |
-| `0`  | `status: ok`    |
-| `1`  | `status: warn`  |
-| `2`  | `status: alarm` |
-| `3`  | prereq missing  |
-| `4`  | `status: error` |
+| Code | Meaning              |
+| ---- | -------------------- |
+| `0`  | `status: ok`         |
+| `1`  | `status: warn`       |
+| `2`  | `status: alarm`      |
+| `3`  | prerequisite missing |
+| `4`  | `status: error`      |
 
 Status semantics follow
 [`live-scoring-monitoring.md § Threshold table`](../../docs/runbooks/live-scoring-monitoring.md#threshold-table). The

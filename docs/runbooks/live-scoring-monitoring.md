@@ -363,8 +363,8 @@ health, recent Worker deploys, error-tier sample). Pick by audience.
 
 The wrappers (`check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`, `check-error-tier-sample.sh`) each
 emit one `{check, env, status, checked_at, evidence}` JSON object on stdout. Exit code mirrors status (`0` ok, `1` warn,
-`2` alarm, `3` prereq missing, `4` error). Three of four use wrangler's existing auth flow; the AE SQL wrapper needs
-`CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars.
+`2` alarm, `3` prerequisite missing, `4` error). Three of four use wrangler's existing auth flow; the AE SQL wrapper
+needs `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars.
 
 ## Still deferred
 

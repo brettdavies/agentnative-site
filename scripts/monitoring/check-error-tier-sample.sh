@@ -35,7 +35,7 @@ counts over the last N hours (default 1) and emits a JSON verdict.
 Requires CF_ACCOUNT_ID and CF_API_TOKEN env vars. The token needs
 "Account Analytics:Read".
 
-Exit: 0 ok, 1 warn, 2 alarm, 3 prereq missing, 4 AE error.
+Exit: 0 ok, 1 warn, 2 alarm, 3 prerequisite missing, 4 AE error.
 EOF
       exit 0
       ;;

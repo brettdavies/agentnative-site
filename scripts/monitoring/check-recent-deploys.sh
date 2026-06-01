@@ -19,7 +19,7 @@ while [ $# -gt 0 ]; do
 Usage: $0 [--env staging|production]
 
 Lists the last 5 Worker deploys via wrangler and emits them as JSON.
-Exit: 0 ok, 3 prereq missing, 4 wrangler error.
+Exit: 0 ok, 3 prerequisite missing, 4 wrangler error.
 EOF
       exit 0
       ;;

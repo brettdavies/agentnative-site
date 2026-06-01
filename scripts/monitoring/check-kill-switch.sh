@@ -19,7 +19,7 @@ while [ $# -gt 0 ]; do
 Usage: $0 [--env staging|production]
 
 Reads SCORE_KV.scoring_disabled via wrangler and emits a JSON verdict.
-Exit: 0 ok, 1 warn, 3 prereq missing, 4 wrangler error.
+Exit: 0 ok, 1 warn, 3 prerequisite missing, 4 wrangler error.
 EOF
       exit 0
       ;;
