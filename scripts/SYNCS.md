@@ -98,9 +98,9 @@ site-own version (`package.json` is `"0.0.0"` deliberately: the spec version IS 
 
 ### Build-time vendoring by other repos
 
-| Consumer                                                     | Mechanism                                                                          | What's exported               | Trigger / cadence                                                                                          | Drift check                                                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `brettdavies/agentnative-cli` `src/skill_install/skill.json` | CLI's `scripts/sync-skill-fixture.sh` pulls from this repo's `src/data/skill.json` | Skill bundle metadata fixture | When this repo bumps `src/data/skill.json` (skill release manifest bump per RELEASES.md §"Skill releases") | CLI's `skill-fixture-drift` GitHub Actions workflow runs the fixture's `--check` equivalent on every PR; CLI side fails if its vendored copy lags this repo. Effectively the inverse of the coverage-matrix arrangement: source-of-truth lives here, drift gate lives there. |
+| Consumer                                                     | Mechanism                                                                                | What's exported               | Trigger / cadence                                                                                                | Drift check                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `brettdavies/agentnative-cli` `src/skill_install/skill.json` | CLI's `scripts/sync-skill-fixture.sh` pulls from this repo's `src/data/skill/skill.json` | Skill bundle metadata fixture | When this repo bumps `src/data/skill/skill.json` (skill release manifest bump per RELEASES.md §"Skill releases") | CLI's `skill-fixture-drift` GitHub Actions workflow runs the fixture's `--check` equivalent on every PR; CLI side fails if its vendored copy lags this repo. Effectively the inverse of the coverage-matrix arrangement: source-of-truth lives here, drift gate lives there. |
 
 ### Deploy-time emission to Cloudflare Workers
 
@@ -143,12 +143,12 @@ The flows interact, but each is independently triggered:
    body.
 
 5. **Skill repo cuts a release** → maintainer fast-forwards `agentnative-skill:main` to the new tag → if any user-facing
-   manifest fields changed (per-host install commands, version, description), edits this repo's `src/data/skill.json` to
-   bump `version` plus the changed fields → PR to `dev` → release flow to `main` → `wrangler deploy` updates
-   `/skill.json` on `anc.dev` → Cloudflare cache purge → CLI's next PR exercises `skill-fixture-drift` against the new
-   fixture. If the release didn't change any manifest fields, skip the manifest bump entirely; installed users learn
-   about the new release via the skill bundle's `bin/check-update`, not via a manifest change here. Full runbook in
-   `RELEASES.md` §"Skill-release procedure".
+   manifest fields changed (per-host install commands, version, description), edits the manifest at
+   `src/data/skill/skill.json` to bump `version` plus the changed fields → PR to `dev` → release flow to `main` →
+   `wrangler deploy` updates `/skill.json` on `anc.dev` → Cloudflare cache purge → CLI's next PR exercises
+   `skill-fixture-drift` against the new fixture. If the release didn't change any manifest fields, skip the manifest
+   bump entirely; installed users learn about the new release via the skill bundle's `bin/check-update`, not via a
+   manifest change here. Full runbook in `RELEASES.md` §"Skill-release procedure".
 
 6. **Site code/content change** → push to `dev` (auto-deploys to staging Worker) → PR `dev` → `main` → push to `main`
    (auto-deploys to `anc.dev`).
@@ -167,8 +167,8 @@ The flows interact, but each is independently triggered:
   and runs `score-anc100.sh` inside the container, writing scorecards back to the host via bind mount. The container is
   the single source of truth for scoring; host-side `regen-scorecards.sh` is deprecated.
 - `src/data/spec/README.md`: what's vendored, why, and the manual reconciliation workflow when spec prose drifts.
-- `RELEASES.md` §"Skill releases": the downstream manifest-bump procedure for `src/data/skill.json` end-to-end (manifest
-  edit → cache-purge → live verify).
+- `RELEASES.md` §"Skill releases": the downstream manifest-bump procedure for `src/data/skill/skill.json` end-to-end
+  (manifest edit → cache-purge → live verify).
 - `docs/DESIGN.md` §3.9 (`/skill` + `/skill.json` build contract) and §3.10 (`/install` HTML-only contract).
 - `AGENTS.md`: repo conventions and the `content/principles/` vs `src/data/spec/principles/` separation rule.
 - `docs/plans/2026-04-23-001-feat-sync-spec-plan.md` (dev branch only, gated off main): the plan that introduced
@@ -179,4 +179,4 @@ The flows interact, but each is independently triggered:
   (commit-a-copy over build-time fetch over symlinks).
 - CLI's reference implementation of `sync-spec.sh`: `~/dev/agentnative-cli/scripts/sync-spec.sh`.
 - CLI's `scripts/sync-skill-fixture.sh` and `skill-fixture-drift` workflow: the inverse-direction drift gate that
-  protects the `src/data/skill.json` → CLI fixture flow.
+  protects the `src/data/skill/skill.json` → CLI fixture flow.

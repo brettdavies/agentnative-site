@@ -57,7 +57,7 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `/skill` — human-facing install page for the `agent-native-cli` skill bundle (rendered HTML; mixed-register prose +
   per-host clone commands)
 - `/skill.json` — canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
-  `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill.json` at build time; full surface
+  `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill/skill.json` at build time; full surface
   contract in `DESIGN.md` §3.9
 - `content/*.md` — markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise

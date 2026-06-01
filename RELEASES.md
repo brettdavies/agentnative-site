@@ -505,7 +505,7 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
 [`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). Site vendors the manifest in
-`src/data/skill.json`; the skill repo holds the actual content.
+`src/data/skill/skill.json`; the skill repo holds the actual content.
 
 ### Release procedure
 
@@ -516,7 +516,7 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
    git checkout main && git merge --ff-only v0.x.y && git push origin main
    ```
 
-2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill.json` to bump
+2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill/skill.json` to bump
    `version` and update any per-host install commands, description, or other surface fields.
 3. **PR to `dev`**: CI runs unit + worker tests on the bumped manifest. Squash-merge on green.
 4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
