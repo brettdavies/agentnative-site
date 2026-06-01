@@ -79,8 +79,8 @@ that doesn't resolve to an installable binary bounces out with the install-anc-l
   (`PIP_UPLOADED_PRIOR_TO`, `UV_EXCLUDE_NEWER="7 days"`), staging instance promoted to `standard-2` (lifts pip
   extraction CPU/IO budget for aider-chat's 91 MB wheel set), and a runbook/decision-log split: `RELEASES.md` becomes
   runbook-only (commands, paths, tables), `ARCHITECTURE.md` is a new top-level decision log holding all rationale prose.
-  Staging container app now on `:d87ed0a` + `standard-2`. Production is not in scope until U10 ships and the whole plan
-  is complete.
+  Staging container app now on `:d87ed0a` + `standard-2`. Production promotion is unblocked as of 2026-06-01 (U10
+  shipped); the next release cuts a `release/*` branch per `RELEASES.md`.
 - U8 — Homepage live-scoring form, invisible Turnstile + lazy-load, 2 s theater floor, three class-specific bounce
   panels, install-anc CTA, CSP allowlist for `challenges.cloudflare.com`, build-emitted
   `src/worker/spec-version.gen.ts`, markdown-twin silence invariant, shareable result page at `/score/live/<binary>`
@@ -184,18 +184,15 @@ without weakening the original guarantees.
   K1-K8, A1-A15, P1-P10 in non-principle context) stripped from comments and JSDoc. Files this branch never touched
   still carry their anchors; a follow-up sweep is queued separately.
 
-### Pending (in execution order for the next session)
+### Deferred follow-ups
 
-1. **U9** — tests (mocked + opt-in live), monitoring runbook, RELEASES.md v3 procedure for live-scoring releases.
-   Cross-cutting; should land while U8's surface is fresh.
-2. **U10** — analytics + billing guardrails: Workers Analytics Engine telemetry (one event per `/api/score` with pm /
-   error / freshness / latency / tier dimensions — U8's `score.tier` log already emits the tier+cache flags this
-   pipeline will consume), kill-switch flip runbook, Budget Alerts at $5 / $25 / $100. Auto-kill via cron is deferred to
-   U10.1 once real traffic patterns inform the threshold.
+- **U10.1 — automated kill cron.** A scheduled Worker that queries the `SCORE_TELEMETRY` Analytics Engine dataset for
+  rolling 24h request count and auto-flips `scoring_disabled` past a threshold. All primitives (AE dataset + kill switch
+- Workers cron) exist; threshold tuning needs real traffic data, so the wiring is deferred.
+- **Production-side procedure block** in the live-scoring monitoring runbook (commands, thresholds, escalation paths
+  against `anc.dev`). Lands with the first production release that promotes live scoring.
 
-U10 lands after U9 (cache hit/miss + tier telemetry must be observable before analytics dashboards are trustworthy).
-
-### Risks to design against during U5-U8
+### Risks to design against
 
 - **Cost ceiling has no native auto-cap on Cloudflare.** Per spike 04 (citing
   <https://developers.cloudflare.com/changelog/post/2026-04-13-billable-usage-dashboard-and-budget-alerts/>), the April
@@ -219,13 +216,11 @@ U10 lands after U9 (cache hit/miss + tier telemetry must be observable before an
   (cite <https://developers.cloudflare.com/containers/platform-details/limits/> footnote). Discipline: never delete
   shipped-version images, treat DO migrations as one-way walls.
 
-### Branch baseline for next session
+### Branch baseline
 
-U5-U8 are dev-only; nothing about this plan ships to production until the entire plan (through U10) is complete. The
-U5/U6/U7 feature branches were squash-merged and deleted locally; the U8 branch (`feat/u8-homepage-form`, head
-`45b66c6`) is pending PR review at the time of this writing.
-
-Next-session work begins with U9 + U10 once U8 merges. New feature branch off `dev` post U8 squash-merge.
+All units (U1 through U10) are squash-merged on `dev`. The next promotion to `main` follows the standard `release/*`
+cherry-pick flow in `RELEASES.md`, gated by the live-DO smoke step in `RELEASES-PREFLIGHT.md`. U10.1 (auto-kill cron)
+remains deferred per the "Deferred follow-ups" section above.
 
 ---
 
@@ -1198,7 +1193,7 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 
 ## Implementation Units
 
-### Shipping Progress (last updated 2026-05-20)
+### Shipping Progress (last updated 2026-06-01)
 
 | Unit | Status    | Shipping refs                                                                                                                                                                                                                                                                      |
 | ---- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1211,7 +1206,7 @@ This validation is meta to the plan: it gates the plan itself, not a unit.
 | U7   | [shipped] | PRs [#96](https://github.com/brettdavies/agentnative-site/pull/96) + [#97](https://github.com/brettdavies/agentnative-site/pull/97) + [#98](https://github.com/brettdavies/agentnative-site/pull/98) + [#99](https://github.com/brettdavies/agentnative-site/pull/99) — 2026-05-19 |
 | U8   | [shipped] | branch `feat/u8-homepage-form` off `dev` commit `37e5375` — head `45b66c6` (16 commits) — PR pending (2026-05-20)                                                                                                                                                                  |
 | U9   | [shipped] | PRs [#101](https://github.com/brettdavies/agentnative-site/pull/101) + [#102](https://github.com/brettdavies/agentnative-site/pull/102) + [#103](https://github.com/brettdavies/agentnative-site/pull/103) — 2026-05-20                                                            |
-| U10  | [pending] | depends on U7 + U9 (both shipped); analytics + billing guardrails                                                                                                                                                                                                                  |
+| U10  | [shipped] | telemetry + AE bindings + runbook in dev pre-2026-06-01; agent-deterministic check + flip wrappers via PR [#143](https://github.com/brettdavies/agentnative-site/pull/143) — 2026-06-01. Auto-kill cron deferred to U10.1.                                                         |
 
 **Phases 1, 2, and the user-facing surface of Phase 3 are complete.** U1 through U4 land the foundation (data, image,
 parser, bindings). U5 wires `/api/score` with the abuse-mitigation stack but leaves the DO as a stub. U6 replaces the
@@ -1222,8 +1217,8 @@ class-specific bounce panels, install-anc CTA, CSP allowlist, build-emitted `spe
 `/score/live/<binary>` result surface (HTML + markdown twin) — with the scope expansions documented above in "Discovered
 during U8 execution (2026-05-20)". The Pre-Implementation Validation gate
 ([PR #77](https://github.com/brettdavies/agentnative-site/pull/77)) ran ahead of Phase 1 and conditioned the U1, U4, U6,
-U8 specs via the F1 and F4 findings (see plan amend commit `08a9a24`). Remaining Phase 3 work covers U9 (operational
-tests + runbook + release procedure) and U10 (analytics + billing guardrails).
+U8 specs via the F1 and F4 findings (see plan amend commit `08a9a24`). All Phase 3 work (U5 through U10) is
+squash-merged on `dev`; U10.1 (auto-kill cron) is the only remaining deferred follow-up.
 
 ---
 
