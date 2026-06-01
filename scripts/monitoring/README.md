@@ -29,12 +29,10 @@ Status semantics follow
 `evidence` block carries the raw inputs the script consulted; consumers can recompute the verdict from it without
 re-running the check.
 
-This directory holds read-only checks. The write counterpart (currently the kill-switch flip) lives at
-[`scripts/ops/`](../ops/).
+This directory holds read-only checks. The write counterpart lives at [`scripts/ops/`](../ops/) (see
+[`scripts/ops/README.md`](../ops/README.md) for `flip-kill-switch.sh` and any future operator actions).
 
 ## Scripts
-
-Read-only checks under `scripts/monitoring/`:
 
 | Script                       | Purpose                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------ |
@@ -43,15 +41,9 @@ Read-only checks under `scripts/monitoring/`:
 | `check-recent-deploys.sh`    | Last 5 Worker deploys via `wrangler deployments list`.                               |
 | `check-error-tier-sample.sh` | Last 1 h error-code distribution via the Analytics Engine SQL API.                   |
 
-Write actions under `scripts/ops/`:
-
-| Script                | Purpose                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| `flip-kill-switch.sh` | Set or clear `SCORE_KV.scoring_disabled`. `--on` puts `true`, `--off` deletes. |
-
 ## Common invocation
 
-All four read-only checks accept:
+All four checks accept:
 
 ```bash
 scripts/monitoring/<script>.sh [--env staging|production] [--dry-run] [--help]
@@ -65,18 +57,9 @@ commands the script would have fired. No wrangler / curl call is made. Exit code
 check will do, or smoke-testing the wrapper without credentials (the AE SQL check skips its `CF_ACCOUNT_ID` /
 `CF_API_TOKEN` pre-check under `--dry-run`).
 
-The flip script under `scripts/ops/` accepts:
-
-```bash
-scripts/ops/flip-kill-switch.sh --on|--off [--env staging|production] [--dry-run] [--yes] [--help]
-```
-
-`--on` or `--off` is required. Production flips (either direction) require `--yes` to guard against typos; staging flips
-both directions are free. `--dry-run` follows the same semantics as the checks.
-
 ## Dependencies
 
-- `bun x wrangler` for KV / R2 / deployments reads and the kill-switch write.
+- `bun x wrangler` for KV / R2 / deployments reads.
 - `jaq` (preferred) or `jq` for JSON shaping.
 - `curl` for the AE SQL API.
 - `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars for `check-error-tier-sample.sh` only. Other checks rely on wrangler's
@@ -89,3 +72,10 @@ Per
 The MCP queries serve IDE agents that already hold a Cloudflare MCP token. The JSON wrappers serve operators, CI, and
 agents reaching Bash but not MCP. The wrappers keep the per-check answer reproducible from a shell prompt without a
 Cloudflare API token in three of four cases (only the AE SQL check needs one).
+
+## See also
+
+- [`scripts/ops/README.md`](../ops/README.md): write-action wrappers (currently `flip-kill-switch.sh`) that follow the
+  same JSON envelope + `--dry-run` contract documented here.
+- [`docs/runbooks/live-scoring-monitoring.md`](../../docs/runbooks/live-scoring-monitoring.md): the manual playbooks
+  these wrappers automate.
