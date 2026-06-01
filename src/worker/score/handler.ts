@@ -102,12 +102,13 @@ import type { ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
 import {
+  _resetRegistryIndexCache,
   type DiscoveryHintsIndex,
   deriveShareBinary,
   deriveShareBinaryFromSpec,
+  loadRegistryIndex,
   lookupRegistry,
   lookupScorecard,
-  type RegistryIndex,
 } from './registry-lookup';
 import { resolveSpec } from './resolve-spec';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
@@ -154,28 +155,16 @@ export interface RateLimit {
 }
 
 // ---------------------------------------------------------------------------
-// Registry / hints index loading. Cached at module scope across invocations
-// in the same isolate (Workers re-instantiate isolates frequently, so this
-// is bounded and recovers from build-deploy drift within seconds).
+// Hints index loading. Registry-index loading lives in registry-lookup.ts
+// so /api/score and /score/live/<binary> share one isolate-level cache.
 // ---------------------------------------------------------------------------
 
-let registryIndexPromise: Promise<RegistryIndex> | null = null;
 let hintsIndexPromise: Promise<DiscoveryHintsIndex> | null = null;
 
 async function fetchAssetJson<T>(env: ScoreEnv, path: string): Promise<T> {
   const res = await env.ASSETS.fetch(new Request(`https://assets.internal${path}`));
   if (!res.ok) throw new Error(`asset fetch failed: ${path} (status ${res.status})`);
   return (await res.json()) as T;
-}
-
-function loadRegistryIndex(env: ScoreEnv): Promise<RegistryIndex> {
-  if (!registryIndexPromise) {
-    registryIndexPromise = fetchAssetJson<RegistryIndex>(env, '/registry-index.json').catch((err) => {
-      registryIndexPromise = null;
-      throw err;
-    });
-  }
-  return registryIndexPromise;
 }
 
 function loadHintsIndex(env: ScoreEnv): Promise<DiscoveryHintsIndex> {
@@ -190,7 +179,7 @@ function loadHintsIndex(env: ScoreEnv): Promise<DiscoveryHintsIndex> {
 
 /** Test-only — drop in-memory index caches. */
 export function _resetIndexCache(): void {
-  registryIndexPromise = null;
+  _resetRegistryIndexCache();
   hintsIndexPromise = null;
 }
 

@@ -23,7 +23,7 @@ import { detectPreference } from '../accept';
 import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { get as cacheGet, keyFor as cacheKeyFor } from './cache';
-import { SHARE_URL_BINARY_RE } from './registry-lookup';
+import { loadRegistryIndex, type RegistryIndex, resolveCuratedSlug, SHARE_URL_BINARY_RE } from './registry-lookup';
 
 // Lazy-cached shell template — fetched on the first /score/live request
 // in each isolate and held for the lifetime of the isolate. Workers re-
@@ -277,11 +277,32 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   // the rest of the site).
   const wantMarkdown = match.isMarkdown || (!match.isMarkdown && detectPreference(request) === 'markdown');
 
-  // The DO's cache write uses spec.binary (the parser-derived binary).
-  // The handler's share_url uses the same. So a user never visits a
-  // /score/live/<alias> URL we'd need to redirect — the URL we emit IS
-  // the cache key. Aliases (e.g., the static /score/rg → /score/ripgrep
-  // redirect) live on the curated-static side and don't apply here.
+  // Curated-tool redirect. The /score/live/<binary> surface is for
+  // binaries NOT in the registry — registry-curated tools have a
+  // canonical /score/<slug> page. The homepage POST flow already
+  // short-circuits via the registry fast-path, but defense-in-depth:
+  // any directly-constructed /score/live/<curated-binary> URL (or a
+  // stale R2 cache entry for a binary that has since been added to
+  // the registry) bounces here to the canonical page. Catches both
+  // binary === entry.name (most tools) and binary === entry.binary
+  // (alias entries like ripgrep/rg, ast-grep/sg). The .md suffix
+  // and 5-minute cache match the rest of the site's redirect policy.
+  let registryIndex: RegistryIndex | null = null;
+  try {
+    registryIndex = await loadRegistryIndex(env);
+  } catch {
+    // Asset fetch failed — proceed without the curated check rather
+    // than 5xx the live path. A future request will retry.
+  }
+  const curatedSlug = registryIndex ? resolveCuratedSlug(binary, registryIndex) : null;
+  if (curatedSlug) {
+    const canonical = `/score/${curatedSlug}${wantMarkdown ? '.md' : ''}`;
+    return new Response(null, {
+      status: 301,
+      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+
   const cached = await cacheGet(env, cacheKeyFor(binary, SPEC_VERSION));
   if (!cached) {
     return renderNotFound(env, binary, wantMarkdown);

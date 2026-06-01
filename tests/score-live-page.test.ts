@@ -7,6 +7,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { keyFor } from '../src/worker/score/cache';
+import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import {
   _resetShellTemplateCache,
   handleLiveScorePage,
@@ -54,11 +55,19 @@ const CACHED_RIPGREP_PAYLOAD = {
   scorecard: SAMPLE_SCORECARD,
 };
 
-function makeEnv(content: Record<string, unknown> = {}) {
+// Registry-index fixture for redirect tests. Empty `by_slug` by default so
+// the curated-tool short-circuit doesn't fire; tests that exercise the
+// redirect override `opts.registry` with curated entries.
+const EMPTY_REGISTRY_INDEX = { by_slug: {}, by_owner_repo: {} };
+
+type MakeEnvOpts = { registry?: { by_slug: Record<string, unknown>; by_owner_repo: Record<string, unknown> } };
+
+function makeEnv(content: Record<string, unknown> = {}, opts: MakeEnvOpts = {}) {
   const store = new Map<string, string>();
   for (const [k, v] of Object.entries(content)) {
     store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
   }
+  const registryIndex = opts.registry ?? EMPTY_REGISTRY_INDEX;
   const env = {
     ASSETS: {
       async fetch(req: Request | string) {
@@ -66,6 +75,9 @@ function makeEnv(content: Record<string, unknown> = {}) {
         const path = new URL(url).pathname;
         if (path === '/_internal/score-live-shell.html') {
           return new Response(SHELL_TEMPLATE, { status: 200 });
+        }
+        if (path === '/registry-index.json') {
+          return new Response(JSON.stringify(registryIndex), { status: 200 });
         }
         return new Response('not found', { status: 404 });
       },
@@ -91,8 +103,9 @@ function makeEnv(content: Record<string, unknown> = {}) {
       },
     },
   };
-  // Reset the module-level template cache so each test re-fetches.
+  // Reset module-level caches so each test re-fetches fixtures fresh.
   _resetShellTemplateCache();
+  _resetRegistryIndexCache();
   return env as unknown as { ASSETS: Fetcher; SCORE_CACHE: R2Bucket };
 }
 
@@ -352,6 +365,110 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
     expect(html).toContain('No live score for');
     // The 404 path uses esc() — confirm by sending a slug with a hyphen.
     expect(html).toContain('foo-bar');
+  });
+});
+
+describe('handleLiveScorePage — curated-tool redirect', () => {
+  // /score/live/<binary> is for non-registry binaries. Anything matching a
+  // curated tool (by name OR alias binary) MUST 301 to /score/<slug>.
+  const RIPGREP_ENTRY = { name: 'ripgrep', binary: 'rg', install: 'brew install ripgrep' };
+  const ANC_ENTRY = { name: 'anc', binary: 'anc', install: 'brew install brettdavies/tap/anc' };
+  const CURATED_REGISTRY = {
+    by_slug: { ripgrep: RIPGREP_ENTRY, anc: ANC_ENTRY },
+    by_owner_repo: {},
+  };
+
+  test('redirects /score/live/<curated-name> to /score/<name>', async () => {
+    const env = makeEnv({}, { registry: CURATED_REGISTRY });
+    const res = await handleLiveScorePage(get('/score/live/anc'), env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/score/anc');
+  });
+
+  test('redirects /score/live/<curated-binary-alias> to /score/<name>', async () => {
+    // ripgrep is registered as name=ripgrep, binary=rg. A user (or stale
+    // cache entry) landing at /score/live/rg should bounce to /score/ripgrep,
+    // not render at the live path.
+    const env = makeEnv({}, { registry: CURATED_REGISTRY });
+    const res = await handleLiveScorePage(get('/score/live/rg'), env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/score/ripgrep');
+  });
+
+  test('preserves .md suffix through the redirect', async () => {
+    const env = makeEnv({}, { registry: CURATED_REGISTRY });
+    const res = await handleLiveScorePage(get('/score/live/anc.md'), env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/score/anc.md');
+  });
+
+  test('Accept: text/markdown on the no-suffix path also redirects to .md', async () => {
+    const env = makeEnv({}, { registry: CURATED_REGISTRY });
+    const req = new Request('https://anc.dev/score/live/anc', {
+      method: 'GET',
+      headers: { accept: 'text/markdown' },
+    });
+    const res = await handleLiveScorePage(req, env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/score/anc.md');
+  });
+
+  test('redirect fires even when an R2 cache entry exists for the curated binary', async () => {
+    // Defense-in-depth: the cache may carry a stale write for a binary that
+    // has since been added to the registry. The redirect MUST win.
+    const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD }, { registry: CURATED_REGISTRY });
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/score/ripgrep');
+  });
+
+  test('non-registry binary still renders normally (no false-positive redirect)', async () => {
+    const env = makeEnv(
+      { [keyFor('cowsay', SPEC_VERSION)]: { ...CACHED_RIPGREP_PAYLOAD } },
+      { registry: CURATED_REGISTRY },
+    );
+    const res = await handleLiveScorePage(get('/score/live/cowsay'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+  });
+
+  test('registry-index asset fetch failure falls through (does not 5xx the live path)', async () => {
+    // If the registry-index asset is unavailable, the live path proceeds
+    // without the curated check rather than failing closed.
+    const store = new Map<string, string>();
+    store.set(CACHED_RIPGREP_KEY, JSON.stringify(CACHED_RIPGREP_PAYLOAD));
+    const env = {
+      ASSETS: {
+        async fetch(req: Request | string) {
+          const url = typeof req === 'string' ? req : req.url;
+          const path = new URL(url).pathname;
+          if (path === '/_internal/score-live-shell.html') {
+            return new Response(SHELL_TEMPLATE, { status: 200 });
+          }
+          return new Response('not found', { status: 404 });
+        },
+      },
+      SCORE_CACHE: {
+        async get(key: string) {
+          const raw = store.get(key);
+          if (raw === undefined) return null;
+          return {
+            async json() {
+              return JSON.parse(raw);
+            },
+            async text() {
+              return raw;
+            },
+          };
+        },
+        async put() {},
+        async delete() {},
+      },
+    } as unknown as { ASSETS: Fetcher; SCORE_CACHE: R2Bucket };
+    _resetShellTemplateCache();
+    _resetRegistryIndexCache();
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
+    expect(res.status).toBe(200);
   });
 });
 
