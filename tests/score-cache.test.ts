@@ -177,7 +177,9 @@ describe('cache.put', () => {
 
   test('refusal-to-cache-half-state: missing toolVersion throws', async () => {
     const { env } = makeR2Stub();
-    await expect(put(env, keyFor('rg', SPEC_VERSION), {}, ANC_VERSION, '', SPEC_VERSION)).rejects.toThrow(/toolVersion/);
+    await expect(put(env, keyFor('rg', SPEC_VERSION), {}, ANC_VERSION, '', SPEC_VERSION)).rejects.toThrow(
+      /toolVersion/,
+    );
   });
 
   test('refusal-to-cache-half-state: missing specVersion throws', async () => {

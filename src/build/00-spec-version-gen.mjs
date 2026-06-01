@@ -123,7 +123,5 @@ export async function computeExpectedSpecVersionModule() {
 
 if (import.meta.main) {
   const { specVersion, siteSpecVersion, ancVersion, path } = await generateSpecVersionModule();
-  console.log(
-    `spec-version-gen: wrote ${path} (spec=${specVersion}, site=${siteSpecVersion}, anc=${ancVersion})`,
-  );
+  console.log(`spec-version-gen: wrote ${path} (spec=${specVersion}, site=${siteSpecVersion}, anc=${ancVersion})`);
 }
