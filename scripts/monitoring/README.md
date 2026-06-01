@@ -8,7 +8,7 @@ single JSON object to stdout in the shape:
 {
   "check": "<name>",
   "env": "staging" | "production",
-  "status": "ok" | "warn" | "alarm" | "error",
+  "status": "ok" | "warn" | "alarm" | "dry-run" | "error",
   "checked_at": "<RFC 3339 timestamp>",
   "evidence": { /* per-check fields */ }
 }
@@ -16,24 +16,25 @@ single JSON object to stdout in the shape:
 
 Exit codes:
 
-| Code | Meaning              |
-| ---- | -------------------- |
-| `0`  | `status: ok`         |
-| `1`  | `status: warn`       |
-| `2`  | `status: alarm`      |
-| `3`  | prerequisite missing |
-| `4`  | `status: error`      |
+| Code | Meaning                           |
+| ---- | --------------------------------- |
+| `0`  | `status: ok` or `status: dry-run` |
+| `1`  | `status: warn`                    |
+| `2`  | `status: alarm`                   |
+| `3`  | prerequisite missing              |
+| `4`  | `status: error`                   |
 
 Status semantics follow
 [`live-scoring-monitoring.md § Threshold table`](../../docs/runbooks/live-scoring-monitoring.md#threshold-table). The
 `evidence` block carries the raw inputs the script consulted; consumers can recompute the verdict from it without
 re-running the check.
 
-The four wrappers cover the U10 agent-deterministic-check surface alongside the inline `Agent (MCP)` queries already
-documented next to each manual check in the monitoring runbook. Either path produces the same answer; pick by audience
-(JSON wrappers for shell-driven CI / cron / operator scripts; MCP for IDE agents and conversational tooling).
+This directory holds read-only checks. The write counterpart (currently the kill-switch flip) lives at
+[`scripts/ops/`](../ops/).
 
 ## Scripts
+
+Read-only checks under `scripts/monitoring/`:
 
 | Script                       | Purpose                                                                              |
 | ---------------------------- | ------------------------------------------------------------------------------------ |
@@ -42,20 +43,40 @@ documented next to each manual check in the monitoring runbook. Either path prod
 | `check-recent-deploys.sh`    | Last 5 Worker deploys via `wrangler deployments list`.                               |
 | `check-error-tier-sample.sh` | Last 1 h error-code distribution via the Analytics Engine SQL API.                   |
 
+Write actions under `scripts/ops/`:
+
+| Script                | Purpose                                                                        |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `flip-kill-switch.sh` | Set or clear `SCORE_KV.scoring_disabled`. `--on` puts `true`, `--off` deletes. |
+
 ## Common invocation
 
-All four scripts accept:
+All four read-only checks accept:
 
 ```bash
-scripts/monitoring/<script>.sh [--env staging|production] [--help]
+scripts/monitoring/<script>.sh [--env staging|production] [--dry-run] [--help]
 ```
 
 `--env staging` is the default. `production` flips the wrangler `--env` flag (absent for prod) and the AE dataset name
 (`anc_live_score_staging` → `anc_live_score_prod`).
 
+`--dry-run` emits the JSON envelope with `status: "dry-run"` and an `evidence.would_run` array listing the remote
+commands the script would have fired. No wrangler / curl call is made. Exit code is `0`. Useful for previewing what a
+check will do, or smoke-testing the wrapper without credentials (the AE SQL check skips its `CF_ACCOUNT_ID` /
+`CF_API_TOKEN` pre-check under `--dry-run`).
+
+The flip script under `scripts/ops/` accepts:
+
+```bash
+scripts/ops/flip-kill-switch.sh --on|--off [--env staging|production] [--dry-run] [--yes] [--help]
+```
+
+`--on` or `--off` is required. Production flips (either direction) require `--yes` to guard against typos; staging flips
+both directions are free. `--dry-run` follows the same semantics as the checks.
+
 ## Dependencies
 
-- `bun x wrangler` for KV / R2 / deployments reads.
+- `bun x wrangler` for KV / R2 / deployments reads and the kill-switch write.
 - `jaq` (preferred) or `jq` for JSON shaping.
 - `curl` for the AE SQL API.
 - `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars for `check-error-tier-sample.sh` only. Other checks rely on wrangler's

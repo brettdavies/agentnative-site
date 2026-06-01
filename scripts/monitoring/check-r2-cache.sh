@@ -12,15 +12,20 @@
 set -euo pipefail
 
 ENV_ARG="staging"
+DRY_RUN=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_ARG="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
     --help|-h)
       cat <<EOF
-Usage: $0 [--env staging|production]
+Usage: $0 [--env staging|production] [--dry-run]
 
 Counts scores/ prefix objects via wrangler r2 object list and confirms
 the scores-7day-ttl lifecycle rule is intact. Emits a JSON verdict.
+With --dry-run, prints the wrangler commands it would run inside the
+JSON envelope under evidence.would_run and exits 0 without calling
+wrangler.
 Exit: 0 ok, 1 warn, 2 alarm, 3 prerequisite missing, 4 error.
 EOF
       exit 0
@@ -42,6 +47,27 @@ if [ -z "$JQ_BIN" ]; then
 fi
 
 NOW="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+WOULD_RUN_LIST="bun x wrangler r2 object list $BUCKET --prefix=scores/"
+WOULD_RUN_LIFECYCLE="bun x wrangler r2 bucket lifecycle list $BUCKET"
+
+if [ "$DRY_RUN" = true ]; then
+  "$JQ_BIN" -n \
+    --arg env "$ENV_ARG" \
+    --arg bucket "$BUCKET" \
+    --arg checked_at "$NOW" \
+    --arg cmd_list "$WOULD_RUN_LIST" \
+    --arg cmd_lifecycle "$WOULD_RUN_LIFECYCLE" \
+    '{
+       check: "r2-cache",
+       env: $env,
+       status: "dry-run",
+       checked_at: $checked_at,
+       evidence: { bucket: $bucket, would_run: [$cmd_list, $cmd_lifecycle] }
+     }'
+  exit 0
+fi
+
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
 

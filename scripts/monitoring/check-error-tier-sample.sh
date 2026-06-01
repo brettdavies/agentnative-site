@@ -19,21 +19,24 @@ set -euo pipefail
 ENV_ARG="staging"
 WINDOW_HOURS="1"
 WARN_THRESHOLD="${WARN_THRESHOLD:-50}"
+DRY_RUN=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_ARG="$2"; shift 2 ;;
     --window-hours) WINDOW_HOURS="$2"; shift 2 ;;
     --warn-threshold) WARN_THRESHOLD="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
     --help|-h)
       cat <<EOF
-Usage: $0 [--env staging|production] [--window-hours N] [--warn-threshold N]
+Usage: $0 [--env staging|production] [--window-hours N] [--warn-threshold N] [--dry-run]
 
 Queries the SCORE_TELEMETRY Analytics Engine dataset for error-code
 counts over the last N hours (default 1) and emits a JSON verdict.
 
 Requires CF_ACCOUNT_ID and CF_API_TOKEN env vars. The token needs
-"Account Analytics:Read".
+"Account Analytics:Read". --dry-run skips the credential check and
+prints the curl command + SQL body it would send.
 
 Exit: 0 ok, 1 warn, 2 alarm, 3 prerequisite missing, 4 AE error.
 EOF
@@ -65,7 +68,7 @@ if [ -z "$JQ_BIN" ]; then
   exit 3
 fi
 
-if [ -z "${CF_ACCOUNT_ID:-}" ] || [ -z "${CF_API_TOKEN:-}" ]; then
+if [ "$DRY_RUN" = false ] && { [ -z "${CF_ACCOUNT_ID:-}" ] || [ -z "${CF_API_TOKEN:-}" ]; }; then
   echo "FATAL: CF_ACCOUNT_ID and CF_API_TOKEN must be set." >&2
   echo "Pull from 1Password; see docs/runbooks/live-scoring-analytics.md." >&2
   exit 3
@@ -85,6 +88,32 @@ GROUP BY error_code
 ORDER BY hits DESC
 FORMAT JSONCompact
 EOF
+
+if [ "$DRY_RUN" = true ]; then
+  WOULD_RUN="curl -X POST -H 'Authorization: Bearer \$CF_API_TOKEN' -H 'Content-Type: text/plain' --data-binary @- https://api.cloudflare.com/client/v4/accounts/\$CF_ACCOUNT_ID/analytics_engine/sql"
+  "$JQ_BIN" -n \
+    --arg env "$ENV_ARG" \
+    --arg dataset "$DATASET" \
+    --arg checked_at "$NOW" \
+    --argjson window_hours "$WINDOW_HOURS" \
+    --argjson warn_threshold "$WARN_THRESHOLD" \
+    --arg would_run "$WOULD_RUN" \
+    --arg sql "$SQL" \
+    '{
+       check: "error-tier-sample",
+       env: $env,
+       status: "dry-run",
+       checked_at: $checked_at,
+       evidence: {
+         dataset: $dataset,
+         window_hours: $window_hours,
+         warn_threshold: $warn_threshold,
+         would_run: [$would_run],
+         sql: $sql
+       }
+     }'
+  exit 0
+fi
 
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT

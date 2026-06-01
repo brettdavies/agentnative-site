@@ -198,8 +198,27 @@ is not a tree.
 
 Symptom: not a failure mode; the operator's tool for stopping all `live` traffic when something downstream is on fire.
 
+Wrapped path (preferred when you want JSON receipt + dry-run preview):
+
 ```bash
-# Flip ON. Subsequent /api/score live requests return 503 with Retry-After: 3600.
+# Flip ON (staging). Subsequent /api/score live requests return 503 with Retry-After: 3600.
+scripts/ops/flip-kill-switch.sh --env staging --on
+
+# Flip OFF (staging).
+scripts/ops/flip-kill-switch.sh --env staging --off
+
+# Production flips (either direction) require --yes.
+scripts/ops/flip-kill-switch.sh --env production --on --yes
+scripts/ops/flip-kill-switch.sh --env production --off --yes
+
+# Preview the wrangler command without firing it.
+scripts/ops/flip-kill-switch.sh --env staging --on --dry-run
+```
+
+Raw wrangler path (equivalent; what the wrapper calls under the hood):
+
+```bash
+# Flip ON.
 bun x wrangler kv key put --binding=SCORE_KV --env staging scoring_disabled true
 
 # Flip OFF.
@@ -344,8 +363,9 @@ is a backstop, not the primary signal.
   [`RELEASES.md` § Live-scoring (v3) release procedure](../../RELEASES.md#live-scoring-v3-release-procedure).
 - Post-deploy smoke: [`RELEASES.md` § Post-deploy smoke](../../RELEASES.md#post-deploy-smoke) and
   `scripts/smoke-api-score.sh`.
-- Agent-deterministic JSON wrappers: [`scripts/monitoring/`](../../scripts/monitoring/) (`check-kill-switch.sh`,
-  `check-r2-cache.sh`, `check-recent-deploys.sh`, `check-error-tier-sample.sh`).
+- Agent-deterministic JSON wrappers: [`scripts/monitoring/`](../../scripts/monitoring/) (read-only checks:
+  `check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`, `check-error-tier-sample.sh`) and
+  [`scripts/ops/`](../../scripts/ops/) (write actions: `flip-kill-switch.sh`).
 - Sandbox image lifecycle and DO migrations:
   [`RELEASES-RATIONALE.md` § Sandbox image releases](../../RELEASES-RATIONALE.md#sandbox-image-releases) and
   [§ DO migrations are one-way walls](../../RELEASES-RATIONALE.md#do-migrations-are-one-way-walls).
@@ -361,10 +381,17 @@ health, recent Worker deploys, error-tier sample). Pick by audience.
 | MCP queries   | Inline **Agent (MCP)** subsections under each "What to watch" entry above (`mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability` and kin). | IDE agents and conversational tooling that already hold a Cloudflare MCP token.  |
 | JSON wrappers | [`scripts/monitoring/`](../../scripts/monitoring/) (see the README there for invocation + exit-code semantics).                                                    | Operators, CI cron, agents reaching Bash but not MCP, retro evidence collection. |
 
-The wrappers (`check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`, `check-error-tier-sample.sh`) each
-emit one `{check, env, status, checked_at, evidence}` JSON object on stdout. Exit code mirrors status (`0` ok, `1` warn,
-`2` alarm, `3` prerequisite missing, `4` error). Three of four use wrangler's existing auth flow; the AE SQL wrapper
-needs `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars.
+The read-only wrappers (`check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`,
+`check-error-tier-sample.sh`) each emit one `{check, env, status, checked_at, evidence}` JSON object on stdout. Exit
+code mirrors status (`0` ok or dry-run, `1` warn, `2` alarm, `3` prerequisite missing, `4` error). Three of four use
+wrangler's existing auth flow; the AE SQL wrapper needs `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars. All four accept
+`--dry-run`, which emits the same envelope with `status: "dry-run"` and an `evidence.would_run` array listing the remote
+commands the script would fire.
+
+The write counterpart lives under [`scripts/ops/`](../../scripts/ops/). Today that's `flip-kill-switch.sh`, which flips
+`SCORE_KV.scoring_disabled` on or off and follows the same JSON-envelope + `--dry-run` discipline as the read-only
+checks. Production flips require `--yes` to guard against typos. See the
+[Kill-switch flip](#kill-switch-flip-manual-incident-response) playbook above for the operator runbook.
 
 ## Still deferred
 

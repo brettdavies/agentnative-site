@@ -11,14 +11,19 @@
 set -euo pipefail
 
 ENV_ARG="staging"
+DRY_RUN=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_ARG="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
     --help|-h)
       cat <<EOF
-Usage: $0 [--env staging|production]
+Usage: $0 [--env staging|production] [--dry-run]
 
 Lists the last 5 Worker deploys via wrangler and emits them as JSON.
+With --dry-run, prints the wrangler command it would run inside the
+JSON envelope under evidence.would_run and exits 0 without calling
+wrangler.
 Exit: 0 ok, 3 prerequisite missing, 4 wrangler error.
 EOF
       exit 0
@@ -42,6 +47,24 @@ WRANGLER_ENV_FLAG=()
 [ "$ENV_ARG" = "staging" ] && WRANGLER_ENV_FLAG=(--env staging)
 
 NOW="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+WOULD_RUN="bun x wrangler deployments list${WRANGLER_ENV_FLAG[*]:+ ${WRANGLER_ENV_FLAG[*]}}"
+
+if [ "$DRY_RUN" = true ]; then
+  "$JQ_BIN" -n \
+    --arg env "$ENV_ARG" \
+    --arg checked_at "$NOW" \
+    --arg would_run "$WOULD_RUN" \
+    '{
+       check: "recent-deploys",
+       env: $env,
+       status: "dry-run",
+       checked_at: $checked_at,
+       evidence: { would_run: [$would_run] }
+     }'
+  exit 0
+fi
+
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
 
