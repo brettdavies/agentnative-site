@@ -10,6 +10,7 @@
 // account, no runtime upstream dependency.
 
 import { makeBadge } from 'badge-maker';
+import { BADGE_ELIGIBILITY_FLOOR_PCT as SHARED_BADGE_FLOOR } from '../shared/scorecard-format.mjs';
 import { SPEC_VERSION } from './util.mjs';
 
 // Cohort-band fills, ascending. Bands and thresholds are the spec-side
@@ -26,13 +27,11 @@ const BAND_QUALIFIED = '#976200'; // ochre  — oklch(54% 0.13 72),  --should
 const BAND_BELOW = '#bf5200'; //     orange — oklch(57% 0.16 47)
 const BAND_CRITICAL = '#af2b25'; //  red    — oklch(50% 0.17 28),  --must
 
-// Badge eligibility floor (percent). A score at or above this clears the
-// floor; the lowest eligible cohort band (Qualified) opens here. Single
-// source of truth for the floor: the spec-side contract is
-// principles/scoring.md, and scorecards-render.mjs imports this constant
-// for the "badge floor is N%" copy so the rendered floor and the color
-// bands never drift apart.
-export const BADGE_ELIGIBILITY_FLOOR_PCT = 70;
+// Badge eligibility floor (percent). Authoritative definition lives in
+// `src/shared/scorecard-format.mjs` so the Worker live-score renderer
+// reads the same value without pulling in badge-maker (Node-only). Re-
+// exported here for back-compat with existing build-side imports.
+export const BADGE_ELIGIBILITY_FLOOR_PCT = SHARED_BADGE_FLOOR;
 
 /**
  * Map a 0–100 percent score to its cohort-band hex fill.

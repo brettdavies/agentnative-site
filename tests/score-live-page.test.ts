@@ -176,13 +176,82 @@ describe('handleLiveScorePage — happy path', () => {
     expect(failIdx).toBeLessThan(warnIdx);
   });
 
-  test('omits per-tool check table and meta sections (summary-only)', async () => {
+  test('renders full audit groups and details block at parity with static /score/<tool>', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
     const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
-    expect(html).not.toContain('scorecard-audits');
-    expect(html).not.toContain('scorecard-meta');
-    expect(html).not.toContain('All Audits');
+    expect(html).toContain('scorecard-audits');
+    expect(html).toContain('All Audits');
+    expect(html).toContain('audit-group');
+    expect(html).toContain('audit-table');
+    expect(html).toContain('scorecard-meta');
+    expect(html).toContain('Version scored');
+    // Every check from results appears in the full audit table.
+    expect(html).toContain('has --help');
+    expect(html).toContain('streams stdout');
+  });
+
+  test('renders principle-met badge alongside score badge', async () => {
+    const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
+    const html = await res.text();
+    expect(html).toContain('scorecard-principle-badge');
+    expect(html).toContain('principles met');
+    // SAMPLE_SCORECARD: P1 + P3 pass; P4 fail, P6 warn — 2/8 met.
+    expect(html).toContain('2/8');
+  });
+
+  test('renders eligible embed snippet when scorecard clears the badge floor', async () => {
+    const eligiblePayload = {
+      ...CACHED_RIPGREP_PAYLOAD,
+      scorecard: {
+        ...SAMPLE_SCORECARD,
+        badge: {
+          score_pct: 92,
+          eligible: true,
+          embed_markdown: '[![agent-native](https://anc.dev/badge/ripgrep.svg)](https://anc.dev/score/ripgrep)',
+        },
+      },
+    };
+    const env = makeEnv({ [CACHED_RIPGREP_KEY]: eligiblePayload });
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
+    const html = await res.text();
+    expect(html).toContain('scorecard-embed--eligible');
+    expect(html).toContain('Embed the badge');
+    // Embed markdown is HTML-escaped inside a <pre><code>.
+    expect(html).toContain('https://anc.dev/badge/ripgrep.svg');
+  });
+
+  test('renders below-floor hint instead of embed when scorecard is below the floor', async () => {
+    const belowFloorPayload = {
+      ...CACHED_RIPGREP_PAYLOAD,
+      scorecard: {
+        ...SAMPLE_SCORECARD,
+        badge: { score_pct: 42, eligible: false },
+      },
+    };
+    const env = makeEnv({ [CACHED_RIPGREP_KEY]: belowFloorPayload });
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
+    const html = await res.text();
+    expect(html).toContain('scorecard-embed--below');
+    expect(html).toContain('badge floor');
+    expect(html).not.toContain('scorecard-embed--eligible');
+  });
+
+  test('renders reproduce CTA with target.kind=command invocation verbatim', async () => {
+    const invocationPayload = {
+      ...CACHED_RIPGREP_PAYLOAD,
+      scorecard: {
+        ...SAMPLE_SCORECARD,
+        target: { kind: 'command', command: 'rg' },
+        run: { invocation: 'anc audit --command rg', started_at: '2026-05-01T12:00:00Z' },
+      },
+    };
+    const env = makeEnv({ [CACHED_RIPGREP_KEY]: invocationPayload });
+    const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
+    const html = await res.text();
+    expect(html).toContain('scorecard-cta');
+    expect(html).toContain('anc audit --command rg');
   });
 
   test('renders cached freshness marker', async () => {
@@ -192,7 +261,7 @@ describe('handleLiveScorePage — happy path', () => {
     expect(html).toContain('cached');
   });
 
-  test('clean scorecard shows "no failing or warning checks"', async () => {
+  test('clean scorecard shows all-principles-met message', async () => {
     const cleanPayload = {
       ...CACHED_RIPGREP_PAYLOAD,
       scorecard: {
@@ -203,7 +272,7 @@ describe('handleLiveScorePage — happy path', () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: cleanPayload });
     const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
-    expect(html).toContain('No failing or warning checks');
+    expect(html).toContain('no issues found');
   });
 });
 
@@ -287,7 +356,7 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
 });
 
 describe('handleLiveScorePage — markdown twin', () => {
-  test('GET /score/live/<binary>.md returns text/markdown with summary', async () => {
+  test('GET /score/live/<binary>.md returns text/markdown with full scorecard', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
     const res = await handleLiveScorePage(get('/score/live/ripgrep.md'), env);
     expect(res.status).toBe(200);
@@ -295,8 +364,13 @@ describe('handleLiveScorePage — markdown twin', () => {
     const md = await res.text();
     expect(md).toContain('# ripgrep');
     expect(md).toContain('**Score:** 92% pass rate');
-    expect(md).toContain('## Top issues');
+    expect(md).toContain('**Principles:**');
+    expect(md).toContain('## Embed the badge');
+    expect(md).toContain('## Reproduce locally');
+    // Full audit table inlined under the embed section, same shape as the
+    // static /score/<slug>.md twin (single source of truth).
     expect(md).toContain('| FAIL | exits 0 on missing flag |');
+    expect(md).toContain('| PASS | has --help |');
     expect(md).toContain('https://anc.dev/p4'); // absolute principle link
     expect(md).not.toContain('<'); // no HTML tags in markdown twin
   });

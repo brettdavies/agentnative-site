@@ -1,17 +1,13 @@
-// Server-side renderer for /score/live/<binary> + markdown twin.
+// Worker route /score/live/<binary> + markdown twin.
 //
-// Reads the cached scorecard from R2 and emits either:
-//
-//   - HTML at /score/live/<binary> — top-3 issues + score badge + CTA,
-//     wrapped in the site shell (build-emitted template asset).
-//   - Markdown at /score/live/<binary>.md OR Accept: text/markdown — same
-//     content, plain markdown twin so agents pasting `Accept:
-//     text/markdown` get a clean document. Mirrors the site-wide
-//     "every HTML page has a markdown twin" invariant.
-//
-// Skips the full check table + per-tool metadata blocks the static
-// `/score/<tool>` page carries — this is a paste-and-share surface, not
-// a deep-dive page.
+// Reads the cached scorecard from R2, derives a minimal `tool` shape
+// from `scorecard.tool` (no registry editorial fields — live-scored
+// binaries by definition didn't match a registry entry), and hands off
+// to the shared `buildScorecardBody` / `buildScorecardMarkdown` in
+// `src/shared/scorecard-format.mjs`. The static `/score/<slug>` build
+// path uses the SAME shared renderer — the `live` URL segment is purely
+// informational about where the scorecard came from (R2 cache vs.
+// committed `scorecards/<slug>.json`).
 //
 // Shell template comes from `dist/_internal/score-live-shell.html`,
 // emitted by `src/build/build.mjs` from the same `emitShell()` helper
@@ -19,9 +15,8 @@
 // is regenerated on every build.
 
 import {
-  extractTopIssues,
-  formatAuditTableMarkdownLines,
-  groupToPrincipleNum,
+  buildScorecardBody as sharedBuildScorecardBody,
+  buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   escHtml as sharedEscHtml,
 } from '../../shared/scorecard-format.mjs';
 import { detectPreference } from '../accept';
@@ -55,38 +50,24 @@ export function _resetShellTemplateCache(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Scorecard shape — minimal subset the summary renderer reads. Status covers
-// the schema 0.6 7-status taxonomy; only `fail`/`warn` reach the issue
-// renderer (via extractTopIssues), so the extra values are accepted but never
-// surfaced here. See content/scorecard-schema.md.
+// Scorecard shape — minimal subset this file reads. The shared renderer
+// accepts the full structurally-typed scorecard; this Worker-local type
+// just narrows the few fields the wrapper itself touches (tool.name/
+// binary, spec_version, badge.score_pct). See content/scorecard-schema.md
+// for the complete shape.
 // ---------------------------------------------------------------------------
 
-type CheckResult = {
-  status: 'pass' | 'warn' | 'fail' | 'opt_out' | 'n_a' | 'skip' | 'error';
-  label: string;
-  group: string;
-  evidence: string | null;
-};
-
 type Scorecard = {
-  schema_version?: string;
+  spec_version?: string;
   tool?: { name?: string; binary?: string; version?: string | null };
-  target?: { kind?: string; command?: string; path?: string | null };
-  badge?: { score_pct?: number; eligible?: boolean };
-  results?: CheckResult[];
-  audience?: string | null;
-  audit_profile?: string | null;
+  badge?: { score_pct?: number; eligible?: boolean; embed_markdown?: string };
 };
 
-// HTML escape + top-issues extraction + principle-number derivation all
-// come from src/shared/scorecard-format.mjs so the Worker + build use the
-// same primitives. `sharedEscHtml` accepts `unknown`; this thin wrapper
-// narrows to string so callsites stay readable.
+// `sharedEscHtml` accepts `unknown`; this thin wrapper narrows to string
+// so the freshness-marker template literal below stays readable.
 function esc(s: string): string {
   return sharedEscHtml(s);
 }
-
-// principle-num derivation uses the shared `groupToPrincipleNum` (above).
 
 // ---------------------------------------------------------------------------
 // Body builder
@@ -101,125 +82,66 @@ export type SummaryRenderInput = {
   freshness: 'cache-hit' | 'live';
 };
 
+function buildFreshnessMarker(freshness: SummaryRenderInput['freshness']): string {
+  return freshness === 'cache-hit'
+    ? `<span class="live-score-summary__freshness" title="Served from cached scorecard">cached</span>`
+    : `<span class="live-score-summary__freshness live-score-summary__freshness--live" title="Just scored">just scored</span>`;
+}
+
+const LIVE_BREADCRUMB = { href: '/', label: '← Score another' };
+
+const LIVE_CTA_NOTE_HTML = `<a href="/install">Install <code>anc</code></a> first if you don't have it. Run <code>anc audit .</code> from inside the project for source-level and project-level audits.`;
+
 /**
- * Build the HTML body for `/score/live/<binary>`. Reuses the visual rhythm
- * of `buildScorecardBody` in `scorecards-render.mjs` but trims to the
- * summary surface: header + score badge + top-3 issues + install-anc CTA.
- * No full check table; no per-tool meta block.
+ * Build the HTML body for `/score/live/<binary>`. Thin wrapper over the
+ * shared `buildScorecardBody` — passes a `tool` derived from the
+ * scorecard (no registry editorial fields), a homepage breadcrumb, a
+ * freshness marker, and suppresses the badge SVG preview (no curated
+ * `/badge/<binary>.svg` exists for non-registry binaries).
+ *
+ * Identical section structure to `/score/<slug>` — the URL is the only
+ * thing that signals "this came from the live cache."
  */
 export function buildScoreSummaryBody(input: SummaryRenderInput): string {
   const { scorecard, binary, ancVersion, toolVersion, freshness } = input;
-  const toolName = scorecard.tool?.name ?? binary;
-  const pct = scorecard.badge?.score_pct ?? 0;
-  const issues = extractTopIssues(scorecard);
-  const freshnessMarker =
-    freshness === 'cache-hit'
-      ? `<span class="live-score-summary__freshness" title="Served from cached scorecard">cached</span>`
-      : `<span class="live-score-summary__freshness live-score-summary__freshness--live" title="Just scored">just scored</span>`;
+  const tool = {
+    name: scorecard.tool?.name ?? binary,
+    binary: scorecard.tool?.binary ?? binary,
+  };
+  const specVersion = scorecard.spec_version ?? SPEC_VERSION;
+  const freshnessMarker = `<span class="live-score-summary__meta-line">Binary <code>${esc(binary)}</code> · scored by anc ${esc(ancVersion)} · spec ${esc(specVersion)}</span> ${buildFreshnessMarker(freshness)}`;
 
-  const issuesBlock =
-    issues.length === 0
-      ? `<section class="live-score-summary__issues live-score-summary__issues--clean">
-  <h2>Status</h2>
-  <p>No failing or warning checks in this scorecard.</p>
-</section>`
-      : `<section class="live-score-summary__issues">
-  <h2>Top issues</h2>
-  <ul class="issue-list">
-${issues
-  .map((issue) => {
-    const pNum = groupToPrincipleNum(issue.group);
-    const statusClass = issue.status === 'fail' ? 'issue--fail' : 'issue--warn';
-    const groupLink = pNum ? `<a href="/p${pNum}">${esc(issue.group)}</a>` : esc(issue.group);
-    const evidence = issue.evidence ? `<span class="issue__evidence">${esc(issue.evidence)}</span>` : '';
-    return `    <li class="issue ${statusClass}">
-      <span class="issue__status">${esc(issue.status.toUpperCase())}</span>
-      <span class="issue__label">${esc(issue.label)}</span>
-      <span class="issue__group">${groupLink}</span>
-      ${evidence}
-    </li>`;
-  })
-  .join('\n')}
-  </ul>
-</section>`;
-
-  return `<nav class="scorecard-breadcrumb" aria-label="Breadcrumb">
-  <a href="/">&larr; Score another</a>
-</nav>
-<header class="live-score-summary__header">
-  <h1>${esc(toolName)} <span class="live-score-summary__version">${esc(toolVersion || '—')}</span></h1>
-  <p class="live-score-summary__meta">
-    Binary <code>${esc(binary)}</code> · scored by anc ${esc(ancVersion)} · spec ${esc(SPEC_VERSION)} ${freshnessMarker}
-  </p>
-</header>
-<section class="live-score-summary__score">
-  <div class="scorecard-score-badge">
-    <span class="scorecard-score-badge__pct">${pct}%</span>
-    <span class="scorecard-score-badge__label">pass rate</span>
-  </div>
-</section>
-${issuesBlock}
-<section class="live-score-summary__cta">
-  <h2>Get the full picture locally</h2>
-  <p>This is a binary/behavioral summary. <a href="/install">Install <code>anc</code></a> and run <code>anc audit .</code> in your project for source-level and project-level audits too.</p>
-  <p class="live-score-summary__cta-aside">Re-score this tool from a fresh paste on the <a href="/">homepage</a>, or browse the curated <a href="/scorecards">leaderboard</a>.</p>
-</section>`;
+  return sharedBuildScorecardBody(tool, scorecard, {
+    version: toolVersion,
+    breadcrumb: LIVE_BREADCRUMB,
+    freshnessMarker,
+    showBadgePreview: false,
+    ctaNoteHtml: LIVE_CTA_NOTE_HTML,
+  });
 }
 
 /**
- * Build the markdown body for `/score/live/<binary>.md`. Same content
- * structure as the HTML body — header, score, top issues, CTA — emitted
- * as plain markdown so agents pasting `Accept: text/markdown` get a
- * clean document with no HTML escapes. Mirrors the markdown-twin
- * pattern used elsewhere on the site.
+ * Build the markdown body for `/score/live/<binary>.md`. Thin wrapper
+ * over the shared `buildScorecardMarkdown` — same single source of truth
+ * as the HTML body above. `baseUrl: 'https://anc.dev'` makes principle
+ * links absolute because this surface is fetched cross-origin via
+ * `Accept: text/markdown` (no `absolutifyMarkdownLinks` post-pass like
+ * the static twin gets at build time).
  */
 export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
   const { scorecard, binary, ancVersion, toolVersion, freshness } = input;
-  const toolName = scorecard.tool?.name ?? binary;
-  const pct = scorecard.badge?.score_pct ?? 0;
-  const issues = extractTopIssues(scorecard);
-  const lines: string[] = [];
-
-  lines.push(`# ${toolName} ${toolVersion ? `(${toolVersion})` : ''}`.trim());
-  lines.push('');
-  lines.push(
-    `Binary \`${binary}\` · scored by anc ${ancVersion} · spec ${SPEC_VERSION} · ${freshness === 'cache-hit' ? 'cached' : 'just scored'}`,
-  );
-  lines.push('');
-  lines.push(`**Score:** ${pct}% pass rate`);
-  lines.push('');
-
-  if (issues.length === 0) {
-    lines.push('## Status');
-    lines.push('');
-    lines.push('No failing or warning checks in this scorecard.');
-    lines.push('');
-  } else {
-    lines.push('## Top issues');
-    lines.push('');
-    // Shared with the static /score/<tool>.md check table — single source
-    // of truth for the row format in src/shared/scorecard-format.mjs.
-    // Absolute baseUrl because /score/live/<binary>.md is consumed by
-    // agents via Accept negotiation and must self-resolve cross-origin
-    // (no absolutifyMarkdownLinks pass like the static .md twins get).
-    for (const row of formatAuditTableMarkdownLines(issues, { baseUrl: 'https://anc.dev' })) {
-      lines.push(row);
-    }
-    lines.push('');
-  }
-
-  lines.push('## Get the full picture locally');
-  lines.push('');
-  lines.push(
-    'This is a binary/behavioral summary. [Install `anc`](https://anc.dev/install) and run `anc audit .` in your project for source-level and project-level audits too.',
-  );
-  lines.push('');
-  lines.push(
-    'Re-score this tool from a fresh paste on the [homepage](https://anc.dev/), or browse the curated [leaderboard](https://anc.dev/scorecards).',
-  );
-  lines.push('');
-
-  return lines.join('\n');
+  const tool = {
+    name: scorecard.tool?.name ?? binary,
+    binary: scorecard.tool?.binary ?? binary,
+  };
+  const specVersion = scorecard.spec_version ?? SPEC_VERSION;
+  const headerLine = `# ${tool.name} ${toolVersion ? `(${toolVersion})` : ''}`.trim();
+  const provenance = `Binary \`${binary}\` · scored by anc ${ancVersion} · spec ${specVersion} · ${freshness === 'cache-hit' ? 'cached' : 'just scored'}`;
+  return sharedBuildScorecardMarkdown(tool, scorecard, {
+    version: toolVersion,
+    baseUrl: 'https://anc.dev',
+    header: `${headerLine}\n\n${provenance}`,
+  });
 }
 
 // ---------------------------------------------------------------------------
