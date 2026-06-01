@@ -109,12 +109,14 @@ export function buildScoreSummaryBody(input: SummaryRenderInput): string {
     binary: scorecard.tool?.binary ?? binary,
   };
   const specVersion = scorecard.spec_version ?? SPEC_VERSION;
-  const freshnessMarker = `<span class="live-score-summary__meta-line">Binary <code>${esc(binary)}</code> · scored by anc ${esc(ancVersion)} · spec ${esc(specVersion)}</span> ${buildFreshnessMarker(freshness)}`;
+  const titleSuffix = `<span class="live-score-summary__version">${esc(toolVersion || '—')}</span>`;
+  const headerSubline = `Binary <code>${esc(binary)}</code> · scored by anc ${esc(ancVersion)} · spec ${esc(specVersion)} ${buildFreshnessMarker(freshness)}`;
 
   return sharedBuildScorecardBody(tool, scorecard, {
     version: toolVersion,
     breadcrumb: LIVE_BREADCRUMB,
-    freshnessMarker,
+    titleSuffix,
+    headerSubline,
     showBadgePreview: false,
     ctaNoteHtml: LIVE_CTA_NOTE_HTML,
   });

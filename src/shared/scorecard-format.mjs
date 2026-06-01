@@ -424,7 +424,8 @@ function renderBelowFloorHint(pct, hasIssues) {
  *   version?: string | null,
  *   metadata?: { tool?: object, anc?: object, run?: object, target?: object },
  *   breadcrumb?: { href: string, label: string },
- *   freshnessMarker?: string,
+ *   headerSubline?: string,
+ *   titleSuffix?: string,
  *   showBadgePreview?: boolean,
  *   ctaNoteHtml?: string,
  * }} [opts]
@@ -442,7 +443,8 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   const topIssues = opts.topIssues ?? extractTopIssues(scorecard);
   const principleScore = opts.principleScore ?? computePrincipleScore(scorecard);
   const breadcrumb = opts.breadcrumb ?? DEFAULT_BREADCRUMB;
-  const freshnessMarker = opts.freshnessMarker ?? '';
+  const titleSuffix = opts.titleSuffix ?? '';
+  const headerSubline = opts.headerSubline ?? '';
 
   let html = `<nav class="scorecard-breadcrumb" aria-label="Breadcrumb">
   <a href="${escHtml(breadcrumb.href)}">${escHtml(breadcrumb.label)}</a>
@@ -452,10 +454,9 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   // Header. Description, tier badge, language tag, and repo/url link are
   // emitted only when present on the `tool` object — keeps the live path
   // (no registry editorial fields) clean without if-else branches in the
-  // caller. The freshness marker (live-only) inlines into the title row.
-  const titleRow = freshnessMarker
-    ? `${escHtml(tool.name)} <span class="live-score-summary__version">${escHtml(version || '—')}</span>`
-    : escHtml(tool.name);
+  // caller. `titleSuffix` (live: version pill) trails the h1 text;
+  // `headerSubline` (live: binary+anc+spec+freshness) renders as a
+  // small meta paragraph below the h1 to avoid h1 inflation.
   const metaParts = [];
   if (tool.tier)
     metaParts.push(`<span class="tier-badge tier-badge--${escHtml(tool.tier)}">${escHtml(tool.tier)}</span>`);
@@ -464,8 +465,8 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   else if (tool.url) metaParts.push(`<a href="${escHtml(tool.url)}">${escHtml(tool.url)}</a>`);
 
   html += `<header class="scorecard-header">
-  <h1>${titleRow}${freshnessMarker ? ` ${freshnessMarker}` : ''}</h1>
-${tool.description ? `  <p class="scorecard-header__desc">${escHtml(tool.description)}</p>\n` : ''}${metaParts.length > 0 ? `  <div class="scorecard-header__meta">\n    ${metaParts.join('\n    ')}\n  </div>\n` : ''}</header>
+  <h1>${escHtml(tool.name)}${titleSuffix ? ` ${titleSuffix}` : ''}</h1>
+${headerSubline ? `  <p class="live-score-summary__meta">${headerSubline}</p>\n` : ''}${tool.description ? `  <p class="scorecard-header__desc">${escHtml(tool.description)}</p>\n` : ''}${metaParts.length > 0 ? `  <div class="scorecard-header__meta">\n    ${metaParts.join('\n    ')}\n  </div>\n` : ''}</header>
 `;
 
   html += `<section class="scorecard-summary">
