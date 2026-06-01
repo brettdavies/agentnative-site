@@ -388,9 +388,9 @@ wrangler's existing auth flow; the AE SQL wrapper needs `CF_ACCOUNT_ID` + `CF_AP
 `--dry-run`, which emits the same envelope with `status: "dry-run"` and an `evidence.would_run` array listing the remote
 commands the script would fire.
 
-The write counterpart lives under [`scripts/ops/`](../../scripts/ops/). Today that's `flip-kill-switch.sh`, which flips
-`SCORE_KV.scoring_disabled` on or off and follows the same JSON-envelope + `--dry-run` discipline as the read-only
-checks. Production flips require `--yes` to guard against typos. See the
+Write actions live under [`scripts/ops/`](../../scripts/ops/). Today that's `flip-kill-switch.sh`, which sets or clears
+`SCORE_KV.scoring_disabled` and follows the same JSON-envelope + `--dry-run` discipline as the read-only checks.
+Production flips require `--yes` to guard against typos. See the
 [Kill-switch flip](#kill-switch-flip-manual-incident-response) playbook above for the operator runbook.
 
 ## Still deferred
