@@ -1,0 +1,535 @@
+{
+  "schema_version": "0.7",
+  "results": [
+    {
+      "id": "p3-must-top-level-examples",
+      "label": "Help flag produces useful output",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p3-help"
+    },
+    {
+      "id": "p3-must-version",
+      "label": "Version flag works (`--version` plus short alias)",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p3-version"
+    },
+    {
+      "id": "p3-should-version-short",
+      "label": "Version flag works (`--version` plus short alias)",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "should",
+      "audit_id": "p3-version"
+    },
+    {
+      "id": "p2-must-output-flag",
+      "label": "Structured output support",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "opt_out",
+      "evidence": "no --output/--format flag detected — tool does not ship structured output. Schema-discovery requirements (p2-must-schema-print, p2-should-schema-file) collapse to n/a via antecedent propagation.",
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p2-json-output"
+    },
+    {
+      "id": "p4-must-exit-code-mapping",
+      "label": "Rejects invalid arguments",
+      "group": "P4",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p4-bad-args"
+    },
+    {
+      "id": "p7-must-quiet",
+      "label": "Quiet mode available",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no --quiet/-q flag detected in --help output",
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p7-quiet"
+    },
+    {
+      "id": "p6-must-sigpipe",
+      "label": "Handles SIGPIPE gracefully",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p6-sigpipe"
+    },
+    {
+      "id": "p1-must-no-interactive",
+      "label": "Non-interactive by default",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p1-non-interactive"
+    },
+    {
+      "id": "p1-must-no-interactive",
+      "label": "Non-interactive gate flag advertised in --help",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "target satisfies P1 via alternative gate (help-on-bare or stdin-primary)",
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p1-flag-existence"
+    },
+    {
+      "id": "p1-must-env-var",
+      "label": "Flags advertise env-var bindings in --help",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "5 flag(s) found in --help but no `[env: NAME]` bindings advertised",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p1-env-hints"
+    },
+    {
+      "id": "p6-must-no-pager",
+      "label": "Pager-using CLI ships --no-pager escape hatch",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "pager referenced in --help but no --no-pager escape hatch advertised",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p6-no-pager-behavioral"
+    },
+    {
+      "id": "p6-must-no-color",
+      "label": "Respects NO_COLOR",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p6-no-color-behavioral"
+    },
+    {
+      "id": "p1-must-secret-non-leaky-path",
+      "label": "Secret-bearing flags expose stdin or *-file companion",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "fail",
+      "evidence": "secret-bearing flag(s) without `*-file` companion or stdin path: --access-token. Flag values leak via process tables, shell history, and CI logs; provide stdin support or a `--<flag>-file` variant.",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p1-secret-non-leaky-path"
+    },
+    {
+      "id": "p2-must-schema-print",
+      "label": "Structured-output CLI exposes its schema at runtime",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "n_a",
+      "evidence": "antecedent `p2-json-output` is opt_out: no --output/--format flag detected — tool does not ship structured output. Schema-discovery requirements (p2-must-schema-print, p2-should-schema-file) collapse to n/a via antecedent propagation.",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p2-schema-print"
+    },
+    {
+      "id": "p2-should-json-aliases",
+      "label": "--json / --jsonl short aliases for --output",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no --json or --jsonl short alias found. Agents and pipelines benefit from short forms alongside the canonical `--output` enum.",
+      "confidence": "high",
+      "tier": "should",
+      "audit_id": "p2-json-aliases"
+    },
+    {
+      "id": "p6-may-standard-names",
+      "label": "Subcommand verbs follow community-standard names",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no subcommands parsed from --help",
+      "confidence": "low",
+      "tier": "may",
+      "audit_id": "p6-standard-names"
+    },
+    {
+      "id": "p8-must-bundle-install",
+      "label": "Skill bundle has install path (`tool skill install [<host>]`)",
+      "group": "P8",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p8-bundle-install"
+    },
+    {
+      "id": "p8-may-install-all",
+      "label": "`skill install --all` for multi-runtime install",
+      "group": "P8",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "medium",
+      "tier": "may",
+      "audit_id": "p8-install-all"
+    },
+    {
+      "id": "p8-may-bundle-update",
+      "label": "`skill update` / `skill upgrade` for bundle refresh",
+      "group": "P8",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "medium",
+      "tier": "may",
+      "audit_id": "p8-bundle-update"
+    },
+    {
+      "id": "p2-may-raw-flag",
+      "label": "`--raw` flag for pipe-safe unformatted output",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no `--raw` flag advertised. MAY-tier — useful for pipelines that want to strip formatting before piping to other tools.",
+      "confidence": "high",
+      "tier": "may",
+      "audit_id": "p2-raw-flag"
+    },
+    {
+      "id": "p2-may-more-formats",
+      "label": "`--output` advertises additional formats beyond text/json",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no `--output` or `--format` flag advertised; vacuous skip for MAY-tier extra formats.",
+      "confidence": "medium",
+      "tier": "may",
+      "audit_id": "p2-more-formats"
+    },
+    {
+      "id": "p3-may-examples-subcommand",
+      "label": "`examples` subcommand or `--examples` flag for curated usage patterns",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no `examples` subcommand or `--examples` flag found. MAY-tier — a curated usage block keeps agents from hunting through long help text.",
+      "confidence": "high",
+      "tier": "may",
+      "audit_id": "p3-examples-subcommand"
+    },
+    {
+      "id": "p6-may-color-flag",
+      "label": "`--color` flag for explicit color control",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no `--color` flag advertised. MAY-tier — `auto|always|never` lets agents and pipelines override the TTY-based default.",
+      "confidence": "high",
+      "tier": "may",
+      "audit_id": "p6-color-flag"
+    },
+    {
+      "id": "p7-should-verbose",
+      "label": "`--verbose` flag for diagnostic escalation",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "high",
+      "tier": "should",
+      "audit_id": "p7-verbose"
+    },
+    {
+      "id": "p7-should-limit",
+      "label": "`--limit` / `--max-results` flag for list operations",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no list-style subcommand detected (list/ls/search/query/find/show/get); vacuous skip for the list-only SHOULD.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p7-limit"
+    },
+    {
+      "id": "p7-may-cursor-pagination",
+      "label": "Cursor-based pagination flags for list traversal",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no list-style subcommand detected; vacuous skip for the list-only MAY.",
+      "confidence": "medium",
+      "tier": "may",
+      "audit_id": "p7-cursor-pagination"
+    },
+    {
+      "id": "p1-should-defaults-in-help",
+      "label": "`--help` advertises default values for flags",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no default-value annotations found in --help. SHOULD-tier — agents reading help text need to see what value a flag falls back to when omitted (`[default: <value>]` per clap convention).",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p1-defaults-in-help"
+    },
+    {
+      "id": "p1-may-rich-tui",
+      "label": "Rich-TUI affordance for TTY contexts",
+      "group": "P1",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no rich-TUI affordance detected (no `--tui`/`--interactive`/`--ui` flag, no spinner/progress/tui mention in --help). MAY-tier — rich TUI in TTY contexts is a nice-to-have, not required.",
+      "confidence": "medium",
+      "tier": "may",
+      "audit_id": "p1-rich-tui"
+    },
+    {
+      "id": "p3-should-about-long-about",
+      "label": "Short `-h` summary differs from `--help` long form",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "`-h` and `--help` produce byte-identical output. SHOULD-tier — clap renders the short summary on `-h` and the full description on `--help` when `long_about` is set; collapsing them gives agents no concise list-level grep target.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p3-about-long-about"
+    },
+    {
+      "id": "p6-should-stdin-input",
+      "label": "Input-accepting commands read from stdin when no file is given",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no input-accepting subcommand detected (process/parse/convert/transform/analyze/validate/format/lint/audit); vacuous skip for the conditional SHOULD.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p6-stdin-input"
+    },
+    {
+      "id": "p6-should-consistent-naming",
+      "label": "Subcommand naming follows a consistent verb/noun convention",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "fewer than 2 user-defined subcommands; vacuous skip for the conditional SHOULD.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p6-consistent-naming"
+    },
+    {
+      "id": "p7-should-timeout",
+      "label": "`--timeout` flag for long-running operations",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no long-running subcommand detected (serve/daemon/watch/tail/monitor/follow/run/start/stream); vacuous skip for the conditional SHOULD.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p7-timeout-behavioral"
+    },
+    {
+      "id": "p2-must-exit-codes",
+      "label": "Bad invocation exits with structured usage-error code (2)",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "bad invocation exited with code 1. The 0/1/2/77/78 convention reserves code 2 for usage errors; using a different non-zero code (often 1) blurs the distinction between usage errors and general failure.",
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p2-structured-exit-codes"
+    },
+    {
+      "id": "p4-must-actionable-errors",
+      "label": "Error messages include a hint or remediation phrase",
+      "group": "P4",
+      "layer": "behavioral",
+      "status": "fail",
+      "evidence": "stderr lacks a hint phrase. Looked for one of: try , use , expected , did you mean, see , run , for more, tip:, help:, hint:, suggestion:, available . Error messages must name what to do next, not just the symptom.",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p4-actionable-errors"
+    },
+    {
+      "id": "p2-must-json-errors",
+      "label": "Errors emit JSON envelope with `error`/`kind`/`message` under `--output json`",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "binary does not advertise `--output json` in --help; MUST applies only to CLIs that opt into the JSON contract.",
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p2-json-errors"
+    },
+    {
+      "id": "p4-should-json-error-output",
+      "label": "`--output json` produces JSON-formatted errors",
+      "group": "P4",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "binary does not advertise `--output json` in --help; SHOULD applies only to CLIs that opt into the JSON contract.",
+      "confidence": "high",
+      "tier": "should",
+      "audit_id": "p4-json-error-output"
+    },
+    {
+      "id": "p2-should-consistent-envelope",
+      "label": "JSON success and error envelopes share their non-payload key set",
+      "group": "P2",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "binary does not advertise `--output json` in --help; envelope-consistency only applies to CLIs that opt into the JSON contract.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p2-consistent-envelope"
+    },
+    {
+      "id": "p3-must-subcommand-examples",
+      "label": "Each subcommand's `--help` ships at least one invocation example",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "binary has no subcommands; MUST applies conditionally to CLIs that use them.",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p3-subcommand-examples"
+    },
+    {
+      "id": "p3-should-paired-examples",
+      "label": "Help text pairs human and `--output json` example invocations",
+      "group": "P3",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no paired text + `--output json` example found within 5 lines in top-level or any subcommand `--help`. Pairing keeps agents from reverse-engineering the JSON invocation from the text one.",
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p3-paired-examples"
+    },
+    {
+      "id": "p6-should-subcommand-operations",
+      "label": "Operations are subcommands, not verb-shaped flags",
+      "group": "P6",
+      "layer": "behavioral",
+      "status": "pass",
+      "evidence": null,
+      "confidence": "medium",
+      "tier": "should",
+      "audit_id": "p6-subcommand-operations"
+    },
+    {
+      "id": "p5-must-force-yes",
+      "label": "Destructive subcommands require `--force` or `--yes`",
+      "group": "P5",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no destructive subcommands detected; MUST applies conditionally to CLIs with destructive operations.",
+      "confidence": "high",
+      "tier": "must",
+      "audit_id": "p5-force-yes"
+    },
+    {
+      "id": "p5-must-read-write-distinction",
+      "label": "Read and write surfaces are both visible in subcommand list",
+      "group": "P5",
+      "layer": "behavioral",
+      "status": "skip",
+      "evidence": "no recognizable read or write subcommand verbs; the read/write distinction is unobservable from the help surface alone.",
+      "confidence": "medium",
+      "tier": "must",
+      "audit_id": "p5-read-write-distinction"
+    },
+    {
+      "id": "p7-may-auto-verbosity",
+      "label": "Help text advertises TTY-aware verbosity behavior",
+      "group": "P7",
+      "layer": "behavioral",
+      "status": "warn",
+      "evidence": "no TTY-aware language found in `--help`. MAY-tier — automatic verbosity reduction when stdout is piped or redirected lets agents skip the explicit `--quiet` flag. Behavioral probes cannot simulate a real TTY without a pty crate, so this audit relies on documented intent.",
+      "confidence": "low",
+      "tier": "may",
+      "audit_id": "p7-auto-verbosity"
+    }
+  ],
+  "summary": {
+    "total": 43,
+    "pass": 12,
+    "warn": 13,
+    "fail": 2,
+    "opt_out": 1,
+    "n_a": 1,
+    "skip": 14,
+    "error": 0
+  },
+  "coverage_summary": {
+    "must": {
+      "total": 28,
+      "verified": 19
+    },
+    "should": {
+      "total": 21,
+      "verified": 13
+    },
+    "may": {
+      "total": 10,
+      "verified": 10
+    }
+  },
+  "audience": "agent-optimized",
+  "audit_profile": null,
+  "spec_version": "0.5.0",
+  "tool": {
+    "name": "fly",
+    "binary": "fly",
+    "version": "flyctl version 0.4.57"
+  },
+  "anc": {
+    "version": "0.5.0"
+  },
+  "run": {
+    "invocation": "anc audit --command fly --output json",
+    "started_at": "2026-06-01T17:34:53.10170175Z",
+    "duration_ms": 298,
+    "platform": {
+      "os": "linux",
+      "arch": "x86_64"
+    }
+  },
+  "target": {
+    "kind": "command",
+    "path": null,
+    "command": "fly"
+  },
+  "badge": {
+    "eligible": false,
+    "score_pct": 66,
+    "embed_markdown": null,
+    "scorecard_url": "https://anc.dev/score/fly",
+    "badge_url": "https://anc.dev/badge/fly.svg",
+    "convention_url": "https://anc.dev/badge"
+  }
+}
