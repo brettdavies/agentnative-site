@@ -25,10 +25,12 @@
 //     somehow (defense in depth past validate.ts) — share_url is null.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { keyFor } from '../src/worker/score/cache';
 import type { Sandbox } from '../src/worker/score/do';
 import { _resetAccessibilityCache } from '../src/worker/score/github-accessibility';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REGISTRY_INDEX = {
   by_slug: {},
@@ -299,16 +301,17 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
 
   test('post-discovery cache hit: share_url derives from resolved spec.binary', async () => {
     // Discovery resolves binary='hexyl'. R2 already holds a prior scorecard
-    // under scores/hexyl/0.4.0.json. The handler short-circuits at the
-    // post-discovery cache tier (step 6.5) and must still return share_url.
+    // under scores/hexyl/<SPEC_VERSION>.json. The handler short-circuits
+    // at the post-discovery cache tier (step 6.5) and must still return
+    // share_url.
     installSmartFetch();
     try {
       const tracker: CallTracker = { doCalls: 0, lastSpecBinary: null };
       const env = makeEnv({
         tracker,
         cacheContent: {
-          'scores/hexyl/0.4.0.json': {
-            spec_version: '0.4.0',
+          [keyFor('hexyl', SPEC_VERSION)]: {
+            spec_version: SPEC_VERSION,
             anc_version: '0.3.1',
             tool_version: '0.16.0',
             scorecard: { tool: { name: 'hexyl', binary: 'hexyl' }, badge: { score_pct: 70 } },

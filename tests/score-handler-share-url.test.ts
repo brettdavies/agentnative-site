@@ -6,8 +6,10 @@
 // the DO + cached lookup write to is the key the share page reads from.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { keyFor } from '../src/worker/score/cache';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REGISTRY_INDEX = {
   by_slug: {
@@ -125,9 +127,9 @@ describe('/api/score — share_url derivation', () => {
   // (ripgrep + bat are curated there), so the install-command cross-check
   // (registry-lookup.ts) doesn't intercept and the input flows through to
   // the cache tier — which is what these share_url tests need to exercise.
-  const CACHED_KEY = 'scores/uncurated-tool/0.4.0.json';
+  const CACHED_KEY = keyFor('uncurated-tool', SPEC_VERSION);
   const CACHED_PAYLOAD = {
-    spec_version: '0.4.0',
+    spec_version: SPEC_VERSION,
     anc_version: '0.3.1',
     tool_version: '0.1.0',
     scorecard: { badge: { score_pct: 70, eligible: false }, results: [] },
@@ -202,8 +204,8 @@ describe('/api/score — share_url derivation', () => {
     // scores/aider/<SPEC_VERSION>.json. Prefill that key so the cached
     // branch fires.
     const env = makeEnv({
-      'scores/aider/0.4.0.json': {
-        spec_version: '0.4.0',
+      [keyFor('aider', SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
         anc_version: '0.3.1',
         tool_version: '0.50.0',
         scorecard: { badge: { score_pct: 80, eligible: true }, results: [] },
@@ -219,8 +221,8 @@ describe('/api/score — share_url derivation', () => {
     // Lowercase repo path should match the case-preserved hint
     // ('Aider-AI/aider' in HINTS_INDEX).
     const env = makeEnv({
-      'scores/aider/0.4.0.json': {
-        spec_version: '0.4.0',
+      [keyFor('aider', SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
         anc_version: '0.3.1',
         tool_version: '0.50.0',
         scorecard: { badge: { score_pct: 80, eligible: true }, results: [] },
@@ -235,8 +237,8 @@ describe('/api/score — share_url derivation', () => {
   test('go-install command: share_url uses last-segment binary derivation', async () => {
     // `go install github.com/user/tool@latest` → parser binary='tool'.
     const env = makeEnv({
-      'scores/sqlc/0.4.0.json': {
-        spec_version: '0.4.0',
+      [keyFor('sqlc', SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
         anc_version: '0.3.1',
         tool_version: '1.27.0',
         scorecard: { badge: { score_pct: 75, eligible: false }, results: [] },

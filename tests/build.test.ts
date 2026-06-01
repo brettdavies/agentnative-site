@@ -521,7 +521,7 @@ function makeV06Scorecard(overrides: Record<string, any> = {}) {
     },
     audience: 'mixed',
     audit_profile: null,
-    spec_version: '0.4.0',
+    spec_version: SPEC_VERSION,
     tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
     anc: { version: '0.4.0' },
     run: {

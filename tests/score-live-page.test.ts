@@ -6,12 +6,14 @@
 // session minting; the URL is meaningful.
 
 import { describe, expect, test } from 'bun:test';
+import { keyFor } from '../src/worker/score/cache';
 import {
   _resetShellTemplateCache,
   handleLiveScorePage,
   parseLiveScorePath,
   parseLiveScorePathMatch,
 } from '../src/worker/score/summary-render';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const SHELL_TEMPLATE = `<!doctype html>
 <html lang="en">
@@ -44,9 +46,9 @@ const SAMPLE_SCORECARD = {
   ],
 };
 
-const CACHED_RIPGREP_KEY = 'scores/ripgrep/0.4.0.json';
+const CACHED_RIPGREP_KEY = keyFor('ripgrep', SPEC_VERSION);
 const CACHED_RIPGREP_PAYLOAD = {
-  spec_version: '0.4.0',
+  spec_version: SPEC_VERSION,
   anc_version: '0.3.1',
   tool_version: '14.1.0',
   scorecard: SAMPLE_SCORECARD,
