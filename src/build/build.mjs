@@ -48,7 +48,7 @@ const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
 const HINTS_PATH = join(REPO_ROOT, 'discovery-hints.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
-const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill.json');
+const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill', 'skill.json');
 
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',

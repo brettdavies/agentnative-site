@@ -144,9 +144,9 @@ describe('regression #5 — /skill.json (skill-distribution canonical surface)',
     expect(parsed).toBeDefined();
   });
 
-  test('dist/skill.json mirrors src/data/skill.json byte-for-byte', async () => {
+  test('dist/skill.json mirrors src/data/skill/skill.json byte-for-byte', async () => {
     const distRaw = await readFile(join(DIST, 'skill.json'), 'utf8');
-    const sourceRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'skill.json'), 'utf8');
+    const sourceRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'skill', 'skill.json'), 'utf8');
     const dist = JSON.parse(distRaw);
     const source = JSON.parse(sourceRaw);
     expect(dist).toEqual(source);

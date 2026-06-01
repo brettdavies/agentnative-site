@@ -454,7 +454,7 @@ documentation surface pattern at
 ### 3.9 Skill distribution — `/skill` and `/skill.json`
 
 Two surfaces, one source. Agents fetch `/skill.json` (canonical, machine-primary). Humans fetch `/skill` (HTML render,
-identical commands). Both derive from `src/data/skill.json` at build time, so drift is structurally impossible because
+identical commands). Both derive from `src/data/skill/skill.json` at build time, so drift is structurally impossible because
 there's only one source.
 
 **Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships singular `/skill`
@@ -463,7 +463,7 @@ second skill ships, `/skill` becomes an index and per-skill content moves under 
 JSON-extension dispatch is already shape-agnostic, so no Worker code change is anticipated for that transition.
 
 **Source repo coupling.** This site vendors the skill manifest's per-host install commands and metadata at site build
-time into `src/data/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
+time into `src/data/skill/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
 `docs/solutions/architecture-patterns/cross-repo-artifact-sync-commit-over-fetch-20260420.md`. The skill repo
 (`brettdavies/agentnative-skill`) holds `main` as the published-release pointer and `dev` as the integration branch; the
 install command's bare `git clone --depth 1` lands on the skill repo's default branch (`main`), which the skill
@@ -514,13 +514,13 @@ twin.
 
 | Source                | Emitted as                                            | Notes                                                              |
 | --------------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
-| `src/data/skill.json` | `dist/skill.json`, `dist/skill.html`, `dist/skill.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
+| `src/data/skill/skill.json` | `dist/skill.json`, `dist/skill.html`, `dist/skill.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
 
 `/skill` enters `sitemap.xml` and `llms.txt` (under a `## Skill` section); `/skill.json` enters `llms.txt` but NOT the
 sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
 
 **Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version` in
-`src/data/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and `/skill.md`
+`src/data/skill/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and `/skill.md`
 against the Cloudflare cache-purge API after deploy). Update detection at install sites is handled by the skill bundle's
 `bin/check-update`, not by a manifest field.
 

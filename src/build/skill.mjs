@@ -1,6 +1,7 @@
-// Skill-distribution build emitter — vendors src/data/skill.json into
-// dist/skill.json (canonical machine surface), dist/skill.html (human
-// page), and dist/skill.md (markdown twin for content-negotiated agents).
+// Skill-distribution build emitter — vendors src/data/skill/skill.json
+// into dist/skill.json (canonical machine surface), dist/skill.html
+// (human page), and dist/skill.md (markdown twin for content-negotiated
+// agents).
 //
 // Contract (docs/plans/2026-04-24-001-feat-skill-distribution-endpoint-plan.md
 // §"/install.json shape", relocated to /skill.json by 2026-04-28-003):
@@ -36,11 +37,11 @@ const REQUIRED_TOP_LEVEL = [
 const REQUIRED_SOURCE = ['type', 'url'];
 
 /**
- * Read + validate src/data/skill.json. Fail-fast on missing/malformed
+ * Read + validate src/data/skill/skill.json. Fail-fast on missing/malformed
  * fields — this is the canonical machine surface and a typo here ships to
  * every agent that hits /skill.json.
  *
- * @param {string} dataPath absolute path to src/data/skill.json
+ * @param {string} dataPath absolute path to src/data/skill/skill.json
  * @returns {Promise<object>} parsed manifest
  */
 export async function loadSkillData(dataPath) {
