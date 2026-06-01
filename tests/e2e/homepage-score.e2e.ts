@@ -96,7 +96,7 @@ test.describe('homepage live-scoring form — happy path', () => {
         scorecard: SCORECARD_SAMPLE,
         spec_version: SPEC_VERSION,
         site_spec_version: SITE_SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         auditor_url: 'https://anc.dev/score',
         share_url: '/score/live/ripgrep',
       },
@@ -131,7 +131,7 @@ test.describe('homepage live-scoring form — happy path', () => {
       body: {
         scorecard: { kind: 'registry_hit', tool: { name: 'ripgrep' }, scorecard_url: '/score/ripgrep' },
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         auditor_url: 'https://anc.dev/score',
       },
     });
@@ -159,7 +159,7 @@ test.describe('homepage live-scoring form — happy path', () => {
           score_pct: 78,
         },
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         auditor_url: 'https://anc.dev/score',
       },
     });
@@ -211,7 +211,7 @@ test.describe('homepage live-scoring form — happy path', () => {
         body: JSON.stringify({
           scorecard: SCORECARD_SAMPLE,
           spec_version: SPEC_VERSION,
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
           auditor_url: 'https://anc.dev/score',
           share_url: '/score/live/ripgrep',
         }),
@@ -234,7 +234,7 @@ test.describe('homepage live-scoring form — happy path', () => {
       status: 200,
       body: {
         scorecard: SCORECARD_SAMPLE,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         spec_version: SPEC_VERSION,
         share_url: '/score/live/bat',
       },
@@ -587,7 +587,7 @@ test.describe('homepage live-scoring — red-team', () => {
       body: {
         scorecard: SCORECARD_SAMPLE,
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         share_url: '/score/live/ripgrep',
         auditor_url: 'https://anc.dev/score',
       },

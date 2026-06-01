@@ -13,7 +13,7 @@ import {
   parseLiveScorePath,
   parseLiveScorePathMatch,
 } from '../src/worker/score/summary-render';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const SHELL_TEMPLATE = `<!doctype html>
 <html lang="en">
@@ -49,7 +49,7 @@ const SAMPLE_SCORECARD = {
 const CACHED_RIPGREP_KEY = keyFor('ripgrep', SPEC_VERSION);
 const CACHED_RIPGREP_PAYLOAD = {
   spec_version: SPEC_VERSION,
-  anc_version: '0.3.1',
+  anc_version: ANC_VERSION,
   tool_version: '14.1.0',
   scorecard: SAMPLE_SCORECARD,
 };
@@ -158,7 +158,7 @@ describe('handleLiveScorePage — happy path', () => {
     expect(html).toContain('<title>ripgrep');
     expect(html).toContain('92%');
     expect(html).toContain('14.1.0');
-    expect(html).toContain('0.3.1'); // anc version
+    expect(html).toContain(ANC_VERSION); // anc version
     expect(html).toContain('exits 0 on missing flag'); // top issue
     expect(html).toContain('subcommands listed'); // top issue
     expect(html).toContain('href="/install"'); // canonical install link (dedup with content/install.md)

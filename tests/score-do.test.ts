@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { handlers, Sandbox } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Stub Sandbox — records every setOutboundHandler + exec call.
@@ -52,7 +52,7 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
 
 const ANC_CHECK_OK = JSON.stringify({
   spec_version: SPEC_VERSION,
-  anc_version: '0.3.1',
+  anc_version: ANC_VERSION,
   tool: { name: 'ripgrep', version: '14.1.0' },
   score: { value: 87 },
 });
@@ -62,7 +62,7 @@ function defaultResponder(command: string): ExecLike {
     return { success: true, stdout: '/usr/local/bin/rg\n', stderr: '' };
   }
   if (command === 'anc --version') {
-    return { success: true, stdout: 'anc 0.3.1\n', stderr: '' };
+    return { success: true, stdout: `anc ${ANC_VERSION}\n`, stderr: '' };
   }
   if (command.startsWith('anc audit ')) {
     return { success: true, stdout: ANC_CHECK_OK, stderr: '' };
@@ -316,7 +316,7 @@ describe('sandbox-exec.score() — happy path', () => {
     const result = await score(stub, CARGO_SPEC);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.anc_version).toBe('0.3.1');
+    expect(result.value.anc_version).toBe(ANC_VERSION);
     expect(result.value.scorecard).toMatchObject({ tool: { name: 'ripgrep' } });
   });
 

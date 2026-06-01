@@ -24,7 +24,7 @@ import { keyFor } from '../src/worker/score/cache';
 import type { Sandbox } from '../src/worker/score/do';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -427,7 +427,7 @@ describe('/api/score — POST pipeline error paths', () => {
       makeEnv({
         doResponse: {
           scorecard: { tool: { name: 'bar', binary: 'bar' }, score: { value: 73 } },
-          anc_version: '0.3.1',
+          anc_version: ANC_VERSION,
         },
       }),
     );
@@ -563,7 +563,7 @@ const CACHE_KEY_UNCURATED = keyFor('uncurated-tool', SPEC_VERSION);
 
 const CACHED_UNCURATED_PAYLOAD = {
   spec_version: SPEC_VERSION,
-  anc_version: '0.3.1',
+  anc_version: ANC_VERSION,
   tool_version: '3.04',
   scorecard: { tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '3.04' }, score: { value: 92 } },
 };
@@ -591,7 +591,7 @@ describe('/api/score — R2 cache tier', () => {
     };
     expect(body.scorecard.tool.name).toBe('uncurated-tool');
     expect(body.scorecard.score.value).toBe(92);
-    expect(body.anc_version).toBe('0.3.1');
+    expect(body.anc_version).toBe(ANC_VERSION);
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
   });
 
@@ -602,7 +602,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'uncurated-tool', version: '3.04' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
@@ -619,7 +619,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'uncurated-tool', version: '3.04' }, score: { value: 50 } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const req = new Request('https://anc.dev/api/score?fromCache=false', {
@@ -662,7 +662,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'uncurated-tool', version: '3.04' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
@@ -702,7 +702,7 @@ describe('/api/score — R2 cache tier', () => {
       auditor_url: string;
     };
     expect(body.spec_version).toBeTruthy();
-    expect(body.anc_version).toBe('0.3.1');
+    expect(body.anc_version).toBe(ANC_VERSION);
     expect(body.auditor_url).toBeTruthy();
   });
 
@@ -717,7 +717,7 @@ describe('/api/score — R2 cache tier', () => {
   const CACHE_KEY_AIDER = keyFor('aider', SPEC_VERSION);
   const CACHED_AIDER_PAYLOAD = {
     spec_version: SPEC_VERSION,
-    anc_version: '0.3.1',
+    anc_version: ANC_VERSION,
     tool_version: '0.93.0',
     scorecard: { tool: { name: 'aider', binary: 'aider', version: '0.93.0' }, score: { value: 81 } },
   };
@@ -736,7 +736,7 @@ describe('/api/score — R2 cache tier', () => {
     expect(tracker.doCalls).toBe(0);
     const body = (await res.json()) as { scorecard: { tool: { name: string } }; anc_version: string };
     expect(body.scorecard.tool.name).toBe('aider');
-    expect(body.anc_version).toBe('0.3.1');
+    expect(body.anc_version).toBe(ANC_VERSION);
   });
 
   test('github-url with hint + R2 miss → live path runs (DO dispatched, hint informs cache key)', async () => {
@@ -746,7 +746,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'aider', version: '0.93.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('https://github.com/Aider-AI/aider'), env);
@@ -786,7 +786,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'bar', version: '0.1.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('cargo install foo-cli'), env);
@@ -839,7 +839,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     // POST install-command — key derives to scores/ripgrep/<SPEC_VERSION>,
@@ -870,7 +870,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'uncurated-tool', version: '1.6.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('npm install -g uncurated-tool'), env);
@@ -897,7 +897,7 @@ describe('/api/score — R2 cache tier', () => {
       cacheContent: {},
       doResponse: {
         scorecard: { tool: { name: 'foo', version: '0.1.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
     const res = await handleScore(postScore('cargo install foo-cli'), env);
@@ -926,7 +926,7 @@ describe('/api/score — R2 cache tier', () => {
     // the same key, so both reads hit the same prefilled entry.
     const cachedFooPayload = {
       spec_version: SPEC_VERSION,
-      anc_version: '0.3.1',
+      anc_version: ANC_VERSION,
       tool_version: '1.0.0',
       scorecard: { tool: { name: 'foo', binary: 'foo', version: '1.0.0' }, score: { value: 75 } },
     };
@@ -981,7 +981,7 @@ describe('/api/score — R2 cache tier', () => {
       tracker,
       doResponse: {
         scorecard: { tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '1.6.0' } },
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
       },
     });
 
@@ -1005,7 +1005,7 @@ describe('/api/score — R2 cache tier', () => {
       keyFor('uncurated-tool', SPEC_VERSION),
       JSON.stringify({
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         tool_version: '1.6.0',
         scorecard: {
           tool: { name: 'uncurated-tool', binary: 'uncurated-tool', version: '1.6.0' },

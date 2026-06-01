@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { keyFor } from '../src/worker/score/cache';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REGISTRY_INDEX = {
   by_slug: {
@@ -18,7 +18,7 @@ const REGISTRY_INDEX = {
       binary: 'rg',
       install: 'cargo install ripgrep',
       version: '14.1.0',
-      anc_version: '0.3.1',
+      anc_version: ANC_VERSION,
       scorecard_url: '/score/ripgrep',
       score_pct: 92,
     },
@@ -27,7 +27,7 @@ const REGISTRY_INDEX = {
       binary: 'bat',
       install: 'cargo install bat',
       version: '0.26.1',
-      anc_version: '0.3.1',
+      anc_version: ANC_VERSION,
       scorecard_url: '/score/bat',
       score_pct: 78,
     },
@@ -130,7 +130,7 @@ describe('/api/score — share_url derivation', () => {
   const CACHED_KEY = keyFor('uncurated-tool', SPEC_VERSION);
   const CACHED_PAYLOAD = {
     spec_version: SPEC_VERSION,
-    anc_version: '0.3.1',
+    anc_version: ANC_VERSION,
     tool_version: '0.1.0',
     scorecard: { badge: { score_pct: 70, eligible: false }, results: [] },
   };
@@ -206,7 +206,7 @@ describe('/api/score — share_url derivation', () => {
     const env = makeEnv({
       [keyFor('aider', SPEC_VERSION)]: {
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         tool_version: '0.50.0',
         scorecard: { badge: { score_pct: 80, eligible: true }, results: [] },
       },
@@ -223,7 +223,7 @@ describe('/api/score — share_url derivation', () => {
     const env = makeEnv({
       [keyFor('aider', SPEC_VERSION)]: {
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         tool_version: '0.50.0',
         scorecard: { badge: { score_pct: 80, eligible: true }, results: [] },
       },
@@ -239,7 +239,7 @@ describe('/api/score — share_url derivation', () => {
     const env = makeEnv({
       [keyFor('sqlc', SPEC_VERSION)]: {
         spec_version: SPEC_VERSION,
-        anc_version: '0.3.1',
+        anc_version: ANC_VERSION,
         tool_version: '1.27.0',
         scorecard: { badge: { score_pct: 75, eligible: false }, results: [] },
       },

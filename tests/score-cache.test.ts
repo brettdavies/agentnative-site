@@ -13,7 +13,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { type CachedScorecard, type CacheEnv, get, keyFor, put } from '../src/worker/score/cache';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // In-memory R2 stub
@@ -96,7 +96,7 @@ describe('cache.get', () => {
   test('hit returns the cached payload (shape validated)', async () => {
     const payload: CachedScorecard = {
       spec_version: SPEC_VERSION,
-      anc_version: '0.3.1',
+      anc_version: ANC_VERSION,
       tool_version: '15.1.0',
       scorecard: { tool: { name: 'ripgrep' }, score: { value: 88 } },
     };
@@ -117,14 +117,14 @@ describe('cache.get', () => {
   });
 
   test('corrupted payload (missing tool_version) → miss', async () => {
-    const corrupted = { spec_version: SPEC_VERSION, anc_version: '0.3.1', scorecard: {} };
+    const corrupted = { spec_version: SPEC_VERSION, anc_version: ANC_VERSION, scorecard: {} };
     const key = keyFor('rg', SPEC_VERSION);
     const { env } = makeR2Stub({ prefill: { [key]: corrupted } });
     expect(await get(env, key)).toBeNull();
   });
 
   test('corrupted payload (missing scorecard field) → miss', async () => {
-    const corrupted = { spec_version: SPEC_VERSION, anc_version: '0.3.1', tool_version: '15.1.0' };
+    const corrupted = { spec_version: SPEC_VERSION, anc_version: ANC_VERSION, tool_version: '15.1.0' };
     const key = keyFor('rg', SPEC_VERSION);
     const { env } = makeR2Stub({ prefill: { [key]: corrupted } });
     expect(await get(env, key)).toBeNull();
@@ -143,7 +143,7 @@ describe('cache.get', () => {
   });
 
   test('delete failure on corrupted payload does not throw', async () => {
-    const corrupted = { spec_version: SPEC_VERSION, anc_version: '0.3.1', tool_version: '', scorecard: {} };
+    const corrupted = { spec_version: SPEC_VERSION, anc_version: ANC_VERSION, tool_version: '', scorecard: {} };
     const key = keyFor('rg', SPEC_VERSION);
     const { env } = makeR2Stub({ prefill: { [key]: corrupted }, throwOnDelete: true });
     // Still returns null without surfacing the delete error.
@@ -159,13 +159,13 @@ describe('cache.put', () => {
   test('happy path writes a well-formed payload', async () => {
     const { env, store } = makeR2Stub();
     const key = keyFor('rg', SPEC_VERSION);
-    await put(env, key, { tool: { name: 'ripgrep' } }, '0.3.1', '15.1.0', SPEC_VERSION);
+    await put(env, key, { tool: { name: 'ripgrep' } }, ANC_VERSION, '15.1.0', SPEC_VERSION);
     const raw = store.get(key);
     expect(raw).toBeTruthy();
     if (!raw) return;
     const parsed = JSON.parse(raw) as CachedScorecard;
     expect(parsed.spec_version).toBe(SPEC_VERSION);
-    expect(parsed.anc_version).toBe('0.3.1');
+    expect(parsed.anc_version).toBe(ANC_VERSION);
     expect(parsed.tool_version).toBe('15.1.0');
     expect(parsed.scorecard).toEqual({ tool: { name: 'ripgrep' } });
   });
@@ -177,29 +177,29 @@ describe('cache.put', () => {
 
   test('refusal-to-cache-half-state: missing toolVersion throws', async () => {
     const { env } = makeR2Stub();
-    await expect(put(env, keyFor('rg', SPEC_VERSION), {}, '0.3.1', '', SPEC_VERSION)).rejects.toThrow(/toolVersion/);
+    await expect(put(env, keyFor('rg', SPEC_VERSION), {}, ANC_VERSION, '', SPEC_VERSION)).rejects.toThrow(/toolVersion/);
   });
 
   test('refusal-to-cache-half-state: missing specVersion throws', async () => {
     const { env } = makeR2Stub();
-    await expect(put(env, keyFor('rg', SPEC_VERSION), {}, '0.3.1', '15.1.0', '')).rejects.toThrow(/specVersion/);
+    await expect(put(env, keyFor('rg', SPEC_VERSION), {}, ANC_VERSION, '15.1.0', '')).rejects.toThrow(/specVersion/);
   });
 
   test('R2 write failure is best-effort: logs but does not throw', async () => {
     const { env } = makeR2Stub({ throwOnPut: true });
     // Should not throw — the user's response must not depend on the cache.
-    await put(env, keyFor('rg', SPEC_VERSION), {}, '0.3.1', '15.1.0', SPEC_VERSION);
+    await put(env, keyFor('rg', SPEC_VERSION), {}, ANC_VERSION, '15.1.0', SPEC_VERSION);
   });
 
   test('round-trip: put then get returns the same payload', async () => {
     const { env } = makeR2Stub();
     const scorecard = { tool: { name: 'ripgrep', version: '15.1.0' }, score: { value: 88 } };
     const key = keyFor('rg', SPEC_VERSION);
-    await put(env, key, scorecard, '0.3.1', '15.1.0', SPEC_VERSION);
+    await put(env, key, scorecard, ANC_VERSION, '15.1.0', SPEC_VERSION);
     const result = await get(env, key);
     expect(result).toEqual({
       spec_version: SPEC_VERSION,
-      anc_version: '0.3.1',
+      anc_version: ANC_VERSION,
       tool_version: '15.1.0',
       scorecard,
     });

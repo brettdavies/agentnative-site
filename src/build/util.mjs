@@ -55,7 +55,7 @@ export {
 } from '../shared/scorecard-format.mjs';
 
 // =====================================================================
-// Spec version constants — three distinct concepts, three distinct files.
+// Version constants — four distinct concepts, three files plus per-scorecard.
 // =====================================================================
 //
 // 1. SPEC_VERSION  — the spec version we last *vendored* (src/data/spec/VERSION).
@@ -70,13 +70,21 @@ export {
 //    reconciliation window is honest (footer correctly says the site hasn't
 //    caught up yet). USED BY: site footer.
 //
-// 3. (Per-scorecard `spec_version` field) — what `anc` was compiled against
+// 3. ANC_VERSION — the currently-published `anc` binary release
+//    (src/data/anc/VERSION). Updated by `./scripts/sync-cli-version.sh`,
+//    which fetches Cargo.toml [package].version from agentnative-cli's
+//    latest v* tag. Read by test fixtures so they auto-track when anc
+//    releases instead of hardcoding a stale literal. NOT used directly
+//    by runtime response shape — production anc_version comes from
+//    `anc --version` exec output in the sandbox at score time.
+//
+// 4. (Per-scorecard `spec_version` field) — what `anc` was compiled against
 //    when it produced that scorecard. NOT a global constant; lives in each
 //    scorecards/<name>-v<ver>.json. USED BY: per-tool badge SVGs (passed
 //    explicitly into renderBadgeSvg) and the OG card (reads anc's own
 //    self-scorecard's spec_version).
 //
-// Both files are read at module load, fail-fast on missing.
+// All three files are read at module load, fail-fast on missing.
 // =====================================================================
 
 const SPEC_VERSION_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'spec', 'VERSION');
@@ -88,6 +96,7 @@ const SITE_SPEC_VERSION_PATH = join(
   'principles',
   'VERSION',
 );
+const ANC_VERSION_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'anc', 'VERSION');
 
 function readVersionFile(path, remediation) {
   try {
@@ -105,6 +114,11 @@ export const SPEC_VERSION = readVersionFile(
 export const SITE_SPEC_VERSION = readVersionFile(
   SITE_SPEC_VERSION_PATH,
   'Create content/principles/VERSION with the spec version this site is reconciled to (one-line semver).',
+);
+
+export const ANC_VERSION = readVersionFile(
+  ANC_VERSION_PATH,
+  'Run ./scripts/sync-cli-version.sh to vendor the latest agentnative-cli release version, then retry.',
 );
 
 const DEFAULT_BASE = 'https://anc.dev';

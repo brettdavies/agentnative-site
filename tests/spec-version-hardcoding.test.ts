@@ -1,14 +1,15 @@
-// Red-team meta-test: scans tests/ for hardcoded SPEC_VERSION literals
-// that would break when SPEC_VERSION advances. The earlier coupling
-// regression — bumping SPEC_VERSION from 0.4.0 to 0.5.0 broke ~12 test
-// files because cache keys and spec_version fields were hardcoded —
-// motivated this guard. Tests now import SPEC_VERSION from
-// src/worker/spec-version.gen.ts (or via util.mjs which re-exports it)
-// and construct keys with keyFor() so they auto-track.
+// Red-team meta-test: scans tests/ for hardcoded SPEC_VERSION and
+// ANC_VERSION literals that would break when either constant advances.
+// The earlier coupling regression — bumping SPEC_VERSION from 0.4.0
+// to 0.5.0 broke ~12 test files because cache keys and spec_version
+// fields were hardcoded — motivated this guard. Tests now import the
+// constants from src/worker/spec-version.gen.ts (or via util.mjs which
+// re-exports them) and construct keys with keyFor() so they auto-track.
 //
 // Patterns this guard flags (only when the literal matches the current
-// SPEC_VERSION; an arbitrary stale version like '0.0.1' is fine because
-// it represents a deliberately-different version for partition tests):
+// constant; arbitrary stale versions like '0.0.1' for SPEC_VERSION or
+// '0.2.5' for ANC_VERSION are fine because they represent
+// deliberately-different versions for partition tests):
 //
 //   1. Cache key literal: `scores/<binary>/<SPEC_VERSION>.json`
 //      Use `keyFor('<binary>', SPEC_VERSION)` instead.
@@ -16,19 +17,25 @@
 //   2. Object field literal: `spec_version: '<SPEC_VERSION>'`
 //      Use `spec_version: SPEC_VERSION` instead.
 //
+//   3. Object field literal: `anc_version: '<ANC_VERSION>'`
+//      Use `anc_version: ANC_VERSION` instead.
+//
+//   4. `anc --version` stdout mock: `'anc <ANC_VERSION>\n'`
+//      Use a template literal `\`anc ${ANC_VERSION}\\n\`` instead.
+//
 // Allowed:
 //   - Comments and block-comment lines (history, examples).
-//   - Lines that already use the `${SPEC_VERSION}` template or call
-//     `keyFor()` (the canonical helpers).
-//   - Stale-version literals that intentionally differ from
-//     SPEC_VERSION (used by partition tests to prove that an old key
-//     is unreachable from the running Worker).
+//   - Lines that already use the `${SPEC_VERSION}` / `${ANC_VERSION}`
+//     template or call `keyFor()` (the canonical helpers).
+//   - Stale-version literals that intentionally differ from the
+//     current constants (used by partition tests to prove that an
+//     old key is unreachable from the running Worker).
 //   - This file itself.
 
 import { describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
-import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const TESTS_DIR = join(REPO_ROOT, 'tests');
@@ -117,6 +124,59 @@ describe('spec-version-hardcoding red-team', () => {
     expect(offenders).toHaveLength(0);
   });
 
+  test('no anc_version: literal matching ANC_VERSION exists in tests/', async () => {
+    const files = await listTestFiles();
+    const offenders: { file: string; line: number; text: string }[] = [];
+    const fieldRe = new RegExp(`anc_version\\s*:\\s*['"\`]${escapeRegex(ANC_VERSION)}['"\`]`);
+    for (const file of files) {
+      const text = await readFile(file, 'utf8');
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!fieldRe.test(line)) continue;
+        if (isCommentLine(line)) continue;
+        offenders.push({ file: relative(REPO_ROOT, file), line: i + 1, text: line.trim() });
+      }
+    }
+    if (offenders.length > 0) {
+      const summary = offenders.map((o) => `  ${o.file}:${o.line}: ${o.text}`).join('\n');
+      throw new Error(
+        `Found ${offenders.length} hardcoded anc_version literal(s) matching ` +
+          `ANC_VERSION (${ANC_VERSION}). Use anc_version: ANC_VERSION so fixtures ` +
+          `auto-track when the published anc binary advances:\n${summary}`,
+      );
+    }
+    expect(offenders).toHaveLength(0);
+  });
+
+  test('no `anc <ANC_VERSION>` stdout-mock literal exists in tests/', async () => {
+    // `anc --version` stdout mocks should use a template literal so the
+    // value moves with the published anc release. The exec-mock pattern
+    // is `'anc X.Y.Z\\n'` — flag those where X.Y.Z matches ANC_VERSION.
+    const files = await listTestFiles();
+    const offenders: { file: string; line: number; text: string }[] = [];
+    const stdoutRe = new RegExp(`['"]anc\\s+${escapeRegex(ANC_VERSION)}\\\\n['"]`);
+    for (const file of files) {
+      const text = await readFile(file, 'utf8');
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!stdoutRe.test(line)) continue;
+        if (isCommentLine(line)) continue;
+        offenders.push({ file: relative(REPO_ROOT, file), line: i + 1, text: line.trim() });
+      }
+    }
+    if (offenders.length > 0) {
+      const summary = offenders.map((o) => `  ${o.file}:${o.line}: ${o.text}`).join('\n');
+      throw new Error(
+        `Found ${offenders.length} hardcoded \`anc <ANC_VERSION>\\n\` stdout-mock ` +
+          `literal(s) matching ANC_VERSION (${ANC_VERSION}). Use a template literal ` +
+          `\`anc \${ANC_VERSION}\\n\` so mocks auto-track:\n${summary}`,
+      );
+    }
+    expect(offenders).toHaveLength(0);
+  });
+
   // -------------------------------------------------------------------------
   // Self-test: prove the guard catches what it claims to catch. If the
   // detection regex regresses (e.g., someone "fixes" it to accept any
@@ -161,5 +221,29 @@ describe('spec-version-hardcoding red-team', () => {
     const canonical = 'const PAYLOAD = { spec_version: SPEC_VERSION };';
     const fieldRe = new RegExp(`spec_version\\s*:\\s*['"\`]${escapeRegex(SPEC_VERSION)}['"\`]`);
     expect(fieldRe.test(canonical)).toBe(false);
+  });
+
+  test('self-test: anc_version regex flags a seeded literal', () => {
+    const seeded = `const PAYLOAD = { anc_version: '${ANC_VERSION}' };`;
+    const fieldRe = new RegExp(`anc_version\\s*:\\s*['"\`]${escapeRegex(ANC_VERSION)}['"\`]`);
+    expect(fieldRe.test(seeded)).toBe(true);
+  });
+
+  test('self-test: anc_version regex does NOT flag a different version (stale-fixture literal)', () => {
+    const stale = "const OLD = { anc_version: '0.2.5' };";
+    const fieldRe = new RegExp(`anc_version\\s*:\\s*['"\`]${escapeRegex(ANC_VERSION)}['"\`]`);
+    expect(fieldRe.test(stale)).toBe(false);
+  });
+
+  test('self-test: anc-stdout regex flags a seeded literal', () => {
+    const seeded = `return { stdout: 'anc ${ANC_VERSION}\\n' };`;
+    const stdoutRe = new RegExp(`['"]anc\\s+${escapeRegex(ANC_VERSION)}\\\\n['"]`);
+    expect(stdoutRe.test(seeded)).toBe(true);
+  });
+
+  test('self-test: anc-stdout regex does NOT flag a template literal', () => {
+    const canonical = 'return { stdout: `anc ${ANC_VERSION}\\n` };';
+    const stdoutRe = new RegExp(`['"]anc\\s+${escapeRegex(ANC_VERSION)}\\\\n['"]`);
+    expect(stdoutRe.test(canonical)).toBe(false);
   });
 });

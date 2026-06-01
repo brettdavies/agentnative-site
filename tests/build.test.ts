@@ -22,7 +22,14 @@ import {
 } from '../src/build/scorecards-render.mjs';
 import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { escHtml, parseFilename, SITE_SPEC_VERSION, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
+import {
+  ANC_VERSION,
+  escHtml,
+  parseFilename,
+  SITE_SPEC_VERSION,
+  SPEC_VERSION,
+  sortedGlob,
+} from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -523,7 +530,7 @@ function makeV06Scorecard(overrides: Record<string, any> = {}) {
     audit_profile: null,
     spec_version: SPEC_VERSION,
     tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
-    anc: { version: '0.4.0' },
+    anc: { version: ANC_VERSION },
     run: {
       invocation: 'anc --command fixture',
       started_at: '2026-05-21T17:03:00Z',
@@ -1029,7 +1036,7 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
       expect(tools).toHaveLength(1);
       expect(tools[0].scorecard.schema_version).toBe('0.6');
       expect(tools[0].scorecard.badge.score_pct).toBe(62);
-      expect(tools[0].metadata.anc.version).toBe('0.4.0');
+      expect(tools[0].metadata.anc.version).toBe(ANC_VERSION);
       expect(warnings.scorecardOrphans).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
