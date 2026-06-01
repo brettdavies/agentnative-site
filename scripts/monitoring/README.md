@@ -29,8 +29,8 @@ Status semantics follow
 `evidence` block carries the raw inputs the script consulted; consumers can recompute the verdict from it without
 re-running the check.
 
-This directory holds read-only checks. The write counterpart lives at [`scripts/ops/`](../ops/) (see
-[`scripts/ops/README.md`](../ops/README.md) for `flip-kill-switch.sh` and any future operator actions).
+This directory holds read-only checks. Write actions live at [`scripts/ops/`](../ops/); see
+[`scripts/ops/README.md`](../ops/README.md) for `flip-kill-switch.sh` and any future operator actions.
 
 ## Scripts
 
