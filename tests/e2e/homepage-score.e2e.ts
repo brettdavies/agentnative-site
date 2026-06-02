@@ -18,7 +18,7 @@
 //     prod-style env (the form disables itself)
 
 import { expect, test } from '@playwright/test';
-import { SITE_SPEC_VERSION, SPEC_VERSION } from '../../src/worker/spec-version.gen';
+import { ANC_VERSION, SITE_SPEC_VERSION, SPEC_VERSION } from '../../src/worker/spec-version.gen';
 
 const SCORECARD_SAMPLE = {
   schema_version: '0.5',
@@ -244,8 +244,8 @@ test.describe('homepage live-scoring form — happy path', () => {
     // No interaction yet → Turnstile not requested.
     expect(observer.turnstileRequested()).toBe(false);
 
-    await page.locator('[data-live-score-example="brew install bat"]').click();
-    await expect(page.locator('#live-score-input')).toHaveValue('brew install bat');
+    await page.locator('[data-live-score-example="cargo binstall ouch"]').click();
+    await expect(page.locator('#live-score-input')).toHaveValue('cargo binstall ouch');
 
     // Chip click is one of the lazy-load triggers; Turnstile request fires.
     await page.waitForFunction(() => Boolean((window as { turnstile?: object }).turnstile), { timeout: 5_000 });
