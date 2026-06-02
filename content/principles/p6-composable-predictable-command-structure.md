@@ -23,27 +23,28 @@ tool a building block rather than a dead end.
 
 **MUST:**
 
-- A SIGPIPE fix is the first executable statement in `main()` (or the equivalent in the target language). Without it,
-  piping output to `head`, `tail`, or any tool that closes the pipe early causes a panic. In Rust:
+- SIGPIPE is handled so that piping to `head`, `tail`, or any tool that closes the pipe early does not crash the
+  process. In Rust, restore the default SIGPIPE handler as the first executable statement in `main()`:
 
   ```rust
   unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL); }
   ```
 
-  Go's runtime handles SIGPIPE on stdout/stderr by default. Python raises `BrokenPipeError` — handle it by exiting
-  cleanly.
+  Equivalents in other languages: in Python, restore the default `SIGPIPE` handler at startup
+  (`signal.signal(signal.SIGPIPE, signal.SIG_DFL)`); in Go, the runtime's default handling already exits cleanly on
+  EPIPE writes; in Node.js, handle `EPIPE` on `process.stdout`.
 
 - TTY detection, plus support for `NO_COLOR` and `TERM=dumb`. When stdout or stderr is not a terminal, color codes are
   suppressed automatically.
 - Shell completions available via a `completions` subcommand (clap_complete in Rust; equivalents elsewhere). This is a
-  Tier 1 meta-command — it works without config, auth, or network.
-- *(Applies when: CLI makes network calls.)* A `--timeout` flag with a sensible default — we recommend 30 seconds for
-  typical request/response operations; longer for streaming or upload commands. Agents operating under their own time
-  budgets need to fail fast rather than block on a slow upstream.
+  Tier 1 meta-command: it works without config, auth, or network.
+- *(Applies when: CLI makes network calls.)* A `--timeout` flag with a sensible default (30 seconds is the canonical
+  recommendation for typical request/response operations; longer for streaming or upload commands). Agents operating
+  under their own time budgets need to fail fast rather than block on a slow upstream.
 - *(Applies when: CLI invokes a pager for output.)* Support `--no-pager` or respect `PAGER=""`. Pagers block headless
   execution indefinitely.
-- *(Applies when: CLI uses subcommands.)* Agentic flags (`--output`, `--quiet`, `--no-interactive`, `--timeout`) are
-  `global = true` so they propagate to every subcommand automatically.
+- *(Applies when: CLI uses subcommands.)* Agentic flags (`--output`, `--quiet`, `--no-interactive`, `--timeout`)
+  propagate to every subcommand automatically (e.g., `global = true` in clap).
 - *(Applies when: CLI runs long-running operations.)* SIGTERM is handled gracefully: in-flight writes flush or roll
   back, locks release, and the process exits non-zero within a bounded shutdown window. The next invocation succeeds
   without manual cleanup. Agents commonly cancel a long-running call when their own deadline expires; a tool that leaves
@@ -52,23 +53,24 @@ tool a building block rather than a dead end.
 **SHOULD:**
 
 - Commands that accept input read from stdin when no file argument is provided. Pipeline composition depends on it.
-- Pick one subcommand-naming convention and apply it consistently — `noun verb`, `verb noun`, or verb-only at the top
+- Pick one subcommand-naming convention and apply it consistently: `noun verb`, `verb noun`, or verb-only at the top
   level (e.g., `git commit`, `git push`). Mixing kebab-case compound verbs (`list-users`) with nested noun-verb (`user
   show`) in the same tool forces agents to learn exceptions.
-- `completions`, `version`, and `help` MUST work without config, network, or auth. (As an implementation note,
-  three-tier dependency gating in `main()` — meta-commands → config-dependent → network-dependent — is one way to
-  enforce this; the observable property is what the principle requires.)
+- Three-tier dependency gating: Tier 1 (meta-commands like `completions`, `version`) needs nothing; Tier 2 (local
+  commands) needs config; Tier 3 (network commands) needs config + auth. `completions` and `version` always work, even
+  in broken environments.
 - When a CLI exposes multiple distinct operations, model them as subcommands rather than mutually-exclusive flags. `tool
   search "query"` is preferable to `tool --search "query" --get "id"`. Single-operation tools (`grep`, `curl`, `jq`) are
-  exempt — flags are their operation surface.
+  exempt: flags are their operation surface.
 
 **MAY:**
 
 - A `--color auto|always|never` flag for explicit color control beyond TTY auto-detection.
-- *(Applies when: CLI uses subcommands.)* Subcommand verbs follow community-standard names — `get`, `list`, `create`,
-  `update`, `delete` — and flag spellings follow widely-used canonical forms — `--force`, `--yes`, `--limit`, `--quiet`,
-  `--verbose`. Names that match what every other CLI calls the same operation reduce the surface an agent has to
-  memorize.
+- *(Applies when: CLI uses subcommands.)* Subcommand verbs follow community-standard names (`get`, `list`, `create`,
+  `update`, `delete`); flag spellings follow widely-used canonical forms (`--force` for confirmation bypass, `--yes` for
+  prompt bypass, `--limit` for pagination, `--quiet` / `--verbose` for volume control). Convergence reduces an agent's
+  per-tool relearning cost: an agent that has seen `kubectl get` and `gh repo list` recognizes `tool list` immediately,
+  without re-reading `--help`.
 
 ## Evidence
 
@@ -82,11 +84,11 @@ tool a building block rather than a dead end.
 
 ## Anti-Patterns
 
-- Missing SIGPIPE handler — `cargo run -- list | head` panics with "broken pipe".
+- Missing SIGPIPE handler: `cargo run -- list | head` panics with "broken pipe".
 - Hard-coded ANSI escape codes without TTY detection.
-- Color output in JSON mode — ANSI codes inside JSON string values break downstream parsing.
+- Color output in JSON mode: ANSI codes inside JSON string values break downstream parsing.
 - A `completions` command that requires auth or config to run.
 - No stdin support on commands where piped input is a natural use case.
 
-Measured by audit IDs `p6-sigpipe`, `p6-no-color-behavioral`, and `p6-no-pager-behavioral` today, with `p6-completions`,
-`p6-timeout`, and `p6-agents-md` planned. Run `anc audit --principle 6 .` against your CLI to see current coverage.
+Measured by audit IDs `p6-sigpipe`, `p6-no-color`, `p6-completions`, `p6-timeout`, `p6-agents-md`. Run `anc audit
+--principle 6 .` against the CLI under test to see each.

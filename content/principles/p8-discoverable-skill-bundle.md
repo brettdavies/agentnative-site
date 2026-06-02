@@ -3,15 +3,15 @@
 ## Definition
 
 Without a skill bundle, every fresh agent invocation begins the same way: pull `--help`, infer the idioms, try a
-command, parse the error, try again. A skill bundle (canonical names `AGENTS.md` or `SKILL.md`) collapses that loop —
+command, parse the error, try again. A skill bundle (canonical names `AGENTS.md` or `SKILL.md`) collapses that loop:
 agent-discoverable through filesystem convention rather than through `--help`, loaded once, recognized thereafter.
 
 ## Why Agents Need It
 
 `--help` describes what is *possible* (the flag and subcommand surface); a skill bundle describes what to *do* (workflow
 knowledge, common compositions, recovery patterns). Workflow knowledge does not fit in `after_help` examples. The bundle
-is also where conventions that span multiple subcommands live — exit-code tables, output-channel discipline, retry
-semantics — context that `--help` for a single subcommand cannot carry on its own. Without one, the agent has nowhere to
+is also where conventions that span multiple subcommands live (exit-code tables, output-channel discipline, retry
+semantics): context that `--help` for a single subcommand cannot carry on its own. Without one, the agent has nowhere to
 durably register what it learned, and re-pays the discovery cost on every fresh session.
 
 ## Requirements
@@ -55,9 +55,9 @@ durably register what it learned, and re-pays the discovery cost on every fresh 
 - A CLI shipping a skill bundle with no install path. The bundle sits unread until a human copies it manually.
 - An install path that requires the agent runtime to be running. The runtime cascade is filesystem-resident; writing to
   it should not need an active session.
-- A bundle whose contents drift from the CLI's actual surface — a skill bundle in a docs subtree maintained by a
+- A bundle whose contents drift from the CLI's actual surface: a skill bundle in a docs subtree maintained by a
   different cadence than the binary itself, naming flags or subcommands that no longer exist.
 
 Requirement IDs `p8-must-bundle-install`, `p8-should-bundle-exists`, `p8-may-install-all`, and `p8-may-bundle-update`
-define the contract; behavioral audits land as the linter grows P8 coverage. Run `anc audit --principle 8 .` against
-your CLI to see what's measured today.
+define the contract; the antecedent audit `p8-bundle-exists` gates the conditional requirements. Run `anc audit
+--principle 8 .` against the CLI under test to see each.

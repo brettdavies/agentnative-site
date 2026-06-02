@@ -5,14 +5,14 @@
 Every CLI with write operations MUST support `--dry-run` so agents can preview a mutation before committing it. Commands
 MUST make the read-vs-write distinction visible from name and `--help` alone, and destructive writes MUST require
 explicit confirmation. An agent that cannot distinguish a safe read from a dangerous write will either avoid the tool or
-execute mutations blindly — both are failure modes.
+execute mutations blindly. Both are failure modes.
 
 ## Why Agents Need It
 
 Agent harnesses commonly retry failed operations. If a write operation is not idempotent, a retry creates duplicates,
 corrupts data, or trips rate limits. When destructive operations require explicit confirmation (`--force`, `--yes`) and
 support preview (`--dry-run`), an agent can safely explore what a command would do before committing to it. Read-only
-tools are inherently safe for retries, but they still benefit from help text that names the mutation contract — "this
+tools are inherently safe for retries, but they still benefit from help text that names the mutation contract: "this
 does not modify state" is a better sentence to put in `--help` than to assume.
 
 ## Requirements
@@ -20,8 +20,8 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 **MUST:**
 
 - *(Applies when: CLI has destructive operations.)* Destructive operations (delete, overwrite, bulk modify) require an
-  explicit `--force` or `--yes` flag. Without it, the tool refuses the operation or enters dry-run mode — never mutates
-  silently.
+  explicit `--force` or `--yes` flag. Without it, the tool refuses the operation or enters dry-run mode. It MUST NOT
+  mutate silently.
 - *(Applies when: CLI has both read and write operations.)* The distinction between read and write commands is clear
   from the command name and help text alone. An agent reading `--help` immediately knows whether a command mutates
   state.
@@ -31,8 +31,8 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 
 **SHOULD:**
 
-- Write operations are idempotent where the domain allows it — running the same command twice produces the same result
-  rather than doubling the effect.
+- Write operations are idempotent where the domain allows it. Running the same command twice produces the same end
+  state, not a doubled effect.
 
 ## Evidence
 
@@ -47,7 +47,7 @@ does not modify state" is a better sentence to put in `--help` than to assume.
 - A `delete` command that executes immediately without `--force` or confirmation.
 - Write commands sharing a name pattern with read commands (e.g., a `sync` that silently overwrites local state).
 - No `--dry-run` option on bulk operations, where a preview prevents costly mistakes.
-- Operations that fail on retry because the first attempt partially succeeded — non-idempotent writes without rollback.
+- Operations that fail on retry because the first attempt partially succeeded: non-idempotent writes without rollback.
 
-Behavioral audits for P5 are planned (`p5-dry-run`, `p5-destructive-guard`) but not yet shipped — `anc audit --principle
-5 .` returns no results today. P5 conformance is currently assessed by reading source and `--help`.
+Measured by audit IDs `p5-dry-run`, `p5-destructive-guard`. Run `anc audit --principle 5 .` against the CLI under test
+to see each.
