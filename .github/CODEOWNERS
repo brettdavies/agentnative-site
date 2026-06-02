@@ -1,0 +1,9 @@
+# Mandatory review on producer-ops paths that determine what ships and how.
+# Content (content/, src/data/, src/components/, etc.) is reviewed via normal
+# PR rules; src/data/skill/skill.json is the canonical contract vendored by
+# downstream repos (agentnative-cli's scripts/sync-skill-fixture.sh).
+
+scripts/**              @brettdavies
+.github/workflows/**    @brettdavies
+.github/rulesets/**     @brettdavies
+.github/CODEOWNERS      @brettdavies
