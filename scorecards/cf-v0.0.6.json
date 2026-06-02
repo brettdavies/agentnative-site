@@ -505,7 +505,7 @@
   "tool": {
     "name": "cf",
     "binary": "cf",
-    "version": "🍊☁️  cf · v0.0.6"
+    "version": "0.0.6"
   },
   "anc": {
     "version": "0.5.0"

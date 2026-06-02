@@ -220,6 +220,17 @@ for name in "${scored_names[@]}"; do
     echo "error: anc audit did not produce valid JSON for $name (file: $out)" >&2
     exit 1
   fi
+
+  # Canonicalize tool.version when version_extract is set. anc captures the
+  # raw first line of `<binary> --version` into .tool.version, which is
+  # decorative (banner / emoji / ASCII art) for any tool whose author put
+  # a logo before the SemVer. Filename version already uses the extracted
+  # value; mirror it into the JSON so agent consumers reading
+  # /score/<tool>.json get the clean SemVer instead of decorative noise.
+  # Tools without version_extract keep the raw probe semantic.
+  if [[ -n "$extractor" ]]; then
+    jaq --arg v "$actual" '.tool.version = $v' "$out" >"$out.tmp" && mv "$out.tmp" "$out"
+  fi
 done
 
 echo
