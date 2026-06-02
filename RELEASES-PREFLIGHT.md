@@ -337,9 +337,21 @@ confirms it worked.
   # <spec_version>
   ```
 
-- [ ] **Production live-DO smoke against a non-registry binary.** Same shape as the staging smoke above, against
-  `anc.dev` (no CF Access headers needed on production). Use the same fresh binary picked for staging; expect the same
-  green outcome.
+- [ ] **Production live-DO smoke against a non-registry binary.** Production binds the real Turnstile site key + secret
+  (staging uses Cloudflare's always-pass test pair), so the staging-style curl recipe with `turnstile_token:"x"` returns
+  `turnstile_failed` against `anc.dev`. Pick one of two paths:
+
+- **Manual (operator-only path).** Open `https://anc.dev/` in a browser, paste the same fresh non-registry binary picked
+  for staging into the form (e.g., `npm install -g cowsay`), submit, watch the live run complete, then visit the
+  resulting share URL (`/score/live/<binary>`) and confirm the four scorecard classes render (`scorecard-summary`,
+  `scorecard-audits`, `scorecard-meta`, `scorecard-embed`).
+- **Service-token (CI / scripted path).** Once the service-token bypass lands per the plan at
+  [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md),
+  re-use the staging smoke recipe with an added `X-Anc-Smoke-Token: ${SMOKE_SERVICE_TOKEN}` header. The bypass skips
+  Turnstile only; rate-limit + kill-switch stay enforced; bypassed runs emit a distinct telemetry tag (`freshness:
+  "live-smoke"`) so they stay separable from user traffic in Analytics Engine.
+
+  Either path satisfies the box. Until the bypass ships, the manual browser path is the only option.
 - [ ] **Cache-purge after deploys that change `/skill`, `/skill.json`, `/skill.md`.** Cloudflare's edge cache holds
   these for the configured TTL; manual purge brings the new version live immediately. Token in 1Password
   (`scripts/staging-cache-smoke.sh` references the item).
