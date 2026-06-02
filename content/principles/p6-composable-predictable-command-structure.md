@@ -67,9 +67,10 @@ tool a building block rather than a dead end.
 
 - A `--color auto|always|never` flag for explicit color control beyond TTY auto-detection.
 - *(Applies when: CLI uses subcommands.)* Subcommand verbs follow community-standard names (`get`, `list`, `create`,
-  `update`, `delete`); flag spellings follow widely-used canonical forms (`--force`, `--yes`, `--limit`, `--quiet`,
-  `--verbose`). Convergence reduces an agent's per-tool relearning cost: an agent that has seen `kubectl get` and `gh
-  repo list` recognizes `tool list` immediately, without re-reading `--help`.
+  `update`, `delete`); flag spellings follow widely-used canonical forms (`--force` for confirmation bypass, `--yes` for
+  prompt bypass, `--limit` for pagination, `--quiet` / `--verbose` for volume control). Convergence reduces an agent's
+  per-tool relearning cost: an agent that has seen `kubectl get` and `gh repo list` recognizes `tool list` immediately,
+  without re-reading `--help`.
 
 ## Evidence
 
