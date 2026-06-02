@@ -16,8 +16,8 @@ Each of the eight principles below has its own page (`/p1` through `/p8`) for de
 available as raw markdown at `/p1.md` … `/p8.md` for agent consumption. The entire spec as one file lives at
 [`/llms-full.txt`](/llms-full.txt); a curated index for retrieval-heavy agents lives at [`/llms.txt`](/llms.txt).
 
-For the standard applied at scale, see the [**ANC 100 leaderboard**](/scorecards) — 100 widely-used CLI tools, scored
-against the same eight principles. The scoring methodology and per-field schema for the underlying JSON live at
+For the standard applied at scale, see the [**ANC 100 leaderboard**](/scorecards) (100 widely-used CLI tools, scored
+against the same eight principles). The scoring methodology and per-field schema for the underlying JSON live at
 [`/methodology`](/methodology) and [`/scorecard-schema`](/scorecard-schema).
 
 To install the linter (`anc`) locally, see [/install](/install). To install the agent-native-cli **skill bundle** (the

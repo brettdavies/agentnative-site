@@ -65,7 +65,7 @@ the default, which is "run everything."
 
 A `[PASS]` is a requirement met, not a compliment. A `[WARN]` is a SHOULD the tool doesn't satisfy; ignoring it is a
 choice, not a bug. A `[FAIL]` is a MUST the tool doesn't satisfy; agents will hit the edge it describes, and the tool
-will surprise them. Nothing here is a vanity metric — the audits map one-to-one to the requirements on the
+will surprise them. Nothing here is a vanity metric because the audits map one-to-one to the requirements on the
 [principles page](/).
 
 ## See how widely-used CLIs score
