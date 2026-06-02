@@ -151,16 +151,17 @@ export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
 // ---------------------------------------------------------------------------
 
 // Same CSP shape applyHeaders sets on static pages — mirrored here because
-// /score/live/<binary> bypasses the static asset pipeline. Three Turnstile
-// directives (script-src, frame-src, connect-src) are kept even though
-// this page itself doesn't load Turnstile, because the share-URL surface
-// links back to the homepage form, and a uniform CSP across HTML responses
-// is easier to assert than per-page exceptions.
+// /score/live/<binary> bypasses the static asset pipeline. Turnstile
+// directives stay because the share-URL surface links back to the
+// homepage form, and CF Web Analytics directives stay because the
+// beacon is injected on every HTML response when enabled at the zone
+// level. Uniform CSP across HTML responses is easier to assert than
+// per-page exceptions.
 const LIVE_SCORE_CSP =
   "default-src 'self'; " +
-  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; " +
   'frame-src https://challenges.cloudflare.com; ' +
-  "connect-src 'self' https://challenges.cloudflare.com; " +
+  "connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com; " +
   "img-src 'self' data:; " +
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
   "font-src 'self' https://fonts.gstatic.com; " +

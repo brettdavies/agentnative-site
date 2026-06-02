@@ -82,13 +82,33 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toContain('## Principles');
     const bullets = body.match(/^-\s+\[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
     expect(bullets.length).toBe(8);
-    // Sub-pages (check, about) present under ## Pages.
     expect(body).toContain('## Pages');
-    const pageLinks = body.match(/^-\s+\[[^\]]+\]\([^)]*\/(check|about)\.md\)$/gm) ?? [];
-    expect(pageLinks.length).toBe(2);
+    // Source of truth: subPages array in src/build/07-subpages.mjs.
+    const expectedPages = [
+      'audit',
+      'install',
+      'about',
+      'badge',
+      'changelog',
+      'contribute',
+      'methodology',
+      'scorecard-schema',
+    ];
+    const pagesSection = body.slice(body.indexOf('## Pages')).split(/\n## /)[0];
+    const pageLinks = pagesSection.match(/^-\s+\[[^\]]+\]\([^)]*\/([a-z-]+)\.md\)$/gm) ?? [];
+    const linkedPageNames = new Set(pageLinks.map((line) => line.match(/\/([a-z-]+)\.md\)/)?.[1]).filter(Boolean));
+    for (const name of expectedPages) {
+      expect(linkedPageNames).toContain(name);
+    }
+    expect(pageLinks.length).toBe(expectedPages.length);
 
-    // Scorecards section with at least the leaderboard link.
+    expect(body).toContain('## Skill');
+    expect(body).toMatch(/\[Skill \(HTML\)\]\([^)]*\/skill\.md\)/);
+    expect(body).toMatch(/\[Skill \(canonical JSON\)\]\([^)]*\/skill\.json\)/);
+
     expect(body).toContain('## Scorecards');
+    expect(body).toMatch(/\[Leaderboard\]\([^)]*\/scorecards\.md\)/);
+    expect(body).toMatch(/\[Coverage Matrix\]\([^)]*\/coverage\.md\)/);
   });
 
   test('/llms-full.txt is served in a single fetch with concatenation delimiters', async ({ request }) => {
