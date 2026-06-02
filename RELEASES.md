@@ -10,10 +10,8 @@ feature branch → PR to dev (squash merge)
               → deploy.yml publishes to production (anc.dev)
 ```
 
-Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message.
-
-**Exception** for `docs/plans/`, `docs/brainstorms/`, `docs/solutions/`: commit directly to `dev` with `docs(plans):`
-(or similar) message. No feature branch, no PR. These paths never reach `main` (`guard-main-docs.yml`).
+Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message. The
+[dev-direct exception](#dev-direct-exception) below names the path categories that may be committed directly to `dev`.
 
 ## Branches
 
@@ -41,12 +39,29 @@ gh pr create --base dev --title "feat(scope): what changed"
 - **PR body**: follow `.github/pull_request_template.md`. See [§ PR body](#pr-body).
 - **PR body prose scrub**: see [§ Prose scrubbing](#prose-scrubbing).
 
+### Dev-direct exception
+
+Paths that live only on `dev` and never ship to `main` can be committed directly to `dev` without a feature branch or
+PR. The `guard-main-docs` workflow blocks them from `main` PRs regardless. The exception applies to:
+
+- Engineering docs: `docs/brainstorms/`, `docs/ideation/`, `docs/plans/`, `docs/research/`, `docs/reviews/`,
+  `docs/solutions/`, and anything under `.context/`.
+- Prose-check stack: `styles/`, `.vale.ini`, `scripts/prose-check.sh`.
+
+The standard feature → PR → squash-merge flow remains required for everything else, including consumer-facing markdown
+(README, AGENTS, CONTRIBUTING, the release runbook).
+
 ## PR body
 
 Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inventions: `## Summary`, `## Changelog`,
 `## Type of Change`, `## Related Issues/Stories`, `## Files Modified`, `## Testing`.
 
 - **No explainer prose anywhere in the body.** User-facing substance only.
+- **Summary describes the net diff only** — what merged `main` looks like vs the base branch. Not commit history,
+  intermediate state, or cherry-pick mechanics.
+- **Zero verification artifacts in the body.** No triple-diff stats, leak-check output ("`guard-main-docs` runs clean"),
+  patch-id cherry-check counts, pre-push gate results, CI status, or prose-scrub findings. Anomalies get fixed before
+  push, not audit-trailed.
 - **Changelog** subsections (`### Added` / `### Changed` / `### Fixed` / `### Documentation`): 1-5 bullets each, delete
   empty subsections, each bullet starts with a verb.
 - **Type of Change**: one checkbox. Prefer `feat`/`fix` over `chore` for any user-observable change.
@@ -60,6 +75,11 @@ Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inve
 → Rationale: [`RELEASES-RATIONALE.md` § PR body conventions](./RELEASES-RATIONALE.md#pr-body-conventions).
 
 ## Releasing dev to main
+
+**Step 0 — run the preflight checklist.** [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md) gates the cut of every
+`release/*` branch. Every box must be checked, including the **mandatory live-scoring DO smoke** against a fresh
+non-registry binary (the surface CI cannot cover and the one that caused the 2026-06-01 rename / container coordination
+incident). Do not proceed to step 1 until preflight is green.
 
 ```bash
 # 1. Branch from main, NOT dev.
@@ -191,6 +211,11 @@ bun x wrangler containers build -p -t "anc-sandbox:$GIT_SHA" docker/sandbox/
 Update **only `env.staging.containers[0].image`** in `wrangler.jsonc` with the new tag. Commit Dockerfile change +
 staging-pin update together. PR to `dev`.
 
+After the deploy completes, the staging container app rolls instances asynchronously — wait for `wrangler containers
+list` to show `STATE = ready` before running any smoke that exercises the live container path. Smokes that race the
+rollout will hit warm OLD-image instances and look identical to a real bug. Full pattern:
+[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md).
+
 #### Promotion (release PR to main)
 
 Cut a `release/*` branch from `main`, cherry-pick the dev commits, then add one promotion commit bumping the top-level
@@ -319,7 +344,7 @@ its own rollback.
 | Step | Date       | Staging deploy ID                      | Container app / DO namespace                                                                       | Notes                                                                                                                                                                  |
 | ---- | ---------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | 2026-05-24 | `c626ddad-6ac2-4f81-a9ec-4a7a6dd926ec` | container `a0309fd2-9622-4dd8-a6a8-faf95292f08e` / DO namespace `a4fb92ed020241cb802c1d5176a39608` | v1 baseline. `env.SCORE (Sandbox)` + all live-scoring bindings present.                                                                                                |
-| 2    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `/api/score` ripgrep returned 200; triad complete (`spec_version: 0.4.0`, `site_spec_version: 0.4.0`, `anc_version: 0.3.0`, `checker_url`).                            |
+| 2    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `/api/score` ripgrep returned 200; triad complete (`spec_version: 0.4.0`, `site_spec_version: 0.4.0`, `anc_version: 0.3.0`, `auditor_url`).                            |
 | 3    | 2026-05-24 | `25107ae7-6727-4ea9-90ff-75996cba8cdc` | container unchanged / DO namespace dropped                                                         | v2-drop-sandbox applied. Worker bindings list no longer shows `env.SCORE`.                                                                                             |
 | 4    | 2026-05-24 | (no deploy)                            | n/a                                                                                                | `-d '{}'` → 400 clean (`unrecognized_input`). `/` + `/scorecards` → 200. DO-forcing input (`xplr`) → CF 1101 (handler guard gap captured).                             |
 | 5a   | 2026-05-24 | (no deploy)                            | container `a0309fd2-...` deleted                                                                   | `wrangler containers delete` required — first v3 deploy attempt failed with the "different durable object namespace" error.                                            |
@@ -337,12 +362,24 @@ in the CF managed registry AND both pins point at the same tag.
 
 `.github/workflows/deploy.yml` runs a smoke step against staging after every successful staging deploy. POSTs to
 `/api/score` for the `ripgrep` slug with the CF Access service-token headers and a Turnstile test token; asserts the
-response triad (`spec_version`, `site_spec_version`, `anc_version`, `checker_url`) plus `scorecard.kind ===
+response triad (`spec_version`, `site_spec_version`, `anc_version`, `auditor_url`) plus `scorecard.kind ===
 "registry_hit"`. Fails the deploy on a missing field. No production smoke step runs until U10 promotes live scoring to
 anc.dev.
 
 → Scope rationale (why the smoke covers only the registry-fast-path):
 [`RELEASES-RATIONALE.md` § Post-deploy smoke scope](./RELEASES-RATIONALE.md#post-deploy-smoke-scope).
+
+### Pre-release live-path smoke (manual)
+
+The CI post-deploy smoke above exercises the registry-fast-path only. The live DO path (install + `anc audit` inside the
+Sandbox container) is not exercised by automation and gates every `release/*` PR via the manual preflight checklist.
+
+→ Procedure:
+[`RELEASES-PREFLIGHT.md` § Live-scoring Sandbox DO path (mandatory)](./RELEASES-PREFLIGHT.md#live-scoring-sandbox-do-path-mandatory).
+→ Why it stays manual (cost / flakiness tradeoff):
+[`RELEASES-RATIONALE.md` § Post-deploy smoke scope](./RELEASES-RATIONALE.md#post-deploy-smoke-scope). → The 2026-06-01
+incident that motivates the check:
+[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md).
 
 ### Cost-watch hand-off
 
@@ -490,7 +527,7 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
 
 `/skill.json` and `/skill` advertise the `agent-native-cli` skill, hosted at
 [`brettdavies/agentnative-skill`](https://github.com/brettdavies/agentnative-skill). Site vendors the manifest in
-`src/data/skill.json`; the skill repo holds the actual content.
+`src/data/skill/skill.json`; the skill repo holds the actual content.
 
 ### Release procedure
 
@@ -501,7 +538,7 @@ gh api -X PUT repos/brettdavies/agentnative-site/rulesets/<id> \
    git checkout main && git merge --ff-only v0.x.y && git push origin main
    ```
 
-2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill.json` to bump
+2. **Bump the manifest in this repo (only when user-facing fields changed)**: edit `src/data/skill/skill.json` to bump
    `version` and update any per-host install commands, description, or other surface fields.
 3. **PR to `dev`**: CI runs unit + worker tests on the bumped manifest. Squash-merge on green.
 4. **Release `dev` → `main`** via the standard `release/*` flow above. Site deploys to `anc.dev`.
@@ -521,6 +558,7 @@ public, run `gh workflow run skill-availability.yml` once to seed a green run on
 
 ## Related docs
 
+- [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md): pre-release verification checklist. Gates every `release/*` PR.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release flow rationale, CI design, status-check pitfalls
 - [`AGENT.md`](./AGENT.md): onboarding, repo conventions, tool-site sequencing
 - [`DESIGN.md`](./DESIGN.md): design system and build contract

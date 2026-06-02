@@ -48,14 +48,14 @@ test.describe('staging /api/score — live round-trip', () => {
       spec_version: string;
       site_spec_version: string;
       anc_version: string;
-      checker_url: string;
+      auditor_url: string;
     };
     expect(body.scorecard.kind).toBe('registry_hit');
     expect(body.scorecard.scorecard_url).toBe('/score/ripgrep');
     expect(body.spec_version).toMatch(/^\d+\.\d+\.\d+/);
     expect(body.site_spec_version).toMatch(/^\d+\.\d+\.\d+/);
     expect(body.anc_version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(body.checker_url).toContain('anc.dev');
+    expect(body.auditor_url).toContain('anc.dev');
   });
 
   test('POST {input: "cargo install ripgrep"} hits cache OR live path, gets share_url', async ({ request }) => {

@@ -3,7 +3,7 @@
 // union every score-pipeline module imports.
 //
 // Every /api/score response carries the triad spec_version + anc_version +
-// checker_url. Missing any of the three is a hard 500, NOT a quiet
+// auditor_url. Missing any of the three is a hard 500, NOT a quiet
 // omission. The check fires at response-build time so a partial response
 // can never escape the Worker.
 //
@@ -20,10 +20,10 @@
 //     payload, NOT from a build-time constant — otherwise a re-deployed
 //     site with a stale cache would lie about which anc actually scored
 //     the artifact.
-//   - CHECKER_URL is a build-time constant pointing at the production
+//   - AUDITOR_URL is a build-time constant pointing at the production
 //     surface; if anc.dev ever moves, the constant moves with it.
 
-import { CHECKER_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
+import { AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 
 export type ScoreError =
   | { code: 'invalid_url'; details: string; cta_text: string }
@@ -50,7 +50,7 @@ export type ScoreError =
 export type ScoreErrorResponse = {
   error: ScoreError;
   spec_version: string;
-  checker_url: string;
+  auditor_url: string;
 };
 
 export type ScoreSuccess = {
@@ -58,7 +58,7 @@ export type ScoreSuccess = {
   spec_version: string;
   site_spec_version: string;
   anc_version: string;
-  checker_url: string;
+  auditor_url: string;
   // Set for inline scorecards (cached + live branches) when the binary is
   // derivable from the input. The homepage form's JS redirects here after
   // a successful submit. URL shape `/live-score/<binary>` reads from the
@@ -72,7 +72,7 @@ export type ScoreSuccess = {
   share_url?: string;
 };
 
-const CTA_INSTALL_ANC = 'Install `anc` and run `anc check .` in your project for full depth.';
+const CTA_INSTALL_ANC = 'Install `anc` and run `anc audit .` in your project for full depth.';
 
 /** Compile-time exhaustiveness guard. Reaching this at runtime is a bug. */
 export function assertNever(value: never): never {
@@ -133,7 +133,7 @@ export type ResponseFreshness = 'live' | 'cache-hit';
 
 /**
  * Build a successful score response. The response triad is asserted
- * inline — a payload missing spec_version / anc_version / checker_url
+ * inline — a payload missing spec_version / anc_version / auditor_url
  * returns 500 with `incomplete_response_contract` so the contract
  * violation is loud, not a silent partial.
  */
@@ -159,7 +159,7 @@ export function shapeScoreSuccess(
     spec_version: SPEC_VERSION,
     site_spec_version: SITE_SPEC_VERSION,
     anc_version,
-    checker_url: CHECKER_URL,
+    auditor_url: AUDITOR_URL,
     ...(shareUrl ? { share_url: shareUrl } : {}),
   };
 
@@ -176,7 +176,7 @@ export function shapeScoreError(error: ScoreError, freshness: ResponseFreshness 
   const body: ScoreErrorResponse = {
     error,
     spec_version: SPEC_VERSION,
-    checker_url: CHECKER_URL,
+    auditor_url: AUDITOR_URL,
   };
 
   const headers = new Headers(freshness === 'cache-hit' ? JSON_HEADERS_CACHE_HIT : JSON_HEADERS_LIVE);

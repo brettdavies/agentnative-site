@@ -1,6 +1,6 @@
 {
-  "schema_version": "1.0",
-  "generated_by": "anc generate coverage-matrix",
+  "schema_version": "0.1",
+  "generated_by": "anc emit coverage-matrix",
   "rows": [
     {
       "id": "p1-must-env-var",
@@ -12,11 +12,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-env-hints",
+          "audit_id": "p1-env-hints",
           "layer": "behavioral"
         },
         {
-          "check_id": "p1-env-flags-source",
+          "audit_id": "p1-env-flags-source",
           "layer": "source"
         }
       ]
@@ -31,15 +31,15 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-non-interactive",
+          "audit_id": "p1-non-interactive",
           "layer": "behavioral"
         },
         {
-          "check_id": "p1-flag-existence",
+          "audit_id": "p1-flag-existence",
           "layer": "behavioral"
         },
         {
-          "check_id": "p1-non-interactive-source",
+          "audit_id": "p1-non-interactive-source",
           "layer": "project"
         }
       ]
@@ -55,7 +55,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-headless-auth",
+          "audit_id": "p1-headless-auth",
           "layer": "source"
         }
       ]
@@ -71,7 +71,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-secret-non-leaky-path",
+          "audit_id": "p1-secret-non-leaky-path",
           "layer": "behavioral"
         }
       ]
@@ -86,7 +86,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-tty-detection-source",
+          "audit_id": "p1-tty-detection-source",
           "layer": "source"
         }
       ]
@@ -101,7 +101,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-defaults-in-help",
+          "audit_id": "p1-defaults-in-help",
           "layer": "behavioral"
         }
       ]
@@ -116,7 +116,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p1-rich-tui",
+          "audit_id": "p1-rich-tui",
           "layer": "behavioral"
         }
       ]
@@ -131,11 +131,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p2-json-output",
+          "audit_id": "p2-json-output",
           "layer": "behavioral"
         },
         {
-          "check_id": "p2-structured-output",
+          "audit_id": "p2-structured-output",
           "layer": "source"
         }
       ]
@@ -150,7 +150,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p2-output-module",
+          "audit_id": "p2-output-module",
           "layer": "source"
         }
       ]
@@ -163,7 +163,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p2-structured-exit-codes",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p2-must-json-errors",
@@ -173,7 +178,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p2-json-errors",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p2-must-schema-print",
@@ -182,11 +192,13 @@
       "summary": "CLIs that emit structured output expose the output schema via a `schema` subcommand or `--schema` flag: runtime-discoverable, with a documented format identifier.",
       "applicability": {
         "kind": "conditional",
-        "condition": "CLI emits structured output"
+        "antecedent": {
+          "audit_id": "p2-json-output"
+        }
       },
       "verifiers": [
         {
-          "check_id": "p2-schema-print",
+          "audit_id": "p2-schema-print",
           "layer": "behavioral"
         }
       ]
@@ -199,7 +211,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p2-consistent-envelope",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p2-should-schema-file",
@@ -208,11 +225,13 @@
       "summary": "Output schemas are also exported to a stable file path (e.g., `schema/<command>.json`) so CI/static-analysis consumers pin without invoking the tool.",
       "applicability": {
         "kind": "conditional",
-        "condition": "CLI emits structured output"
+        "antecedent": {
+          "audit_id": "p2-json-output"
+        }
       },
       "verifiers": [
         {
-          "check_id": "p2-schema-file",
+          "audit_id": "p2-schema-file",
           "layer": "project"
         }
       ]
@@ -227,7 +246,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p2-json-aliases",
+          "audit_id": "p2-json-aliases",
           "layer": "behavioral"
         }
       ]
@@ -242,7 +261,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p2-more-formats",
+          "audit_id": "p2-more-formats",
           "layer": "behavioral"
         }
       ]
@@ -257,7 +276,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p2-raw-flag",
+          "audit_id": "p2-raw-flag",
           "layer": "behavioral"
         }
       ]
@@ -271,7 +290,12 @@
         "kind": "conditional",
         "condition": "CLI uses subcommands"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p3-subcommand-examples",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p3-must-top-level-examples",
@@ -283,7 +307,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p3-help",
+          "audit_id": "p3-help",
           "layer": "behavioral"
         }
       ]
@@ -298,7 +322,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p3-version",
+          "audit_id": "p3-version",
           "layer": "behavioral"
         }
       ]
@@ -313,7 +337,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p3-version",
+          "audit_id": "p3-version",
           "layer": "behavioral"
         }
       ]
@@ -326,7 +350,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p3-paired-examples",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p3-should-about-long-about",
@@ -338,7 +367,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p3-about-long-about",
+          "audit_id": "p3-about-long-about",
           "layer": "behavioral"
         }
       ]
@@ -353,7 +382,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p3-examples-subcommand",
+          "audit_id": "p3-examples-subcommand",
           "layer": "behavioral"
         }
       ]
@@ -368,7 +397,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p4-try-parse",
+          "audit_id": "p4-try-parse",
           "layer": "source"
         }
       ]
@@ -383,11 +412,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p4-bad-args",
+          "audit_id": "p4-bad-args",
           "layer": "behavioral"
         },
         {
-          "check_id": "p4-exit-codes",
+          "audit_id": "p4-exit-codes",
           "layer": "source"
         }
       ]
@@ -400,7 +429,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p4-actionable-errors",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p4-should-structured-enum",
@@ -412,11 +446,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p4-error-module",
+          "audit_id": "p4-error-module",
           "layer": "project"
         },
         {
-          "check_id": "p4-error-types",
+          "audit_id": "p4-error-types",
           "layer": "source"
         }
       ]
@@ -440,7 +474,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p4-json-error-output",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p4-should-enumerate-valid-set",
@@ -453,11 +492,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p4-enumerate-valid-set",
+          "audit_id": "p4-enumerate-valid-set",
           "layer": "source"
         },
         {
-          "check_id": "p4-enumerate-valid-set",
+          "audit_id": "p4-enumerate-valid-set",
           "layer": "source"
         }
       ]
@@ -471,7 +510,12 @@
         "kind": "conditional",
         "condition": "CLI has destructive operations"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p5-force-yes",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p5-must-read-write-distinction",
@@ -482,7 +526,12 @@
         "kind": "conditional",
         "condition": "CLI has both read and write operations"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p5-read-write-distinction",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p5-must-dry-run",
@@ -495,7 +544,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p5-dry-run",
+          "audit_id": "p5-dry-run",
           "layer": "project"
         }
       ]
@@ -521,7 +570,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-sigpipe",
+          "audit_id": "p6-sigpipe",
           "layer": "behavioral"
         }
       ]
@@ -537,11 +586,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-sigterm",
+          "audit_id": "p6-sigterm",
           "layer": "source"
         },
         {
-          "check_id": "p6-sigterm",
+          "audit_id": "p6-sigterm",
           "layer": "source"
         }
       ]
@@ -556,15 +605,15 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-no-color-behavioral",
+          "audit_id": "p6-no-color-behavioral",
           "layer": "behavioral"
         },
         {
-          "check_id": "p6-no-color",
+          "audit_id": "p6-no-color",
           "layer": "source"
         },
         {
-          "check_id": "p6-no-color",
+          "audit_id": "p6-no-color",
           "layer": "source"
         }
       ]
@@ -579,7 +628,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-completions",
+          "audit_id": "p6-completions",
           "layer": "project"
         }
       ]
@@ -595,7 +644,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-timeout",
+          "audit_id": "p6-timeout",
           "layer": "source"
         }
       ]
@@ -611,11 +660,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-no-pager-behavioral",
+          "audit_id": "p6-no-pager-behavioral",
           "layer": "behavioral"
         },
         {
-          "check_id": "p6-no-pager",
+          "audit_id": "p6-no-pager",
           "layer": "source"
         }
       ]
@@ -631,7 +680,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-global-flags",
+          "audit_id": "p6-global-flags",
           "layer": "source"
         }
       ]
@@ -647,7 +696,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-stdin-input",
+          "audit_id": "p6-stdin-input",
           "layer": "behavioral"
         }
       ]
@@ -663,7 +712,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-consistent-naming",
+          "audit_id": "p6-consistent-naming",
           "layer": "behavioral"
         }
       ]
@@ -687,7 +736,12 @@
         "kind": "conditional",
         "condition": "CLI performs multiple distinct operations"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p6-subcommand-operations",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p6-may-color-flag",
@@ -699,7 +753,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-color-flag",
+          "audit_id": "p6-color-flag",
           "layer": "behavioral"
         }
       ]
@@ -715,7 +769,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-standard-names",
+          "audit_id": "p6-standard-names",
           "layer": "behavioral"
         }
       ]
@@ -730,7 +784,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p7-quiet",
+          "audit_id": "p7-quiet",
           "layer": "behavioral"
         }
       ]
@@ -746,7 +800,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p7-output-clamping",
+          "audit_id": "p7-output-clamping",
           "layer": "source"
         }
       ]
@@ -761,7 +815,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p7-verbose",
+          "audit_id": "p7-verbose",
           "layer": "behavioral"
         }
       ]
@@ -777,7 +831,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p7-limit",
+          "audit_id": "p7-limit",
           "layer": "behavioral"
         }
       ]
@@ -792,7 +846,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p7-timeout-behavioral",
+          "audit_id": "p7-timeout-behavioral",
           "layer": "behavioral"
         }
       ]
@@ -808,7 +862,7 @@
       },
       "verifiers": [
         {
-          "check_id": "p7-cursor-pagination",
+          "audit_id": "p7-cursor-pagination",
           "layer": "behavioral"
         }
       ]
@@ -821,7 +875,12 @@
       "applicability": {
         "kind": "universal"
       },
-      "verifiers": []
+      "verifiers": [
+        {
+          "audit_id": "p7-auto-verbosity",
+          "layer": "behavioral"
+        }
+      ]
     },
     {
       "id": "p8-must-bundle-install",
@@ -830,11 +889,13 @@
       "summary": "When a skill bundle exists, the CLI provides an install path (`tool skill install [<host>]`) that registers the bundle with installed agent runtimes.",
       "applicability": {
         "kind": "conditional",
-        "condition": "CLI ships an agent skill bundle"
+        "antecedent": {
+          "audit_id": "p8-bundle-exists"
+        }
       },
       "verifiers": [
         {
-          "check_id": "p8-bundle-install",
+          "audit_id": "p8-bundle-install",
           "layer": "behavioral"
         }
       ]
@@ -849,11 +910,11 @@
       },
       "verifiers": [
         {
-          "check_id": "p6-agents-md",
+          "audit_id": "p6-agents-md",
           "layer": "project"
         },
         {
-          "check_id": "p8-bundle-exists",
+          "audit_id": "p8-bundle-exists",
           "layer": "project"
         }
       ]
@@ -865,11 +926,13 @@
       "summary": "An `--all` mode auto-detects installed runtimes (Claude Code, Cursor, Codex, OpenCode, etc.) and installs across all.",
       "applicability": {
         "kind": "conditional",
-        "condition": "CLI ships an agent skill bundle"
+        "antecedent": {
+          "audit_id": "p8-bundle-exists"
+        }
       },
       "verifiers": [
         {
-          "check_id": "p8-install-all",
+          "audit_id": "p8-install-all",
           "layer": "behavioral"
         }
       ]
@@ -881,11 +944,13 @@
       "summary": "An update/upgrade subcommand (`tool skill update`) pulls the latest bundle version.",
       "applicability": {
         "kind": "conditional",
-        "condition": "CLI ships an agent skill bundle"
+        "antecedent": {
+          "audit_id": "p8-bundle-exists"
+        }
       },
       "verifiers": [
         {
-          "check_id": "p8-bundle-update",
+          "audit_id": "p8-bundle-update",
           "layer": "behavioral"
         }
       ]
@@ -893,20 +958,20 @@
   ],
   "summary": {
     "total": 59,
-    "covered": 45,
-    "uncovered": 14,
+    "covered": 56,
+    "uncovered": 3,
     "dual_layer": 10,
     "must": {
       "total": 28,
-      "covered": 22
+      "covered": 28
     },
     "should": {
       "total": 21,
-      "covered": 14
+      "covered": 18
     },
     "may": {
       "total": 10,
-      "covered": 9
+      "covered": 10
     }
   },
   "audit_profiles": [

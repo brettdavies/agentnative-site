@@ -54,6 +54,9 @@ services:
               count: all
               capabilities: [gpu]
 
-    # Default entrypoint runs the batch scorer. Override with
-    # `docker compose run --rm scorer bash` for an interactive shell.
-    command: ["/work/score-anc100.sh"]
+    # The image's ENTRYPOINT (`/bin/bash /work/score-anc100.sh`) runs the
+    # batch scorer when no command is passed. Override with
+    # `docker compose run --rm --entrypoint /bin/bash scorer` for an
+    # interactive shell. A `command:` override here would be appended to
+    # the entrypoint as a positional arg, breaking the scorer; leave it
+    # unset.

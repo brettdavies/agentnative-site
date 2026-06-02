@@ -1,7 +1,7 @@
 # Install anc
 
 `anc` is the reference linter for the agent-native CLI standard. It scores any CLI against the eight principles and
-tells you, by check ID, where it passes and where it falls short. Install it locally, then point it at a binary or a
+tells you, by audit ID, where it passes and where it falls short. Install it locally, then point it at a binary or a
 project directory.
 
 ## Homebrew
@@ -39,8 +39,8 @@ archive for your platform, extract, and put the `anc` binary on `$PATH`.
 
 ## What's next
 
-Once installed, invoke the CLI as `anc`. See [/check](/check) for usage: flags, output shapes, and how to interpret the
-per-principle check IDs. The principles themselves are spelled out at [/](/), with one page per principle (`/p1` through
+Once installed, invoke the CLI as `anc`. See [/audit](/audit) for usage: flags, output shapes, and how to interpret the
+per-principle audit IDs. The principles themselves are spelled out at [/](/), with one page per principle (`/p1` through
 `/p8`).
 
 To install the **agent-native-cli skill bundle** instead (the Claude Code / Codex / Cursor / OpenCode skill that teaches

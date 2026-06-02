@@ -1,4 +1,4 @@
-// Live-scoring Sandbox Durable Object — install + anc check inside an
+// Live-scoring Sandbox Durable Object — install + anc audit inside an
 // Alpine + musl Container, with two-phase egress (R7) enforced via the
 // CF Sandbox SDK's named outbound handlers (Pattern Y). The class
 // extends `@cloudflare/sandbox` and inherits the runtime egress control
@@ -246,7 +246,7 @@ export async function writeCacheBestEffort(
 }
 
 // Pulls `scorecard.tool.version` if present. The shape is the anc
-// JSON envelope; the field is populated by `anc check` from whatever
+// JSON envelope; the field is populated by `anc audit` from whatever
 // version flag the tool exposes. Unknown values bail out so cache.put's
 // refusal-to-cache-half-state isn't reached at runtime. Exported for
 // the same unit-test reason as writeCacheBestEffort.
@@ -275,7 +275,7 @@ function statusFor(error: string): number {
     case 'chain_resolved_install_failed':
     case 'chain_resolved_no_binary_produced':
     case 'install_unsupported':
-    case 'anc_check_failed':
+    case 'anc_audit_failed':
       return 502;
     case 'timeout':
       return 504;

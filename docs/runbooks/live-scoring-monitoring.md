@@ -198,8 +198,27 @@ is not a tree.
 
 Symptom: not a failure mode; the operator's tool for stopping all `live` traffic when something downstream is on fire.
 
+Wrapped path (preferred when you want JSON receipt + dry-run preview):
+
 ```bash
-# Flip ON. Subsequent /api/score live requests return 503 with Retry-After: 3600.
+# Flip ON (staging). Subsequent /api/score live requests return 503 with Retry-After: 3600.
+scripts/ops/flip-kill-switch.sh --env staging --on
+
+# Flip OFF (staging).
+scripts/ops/flip-kill-switch.sh --env staging --off
+
+# Production flips (either direction) require --yes.
+scripts/ops/flip-kill-switch.sh --env production --on --yes
+scripts/ops/flip-kill-switch.sh --env production --off --yes
+
+# Preview the wrangler command without firing it.
+scripts/ops/flip-kill-switch.sh --env staging --on --dry-run
+```
+
+Raw wrangler path (equivalent; what the wrapper calls under the hood):
+
+```bash
+# Flip ON.
 bun x wrangler kv key put --binding=SCORE_KV --env staging scoring_disabled true
 
 # Flip OFF.
@@ -344,10 +363,35 @@ is a backstop, not the primary signal.
   [`RELEASES.md` § Live-scoring (v3) release procedure](../../RELEASES.md#live-scoring-v3-release-procedure).
 - Post-deploy smoke: [`RELEASES.md` § Post-deploy smoke](../../RELEASES.md#post-deploy-smoke) and
   `scripts/smoke-api-score.sh`.
+- Agent-deterministic JSON wrappers: [`scripts/monitoring/`](../../scripts/monitoring/) (read-only checks:
+  `check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`, `check-error-tier-sample.sh`) and
+  [`scripts/ops/`](../../scripts/ops/) (write actions: `flip-kill-switch.sh`).
 - Sandbox image lifecycle and DO migrations:
   [`RELEASES-RATIONALE.md` § Sandbox image releases](../../RELEASES-RATIONALE.md#sandbox-image-releases) and
   [§ DO migrations are one-way walls](../../RELEASES-RATIONALE.md#do-migrations-are-one-way-walls).
 - Plan unit: `docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md` (U9 deliverable 5).
+
+## Agent-deterministic checks
+
+Two surfaces produce the same verdict for the four checks the operator cares about most (kill-switch state, R2 cache
+health, recent Worker deploys, error-tier sample). Pick by audience.
+
+| Surface       | Path                                                                                                                                                               | Best for                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| MCP queries   | Inline **Agent (MCP)** subsections under each "What to watch" entry above (`mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability` and kin). | IDE agents and conversational tooling that already hold a Cloudflare MCP token.  |
+| JSON wrappers | [`scripts/monitoring/`](../../scripts/monitoring/) (see the README there for invocation + exit-code semantics).                                                    | Operators, CI cron, agents reaching Bash but not MCP, retro evidence collection. |
+
+The read-only wrappers (`check-kill-switch.sh`, `check-r2-cache.sh`, `check-recent-deploys.sh`,
+`check-error-tier-sample.sh`) each emit one `{check, env, status, checked_at, evidence}` JSON object on stdout. Exit
+code mirrors status (`0` ok or dry-run, `1` warn, `2` alarm, `3` prerequisite missing, `4` error). Three of four use
+wrangler's existing auth flow; the AE SQL wrapper needs `CF_ACCOUNT_ID` + `CF_API_TOKEN` env vars. All four accept
+`--dry-run`, which emits the same envelope with `status: "dry-run"` and an `evidence.would_run` array listing the remote
+commands the script would fire.
+
+Write actions live under [`scripts/ops/`](../../scripts/ops/). Today that's `flip-kill-switch.sh`, which sets or clears
+`SCORE_KV.scoring_disabled` and follows the same JSON-envelope + `--dry-run` discipline as the read-only checks.
+Production flips require `--yes` to guard against typos. See the
+[Kill-switch flip](#kill-switch-flip-manual-incident-response) playbook above for the operator runbook.
 
 ## Still deferred
 
@@ -355,21 +399,8 @@ Out of scope for U10, named here so the operator knows where the next gap is:
 
 - **Auto-kill cron** (U10.1). Reads an Analytics Engine aggregate for rolling 24h request count and flips
   `scoring_disabled` automatically when the budget breaches the configured ceiling. Threshold needs real traffic data to
-  set; deferred until staging soak produces enough signal.
+  set; deferred until staging soak produces enough signal. Once it lands, `check-error-tier-sample.sh` becomes the
+  natural cron primitive.
 - **Production-side procedure block** in this runbook (commands, thresholds, escalation paths against anc.dev rather
   than the staging Worker). Lands when live scoring promotes to anc.dev.
 - **Authenticated GitHub PAT for discovery**, if chronic unauth-quota exhaustion has materialised by then.
-
-### Agent-deterministic checks
-
-**Decision (U10):** Path B (MCP queries) shipped. Each manual check above carries an inline **Agent (MCP)** subsection
-naming the `mcp__plugin_cloudflare_cloudflare-observability__query_worker_observability` (or related cloudflare-bindings
-MCP) call. No `scripts/monitoring/` wrapper scripts were added; the existing wrangler CLI + dashboard surface stays the
-operator path, and agents reach the same data through native MCP tools.
-
-Rationale: agents already have Cloudflare MCP tools; documenting which call to make for which check costs zero new code
-surface and zero ongoing maintenance. The alternative (shell scripts in `scripts/monitoring/`) was deferred because its
-unique value is GitHub Actions cron reach, which U10's acceptance bar doesn't require. If automated CI monitoring
-becomes a need later, scripts can land as a separate change without unwinding the MCP docs.
-
-Until U10 lands, the runbook above is the operator's only playbook.

@@ -1,4 +1,4 @@
-// Live-scoring orchestration — install + anc check inside a Sandbox DO,
+// Live-scoring orchestration — install + anc audit inside a Sandbox DO,
 // with two-phase egress enforced via the SDK's named outbound handlers.
 // The DO class in ./do.ts holds the static `outboundHandlers` map; this
 // module orchestrates the per-request install + score flow by calling
@@ -26,7 +26,7 @@ import { SDIST_TRUSTED_NAMES } from './sdist-allowlist';
 import { validBranchName } from './validate';
 
 // Per-clone destination — fixed name keeps the path predictable for the
-// `anc check <path>` invocation and the cleanup post-score (the warm
+// `anc audit <path>` invocation and the cleanup post-score (the warm
 // container session may reuse this DO instance for the next request).
 // Lives under /tmp so it's wiped by the container's tmpfs semantics.
 const CLONE_DEST = '/tmp/anc-clone-target';
@@ -48,9 +48,9 @@ export type ScoreSuccess = {
     // DO success envelope so handler.ts can populate the AE
     // `install ms` slot without a second timing surface.
     install_ms: number;
-    // Wall-clock duration of the anc check exec. Same shape +
+    // Wall-clock duration of the anc audit exec. Same shape +
     // rationale as install_ms; populated on the ok-true branch.
-    anc_check_ms: number;
+    anc_audit_ms: number;
   };
 };
 
@@ -69,7 +69,7 @@ export type ScoreErrorCode =
   | 'chain_resolved_no_binary_produced' // install succeeded but `which <binary>` missed.
   // Exec failure classes.
   | 'anc_version_unreadable' // anc --version returned no parseable version.
-  | 'anc_check_failed' // anc check returned non-zero AND no parseable JSON envelope.
+  | 'anc_audit_failed' // anc audit returned non-zero AND no parseable JSON envelope.
   // Wall-clock.
   | 'timeout';
 
@@ -116,7 +116,7 @@ const TOTAL_TIMEOUT_MS = 60_000; // R7 — install + score combined.
 const SHORT_EXEC_TIMEOUT_MS = 5_000; // `which`, `anc --version`.
 
 // Per-PM install-host allowlists. Only these hosts are reachable during
-// Phase 1 install for each PM; Phase 2 (anc check) blocks all hosts.
+// Phase 1 install for each PM; Phase 2 (anc audit) blocks all hosts.
 // Tightening or relaxing this map changes the security baseline — pair
 // any update with a refresh of the script-execution audit row.
 //
@@ -212,7 +212,7 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
   // Auto-detect (Fix 1): direct-install commands print
   // `DETECTED_BINARY=<name>` on stdout when the archive carried a binary
   // whose filename differs from spec.binary (the gogcli → gog case).
-  // Override spec.binary so the downstream `which` gate + `anc check
+  // Override spec.binary so the downstream `which` gate + `anc audit
   // --command <binary>` invocation targets the file that actually got
   // installed. The detected name is the basename, character-validated
   // by the install command's filter before it lands here.
@@ -237,7 +237,7 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     }
   }
 
-  // Phase 2 — lock down. `anc check` must not reach any host. Setting the
+  // Phase 2 — lock down. `anc audit` must not reach any host. Setting the
   // handler BEFORE exec is the second safety invariant covered by test
   // scenario (b).
   await sandbox.setOutboundHandler('noHttp');
@@ -258,44 +258,44 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     };
   }
 
-  // Run anc check. Two invocation shapes:
-  //   - binary install (default): `anc check --command <binary>` scores
+  // Run anc audit. Two invocation shapes:
+  //   - binary install (default): `anc audit --command <binary>` scores
   //     the running binary's behavior against the spec.
-  //   - source clone (git-clone PM, branch-scoped paste): `anc check
+  //   - source clone (git-clone PM, branch-scoped paste): `anc audit
   //     <clone-path>` scores the source layout + project files. The
   //     clone-path is interpolated via shellQuote and the path itself
   //     is built from the spec, NOT from user input — the user's input
   //     only flows in through the validated owner/repo/branch slots
   //     which are character-class-restricted at validate.ts.
   const auditProfile = (spec as { audit_profile?: string }).audit_profile;
-  const ancCheckCmd = isSourceScoped
-    ? buildAncCheckSourceCmd(spec as GitCloneInstall, auditProfile)
+  const ancAuditCmd = isSourceScoped
+    ? buildAncAuditSourceCmd(spec as GitCloneInstall, auditProfile)
     : auditProfile
-      ? `anc check --command ${shellQuote(binary)} --output json --audit-profile ${shellQuote(auditProfile)}`
-      : `anc check --command ${shellQuote(binary)} --output json`;
-  const ancCheckStart = Date.now();
-  const checkResult = await sandbox.exec(ancCheckCmd, { timeout: TOTAL_TIMEOUT_MS });
-  const ancCheckMs = Date.now() - ancCheckStart;
+      ? `anc audit --command ${shellQuote(binary)} --output json --audit-profile ${shellQuote(auditProfile)}`
+      : `anc audit --command ${shellQuote(binary)} --output json`;
+  const ancAuditStart = Date.now();
+  const auditResult = await sandbox.exec(ancAuditCmd, { timeout: TOTAL_TIMEOUT_MS });
+  const ancAuditMs = Date.now() - ancAuditStart;
 
   // anc emits a structured envelope on stdout even on non-zero exit when
   // a check produced findings. Try to parse before declaring failure.
   let scorecard: unknown;
   try {
-    scorecard = JSON.parse(checkResult.stdout);
+    scorecard = JSON.parse(auditResult.stdout);
   } catch {
-    if (!checkResult.success) {
+    if (!auditResult.success) {
       return {
         ok: false,
-        error: 'anc_check_failed',
-        details: truncate(checkResult.stderr) || truncate(checkResult.stdout),
+        error: 'anc_audit_failed',
+        details: truncate(auditResult.stderr) || truncate(auditResult.stdout),
       };
     }
-    return { ok: false, error: 'anc_check_failed', details: 'anc returned non-JSON stdout' };
+    return { ok: false, error: 'anc_audit_failed', details: 'anc returned non-JSON stdout' };
   }
 
   return {
     ok: true,
-    value: { scorecard, anc_version: ancVersion, install_ms: installMs, anc_check_ms: ancCheckMs },
+    value: { scorecard, anc_version: ancVersion, install_ms: installMs, anc_audit_ms: ancAuditMs },
   };
 }
 
@@ -470,7 +470,7 @@ function installCommandFor(spec: InstallSpec): string | null {
 // name; ties broken by lexicographic order for determinism). The chosen
 // file is installed under its OWN basename, and that basename is echoed
 // to stdout as `DETECTED_BINARY=<name>` so runScore() can override
-// spec.binary before the `which <binary>` gate + `anc check --command
+// spec.binary before the `which <binary>` gate + `anc audit --command
 // <binary>` invocation run.
 //
 // Gate-capture (Fix 3): each pipeline step echoes `GATE:<name>` to
@@ -642,7 +642,7 @@ export function extractDetectedBinary(stdout: string): string | null {
       const name = line.slice(DETECTED_BINARY_PREFIX.length).trim();
       // Whitelist filename characters — the install command's own filter
       // rejects path-traversal upstream, but defense in depth keeps any
-      // smuggled bytes out of the shell-quoted `anc check --command` slot.
+      // smuggled bytes out of the shell-quoted `anc audit --command` slot.
       if (/^[A-Za-z0-9._-]+$/.test(name) && name.length > 0 && name.length <= 64) {
         return name;
       }
@@ -741,11 +741,11 @@ export function buildGitCloneCommand(spec: GitCloneInstall): string | null {
   );
 }
 
-// Build the `anc check <path>` invocation for a source-scoped score.
+// Build the `anc audit <path>` invocation for a source-scoped score.
 // Mirrors the `--command <binary>` form's audit-profile handling.
-export function buildAncCheckSourceCmd(_spec: GitCloneInstall, auditProfile: string | undefined): string {
+export function buildAncAuditSourceCmd(_spec: GitCloneInstall, auditProfile: string | undefined): string {
   const path = shellQuote(CLONE_DEST);
   return auditProfile
-    ? `anc check ${path} --output json --audit-profile ${shellQuote(auditProfile)}`
-    : `anc check ${path} --output json`;
+    ? `anc audit ${path} --output json --audit-profile ${shellQuote(auditProfile)}`
+    : `anc audit ${path} --output json`;
 }

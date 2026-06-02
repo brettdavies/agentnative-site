@@ -98,7 +98,7 @@ export async function emitScorecardSurface({
   // Each registry-index entry is augmented with the latest scorecard's
   // version, the anc binary version that produced it, and the public URL
   // of the per-tool scorecard page, so /api/score can return the
-  // spec_version + anc_version + checker_url triad without fetching the
+  // spec_version + anc_version + auditor_url triad without fetching the
   // full scorecard payload.
   const enrichments = {};
   for (const t of toolsWithScorecards) {
@@ -122,15 +122,16 @@ export async function emitScorecardSurface({
   for (const w of indexWarnings) console.warn(`warning: ${w}`);
   const leaderboard = computeLeaderboard(toolsWithScorecards);
 
-  const methodologyHtml = `  <p>Every score is the output of <code>anc check &lt;binary&gt;</code> against a real CLI tool.
-  The <strong>score</strong> column is the pass rate <code>pass / (pass + warn + fail)</code>;
+  const methodologyHtml = `  <p>Every score is the output of <code>anc audit &lt;binary&gt;</code> against a real CLI tool.
+  The <strong>score</strong> column is the behavioral-layer compliance score: requirement checks,
+  credit-weighted by outcome (a met requirement counts full, a missed SHOULD or MAY counts half);
   the <strong>principles met</strong> column counts how many of the eight principles have every
   check passing. The <strong>audience</strong> classification — when present — is informational,
   not authoritative; the per-tool page's evidence list is the ground truth.</p>
   <p>For the full explanation of scoring, audience classification, audit profiles, and how to
   request a re-score, see the <a href="/methodology">methodology page</a>.</p>
   <p>To reproduce any row locally, <a href="/install">install <code>anc</code></a> and run
-  <code>anc check &lt;binary&gt;</code>.</p>`;
+  <code>anc audit &lt;binary&gt;</code>.</p>`;
 
   const leaderboardBody = buildLeaderboardBody(leaderboard, methodologyHtml);
   await writeFile(
@@ -254,7 +255,7 @@ export async function emitScorecardSurface({
     join(distDir, 'coverage.html'),
     emitShell({
       title: 'Spec Coverage Matrix — anc.dev',
-      description: 'Which agent-native CLI requirements have automated checks and which remain uncovered.',
+      description: 'Which agent-native CLI requirements have automated audits and which remain uncovered.',
       canonicalPath: '/coverage',
       bodyHtml: coverageBody,
       themeInitJs: themeInit,

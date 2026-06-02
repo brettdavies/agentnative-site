@@ -18,6 +18,7 @@
 //     prod-style env (the form disables itself)
 
 import { expect, test } from '@playwright/test';
+import { SITE_SPEC_VERSION, SPEC_VERSION } from '../../src/worker/spec-version.gen';
 
 const SCORECARD_SAMPLE = {
   schema_version: '0.5',
@@ -93,10 +94,10 @@ test.describe('homepage live-scoring form — happy path', () => {
       status: 200,
       body: {
         scorecard: SCORECARD_SAMPLE,
-        spec_version: '0.4.0',
-        site_spec_version: '0.4.0',
-        anc_version: '0.3.1',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        site_spec_version: SITE_SPEC_VERSION,
+        anc_version: ANC_VERSION,
+        auditor_url: 'https://anc.dev/score',
         share_url: '/score/live/ripgrep',
       },
     });
@@ -129,9 +130,9 @@ test.describe('homepage live-scoring form — happy path', () => {
       status: 200,
       body: {
         scorecard: { kind: 'registry_hit', tool: { name: 'ripgrep' }, scorecard_url: '/score/ripgrep' },
-        spec_version: '0.4.0',
-        anc_version: '0.3.1',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        anc_version: ANC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
 
@@ -157,9 +158,9 @@ test.describe('homepage live-scoring form — happy path', () => {
           scorecard_url: '/score/bat',
           score_pct: 78,
         },
-        spec_version: '0.4.0',
-        anc_version: '0.3.1',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        anc_version: ANC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
 
@@ -209,9 +210,9 @@ test.describe('homepage live-scoring form — happy path', () => {
         contentType: 'application/json; charset=utf-8',
         body: JSON.stringify({
           scorecard: SCORECARD_SAMPLE,
-          spec_version: '0.4.0',
-          anc_version: '0.3.1',
-          checker_url: 'https://anc.dev/score',
+          spec_version: SPEC_VERSION,
+          anc_version: ANC_VERSION,
+          auditor_url: 'https://anc.dev/score',
           share_url: '/score/live/ripgrep',
         }),
       });
@@ -231,7 +232,12 @@ test.describe('homepage live-scoring form — happy path', () => {
   test('example chip click fills input and lazy-loads Turnstile', async ({ page }) => {
     const observer = await mockTurnstileAndScore(page, {
       status: 200,
-      body: { scorecard: SCORECARD_SAMPLE, anc_version: '0.3.1', spec_version: '0.4.0', share_url: '/score/live/bat' },
+      body: {
+        scorecard: SCORECARD_SAMPLE,
+        anc_version: ANC_VERSION,
+        spec_version: SPEC_VERSION,
+        share_url: '/score/live/bat',
+      },
     });
 
     await page.goto('/');
@@ -274,8 +280,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 400,
       body: {
         error: { code: 'unrecognized_input', cta_text: 'paste a tool name…' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
 
@@ -294,8 +300,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 400,
       body: {
         error: { code: 'non_github_host', cta_text: 'anc.dev only scores public GitHub repos.' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -311,8 +317,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 429,
       body: {
         error: { code: 'rate_limited', retry_after: 60, cta_text: '...' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -328,8 +334,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 400,
       body: {
         error: { code: 'turnstile_failed', cta_text: '...' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -345,8 +351,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 404,
       body: {
         error: { code: 'chain_no_resolve', cta_text: '...' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -366,8 +372,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 502,
       body: {
         error: { code: 'chain_resolved_install_failed', details: longStderr, cta_text: '...' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -386,8 +392,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 502,
       body: {
         error: { code: 'chain_resolved_no_binary_produced', details: '', cta_text: '...' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -408,8 +414,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 400,
       body: {
         error: { code: 'non_https_url', cta_text: 'Use https:// — http:// is not allowed.' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -438,8 +444,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
           code: 'invalid_url_path',
           cta_text: 'Paste the repo root URL (e.g. https://github.com/owner/repo), not a branch or release link.',
         },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -466,8 +472,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
           details: 'apt-get install foo',
           cta_text: '...',
         },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -496,8 +502,8 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
       status: 502,
       body: {
         error: { code: 'install_unsupported', pm: 'brew_only', cta_text: '...' },
-        spec_version: '0.4.0',
-        checker_url: 'https://anc.dev/score',
+        spec_version: SPEC_VERSION,
+        auditor_url: 'https://anc.dev/score',
       },
     });
     await page.goto('/');
@@ -580,10 +586,10 @@ test.describe('homepage live-scoring — red-team', () => {
       status: 200,
       body: {
         scorecard: SCORECARD_SAMPLE,
-        spec_version: '0.4.0',
-        anc_version: '0.3.1',
+        spec_version: SPEC_VERSION,
+        anc_version: ANC_VERSION,
         share_url: '/score/live/ripgrep',
-        checker_url: 'https://anc.dev/score',
+        auditor_url: 'https://anc.dev/score',
       },
     });
 

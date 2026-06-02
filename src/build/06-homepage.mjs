@@ -74,7 +74,7 @@ function buildLiveScoreSection() {
     <div class="live-score__content">
       <h2 id="live-score-heading" class="live-score__title">Score a binary, live.</h2>
       <p class="live-score__lede">
-        <a href="/install">Install <code>anc</code> locally</a> for source + project depth. The demo here is binary and behavioral checks only.
+        <a href="/install">Install <code>anc</code> locally</a> for source + project depth. The demo here is binary and behavioral audits only.
       </p>
       <form class="live-score__form" method="post" action="/api/score" novalidate data-live-score-form>
         <div class="live-score__input-row">
@@ -94,10 +94,13 @@ function buildLiveScoreSection() {
         </div>
         <p id="live-score-help" class="live-score__help">
           or try
-          <button type="button" class="live-score__chip" data-live-score-example="ripgrep"><code>ripgrep</code></button>,
-          <button type="button" class="live-score__chip" data-live-score-example="brew install bat"><code>brew install bat</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="ripgrep" aria-label="Try example: ripgrep"><code>ripgrep</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="cargo binstall ouch" aria-label="Try example: cargo binstall ouch"><code>cargo binstall ouch</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="npm install -g cowsay" aria-label="Try example: npm install -g cowsay"><code>npm install -g cowsay</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="pip install black" aria-label="Try example: pip install black"><code>pip install black</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="uv tool install rclone" aria-label="Try example: uv tool install rclone"><code>uv tool install rclone</code></button>,
           or
-          <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli"><code>github.com/cli/cli</code></button>.
+          <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli" aria-label="Try example: github.com/cli/cli"><code>github.com/cli/cli</code></button>.
         </p>
         <p class="live-score__status" data-live-score-status role="status" aria-live="polite" hidden></p>
       </form>
@@ -143,11 +146,20 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles 
     }),
   );
 
-  // index.md — trimmed to match the HTML homepage.
+  // index.md — content-only markdown twin. The live-score form is
+  // interactive (button-based chip examples); content extractors and
+  // agents fetching the twin need the same examples surfaced as inline
+  // code so the homepage contract holds without JavaScript.
   const indexMdLines = [
     `# ${introTitle}`,
     '',
     introLede,
+    '',
+    '## Score a binary, live.',
+    '',
+    '[Install `anc` locally](/install) for source + project depth. The demo here is binary and behavioral audits only.',
+    '',
+    'Paste a tool name, install command, or GitHub URL into the homepage form to score it. Examples: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`.',
     '',
     '## Principles',
     '',

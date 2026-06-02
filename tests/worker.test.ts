@@ -378,9 +378,9 @@ describe('worker.fetch — /api/score routing', () => {
     const url = 'https://anc.dev/api/score?input=unknown-tool';
     const res = await worker.fetch(req(url), env);
     expect(res.headers.get('Content-Type')).toContain('application/json');
-    const body = (await res.json()) as { error?: unknown; spec_version?: unknown; checker_url?: unknown };
+    const body = (await res.json()) as { error?: unknown; spec_version?: unknown; auditor_url?: unknown };
     expect(body.spec_version).toBeTruthy();
-    expect(body.checker_url).toBeTruthy();
+    expect(body.auditor_url).toBeTruthy();
   });
 
   test('asset-first invariant: /scorecards/ripgrep still proxies to env.ASSETS', async () => {

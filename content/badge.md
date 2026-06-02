@@ -20,7 +20,7 @@ https://anc.dev/badge/<tool>.svg
 ```
 
 The label reads `agent-native vMAJOR.MINOR` (the spec version the score is rooted in); the message is the rounded
-percent score; the color tracks the same green / yellow / red bands the [leaderboard](/scorecards) uses.
+percent score; the color tracks the cohort band the score falls into (see [Color bands](#color-bands) below).
 
 ## How to embed it
 
@@ -35,11 +35,12 @@ Per-tool scorecard pages whose tool clears the eligibility floor render this sni
 
 ## Eligibility: the floor
 
-A tool may legitimately embed the badge when its score is **80% or higher**.
+A tool may legitimately embed the badge when its score is **70% or higher**.
 
-The floor is the brightline at the top quartile of the launch corpus. It captures tools that took agent-readiness
-seriously, not tools that scored marginally. A tool below the floor can still link to its scorecard page (that is the
-public-by-default posture of the standard), but should not embed the badge as a quality signal until it clears 80%.
+The floor sits at 70: the entry to the lowest eligible cohort band (Qualified). A tool that clears it has taken
+agent-readiness seriously enough to earn a public signal, and the band above the floor (Solid, Strong, Exemplary) tells
+a reader how far past the bar the tool sits. A tool below the floor can still link to its scorecard page (that is the
+public-by-default posture of the standard), but should not embed the badge as a quality signal until it clears 70.
 
 The floor is enforced by the per-tool scorecard page, not by the SVG endpoint. The SVG is rendered for every scored tool
 regardless of score. This is intentional: a tool that already embedded the badge should see the visual color shift if
@@ -47,19 +48,26 @@ its score regresses, not a 404.
 
 ## Score format: `XX%`
 
-The score on the badge is the same pass-rate the leaderboard reports: `pass / (pass + warn + fail)`, rounded to the
-nearest integer percent.
+The score on the badge is the same behavioral-layer score the leaderboard reports, rounded to the nearest integer
+percent. The [methodology](/methodology#how-a-score-is-computed) defines the formula.
 
-`91/100` and `6/7 principles` were both considered and rejected. The rounded percent reads cleanest at badge size and
+`91/100` and `6/8 principles` were both considered and rejected. The rounded percent reads cleanest at badge size and
 matches the leaderboard's score column so a reader sees the same number across surfaces.
 
 ## Color bands
 
-| Range     | Color       | What it means                                                |
-| --------- | ----------- | ------------------------------------------------------------ |
-| 80–100%   | brightgreen | Eligible; meets or exceeds the badge floor                   |
-| 60–79%    | yellow      | Decent agent-readiness with meaningful gaps                  |
-| Below 60% | red         | Significant gaps; the per-tool page lists the failing checks |
+The badge color tracks the cohort band the score falls into. The four bands at or above the floor are eligible; below
+the floor, the color shifts to a warm warning. The band thresholds are the spec-side contract; the colors are a site
+choice.
+
+| Score    | Band        | Color  | What it means                   |
+| -------- | ----------- | ------ | ------------------------------- |
+| 85–100   | Exemplary   | navy   | Eligible; the strongest cohort  |
+| 80–84    | Strong      | teal   | Eligible; broad conformance     |
+| 75–79    | Solid       | green  | Eligible; solid agent-readiness |
+| 70–74    | Qualified   | ochre  | Eligible; clears the floor      |
+| 50–69    | Below floor | orange | Not eligible; meaningful gaps   |
+| Under 50 | Below floor | red    | Not eligible; significant gaps  |
 
 Tools below the floor still receive a rendered SVG so an embedded badge stays honest after a regression.
 
@@ -84,9 +92,9 @@ Self-grading is acceptable. The badge URL must resolve to a scorecard that anyon
 In practice this means:
 
 - The tool must be listed in the [registry](https://github.com/brettdavies/agentnative-site/blob/main/registry.yaml).
-- The scorecard must be a real `anc check --output json` run, committed under
+- The scorecard must be a real `anc audit --output json` run, committed under
   [`scorecards/`](https://github.com/brettdavies/agentnative-site/tree/main/scorecards).
-- Anyone reading the badge can run `anc check --command <binary>` locally and arrive at the same number, modulo
+- Anyone reading the badge can run `anc audit --command <binary>` locally and arrive at the same number, modulo
   scorecard-staleness. See the regression policy below.
 
 If the live re-run produces a different score than the badge, the live re-run wins. The badge is a pointer, not an
@@ -95,11 +103,11 @@ authority.
 ## Regression policy
 
 If a tool regresses below the floor, no separate action is required from the tool author. The next site build will
-render a yellow or red badge in place of green, and the per-tool scorecard page will replace the embed snippet with a
-"top issues to address" hint. There is no maintainer takedown, no embargo, no retroactive edit of historical commits in
-the tool's README.
+render a below-floor color in place of the eligible band, and the per-tool scorecard page will replace the embed snippet
+with a "top issues to address" hint. There is no maintainer takedown, no embargo, no retroactive edit of historical
+commits in the tool's README.
 
-This is the core promise: the badge is an outbound link, not a stamp. Embedding it is permission for the world to check
+This is the core promise: the badge is an outbound link, not a stamp. Embedding it is permission for the world to audit
 your work continuously, not a one-time award.
 
 ## Claiming the badge
@@ -107,8 +115,8 @@ your work continuously, not a one-time award.
 1. Get on the [leaderboard](/scorecards): file a registry entry per
    [the registry README](https://github.com/brettdavies/agentnative-site/blob/main/registry.yaml). The site
    auto-discovers the latest scorecard for each registry entry on every build.
-2. Run `anc check --command <binary> --output json > scorecards/<tool>-v<version>.json` and commit the result.
-3. When your tool's row on the leaderboard reads 80% or higher, the per-tool page at `/score/<tool>` renders the embed
+2. Run `anc audit --command <binary> --output json > scorecards/<tool>-v<version>.json` and commit the result.
+3. When your tool's row on the leaderboard reads 70% or higher, the per-tool page at `/score/<tool>` renders the embed
    snippet inline. Copy it into your README.
 
 That is the whole flow. The convention is intentionally narrow.

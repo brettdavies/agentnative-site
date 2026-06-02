@@ -4,7 +4,7 @@
 // callers proper type checking. Pair this with the .mjs implementation —
 // changes to one need a mirroring change to the other.
 
-export type CheckResultLike = {
+export type AuditResultLike = {
   status: 'pass' | 'fail' | 'warn' | 'skip' | string;
   label: string;
   group: string;
@@ -12,7 +12,7 @@ export type CheckResultLike = {
 };
 
 export type ScorecardLike = {
-  results?: CheckResultLike[];
+  results?: AuditResultLike[];
 };
 
 export function escHtml(s: unknown): string;
@@ -23,11 +23,11 @@ export const BONUS_GROUPS: string[];
 
 export function groupToPrincipleNum(group: string): number | null;
 
-export function extractTopIssues<T extends CheckResultLike = CheckResultLike>(
+export function extractTopIssues<T extends AuditResultLike = AuditResultLike>(
   scorecard: { results?: T[] } | null | undefined,
   limit?: number,
 ): T[];
 
-export function formatCheckRowMarkdown(check: CheckResultLike, opts?: { baseUrl?: string }): string;
+export function formatAuditRowMarkdown(check: AuditResultLike, opts?: { baseUrl?: string }): string;
 
-export function formatCheckTableMarkdownLines(checks: CheckResultLike[], opts?: { baseUrl?: string }): string[];
+export function formatAuditTableMarkdownLines(checks: AuditResultLike[], opts?: { baseUrl?: string }): string[];

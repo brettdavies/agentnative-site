@@ -32,7 +32,7 @@
 //   double2 install ms     sandbox exec install duration; null on
 //                          non-live paths (registry hit, cache hit,
 //                          pre-install error)
-//   double3 anc check ms   sandbox exec anc-check duration; null on
+//   double3 anc audit ms   sandbox exec anc-audit duration; null on
 //                          non-live paths
 //   double4 status         HTTP status the response carried
 //
@@ -70,7 +70,7 @@ export type ScoreEventFields = {
   resolved_step: ResolvedStep | 'registry' | null;
   total_ms: number;
   install_ms: number | null;
-  anc_check_ms: number | null;
+  anc_audit_ms: number | null;
   response_status: number;
   // tool name OR slug — whichever the input resolved to. Null when
   // input validation rejected before any name was knowable.
@@ -81,7 +81,7 @@ export function recordScoreEvent(env: ScoreTelemetryEnv, fields: ScoreEventField
   try {
     env.SCORE_TELEMETRY.writeDataPoint({
       blobs: [fields.input_kind, fields.pm, fields.error_code, fields.freshness, fields.resolved_step],
-      doubles: [fields.total_ms, fields.install_ms, fields.anc_check_ms, fields.response_status],
+      doubles: [fields.total_ms, fields.install_ms, fields.anc_audit_ms, fields.response_status],
       indexes: fields.tool ? [fields.tool] : [],
     });
   } catch (err) {

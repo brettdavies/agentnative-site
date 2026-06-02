@@ -12,7 +12,7 @@ badge surface, and the agent-native-cli skill bundle distribution endpoint.
 | `/scorecards`                                                       | The ANC 100 leaderboard (every curated tool, sortable)                  |
 | `/score/<tool>`                                                     | Per-tool curated scorecards (renders from `scorecards/<tool>.json`)     |
 | `/score/live/<binary>`                                              | Shareable live-score result pages backed by the R2 score cache          |
-| `/check`, `/install`, `/methodology`, `/badge`, `/scorecard-schema` | Supporting pages on usage, install, scoring methodology, badge, schema  |
+| `/audit`, `/install`, `/methodology`, `/badge`, `/scorecard-schema` | Supporting pages on usage, install, scoring methodology, badge, schema  |
 | `/contribute`, `/about`                                             | Contribution map and attribution                                        |
 | `/skill`                                                            | Human-facing install for the `agent-native-cli` skill bundle            |
 | `/skill.json`                                                       | Canonical machine-primary skill manifest                                |
@@ -22,12 +22,13 @@ Every HTML page has a markdown twin reachable via `.md` suffix or `Accept: text/
 
 ## Scoring
 
-Per-tool scorecards display a percent computed as `pass / (pass + warn + fail)` (skips and errors are excluded so
-inapplicable checks do not drag the score). MUST-tier misses count as `fail`; SHOULD- or MAY-tier misses count as
-`warn`. Badge eligibility starts at 80%. Full formula and tier mapping at [`/methodology`](https://anc.dev/methodology);
-per-field JSON schema at [`/scorecard-schema`](https://anc.dev/scorecard-schema); badge contract at
-[`/badge`](https://anc.dev/badge). The scoring engine itself lives in
-[`agentnative-cli`](https://github.com/brettdavies/agentnative-cli).
+Per-tool scorecards display a behavioral-layer compliance score: each requirement is credited by outcome (a met
+requirement counts full, a partially-met SHOULD or MAY counts half, a missed MUST or a deliberate opt-out counts zero),
+while inapplicable and unmeasured checks are excluded so they neither help nor hurt. MUST-tier misses are `fail`;
+SHOULD- or MAY-tier misses are `warn`. Badge eligibility starts at 70%. Full formula, the seven-status taxonomy, and the
+cohort bands at [`/methodology`](https://anc.dev/methodology); per-field JSON schema at
+[`/scorecard-schema`](https://anc.dev/scorecard-schema); badge contract at [`/badge`](https://anc.dev/badge). The
+scoring engine itself lives in [`agentnative-cli`](https://github.com/brettdavies/agentnative-cli).
 
 ## Stack
 

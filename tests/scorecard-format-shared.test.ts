@@ -2,7 +2,7 @@
 // shared by build-time markdown rendering (scorecards-render.mjs) and the
 // Worker's /score/live/<binary>.md route (summary-render.ts).
 //
-// The row formatter is the load-bearing primitive: every check-table row in
+// The row formatter is the load-bearing primitive: every audit-table row in
 // both `dist/score/<tool>.md` and `/score/live/<binary>.md` flows through
 // it. Pipe-escape behavior and principle-link shape live here.
 
@@ -11,11 +11,12 @@ import {
   BONUS_GROUPS,
   escHtml,
   extractTopIssues,
-  formatCheckRowMarkdown,
-  formatCheckTableMarkdownLines,
+  formatAuditRowMarkdown,
+  formatAuditTableMarkdownLines,
   groupToPrincipleNum,
   PRINCIPLE_GROUPS,
   PRINCIPLE_NAMES,
+  statusLabel,
 } from '../src/shared/scorecard-format.mjs';
 
 describe('escHtml', () => {
@@ -30,8 +31,8 @@ describe('escHtml', () => {
 });
 
 describe('PRINCIPLE_GROUPS + PRINCIPLE_NAMES', () => {
-  test('covers P1..P7', () => {
-    expect(PRINCIPLE_GROUPS).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7']);
+  test('covers P1..P8', () => {
+    expect(PRINCIPLE_GROUPS).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8']);
     for (const g of PRINCIPLE_GROUPS) {
       expect(PRINCIPLE_NAMES[g]).toBeTruthy();
     }
@@ -82,9 +83,26 @@ describe('extractTopIssues', () => {
   });
 });
 
-describe('formatCheckRowMarkdown', () => {
+describe('statusLabel (7-status taxonomy, schema 0.6)', () => {
+  test('maps the five historic statuses to their uppercase label', () => {
+    expect(statusLabel('pass')).toBe('PASS');
+    expect(statusLabel('warn')).toBe('WARN');
+    expect(statusLabel('fail')).toBe('FAIL');
+    expect(statusLabel('skip')).toBe('SKIP');
+    expect(statusLabel('error')).toBe('ERROR');
+  });
+  test('maps the two new statuses to punctuated labels a bare uppercase cannot produce', () => {
+    expect(statusLabel('opt_out')).toBe('OPT-OUT');
+    expect(statusLabel('n_a')).toBe('N/A');
+  });
+  test('unknown status falls back to uppercase so a future CLI status still renders', () => {
+    expect(statusLabel('quarantined')).toBe('QUARANTINED');
+  });
+});
+
+describe('formatAuditRowMarkdown', () => {
   test('emits canonical row shape with site-relative link', () => {
-    const row = formatCheckRowMarkdown({
+    const row = formatAuditRowMarkdown({
       status: 'fail',
       label: 'exits 0 on missing flag',
       group: 'P4',
@@ -93,14 +111,14 @@ describe('formatCheckRowMarkdown', () => {
     expect(row).toBe('| FAIL | exits 0 on missing flag | [P4](/p4) | expected non-zero exit, got 0 |');
   });
   test('absolute baseUrl produces absolute principle link', () => {
-    const row = formatCheckRowMarkdown(
+    const row = formatAuditRowMarkdown(
       { status: 'warn', label: 'noisy', group: 'P2', evidence: 'extra logging' },
       { baseUrl: 'https://anc.dev' },
     );
     expect(row).toBe('| WARN | noisy | [P2](https://anc.dev/p2) | extra logging |');
   });
   test('bonus groups stay plain text (no link)', () => {
-    const row = formatCheckRowMarkdown({
+    const row = formatAuditRowMarkdown({
       status: 'fail',
       label: 'low test coverage',
       group: 'CodeQuality',
@@ -109,7 +127,7 @@ describe('formatCheckRowMarkdown', () => {
     expect(row).toBe('| FAIL | low test coverage | CodeQuality | 40% |');
   });
   test('escapes pipe characters in label + evidence to preserve table shape', () => {
-    const row = formatCheckRowMarkdown({
+    const row = formatAuditRowMarkdown({
       status: 'fail',
       label: 'pipe | trouble',
       group: 'P3',
@@ -122,7 +140,7 @@ describe('formatCheckRowMarkdown', () => {
     expect(unescapedPipes).toBe(5);
   });
   test('handles null evidence', () => {
-    const row = formatCheckRowMarkdown({
+    const row = formatAuditRowMarkdown({
       status: 'pass',
       label: 'ok',
       group: 'P1',
@@ -130,22 +148,38 @@ describe('formatCheckRowMarkdown', () => {
     });
     expect(row).toBe('| PASS | ok | [P1](/p1) |  |');
   });
+  test('renders 0.6 opt_out / n_a statuses with their display labels', () => {
+    const optOut = formatAuditRowMarkdown({
+      status: 'opt_out',
+      label: 'Structured output support',
+      group: 'P2',
+      evidence: 'no --output flag detected',
+    });
+    expect(optOut).toBe('| OPT-OUT | Structured output support | [P2](/p2) | no --output flag detected |');
+    const na = formatAuditRowMarkdown({
+      status: 'n_a',
+      label: 'JSON Schema when --output json is supported',
+      group: 'P2',
+      evidence: 'antecedent unmet',
+    });
+    expect(na).toBe('| N/A | JSON Schema when --output json is supported | [P2](/p2) | antecedent unmet |');
+  });
 });
 
-describe('formatCheckTableMarkdownLines', () => {
+describe('formatAuditTableMarkdownLines', () => {
   test('emits header + delimiter + rows', () => {
-    const lines = formatCheckTableMarkdownLines([
+    const lines = formatAuditTableMarkdownLines([
       { status: 'fail', label: 'a', group: 'P1', evidence: 'x' },
       { status: 'warn', label: 'b', group: 'P2', evidence: null },
     ]);
     expect(lines).toEqual([
-      '| Status | Check | Principle | Evidence |',
+      '| Status | Audit | Principle | Evidence |',
       '|--------|-------|-----------|----------|',
       '| FAIL | a | [P1](/p1) | x |',
       '| WARN | b | [P2](/p2) |  |',
     ]);
   });
   test('returns [] for empty input (caller decides fallback copy)', () => {
-    expect(formatCheckTableMarkdownLines([])).toEqual([]);
+    expect(formatAuditTableMarkdownLines([])).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@
 ## Definition
 
 Every automation path MUST run without human input. A CLI tool that blocks on an interactive prompt is invisible to an
-agent — the agent hangs, the user sees nothing, and the operation times out silently.
+agent: the agent hangs, the user sees nothing, and the operation times out silently.
 
 ## Why Agents Need It
 
@@ -25,15 +25,15 @@ deadlock.
   quiet: bool,
   ```
 
-- When `--no-interactive` is set, or when stdin is not a TTY, the tool does not enter any blocking-interactive surface —
-  it uses defaults, reads from stdin, or exits with an actionable error. "Blocking-interactive surface" includes prompt
+- When `--no-interactive` is set, or when stdin is not a TTY, the tool does not enter any blocking-interactive surface.
+  It uses defaults, reads from stdin, or exits with an actionable error. "Blocking-interactive surface" includes prompt
   library calls AND TUI session initialization.
 - *(Applies when: CLI uses interactive OAuth.)* A headless authentication path. The canonical flag is `--no-browser`,
   which SHOULD trigger the OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628))
   when the identity provider supports it: the CLI prints a URL and a code; the user authorizes on another device. Agents
   cannot open browsers. Non-canonical alternatives (`--device-code`, `--remote`, `--headless`) are acceptable but should
   migrate toward `--no-browser`. CLIs that authenticate via static API key, PAT, or pre-issued token satisfy this
-  requirement through the env-var-settable flags MUST above — no browser to begin with.
+  requirement through the env-var-settable flags MUST above (no browser to begin with).
 - *(Applies when: CLI accepts secret material as input.)* At least one input path that does not leak the secret into
   process listings, shell history, or the parent environment. The two leak-resistant paths are stdin and a `--*-file`
   flag pointing at a credential file. Flag-value forms (`--token <value>`) and environment variables (`TOOL_TOKEN`) MAY
@@ -51,14 +51,14 @@ deadlock.
 
 **MAY:**
 
-- Offer rich interactive experiences — spinners, progress bars, multi-select menus — when a TTY is detected and
+- Offer rich interactive experiences (spinners, progress bars, multi-select menus) when a TTY is detected and
   `--no-interactive` is not set, provided the non-interactive path remains fully functional.
 
 ## Scope
 
-"Agent" in this specification means a process invoking the CLI as a subprocess. This spec's automated checks verify
+"Agent" in this specification means a process invoking the CLI as a subprocess. This spec's automated audits verify
 behavior under non-TTY stdin. TTY-driving agents (tmux panes, `ssh -t` sandbox shells, `expect` automation, computer-use
-desktop agents) are affected by the same MUSTs — but `anc` currently does not allocate a PTY during verification. Pass
+desktop agents) are affected by the same MUSTs, but `anc` currently does not allocate a PTY during verification. Pass
 verdicts for TTY-driving-agent scenarios are probable-but-not-verified; see [/coverage](/coverage) for the gap.
 
 ## Evidence
@@ -83,5 +83,5 @@ verdicts for TTY-driving-agent scenarios are probable-but-not-verified; see [/co
 - A `--password <value>` flag with no stdin or file alternative — every invocation leaks the secret into process
   listings.
 
-Measured by check IDs `p1-non-interactive`, `p1-flag-existence`, and `p1-env-hints` today. Run `anc check --principle 1
-.` against your CLI to see current coverage.
+Measured by audit IDs `p1-non-interactive` (behavioral) and `p1-non-interactive-source` (source) today. Run `anc audit
+--principle 1 .` against the CLI under test to see each.

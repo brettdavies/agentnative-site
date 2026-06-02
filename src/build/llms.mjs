@@ -9,7 +9,7 @@
 //   ...
 //
 //   ## Pages
-//   - [Check your CLI](/check.md)
+//   - [Audit your CLI](/audit.md)
 //   - [About this standard](/about.md)
 //
 //   ## Scorecards
@@ -25,7 +25,7 @@
 //
 //   ---
 //
-// Sections shipped in llms-full: _intro, p1..p8, check, about.
+// Sections shipped in llms-full: _intro, p1..p8, audit, about.
 
 import { resolveBaseUrl } from './util.mjs';
 

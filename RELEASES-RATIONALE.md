@@ -43,9 +43,11 @@ date prefix is convention-enforced via review and the runbook. Tightening the wo
 
 ### No explainer prose in the body
 
-Every section of a PR body is user-facing substance only: what is changing for the consumer that was not already there.
-Workflow mechanics (cherry-pick, regenerate, pre-push gate, CI behavior) is documented in RELEASES.md and `.github/`,
-NOT in the PR body. Triple-diff output, pre-push gate results, CI check status, exclusion rationale, and other
+Every section of a PR body is user-facing substance only: what is changing for the consumer that was not already there —
+the **net diff**, not the commit history or intermediate state that produced it. Workflow mechanics (cherry-pick,
+regenerate, pre-push gate, CI behavior) is documented in RELEASES.md and `.github/`, NOT in the PR body. Triple-diff
+output ("A: 12 files, B: none, C: clean"), leak-check narration ("`guard-main-docs` runs clean", "no guarded paths
+leaked"), patch-id cherry-check counts, pre-push gate results, CI check status, exclusion rationale, and other
 verification artifacts stay local; anomalies get fixed before push, not audit-trailed in the body.
 
 The PR body is read by humans reviewing what shipped. Workflow mechanics and tool-fix provenance are noise from that
@@ -237,7 +239,7 @@ The CI smoke step after staging deploys (`/api/score` with the `ripgrep` slug, a
 `registry_hit`) deliberately covers the registry-fast-path only. The motivation is two-sided.
 
 First, the registry-fast-path is the surface every other branch of the pipeline depends on: if the curated
-`/api/score?input=ripgrep` doesn't return `{ scorecard, spec_version, site_spec_version, anc_version, checker_url }`, no
+`/api/score?input=ripgrep` doesn't return `{ scorecard, spec_version, site_spec_version, anc_version, auditor_url }`, no
 downstream tier works either. Failing the deploy on this surface catches the broadest class of regressions in the
 shortest run time.
 
@@ -250,6 +252,14 @@ cadence where the cost and the latency are acceptable.
 
 The smoke is therefore a high-leverage tripwire, not a full pipeline test. When it fails, the deploy is wrong; when it
 passes, the deploy is at least serving the response triad to a curated input, not a proof that the live path works.
+
+The live-path verification is preflight, not CI. The manual pre-release checklist at
+[`RELEASES-PREFLIGHT.md` § Live-scoring Sandbox DO path (mandatory)](./RELEASES-PREFLIGHT.md#live-scoring-sandbox-do-path-mandatory)
+runs once before every `release/*` PR with a fresh non-registry binary against staging, after waiting for the container
+app to reach `STATE = ready`. The cost / flakiness tradeoff above is why it stays manual; the preflight cadence is why
+the gap doesn't ship to production. The 2026-06-01 rename-vs-container coordination incident (documented at
+[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md))
+is the reason the preflight check is mandatory rather than advisory.
 
 ## Wrangler env inheritance traps
 

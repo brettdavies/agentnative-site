@@ -15,6 +15,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { extractToolVersion, type ScoreSandboxEnv, writeCacheBestEffort } from '../src/worker/score/do';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // R2 stub mirroring the cache.ts test stub
@@ -91,7 +92,7 @@ describe('writeCacheBestEffort — preconditions', () => {
       // SCORE_CACHE intentionally absent — matches the optional binding
       // shape on ScoreSandboxEnv (DO test envs without R2 wired up).
     };
-    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: '0.3.1' });
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
     // No assertion possible on the side-effect; the contract is "does
     // not throw and does not crash". Reaching the next line is the test.
   });
@@ -100,14 +101,14 @@ describe('writeCacheBestEffort — preconditions', () => {
     const { env, writes } = makeR2Stub();
     await writeCacheBestEffort(env, SPEC, {
       scorecard: { schema_version: '0.5', tool: { name: 'cowsay' } },
-      anc_version: '0.3.1',
+      anc_version: ANC_VERSION,
     });
     expect(writes).toHaveLength(0);
   });
 
   test('null scorecard → skips write', async () => {
     const { env, writes } = makeR2Stub();
-    await writeCacheBestEffort(env, SPEC, { scorecard: null, anc_version: '0.3.1' });
+    await writeCacheBestEffort(env, SPEC, { scorecard: null, anc_version: ANC_VERSION });
     expect(writes).toHaveLength(0);
   });
 });
@@ -119,16 +120,18 @@ describe('writeCacheBestEffort — preconditions', () => {
 describe('writeCacheBestEffort — happy path', () => {
   test('writes the canonical scores/{binary}/{SPEC_VERSION}.json key', async () => {
     const { env, writes } = makeR2Stub();
-    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: '0.3.1' });
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
     expect(writes).toHaveLength(1);
-    // SPEC_VERSION as the partition slot — handoff Decision 2 + gotcha
-    // 3. Currently 0.4.0; if it bumps, update this expectation.
-    expect(writes[0].key).toBe('scores/cowsay/0.4.0.json');
+    // SPEC_VERSION as the partition slot — handoff Decision 2 + gotcha 3
+    // in .context/handoffs/2026-05-19-001-feat-live-scoring-cf-sandbox.md.
+    // The expectation tracks SPEC_VERSION via the gen.ts import so it
+    // moves automatically when the spec advances.
+    expect(writes[0].key).toBe(`scores/cowsay/${SPEC_VERSION}.json`);
   });
 
   test('payload carries spec_version, anc_version, tool_version, scorecard', async () => {
     const { env, writes } = makeR2Stub();
-    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: '0.3.1' });
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
     expect(writes).toHaveLength(1);
     const parsed = JSON.parse(writes[0].value) as {
       spec_version: string;
@@ -136,21 +139,21 @@ describe('writeCacheBestEffort — happy path', () => {
       tool_version: string;
       scorecard: { tool: { name: string } };
     };
-    expect(parsed.spec_version).toBe('0.4.0');
-    expect(parsed.anc_version).toBe('0.3.1');
+    expect(parsed.spec_version).toBe(SPEC_VERSION);
+    expect(parsed.anc_version).toBe(ANC_VERSION);
     expect(parsed.tool_version).toBe('1.6.0');
     expect(parsed.scorecard.tool.name).toBe('cowsay');
   });
 
   test('different binaries write to different cache keys (no aliasing)', async () => {
     const { env, writes } = makeR2Stub();
-    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: '0.3.1' });
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
     await writeCacheBestEffort(
       env,
       { pm: 'cargo-binstall', package: 'ripgrep', binary: 'rg' },
-      { scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } }, anc_version: '0.3.1' },
+      { scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } }, anc_version: ANC_VERSION },
     );
-    expect(writes.map((w) => w.key)).toEqual(['scores/cowsay/0.4.0.json', 'scores/rg/0.4.0.json']);
+    expect(writes.map((w) => w.key)).toEqual([`scores/cowsay/${SPEC_VERSION}.json`, `scores/rg/${SPEC_VERSION}.json`]);
   });
 
   test('parser-driven binary derivation does not alias to curated slug (cargo binstall ripgrep → scores/ripgrep/...)', async () => {
@@ -166,10 +169,10 @@ describe('writeCacheBestEffort — happy path', () => {
     await writeCacheBestEffort(
       env,
       { pm: 'cargo-binstall', package: 'ripgrep', binary: 'ripgrep' },
-      { scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } }, anc_version: '0.3.1' },
+      { scorecard: { tool: { name: 'ripgrep', version: '15.1.0' } }, anc_version: ANC_VERSION },
     );
-    expect(writes[0].key).toBe('scores/ripgrep/0.4.0.json');
-    expect(writes[0].key).not.toBe('scores/rg/0.4.0.json');
+    expect(writes[0].key).toBe(`scores/ripgrep/${SPEC_VERSION}.json`);
+    expect(writes[0].key).not.toBe(`scores/rg/${SPEC_VERSION}.json`);
   });
 });
 
@@ -182,6 +185,6 @@ describe('writeCacheBestEffort — failure isolation', () => {
     const { env } = makeR2Stub({ throwOnPut: true });
     // Must not throw — the caller (Sandbox.fetch) MUST return the user's
     // score regardless of whether the cache write landed.
-    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: '0.3.1' });
+    await writeCacheBestEffort(env, SPEC, { scorecard: SCORECARD_WITH_VERSION, anc_version: ANC_VERSION });
   });
 });

@@ -50,14 +50,14 @@ anchors, and semantic HTML. Keep this framing in every decision.
 ## Structure
 
 - `index.html` — single-page surface for the 7 principles, anchor-linked (`#p1-...` through `#p7-...`)
-- `/check` — usage for the `anc` CLI (flags, output shapes, check-ID conventions)
+- `/audit` — usage for the `anc` CLI (flags, output shapes, audit-ID conventions)
 - `/install` — human-facing install page for the `agentnative` CLI itself (HTML + markdown twin only — no JSON manifest;
   `brew`, `cargo`, and platform archives, sourced from `content/install.md`)
 - `/about` — attribution, versioning, credits (subtle: the site does not lead with Brett's name)
 - `/skill` — human-facing install page for the `agent-native-cli` skill bundle (rendered HTML; mixed-register prose +
   per-host clone commands)
 - `/skill.json` — canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
-  `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill.json` at build time; full surface
+  `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill/skill.json` at build time; full surface
   contract in `DESIGN.md` §3.9
 - `content/*.md` — markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
@@ -154,7 +154,7 @@ agent-side browser-verify rule above is the working gate.
 | `~/.gstack/projects/brettdavies-agentnative/brett-main-design-20260327-214808.md`                   | agentnative CLI design doc                                                                                                     | The tool this site promotes. The site's `cargo install agentnative` CTA depends on v0.1 of this tool being on crates.io.                                                                                                   |
 | `~/.gstack/projects/brettdavies-agentnative/brett-main-naming-rationale-20260327.md`                | Naming rationale                                                                                                               | Why "agentnative" and "anc".                                                                                                                                                                                               |
 | `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md` | Voice anchor                                                                                                                   | Canonical in-voice exemplar for Brett (not this site's tone, but useful for adjacent surfaces).                                                                                                                            |
-| `docs/solutions/` (symlink to `~/dev/solutions-docs/`)                                              | Cross-repo documented solutions; includes the agent-native documentation surface pattern that informs this site's architecture | Relevant when researching architecture or tooling patterns. Search before building from scratch.                                                                                                                           |
+| `docs/solutions/` (symlink to `~/dev/solutions-docs/`)                                              | Cross-repo documented solutions; includes the agent-native documentation surface pattern that informs this site's architecture | Organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Search with `qmd query "<topic>" --collection solutions`. Relevant when researching architecture or tooling patterns before building from scratch. |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md`                               | Shared research index for both this site and the `agentnative` CLI linter                                                      | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties.                                |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md`                             | Canonical spec for P1-P7 (one file per principle, pressure-testable)                                                           | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately. |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md`          | Build & distribution plan                                                                                                      | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified.                                                                            |
@@ -190,7 +190,7 @@ agent-side browser-verify rule above is the working gate.
 
 ## Tool-site sequencing (do not violate)
 
-The site's "Check your CLI" CTA runs `cargo install agentnative`. That command only succeeds once the tool's v0.1 ships
+The site's "Audit your CLI" CTA runs `cargo install agentnative`. That command only succeeds once the tool's v0.1 ships
 to crates.io. Until then:
 
 - Local development and `workers.dev` staging deploys are fine.

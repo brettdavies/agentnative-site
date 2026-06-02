@@ -101,7 +101,7 @@ What that means in practice for files in this directory:
   paragraph between Why and Requirements.
 - **Code samples carry weight a paragraph cannot.** A six-line Rust block beats three sentences of prose describing the
   same pattern. The principle pages are the only site surface where code blocks are load-bearing for the argument.
-- **Closes** with one short line citing the check IDs that measure the principle today and an `anc check --principle
+- **Closes** with one short line citing the audit IDs that measure the principle today and an `anc audit --principle
   <n>` invocation a reader can copy. Use the spec's actual requirement IDs (`p<n>-must-...`, `p<n>-should-...`), not
   paraphrased shorthand.
 

@@ -88,6 +88,17 @@ export default {
       });
     }
 
+    // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
+    // 301 the old path (and its markdown twin) so existing inbound links
+    // and any cached references resolve to the canonical page.
+    if (pathname === '/check' || pathname === '/check.md') {
+      const canonical = pathname.endsWith('.md') ? '/audit.md' : '/audit';
+      return new Response(null, {
+        status: 301,
+        headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+
     // Shareable live-score result page. Reads the cached scorecard from
     // R2 by binary slug, renders an HTML summary view.
     // Strict regex enforced by parseLiveScorePath — slugs must match
