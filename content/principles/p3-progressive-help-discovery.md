@@ -15,7 +15,7 @@ trial-and-errors its way into a working call, burning tokens and sometimes landi
 
 ## Requirements
 
-The principle is framework-agnostic — `clap`'s `after_help` is the worked example below; analogs include `cobra`'s
+The principle is framework-agnostic. `clap`'s `after_help` is the worked example below; analogs include `cobra`'s
 `Example` (Go), `argparse`'s `epilog` (Python), `docopt`'s usage block, and the `Examples:` convention in `gh` /
 `kubectl`.
 
@@ -24,13 +24,20 @@ The principle is framework-agnostic — `clap`'s `after_help` is the worked exam
 - Every subcommand ships at least one concrete invocation example showing the command with realistic arguments, rendered
   in the section that appears after the flags list. In clap this is the `after_help` attribute.
 - The top-level command ships at least one concrete example, and 2–3 when the tool has multiple primary use cases.
+- The top-level command responds to `--version` with a non-empty version line on stdout and exits 0. Agents pin against
+  tool versions to detect breaking changes; a `--version` that errors, exits non-zero, or prints nothing forces every
+  consumer to scrape the binary path or manifest for a clue.
 
 **SHOULD:**
 
-- When the CLI exposes a structured-output mode (see [P2](/p2)), examples show human and agent invocations side by side
-  — a text-output example followed by its `--output json` equivalent. Readers see the pair; agents see the JSON form.
+- When the CLI exposes a structured-output mode (see [P2](/p2)), examples show human and agent invocations side by side:
+  a text-output example followed by its `--output json` equivalent. Readers see the pair; agents see the JSON form.
 - Short `about` for command-list summaries; `long_about` reserved for detailed descriptions visible with `--help` but
   not `-h`.
+- A short alias for `--version` works: `-V` (clap default; `curl`, `wget`, `gzip`), `-v` (`npm`, `node`, `bun`, `yarn`,
+  `make`), or `-version` (Go's `flag` package). Any of the three is sufficient. Agents probing tool versions across many
+  CLIs save token cost when they can pin against a one- or two-character flag; the long-only path forces an extra parse
+  step.
 
 **MAY:**
 
@@ -46,11 +53,11 @@ The principle is framework-agnostic — `clap`'s `after_help` is the worked exam
 
 ## Anti-Patterns
 
-- Relying solely on `///` doc comments — those populate `about` / `long_about`, not `after_help`, so no examples render
+- Relying solely on `///` doc comments: those populate `about` / `long_about`, not `after_help`, so no examples render
   after the flags list.
 - A single `about` string serving as both summary and usage documentation.
 - Examples buried in a README or man page but absent from `--help` output.
 - `after_help` text that describes the flags in prose instead of demonstrating them in code.
 
-Measured by audit IDs `p3-help` and `p3-version` today, with `p3-after-help` planned. Run `anc audit --principle 3 .`
-against your CLI to see current coverage.
+Measured by audit IDs `p3-help`, `p3-after-help`, `p3-version`. Run `anc audit --principle 3 .` against the CLI under
+test to see each.
