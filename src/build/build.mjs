@@ -35,6 +35,7 @@ import { emitSubPages } from './07-subpages.mjs';
 import { emitScorecardSurface } from './08-scorecards-emit.mjs';
 import { emitLlmsSurface } from './09-llms-emit.mjs';
 import { buildSitemap } from './10-sitemap.mjs';
+import { minifyDist } from './12-minify-dist.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate } from './shell.mjs';
@@ -248,6 +249,11 @@ export async function build() {
     principles.map((p) => ({ n: p.n, sourcePath: p.filename })),
   );
 
+  // 12. Minify dist/ HTML, JSON, and CSS. Runs after invariants so the
+  // validators see pristine output and the minifier is the last hand on
+  // the wire format.
+  const minifyStats = await minifyDist(DIST_DIR);
+
   const scorecardPageCount = scorecardPaths.length;
   const leaderboardPageCount = 1; // /scorecards index, counted in htmlPages but not scorecardPages
   // 7: check, install, about, badge, changelog, methodology, coverage
@@ -264,6 +270,7 @@ export async function build() {
     extras: extraPages,
     scorecardPages: scorecardPageCount,
     badgeSvgs: badgePaths.length,
+    minified: minifyStats,
   };
 }
 
