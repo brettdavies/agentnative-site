@@ -874,6 +874,15 @@ tools:
     # line carries the client SemVer (`Warning: client version is X.Y.Z`).
     version_extract: "ollama --version 2>&1 | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
 
+  - name: cursor
+    url: https://cursor.com
+    binary: cursor
+    language: TypeScript
+    tier: agent
+    creator: Anysphere
+    install: included with Cursor IDE distribution
+    description: AI code editor (VS Code fork) with diff/merge/goto CLI launcher
+
   # ─────────────────────────────────────────────────────────────────
   # NOTABLE — tools from prominent builders, capped at 3-4 per creator
   # ─────────────────────────────────────────────────────────────────
