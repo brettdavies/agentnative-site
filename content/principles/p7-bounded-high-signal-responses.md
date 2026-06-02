@@ -20,8 +20,8 @@ high-signal and inside budget.
 **MUST:**
 
 - A `--quiet` flag suppresses non-essential output: progress indicators, informational messages, decorative formatting.
-  When `--quiet` is set, only requested data and errors appear. Implementations typically route diagnostics through a
-  macro that short-circuits when quiet is on:
+  When `--quiet` is set, only requested data and errors appear. Implementations route diagnostics through a macro that
+  short-circuits when quiet is on:
 
   ```rust
   macro_rules! diag {
