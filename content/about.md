@@ -56,27 +56,6 @@ version of the standard it claims to target.
 Spec text on this site is available under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The `anc` linter is
 dual-licensed under MIT and Apache-2.0; see [its LICENSE files](https://github.com/brettdavies/agentnative-cli).
 
-## Contributing
-
-Pressure-testing is how the spec evolves. Three ways to contribute:
-
-1. **[Submit a grading finding](https://github.com/brettdavies/agentnative/issues/new?template=grading-finding.yml):**
-   score a real CLI against a principle you think the spec gets wrong, and report what you found. Name the CLI, the
-   principle, and the specific MUST/SHOULD/MAY that failed (or passed unexpectedly).
-2.
-
-**[Report a false positive or false negative](https://github.com/brettdavies/agentnative-cli/issues/new?template=false-positive.yml):**
-in the `anc` auditor. Include the command, the output, and the audit ID.
-3. **[Propose a principle edit](https://github.com/brettdavies/agentnative/issues/new?template=pressure-test.yml):**
-   merge, split, rewording, demotion of a MUST to a SHOULD. Describe the problem before proposing a solution.
-4.
-**[Add a tool to the registry](https://github.com/brettdavies/agentnative-cli/issues/new?template=add-tool-to-registry.yml):**
-propose a CLI for inclusion on the anc.dev/scorecards leaderboard. Include the install command, the source repo, and
-(optionally) the result of a fresh `anc audit` run.
-
-For full routing guidance, see the spec repo's
-[CONTRIBUTING.md](https://github.com/brettdavies/agentnative/blob/main/CONTRIBUTING.md).
-
 ## Colophon
 
 Built with Cloudflare Workers. Typeset in Uncut Sans and Monaspace Xenon. Source:
