@@ -1,8 +1,9 @@
 ---
 title: "feat: Brand-aligned OG image + block-level MUST/SHOULD/MAY treatment"
 type: feat
-status: active
+status: shipped
 date: 2026-04-29
+shipped_in: "src/build/plugins/normative-block.mjs + regenerated public/og-image.png on main; live since the v0.1 launch cascade."
 origin:
   - .context/compound-engineering/todos/004-pending-p2-block-level-must-should-may.md
   - .context/compound-engineering/todos/005-pending-p2-og-image-regeneration.md
@@ -53,11 +54,11 @@ no prior conversation context. Every decision has been resolved in writing below
 1. Site brand signature (`MUST`/`SHOULD`/`MAY` color trio) is absent — the OG could be the social card for any dev tool.
 2. Hero is descriptive, not demonstrative — tells, doesn't show.
 3. The 7-principle panel is a slug list, not a typeset excerpt. Eight near-identical rows tell the viewer nothing about
-     what each principle does.
+   what each principle does.
 4. No domain mark — `anc.dev` doesn't appear on the image, so a re-screenshotted share loses the canonical source.
 5. Stale, hard-coded version + ISO date stamp (`v0.1 · 2026-04-14`) baked into a binary asset.
 6. LLM-generated text rendering carries a glyph-drift risk (the existing prompt itself defensively says "Double-check
-     the hyphen in 'agent-native' is U+002D, not an en-dash").
+   the hyphen in 'agent-native' is U+002D, not an en-dash").
 
 ## Requirements Trace
 
@@ -169,15 +170,15 @@ system. Local patterns are sufficient.
   authors can apply (R1). It maps exactly onto the shape every principle file already uses. Mid-paragraph keyword
   qualifiers stay inline — the existing `rfc-keywords.mjs` plugin keeps owning that.
 - *Rationale:* Avoids origin doc Option 2's heuristic-surprise risk (a paragraph that *starts* with a keyword but is not
-    a normative declaration stays inline). Avoids origin doc Option 3's plugin-dependency cost (no `remark-directive`).
-    Achieves origin doc Option 1's clarity without per-instance author markup, because the markdown source already
-    encodes the intent.
+  a normative declaration stays inline). Avoids origin doc Option 3's plugin-dependency cost (no `remark-directive`).
+  Achieves origin doc Option 1's clarity without per-instance author markup, because the markdown source already encodes
+  the intent.
 - **Decision: Implement as a new mdast-level remark plugin, not a rehype-level transform.**
 - *Rationale:* Mdast nodes still distinguish `paragraph` and `list` cleanly. Rehype-level requires reasoning about `<p>`
-    and `<ul>` as siblings under `<section>` after `remark-rehype` already separated them, which is more fragile.
+  and `<ul>` as siblings under `<section>` after `remark-rehype` already separated them, which is more fragile.
 - **Decision: Run the new plugin AFTER `rfc-keywords` in the unified pipeline.**
 - *Rationale:* The block container wraps the inline-styled paragraph and list. By running second, the inner `<strong
-    class="rfc-must">MUST</strong>` is already in place when the wrapper is added.
+  class="rfc-must">MUST</strong>` is already in place when the wrapper is added.
 - **Decision: Render container as `<aside class="normative normative--must" aria-labelledby="…">` with a leading badge
   child.** Single semantic element, ARIA-labelled by the badge. Color-not-only differentiation (R8) provided by the
   badge text itself (`MUST` / `SHOULD` / `MAY`) plus a small geometric difference (badge uses tabular figures
@@ -191,10 +192,10 @@ system. Local patterns are sufficient.
 - **Decision: Replace `gemini-3-pro-image-preview` with deterministic Playwright HTML→PNG.** The existing Python
   generator at `scripts/og/generate.py` is deleted in Unit 4.
 - *Rationale:* (a) Eliminates glyph drift — the actual `Uncut Sans` and `Monaspace Xenon` woff2 files render the text
-    via Chromium's font engine instead of being approximated by an LLM. (b) Reproducible: same inputs always produce
-    identical output bytes, so a future renderer change shows up as an obvious binary diff. (c) Zero API cost, no
-    `GEMINI_API_KEY` required. (d) Tracks future design changes automatically because it consumes
-    `docs/design/foundation.css` for color tokens. (e) Playwright is already a dev dep; no new dependencies.
+  via Chromium's font engine instead of being approximated by an LLM. (b) Reproducible: same inputs always produce
+  identical output bytes, so a future renderer change shows up as an obvious binary diff. (c) Zero API cost, no
+  `GEMINI_API_KEY` required. (d) Tracks future design changes automatically because it consumes
+  `docs/design/foundation.css` for color tokens. (e) Playwright is already a dev dep; no new dependencies.
 - **Decision: HTML/CSS for the card lives at `docs/design/og.html` + `docs/design/og.css`.** Reusable for further
   iteration without touching the generator script. The `og.html` references local font URLs and the same
   `foundation.css` shipping to production.
@@ -202,7 +203,7 @@ system. Local patterns are sufficient.
   B publication-TOC / C single-statement — were sketched in the originating session. The skill produces all three as
   renderable variants and a comparison artifact; the user picks one before Unit 3.
 - *Rationale:* The originating session conversation explicitly raised brand fit as the open question. Skipping shotgun
-    would commit to one direction on faith.
+  would commit to one direction on faith.
 - **Decision: Finalization via `/impeccable` (not `compound-engineering:frontend-design`).** The repo already declares
   `.impeccable.md` as the project's design context file (the file frontmatter explicitly lists `/impeccable`, `/typeset`
   as consumers); `docs/DESIGN.md` references the impeccable skill's `<absolute_bans>` list as authoritative. Picking the
@@ -215,11 +216,11 @@ system. Local patterns are sufficient.
   `public/og-image.png`; `assets.mjs` continues to copy it byte-for-byte to `dist/og-image.png`. Running on every build
   would create unnecessary binary diffs in PRs.
 - *Rationale:* Matches the current discipline (DESIGN.md §4.13: "Generated out-of-band … not regenerated on every
-    build"). Locks the asset's contents to commits where the generator output is actually exercised.
+  build"). Locks the asset's contents to commits where the generator output is actually exercised.
 - **Decision: PNG optimization via Sharp's PNG palette quantization, not pngquant.** Avoids adding a binary toolchain
   dependency (the current Python script uses Pillow's quantize for the same reason).
 - **Alternative if Sharp underperforms:** call out to `pngquant` if Homebrew-installed locally, fall back to Sharp. Keep
-    the budget at <100 KB (current image is 67 KB; new image is acceptable up to ~150 KB per origin doc).
+  the budget at <100 KB (current image is 67 KB; new image is acceptable up to ~150 KB per origin doc).
 
 ## Open Questions
 
@@ -542,16 +543,16 @@ doc.
 
 1. Resolve repo root via `import.meta.url`.
 2. Read `src/build/shell.mjs` source, regex-extract the version literal (currently `v0.1.0`). This is the same SoT the
-     footer ships from, so the OG never drifts from the visible UI.
+   footer ships from, so the OG never drifts from the visible UI.
 3. Launch Playwright Chromium headless, viewport 1200×630, deviceScaleFactor 2 (renders at 2400×1260).
 4. `page.goto('file://' + repoRoot + '/docs/design/og.html')` with version injected via a query string
-     (`?version=v0.1.0`) and consumed by a tiny inline script in `og.html` that writes `data-version` text.
+   (`?version=v0.1.0`) and consumed by a tiny inline script in `og.html` that writes `data-version` text.
 5. `await page.evaluate(() => document.fonts.ready)` to ensure all woff2 faces have loaded before screenshot.
 6. `page.screenshot({ clip: {x:0, y:0, width:1200, height:630}, omitBackground:false })` at the *element* scale,
-     returning a 2400×1260 PNG buffer.
+   returning a 2400×1260 PNG buffer.
 7. Pipe the buffer through Sharp: resize to 1200×630 (Lanczos3), `.png({ palette: true, quality: 90 })`.
 8. Write to `public/og-image.png`. Print final file size to stderr; if >150 KB, retry with stricter palette quantization
-     (max 128 colors).
+   (max 128 colors).
 
 - `package.json`: dev-dep on `sharp` if not already present (verify; install with `bun add -d sharp` if missing).
   Playwright already installed.
@@ -645,14 +646,14 @@ missed.
   test scenarios). The aggregate count (19) is the integration-coverage signal.
 - **Unchanged invariants:**
 - The existing `rfc-keywords` mdast plugin keeps owning inline keyword annotation. Mid-paragraph keywords behave exactly
-    as today.
+  as today.
 - The markdown source files in `content/principles/` are unmodified.
 - The OG meta tag set keeps its current shape; only `og:image:alt` and `twitter:image:alt` are added.
 - The asset's filename and path (`public/og-image.png` → served as `/og-image.png`) is unchanged. Cache headers
-    (immutable per `src/worker/headers.ts:54`) need no update — replacing the file's contents while keeping the URL
-    means CDN purge happens automatically on deploy.
+  (immutable per `src/worker/headers.ts:54`) need no update — replacing the file's contents while keeping the URL means
+  CDN purge happens automatically on deploy.
 - The hard-coded `v0.1.0` literal in `src/build/shell.mjs:177` remains the version SoT until the spec-VERSION sync work
-    lands. The OG generator reads from this same literal so OG and footer never drift.
+  lands. The OG generator reads from this same literal so OG and footer never drift.
 
 ## Risks & Dependencies
 
@@ -694,9 +695,12 @@ missed.
 
 - **Origin docs:**
 -
-    [`.context/compound-engineering/todos/004-pending-p2-block-level-must-should-may.md`](.context/compound-engineering/todos/004-pending-p2-block-level-must-should-may.md)
+
+[`.context/compound-engineering/todos/004-pending-p2-block-level-must-should-may.md`](.context/compound-engineering/todos/004-pending-p2-block-level-must-should-may.md)
 -
-    [`.context/compound-engineering/todos/005-pending-p2-og-image-regeneration.md`](.context/compound-engineering/todos/005-pending-p2-og-image-regeneration.md)
+
+[`.context/compound-engineering/todos/005-pending-p2-og-image-regeneration.md`](.context/compound-engineering/todos/005-pending-p2-og-image-regeneration.md)
+
 - **Related code:**
 - `src/build/render.mjs` — unified pipeline.
 - `src/build/plugins/rfc-keywords.mjs` — existing inline plugin (pattern reference).
@@ -709,8 +713,10 @@ missed.
 - `playwright.config.ts` — Playwright dev-dep + chromium project.
 - **Related solutions docs:**
 -
-    [`docs/solutions/ui-bugs/rfc-keyword-remark-plugin-nested-strong-2026-04-14.md`](docs/solutions/ui-bugs/rfc-keyword-remark-plugin-nested-strong-2026-04-14.md)
-    — must preserve inline behavior inside the new block.
+
+[`docs/solutions/ui-bugs/rfc-keyword-remark-plugin-nested-strong-2026-04-14.md`](docs/solutions/ui-bugs/rfc-keyword-remark-plugin-nested-strong-2026-04-14.md)
+— must preserve inline behavior inside the new block.
+
 - **Related design system docs:**
 - `docs/DESIGN.md` §4.7 (keyword treatment options 7a/7b/block-level).
 - `docs/DESIGN.md` §4.13 (OG card brief — content carried into Unit 3 finalization).

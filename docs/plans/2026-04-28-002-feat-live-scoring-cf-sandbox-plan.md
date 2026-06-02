@@ -1,9 +1,10 @@
 ---
 title: "feat: Live scoring via Cloudflare Sandbox + Worker (v3 — install-binary only)"
 type: feat
-status: active
+status: shipped
 date: 2026-04-28
-revised: 2026-05-04
+revised: 2026-06-02
+shipped_in: "U1-U8 on dev across spring 2026; promoted to main via release #115 (live-scoring v3 + anc 0.4.0) and #145 (live-scoring v3 + audit rename + spec v0.5.0)."
 origin: docs/brainstorms/live-scoring-spike.md
 ---
 

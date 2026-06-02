@@ -1,8 +1,9 @@
 ---
 title: 'feat: Pre-flight library-vs-CLI detection for live-scoring install-command inputs'
 type: feat
-status: active
+status: deferred
 date: 2026-05-18
+deferred_rationale: "Plan's own recommendation in Key Technical Decisions was defer until telemetry justifies the build cost. As of 2026-06-02 no chain_resolved_library_not_cli implementation exists on main; preserving the triage analysis here in case telemetry later flips the call."
 origin: U6 follow-up (no upstream brainstorm doc; tactical scope captured in chat handoff from the U6 PM-coverage session, 2026-05-18)
 ---
 

@@ -1,10 +1,10 @@
 ---
 title: "feat: Show HN launch readiness — agentnative-site"
 type: feat
-status: active
+status: shipped
 date: 2026-04-28
-last-revised: 2026-04-30
-shipped_in: HELD — launch did NOT occur 2026-04-30; relaunch target Mon 2026-05-04 contingent on live-scoring v2 surface (`docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md`) shipping over the weekend.
+last-revised: 2026-06-02
+shipped_in: "Technical launch surface shipped: site live via release #60 (anc.dev v0.1, 2026-04-30); live-scoring v3 via #115 and #145. Show HN marketing event is a separate concern."
 parent: ~/.gstack/projects/brettdavies-agentnative/brett-dev-design-show-hn-launch-inversion-20260427-144756.md
 ---
 
