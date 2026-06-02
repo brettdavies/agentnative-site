@@ -53,6 +53,13 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 //   - frame-src   (invisible widget iframe)
 //   - connect-src (token exchange XHR)
 //
+// CF Web Analytics adds `static.cloudflareinsights.com` to script-src
+// (the beacon script is auto-injected by the CF edge into HTML responses
+// when Web Analytics is enabled at the zone level) and
+// `cloudflareinsights.com` to connect-src (the beacon POSTs real-user
+// metrics back to a CF endpoint). Both must be present or the beacon
+// silently drops field Core Web Vitals.
+//
 // `'unsafe-inline'` is required for:
 //   - script-src: shell.mjs inlines the theme-init bootstrap (`<script>${themeInit}</script>`)
 //                 so dark/light mode is set BEFORE first paint, no FOUC.
@@ -73,9 +80,9 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 // The CSS file in turn loads font files from fonts.gstatic.com.
 const CSP_HTML =
   "default-src 'self'; " +
-  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+  "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; " +
   'frame-src https://challenges.cloudflare.com; ' +
-  "connect-src 'self' https://challenges.cloudflare.com; " +
+  "connect-src 'self' https://challenges.cloudflare.com https://cloudflareinsights.com; " +
   "img-src 'self' data:; " +
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
   "font-src 'self' https://fonts.gstatic.com; " +
