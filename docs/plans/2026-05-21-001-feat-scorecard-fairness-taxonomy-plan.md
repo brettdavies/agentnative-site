@@ -1,8 +1,9 @@
 ---
 title: 'feat: Scorecard status taxonomy + scoring fairness (Path 2)'
 type: feat
-status: in-progress
+status: shipped
 date: 2026-05-21
+shipped_in: "Cross-repo: spec v0.5.0 (d5d4086, PR #44), CLI v0.5.0 (eba2145, PR #72), skill v0.5.0 (dff0412, PR #23), site via release #145 (08958bc). Schema landed at 0.6 per plan, then advanced to 0.7 alongside the check to audit rename (CLI PR #65). Full 98-tool registry rescored on schema 0.7 against anc v0.5.0. Plan retained as the historical record of the migration arc, decision rationale (7-status vs annotated skip, conditional antecedents, deferral of compound antecedents to v2), and release-train ordering."
 origin: anc v0.4.0 rescore session, 2026-05-21 — sandbox-driven fairness analysis triggered by the v0.4.0 behavioral audit expansion (11 → 18 checks) widening the denominator and exposing the existing scoring algorithm's conflations
 ---
 
