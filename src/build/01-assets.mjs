@@ -52,9 +52,21 @@ export async function copyAssets({ repoRoot, distDir }) {
     throw new Error('foundation.css copy is not byte-equivalent');
   }
 
-  // 2. site.css — read from src/styles/site.css (a real CSS file with editor support).
+  // 2. site.css — Bun.build minifies. external: ['/*'] preserves url()
+  // references to runtime assets (/fonts/*, etc.) instead of trying to
+  // resolve them at build time. Foundation.css stays byte-equivalent per
+  // the C3 DRY contract; site.css is rendered output so minification is
+  // safe and shaves the page weight Lighthouse flags as unminified-css.
   await mkdir(join(distDir, 'css'), { recursive: true });
-  const siteCss = await readFile(join(repoRoot, 'src/styles/site.css'), 'utf8');
+  const siteResult = await Bun.build({
+    entrypoints: [join(repoRoot, 'src/styles/site.css')],
+    minify: true,
+    external: ['/*'],
+  });
+  if (!siteResult.success) {
+    throw new Error(`site.css minify failed: ${siteResult.logs.map((l) => String(l)).join('\n')}`);
+  }
+  const siteCss = await siteResult.outputs[0].text();
   await writeFile(join(distDir, 'css/site.css'), siteCss);
 
   // 3. Fonts.
