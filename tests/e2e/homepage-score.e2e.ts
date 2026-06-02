@@ -89,7 +89,11 @@ async function mockTurnstileAndScore(
 }
 
 test.describe('homepage live-scoring form — happy path', () => {
-  test('paste registry slug → 2 s theater → redirect to share_url', async ({ page }) => {
+  test('paste non-registry binary → 2 s theater → redirect to share_url', async ({ page }) => {
+    // Registry slugs route via the registry_hit branch (covered by the
+    // next test). This case is the non-registry live-scoring flow where
+    // the response carries a /score/live/<binary> share_url and the
+    // client navigates straight to it without the curated-tool 301.
     const observer = await mockTurnstileAndScore(page, {
       status: 200,
       body: {
@@ -98,7 +102,7 @@ test.describe('homepage live-scoring form — happy path', () => {
         site_spec_version: SITE_SPEC_VERSION,
         anc_version: ANC_VERSION,
         auditor_url: 'https://anc.dev/score',
-        share_url: '/score/live/ripgrep',
+        share_url: '/score/live/mybinary',
       },
     });
 
@@ -111,11 +115,11 @@ test.describe('homepage live-scoring form — happy path', () => {
     // Capture the start time and submit; the 2 s theater is enforced
     // client-side via Promise.all([fetch, setTimeout(2000)]).
     const start = Date.now();
-    await input.fill('ripgrep');
+    await input.fill('mybinary');
     await page.locator('[data-live-score-submit]').click();
 
     // After submit, the page should redirect to share_url.
-    await page.waitForURL('**/score/live/ripgrep', { timeout: 10_000 });
+    await page.waitForURL('**/score/live/mybinary', { timeout: 10_000 });
     const elapsed = Date.now() - start;
     expect(elapsed).toBeGreaterThanOrEqual(1900); // 2 s minus a small jitter tolerance
 
@@ -588,15 +592,15 @@ test.describe('homepage live-scoring — red-team', () => {
         scorecard: SCORECARD_SAMPLE,
         spec_version: SPEC_VERSION,
         anc_version: ANC_VERSION,
-        share_url: '/score/live/ripgrep',
+        share_url: '/score/live/mybinary',
         auditor_url: 'https://anc.dev/score',
       },
     });
 
     await page.goto('/');
-    await page.locator('#live-score-input').fill('ripgrep');
+    await page.locator('#live-score-input').fill('mybinary');
     await page.locator('[data-live-score-submit]').click();
-    await page.waitForURL('**/score/live/ripgrep', { timeout: 10_000 });
+    await page.waitForURL('**/score/live/mybinary', { timeout: 10_000 });
 
     const finalUrl = page.url();
     expect(finalUrl).not.toContain('fake-token');
