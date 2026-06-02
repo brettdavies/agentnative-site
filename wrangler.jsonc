@@ -121,7 +121,7 @@
   // TURNSTILE_SECRET is set via `wrangler secret put` and is not
   // committed. env.staging.vars carries Cloudflare's always-pass test
   // sitekey for CLI verification flows.
-  "vars": { "TURNSTILE_SITEKEY": "ff0x4AAAAAADQFMBoVm56-OPuQ" },
+  "vars": { "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ" },
   // Production (top-level): anc.dev + www.anc.dev custom domains, no
   // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
   // push to main. Cloudflare auto-provisions SSL cert + DNS CNAME for
