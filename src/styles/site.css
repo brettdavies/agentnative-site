@@ -1453,6 +1453,9 @@ body:has(.leaderboard-hero) main {
   text-decoration-style: dotted;
   text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
   text-underline-offset: 0.18em;
+  /* Chips are atomic typographical units; browser may wrap BETWEEN chips
+     at viewport-dependent points, but never inside a single chip's text. */
+  white-space: nowrap;
 }
 
 .live-score__chip code {
