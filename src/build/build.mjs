@@ -248,7 +248,8 @@ export async function build() {
     principles.map((p) => ({ n: p.n, sourcePath: p.filename })),
   );
 
-  const scorecardPageCount = scorecardPaths.length + 1; // +1 for leaderboard
+  const scorecardPageCount = scorecardPaths.length;
+  const leaderboardPageCount = 1; // /scorecards index, counted in htmlPages but not scorecardPages
   // 7: check, install, about, badge, changelog, methodology, coverage
   // (scorecard-schema is in subPages but counts under the sub-pages tally
   // emitted alongside; skill.html is also emitted separately. The
@@ -258,8 +259,8 @@ export async function build() {
   const extraPages = 7;
   return {
     principles: principles.length,
-    htmlPages: principles.length + extraPages + scorecardPageCount,
-    mdPages: principles.length + extraPages + scorecardPageCount,
+    htmlPages: principles.length + extraPages + scorecardPageCount + leaderboardPageCount,
+    mdPages: principles.length + extraPages + scorecardPageCount + leaderboardPageCount,
     extras: extraPages,
     scorecardPages: scorecardPageCount,
     badgeSvgs: badgePaths.length,
