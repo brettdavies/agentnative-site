@@ -2,7 +2,7 @@
 //
 // Plan U5 — every variant of the ScoreError discriminated union must:
 //   1. Map to the documented HTTP status (statusForError).
-//   2. Carry the R11 triad (spec_version + checker_url) on the wire.
+//   2. Carry the R11 triad (spec_version + auditor_url) on the wire.
 //   3. Honor Retry-After when the variant declares retry_after (rate_limited
 //      and scoring_disabled).
 //
@@ -19,7 +19,7 @@ import {
   shapeScoreSuccess,
   statusForError,
 } from '../src/worker/score/response-shape';
-import { CHECKER_URL, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { AUDITOR_URL, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // One representative of every ScoreError variant — exhaustiveness here is
 // what gives us coverage of the assertNever() guard inside statusForError.
@@ -76,12 +76,12 @@ describe('statusForError — HTTP status mapping per variant', () => {
 });
 
 describe('shapeScoreError — wire shape + headers', () => {
-  test('every variant carries spec_version + checker_url', async () => {
+  test('every variant carries spec_version + auditor_url', async () => {
     for (const e of ALL_ERRORS) {
       const res = shapeScoreError(e);
       const body = (await res.json()) as Record<string, unknown>;
       expect(body.spec_version).toBe(SPEC_VERSION);
-      expect(body.checker_url).toBe(CHECKER_URL);
+      expect(body.auditor_url).toBe(AUDITOR_URL);
       expect((body.error as { code: string }).code).toBe(e.code);
     }
   });
@@ -119,7 +119,7 @@ describe('shapeScoreSuccess — R11 triad enforcement', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.spec_version).toBe(SPEC_VERSION);
     expect(body.anc_version).toBe('0.3.0');
-    expect(body.checker_url).toBe(CHECKER_URL);
+    expect(body.auditor_url).toBe(AUDITOR_URL);
     expect(body.scorecard).toEqual({ name: 'ripgrep' });
   });
 

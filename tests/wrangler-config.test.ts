@@ -59,12 +59,19 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
     expect((triggers.crons as unknown[]).length).toBe(0);
   });
 
-  test('top-level routes points exactly at anc.dev as a custom domain (the canary value)', () => {
+  test('top-level routes binds anc.dev + www.anc.dev as custom domains (the canary value)', () => {
+    // Both apex and www are required so a regression that drops either
+    // surface (or a future edit that loses the custom_domain flag,
+    // re-enabling the .workers.dev URL leak) is loud. Per-entry asserts
+    // pin shape; set-equality on patterns means order doesn't matter.
     expect(Array.isArray(config.routes)).toBe(true);
     const routes = config.routes as Array<Record<string, unknown>>;
-    expect(routes.length).toBe(1);
-    expect(routes[0].pattern).toBe('anc.dev');
-    expect(routes[0].custom_domain).toBe(true);
+    expect(routes.length).toBe(2);
+    for (const route of routes) {
+      expect(route.custom_domain).toBe(true);
+    }
+    const patterns = routes.map((r) => r.pattern).sort();
+    expect(patterns).toEqual(['anc.dev', 'www.anc.dev']);
   });
 
   test('top-level `route` singular is NOT used (same hazard shape as `routes`; staging would inherit silently)', () => {

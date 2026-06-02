@@ -11,8 +11,8 @@ Three tiers, all welcome, none required. The shape of the contribution determine
 | Tier            | What                                                                                                                                                                                                         | Where                                                              | Time     |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | -------- |
 | **1. Signal**   | A finding against a principle's wording, a missing citation, a contradiction between two principles, a false positive in `anc`, a broken link on the site, a bundle content issue                            | A repo-specific issue template (see "Per-repo intake" below)       | ~5 min   |
-| **2. Proposal** | A new principle the spec is missing, a MUST/SHOULD tier change with rationale, a counter-example that breaks an applicability clause, a new language checker design, a new host runtime for the skill bundle | An issue with the full case in the body, against the relevant repo | ~1-2 hrs |
-| **3. Code**     | A new language checker for `anc`, a tool scoring submission for the leaderboard, a site or skill-bundle improvement, a governance or workflow PR                                                             | A pull request against the relevant repo's `dev` branch            | Variable |
+| **2. Proposal** | A new principle the spec is missing, a MUST/SHOULD tier change with rationale, a counter-example that breaks an applicability clause, a new language auditor design, a new host runtime for the skill bundle | An issue with the full case in the body, against the relevant repo | ~1-2 hrs |
+| **3. Code**     | A new language auditor for `anc`, a tool scoring submission for the leaderboard, a site or skill-bundle improvement, a governance or workflow PR                                                             | A pull request against the relevant repo's `dev` branch            | Variable |
 
 ## Per-repo intake
 
@@ -32,7 +32,7 @@ The principle text, the requirement IDs, the versioning policy. Pressure-tests a
 
 ### Linter: [agentnative-cli](https://github.com/brettdavies/agentnative-cli)
 
-`anc`, the Rust linter that scores any repo against the spec. The scoring engine, the registry, the language checkers.
+`anc`, the Rust linter that scores any repo against the spec. The scoring engine, the registry, the language auditors.
 
 - [Report a false positive](https://github.com/brettdavies/agentnative-cli/issues/new?template=false-positive.yml) (Tier
   1)

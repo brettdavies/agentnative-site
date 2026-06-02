@@ -43,7 +43,7 @@
       // Account ID in the URI is committed deliberately: Wrangler
       // resolves it from auth at push time, so the literal here is the
       // auth-time-generated tag rather than a pre-shared identifier.
-      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:9aed5c3",
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
       "instance_type": "basic",
       "max_instances": 3
     }
@@ -122,10 +122,12 @@
   // committed. env.staging.vars carries Cloudflare's always-pass test
   // sitekey for CLI verification flows.
   "vars": { "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ" },
-  // Production (top-level): anc.dev custom domain, no .workers.dev URL.
-  // Deployed via `wrangler deploy` (no --env flag) on push to main.
-  // Cloudflare auto-provisions SSL cert + DNS CNAME for the custom domain.
-  "routes": [{ "pattern": "anc.dev", "custom_domain": true }],
+  // Production (top-level): anc.dev + www.anc.dev custom domains, no
+  // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
+  // push to main. Cloudflare auto-provisions SSL cert + DNS CNAME for
+  // each custom domain (both bindings live in the same anc.dev zone).
+  // Wrangler owns these bindings; never attach via the CF dashboard.
+  "routes": [{ "pattern": "anc.dev", "custom_domain": true }, { "pattern": "www.anc.dev", "custom_domain": true }],
   "workers_dev": false,
   // Staging: separate Worker (agentnative-site-staging) deployed from
   // dev. workers.dev only — no custom domain. The staging-noindex guard
@@ -169,7 +171,7 @@
           // `containers` is non-inheritable per-env, so this duplicate
           // URI is required. Bump procedure: RELEASES.md § Image bump
           // (feat PR to dev).
-          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:9aed5c3",
+          "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:182da1b",
           "instance_type": "standard-2",
           "max_instances": 10
         }

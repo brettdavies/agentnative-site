@@ -65,14 +65,20 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 //
 // Applied to every HTML response (not just /), so a CSP regression test
 // hitting any page surfaces drift on every directive.
+// style-src + font-src include the Google Fonts origins because the
+// Turnstile widget bootstrap injects `<link rel=stylesheet
+// href="https://fonts.googleapis.com/css?family=Lato...">` into the
+// host document even when the sitekey is configured as Invisible mode
+// in the CF dashboard (defensive UI prep in case the challenge elevates).
+// The CSS file in turn loads font files from fonts.gstatic.com.
 const CSP_HTML =
   "default-src 'self'; " +
   "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
   'frame-src https://challenges.cloudflare.com; ' +
   "connect-src 'self' https://challenges.cloudflare.com; " +
   "img-src 'self' data:; " +
-  "style-src 'self' 'unsafe-inline'; " +
-  "font-src 'self'; " +
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src 'self' https://fonts.gstatic.com; " +
   "base-uri 'self'; " +
   "form-action 'self'; " +
   "object-src 'none'; " +

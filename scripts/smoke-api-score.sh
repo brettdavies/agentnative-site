@@ -80,7 +80,7 @@ if ! echo "${response}" | "$JQ_BIN" --exit-status '
     and (.spec_version | type) == "string"
     and (.site_spec_version | type) == "string"
     and (.anc_version | type) == "string"
-    and (.checker_url | type) == "string"
+    and (.auditor_url | type) == "string"
   ' > /dev/null; then
   echo "FATAL: /api/score response missing required fields for ${SLUG}" >&2
   exit 1

@@ -6,8 +6,12 @@
 //                      Worker scores against).
 // SITE_SPEC_VERSION  — from content/principles/VERSION (the principle
 //                      copy this site renders).
-// CHECKER_URL        — production live-scoring surface; moves with anc.dev.
+// ANC_VERSION        — from src/data/anc/VERSION (the currently-published
+//                      anc binary release; vendored from agentnative-cli's
+//                      Cargo.toml).
+// AUDITOR_URL        — production live-scoring surface; moves with anc.dev.
 
-export const SPEC_VERSION = '0.4.0';
+export const SPEC_VERSION = '0.5.0';
 export const SITE_SPEC_VERSION = '0.4.0';
-export const CHECKER_URL = 'https://anc.dev/score';
+export const ANC_VERSION = '0.5.0';
+export const AUDITOR_URL = 'https://anc.dev/score';

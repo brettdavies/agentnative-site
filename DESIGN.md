@@ -338,13 +338,13 @@ root alongside their `.md` twins):
 | Request path | Resolution                                                     |
 | ------------ | -------------------------------------------------------------- |
 | `/p3`        | 200 → serves `dist/p3.html`                                    |
-| `/check`     | 200 → serves `dist/check.html`                                 |
+| `/audit`     | 200 → serves `dist/audit.html`                                 |
 | `/about`     | 200 → serves `dist/about.html`                                 |
-| `/check/`    | 307 → redirects to `/check`                                    |
+| `/audit/`    | 307 → redirects to `/audit`                                    |
 | `/p3.html`   | 307 → redirects to `/p3`                                       |
 | `/p3.md`     | 200 → serves `dist/p3.md` (no html_handling applies; not HTML) |
 
-Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/check`,
+Canonical URLs are extension-less, no trailing slash, uniform across all nine pages (`/`, `/p1`…`/p7`, `/audit`,
 `/about`). No `check/index.html` / `about/index.html` asymmetry.
 
 **`llms-full.txt` per-section format (A5).** Each section (`_intro`, p1…p7, `check`, `about`) is emitted in this exact
@@ -402,7 +402,7 @@ await writeHtml("dist/index.html", indexHtml);
 await writeFile("dist/index.md", concat("content/_intro.md", ...principles));
 
 await writeFile("dist/llms.txt",      buildLlmsIndex(principles));
-await writeFile("dist/llms-full.txt", buildLlmsFull(principles, "content/check.md", "content/about.md"));
+await writeFile("dist/llms-full.txt", buildLlmsFull(principles, "content/audit.md", "content/about.md"));
 await writeFile("dist/sitemap.xml",   buildSitemap([...principles, "check", "about"]));
 ```
 
@@ -454,7 +454,7 @@ documentation surface pattern at
 ### 3.9 Skill distribution — `/skill` and `/skill.json`
 
 Two surfaces, one source. Agents fetch `/skill.json` (canonical, machine-primary). Humans fetch `/skill` (HTML render,
-identical commands). Both derive from `src/data/skill.json` at build time, so drift is structurally impossible because
+identical commands). Both derive from `src/data/skill/skill.json` at build time, so drift is structurally impossible because
 there's only one source.
 
 **Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships singular `/skill`
@@ -463,7 +463,7 @@ second skill ships, `/skill` becomes an index and per-skill content moves under 
 JSON-extension dispatch is already shape-agnostic, so no Worker code change is anticipated for that transition.
 
 **Source repo coupling.** This site vendors the skill manifest's per-host install commands and metadata at site build
-time into `src/data/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
+time into `src/data/skill/skill.json`. No fetch-on-build, no submodule, no `marketplace.json` machinery. Per
 `docs/solutions/architecture-patterns/cross-repo-artifact-sync-commit-over-fetch-20260420.md`. The skill repo
 (`brettdavies/agentnative-skill`) holds `main` as the published-release pointer and `dev` as the integration branch; the
 install command's bare `git clone --depth 1` lands on the skill repo's default branch (`main`), which the skill
@@ -514,13 +514,13 @@ twin.
 
 | Source                | Emitted as                                            | Notes                                                              |
 | --------------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
-| `src/data/skill.json` | `dist/skill.json`, `dist/skill.html`, `dist/skill.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
+| `src/data/skill/skill.json` | `dist/skill.json`, `dist/skill.html`, `dist/skill.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
 
 `/skill` enters `sitemap.xml` and `llms.txt` (under a `## Skill` section); `/skill.json` enters `llms.txt` but NOT the
 sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
 
 **Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version` in
-`src/data/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and `/skill.md`
+`src/data/skill/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and `/skill.md`
 against the Cloudflare cache-purge API after deploy). Update detection at install sites is handled by the skill bundle's
 `bin/check-update`, not by a manifest field.
 
@@ -541,7 +541,7 @@ future edit can't accidentally re-create it.
 `/install` is the canonical home for the brew/cargo install lines. Three places that previously inlined those commands
 now link here instead:
 
-- `content/check.md`'s `## Install` section — collapsed to a one-line link to `/install`.
+- `content/audit.md`'s `## Install` section — collapsed to a one-line link to `/install`.
 - `src/build/build.mjs`'s leaderboard methodology HTML — links to `/install` instead of inlining brew/cargo.
 - `src/build/scorecards-render.mjs`'s per-tool scorecard CTA — links to `/install` instead of inlining brew.
 
@@ -1045,7 +1045,7 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - `<article>` at `max-inline-size: 68ch`, horizontally centered.
 - Page padding: `--space-5` mobile, `--space-7` desktop.
 - **Header (Terse package)**: wordmark `agentnative` on the left in Uncut Sans Semibold; no link (already on the
-  homepage, so clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/check`, `/about`,
+  homepage, so clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/audit`, `/about`,
   `llms.txt`. The `llms.txt` link carries `title="Machine-readable index for AI agents"` for hover context. No nav tree,
   no version pill, no search. Header is one line tall; does not duplicate the mini-TOC's role.
 - **Footer (Terse package)**: a single line. `v0.1 · 2026-04-14 · source on GitHub`. Separator is a middot (`·`) with
@@ -1054,7 +1054,7 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 - **Mini-TOC ships on desktop ≥ 1100px** (resolving open question 5.2). Sticky right-rail `<aside>` in a 2-column grid
   with the article. Lists the 7 principle anchors. Collapses to an inline `<nav>` at the top of the article below
   1100px. Always visible in one form or the other.
-- `/check` and `/about` use the same header + footer chrome, minus the mini-TOC.
+- `/audit` and `/about` use the same header + footer chrome, minus the mini-TOC.
 
 ### 4.12 Accessibility baseline
 

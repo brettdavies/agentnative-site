@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import type { InstallSpec } from '../src/worker/score/discover-binary';
 import type { DiscoveryHintsIndex, RegistryIndex } from '../src/worker/score/registry-lookup';
-import { deriveShareBinary, lookupRegistry } from '../src/worker/score/registry-lookup';
+import {
+  deriveShareBinary,
+  deriveShareBinaryFromSpec,
+  lookupRegistry,
+  SHARE_URL_BINARY_RE,
+} from '../src/worker/score/registry-lookup';
 import type { ValidatedInput } from '../src/worker/score/validate';
 
 const REGISTRY: RegistryIndex = {
@@ -153,5 +159,83 @@ describe('deriveShareBinary — branch-aware', () => {
       spec: { pm: 'pip', package: 'black', binary: 'black' },
     };
     expect(deriveShareBinary(input, HINTS)).toBe('black');
+  });
+
+  test('install-command with slug-incompatible binary (uppercase) → null', () => {
+    // Defense in depth — install-command parser doesn't normalize case,
+    // so a hypothetical paste like `pip install MyTool` (where the
+    // package == binary == 'MyTool') must not mint a URL the
+    // /score/live/<binary> route refuses to serve.
+    const input: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'pip', package: 'MyTool', binary: 'MyTool' },
+    };
+    expect(deriveShareBinary(input, HINTS)).toBeNull();
+  });
+
+  test('hint with slug-incompatible binary → null', () => {
+    // Hints are author-curated, but the same slug-shape gate applies so
+    // a typo in src/data/hints/ can't bypass the route's regex.
+    const hints: DiscoveryHintsIndex = {
+      by_owner_repo: { 'foo/bar': { pm: 'pip', package: 'foo', binary: 'My_Tool' } },
+    };
+    const input: ValidatedInput = { kind: 'github-url', owner: 'foo', repo: 'bar' };
+    expect(deriveShareBinary(input, hints)).toBeNull();
+  });
+});
+
+describe('deriveShareBinaryFromSpec — post-discovery derivation', () => {
+  test('direct (releases-asset) spec → binary passes through', () => {
+    const spec: InstallSpec = {
+      pm: 'direct',
+      url: 'https://github.com/sharkdp/hexyl/releases/download/v0.16.0/hexyl-x86_64-linux.tar.gz',
+      binary: 'hexyl',
+    };
+    expect(deriveShareBinaryFromSpec(spec)).toBe('hexyl');
+  });
+
+  test('parsed-install spec (any PM) → binary passes through', () => {
+    for (const pm of ['brew', 'cargo-binstall', 'bun', 'pip', 'uv', 'npm', 'go'] as const) {
+      const spec: InstallSpec = { pm, package: 'foo', binary: 'foo' };
+      expect(deriveShareBinaryFromSpec(spec)).toBe('foo');
+    }
+  });
+
+  test('git-clone spec → null (branch-scoped, no shareable surface)', () => {
+    const spec: InstallSpec = {
+      pm: 'git-clone',
+      owner: 'sharkdp',
+      repo: 'hexyl',
+      branch: 'feature/x',
+      binary: 'hexyl',
+    };
+    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
+  });
+
+  test('uppercase / underscore / period / leading hyphen → null', () => {
+    for (const binary of ['MyTool', 'my_tool', 'tool.js', '-bad']) {
+      const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary };
+      expect(deriveShareBinaryFromSpec(spec)).toBeNull();
+    }
+  });
+
+  test('empty binary → null (refuse to mint /score/live/)', () => {
+    const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary: '' };
+    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
+  });
+
+  test('over-long binary (>64 chars) → null', () => {
+    const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary: 'a'.repeat(65) };
+    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
+  });
+});
+
+describe('SHARE_URL_BINARY_RE — invariant', () => {
+  test('matches the /score/live/<binary> route slug shape exactly', () => {
+    // The summary-render.ts BINARY_SLUG_RE is `SHARE_URL_BINARY_RE`
+    // (re-exported), so any value the handler mints is a value the
+    // route accepts. This test pins the source string so a refactor
+    // that drifts one without the other fails loudly.
+    expect(SHARE_URL_BINARY_RE.source).toBe('^[a-z0-9][a-z0-9-]{0,63}$');
   });
 });

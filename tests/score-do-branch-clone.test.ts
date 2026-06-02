@@ -2,7 +2,7 @@
 //
 // The DO routes github-url-with-branch inputs to a pm: 'git-clone'
 // install spec that clones the repo at the requested ref and runs
-// `anc check <path>` against the source. The Sandbox SDK only exposes
+// `anc audit <path>` against the source. The Sandbox SDK only exposes
 // `exec(command: string)` — no argv array — so command-string
 // composition + shellQuote is the trust boundary at exec time. These
 // tests pin:
@@ -14,7 +14,7 @@
 //   - The DO refuses unsafe branch names BEFORE shellQuote runs
 //     (defense in depth — the regex catches structural metacharacters;
 //     shellQuote closes the escape)
-//   - `anc check <path>` is used instead of `anc check --command
+//   - `anc audit <path>` is used instead of `anc audit --command
 //     <binary>` for source-scoped scores
 //   - `which <binary>` gate is SKIPPED for git-clone (no binary lands
 //     on PATH; the cloned source is what gets scored)
@@ -22,12 +22,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { GitCloneInstall, InstallSpec } from '../src/worker/score/discover-binary';
 import {
-  buildAncCheckSourceCmd,
+  buildAncAuditSourceCmd,
   buildGitCloneCommand,
   type ContainerLike,
   type ExecLike,
   score,
 } from '../src/worker/score/sandbox-exec';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Stub — mirrors the shape in score-do.test.ts so tests run offline.
@@ -40,8 +41,8 @@ type Call =
 type ExecResponder = (command: string) => ExecLike;
 
 const ANC_CHECK_OK = JSON.stringify({
-  spec_version: '0.4.0',
-  anc_version: '0.3.1',
+  spec_version: SPEC_VERSION,
+  anc_version: ANC_VERSION,
   tool: { name: 'qmd', version: '0.1.0' },
   score: { value: 70 },
 });
@@ -52,9 +53,9 @@ function defaultResponder(command: string): ExecLike {
     return { success: true, stdout: '', stderr: '' };
   }
   if (command === 'anc --version') {
-    return { success: true, stdout: 'anc 0.3.1\n', stderr: '' };
+    return { success: true, stdout: `anc ${ANC_VERSION}\n`, stderr: '' };
   }
-  if (command.startsWith('anc check ')) {
+  if (command.startsWith('anc audit ')) {
     return { success: true, stdout: ANC_CHECK_OK, stderr: '' };
   }
   return { success: true, stdout: '', stderr: '' };
@@ -198,22 +199,22 @@ describe('buildGitCloneCommand — red team', () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildAncCheckSourceCmd — source-path anc invocation
+// buildAncAuditSourceCmd — source-path anc invocation
 // ---------------------------------------------------------------------------
 
-describe('buildAncCheckSourceCmd — source-path anc invocation', () => {
-  test('emits `anc check <path> --output json`', () => {
-    expect(buildAncCheckSourceCmd(CLI_SPEC, undefined)).toBe("anc check '/tmp/anc-clone-target' --output json");
+describe('buildAncAuditSourceCmd — source-path anc invocation', () => {
+  test('emits `anc audit <path> --output json`', () => {
+    expect(buildAncAuditSourceCmd(CLI_SPEC, undefined)).toBe("anc audit '/tmp/anc-clone-target' --output json");
   });
 
   test('appends `--audit-profile <profile>` when audit_profile present', () => {
-    expect(buildAncCheckSourceCmd(CLI_SPEC, 'cli-tool')).toBe(
-      "anc check '/tmp/anc-clone-target' --output json --audit-profile 'cli-tool'",
+    expect(buildAncAuditSourceCmd(CLI_SPEC, 'cli-tool')).toBe(
+      "anc audit '/tmp/anc-clone-target' --output json --audit-profile 'cli-tool'",
     );
   });
 
   test('path is single-quote-wrapped (POSIX shell escape)', () => {
-    const cmd = buildAncCheckSourceCmd(CLI_SPEC, undefined);
+    const cmd = buildAncAuditSourceCmd(CLI_SPEC, undefined);
     expect(cmd).toContain("'/tmp/anc-clone-target'");
   });
 });
@@ -223,7 +224,7 @@ describe('buildAncCheckSourceCmd — source-path anc invocation', () => {
 // ---------------------------------------------------------------------------
 
 describe('score() — git-clone orchestration', () => {
-  test('runs the clone, skips `which` gate, runs `anc check <path>`', async () => {
+  test('runs the clone, skips `which` gate, runs `anc audit <path>`', async () => {
     const { stub, calls } = makeStub();
     const result = await score(stub, CLI_SPEC);
     expect(result.ok).toBe(true);
@@ -236,25 +237,25 @@ describe('score() — git-clone orchestration', () => {
     // gets checked.
     const whichCall = execCalls.find((c) => c.command.startsWith('which '));
     expect(whichCall).toBeUndefined();
-    // `anc check <path>` runs after the noHttp lockdown.
-    const ancCheck = execCalls.find((c) => c.command.startsWith('anc check '));
-    expect(ancCheck).toBeDefined();
-    expect(ancCheck?.command).toContain("'/tmp/anc-clone-target'");
-    expect(ancCheck?.command).not.toContain('--command');
+    // `anc audit <path>` runs after the noHttp lockdown.
+    const ancAudit = execCalls.find((c) => c.command.startsWith('anc audit '));
+    expect(ancAudit).toBeDefined();
+    expect(ancAudit?.command).toContain("'/tmp/anc-clone-target'");
+    expect(ancAudit?.command).not.toContain('--command');
   });
 
-  test('two-phase egress holds: allowedInstall BEFORE clone, noHttp BEFORE anc check', async () => {
+  test('two-phase egress holds: allowedInstall BEFORE clone, noHttp BEFORE anc audit', async () => {
     const { stub, calls } = makeStub();
     await score(stub, CLI_SPEC);
     const phase1 = calls.findIndex((c) => c.kind === 'setOutboundHandler' && c.name === 'allowedInstall');
     const cloneExec = calls.findIndex((c) => c.kind === 'exec' && c.command.includes('git clone'));
     const phase2 = calls.findIndex((c) => c.kind === 'setOutboundHandler' && c.name === 'noHttp');
-    const ancCheckExec = calls.findIndex((c) => c.kind === 'exec' && c.command.startsWith('anc check '));
+    const ancAuditExec = calls.findIndex((c) => c.kind === 'exec' && c.command.startsWith('anc audit '));
 
     expect(phase1).toBeGreaterThanOrEqual(0);
     expect(cloneExec).toBeGreaterThan(phase1);
     expect(phase2).toBeGreaterThan(cloneExec);
-    expect(ancCheckExec).toBeGreaterThan(phase2);
+    expect(ancAuditExec).toBeGreaterThan(phase2);
   });
 
   test('allowedInstall hosts include github.com + *.githubusercontent.com wildcard', async () => {
@@ -310,7 +311,7 @@ describe('score() — git-clone orchestration', () => {
     const result = await score(stub, CLI_SPEC);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.anc_version).toBe('0.3.1');
+    expect(result.value.anc_version).toBe(ANC_VERSION);
     expect(result.value.scorecard).toMatchObject({ tool: { name: 'qmd' } });
   });
 });

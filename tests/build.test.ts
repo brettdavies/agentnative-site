@@ -22,7 +22,14 @@ import {
 } from '../src/build/scorecards-render.mjs';
 import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
-import { escHtml, parseFilename, SITE_SPEC_VERSION, SPEC_VERSION, sortedGlob } from '../src/build/util.mjs';
+import {
+  ANC_VERSION,
+  escHtml,
+  parseFilename,
+  SITE_SPEC_VERSION,
+  SPEC_VERSION,
+  sortedGlob,
+} from '../src/build/util.mjs';
 
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
@@ -327,7 +334,7 @@ describe('emitShell — OG image alt text', () => {
 // Scorecards module
 // -------------------------------------------------------------------
 
-// Reusable scorecard fixture matching the anc check --output json schema.
+// Reusable scorecard fixture matching the anc audit --output json schema.
 function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}) {
   const results = overrides.results ?? [
     {
@@ -409,7 +416,7 @@ function makeV04Scorecard(overrides: Record<string, any> = {}) {
     tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
     anc: { version: '0.1.0', commit: 'abc1234' },
     run: {
-      invocation: 'anc check --command fixture --output json',
+      invocation: 'anc audit --command fixture --output json',
       started_at: '2026-04-30T04:00:00.000000000Z',
       duration_ms: 42,
       platform: { os: 'linux', arch: 'x86_64' },
@@ -419,6 +426,122 @@ function makeV04Scorecard(overrides: Record<string, any> = {}) {
       eligible: true,
       score_pct: 100,
       embed_markdown: '[![agent-native](https://anc.dev/badge/fixture.svg)](https://anc.dev/score/fixture)',
+      scorecard_url: 'https://anc.dev/score/fixture',
+      badge_url: 'https://anc.dev/badge/fixture.svg',
+      convention_url: 'https://anc.dev/badge',
+    },
+    ...overrides,
+  };
+}
+
+// Schema 0.6 fixture — the 7-status taxonomy. results[] carry per-row `id`,
+// `tier`, `check_id`, `confidence`; summary gains opt_out/n_a counters; `anc`
+// drops `commit`. This object validates against the CLI's published 0.6
+// scorecard JSON Schema (agentnative-cli/schema/scorecard.schema.json).
+function makeV06Scorecard(overrides: Record<string, any> = {}) {
+  const results = overrides.results ?? [
+    {
+      id: 'p1-must-no-interactive',
+      label: 'Non-interactive by default',
+      group: 'P1',
+      layer: 'behavioral',
+      status: 'pass',
+      evidence: null,
+      confidence: 'high',
+      tier: 'must',
+      check_id: 'p1-non-interactive',
+    },
+    {
+      id: 'p2-must-schema-when-json',
+      label: 'Exposes JSON Schema when --output json is supported',
+      group: 'P2',
+      layer: 'behavioral',
+      status: 'n_a',
+      evidence: 'antecedent p2-json-output is opt_out; consequent not applicable',
+      confidence: 'high',
+      tier: 'must',
+      check_id: 'p2-schema-print',
+    },
+    {
+      id: 'p2-json-output',
+      label: 'Structured output support',
+      group: 'P2',
+      layer: 'behavioral',
+      status: 'opt_out',
+      evidence: 'no --output/--format flag detected',
+      confidence: 'high',
+      tier: 'should',
+      check_id: 'p2-json-output',
+    },
+    {
+      id: 'p3-must-version',
+      label: 'Version flag works',
+      group: 'P3',
+      layer: 'behavioral',
+      status: 'pass',
+      evidence: null,
+      confidence: 'high',
+      tier: 'must',
+      check_id: 'p3-version',
+    },
+    {
+      id: 'p3-should-version-short',
+      label: 'Short version alias',
+      group: 'P3',
+      layer: 'behavioral',
+      status: 'warn',
+      evidence: '--version present; short alias -V not detected',
+      confidence: 'medium',
+      tier: 'should',
+      check_id: 'p3-version',
+    },
+    {
+      id: 'p6-no-pager-behavioral',
+      label: 'Does not spawn a pager',
+      group: 'P6',
+      layer: 'behavioral',
+      status: 'skip',
+      evidence: 'could not measure via safe probes',
+      confidence: 'medium',
+      tier: 'may',
+      check_id: 'p6-no-pager',
+    },
+  ];
+  const tally = (s: string) => results.filter((r: any) => r.status === s).length;
+  return {
+    schema_version: '0.6',
+    results,
+    summary: {
+      total: results.length,
+      pass: tally('pass'),
+      warn: tally('warn'),
+      fail: tally('fail'),
+      opt_out: tally('opt_out'),
+      n_a: tally('n_a'),
+      skip: tally('skip'),
+      error: tally('error'),
+    },
+    coverage_summary: {
+      must: { total: 23, verified: 17 },
+      should: { total: 14, verified: 9 },
+      may: { total: 7, verified: 3 },
+    },
+    audience: 'mixed',
+    audit_profile: null,
+    spec_version: SPEC_VERSION,
+    tool: { name: 'fixture', binary: 'fixture', version: 'fixture 1.2.3' },
+    anc: { version: ANC_VERSION },
+    run: {
+      invocation: 'anc --command fixture',
+      started_at: '2026-05-21T17:03:00Z',
+      duration_ms: 1240,
+      platform: { os: 'linux', arch: 'x86_64' },
+    },
+    target: { kind: 'command', path: null, command: 'fixture' },
+    badge: {
+      eligible: false,
+      score_pct: 62,
+      embed_markdown: null,
       scorecard_url: 'https://anc.dev/score/fixture',
       badge_url: 'https://anc.dev/badge/fixture.svg',
       convention_url: 'https://anc.dev/badge',
@@ -856,12 +979,12 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
     }
   });
 
-  test('rejects scorecards below the supported schema version (no synthesis fallback)', async () => {
-    // Schema 0.5 is the supported floor. The site reads `scorecard.badge.*`
-    // and `scorecard.{tool,anc,run,target}` directly from each scorecard;
-    // a scorecard without these blocks would fail render. The load-time
-    // invariant fails the build immediately rather than silently render
-    // wrong data via a synthesized fallback.
+  test('rejects scorecards outside the supported schema set (no synthesis fallback)', async () => {
+    // Schemas 0.5 and 0.6 are supported during the migration window. The site
+    // reads `scorecard.badge.*` and `scorecard.{tool,anc,run,target}` directly
+    // from each scorecard; a scorecard without these blocks would fail render.
+    // The load-time invariant fails the build immediately rather than silently
+    // render wrong data via a synthesized fallback.
     const dir = join(tmpdir(), `scorecards-invariant-${Date.now()}`);
     await mkdir(dir, { recursive: true });
     const stale = {
@@ -886,7 +1009,113 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
         },
       ];
       await expect(loadScoredTools(dir, registry)).rejects.toThrow(
-        /schema_version "0\.4" not supported.*Site requires schema 0\.5/,
+        /schema_version "0\.4" not supported.*Site supports schema 0\.5, 0\.6/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loads a schema 0.6 scorecard (7-status taxonomy migration window)', async () => {
+    const dir = join(tmpdir(), `scorecards-v06-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard()));
+    try {
+      const registry = [
+        {
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+        },
+      ];
+      const { tools, warnings } = await loadScoredTools(dir, registry);
+      expect(tools).toHaveLength(1);
+      expect(tools[0].scorecard.schema_version).toBe('0.6');
+      expect(tools[0].scorecard.badge.score_pct).toBe(62);
+      expect(tools[0].metadata.anc.version).toBe(ANC_VERSION);
+      expect(warnings.scorecardOrphans).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loads schema 0.5, 0.6, and 0.7 scorecards side by side', async () => {
+    const dir = join(tmpdir(), `scorecards-mixed-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'alpha-v1.0.0.json'), JSON.stringify(makeV04Scorecard()));
+    await writeFile(
+      join(dir, 'beta-v1.2.3.json'),
+      JSON.stringify(makeV06Scorecard({ tool: { name: 'beta', binary: 'beta', version: 'beta 1.2.3' } })),
+    );
+    await writeFile(
+      join(dir, 'gamma-v2.0.0.json'),
+      JSON.stringify(
+        makeV06Scorecard({
+          schema_version: '0.7',
+          tool: { name: 'gamma', binary: 'gamma', version: 'gamma 2.0.0' },
+        }),
+      ),
+    );
+    try {
+      const registry = [
+        {
+          name: 'alpha',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'x',
+        },
+        {
+          name: 'beta',
+          repo: 'c/d',
+          binary: 'beta',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'y',
+        },
+        {
+          name: 'gamma',
+          repo: 'e/f',
+          binary: 'gamma',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'z',
+        },
+      ];
+      const { tools } = await loadScoredTools(dir, registry);
+      const versions = tools.map((t: any) => t.scorecard.schema_version).sort();
+      expect(versions).toEqual(['0.5', '0.6', '0.7']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a schema version above the supported set (e.g. 0.8)', async () => {
+    const dir = join(tmpdir(), `scorecards-future-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'fixture-v1.2.3.json'), JSON.stringify(makeV06Scorecard({ schema_version: '0.8' })));
+    try {
+      const registry = [
+        {
+          name: 'fixture',
+          repo: 'a/b',
+          binary: 'fixture',
+          language: 'Rust',
+          tier: 'workhorse',
+          creator: 'me',
+          description: 'thing',
+        },
+      ];
+      await expect(loadScoredTools(dir, registry)).rejects.toThrow(
+        /schema_version "0\.8" not supported.*Site supports schema 0\.5, 0\.6, 0\.7/,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1021,7 +1250,7 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
           name: 'fixture-v1.2.3.json',
           content: makeV04Scorecard({
             run: {
-              invocation: 'anc check',
+              invocation: 'anc audit',
               started_at: 'not-a-timestamp',
               duration_ms: 1,
               platform: { os: 'linux', arch: 'x86_64' },
@@ -1092,20 +1321,22 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
 });
 
 describe('computePrincipleScore', () => {
-  test('maps P1-P7 groups correctly, excludes CodeQuality/ProjectStructure', () => {
+  test('maps P1-P8 groups correctly, excludes CodeQuality/ProjectStructure', () => {
     const sc = makeScorecard();
     const ps = computePrincipleScore(sc);
-    expect(ps.total).toBe(7);
-    // P1=pass, P2=fail, P3=pass, P4=pass, P5=skip(no checks), P6=partial(has warn), P7=pass
+    expect(ps.total).toBe(8);
+    // P1=pass, P2=fail, P3=pass, P4=pass, P5=skip(no checks), P6=partial(has warn),
+    // P7=pass, P8=skip(no checks)
     expect(ps.met).toBe(4); // P1, P3, P4, P7
     expect(ps.details.find((d: any) => d.group === 'P2')?.status).toBe('fail');
     expect(ps.details.find((d: any) => d.group === 'P6')?.status).toBe('partial');
+    expect(ps.details.find((d: any) => d.group === 'P8')?.status).toBe('skip');
   });
 
-  test('returns 0/7 for null scorecard', () => {
+  test('returns 0/8 for null scorecard', () => {
     const ps = computePrincipleScore(null);
     expect(ps.met).toBe(0);
-    expect(ps.total).toBe(7);
+    expect(ps.total).toBe(8);
   });
 });
 
@@ -1143,7 +1374,7 @@ describe('computeLeaderboard', () => {
     return {
       ...makeScorecard(),
       badge: {
-        eligible: scorePct >= 80,
+        eligible: scorePct >= 70,
         score_pct: scorePct,
         embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
         scorecard_url: `https://anc.dev/score/${name}`,
@@ -1247,7 +1478,7 @@ describe('renderAudienceBanner', () => {
 });
 
 // -------------------------------------------------------------------
-// renderCheckRows (via buildScorecardBody) — suppressed-check rendering
+// renderAuditRows (via buildScorecardBody) — suppressed-check rendering
 // -------------------------------------------------------------------
 
 describe('suppressed-check rendering', () => {
@@ -1306,22 +1537,22 @@ describe('suppressed-check rendering', () => {
     repo: 'jesseduffield/lazygit',
   };
 
-  test('audit_profile-suppressed Skip gets check--suppressed class and "N/A by <category>" status', () => {
+  test('audit_profile-suppressed Skip gets audit--suppressed class and "N/A by <category>" status', () => {
     const sc = suppressedScorecard();
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
-    expect(html).toContain('check--suppressed');
+    expect(html).toContain('audit--suppressed');
     expect(html).toContain('N/A by human-tui');
   });
 
-  test('organic Skip retains check--skip without check--suppressed', () => {
+  test('organic Skip retains audit--skip without audit--suppressed', () => {
     const sc = suppressedScorecard();
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
     // The organic skip row's status cell still shows "SKIP" uppercase.
     expect(html).toContain('>SKIP<');
     // And it must NOT carry the suppressed class.
-    const organicSkipMatch = html.match(/<tr class="([^"]*)">\s*<td class="check__status">SKIP<\/td>/);
+    const organicSkipMatch = html.match(/<tr class="([^"]*)">\s*<td class="audit__status">SKIP<\/td>/);
     expect(organicSkipMatch).not.toBeNull();
-    expect(organicSkipMatch?.[1]).not.toContain('check--suppressed');
+    expect(organicSkipMatch?.[1]).not.toContain('audit--suppressed');
   });
 
   test('non-suppression Skip evidence is preserved verbatim', () => {
@@ -1361,7 +1592,7 @@ describe('suppressed-check rendering', () => {
       },
     };
     const html = buildScorecardBody(tool, sc, [], { met: 0, total: 7, details: [] });
-    expect(html).not.toContain('check--suppressed');
+    expect(html).not.toContain('audit--suppressed');
     expect(html).not.toContain('N/A by');
     // The status cell stays as the regular SKIP pill.
     expect(html).toContain('>SKIP<');
@@ -1609,29 +1840,42 @@ describe('loadSkillData — fail-fast validation', () => {
 // badge-maker rendering — color thresholds, label format, SVG output
 // -------------------------------------------------------------------
 
-describe('badgeColor — threshold mapping', () => {
-  test('100% → brightgreen', () => {
-    expect(badgeColor(100)).toBe('brightgreen');
+describe('badgeColor — cohort-band mapping', () => {
+  const EXEMPLARY = '#005da1';
+  const STRONG = '#007b80';
+  const SOLID = '#0a7e3a';
+  const QUALIFIED = '#976200';
+  const BELOW = '#bf5200';
+  const CRITICAL = '#af2b25';
+
+  test('≥ 85 → navy (Exemplary)', () => {
+    expect(badgeColor(100)).toBe(EXEMPLARY);
+    expect(badgeColor(85)).toBe(EXEMPLARY);
   });
 
-  test('80% (floor) → brightgreen — brightline at the eligibility floor', () => {
-    expect(badgeColor(80)).toBe('brightgreen');
+  test('80–84 → teal (Strong)', () => {
+    expect(badgeColor(84)).toBe(STRONG);
+    expect(badgeColor(80)).toBe(STRONG);
   });
 
-  test('79% → yellow — one point below floor flips color', () => {
-    expect(badgeColor(79)).toBe('yellow');
+  test('75–79 → green (Solid)', () => {
+    expect(badgeColor(79)).toBe(SOLID);
+    expect(badgeColor(75)).toBe(SOLID);
   });
 
-  test('60% → yellow — bottom of mid band', () => {
-    expect(badgeColor(60)).toBe('yellow');
+  test('70–74 → ochre (Qualified — at the eligibility floor)', () => {
+    expect(badgeColor(74)).toBe(QUALIFIED);
+    expect(badgeColor(70)).toBe(QUALIFIED);
   });
 
-  test('59% → red', () => {
-    expect(badgeColor(59)).toBe('red');
+  test('69 → orange — one point below the floor flips the color', () => {
+    expect(badgeColor(69)).toBe(BELOW);
+    expect(badgeColor(50)).toBe(BELOW);
   });
 
-  test('0% → red', () => {
-    expect(badgeColor(0)).toBe('red');
+  test('< 50 → red (critical)', () => {
+    expect(badgeColor(49)).toBe(CRITICAL);
+    expect(badgeColor(0)).toBe(CRITICAL);
   });
 });
 
@@ -1659,12 +1903,13 @@ describe('badgeFormat — label, message, color contract', () => {
     expect(badgeFormat(0).message).toBe('0%');
   });
 
-  test('color follows badgeColor of the rounded percent — green at floor', () => {
-    // 0.8 mirrors the CLI eligibility floor (the rendering boundary that
-    // keeps a tool's badge readable as "passing" once embedded).
-    expect(badgeFormat(0.8).color).toBe('brightgreen');
-    expect(badgeFormat(0.79).color).toBe('yellow');
-    expect(badgeFormat(0.59).color).toBe('red');
+  test('color follows badgeColor of the rounded percent across the bands', () => {
+    expect(badgeFormat(0.91).color).toBe('#005da1'); // Exemplary
+    expect(badgeFormat(0.8).color).toBe('#007b80'); //  Strong
+    expect(badgeFormat(0.77).color).toBe('#0a7e3a'); // Solid
+    expect(badgeFormat(0.7).color).toBe('#976200'); //  Qualified (floor)
+    expect(badgeFormat(0.69).color).toBe('#bf5200'); // below floor
+    expect(badgeFormat(0.42).color).toBe('#af2b25'); // critical
   });
 
   test('style is flat — visually identical to shields.io defaults', () => {
@@ -1681,14 +1926,15 @@ describe('renderBadgeSvg — SVG output', () => {
     expect(svg).toContain('</svg>');
   });
 
-  test('100% badge uses brightgreen fill (#4c1)', () => {
+  test('Exemplary badge uses the navy fill (#005da1)', () => {
     const svg = renderBadgeSvg(1.0, '0.3.0');
-    expect(svg).toContain('#4c1');
+    expect(svg).toContain('#005da1');
   });
 
-  test('below-floor badge does NOT use brightgreen — visual signal stays honest on regression', () => {
+  test('below-floor badge renders the orange fill, not a top-band color — regression stays honest', () => {
     const svg = renderBadgeSvg(0.5, '0.3.0');
-    expect(svg).not.toContain('#4c1');
+    expect(svg).toContain('#bf5200');
+    expect(svg).not.toContain('#005da1');
   });
 });
 
@@ -1740,7 +1986,7 @@ describe('buildScorecardBody — embed-snippet gating', () => {
       summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
       results,
       badge: {
-        eligible: score_pct >= 80,
+        eligible: score_pct >= 70,
         score_pct,
         embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
         scorecard_url: 'https://anc.dev/score/rg',
@@ -1761,32 +2007,76 @@ describe('buildScorecardBody — embed-snippet gating', () => {
     expect(html).toContain('alt="agent-native badge for rg"');
   });
 
-  test('eligible at exactly the floor (score=0.80) — brightline check, >= not >', () => {
-    const html = buildScorecardBody(tool('rg'), sc(8, 2), [], { met: 5, total: 7, details: [] });
+  test('eligible at exactly the floor (score=0.70) — brightline check, >= not >', () => {
+    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 5, total: 8, details: [] });
     expect(html).toContain('scorecard-embed--eligible');
     expect(html).not.toContain('scorecard-embed--below');
   });
 
-  test('one point below the floor (score=0.79) renders the below-floor hint', () => {
-    const sc79 = sc(79, 21);
+  test('one point below the floor (score=0.69) renders the below-floor hint', () => {
+    const sc69 = sc(69, 31);
     const issues = [{ id: 'f0', label: 'fail0', group: 'P2', status: 'fail', evidence: 'no flag' }];
-    const html = buildScorecardBody(tool('rg'), sc79, issues, { met: 4, total: 7, details: [] });
+    const html = buildScorecardBody(tool('rg'), sc69, issues, { met: 4, total: 8, details: [] });
     expect(html).toContain('scorecard-embed--below');
     expect(html).not.toContain('scorecard-embed--eligible');
     expect(html).not.toContain('<img src="/badge/rg.svg"'); // no preview image below the floor
-    expect(html).toContain('1 point below'); // singular for a 1-point gap (80 - 79 = 1)
+    expect(html).toContain('1 point below'); // singular for a 1-point gap (70 - 69 = 1)
     expect(html).toContain('top issues above are the place to start'); // points at existing issues section
   });
 
   test('below-floor with no top issues references the full check list instead', () => {
-    const html = buildScorecardBody(tool('rg'), sc(7, 3), [], { met: 4, total: 7, details: [] });
-    expect(html).toContain('See the full check results below for the gaps.');
+    const html = buildScorecardBody(tool('rg'), sc(6, 4), [], { met: 4, total: 8, details: [] });
+    expect(html).toContain('See the full audit results below for the gaps.');
     expect(html).not.toContain('top issues above are the place to start');
   });
 
-  test('below-floor gap math: 65% scorecard is 15 points below the 80% floor (plural)', () => {
-    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 7, details: [] });
-    expect(html).toContain('15 points below');
+  test('below-floor gap math: 65% scorecard is 5 points below the 70% floor (plural)', () => {
+    const html = buildScorecardBody(tool('rg'), sc(65, 35), [], { met: 3, total: 8, details: [] });
+    expect(html).toContain('5 points below');
+  });
+});
+
+describe('buildScorecardBody — 7-status taxonomy rendering (schema 0.6)', () => {
+  function tool(name = 'fixture') {
+    return {
+      name,
+      binary: name,
+      description: 'a fixture',
+      tier: 'workhorse',
+      language: 'rust',
+      creator: 'me',
+      install: `brew install ${name}`,
+      repo: `me/${name}`,
+    };
+  }
+
+  function render() {
+    const scorecard = makeV06Scorecard();
+    const metadata = { tool: scorecard.tool, anc: scorecard.anc, run: scorecard.run, target: scorecard.target };
+    return buildScorecardBody(tool(), scorecard, [], { met: 5, total: 7, details: [] }, '1.2.3', metadata);
+  }
+
+  test('opt_out renders its own class + OPT-OUT label, distinct from skip', () => {
+    const html = render();
+    expect(html).toContain('audit audit--opt_out');
+    expect(html).toMatch(/audit--opt_out">\s*<td class="audit__status">OPT-OUT</);
+    // Never the raw snake_case the underscore status would produce under a bare toUpperCase.
+    expect(html).not.toContain('>OPT_OUT<');
+  });
+
+  test('n_a renders its own class + N/A label, distinct from skip', () => {
+    const html = render();
+    expect(html).toContain('audit audit--n_a');
+    expect(html).toMatch(/audit--n_a">\s*<td class="audit__status">N\/A</);
+    expect(html).not.toContain('>N_A<');
+  });
+
+  test('skip stays its own bucket alongside the two new statuses', () => {
+    const html = render();
+    expect(html).toContain('audit audit--skip');
+    // All three excluded-from-numerator statuses are visually separate classes.
+    const classes = ['audit--opt_out', 'audit--n_a', 'audit--skip'];
+    for (const c of classes) expect(html).toContain(c);
   });
 });
 
@@ -1833,7 +2123,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       summary: { total: passes + fails, pass: passes, warn: 0, fail: fails, skip: 0, error: 0 },
       results,
       badge: {
-        eligible: score_pct >= 80,
+        eligible: score_pct >= 70,
         score_pct,
         embed_markdown: '[![agent-native](https://anc.dev/badge/rg.svg)](https://anc.dev/score/rg)',
         scorecard_url: 'https://anc.dev/score/rg',
@@ -1848,7 +2138,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
       anc: { version: '0.1.0', commit: 'fff3f13' },
       run: {
-        invocation: 'anc check --command rg --output json',
+        invocation: 'anc audit --command rg --output json',
         started_at: '2026-04-30T04:18:53.099683344Z',
         duration_ms: 53,
         platform: { os: 'linux', arch: 'x86_64' },
@@ -1949,7 +2239,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
 
   test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
     const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
-    expect(html).toContain('<pre><code>anc check --command rg --output json</code></pre>');
+    expect(html).toContain('<pre><code>anc audit --command rg --output json</code></pre>');
   });
 
   test('reproduce CTA falls back to synthesized form for project-mode runs', () => {
@@ -1963,10 +2253,10 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({
         target: { kind: 'project', path: '/home/secret/repo', command: null },
-        run: { ...v04Meta().run, invocation: 'anc check /home/secret/repo' },
+        run: { ...v04Meta().run, invocation: 'anc audit /home/secret/repo' },
       }),
     );
-    expect(html).toContain('<pre><code>anc check --command rg</code></pre>');
+    expect(html).toContain('<pre><code>anc audit --command rg</code></pre>');
     expect(html).not.toContain('/home/secret/repo');
   });
 
@@ -1978,7 +2268,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       { met: 7, total: 7, details: [] },
       '15.1.0',
       v04Meta({
-        run: { ...v04Meta().run, invocation: 'anc check --command "<rg>" --output json' },
+        run: { ...v04Meta().run, invocation: 'anc audit --command "<rg>" --output json' },
       }),
     );
     expect(html).not.toContain('<rg>');
@@ -2041,7 +2331,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
         anc: { version: '0.1.0', commit: 'fff3f13' },
         run: {
-          invocation: 'anc check --command rg --output json',
+          invocation: 'anc audit --command rg --output json',
           started_at: '2026-04-30T04:18:53.099683344Z',
           duration_ms: 53,
           platform: { os: 'linux', arch: 'x86_64' },
@@ -2050,11 +2340,11 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
       },
     );
     expect(md).toContain('## Reproduce locally');
-    expect(md).toContain('anc check --command rg --output json');
+    expect(md).toContain('anc audit --command rg --output json');
     // The repro fence is tagged `bash` so renderers (Shiki, GitHub markdown,
     // hosted previews) syntax-highlight the command instead of treating it
     // as plain text.
-    expect(md).toContain('```bash\nanc check --command rg --output json\n```');
+    expect(md).toContain('```bash\nanc audit --command rg --output json\n```');
   });
 
   test('project-mode invocation falls back to the synthesized form (no path leak)', () => {
@@ -2088,7 +2378,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
         anc: { version: '0.1.0', commit: 'fff3f13' },
         run: {
-          invocation: 'anc check /home/secret/repo',
+          invocation: 'anc audit /home/secret/repo',
           started_at: '2026-04-30T04:18:53.099683344Z',
           duration_ms: 53,
           platform: { os: 'linux', arch: 'x86_64' },
@@ -2097,7 +2387,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
       },
     );
     expect(md).not.toContain('/home/secret/repo');
-    expect(md).toContain('anc check --command rg');
+    expect(md).toContain('anc audit --command rg');
   });
 
   test('mirrors the v0.4 metadata fields the HTML Details block carries', () => {
@@ -2131,7 +2421,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
         tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
         anc: { version: '0.1.0', commit: 'fff3f13' },
         run: {
-          invocation: 'anc check --command rg --output json',
+          invocation: 'anc audit --command rg --output json',
           started_at: '2026-04-30T04:18:53.099683344Z',
           duration_ms: 53,
           platform: { os: 'linux', arch: 'x86_64' },
@@ -2165,7 +2455,7 @@ describe('buildLeaderboardBody — badge callout', () => {
       scorecard: {
         summary: { pass: 1, warn: 0, fail: 0 },
         badge: {
-          eligible: score_pct >= 80,
+          eligible: score_pct >= 70,
           score_pct,
           embed_markdown: `[![agent-native](https://anc.dev/badge/${name}.svg)](https://anc.dev/score/${name})`,
           scorecard_url: `https://anc.dev/score/${name}`,
@@ -2182,8 +2472,8 @@ describe('buildLeaderboardBody — badge callout', () => {
     const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3)];
     const html = buildLeaderboardBody(lb as any, '<p>m</p>');
     expect(html).toContain('leaderboard-badge-callout');
-    expect(html).toContain('above 80%');
-    // Two of four entries clear 0.80; denominator is the audited corpus.
+    expect(html).toContain('above 70%');
+    // Two of four entries clear 0.70; denominator is the audited corpus.
     expect(html).toContain('2 of 4 listed tools');
   });
 

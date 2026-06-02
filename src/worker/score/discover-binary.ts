@@ -51,8 +51,8 @@ export type DirectInstall = { pm: 'direct'; url: string; binary: string };
 // artifacts (which are scored against the release, not a branch), so a
 // branch-scoped paste needs the source at THAT branch. The orchestration
 // in sandbox-exec.ts clones the repo at the specified branch with
-// `--depth 1` (shallow) and runs `anc check` against the cloned
-// directory rather than `anc check --command <binary>`.
+// `--depth 1` (shallow) and runs `anc audit` against the cloned
+// directory rather than `anc audit --command <binary>`.
 export type GitCloneInstall = {
   pm: 'git-clone';
   owner: string;

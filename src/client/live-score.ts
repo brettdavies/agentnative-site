@@ -26,7 +26,16 @@ interface TurnstileApi {
     element: HTMLElement | string,
     options: {
       sitekey: string;
-      size?: 'invisible' | 'normal' | 'compact';
+      // `size` is widget dimensions (compact|flexible|normal). `invisible`
+      // is NOT a valid size value — Turnstile throws on render. Invisible
+      // behavior is controlled by the sitekey's mode (set in the CF
+      // dashboard), not by render-time params.
+      size?: 'compact' | 'flexible' | 'normal';
+      // `execution: 'execute'` defers the challenge until execute() is
+      // called explicitly (matches our acquire-on-submit flow). The
+      // default 'render' starts the challenge as soon as the widget
+      // mounts, which races our acquireTurnstileToken caller.
+      execution?: 'render' | 'execute';
       callback?: (token: string) => void;
       'error-callback'?: () => void;
       'expired-callback'?: () => void;
@@ -112,6 +121,18 @@ function initLiveScore(els: {
   // curated-reward or phase-progression text from the previous submit.
   // Reset to a clean state so the form is immediately usable again.
   // Standard a11y pattern, no copy change needed.
+  //
+  // Also tear down the Turnstile widget on pagehide so a bfcache-restored
+  // page doesn't reuse a half-dead widget instance. On the next
+  // acquireTurnstileToken the module-scope state is empty and a fresh
+  // widget is rendered.
+  window.addEventListener('pagehide', () => {
+    if (turnstileWidget && window.turnstile) {
+      window.turnstile.remove(turnstileWidget.id);
+    }
+    turnstileWidget = null;
+    pendingTurnstile = null;
+  });
   window.addEventListener('pageshow', (event) => {
     if (!event.persisted) return;
     setSubmitting(els, false);
@@ -224,6 +245,25 @@ function readSitekey(): string | null {
   return value ? value : null;
 }
 
+// Module-scope state for the Turnstile widget. The widget is rendered
+// exactly once per page session; subsequent acquires reset and re-execute
+// the existing widget rather than rendering again. Re-rendering on the
+// same container while a prior execution is still settling triggers
+// Turnstile's "Call to execute() on a widget that is already executing"
+// warning and a 400020 from challenges.cloudflare.com on the second
+// submit. The Turnstile callback is fixed at render time, so the pending
+// resolver/rejector is swapped here per acquire.
+let turnstileWidget: { id: string; container: HTMLDivElement } | null = null;
+let pendingTurnstile: { resolve: (token: string) => void; reject: (err: Error) => void } | null = null;
+
+function settleTurnstile(result: { token: string } | { error: Error }): void {
+  const p = pendingTurnstile;
+  pendingTurnstile = null;
+  if (!p) return;
+  if ('token' in result) p.resolve(result.token);
+  else p.reject(result.error);
+}
+
 function acquireTurnstileToken(
   sitekey: string,
   api: TurnstileApi,
@@ -231,6 +271,22 @@ function acquireTurnstileToken(
   onWidget: (id: string) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    // Defense-in-depth: if a prior acquire is still pending (submit-button
+    // disable should have prevented this) reject the new caller rather
+    // than dropping the prior resolver on the floor.
+    if (pendingTurnstile) {
+      reject(new Error('turnstile_already_pending'));
+      return;
+    }
+    pendingTurnstile = { resolve, reject };
+
+    if (turnstileWidget) {
+      api.reset(turnstileWidget.id);
+      onWidget(turnstileWidget.id);
+      api.execute(turnstileWidget.id);
+      return;
+    }
+
     let container = formEl.querySelector<HTMLDivElement>('[data-turnstile-mount]');
     if (!container) {
       container = document.createElement('div');
@@ -240,11 +296,12 @@ function acquireTurnstileToken(
     }
     const id = api.render(container, {
       sitekey,
-      size: 'invisible',
-      callback: (token: string) => resolve(token),
-      'error-callback': () => reject(new Error('turnstile_error')),
-      'expired-callback': () => reject(new Error('turnstile_expired')),
+      execution: 'execute',
+      callback: (token: string) => settleTurnstile({ token }),
+      'error-callback': () => settleTurnstile({ error: new Error('turnstile_error') }),
+      'expired-callback': () => settleTurnstile({ error: new Error('turnstile_expired') }),
     });
+    turnstileWidget = { id, container };
     onWidget(id);
     api.execute(id);
   });
@@ -360,7 +417,7 @@ function handleScoreResponse(
     case 'sandbox_stub_until_u6':
       renderInlineError(
         els.statusEl,
-        'Live scoring is still rolling out for this input shape. Run anc locally for the full check.',
+        'Live scoring is still rolling out for this input shape. Run anc locally for the full audit.',
       );
       return;
     case 'non_github_host':
@@ -550,7 +607,7 @@ function renderCuratedReward(statusEl: HTMLParagraphElement, message: string): v
  *   - Queued (until t=900 ms)
  *   - Resolving install path (until t=2.5 s)
  *   - Installing in sandbox (until t=18 s)
- *   - Running anc check (until response)
+ *   - Running anc audit (until response)
  *
  * Cancelling the cycle when the response arrives keeps the user from
  * ever seeing a phase that's obviously past the work. No CSS animation,
@@ -561,7 +618,7 @@ function startPhaseProgression(statusEl: HTMLParagraphElement): PhaseTimer {
   const schedule: { atMs: number; text: string }[] = [
     { atMs: 900, text: 'Resolving install path…' },
     { atMs: 2500, text: 'Installing in sandbox…' },
-    { atMs: 18000, text: 'Running anc check…' },
+    { atMs: 18000, text: 'Running anc audit…' },
   ];
   const handles: number[] = [];
   for (const phase of schedule) {

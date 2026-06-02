@@ -8,17 +8,26 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
-import { PRINCIPLE_GROUPS } from './util.mjs';
+import { computePrincipleScore as sharedComputePrincipleScore } from '../shared/scorecard-format.mjs';
+
+// Re-exported from shared so the Worker live-score renderer reads from
+// the same implementation. Public surface unchanged for existing callers.
+export const computePrincipleScore = sharedComputePrincipleScore;
 
 const TOOL_NAME_RE = /^[a-z0-9-]+$/;
 
-// Schema version every committed scorecard must declare. The site reads
-// derived fields directly from `scorecard.badge.{score_pct, eligible,
-// embed_markdown}` and assumes their presence. Bumping this constant
-// without regenerating the corpus will fail the build at load. Bump
-// SUPPORTED_SCHEMA_VERSION + run `bash docker/score/build.sh --run` +
-// trash any superseded older-version files in a single PR.
-const SUPPORTED_SCHEMA_VERSION = '0.5';
+// Schema versions a committed scorecard may declare. The site reads derived
+// fields directly from `scorecard.badge.{score_pct, eligible, embed_markdown}`
+// and assumes their presence; 0.6 adds the 7-status taxonomy (opt_out / n_a)
+// and per-row results, both of which render additively over the 0.5 path;
+// 0.7 renames the per-row `check_id` field to `audit_id` (renderer ignores
+// either; the rename is invisible to rendering). The set is intentionally
+// plural across the migration window: the published anc v0.5.0 emits 0.7
+// scorecards via docker/score, while pre-rescore artifacts may still sit at
+// 0.5 or 0.6 until they are regenerated. Drop older versions once the full
+// rescore corpus stabilizes. Adding a version here without a corpus able to
+// satisfy it still fails the build at load.
+const SUPPORTED_SCHEMA_VERSIONS = new Set(['0.5', '0.6', '0.7']);
 
 // Mirrors `ExceptionCategory::to_kebab_str()` in
 // agentnative/src/principles/registry.rs (CLI v0.1.3). Adding a new variant
@@ -226,15 +235,15 @@ export async function loadScoredTools(scorecardsDir, registry) {
 
     const raw = await readFile(join(scorecardsDir, filename), 'utf8');
     const scorecard = JSON.parse(raw);
-    // Schema invariant: every committed scorecard must be at the supported version.
+    // Schema invariant: every committed scorecard must declare a supported version.
     // Non-conforming corpus → fail the build immediately rather than silently render
-    // wrong data via a synthesized fallback. Bump SUPPORTED_SCHEMA_VERSION + regen
-    // the full corpus together (`bash docker/score/build.sh --run`); never one without
-    // the other.
-    if (scorecard.schema_version !== SUPPORTED_SCHEMA_VERSION) {
+    // wrong data via a synthesized fallback. Regenerate the full corpus together
+    // (`bash docker/score/build.sh --run`); never leave a mixed corpus drifting
+    // outside the supported set.
+    if (!SUPPORTED_SCHEMA_VERSIONS.has(scorecard.schema_version)) {
       throw new Error(
         `${filename}: schema_version "${scorecard.schema_version}" not supported. ` +
-          `Site requires schema ${SUPPORTED_SCHEMA_VERSION}. Regenerate via ` +
+          `Site supports schema ${[...SUPPORTED_SCHEMA_VERSIONS].join(', ')}. Regenerate via ` +
           `\`bash docker/score/build.sh --run\` then trash any superseded older-version files.`,
       );
     }
@@ -372,34 +381,6 @@ export async function runScorecardInvariants(scorecardsDir, registry) {
 // -------------------------------------------------------------------
 // Scoring
 // -------------------------------------------------------------------
-
-/**
- * Map P1–P7 groups to pass/partial/fail and return "N/7 principles met".
- * CodeQuality and ProjectStructure are excluded from the N/7 count.
- *
- * @param {object | null} scorecard
- * @returns {{ met: number, total: 7, details: Array<{ group: string, status: string }> }}
- */
-export function computePrincipleScore(scorecard) {
-  if (!scorecard) return { met: 0, total: 7, details: [] };
-
-  const details = [];
-  for (const group of PRINCIPLE_GROUPS) {
-    const checks = scorecard.results.filter((r) => r.group === group);
-    if (checks.length === 0) {
-      details.push({ group, status: 'skip' });
-      continue;
-    }
-    const hasFail = checks.some((r) => r.status === 'fail');
-    const hasWarn = checks.some((r) => r.status === 'warn');
-    if (hasFail) details.push({ group, status: 'fail' });
-    else if (hasWarn) details.push({ group, status: 'partial' });
-    else details.push({ group, status: 'pass' });
-  }
-
-  const met = details.filter((d) => d.status === 'pass').length;
-  return { met, total: 7, details };
-}
 
 /**
  * Compute layer scores: primary (behavioral + project) vs source.

@@ -95,18 +95,20 @@
 import type { Container } from '@cloudflare/containers';
 import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
-import { CHECKER_URL, SPEC_VERSION } from '../spec-version.gen';
+import { AUDITOR_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import * as cache from './cache';
 import type { ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
 import {
+  _resetRegistryIndexCache,
   type DiscoveryHintsIndex,
   deriveShareBinary,
+  deriveShareBinaryFromSpec,
+  loadRegistryIndex,
   lookupRegistry,
   lookupScorecard,
-  type RegistryIndex,
 } from './registry-lookup';
 import { resolveSpec } from './resolve-spec';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
@@ -153,28 +155,16 @@ export interface RateLimit {
 }
 
 // ---------------------------------------------------------------------------
-// Registry / hints index loading. Cached at module scope across invocations
-// in the same isolate (Workers re-instantiate isolates frequently, so this
-// is bounded and recovers from build-deploy drift within seconds).
+// Hints index loading. Registry-index loading lives in registry-lookup.ts
+// so /api/score and /score/live/<binary> share one isolate-level cache.
 // ---------------------------------------------------------------------------
 
-let registryIndexPromise: Promise<RegistryIndex> | null = null;
 let hintsIndexPromise: Promise<DiscoveryHintsIndex> | null = null;
 
 async function fetchAssetJson<T>(env: ScoreEnv, path: string): Promise<T> {
   const res = await env.ASSETS.fetch(new Request(`https://assets.internal${path}`));
   if (!res.ok) throw new Error(`asset fetch failed: ${path} (status ${res.status})`);
   return (await res.json()) as T;
-}
-
-function loadRegistryIndex(env: ScoreEnv): Promise<RegistryIndex> {
-  if (!registryIndexPromise) {
-    registryIndexPromise = fetchAssetJson<RegistryIndex>(env, '/registry-index.json').catch((err) => {
-      registryIndexPromise = null;
-      throw err;
-    });
-  }
-  return registryIndexPromise;
 }
 
 function loadHintsIndex(env: ScoreEnv): Promise<DiscoveryHintsIndex> {
@@ -189,7 +179,7 @@ function loadHintsIndex(env: ScoreEnv): Promise<DiscoveryHintsIndex> {
 
 /** Test-only — drop in-memory index caches. */
 export function _resetIndexCache(): void {
-  registryIndexPromise = null;
+  _resetRegistryIndexCache();
   hintsIndexPromise = null;
 }
 
@@ -201,7 +191,7 @@ export function _resetIndexCache(): void {
 // flags so operators can later query "what percentage of cache hits came
 // from pre vs post discovery?" via the observability binding. NOT exposed
 // in the response body — operational signal, not part of the
-// spec_version + anc_version + checker_url response contract.
+// spec_version + anc_version + auditor_url response contract.
 //
 // `tier` records the resolution branch that produced the response:
 //   - `curated`     — registry-fast-path hit
@@ -229,7 +219,7 @@ type Telemetry = {
   freshness: FreshnessTag | null;
   resolved_step: ResolvedStep | 'registry' | null;
   install_ms: number | null;
-  anc_check_ms: number | null;
+  anc_audit_ms: number | null;
 };
 
 function newTelemetry(): Telemetry {
@@ -245,7 +235,7 @@ function newTelemetry(): Telemetry {
     freshness: null,
     resolved_step: null,
     install_ms: null,
-    anc_check_ms: null,
+    anc_audit_ms: null,
   };
 }
 
@@ -283,7 +273,7 @@ function buildScoreEventFields(t: Telemetry, totalMs: number, status: number): S
     resolved_step: t.resolved_step,
     total_ms: totalMs,
     install_ms: t.install_ms,
-    anc_check_ms: t.anc_check_ms,
+    anc_audit_ms: t.anc_audit_ms,
     response_status: status,
     tool: t.binary,
   };
@@ -666,7 +656,10 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
       telemetry.cache_post_hit = true;
       telemetry.tier = 'cache_post';
       telemetry.freshness = 'cache-hit';
-      const shareUrl = shareUrlForInput(validated, hintsIndex);
+      // Post-discovery share URL — derives from the resolved spec.binary
+      // (same key the DO wrote the cache under), so github-url inputs
+      // without an upfront hint still get a shareable result page.
+      const shareUrl = shareUrlForSpec(spec);
       return shapeWithPreference(
         shapeScoreSuccess(cached.scorecard, cached.anc_version, 'cache-hit', shareUrl),
         preference,
@@ -760,8 +753,13 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
     telemetry.tier = 'live';
     telemetry.freshness = 'live';
     telemetry.install_ms = typeof doPayload.install_ms === 'number' ? doPayload.install_ms : null;
-    telemetry.anc_check_ms = typeof doPayload.anc_check_ms === 'number' ? doPayload.anc_check_ms : null;
-    const shareUrl = shareUrlForInput(validated, hintsIndex);
+    telemetry.anc_audit_ms = typeof doPayload.anc_audit_ms === 'number' ? doPayload.anc_audit_ms : null;
+    // Post-discovery share URL — same derivation as the cache_post tier:
+    // spec.binary IS the cache key the DO just wrote under, so the share
+    // URL and the R2 entry stay in lockstep. github-url-without-hint
+    // inputs that previously returned no share_url now get one as soon
+    // as discovery resolved a slug-shaped binary.
+    const shareUrl = shareUrlForSpec(spec);
     return shapeWithPreference(
       shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live', shareUrl),
       preference,
@@ -771,7 +769,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
 
   // DO returned 2xx but with an unrecognized envelope shape. Fail loud
   // rather than synthesize a partial success — better an honest 500
-  // than a response missing the spec_version / anc_version / checker_url
+  // than a response missing the spec_version / anc_version / auditor_url
   // triad.
   telemetry.tier = 'error_incomplete_response_contract';
   return shapeWithPreference(
@@ -865,7 +863,7 @@ function markdownHeaders(base: Headers): Headers {
 function renderJsonAsMarkdown(payload: Record<string, unknown>): string {
   const triad = [
     `**spec_version:** ${String(payload.spec_version ?? 'unknown')}`,
-    `**checker_url:** ${String(payload.checker_url ?? CHECKER_URL)}`,
+    `**auditor_url:** ${String(payload.auditor_url ?? AUDITOR_URL)}`,
   ];
   if (payload.error) {
     const err = payload.error as { code: string; details?: string; cta_text?: string };
@@ -912,13 +910,13 @@ function isStubError(payload: unknown): boolean {
 //
 // The handler narrows on the envelope shape, then maps DO error codes to
 // user-facing ScoreError variants. Codes the DO knows about but the user
-// envelope doesn't (anc_check_failed, anc_version_unreadable) collapse to
+// envelope doesn't (anc_audit_failed, anc_version_unreadable) collapse to
 // incomplete_response_contract so the hard-gate semantics on the
 // response triad hold.
 
 function isDoSuccess(
   payload: unknown,
-): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_check_ms?: number } {
+): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_audit_ms?: number } {
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return 'scorecard' in obj && typeof obj.anc_version === 'string';
@@ -994,10 +992,10 @@ function mapDoError(payload: { error: string; details?: string }): Response {
     case 'timeout':
       // DO doesn't differentiate install-phase vs score-phase timeout
       // (the 60 s budget covers both). Defaulting to 'score' matches the
-      // common case: install completes quickly, anc check is the long pole.
+      // common case: install completes quickly, anc audit is the long pole.
       return shapeScoreError({ code: 'timeout', phase: 'score', cta_text: CTA_INSTALL_ANC });
     default:
-      // anc_check_failed / anc_version_unreadable / setOutboundHandler
+      // anc_audit_failed / anc_version_unreadable / setOutboundHandler
       // failures land here. If we can't deliver scorecard + anc_version,
       // surface the contract gap loudly rather than synthesize a partial:
       // a missing-field response shape would leak into the cache and
@@ -1049,19 +1047,37 @@ async function sha256(input: string): Promise<string> {
 }
 
 /**
- * Build the shareable HTML URL for an inline-scorecard response. Reads the
- * cache-tier binary derivation from registry-lookup so the share URL and
- * the cache key the DO writes to stay in lockstep. The `/score/live/`
+ * Build the shareable HTML URL for an inline-scorecard response BEFORE
+ * discovery has run. Used by the pre-discovery cache-hit branch (step 2,
+ * `lookup.kind === 'cached'`), where only the input-derived binary
+ * (install-command spec or hinted github-url) is known. The `/score/live/`
  * prefix nests under the existing `/score/<tool>` curated namespace; the
  * string "live" is reserved in the registry (scorecards.mjs) so no
  * curated tool can collide.
  *
- * Returns null when the binary isn't derivable upfront (github-url without
- * a hint). In that case the JSON response ships without `share_url`; the
- * user still has the scorecard inline and can re-paste to re-score.
+ * Returns null for github-url-without-hint inputs (no upfront binary;
+ * `shareUrlForSpec` handles those after discovery) and for branch-scoped
+ * pastes (no shareable surface by design).
  */
 function shareUrlForInput(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
   const binary = deriveShareBinary(input, hintsIndex);
+  return binary ? `/score/live/${binary}` : null;
+}
+
+/**
+ * Build the shareable HTML URL once discovery has resolved an `InstallSpec`.
+ * Used by the post-discovery cache-hit branch (step 6.5) and the live-success
+ * branch (DO returned a scorecard) so github-url-without-hint inputs still
+ * get a `share_url` keyed by the discovered binary. The derivation uses the
+ * same value the DO writes the R2 cache under, so the share URL and the
+ * /score/live/<binary> read path stay in lockstep.
+ *
+ * Returns null for branch-scoped (git-clone) specs and for any binary that
+ * fails the public slug regex — see `deriveShareBinaryFromSpec` for the
+ * rationale.
+ */
+function shareUrlForSpec(spec: import('./discover-binary').InstallSpec): string | null {
+  const binary = deriveShareBinaryFromSpec(spec);
   return binary ? `/score/live/${binary}` : null;
 }
 

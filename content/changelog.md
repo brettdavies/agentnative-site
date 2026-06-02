@@ -7,7 +7,7 @@ without shifting requirements. See [Versioning](/about) for the full policy.
 ## Unreleased
 
 Initial publication of the standard. Seven principles (P1 through P7) defining agent-native CLI behavior, enforced
-by RFC 2119 requirement tiers. Companion linter [`agentnative`](/check) scores any CLI against them.
+by RFC 2119 requirement tiers. Companion linter [`agentnative`](/audit) scores any CLI against them.
 
 - P1: Non-Interactive by Default
 - P2: Structured, Parseable Output

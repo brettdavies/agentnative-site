@@ -7,11 +7,10 @@ Channel-specific product + design context for the **site channel** of agentnativ
 
 The site channel sits in a three-tier waterfall. Each tier owns a different concern; nothing duplicates.
 
-1. **Universal: [`BRAND.md`](BRAND.md).** Shared identity, voice anchor, audiences, universal anti-patterns. Vendored
-   from [`agentnative-spec/BRAND.md`](https://github.com/brettdavies/agentnative/blob/main/BRAND.md) alongside the
-   prose-check stack via [`scripts/sync-prose-tooling.sh`](scripts/sync-prose-tooling.sh) (re-run after any
-   agentnative-spec release that touches the universal voice). Applies across every channel (spec, site, linter, skill
-   bundle). Read that first.
+1. **Universal: [`BRAND.md`](BRAND.md).** Shared identity, voice anchor, audiences, universal anti-patterns. The
+   authoritative copy lives in [`agentnative-spec`](https://github.com/brettdavies/agentnative/blob/main/BRAND.md); a
+   vendored mirror sits on this repo's `dev` branch. Applies across every channel (spec, site, linter, skill bundle).
+   Read that first.
 2. **Channel delta — this file (`PRODUCT.md`).** What the site channel adds, narrows, or overrides on top of `BRAND.md`.
    Audience narrowing, channel-specific bans, the markdown-source-of-truth principle, the tech stack and scope
    decisions.
@@ -101,7 +100,7 @@ Site-specific surface registers (1a homepage lede vs 1b principle page, 2 task p
 - **Stack (decided).** Static site generation; plain HTML from markdown via a 200-line Node build; Cloudflare Worker (80
   lines) for routing, `Accept: text/markdown`, `.md` URL suffix, `Link` and `X-Llms-Txt` response headers, and
   `X-Robots-Tag: noindex` on the markdown variant. See `DESIGN.md` §3.
-- **Scope (decided).** Index plus 7 principle anchors on one page, plus `/check` and `/about`. Nine surfaces total.
+- **Scope (decided).** Index plus 7 principle anchors on one page, plus `/audit` and `/about`. Nine surfaces total.
   `DESIGN.md` §3.1 locks SSG as non-negotiable.
 - **Accessibility.** WCAG 2.1 AA and APCA Lc ≥ 60 body minimum both pass in both modes, verified in
   `docs/research/design/color-analysis.md`. Smaller sizes or lower-contrast weights MUST be re-checked on any typography

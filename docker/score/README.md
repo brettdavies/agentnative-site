@@ -1,6 +1,6 @@
 # anc100 batch-scoring image
 
-Pre-bakes every tool from `registry.yaml`, then runs `anc check` against each to write
+Pre-bakes every tool from `registry.yaml`, then runs `anc audit` against each to write
 `scorecards/<name>-v<version>.json` back to the host repo. Used to populate the `/scorecards` leaderboard for launch.
 
 ## Layout
@@ -107,7 +107,7 @@ The runner classifies each registry entry as one of:
 - **install-missing**: install command at build time exited zero but the expected `binary` is not in PATH (or installed
   cleanly but only as a library, etc.). No scorecard written; the leaderboard renders the registry's existing fallback
   row ("not yet scored").
-- **score-failed**: binary present, but `anc check` produced invalid JSON or exited >1 (real error, not the standard
+- **score-failed**: binary present, but `anc audit` produced invalid JSON or exited >1 (real error, not the standard
   "checks failed" exit 1). No scorecard written; entry logged in `/work/scoring-failures.txt`.
 - **skipped**: install method outside the allowed set (e.g., the `included` value used for `nvidia-smi`'s "comes with
   the driver"). The runner records and moves on.

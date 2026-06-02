@@ -9,7 +9,7 @@
 //   5. Copy each principle's markdown source byte-for-byte.
 //   6. Build homepage — hero (title + lede) + principle listing (links to
 //      /p{N} pages). No inline principle content on the index page.
-//   7. Render check.md + about.md into sub-pages.
+//   7. Render audit.md + about.md into sub-pages.
 //   8. Scorecard pages — leaderboard + per-tool pages from registry.yaml
 //      + scorecards/*.json.
 //   9. Emit llms.txt + llms-full.txt.
@@ -48,7 +48,7 @@ const REGISTRY_PATH = join(REPO_ROOT, 'registry.yaml');
 const HINTS_PATH = join(REPO_ROOT, 'discovery-hints.yaml');
 const SCORECARDS_DIR = join(REPO_ROOT, 'scorecards');
 const COVERAGE_MATRIX_PATH = join(REPO_ROOT, 'src', 'data', 'coverage-matrix.json');
-const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill.json');
+const SKILL_DATA_PATH = join(REPO_ROOT, 'src', 'data', 'skill', 'skill.json');
 
 const LOCKED_SLUGS = [
   'p1-non-interactive-by-default',
@@ -117,7 +117,7 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
   // gains the live-scoring form; the markdown twin MUST NOT carry any of
   // that surface (no form markup, no JS reference, no Turnstile mention,
   // no /api/score documentation). Agents pasting `Accept: text/markdown`
-  // against `/` are expected to use `anc check` locally; the form is
+  // against `/` are expected to use `anc audit` locally; the form is
   // HTML-only by design. A future copy edit that leaks any of these
   // tokens into the homepage markdown fails the build here.
   const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');

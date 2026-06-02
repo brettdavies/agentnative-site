@@ -9,7 +9,7 @@
 //
 //   (b) Two-phase egress order: setOutboundHandler('allowedInstall', ...)
 //       fires BEFORE exec(installCmd), AND setOutboundHandler('noHttp')
-//       fires BEFORE exec('anc check ...'). Asserted via a call log on a
+//       fires BEFORE exec('anc audit ...'). Asserted via a call log on a
 //       hand-rolled Container-like stub. This is the load-bearing
 //       security invariant for R7.
 //
@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { handlers, Sandbox } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // ---------------------------------------------------------------------------
 // Stub Sandbox — records every setOutboundHandler + exec call.
@@ -50,8 +51,8 @@ function makeStub(responder: ExecResponder = defaultResponder): { stub: Containe
 }
 
 const ANC_CHECK_OK = JSON.stringify({
-  spec_version: '0.4.0',
-  anc_version: '0.3.1',
+  spec_version: SPEC_VERSION,
+  anc_version: ANC_VERSION,
   tool: { name: 'ripgrep', version: '14.1.0' },
   score: { value: 87 },
 });
@@ -61,9 +62,9 @@ function defaultResponder(command: string): ExecLike {
     return { success: true, stdout: '/usr/local/bin/rg\n', stderr: '' };
   }
   if (command === 'anc --version') {
-    return { success: true, stdout: 'anc 0.3.1\n', stderr: '' };
+    return { success: true, stdout: `anc ${ANC_VERSION}\n`, stderr: '' };
   }
-  if (command.startsWith('anc check ')) {
+  if (command.startsWith('anc audit ')) {
     return { success: true, stdout: ANC_CHECK_OK, stderr: '' };
   }
   // install command — default success
@@ -109,13 +110,13 @@ describe('sandbox-exec.score() — two-phase egress ordering (test scenario b)',
     expect(installExec).toBeGreaterThan(phase1);
   });
 
-  test("setOutboundHandler('noHttp') fires BEFORE exec('anc check ...')", async () => {
+  test("setOutboundHandler('noHttp') fires BEFORE exec('anc audit ...')", async () => {
     const { stub, calls } = makeStub();
     await score(stub, CARGO_SPEC);
     const phase2 = calls.findIndex((c) => c.kind === 'setOutboundHandler' && c.name === 'noHttp');
-    const ancCheckExec = calls.findIndex((c) => c.kind === 'exec' && c.command.startsWith('anc check '));
+    const ancAuditExec = calls.findIndex((c) => c.kind === 'exec' && c.command.startsWith('anc audit '));
     expect(phase2).toBeGreaterThanOrEqual(0);
-    expect(ancCheckExec).toBeGreaterThan(phase2);
+    expect(ancAuditExec).toBeGreaterThan(phase2);
   });
 
   test('Phase 1 setOutboundHandler carries the install host allowlist via params', async () => {
@@ -140,13 +141,13 @@ describe('sandbox-exec.score() — two-phase egress ordering (test scenario b)',
     const { stub, calls } = makeStub();
     await score(stub, CARGO_SPEC);
     const phase2Idx = calls.findIndex((c) => c.kind === 'setOutboundHandler' && c.name === 'noHttp');
-    // After noHttp swap, the only execs should be `anc --version` and `anc check ...`
+    // After noHttp swap, the only execs should be `anc --version` and `anc audit ...`
     const afterPhase2 = calls.slice(phase2Idx + 1).filter((c) => c.kind === 'exec') as Array<
       Extract<Call, { kind: 'exec' }>
     >;
     for (const exec of afterPhase2) {
       expect(
-        exec.command === 'anc --version' || exec.command.startsWith('anc check '),
+        exec.command === 'anc --version' || exec.command.startsWith('anc audit '),
         `unexpected exec under noHttp egress: ${exec.command}`,
       ).toBe(true);
     }
@@ -315,24 +316,24 @@ describe('sandbox-exec.score() — happy path', () => {
     const result = await score(stub, CARGO_SPEC);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.anc_version).toBe('0.3.1');
+    expect(result.value.anc_version).toBe(ANC_VERSION);
     expect(result.value.scorecard).toMatchObject({ tool: { name: 'ripgrep' } });
   });
 
   test('audit_profile from registry passes through as --audit-profile flag', async () => {
     const { stub, calls } = makeStub();
     await score(stub, { ...CARGO_SPEC, audit_profile: 'cli-tool' } as InstallSpec & { audit_profile: string });
-    const ancCheck = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc check '));
-    expect(ancCheck).toBeDefined();
-    expect((ancCheck as Extract<Call, { kind: 'exec' }>).command).toContain("--audit-profile 'cli-tool'");
+    const ancAudit = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc audit '));
+    expect(ancAudit).toBeDefined();
+    expect((ancAudit as Extract<Call, { kind: 'exec' }>).command).toContain("--audit-profile 'cli-tool'");
   });
 
-  test('no audit_profile → anc check invoked WITHOUT --audit-profile flag', async () => {
+  test('no audit_profile → anc audit invoked WITHOUT --audit-profile flag', async () => {
     const { stub, calls } = makeStub();
     await score(stub, CARGO_SPEC);
-    const ancCheck = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc check '));
-    expect(ancCheck).toBeDefined();
-    expect((ancCheck as Extract<Call, { kind: 'exec' }>).command).not.toContain('--audit-profile');
+    const ancAudit = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc audit '));
+    expect(ancAudit).toBeDefined();
+    expect((ancAudit as Extract<Call, { kind: 'exec' }>).command).not.toContain('--audit-profile');
   });
 });
 
@@ -516,7 +517,7 @@ describe('sandbox-exec.score() — install table per PM', () => {
           c.kind === 'exec' &&
           !c.command.startsWith('which ') &&
           c.command !== 'anc --version' &&
-          !c.command.startsWith('anc check '),
+          !c.command.startsWith('anc audit '),
       ) as Array<Extract<Call, { kind: 'exec' }>>;
       expect(installCmds).toHaveLength(1);
       expect(installCmds[0].command).toBe(expected);
@@ -688,9 +689,9 @@ describe('sandbox-exec.score() — bounce classes', () => {
     expect(result.details).toBe('garbage');
   });
 
-  test('anc check returns non-JSON → anc_check_failed', async () => {
+  test('anc audit returns non-JSON → anc_audit_failed', async () => {
     const responder: ExecResponder = (cmd) => {
-      if (cmd.startsWith('anc check ')) {
+      if (cmd.startsWith('anc audit ')) {
         return { success: true, stdout: 'definitely not json', stderr: '' };
       }
       return defaultResponder(cmd);
@@ -699,15 +700,15 @@ describe('sandbox-exec.score() — bounce classes', () => {
     const result = await score(stub, CARGO_SPEC);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toBe('anc_check_failed');
+    expect(result.error).toBe('anc_audit_failed');
   });
 
-  test('anc check non-zero but valid JSON envelope → still returns scorecard', async () => {
+  test('anc audit non-zero but valid JSON envelope → still returns scorecard', async () => {
     // anc emits structured envelopes on stderr-exit when checks produce
     // findings; the orchestration treats a parseable envelope as the
     // authoritative response regardless of exit code.
     const responder: ExecResponder = (cmd) => {
-      if (cmd.startsWith('anc check ')) {
+      if (cmd.startsWith('anc audit ')) {
         return { success: false, stdout: ANC_CHECK_OK, stderr: '', exitCode: 1 };
       }
       return defaultResponder(cmd);
@@ -739,8 +740,7 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
   // ago. Date computed at exec time via shell substitution so a long-
   // running image doesn't widen the gate. pip v26.0+ honors the env
   // var; older pip versions ignore it (no-op). The companion uv gate
-  // (UV_EXCLUDE_NEWER) is asserted at the image layer in
-  // tests/dockerfile-sandbox.test.ts.
+  // (UV_EXCLUDE_NEWER) lives at the image layer.
 
   test('pip install command prepends PIP_UPLOADED_PRIOR_TO with a 7-day shell-computed date', async () => {
     const { stub, calls } = makeStub();
@@ -795,8 +795,7 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     // quiet at the OS level, but the currently-deployed image predates
     // that change. Prepending the env var inline at exec time gives
     // the currently-deployed sandbox the suppression immediately,
-    // without a rebuild. The companion image-level test lives in
-    // tests/dockerfile-sandbox.test.ts.
+    // without a rebuild.
     const { stub, calls } = makeStub();
     await score(stub, { pm: 'pip', package: 'black', binary: 'black' });
     const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
@@ -908,7 +907,7 @@ describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
   // run; the container then echoes `DETECTED_BINARY=<name>` to stdout
   // and runScore() overrides spec.binary before the `which` gate. These
   // tests stub the container, return a canned auto-detect result, and
-  // assert the `which` + `anc check` calls reference the detected name.
+  // assert the `which` + `anc audit` calls reference the detected name.
 
   test('archive auto-detect picks gog when repo=gogcli (the gogcli/openclaw fix)', async () => {
     // gogcli/openclaw case: GitHub Releases ships a `gog` binary, but
@@ -938,7 +937,7 @@ describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
       | Extract<Call, { kind: 'exec' }>
       | undefined;
     expect(whichCall?.command).toBe("which 'gog'");
-    const ancCall = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc check ')) as
+    const ancCall = calls.find((c) => c.kind === 'exec' && c.command.startsWith('anc audit ')) as
       | Extract<Call, { kind: 'exec' }>
       | undefined;
     expect(ancCall?.command).toContain("--command 'gog'");
@@ -962,7 +961,7 @@ describe('sandbox-exec.score() — direct-install auto-detect (Fix 1)', () => {
     // Defense in depth: the install command's own filter rejects
     // path-traversal candidates upstream. The extractDetectedBinary
     // parser whitelists [A-Za-z0-9._-] so any smuggled bytes (e.g.
-    // `gog; rm -rf /`) don't reach the shell-quoted `anc check
+    // `gog; rm -rf /`) don't reach the shell-quoted `anc audit
     // --command <binary>` slot.
     const responder: ExecResponder = (cmd) => {
       if (cmd.startsWith('(') && cmd.includes('GATE:download')) {

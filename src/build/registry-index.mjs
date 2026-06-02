@@ -41,7 +41,7 @@ function projectRegistryEntry(tool, enrichment) {
   if (tool.repo) out.repo = tool.repo;
   // The registry-fast-path response carries the latest scorecard's
   // version + anc_version + URL so the Worker can build the response
-  // triad (spec_version + anc_version + checker_url) and route the user
+  // triad (spec_version + anc_version + auditor_url) and route the user
   // to /score/<slug> without fetching the scorecard JSON. Also carry
   // score_pct so the registry_hit envelope can show a "Curated - N% pass
   // rate" reward inline on the homepage form without a second round-trip.
