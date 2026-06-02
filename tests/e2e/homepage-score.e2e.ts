@@ -582,6 +582,18 @@ test.describe('/live-score URL canonicalization', () => {
     expect(res.status()).toBe(404);
     expect(res.headers()['content-type']).toContain('text/markdown');
   });
+
+  test('/score/live/<curated-binary> → 301 to /score/<curated-binary>', async ({ request }) => {
+    const res = await request.get('/score/live/ripgrep', { maxRedirects: 0 });
+    expect(res.status()).toBe(301);
+    expect(res.headers().location).toBe('/score/ripgrep');
+  });
+
+  test('/score/live/<curated-binary>.md → 301 to /score/<curated-binary>.md', async ({ request }) => {
+    const res = await request.get('/score/live/ripgrep.md', { maxRedirects: 0 });
+    expect(res.status()).toBe(301);
+    expect(res.headers().location).toBe('/score/ripgrep.md');
+  });
 });
 
 test.describe('homepage live-scoring — red-team', () => {
