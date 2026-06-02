@@ -75,6 +75,7 @@ argv
 atuin
 audit_profile
 bandwhich
+boolean
 breakpoint
 brightline
 broot
@@ -250,3 +251,4 @@ sdist
 siteverify
 uncached
 unmetered
+rollout
