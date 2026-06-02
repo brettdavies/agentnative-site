@@ -7,31 +7,31 @@ why, and what to do next. An error that says "operation failed" gives an agent n
 
 ## Why Agents Need It
 
-Agents operate in a retry loop: attempt, observe, decide. When an error is vague or unstructured — a bare stack trace, a
-one-word failure, a mixed-channel splurge — the agent cannot tell whether to retry, re-authenticate, fix configuration,
-or escalate to the user. Distinct exit codes — when paired with this standard's published mapping — let the agent act
-correctly without parsing message text. The difference between exit code 77 (re-authenticate) and exit code 78 (fix
-config) determines whether the agent retries OAuth or asks the user to check their config file. Getting that wrong
-wastes entire conversation turns.
+Agents operate in a retry loop: attempt, observe, decide. When an error is vague or unstructured (a bare stack trace, a
+one-word failure, a mixed-channel splurge), the agent cannot tell whether to retry, re-authenticate, fix configuration,
+or escalate to the user. Distinct exit codes paired with this standard's published mapping let the agent act correctly
+on the first read. The difference between exit code 77 (re-authenticate) and exit code 78 (fix config) determines
+whether the agent retries OAuth or asks the user to check their config file. Getting that wrong wastes entire
+conversation turns.
 
-Codes 77 and 78 follow BSD `sysexits.h` (`EX_NOPERM`, `EX_CONFIG`); most CLIs today do not distinguish auth from config
-errors at the exit-code layer — this standard adopts `sysexits.h` numbering so agents can disambiguate.
+Codes 77 and 78 follow BSD `sysexits.h` (`EX_NOPERM`, `EX_CONFIG`). Most CLIs today do not distinguish auth from config
+errors at the exit-code layer; this standard adopts `sysexits.h` numbering so agents can disambiguate.
 
 ## Requirements
 
 **MUST:**
 
 - Parse arguments with `try_parse()` instead of `parse()`. Clap's `parse()` calls `process::exit()` directly, bypassing
-  custom error handlers — which means `--output json` cannot emit JSON parse errors. `try_parse()` returns a `Result`
-  the tool can format:
+  custom error handlers, which means `--output json` cannot emit JSON parse errors. `try_parse()` returns a `Result` the
+  tool can format:
 
   ```rust
   let cli = Cli::try_parse()?;
   ```
 
-- Error types map to distinct exit codes — at minimum: `0` (success), `1` (general command error), `2` (usage / argument
-  error), `77` (auth / permission error), `78` (configuration error).
-- Every error message names **the failure**, **the cause**, and **a concrete remediation** — a command to run or a value
+- Error types map to distinct exit codes. Use 77 when the CLI has an auth surface and 78 when it has a config surface; 0
+  (success), 1 (general command error), and 2 (usage / argument error) are universal.
+- Every error message names **the failure**, **the cause**, and **a concrete remediation**: a command to run or a value
   to set, not a hint to consult documentation. Example:
 
   ```text
@@ -48,7 +48,7 @@ errors at the exit-code layer — this standard adopts `sysexits.h` numbering so
 - Error output respects `--output json`: JSON-formatted errors go to stderr when JSON output is selected, consistent
   with [P2](/p2)'s stream discipline (stdout for data, stderr for diagnostics).
 - *(Applies when: rejecting input against an enum or a fixed-allowed-values set.)* The error message includes the valid
-  set. `unknown command 'lst' (valid: list, get, create, update, delete)` is more useful than `unknown command 'lst'` —
+  set. `unknown command 'lst' (valid: list, get, create, update, delete)` is more useful than `unknown command 'lst'`:
   the agent learns the surface from the failure instead of going back to `--help`.
 
 ## Evidence
@@ -62,12 +62,12 @@ errors at the exit-code layer — this standard adopts `sysexits.h` numbering so
 
 ## Anti-Patterns
 
-- `Cli::parse()` anywhere in the codebase — it silently prevents JSON error output.
+- `Cli::parse()` anywhere in the codebase, because it silently prevents JSON error output.
 - `process::exit()` in library code or command handlers. Only `main()` (and signal/panic handlers it installs) may call
   it, after all error handling.
 - A single catch-all error variant that maps everything to exit code 1.
 - Error messages that state the symptom without the cause or fix ("Error: request failed").
 - Panics (`unwrap()`, `expect()`) on recoverable errors in production code paths.
 
-Measured by audit ID `p4-bad-args` today, with `p4-process-exit`, `p4-unwrap`, and `p4-exit-codes` planned. Run `anc
-audit --principle 4 .` against your CLI to see current coverage.
+Measured by audit IDs `p4-bad-args`, `p4-process-exit`, `p4-unwrap`, `p4-exit-codes`. Run `anc audit --principle 4 .`
+against the CLI under test to see each.

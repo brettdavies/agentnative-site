@@ -2,14 +2,14 @@
 
 ## Definition
 
-CLI tools MUST provide mechanisms to control output volume. Agent context windows are finite and expensive — a tool that
+CLI tools MUST provide mechanisms to control output volume. Agent context windows are finite and expensive: a tool that
 dumps tens of thousands of lines of unfiltered output wastes tokens on every request and can exceed smaller context
 windows entirely, breaking the conversation that invoked it. "High-signal" here means the bytes that survive `--quiet`
-are the ones the caller asked for — data and errors — not progress, decoration, or chatter.
+are the ones the caller asked for (data and errors), not progress, decoration, or chatter.
 
 ## Why Agents Need It
 
-Unbounded CLI output is expensive for any agent — token cost and context-window capacity for LLM agents, parse cost and
+Unbounded CLI output is expensive for any agent: token cost and context-window capacity for LLM agents, parse cost and
 memory pressure for scripts, schedulers, and other automation. Either way, the agent ends up truncating (losing
 potentially important data) or consuming the full response (wasting cycles on noise). Bounded output with `--quiet`,
 `--verbose`, and `--limit` flags gives the agent precise control over how much data arrives, keeping responses
@@ -33,7 +33,7 @@ high-signal and inside budget.
 
 - *(Applies when: CLI has list-style commands.)* List operations clamp to a documented default maximum. A `list` without
   `--limit` does not return more than a configurable ceiling (e.g., 100 items), and that ceiling is named in `--help` so
-  callers can plan around it. If more items exist, the output indicates truncation — `"truncated": true` in JSON, a
+  callers can plan around it. If more items exist, the output indicates truncation: `"truncated": true` in JSON, a
   stderr note in text mode.
 
 **SHOULD:**
@@ -60,11 +60,11 @@ high-signal and inside budget.
 
 ## Anti-Patterns
 
-- List commands that return all results with no default limit — an agent listing 50,000 items floods its context window.
-- No `--quiet` flag — agents consuming JSON output still receive interleaved diagnostic text on stderr.
+- List commands that return all results with no default limit: an agent listing 50,000 items floods its context window.
+- No `--quiet` flag: agents consuming JSON output still receive interleaved diagnostic text on stderr.
 - `--verbose` as the only output control. If there is no way to reduce output, bounded responses do not exist.
 - Progress bars or spinners that write to stderr in non-TTY contexts, adding noise to agent logs.
 - No `--timeout` on network operations. A stalled request blocks the agent indefinitely.
 
-Measured by audit ID `p7-quiet` today, with `p7-limit` and `p7-timeout` planned. Run `anc audit --principle 7 .` against
-your CLI to see current coverage.
+Measured by audit IDs `p7-quiet`, `p7-limit`, `p7-timeout`. Run `anc audit --principle 7 .` against the CLI under test
+to see each.
