@@ -883,6 +883,15 @@ tools:
     install: included with Cursor IDE distribution
     description: AI code editor (VS Code fork) with diff/merge/goto CLI launcher
 
+  - name: xai-grok-build
+    url: https://x.ai/cli
+    binary: grok
+    language: Rust
+    tier: agent
+    creator: xAI
+    install: curl -fsSL https://x.ai/cli/install.sh | bash
+    description: xAI's Grok Build TUI — agentic coding CLI for Grok models
+
   # ─────────────────────────────────────────────────────────────────
   # NOTABLE — tools from prominent builders, capped at 3-4 per creator
   # ─────────────────────────────────────────────────────────────────
