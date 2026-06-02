@@ -43,7 +43,7 @@
       // Account ID in the URI is committed deliberately: Wrangler
       // resolves it from auth at push time, so the literal here is the
       // auth-time-generated tag rather than a pre-shared identifier.
-      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:30f61f1",
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:182da1b",
       "instance_type": "basic",
       "max_instances": 3
     }
