@@ -95,7 +95,9 @@ function buildLiveScoreSection() {
         <p id="live-score-help" class="live-score__help">
           or try
           <button type="button" class="live-score__chip" data-live-score-example="ripgrep"><code>ripgrep</code></button>,
-          <button type="button" class="live-score__chip" data-live-score-example="brew install bat"><code>brew install bat</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="cargo binstall ouch"><code>cargo binstall ouch</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="npm install -g cowsay"><code>npm install -g cowsay</code></button>,
+          <button type="button" class="live-score__chip" data-live-score-example="uv tool install rclone"><code>uv tool install rclone</code></button>,
           or
           <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli"><code>github.com/cli/cli</code></button>.
         </p>
