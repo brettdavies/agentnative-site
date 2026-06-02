@@ -545,6 +545,16 @@ test.describe('homepage live-scoring form — CSP + markdown-twin regressions', 
     expect(csp).toMatch(/connect-src[^;]*challenges\.cloudflare\.com/);
   });
 
+  test('CSP header allows CF Web Analytics beacon (script-src + connect-src)', async ({ request }) => {
+    const res = await request.get('/');
+    const csp = res.headers()['content-security-policy'];
+    // Beacon script auto-injected by the CF edge when Web Analytics is
+    // enabled at the zone level; without these the beacon silently drops
+    // every real-user CWV sample.
+    expect(csp).toMatch(/script-src[^;]*static\.cloudflareinsights\.com/);
+    expect(csp).toMatch(/connect-src[^;]*cloudflareinsights\.com/);
+  });
+
   test('/index.md does NOT mention live-score, turnstile, or /api/score', async ({ request }) => {
     const res = await request.get('/index.md');
     expect(res.status()).toBe(200);
