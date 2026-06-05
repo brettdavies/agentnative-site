@@ -645,7 +645,7 @@ markdown twin.
 
 ---
 
-### U3. MCP Worker module — server factory, read-only tools, resources, instructions, visitor log, catalog loader
+### U3. MCP Worker module — server factory, read-only tools, resources, instructions, visitor log, catalog loader [shipped]
 
 **Goal.** The full MCP module under `src/worker/mcp/`, MINUS the `score_cli` tool. Eight tools (`list_tools`,
 `get_tool`, `search_tools`, `list_principles`, `get_principle`, `list_spec_sections`, `get_spec_section`,
