@@ -438,8 +438,8 @@ flowchart TD
 | `list_tools`         | (none)                                                                  | Array of summary records: `slug`, `name`, `binary`, `install`, `version`, `score_pct`, `scorecard_url`, `audit_profile`                                                                                                                                                                                      |
 | `get_tool`           | `slug: string`                                                          | Full registry record by slug                                                                                                                                                                                                                                                                                 |
 | `search_tools`       | `score_min?`, `score_max?`, `audit_profile?`, `principle_min_score?`    | Filtered registry rows; AND semantics; missing fields treated as no constraint                                                                                                                                                                                                                               |
-| `list_principles`    | (none)                                                                  | Array of `{ n, slug, title, level_summary }` for the ten principles                                                                                                                                                                                                                                          |
-| `get_principle`      | `n: 1..10`                                                              | Single principle: `n`, `slug`, `title`, `body_markdown`, list of MUST/SHOULD/MAY requirements with `audit_id`s                                                                                                                                                                                               |
+| `list_principles`    | (none)                                                                  | Array of `{ n, slug, title, level_summary }` for the eight principles                                                                                                                                                                                                                                        |
+| `get_principle`      | `n: 1..8`                                                               | Single principle: `n`, `slug`, `title`, `body_markdown`, list of MUST/SHOULD/MAY requirements with `audit_id`s                                                                                                                                                                                               |
 | `list_spec_sections` | (none)                                                                  | Array of `{ slug, title, level, parent_slug? }` from the vendored spec table of contents at the current `spec_version`                                                                                                                                                                                       |
 | `get_spec_section`   | `slug: string`                                                          | Full section: `slug`, `title`, `body_markdown`, `spec_version`                                                                                                                                                                                                                                               |
 | `get_scorecard`      | `{ binary?, slug?, install?, github_url? }` (ValidatedInput-compatible) | `isError: false` always for cache-state outcomes. Hit: `{ found: true, scorecard, scorecard_url, source: "registry"\|"live-cache", spec_version }`. Miss: `{ found: false, next_tool: "score_cli", message }`                                                                                                |
@@ -599,9 +599,9 @@ existing prose-page pipeline renders it to `dist/mcp-docs.html` + `dist/mcp-docs
 - `registry` is the existing `registry-index.json` rows (already emitted by `08-scorecards-emit.mjs`) projected down to
   the fields the MCP `list_tools` / `get_tool` / `search_tools` tools expose. The projection is the place to drop any
   fields not safe for agent consumption (none identified today; the registry-index is already public).
-- `principles` is the ten principle markdown bodies (`content/principles/*.md`) plus the MUST/SHOULD/MAY rows drawn from
-  the existing coverage-matrix JSON (the coverage matrix stays vendored on-site for agents that want the full row-level
-  detail; MCP exposes the principle-level summary only).
+- `principles` is the eight principle markdown bodies (`content/principles/*.md`) plus the MUST/SHOULD/MAY rows drawn
+  from the existing coverage-matrix JSON (the coverage matrix stays vendored on-site for agents that want the full
+  row-level detail; MCP exposes the principle-level summary only).
 - `spec_sections` is the vendored spec at `src/data/spec/` projected to a table of contents (slug, title, level) plus
   per-section body bodies addressable by slug. The current vendored `VERSION` (0.5.0 at plan time) is captured in
   `catalog.spec_version`.
@@ -632,7 +632,7 @@ non-empty body) before the emit stage code is finalized.
 - Catalog `generated_at` is a valid ISO-8601 Z-suffixed timestamp.
 - Catalog `registry` length matches `dist/registry-index.json` length (no rows dropped).
 - Every catalog `registry` row carries non-empty `slug`, `binary`, `name`, `install`.
-- Catalog `principles` has length 10; principle numbers are exactly `1..10`.
+- Catalog `principles` has length 8; principle numbers are exactly `1..8`.
 - Every catalog `principles` row carries non-empty `slug`, `title`, `body_markdown`.
 - Catalog `spec_sections` is non-empty; every section carries non-empty `slug`, `title`, `body_markdown`.
 - Catalog `spec_version` equals the contents of `src/data/spec/VERSION` (trimmed).
@@ -744,7 +744,7 @@ implemented yet` so the tool count is honest at the handshake; U5 makes it real.
 - `tools/call get_tool { slug: "does-not-exist" }` returns `isError: false` with content `{ found: false, message }`
   naming the missing slug. (Look-not-found is data, not failure.)
 - `tools/call search_tools { score_min: 80 }` returns only rows where `score_pct >= 80`.
-- `tools/call list_principles` returns exactly 10 entries; numbers `1..10` all present.
+- `tools/call list_principles` returns exactly 8 entries; numbers `1..8` all present.
 - `tools/call get_principle { n: 3 }` returns the principle body matching the fixture.
 - `tools/call list_spec_sections` returns the table-of-contents shape; every row carries `slug` + `title` + `level`.
 - `tools/call get_spec_section { slug: "<fixture-slug>" }` returns the section body with `spec_version` carried.

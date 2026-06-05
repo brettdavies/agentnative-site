@@ -26,6 +26,7 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
     '/contribute',
     '/methodology',
     '/scorecard-schema',
+    '/mcp-docs',
     ...extraPaths,
   ];
 
