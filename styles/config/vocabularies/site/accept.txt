@@ -252,3 +252,11 @@ siteverify
 uncached
 unmetered
 rollout
+streamable
+denormalized
+falsy
+preflights
+scorecard_url
+score_pct
+level_summary
+audit_profile
