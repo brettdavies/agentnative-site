@@ -994,7 +994,7 @@ returns `{ audited: false, message: "...disabled by the operator" }` without inv
 
 ---
 
-### U6. Discoverability surfaces — `.well-known/mcp` JSON pointer, `ai.txt`, `security.txt`, llms.txt Programmatic Access section
+### U6. Discoverability surfaces — `.well-known/mcp` JSON pointer, `ai.txt`, `security.txt`, llms.txt Programmatic Access section [shipped]
 
 **Goal.** Ship the four public discoverability surfaces. `/.well-known/mcp` advertises the MCP endpoint, spec revision,
 transport, and documentation URL. `/.well-known/ai.txt` declares AI-training and agent-access posture.
