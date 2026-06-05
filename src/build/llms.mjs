@@ -39,6 +39,9 @@ import { resolveBaseUrl } from './util.mjs';
  * @param {Array<{ name: string, title: string }>=} args.subPages
  * @param {Array<{ name: string, path: string }>=} args.scorecardLinks
  * @param {Array<{ name: string, path: string }>=} args.skillLinks
+ * @param {Array<{ label: string, path: string }>=} args.programmaticAccess
+ *        Optional Programmatic access section (U6 of the MCP plan).
+ *        When provided, renders between the summary and Principles.
  * @param {string=} args.baseUrl
  */
 export function buildLlmsIndex({
@@ -48,6 +51,7 @@ export function buildLlmsIndex({
   subPages = [],
   scorecardLinks = [],
   skillLinks = [],
+  programmaticAccess = [],
   baseUrl,
 }) {
   const base = resolveBaseUrl(baseUrl);
@@ -57,6 +61,14 @@ export function buildLlmsIndex({
   lines.push('');
   lines.push(`> ${summary}`);
   lines.push('');
+  if (programmaticAccess.length > 0) {
+    lines.push('## Programmatic access');
+    lines.push('');
+    for (const entry of programmaticAccess) {
+      lines.push(`- [${entry.label}](${base}${entry.path})`);
+    }
+    lines.push('');
+  }
   lines.push('## Principles');
   lines.push('');
   for (const p of principles) {
