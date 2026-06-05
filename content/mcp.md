@@ -91,7 +91,7 @@ Two layers carry errors:
   rate limit. Codes follow JSON-RPC 2.0:
 - `-32700` parse error (malformed JSON body)
 - `-32099` rate limit exceeded (implementation-defined server-error range; used by both `MCP_LIMITER` at the dispatch
-    layer and `MCP_AUDIT_LIMITER` inside `score_cli`)
+  layer and `MCP_AUDIT_LIMITER` inside `score_cli`)
 
 The `406 Not Acceptable` response is the exception: it is a transport rejection that happens before any JSON-RPC
 parsing, so the body is plain text without a `jsonrpc`/`id`/`error` envelope.
@@ -105,7 +105,10 @@ Two bindings, two cost profiles.
 - `MCP_AUDIT_LIMITER`: 5 fresh audits per 60 minutes per IP. Gates only `score_cli` cache-miss audits. Keyed on
   `cf-connecting-ip`; **no anon fallback**: a request with no `cf-connecting-ip` header is rejected with `-32099` rather
   than consuming a shared bucket, because container-run cost is non-trivial and a shared anon bucket would be a DoS
-  vector.
+  vector. The "5 per 60 minutes" ceiling is enforced in two layers: the CF Rate Limiting binding only accepts `period:
+  10 | 60` (validated at wrangler parse time), so the binding enforces the 5-per-60-seconds burst floor and an
+  application-side KV-backed per-hour window in `SCORE_KV` enforces the hourly ceiling. Key shape:
+  `mcp_audit:<ip>:<hour_bucket>` with a 2-hour TTL.
 
 The read tier accepts a shared anon bucket because per-request cost is trivial and a small anon flood is recoverable.
 The audit tier rejects on missing IP because container-run cost is non-trivial. Both ceilings are pre-data placeholders

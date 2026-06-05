@@ -1241,6 +1241,14 @@ Everything listed in Implementation Units U1-U8.
 
 ### Deferred to follow-up work
 
+- **U5b: handler.ts refactor to compose `orchestrate.runFreshOnly`.** U5a (the score_cli landing) extracted the
+  run-fresh pipeline into `orchestrate.runFreshOnly` and composed it from the MCP surface. `handler.ts` continues to
+  inline its own copy of the run-fresh pipeline because it has ~3,360 lines of test coverage across four files asserting
+  specific telemetry tiers, share-URL derivations, and response shapes at each pipeline stage. The lift is a
+  straightforward switch on the orchestrator's discriminated kind, but the per-tier telemetry assertions need focused
+  updates. U5b owns that work; until it lands, the run-fresh pipeline is duplicated (orchestrator + inlined handler
+  copy) and the two slices have to stay behaviorally identical. The orchestrator was written as a straight substitution
+  of handler.ts's existing slice precisely so the lift in U5b is mechanical.
 - **Automatic re-audit of cached scorecards on `spec_version` bump.** Today re-audits are operator-owned via the
   build/release flow. A future enhancement could trigger background re-audits when the vendored spec version changes,
   surfacing fresh data without per-agent cost. Out of scope here; needs its own cost-modeling.

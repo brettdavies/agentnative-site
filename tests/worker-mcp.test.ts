@@ -453,8 +453,14 @@ describe('MCP spec tools', () => {
   });
 });
 
-describe('MCP score_cli stub', () => {
-  test('returns isError false with audited false and the U5 message', async () => {
+describe('MCP score_cli kill switch (real implementation lands in U5a)', () => {
+  test('with MCP_LIVE_SCORING_ENABLED not set, returns isError: false + audited: false + disabled message', async () => {
+    // makeEnv() does NOT set MCP_LIVE_SCORING_ENABLED, so the kill
+    // switch fires first and short-circuits before validateInput, the
+    // limiters, or runFreshOnly run. This is the production-default
+    // posture (production env vars block defaults MCP_LIVE_SCORING_ENABLED
+    // to "false"); the test confirms the kill switch is wired before
+    // the cost-bearing path.
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, {
@@ -466,7 +472,7 @@ describe('MCP score_cli stub', () => {
     expect(result.result?.isError).toBeFalsy();
     const body = getJsonContent(result) as { audited: boolean; message: string };
     expect(body.audited).toBe(false);
-    expect(body.message).toContain('U5');
+    expect(body.message.toLowerCase()).toContain('disabled');
   });
 });
 
