@@ -42,11 +42,13 @@ gated by Turnstile. Full inventory in [`wrangler.jsonc`](./wrangler.jsonc); desi
 ```bash
 bun install
 bun run build              # produces dist/
-bun run dev                # bun run build && wrangler dev --local
-wrangler dev --env staging # local Worker against staging bindings
+bun run dev                # bun run build && wrangler dev --env staging --local --port 8787 (http://localhost:8787)
 bun test                   # unit + regression
 bun run test:e2e           # Playwright
 ```
+
+`bun run dev` is the only valid local preview. Static-file servers (`python -m http.server`, `serve`, `npx http-server`)
+bypass the Worker and produce a false preview — see [AGENTS.md → Local dev](AGENTS.md#local-dev).
 
 After cloning, point git at the repo's hooks once:
 

@@ -6,7 +6,7 @@
   "description": "agentnative.dev — the agent-native CLI standard",
   "scripts": {
     "build": "bun src/build/build.mjs",
-    "dev": "bun run build && wrangler dev --local",
+    "dev": "bun run build && wrangler dev --env staging --local --port 8787",
     "test": "bun test",
     "test:e2e": "playwright test",
     "types": "wrangler types ./src/worker-configuration.d.ts",
