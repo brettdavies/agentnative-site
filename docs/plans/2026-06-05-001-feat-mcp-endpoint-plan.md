@@ -775,7 +775,7 @@ counts. Every tool returns either a valid result or a well-shaped `isError`. Ins
 
 ---
 
-### U4. Worker dispatch — `POST /mcp` branch, MCP_ENABLED gate, Accept-negotiated JSON/SSE, MCP_LIMITER, log-after-gate, no CORS
+### U4. Worker dispatch — `POST /mcp` branch, MCP_ENABLED gate, Accept-negotiated JSON/SSE, MCP_LIMITER, log-after-gate, no CORS [shipped]
 
 **Goal.** Wire the MCP module into `src/worker/index.ts`. Add the two new rate-limit bindings + `MCP_ENABLED` env var to
 `wrangler.jsonc`. The `/mcp` route is reachable end-to-end with `wrangler dev --env staging --local`; the eight
