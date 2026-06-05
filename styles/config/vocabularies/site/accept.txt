@@ -260,3 +260,5 @@ scorecard_url
 score_pct
 level_summary
 audit_profile
+streamsgrp
+bypassable
