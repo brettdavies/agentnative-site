@@ -48,11 +48,16 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      // Both opt-in live projects (skill + homepage-score-live) are
-      // excluded from the default suite — they hit real network endpoints
-      // (github.com clone hosts, the staging Worker) that the deep-check
-      // daily schedule shouldn't depend on.
-      testIgnore: [/skill\.e2e\.ts/, /homepage-score-live\.e2e\.ts/],
+      // Live opt-in projects (skill, homepage-score-live, staging-mcp)
+      // are excluded from the default suite — they hit real network
+      // endpoints (github.com clone hosts, the staging Worker) that the
+      // deep-check daily schedule shouldn't depend on.
+      testIgnore: [
+        /skill\.e2e\.ts/,
+        /homepage-score-live\.e2e\.ts/,
+        /mcp\.e2e\.ts/,
+        /discoverability\.e2e\.ts/,
+      ],
     },
     { name: 'mobile-android', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
     { name: 'mobile-ios', use: { ...devices['iPhone 13'] }, testMatch: /flows\.e2e\.ts/ },
@@ -74,6 +79,20 @@ export default defineConfig({
       // Real Sandbox container cold starts and Turnstile siteverify
       // round-trips push the per-test budget past Playwright's default.
       timeout: 120_000,
+    },
+    {
+      name: 'staging-mcp',
+      // Live staging Worker — MCP transport plus the four
+      // discoverability surfaces (.well-known/{mcp, security.txt,
+      // ai.txt}, llms.txt Programmatic access, /mcp-docs.{html,md}).
+      // Set ANC_STAGING_BASE_URL before invoking (and
+      // ANC_STAGING_ACCESS_CLIENT_ID/SECRET for headless Access auth).
+      // Excluded from the default suite; run with `bun x playwright test
+      // --project=staging-mcp` after a staging deploy or when triaging
+      // an MCP regression the bun unit layer can't reproduce against
+      // workerd.
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /(?:mcp|discoverability)\.e2e\.ts/,
     },
   ],
   webServer: {
