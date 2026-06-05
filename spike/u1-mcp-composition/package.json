@@ -1,0 +1,23 @@
+{
+  "name": "anc-u1-mcp-composition",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Disposable spike: verify createMcpHandler + Sandbox DO composition against anc's exact entrypoint shape. Deleted at U2.",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy:dryrun": "wrangler deploy --dry-run"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.3",
+    "@cloudflare/sandbox": "0.9.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "agents": "^0.13.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260405.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.81.0"
+  }
+}
