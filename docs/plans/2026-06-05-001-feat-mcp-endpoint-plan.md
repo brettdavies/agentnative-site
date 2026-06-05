@@ -1,7 +1,8 @@
 ---
 title: 'feat: MCP server at POST /mcp on anc.dev'
-status: active
+status: completed
 created: 2026-06-05
+completed: 2026-06-05
 plan_type: feat
 depth: deep
 related_repos:
@@ -1164,7 +1165,7 @@ set after staging deploy. CI runs the full bun suite on every PR and the e2e sui
 
 ---
 
-### U8. Documentation sweep — AGENTS.md MCP section, README.md MCP pointer, `content/mcp.md` finalization
+### U8. Documentation sweep — AGENTS.md MCP section, README.md MCP pointer, `content/mcp.md` finalization [shipped]
 
 **Goal.** The on-site documentation is consistent and complete. `content/mcp.md` was scaffolded in U2 with a stub
 `score_cli` section; U5 updated it; U8 confirms it's the canonical wire contract. AGENTS.md gets a new MCP section
