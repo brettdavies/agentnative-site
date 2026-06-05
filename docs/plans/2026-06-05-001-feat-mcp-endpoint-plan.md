@@ -512,7 +512,7 @@ bun unit + Playwright e2e cover the surface). No `src/worker/score/run-fresh-aud
 
 ## Implementation Units
 
-### U1. Spike — verify `createMcpHandler` composes with anc's existing Worker exports
+### U1. Spike — verify `createMcpHandler` composes with anc's existing Worker exports [shipped]
 
 **Goal.** Prove that `createMcpHandler` from `agents/mcp` + `McpServer` from `@modelcontextprotocol/sdk` compose cleanly
 with anc's existing Worker entrypoint, which already re-exports `ContainerProxy` (CF Sandbox SDK) and `Sandbox` (the
