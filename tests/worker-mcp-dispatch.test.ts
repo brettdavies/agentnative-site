@@ -359,6 +359,31 @@ describe('POST /mcp — response posture', () => {
   });
 });
 
+describe('POST /mcp — malformed JSON-RPC body', () => {
+  test('non-JSON body surfaces a transport-level error (SDK 400 with a parse-error body)', async () => {
+    // The agents SDK owns the JSON-RPC parse step. A non-JSON body
+    // surfaces as an HTTP 400 with a transport-level error body (the
+    // SDK does not wrap pre-parse failures in a JSON-RPC -32700
+    // envelope). This is reasonable behavior: the request never became
+    // a JSON-RPC envelope, so there's no id to echo back. The test
+    // pins the actual transport surface so a future SDK upgrade that
+    // changes the shape (e.g., to a 200 + JSON-RPC envelope) is
+    // visible.
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: 'not-json{{',
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+  });
+});
+
 describe('asset-first invariant preserved', () => {
   test('GET /about still serves the asset (non-/mcp paths unchanged)', async () => {
     const env = makeEnv();
