@@ -565,7 +565,7 @@ check that the handshake-only test would silently pass. Spike directory deleted 
 
 ---
 
-### U2. Build pipeline — MCP catalog emit + content/mcp.md authoring
+### U2. Build pipeline — MCP catalog emit + content/mcp.md authoring [shipped]
 
 **Goal.** A new build stage emits `dist/_internal/mcp-catalog.json` containing the denormalized projection the Worker
 needs (registry, principles, spec sections). Author `content/mcp.md` as the wire-contract documentation source so the
