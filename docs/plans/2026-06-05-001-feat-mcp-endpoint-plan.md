@@ -1078,7 +1078,7 @@ access"` shows the three expected links.
 
 ---
 
-### U7. Test layer — Playwright live-staging smoke; bun unit consolidation
+### U7. Test layer — Playwright live-staging smoke; bun unit consolidation [shipped]
 
 **Goal.** Two test layers exercise the MCP surface end to end. Bun unit tests authored alongside U3/U4/U5 handle the
 fast inner loop. A new Playwright e2e smoke runs against the deployed staging host. U7 adds the Playwright layer and
