@@ -1032,10 +1032,10 @@ transport, and documentation URL. `/.well-known/ai.txt` declares AI-training and
 
 - `.well-known/ai.txt` mirrors streamsgrp's template; substitutions:
 - `Programmatic-API: https://anc.dev/mcp`
-- `Contact: mailto:hello@anc.dev` (or the canonical contact already in the site footer; confirm against
-  `content/contact.md` at unit time)
+- `Contact: mailto:97-boss-beetle@icloud.com` (operator's canonical inbox; apex aliases on anc.dev are not provisioned
+  today, so the discoverability surfaces point at the real address)
 - `.well-known/security.txt` mirrors streamsgrp's RFC 9116 shape:
-- `Contact: mailto:security@anc.dev`
+- `Contact: mailto:97-boss-beetle@icloud.com`
 - `Expires:` one-year-out ISO timestamp via the existing `expiresInOneYearIso` util (port from streamsgrp if not already
   in `src/build/util.mjs`)
 - `Canonical: https://anc.dev/.well-known/security.txt`
@@ -1152,7 +1152,7 @@ Playwright e2e (staging):
 Playwright discoverability (staging):
 
 - `GET /.well-known/mcp` returns valid JSON with `mcp_endpoint`, `version: "2025-06-18"`, `documentation`.
-- `GET /.well-known/security.txt` carries `Contact: mailto:security@anc.dev` and valid `Expires:`.
+- `GET /.well-known/security.txt` carries `Contact: mailto:97-boss-beetle@icloud.com` and valid `Expires:`.
 - `GET /.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp`.
 - `GET /llms.txt` contains `## Programmatic access` section with three expected links.
 - `GET /mcp-docs.md` returns the markdown twin; `GET /mcp-docs/` returns the HTML rendering.
