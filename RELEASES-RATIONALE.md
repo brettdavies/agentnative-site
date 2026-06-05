@@ -261,6 +261,87 @@ the gap doesn't ship to production. The 2026-06-01 rename-vs-container coordinat
 [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md))
 is the reason the preflight check is mandatory rather than advisory.
 
+## MCP endpoint rate limits and cost gates
+
+`POST /mcp` ships with two rate-limit bindings and one structural cost rule. The shape isn't accidental; each piece
+exists because the alternative was worse.
+
+### Why `score_cli` never bypasses the cache
+
+The MCP surface has no `force_refresh` flag and no path that forces a fresh audit on an already-cached binary. The
+obvious alternative (one tool with a `force` parameter) was rejected because it makes cost opaque to the caller. An
+agent that sees a single `score_cli` tool with a boolean parameter cannot reason about which calls are cheap and which
+are metered; the agent's prompt would have to encode the rule "set `force: false` unless you really need a fresh audit",
+and prompts decay. A two-tool split (`get_scorecard` cheap, `score_cli` metered) makes the cost signal structural: the
+tool selection IS the cost declaration.
+
+The rule is contract, not enforcement at the platform layer. A future PR that adds a "force refresh" parameter would
+silently break the cost model — there is no Cloudflare-side guard that would block the deploy. The regression guard is
+`tests/worker-mcp-audit.test.ts`, which asserts that a cache hit on `score_cli` returns `audited: false` rather than
+running the container. Any change that makes that test pass while running the container has broken the contract.
+
+The honest framing for an operator: `score_cli` is "rate-limited" only in the sense that the cache is universally
+respected. If the cache were bypassable, `MCP_AUDIT_LIMITER` would become the load-bearing cost ceiling and a single
+malicious caller with a fresh binary per request could drain the audit budget. The cache rule is what makes the
+audit-limiter ceiling tractable.
+
+### Why two separate rate limiters
+
+The dispatch tier and the audit tier have order-of-magnitude different costs per request. A single limiter sized for the
+cheap tier (60 req/min) would let an attacker burn the audit budget at sixty containers per minute. A single limiter
+sized for the expensive tier (5 req/hour) would make the read-only catalog tools unusable for legitimate agents.
+
+`MCP_LIMITER` (60 req / 60s per IP) gates every `POST /mcp`. It exists because a small flood of cheap read calls matters
+for Workers CPU time and dispatch latency, but the per-request cost is bounded. A shared `anon` bucket on missing
+`cf-connecting-ip` is acceptable here: read-tier abuse degrades the surface but does not bill the operator
+significantly.
+
+`MCP_AUDIT_LIMITER` (5 req / 60s binding burst floor + KV-backed hourly window) gates only `score_cli` cache-miss
+audits. The two layers exist because Cloudflare Rate Limiting only accepts `period: 10 | 60` seconds. The plan's "5 per
+60 minutes" ceiling cannot be expressed in the binding alone; the binding holds the burst floor and an application-side
+KV window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the hourly ceiling. **No anon fallback at
+this tier** (KTD-4 of the MCP plan): a request with no `cf-connecting-ip` returns `-32099` immediately rather than
+consuming a shared bucket, because container-run cost is non-trivial and a shared anon audit budget is a DoS vector.
+
+The two-layer enforcement has a small TOCTOU race between the binding read and the KV write inside `score_cli`. The race
+is bounded by the binding burst floor above it; worst-case overshoot is handfuls of audits per hour, not orders of
+magnitude. Tightening the race would require a Durable Object counter per IP, which trades the race for permanent
+single-writer latency on every audit; the cost / correctness tradeoff favors leaving the race in place until visitor
+data shows it matters.
+
+The "5 per 60 minutes" and "60 per 60 seconds" numbers are both pre-data placeholders sized from streamsgrp parity.
+Review at 14 days of visitor-log data. The structure (binding floor + KV hourly window for audits; simple binding for
+reads) survives any retuning; only the ceilings move.
+
+### Why two kill switches instead of one
+
+`MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are independent because the two failure modes they cover are independent.
+
+A surface-level emergency (security issue, schema bug, abuse pattern at the dispatch layer) needs the whole `/mcp`
+branch offline. `MCP_ENABLED=false` returns `503 Service Unavailable` with `Retry-After: 3600` and a plain-text body. No
+JSON-RPC envelope, because the surface is off, not in-error; an agent that gets a 503 should back off, not retry within
+a JSON-RPC handler.
+
+A cost-level emergency (audit budget overrun, container instability surfacing only on `score_cli` runs) needs the
+expensive tool off but the read tier alive. `MCP_LIVE_SCORING_ENABLED=false` returns `isError: false` with `audited:
+false` and `next_tool: get_scorecard` — the agent learns the score is unavailable and that the cached path is still
+there. Read tools (`list_tools`, `get_principle`, etc.) keep serving.
+
+Collapsing the two into a single switch would force the operator to choose between losing the catalog and losing the
+audits. The split lets the cost emergency cost the operator nothing visible on the read surface.
+
+### Visitor log fires AFTER the gate, not before
+
+The structured `[mcp-call]` log line runs after `MCP_LIMITER` resolves, not before. The reason is Workers Logs volume
+under attack: pre-gate logging would amplify any flood directly into the logging budget. Post-gate logging still records
+the denial (the `gate_result: rate_limited` line carries the IP and `User-Agent` for forensic triage) but trades one
+extra log line per denied request for a bounded ceiling on logged volume.
+
+The post-gate position has a small observability gap: a flood that hits the rate-limit ceiling logs only the count of
+denials, not the unique request shapes within the denied set. If visitor data later shows we need that detail (abuse
+investigation, pattern recognition), the fix is a sampled pre-gate log line (e.g., 1-in-100 of denied requests), not
+full pre-gate logging.
+
 ## Wrangler env inheritance traps
 
 Wrangler's per-env config inherits some keys from the top-level and not others. Mismatched expectations on either side

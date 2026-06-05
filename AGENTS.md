@@ -63,11 +63,79 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
 - `/llms.txt`, `/llms-full.txt` — llmstxt.org convention (summary index + full concatenated spec)
+- `/mcp` — `POST`-only Model Context Protocol server. Wire contract in [`content/mcp.md`](content/mcp.md);
+  discoverability pointer at `/.well-known/mcp`; HTML + `.md` twin at `/mcp-docs`
 - `/sitemap.xml`, `/robots.txt` — hygiene
 - `public/og-image.png` — 1200x630 designed social preview
 
 Plain HTML + minimal CSS + small Worker script. No frontend framework, no build pipeline beyond the Worker's CommonMark
 render step. Deploy via `wrangler`.
+
+## MCP server
+
+`POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server pinned to spec revision `2025-06-18`.
+The full wire contract is [`content/mcp.md`](content/mcp.md) (served at `/mcp-docs.md` and `/mcp-docs/`). This section
+is the agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
+
+**Discovery siblings.** `/.well-known/mcp` (JSON pointer), `/.well-known/ai.txt` (`Programmatic-API` declaration),
+`/.well-known/security.txt` (RFC 9116 contact), `/llms.txt` (Programmatic access section). The pointer's `documentation`
+field is the canonical `.md` URL; `initialize.instructions` carries the same pointer plus a session-time summary.
+
+**Nine tools, five resources.** Tools cover four surfaces:
+
+- Registry: `list_tools`, `get_tool`, `search_tools`
+- Principles: `list_principles`, `get_principle`
+- Spec: `list_spec_sections`, `get_spec_section`
+- Scorecards: `get_scorecard` (cache read), `score_cli` (cache-miss audit)
+
+Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
+`anc://spec/{section}`, `anc://scorecard/{binary}`.
+
+**Two rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
+falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
+audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback** — missing IP returns `-32099` rather
+than consuming a shared bucket, because container-run cost is non-trivial. The hourly window is enforced in two layers:
+the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and
+an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the
+hourly ceiling.
+
+**Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
+a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; `score_cli` is the metered one. The two
+tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
+`/`.
+
+**Two kill switches, surgical and zero-deploy.** Both default `"false"` in production and `"true"` in staging. Flip via
+`wrangler secret put`.
+
+- `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
+  one-line plain-text body. No JSON-RPC envelope — the surface is off, not in-error.
+- `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
+  `next_tool: get_scorecard` redirect; the read tier stays alive.
+
+**Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
+the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
+`-32700` for malformed JSON, `-32099` for rate-limit breach at either limiter. The `406 Not Acceptable` Accept-header
+rejection is the one transport error that bypasses the JSON-RPC envelope (the rejection is pre-parse, so there is no
+`id` to echo back). **Cache state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false,
+next_tool`, and a `score_cli` hit is `isError: false` with `audited: false, next_tool`.
+
+**Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
+are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
+fail the browser's same-origin check and are blocked client-side — the deliberate posture, because a browser-reachable
+`/mcp` would let any malicious web page trigger `score_cli` runs charged against the visitor's `cf-connecting-ip`. A
+future use case needing browser access gets its own KTD revision, an explicit allow-list, and a rate-limit policy
+designed for browser traffic.
+
+**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `[mcp-call]`
+log line carrying `Origin`, `User-Agent`, Cloudflare-injected client IP and country, the chosen response format, and a
+`gate_result` of `passed` or `rate_limited`. Firing after the rate-limit gate keeps Workers Logs volume bounded under
+attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
+inventory is published.
+
+**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp` `"version"`, `content/mcp.md`'s
+"Endpoint" block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all carry the same `2025-06-18`
+literal. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each occurrence so a single-source
+bump breaks the build.
 
 ## Voice
 
