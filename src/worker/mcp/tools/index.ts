@@ -7,16 +7,16 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { Catalog } from '../catalog';
 import { registerPrincipleTools } from './principles';
 import { registerRegistryTools } from './registry';
-import { registerScorecardAuditTool } from './scorecard-audit';
+import { registerScorecardAuditTool, type ScorecardAuditEnv } from './scorecard-audit';
 import { registerScorecardReadTool, type ScorecardReadEnv } from './scorecard-read';
 import { registerSpecTools } from './spec';
 
-export interface RegisterToolsEnv extends ScorecardReadEnv {}
+export interface RegisterToolsEnv extends ScorecardReadEnv, ScorecardAuditEnv {}
 
 export function registerTools(server: McpServer, catalog: Catalog, env: RegisterToolsEnv): void {
   registerRegistryTools(server, catalog);
   registerPrincipleTools(server, catalog);
   registerSpecTools(server, catalog);
   registerScorecardReadTool(server, catalog, env);
-  registerScorecardAuditTool(server, catalog);
+  registerScorecardAuditTool(server, catalog, env);
 }
