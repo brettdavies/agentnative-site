@@ -8,16 +8,20 @@
 //
 // All three lift from streamsgrp's 07-well-known.mjs (anc and streamsgrp
 // converged on the same wire shape during the cross-repo MCP work).
-// Mailbox provisioning for `security@anc.dev` and `hello@anc.dev` is an
-// operational concern; the build emits the files unconditionally.
+//
+// The canonical contact for anc.dev is the operator's iCloud address;
+// both security.txt and ai.txt point at the same inbox. Apex-domain
+// aliases like security@anc.dev are not provisioned, and pinning the
+// real address in the file is how the discoverability surfaces stay
+// reachable today. If a routed alias lands in the future the constant
+// flips here in one place.
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
 const MCP_SPEC_VERSION = '2025-06-18';
-const SECURITY_CONTACT = 'security@anc.dev';
-const AI_CONTACT = 'hello@anc.dev';
+const ANC_CONTACT = '97-boss-beetle@icloud.com';
 
 function buildMcpPointer(baseUrl) {
   return `${JSON.stringify(
@@ -36,7 +40,7 @@ function buildMcpPointer(baseUrl) {
 function buildSecurityTxt(baseUrl) {
   const expires = expiresInOneYearIso();
   return [
-    `Contact: mailto:${SECURITY_CONTACT}`,
+    `Contact: mailto:${ANC_CONTACT}`,
     `Expires: ${expires}`,
     'Preferred-Languages: en',
     `Canonical: ${baseUrl}/.well-known/security.txt`,
@@ -55,7 +59,7 @@ function buildAiTxt(baseUrl) {
     'Allow-AI-Training: yes',
     'Allow-Inference: yes',
     `Programmatic-API: ${baseUrl}/mcp`,
-    `Contact: mailto:${AI_CONTACT}`,
+    `Contact: mailto:${ANC_CONTACT}`,
     '',
   ].join('\n');
 }

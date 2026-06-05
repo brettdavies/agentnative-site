@@ -58,7 +58,7 @@ describe('.well-known/security.txt (built dist/)', () => {
   test('file exists and has the RFC 9116 fields in order', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'security.txt'), 'utf8');
     const lines = raw.trim().split('\n');
-    expect(lines[0]).toBe('Contact: mailto:security@anc.dev');
+    expect(lines[0]).toBe('Contact: mailto:97-boss-beetle@icloud.com');
     expect(lines[1]).toMatch(/^Expires:\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     expect(lines[2]).toBe('Preferred-Languages: en');
     expect(lines[3]).toBe('Canonical: https://anc.dev/.well-known/security.txt');
@@ -82,7 +82,7 @@ describe('.well-known/ai.txt (built dist/)', () => {
     expect(raw).toContain('Allow-AI-Training: yes');
     expect(raw).toContain('Allow-Inference: yes');
     expect(raw).toContain('Programmatic-API: https://anc.dev/mcp');
-    expect(raw).toContain('Contact: mailto:hello@anc.dev');
+    expect(raw).toContain('Contact: mailto:97-boss-beetle@icloud.com');
   });
 });
 

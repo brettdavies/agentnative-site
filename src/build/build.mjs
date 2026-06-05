@@ -262,8 +262,9 @@ export async function build() {
   // 11a. Discoverability — .well-known/{mcp, ai.txt, security.txt}.
   // The MCP JSON pointer's `documentation` field references
   // /mcp-docs.md (rendered at stage 7), so this stage MUST run after
-  // the sub-pages stage. Mailbox provisioning for security@anc.dev
-  // and hello@anc.dev is operational, not build-time.
+  // the sub-pages stage. The contact address pinned in security.txt
+  // and ai.txt is the operator's canonical inbox; the constant lives
+  // in 11a-discovery-emit.mjs.
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
 
   // 12. Invariant check — fails fast if any critical contract slips.
