@@ -135,6 +135,21 @@ export function resolveBaseUrl(baseUrl) {
 }
 
 /**
+ * Produce an ISO-8601 Z-suffixed timestamp one year from now. Used by
+ * the security.txt emitter (RFC 9116 `Expires:` field requires a future
+ * timestamp; per the RFC the field SHOULD be at most one year from
+ * publication). Caller passes the result verbatim.
+ *
+ * @returns {string}
+ */
+export function expiresInOneYearIso() {
+  const now = new Date();
+  const expires = new Date(now);
+  expires.setUTCFullYear(now.getUTCFullYear() + 1);
+  return expires.toISOString();
+}
+
+/**
  * Rewrite site-root-relative markdown links to absolute URLs.
  *
  * Source markdown authors site-internal links as `[text](/p3)` so HTML pages

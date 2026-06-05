@@ -43,6 +43,7 @@ import { emitScorecardSurface } from './08-scorecards-emit.mjs';
 import { emitLlmsSurface } from './09-llms-emit.mjs';
 import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
+import { emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -258,6 +259,14 @@ export async function build() {
   // Worker's own ASSETS fetch bypasses by not re-entering dispatch).
   const mcpCatalogStats = await emitMcpCatalog({ distDir: DIST_DIR, repoRoot: REPO_ROOT });
 
+  // 11a. Discoverability — .well-known/{mcp, ai.txt, security.txt}.
+  // The MCP JSON pointer's `documentation` field references
+  // /mcp-docs.md (rendered at stage 7), so this stage MUST run after
+  // the sub-pages stage. The contact address pinned in security.txt
+  // and ai.txt is the operator's canonical inbox; the constant lives
+  // in 11a-discovery-emit.mjs.
+  const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
+
   // 12. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
     DIST_DIR,
@@ -287,6 +296,7 @@ export async function build() {
     scorecardPages: scorecardPageCount,
     badgeSvgs: badgePaths.length,
     mcpCatalog: mcpCatalogStats,
+    discovery: discoveryStats,
     minified: minifyStats,
   };
 }
