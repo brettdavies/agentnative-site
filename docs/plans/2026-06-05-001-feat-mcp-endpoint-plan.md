@@ -870,7 +870,7 @@ http://localhost:8787/mcp -H 'content-type: application/json' -H 'accept: applic
 
 ---
 
-### U5. Complete the shared-pipeline extraction; replace `score_cli` stub with real implementation
+### U5. Complete the shared-pipeline extraction; replace `score_cli` stub with real implementation [shipped-as-U5a]
 
 **Goal.** Complete the `orchestrate.ts` extraction begun in U3 by lifting the run-fresh-on-miss path out of
 `handler.ts`. Both `/api/score` (existing) and `score_cli` (new) compose `orchestrate.ts` as their core. Replace the U3
