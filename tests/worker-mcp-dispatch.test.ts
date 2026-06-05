@@ -1,0 +1,384 @@
+// POST /mcp dispatch tests for U4 — covers detectMcpFormat, the
+// MCP_ENABLED kill switch, the method gate (405 Allow:POST), the
+// Accept-header gate (406 text/plain), the MCP_LIMITER -32099
+// envelope, the visitor-log gate_result emission, and the response-
+// shaping invariants (no Access-Control-Allow-Origin, Cache-Control:
+// no-store, bypass applyHeaders).
+//
+// U4 lands the dispatch in src/worker/index.ts above the asset-first
+// branch. Tests go through the full Worker entry so the gate ordering
+// (1: MCP_ENABLED, 2: method, 3: format, 4: limiter+log) is exercised
+// end-to-end. The catalog read is stubbed via env.ASSETS in the same
+// shape as tests/worker-mcp.test.ts so this file does not need a real
+// dist/_internal/mcp-catalog.json on disk.
+
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { detectMcpFormat } from '../src/worker/accept';
+import worker, { type Env } from '../src/worker/index';
+import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+
+const FIXTURE_CATALOG = {
+  generated_at: '2026-06-05T18:00:00.000Z',
+  spec_version: SPEC_VERSION,
+  registry: [
+    {
+      slug: 'curl',
+      name: 'curl',
+      binary: 'curl',
+      install: 'brew install curl',
+      version: '8.20.0',
+      anc_version: ANC_VERSION,
+      scorecard_url: '/score/curl',
+      score_pct: 73,
+      repo: 'curl/curl',
+    },
+  ],
+  principles: [
+    {
+      n: 1,
+      slug: 'non-interactive-by-default',
+      title: 'P1: Non-Interactive by Default',
+      body_markdown: '# P1\n\nFixture.\n',
+      requirements: [],
+    },
+  ],
+  spec_sections: [
+    {
+      slug: 'scoring',
+      title: 'Scoring',
+      level: 2,
+      parent_slug: null,
+      body_markdown: '# Scoring\n\nFixture.\n',
+    },
+  ],
+};
+
+interface RateStub {
+  calls: number;
+  shouldSucceed: boolean;
+  lastKey?: string;
+}
+
+function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
+  const enabled = opts.enabled ?? true;
+  return {
+    ASSETS: {
+      fetch(req: Request) {
+        const path = new URL(req.url).pathname;
+        if (path === '/_internal/mcp-catalog.json') {
+          return Promise.resolve(
+            new Response(JSON.stringify(FIXTURE_CATALOG), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          );
+        }
+        if (path === '/about') {
+          return Promise.resolve(
+            new Response('<html><body>about</body></html>', {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+            }),
+          );
+        }
+        return Promise.resolve(new Response('not found', { status: 404 }));
+      },
+    } as unknown as Fetcher,
+    MCP_ENABLED: enabled ? 'true' : 'false',
+    MCP_LIVE_SCORING_ENABLED: enabled ? 'true' : 'false',
+    MCP_LIMITER: opts.limiter
+      ? {
+          async limit({ key }) {
+            const stub = opts.limiter as RateStub;
+            stub.calls += 1;
+            stub.lastKey = key;
+            return { success: stub.shouldSucceed };
+          },
+        }
+      : undefined,
+  };
+}
+
+async function postMcp(env: Env, accept: string, body: object): Promise<Response> {
+  return worker.fetch(
+    new Request('https://anc.dev/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept },
+      body: JSON.stringify(body),
+    }),
+    env,
+    {} as ExecutionContext,
+  );
+}
+
+function initBody() {
+  return {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'test', version: '0.0.0' },
+    },
+  };
+}
+
+beforeEach(() => {
+  resetCatalogCacheForTests();
+});
+
+afterEach(() => {
+  resetCatalogCacheForTests();
+});
+
+describe('detectMcpFormat', () => {
+  function req(accept?: string): Request {
+    const headers = new Headers({ 'content-type': 'application/json' });
+    if (accept !== undefined) headers.set('accept', accept);
+    return new Request('https://anc.dev/mcp', { method: 'POST', headers });
+  }
+
+  test('absent Accept defaults to json', () => {
+    expect(detectMcpFormat(req(undefined))).toBe('json');
+  });
+
+  test('empty Accept defaults to json', () => {
+    expect(detectMcpFormat(req(''))).toBe('json');
+  });
+
+  test('*/* defaults to json', () => {
+    expect(detectMcpFormat(req('*/*'))).toBe('json');
+  });
+
+  test('application/json alone returns json', () => {
+    expect(detectMcpFormat(req('application/json'))).toBe('json');
+  });
+
+  test('text/event-stream alone returns sse', () => {
+    expect(detectMcpFormat(req('text/event-stream'))).toBe('sse');
+  });
+
+  test('both with no q-values returns json (json wins ties)', () => {
+    expect(detectMcpFormat(req('application/json, text/event-stream'))).toBe('json');
+  });
+
+  test('higher q on sse wins', () => {
+    expect(detectMcpFormat(req('application/json;q=0.5, text/event-stream;q=0.9'))).toBe('sse');
+  });
+
+  test('higher q on json wins', () => {
+    expect(detectMcpFormat(req('application/json;q=0.9, text/event-stream;q=0.5'))).toBe('json');
+  });
+
+  test('neither acceptable returns false', () => {
+    expect(detectMcpFormat(req('text/csv'))).toBe(false);
+  });
+
+  test('text/plain alone returns false (neither MIME)', () => {
+    expect(detectMcpFormat(req('text/plain'))).toBe(false);
+  });
+});
+
+describe('POST /mcp — MCP_ENABLED kill switch', () => {
+  test('returns 503 with Retry-After when disabled', async () => {
+    const env = makeEnv({ enabled: false });
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('3600');
+    expect((res.headers.get('content-type') ?? '').includes('text/plain')).toBe(true);
+  });
+
+  test('503 body is plain text, NOT a JSON-RPC envelope', async () => {
+    const env = makeEnv({ enabled: false });
+    const res = await postMcp(env, 'application/json', initBody());
+    const text = await res.text();
+    expect(text).not.toContain('jsonrpc');
+    expect(text.toLowerCase()).toContain('disabled');
+  });
+});
+
+describe('POST /mcp — method gate', () => {
+  for (const method of ['GET', 'PUT', 'DELETE', 'PATCH']) {
+    test(`${method} returns 405 with Allow: POST`, async () => {
+      const env = makeEnv();
+      const res = await worker.fetch(
+        new Request('https://anc.dev/mcp', { method, headers: { accept: 'application/json' } }),
+        env,
+        {} as ExecutionContext,
+      );
+      expect(res.status).toBe(405);
+      expect(res.headers.get('allow')).toBe('POST');
+    });
+  }
+});
+
+describe('POST /mcp — Accept gate', () => {
+  test('text/csv returns 406 text/plain with no JSON-RPC envelope', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'text/csv', initBody());
+    expect(res.status).toBe(406);
+    expect((res.headers.get('content-type') ?? '').includes('text/plain')).toBe(true);
+    const text = await res.text();
+    expect(text).not.toContain('jsonrpc');
+  });
+
+  test('absent Accept defaults to JSON and reaches the handler', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(initBody()),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('POST /mcp — MCP_LIMITER gate', () => {
+  test('rate-limit breach returns -32099 JSON-RPC envelope at HTTP 200', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: false };
+    const env = makeEnv({ limiter });
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    const body = (await res.json()) as { jsonrpc: string; error?: { code: number; message: string } };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error?.code).toBe(-32099);
+    expect(body.error?.message.toLowerCase()).toContain('rate limit');
+    expect(limiter.calls).toBe(1);
+  });
+
+  test('keyed on cf-connecting-ip when header is present', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'cf-connecting-ip': '198.51.100.42',
+        },
+        body: JSON.stringify(initBody()),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(limiter.lastKey).toBe('198.51.100.42');
+  });
+
+  test('falls back to shared anon bucket when cf-connecting-ip is absent', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcp(env, 'application/json', initBody());
+    expect(limiter.lastKey).toBe('anon');
+  });
+
+  test('absent MCP_LIMITER binding passes through to the handler', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result?: { serverInfo?: { name?: string } } };
+    expect(body.result?.serverInfo?.name).toBe('anc');
+  });
+});
+
+describe('POST /mcp — visitor log fires after the gate decision', () => {
+  test('emits exactly one log line per request with the gate_result field', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    const seen: Array<{ args: unknown[] }> = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      seen.push({ args });
+    };
+    try {
+      await postMcp(env, 'application/json', initBody());
+    } finally {
+      console.log = originalLog;
+    }
+    const mcpLines = seen.filter((s) => s.args[0] === '[mcp-call]');
+    expect(mcpLines.length).toBe(1);
+    const payload = mcpLines[0].args[1] as { gate_result?: string; format?: string };
+    expect(payload.gate_result).toBe('passed');
+    expect(payload.format).toBe('json');
+  });
+
+  test('log emits gate_result: rate_limited when the limiter denies', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: false };
+    const env = makeEnv({ limiter });
+    const seen: Array<{ args: unknown[] }> = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      seen.push({ args });
+    };
+    try {
+      await postMcp(env, 'application/json', initBody());
+    } finally {
+      console.log = originalLog;
+    }
+    const mcpLines = seen.filter((s) => s.args[0] === '[mcp-call]');
+    expect(mcpLines.length).toBe(1);
+    const payload = mcpLines[0].args[1] as { gate_result?: string };
+    expect(payload.gate_result).toBe('rate_limited');
+  });
+});
+
+describe('POST /mcp — response posture', () => {
+  test('response carries Cache-Control: no-store and bypasses applyHeaders', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    expect((res.headers.get('cache-control') ?? '').toLowerCase()).toContain('no-store');
+    // applyHeaders adds Link: rel=alternate on asset responses; the /mcp
+    // branch bypasses applyHeaders, so the header should be absent.
+    expect(res.headers.get('link')).toBeNull();
+  });
+
+  test('response carries no Access-Control-Allow-Origin header (KTD-10 server-to-agent posture)', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  test('OPTIONS /mcp falls through to asset-first dispatch and returns 404 (browser blocked client-side)', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', { method: 'OPTIONS' }),
+      env,
+      {} as ExecutionContext,
+    );
+    // OPTIONS doesn't match the POST gate; falls through to assets which
+    // serve a 404 for the /mcp path.
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('asset-first invariant preserved', () => {
+  test('GET /about still serves the asset (non-/mcp paths unchanged)', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/about', { headers: { accept: 'text/html' } }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('about');
+  });
+
+  test('GET /_internal/mcp-catalog.json is 404 from the public path (interceptor)', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/_internal/mcp-catalog.json', { headers: { accept: 'application/json' } }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+  });
+});

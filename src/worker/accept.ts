@@ -11,17 +11,29 @@
 //                         (`/api/score.md`, `/api/score.json`) in
 //                         `score/content-negotiation.ts`.
 //
+// detectMcpFormat — POST /mcp endpoint ('json' | 'sse' | false). The MCP
+//                   streamable HTTP transport allows the server to return
+//                   either a single application/json response or a SSE
+//                   stream; JSON wins ties. Absent / empty / `*/*` Accept
+//                   returns 'json'. The literal `false` return is the
+//                   "neither MIME acceptable" signal that drives the 406
+//                   text/plain rejection in src/worker/index.ts (no
+//                   JSON-RPC envelope at the pre-JSON-RPC layer).
+//
 // See docs/DESIGN.md §3.4 (Worker paragraph) + eng review A3. Site-side
 // test matrix lives in tests/worker.test.ts; /api/score q-value tests live
-// in the same file's /api/score describe block.
+// in the same file's /api/score describe block; /mcp q-value tests live
+// in tests/worker-mcp-dispatch.test.ts.
 
 import accepts from 'accepts';
 
 export type Preference = 'html' | 'markdown';
 export type ScorePreference = 'json' | 'markdown';
+export type McpFormat = 'json' | 'sse' | false;
 
 const SITE_PREFERENCE_ORDER = ['text/html', 'text/markdown'];
 const SCORE_PREFERENCE_ORDER = ['application/json', 'text/markdown', 'text/html'];
+const MCP_FORMAT_ORDER = ['application/json', 'text/event-stream'];
 
 /**
  * Shim a Workers `Request` into the shape `accepts` expects: it only reads
@@ -46,4 +58,20 @@ export function detectScorePreference(request: Request): ScorePreference {
   // @ts-expect-error — see detectPreference above.
   const match = accepts(shim(request)).type(SCORE_PREFERENCE_ORDER);
   return match === 'text/markdown' ? 'markdown' : 'json';
+}
+
+export function detectMcpFormat(request: Request): McpFormat {
+  const acceptHeader = request.headers.get('accept');
+  // Per R2 of the MCP endpoint plan: absent / empty / `*/*` Accept
+  // defaults to JSON. The accepts package would already pick the first
+  // listed type for `*/*` but treats an absent header as "*/*" too —
+  // both reduce to JSON here, but we early-return so the intent stays
+  // explicit at the call site.
+  if (!acceptHeader || acceptHeader.trim() === '' || acceptHeader.includes('*/*')) {
+    return 'json';
+  }
+  // @ts-expect-error — see detectPreference above.
+  const match = accepts(shim(request)).type(MCP_FORMAT_ORDER);
+  if (!match) return false;
+  return match === 'text/event-stream' ? 'sse' : 'json';
 }

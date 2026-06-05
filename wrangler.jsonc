@@ -87,6 +87,35 @@
       "name": "SCORE_LIMITER_IP",
       "namespace_id": "1003",
       "simple": { "limit": 30, "period": 60 }
+    },
+    // MCP_LIMITER — keyed on `cf-connecting-ip` in src/worker/index.ts.
+    // 60 requests per 60 seconds per IP gates every POST /mcp. Missing
+    // header falls back to a shared `anon` bucket because per-request
+    // cost on the read tier is trivial and a small anon flood is
+    // recoverable. Production ceiling is a pre-data placeholder sized
+    // from streamsgrp parity; review at 14 days of visitor-log data.
+    {
+      "name": "MCP_LIMITER",
+      "namespace_id": "1005",
+      "simple": { "limit": 60, "period": 60 }
+    },
+    // MCP_AUDIT_LIMITER — keyed on `cf-connecting-ip` inside
+    // src/worker/mcp/tools/scorecard-audit.ts (wiring lands in U5 of
+    // docs/plans/2026-06-05-001-feat-mcp-endpoint-plan.md). The plan
+    // calls for "5 fresh audits per 60 minutes per IP" but CF Rate
+    // Limiting bindings only accept `period: 10 | 60` (validated at
+    // wrangler parse time). The binding here enforces "5 per 60s" as
+    // the burst floor; U5 layers an application-level per-hour window
+    // (KV-backed, keyed on the same IP) on top to honor the plan's
+    // hourly ceiling. NO anon fallback at the audit tier (KTD-4):
+    // missing `cf-connecting-ip` returns the -32099 envelope
+    // immediately rather than consuming a shared anon bucket —
+    // container-run cost is non-trivial and a shared anon audit
+    // budget is a DoS vector.
+    {
+      "name": "MCP_AUDIT_LIMITER",
+      "namespace_id": "1007",
+      "simple": { "limit": 5, "period": 60 }
     }
   ],
   // SCORE_KV — operator-flippable `scoring_disabled` kill switch. Flip
@@ -121,7 +150,16 @@
   // TURNSTILE_SECRET is set via `wrangler secret put` and is not
   // committed. env.staging.vars carries Cloudflare's always-pass test
   // sitekey for CLI verification flows.
-  "vars": { "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ" },
+  // MCP_ENABLED / MCP_LIVE_SCORING_ENABLED default `"false"` in
+  // production until the operator explicitly flips via `wrangler secret
+  // put` (per KTD-11 of the MCP endpoint plan). MCP_ENABLED gates the
+  // entire /mcp branch; MCP_LIVE_SCORING_ENABLED gates only score_cli.
+  // Surgical zero-deploy off-switches.
+  "vars": {
+    "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ",
+    "MCP_ENABLED": "false",
+    "MCP_LIVE_SCORING_ENABLED": "false"
+  },
   // Production (top-level): anc.dev + www.anc.dev custom domains, no
   // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
   // push to main. Cloudflare auto-provisions SSL cert + DNS CNAME for
@@ -220,6 +258,16 @@
           "name": "SCORE_LIMITER_IP",
           "namespace_id": "1004",
           "simple": { "limit": 30, "period": 60 }
+        },
+        {
+          "name": "MCP_LIMITER",
+          "namespace_id": "1006",
+          "simple": { "limit": 60, "period": 60 }
+        },
+        {
+          "name": "MCP_AUDIT_LIMITER",
+          "namespace_id": "1008",
+          "simple": { "limit": 5, "period": 60 }
         }
       ],
       "kv_namespaces": [
@@ -242,8 +290,15 @@
       // top-level `vars` block. REPLACE-not-merge inheritance and the
       // future-vars-mirroring requirement: RELEASES-RATIONALE.md §
       // Wrangler env inheritance traps.
+      // Staging defaults `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED`
+      // to "true" so the staging host serves /mcp end-to-end during
+      // soak; production stays gated until explicit promotion via
+      // `wrangler secret put`. See top-level `vars` for the production
+      // defaults.
       "vars": {
-        "TURNSTILE_SITEKEY": "1x00000000000000000000AA"
+        "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
+        "MCP_ENABLED": "true",
+        "MCP_LIVE_SCORING_ENABLED": "true"
       }
     }
   }
