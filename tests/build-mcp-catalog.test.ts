@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildMcpCatalog } from '../src/build/11-mcp-catalog.mjs';
+import { buildMcpCatalog as _buildMcpCatalog } from '../src/build/11-mcp-catalog.mjs';
+import type { Catalog } from '../src/worker/mcp/catalog';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+
+const buildMcpCatalog = _buildMcpCatalog as (args: unknown) => Catalog;
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');

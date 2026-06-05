@@ -101,6 +101,7 @@ import * as cache from './cache';
 import type { ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
+import { _resetHintsIndexCache, loadHintsIndex } from './orchestrate';
 import {
   _resetRegistryIndexCache,
   type DiscoveryHintsIndex,
@@ -155,32 +156,17 @@ export interface RateLimit {
 }
 
 // ---------------------------------------------------------------------------
-// Hints index loading. Registry-index loading lives in registry-lookup.ts
-// so /api/score and /score/live/<binary> share one isolate-level cache.
+// Hints index loading. Both the registry-index loader (registry-lookup.ts)
+// and the discovery-hints loader (orchestrate.ts) live outside handler.ts
+// so /api/score and the MCP get_scorecard tool share one isolate-level
+// cache for each index. The orchestrate.ts loader was lifted out of this
+// file in U3 of the MCP endpoint plan.
 // ---------------------------------------------------------------------------
-
-let hintsIndexPromise: Promise<DiscoveryHintsIndex> | null = null;
-
-async function fetchAssetJson<T>(env: ScoreEnv, path: string): Promise<T> {
-  const res = await env.ASSETS.fetch(new Request(`https://assets.internal${path}`));
-  if (!res.ok) throw new Error(`asset fetch failed: ${path} (status ${res.status})`);
-  return (await res.json()) as T;
-}
-
-function loadHintsIndex(env: ScoreEnv): Promise<DiscoveryHintsIndex> {
-  if (!hintsIndexPromise) {
-    hintsIndexPromise = fetchAssetJson<DiscoveryHintsIndex>(env, '/discovery-hints-index.json').catch((err) => {
-      hintsIndexPromise = null;
-      throw err;
-    });
-  }
-  return hintsIndexPromise;
-}
 
 /** Test-only — drop in-memory index caches. */
 export function _resetIndexCache(): void {
   _resetRegistryIndexCache();
-  hintsIndexPromise = null;
+  _resetHintsIndexCache();
 }
 
 // ---------------------------------------------------------------------------
