@@ -39,7 +39,7 @@ describe('.well-known/mcp pointer (built dist/)', () => {
     ]);
   });
 
-  test('values match the wire contract pinned in content/mcp.md and instructions.ts', async () => {
+  test('values match the wire contract pinned in content/mcp-skill.md and instructions.ts', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
     const parsed = JSON.parse(raw) as {
       mcp_endpoint: string;

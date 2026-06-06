@@ -2,7 +2,7 @@
 
 Operator playbook for `POST https://anc.dev/mcp`. Companion to the client-facing skill at
 [`content/mcp-skill.md`](../../content/mcp-skill.md) (published at `https://anc.dev/mcp-skill.md`). The client skill
-covers the wire contract clients see; this runbook covers the surfaces operators see — kill switches, observability,
+covers the wire contract clients see; this runbook covers the surfaces operators see: kill switches, observability,
 posture rationale, spec-revision drift handling, and rate-limit policy. Unpublished by design: the published surface is
 the client skill plus the `.well-known/mcp` pointer, not this runbook.
 
@@ -13,7 +13,7 @@ flip with `wrangler secret put`.
 
 | Secret                     | Scope                     | Falsy behavior                                                                                                                                                                                          |
 | -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_ENABLED`              | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope — the surface is off, not in-error. Discoverability siblings stay live.                         |
+| `MCP_ENABLED`              | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
 | `MCP_LIVE_SCORING_ENABLED` | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
 
 Decision flow:
@@ -65,7 +65,7 @@ Every `POST /mcp` request emits one structured `[mcp-call]` log line. Schema:
 | `response_format` | chosen `application/json` / `text/event-stream` | Negotiated from `Accept`.                                |
 | `gate_result`     | `passed` or `rate_limited`                      | The log fires AFTER the rate-limit gate decision.        |
 
-**Important:** the log fires after the gate so Workers Logs volume stays bounded under attack — but still records the
+**Important:** the log fires after the gate so Workers Logs volume stays bounded under attack, but still records the
 denial. A flood that trips `MCP_LIMITER` produces one log line per request, not zero.
 
 To query:
@@ -84,9 +84,9 @@ triaging unexpected traffic shape: filter by `origin` (browser probes) or `user_
 
 Spec revision `2025-06-18` is pinned in three places that MUST stay in lockstep:
 
-1. `src/worker/mcp/instructions.ts` — the `SPEC_REVISION` constant baked into the handshake `instructions` field.
-2. `src/build/11a-discovery-emit.mjs` — the `MCP_SPEC_VERSION` constant baked into `/.well-known/mcp`.
-3. The MCP SDK version in `package.json` — the SDK enforces the protocol-level pin on `initialize`.
+1. `src/worker/mcp/instructions.ts`: the `SPEC_REVISION` constant baked into the handshake `instructions` field.
+2. `src/build/11a-discovery-emit.mjs`: the `MCP_SPEC_VERSION` constant baked into `/.well-known/mcp`.
+3. The MCP SDK version in `package.json`: the SDK enforces the protocol-level pin on `initialize`.
 
 Tests assert each literal value so any drift breaks the build (`tests/worker-mcp.test.ts`,
 `tests/build-discovery-emit.test.ts`). When upgrading the SDK:
@@ -110,13 +110,13 @@ refactor doesn't drop the security argument.
 
 Per-request cost is trivial (in-isolate catalog read, no container, no R2 write). A small anon flood is recoverable
 within the 60-second window. A shared anon bucket is acceptable because the worst case is a brief denial-of-service for
-unkeyed traffic — no resource cost amplifies.
+unkeyed traffic, since no resource cost amplifies.
 
 ### Audit tier (`MCP_AUDIT_LIMITER`): 5 audits / 60min per IP, NO anon fallback
 
 Per-request cost is non-trivial (container spawn, R2 write, DO dispatch). A shared anon bucket would be a DoS vector: an
 attacker without `cf-connecting-ip` could burn the bucket and lock out every legitimate anonymous caller from auditing.
-The mitigation is to reject on missing IP rather than share — the cost difference between read and audit makes the rule
+The mitigation is to reject on missing IP rather than share. The cost difference between read and audit makes the rule
 asymmetric.
 
 The hourly ceiling is enforced in two layers because the CF Rate Limiting binding only accepts `period: 10 | 60`
@@ -139,13 +139,13 @@ audit-window distribution from KV; tune to keep p95 traffic under the ceiling ra
 
 Four surfaces advertise the MCP endpoint. Operators are responsible for keeping them coherent.
 
-- `/.well-known/mcp` — JSON pointer. `documentation` field must equal the published client-skill URL
+- `/.well-known/mcp`: JSON pointer. `documentation` field must equal the published client-skill URL
   (`https://anc.dev/mcp-skill.md`). Tests assert this literal.
-- `/.well-known/ai.txt` — `Programmatic-API: https://anc.dev/mcp` plus the canonical contact
+- `/.well-known/ai.txt`: `Programmatic-API: https://anc.dev/mcp` plus the canonical contact
   (`97-boss-beetle@icloud.com`).
-- `/.well-known/security.txt` — RFC 9116 contact; `Expires` must stay at least 300 days in the future (tests assert).
-- `/llms.txt` — Programmatic access section listing `/mcp`, `/.well-known/mcp`, and the client-skill URL.
-- `InitializeResult.instructions` — session-time summary plus a pointer back to the client-skill URL.
+- `/.well-known/security.txt`: RFC 9116 contact; `Expires` must stay at least 300 days in the future (tests assert).
+- `/llms.txt`: Programmatic access section listing `/mcp`, `/.well-known/mcp`, and the client-skill URL.
+- `InitializeResult.instructions`: session-time summary plus a pointer back to the client-skill URL.
 
 When the client-skill URL changes (a rename, a domain move), all six surfaces have to update together. The drift gate is
 the test suite; trust it, but pull the e2e suite locally before deploying to confirm.
@@ -153,7 +153,7 @@ the test suite; trust it, but pull the e2e suite locally before deploying to con
 ## Live-scoring kill switch interplay
 
 `MCP_LIVE_SCORING_ENABLED` shares a name and semantic with the live-scoring kill switch used by the human form on `/`.
-They are separate secrets — one gates the MCP tool, the other gates `/api/score` — but they target the same underlying
+They are separate secrets (one gates the MCP tool, the other gates `/api/score`), but they target the same underlying
 cost (container audit pool). When both are flipped off, no live audits run from any surface; cached scorecards remain
 available everywhere.
 

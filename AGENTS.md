@@ -4,37 +4,36 @@ The agentnative spec site. This file is for any agent (Claude Code or otherwise)
 
 ## Project
 
-A site that publishes the agent-native CLI standard (the 7 principles for CLI tools operated by AI agents). The site is
-the primary launch surface for agentnative. When the HN post goes live ("Show HN: agentnative — check if your CLI is
-agent-native"), it links here. The standard is what launches; the tool (`brettdavies/agentnative-cli`) is how you use
-it.
+A site that publishes the agent-native CLI standard (the 8 principles for CLI tools operated by AI agents). The site is
+the primary launch surface for agentnative. The standard is what launches; the tool (`brettdavies/agentnative-cli`) is
+how you use it.
 
 ## Authoritative scope
 
 The scope for v0 is decided and lives in:
 
-- `~/.gstack/projects/brettdavies-agentnative-site/ceo-plans/2026-04-13-spec-site.md` — approved scope, gaps to close,
+- `~/.gstack/projects/brettdavies-agentnative-site/ceo-plans/2026-04-13-spec-site.md`: approved scope, gaps to close,
   deployment ordering, test plan. Read this before making scope choices.
-- `docs/TODOS.md` — deferred work for later phases (live scorecard embed, versioned spec, community PR flow,
+- `docs/TODOS.md`: deferred work for later phases (live scorecard embed, versioned spec, community PR flow,
   `--agent-caps` docs, davies.fyi cross-link).
-- `~/obsidian-vault/Projects/brettdavies-agentnative/principles/` — authoritative spec for the 7 principles (one file
-  per principle, MUST/SHOULD/MAY requirements, pressure-testable). The site's principle copy in `content/principles/` is
-  written **manually** from these files — no build-time import, no live link. When you write or edit site copy, read the
+- `~/obsidian-vault/Projects/brettdavies-agentnative/principles/`: authoritative spec for the 8 principles (one file per
+  principle, MUST/SHOULD/MAY requirements, pressure-testable). The site's principle copy in `content/principles/` is
+  written **manually** from these files. No build-time import, no live link. When you write or edit site copy, read the
   relevant `p<n>-*.md` spec file first. Do not edit the spec to match the site; propagate in the other direction,
   deliberately.
-- `src/data/spec/` — vendored snapshot of `brettdavies/agentnative` (the canonical spec repo) at a pinned tag. Contains
-  `VERSION` (the spec version this snapshot is at; exported as `SPEC_VERSION` from `src/build/util.mjs` — reference /
+- `src/data/spec/`: vendored snapshot of `brettdavies/agentnative` (the canonical spec repo) at a pinned tag. Contains
+  `VERSION` (the spec version this snapshot is at; exported as `SPEC_VERSION` from `src/build/util.mjs`, reference /
   diff target only, NOT used for any user-visible surface), `CHANGELOG.md`, and `principles/p*-*.md` (machine-readable
-  frontmatter — diff target only, NOT consumed by site rendering). Refreshed via `scripts/sync-spec.sh` (remote-first;
+  frontmatter, diff target only, NOT consumed by site rendering). Refreshed via `scripts/sync-spec.sh` (remote-first;
   auto-picks the latest v* tag). The site copy in `content/principles/` and the vendored spec at
-  `src/data/spec/principles/` coexist intentionally — they serve different audiences (humans vs machines) and their
-  reconciliation is a deliberate editorial act, not a derivation.
-- `content/principles/VERSION` — the spec version the site's PROSE has been **reconciled to**. Exported as
+  `src/data/spec/principles/` coexist intentionally, because they serve different audiences (humans vs machines) and
+  their reconciliation is a deliberate editorial act, not a derivation.
+- `content/principles/VERSION`: the spec version the site's PROSE has been **reconciled to**. Exported as
   `SITE_SPEC_VERSION` from `src/build/util.mjs` and rendered in the site footer. Bumped MANUALLY by the contributor who
-  reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run — bumping before reconciliation lies to visitors
-  about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The badge SVGs
-  use a different source (each scorecard's own `spec_version` field), and the OG card uses anc's self-scorecard's
-  `spec_version` — three sources for three different events (vendor / score / reconcile).
+  reconciles `content/principles/p*-*.md` after a `sync-spec.sh` run, because bumping before reconciliation lies to
+  visitors about site currency. Always ≤ `SPEC_VERSION`; lag during the manual reconciliation window is honest. The
+  badge SVGs use a different source (each scorecard's own `spec_version` field), and the OG card uses anc's
+  self-scorecard's `spec_version`. Three sources for three different events (vendor / score / reconcile).
 - Workflow detail in [`src/data/spec/README.md`](src/data/spec/README.md); cross-repo version model at
   [`docs/solutions/best-practices/agentnative-version-model-2026-05-01.md`](docs/solutions/best-practices/agentnative-version-model-2026-05-01.md);
   governing pattern at
@@ -49,24 +48,24 @@ anchors, and semantic HTML. Keep this framing in every decision.
 
 ## Structure
 
-- `index.html` — single-page surface for the 7 principles, anchor-linked (`#p1-...` through `#p7-...`)
-- `/audit` — usage for the `anc` CLI (flags, output shapes, audit-ID conventions)
-- `/install` — human-facing install page for the `agentnative` CLI itself (HTML + markdown twin only — no JSON manifest;
+- `index.html`: single-page surface for the 8 principles, anchor-linked (`#p1-...` through `#p8-...`)
+- `/audit`: usage for the `anc` CLI (flags, output shapes, audit-ID conventions)
+- `/install`: human-facing install page for the `agentnative` CLI itself (HTML + markdown twin only, no JSON manifest;
   `brew`, `cargo`, and platform archives, sourced from `content/install.md`)
-- `/about` — attribution, versioning, credits (subtle: the site does not lead with Brett's name)
-- `/skill` — human-facing install page for the `agent-native-cli` skill bundle (rendered HTML; mixed-register prose +
+- `/about`: attribution, versioning, credits (subtle: the site does not lead with Brett's name)
+- `/skill`: human-facing install page for the `agent-native-cli` skill bundle (rendered HTML; mixed-register prose +
   per-host clone commands)
-- `/skill.json` — canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
+- `/skill.json`: canonical machine-primary skill manifest. Same data, agent-readable. `Content-Type: application/json`,
   `X-Robots-Tag: noindex`. Both `/skill` and `/skill.json` derive from `src/data/skill/skill.json` at build time; full
   surface contract in `DESIGN.md` §3.9
-- `content/*.md` — markdown source of truth for every page (principle files, check, about, index)
-- Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
+- `content/*.md`: markdown source of truth for every page (principle files, check, about, index)
+- Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
-- `/llms.txt`, `/llms-full.txt` — llmstxt.org convention (summary index + full concatenated spec)
-- `/mcp` — `POST`-only Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
+- `/llms.txt`, `/llms-full.txt`: llmstxt.org convention (summary index + full concatenated spec)
+- `/mcp`: `POST`-only Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
   discoverability pointer at `/.well-known/mcp`; HTML + `.md` twin at `/mcp-skill`
-- `/sitemap.xml`, `/robots.txt` — hygiene
-- `public/og-image.png` — 1200x630 designed social preview
+- `/sitemap.xml`, `/robots.txt`: hygiene
+- `public/og-image.png`: 1200x630 designed social preview
 
 Plain HTML + minimal CSS + small Worker script. No frontend framework, no build pipeline beyond the Worker's CommonMark
 render step. Deploy via `wrangler`.
@@ -95,10 +94,10 @@ Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, 
 
 **Two rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
-audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback** — missing IP returns `-32099` rather
-than consuming a shared bucket, because container-run cost is non-trivial. The hourly window is enforced in two layers:
-the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and
-an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the
+audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. Missing IP returns `-32099` rather than
+consuming a shared bucket, because container-run cost is non-trivial. The hourly window is enforced in two layers: the
+CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and an
+application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the
 hourly ceiling.
 
 **Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
@@ -110,7 +109,7 @@ tools compose the same `/api/score` orchestration core, so cache semantics never
 `wrangler secret put`.
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
-  one-line plain-text body. No JSON-RPC envelope — the surface is off, not in-error.
+  one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
 - `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
   `next_tool: get_scorecard` redirect; the read tier stays alive.
 
@@ -123,10 +122,10 @@ next_tool`, and a `score_cli` hit is `isError: false` with `audited: false, next
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
-fail the browser's same-origin check and are blocked client-side — the deliberate posture, because a browser-reachable
-`/mcp` would let any malicious web page trigger `score_cli` runs charged against the visitor's `cf-connecting-ip`. A
-future use case needing browser access gets its own KTD revision, an explicit allow-list, and a rate-limit policy
-designed for browser traffic.
+fail the browser's same-origin check and are blocked client-side. This is the deliberate posture, because a
+browser-reachable `/mcp` would let any malicious web page trigger `score_cli` runs charged against the visitor's
+`cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
+rate-limit policy designed for browser traffic.
 
 **Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `[mcp-call]`
 log line carrying `Origin`, `User-Agent`, Cloudflare-injected client IP and country, the chosen response format, and a
@@ -134,10 +133,10 @@ log line carrying `Origin`, `User-Agent`, Cloudflare-injected client IP and coun
 attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
 inventory is published.
 
-**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp` `"version"`, `content/mcp.md`'s
-"Endpoint" block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all carry the same `2025-06-18`
-literal. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each occurrence so a single-source
-bump breaks the build.
+**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp` `"version"`,
+`content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
+carry the same `2025-06-18` literal. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each
+occurrence so a single-source bump breaks the build.
 
 ## Voice
 
@@ -153,7 +152,7 @@ Use RFC 2119 language (MUST, SHOULD, MAY) for requirements. Concrete examples, n
 then show the fix.
 
 The brand voice anchor is the xAI cover letter in the obsidian vault. Brand doc (see cross-repo table) carries
-positioning context — treat its tactical design specifics as placeholders, not settled. The strategic framing (phases,
+positioning context. Treat its tactical design specifics as placeholders, not settled. The strategic framing (phases,
 narrative, attribution rules) is load-bearing.
 
 ## Visual design
@@ -174,21 +173,21 @@ design principles): [`PRODUCT.md`](PRODUCT.md).
 
 ## Visual fidelity
 
-Two gates protect against visual regressions slipping past unit tests, which only assert HTML structure — not rendered
+Two gates protect against visual regressions slipping past unit tests, which only assert HTML structure, not rendered
 appearance.
 
 ### Browser-verify before declaring "done"
 
 Any change that touches CSS, design tokens, layout, color, or component HTML must be verified in an actual browser
-before the unit is reported complete. `bun test` and `bun run build` going green does not count — neither renders the
-page, neither resolves dark-mode token overrides, neither catches "near-white text on near-white background" failure
+before the unit is reported complete. `bun test` and `bun run build` going green does not count, because neither renders
+the page, neither resolves dark-mode token overrides, neither catches "near-white text on near-white background" failure
 modes that surface only under a specific theme.
 
 The verification is mechanical:
 
 1. Open the changed page on staging (or local `bun run dev`) in a browser.
 2. Toggle through both themes (light + dark) using the in-page toggle. Confirm the changed surface reads correctly under
-   each — text is legible against background, borders register as edges, interactive elements stay distinguishable from
+   each: text is legible against background, borders register as edges, interactive elements stay distinguishable from
    prose.
 3. Capture a screenshot for the PR description when the change is non-trivial.
 
@@ -209,9 +208,9 @@ baseline; non-trivial pixel deltas fail the run.
 This protects against the failure mode the browser-verify rule depends on humans catching: an agent or human pushes a
 "non-visual" change that nonetheless shifts the rendered page. Snapshot tests don't require a brain in the loop.
 
-The tooling is heavier than the lint-rule alternatives — baseline images need maintenance, flake budgets need discipline
-— so the rollout is deferred until the design system is stable enough for a baseline to be load-bearing. Until then, the
-agent-side browser-verify rule above is the working gate.
+The tooling is heavier than the lint-rule alternatives (baseline images need maintenance, flake budgets need
+discipline), so the rollout is deferred until the design system is stable enough for a baseline to be load-bearing.
+Until then, the agent-side browser-verify rule above is the working gate.
 
 ## Local dev
 
@@ -221,7 +220,7 @@ the `applyHeaders` policy (`Link: rel=alternate`, `X-Llms-Txt`, staging `X-Robot
 `/mcp` transport, the `/api/score` + `/score/live/<binary>` live-scoring path, the `/check` → `/audit` redirect, the
 `/_internal/*` 404 guard, and the homepage `{{TURNSTILE_SITEKEY}}` substitution. Without the Worker, none of those
 contracts are visible. Static-file servers (`python -m http.server`, `serve`, `npx http-server`, etc.) bypass the Worker
-entirely and produce a false preview — never use them to verify any of those surfaces or the `.md`-twin contract.
+entirely and produce a false preview. Never use them to verify any of those surfaces or the `.md`-twin contract.
 
 ```bash
 bun run dev    # http://localhost:8787, staging bindings, local Worker
@@ -233,7 +232,7 @@ Turnstile test secret, and the staging R2 / KV / rate-limit namespaces. The top-
 namespaces, R2, and asset directory in-process; dropping it would route to the deployed staging Worker and bypass the
 local build.
 
-Production-mode preview (rare — only when verifying the production block of `wrangler.jsonc`):
+Production-mode preview (rare, only when verifying the production block of `wrangler.jsonc`):
 
 ```bash
 bun run build
@@ -256,18 +255,16 @@ already bound there rather than picking a fallback.
 | `~/obsidian-vault/Projects/brettdavies-Brand-System/seed-material/xAI-Cover-Letter-VOICE-ANCHOR.md` | Voice anchor                                                                                                                   | Canonical in-voice exemplar for Brett (not this site's tone, but useful for adjacent surfaces).                                                                                                                                    |
 | `docs/solutions/` (symlink to `~/dev/solutions-docs/`)                                              | Cross-repo documented solutions; includes the agent-native documentation surface pattern that informs this site's architecture | Organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Search with `qmd query "<topic>" --collection solutions`. Relevant when researching architecture or tooling patterns before building from scratch. |
 | `~/obsidian-vault/Projects/brettdavies-agentnative/research/index.md`                               | Shared research index for both this site and the `agentnative` CLI linter                                                      | External signal (blog posts, HN threads, competitor CLIs) extracted into curated quotes + principle mapping. Read before writing principle copy or launch framing that cites third parties.                                        |
-| `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md`                             | Canonical spec for P1-P7 (one file per principle, pressure-testable)                                                           | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files — no build-time import, no live link. When principle spec changes, propagate to site copy deliberately.         |
+| `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md`                             | Canonical spec for P1-P8 (one file per principle, pressure-testable)                                                           | Source of truth for principle meaning. Site copy in `content/principles/` is written **manually** from these files. No build-time import, no live link. When principle spec changes, propagate to site copy deliberately.          |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-build-plan-20260414-130000.md`          | Build & distribution plan                                                                                                      | Scaffolding decisions for /ce-plan and /ce-work: target repo tree, build pipeline, deployment. Locked decisions; Cloudflare-specifics verified.                                                                                    |
 | `~/.gstack/projects/brettdavies-agentnative-site/brett-main-eng-review-20260414-123800.md`          | Eng review                                                                                                                     | Architecture + code quality + test coverage review for M1. §12 lists all DESIGN.md edits. Decisions resolved; no blockers.                                                                                                         |
 | `docs/plans/2026-04-17-001-feat-registry-leaderboard-scorecard-pages-plan.md`                       | Registry + leaderboard plan                                                                                                    | Plan 1 scope: tool registry, pre-computed scorecards, `/scorecards` leaderboard, `/score/<tool>` pages. Plan 2 (live scoring via CF Sandbox) is separate.                                                                          |
 
 ## Related repos
 
-- `brettdavies/agentnative-cli` (`~/dev/agentnative`, tmux `anc`) — the Rust CLI linter. The site's core CTA links to
-  it.
-- `brettdavies/brettdavies` (`~/dev/brettdavies`) — GitHub profile. Single-commit policy (amend +
-  force-push-with-lease).
-- `brettdavies/davies.fyi` — does not exist yet. The site's /about page will eventually link to it.
+- `brettdavies/agentnative-cli` (`~/dev/agentnative`, tmux `anc`): the Rust CLI linter. The site's core CTA links to it.
+- `brettdavies/brettdavies` (`~/dev/brettdavies`): GitHub profile. Single-commit policy (amend + force-push-with-lease).
+- `brettdavies/davies.fyi`: does not exist yet. The site's /about page will eventually link to it.
 
 ## Repo conventions
 
@@ -281,12 +278,12 @@ already bound there rather than picking a fallback.
 - **Rulesets:** `.github/rulesets/protect-main.json` and `protect-dev.json` are the source of truth for branch
   protection; apply via `gh api` (see `RELEASES.md § Branch protection`).
 - **CI:**
-- `ci.yml` — fast PR gate (lint · build · test · wrangler dry-run).
-- `deep-check.yml` — scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
+- `ci.yml`: fast PR gate (lint · build · test · wrangler dry-run).
+- `deep-check.yml`: scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
   last deep-check.
-- `deploy.yml` — publishes to the `*.workers.dev` staging on every push to `main`.
-- `guard-main-docs.yml` — blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
-- `guard-release-branch.yml` — rejects PRs to main whose head isn't `release/*`.
+- `deploy.yml`: publishes to the `*.workers.dev` staging on every push to `main`.
+- `guard-main-docs.yml`: blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
+- `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.
 
 ## Tool-site sequencing (do not violate)
 
@@ -304,10 +301,10 @@ The production domain (candidates: agentnative.dev / .io / .org) is **Brett's pu
 ## First action for a fresh agent session
 
 1. Read the CEO plan (link above). This is the single source of truth for v0 scope.
-2. Read `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md` and the seven `p<n>-*.md` files — the
+2. Read `~/obsidian-vault/Projects/brettdavies-agentnative/principles/index.md` and the eight `p<n>-*.md` files: the
    authoritative spec that the site's `content/principles/` copy is written from (manually, not auto-derived).
 3. Run a reference-site survey for visual design (clig.dev, 12factor.net, htmx.org, rust-lang.org book, json-schema.org,
-   fly.io docs, matklad.github.io — pick 3-4 that embody "simple, traditional, modern flair" and extract tokens).
-   Produce `DESIGN.md` before writing any HTML.
+   fly.io docs, matklad.github.io; pick 3-4 that embody "simple, traditional, modern flair" and extract tokens). Produce
+   `DESIGN.md` before writing any HTML.
 4. Scaffold the markdown sources in `content/` first, then the Worker + HTML renderer, then wire deploy.
 5. Check in with Brett before attaching the production domain.

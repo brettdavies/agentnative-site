@@ -2,7 +2,7 @@
 
 anc.dev exposes the agent-native CLI standard catalog over a Model Context Protocol server at `https://anc.dev/mcp`.
 Nine tools cover four surfaces (registry, principles, spec, scorecards) plus five resources for direct lookup. The
-catalog is public — no authentication, no API key. This page is the **client integration guide**: how to call each tool,
+catalog is public: no authentication, no API key. This page is the **client integration guide**: how to call each tool,
 what comes back, and what to do when something fails. Operator-facing material (kill switches, structured logging, CORS
 posture) lives in the in-repo runbook at `docs/runbooks/mcp-operator.md`.
 
@@ -71,7 +71,7 @@ cached the result.
 ### "Is this binary in the live-score cache?"
 
 Same tool, install command as input. A hit returns the cached scorecard with `source: "live-cache"`; a miss returns a
-typed redirect — **not** an error.
+typed redirect. Not an error.
 
 ```json
 // tools/call get_scorecard { "install": "npm install -g cowsay" }
@@ -127,9 +127,9 @@ same input. The cost difference (registry/cache lookup vs container run) is the 
 
 ## Browse the catalog
 
-Three tools over the curated registry. None of them require a network round trip on the server side — every response is
-a slice of the build-time catalog projection. Live-scored binaries do **not** appear here; they only show up via
-`get_scorecard` / `score_cli`.
+Three tools over the curated registry. None of them require a network round trip on the server side, since every
+response is a slice of the build-time catalog projection. Live-scored binaries do **not** appear here; they only show up
+via `get_scorecard` / `score_cli`.
 
 ```json
 // tools/call list_tools
@@ -160,8 +160,8 @@ Filters AND together. Rows without a committed scorecard are excluded when eithe
 ## Read the spec
 
 Two pairs of tools cover the spec text and the principles that derive from it. The principle records carry the
-`audit_id` strings the `anc` CLI emits — useful when an agent is reading a scorecard and wants to look up exactly which
-requirement a finding maps to.
+`audit_id` strings the `anc` CLI emits. Those identifiers are useful when an agent is reading a scorecard and wants to
+look up exactly which requirement a finding maps to.
 
 ```json
 // tools/call list_principles
@@ -271,9 +271,9 @@ Two limiters, two cost profiles.
 | `MCP_LIMITER`       | every `POST /mcp` request          | 60 per 60 seconds per IP | `cf-connecting-ip` | yes (shared)  |
 | `MCP_AUDIT_LIMITER` | `score_cli` cache-miss audits only | 5 per 60 minutes per IP  | `cf-connecting-ip` | **no**        |
 
-The audit tier rejects requests with no `cf-connecting-ip` header rather than consuming a shared bucket — container-run
-cost is non-trivial and a shared anon bucket would be a DoS vector. The hourly ceiling is enforced in two layers (CF
-binding burst gate + KV-backed per-hour window); both surface as `-32099` on breach.
+The audit tier rejects requests with no `cf-connecting-ip` header rather than consuming a shared bucket, because
+container-run cost is non-trivial and a shared anon bucket would be a DoS vector. The hourly ceiling is enforced in two
+layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32099` on breach.
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
 roll. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be tuned with
@@ -303,7 +303,7 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 
 **Discovery siblings.**
 
-- `https://anc.dev/.well-known/mcp` — HTTP-level JSON pointer carrying `mcp_endpoint`, `version`, `description`,
+- `https://anc.dev/.well-known/mcp`: HTTP-level JSON pointer carrying `mcp_endpoint`, `version`, `description`,
   `transport`, and `documentation` (this page).
-- `https://anc.dev/.well-known/ai.txt` — AI-training and agent-access posture plus `Programmatic-API:
+- `https://anc.dev/.well-known/ai.txt`: AI-training and agent-access posture plus `Programmatic-API:
   https://anc.dev/mcp`.
