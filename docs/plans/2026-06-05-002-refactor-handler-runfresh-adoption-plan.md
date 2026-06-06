@@ -63,8 +63,9 @@ share-URL derivation silently returned `null` for an entire input class. The tes
 ## Requirements
 
 - **R1. Behavioral parity.** Every `/api/score` response — for every input class the test suite exercises — remains
-  byte-identical to the pre-refactor baseline. Telemetry payload shape and emit order remain identical. The 3,360-line
-  bun suite stays green.
+  byte-identical to the pre-refactor baseline. Telemetry payload values, shape, and emit order remain identical
+  (including `cache_post_attempted` distribution across error paths and `binary` / `pm` / `resolved_step` attribution on
+  every spec-resolved request, per KTD-4 and KTD-7). The 3,360-line bun suite stays green.
 - **R2. Code-path symmetry.** Both `/api/score` and MCP `score_cli` compose the same `runFreshOnly` orchestrator. The
   symmetry contract in AGENTS.md line 104 ("The two tools compose the same `/api/score` orchestration core, so cache
   semantics never drift between MCP and the human form on `/`") is no longer aspirational; it is enforced by structure.
@@ -119,13 +120,19 @@ section comment in `handler.ts`. Lift-and-delete is the clean end state. The han
 
 ### KTD-4. Telemetry `cache_post_attempted` flag is captured inside the per-variant switch arms, not before the orchestrator call
 
-The seam the repo recon surfaced. Today `handler.ts` line 639 sets `telemetry.cache_post_attempted = true` BEFORE
-attempting the post-discovery cache lookup, when `spec.pm !== 'git-clone' && !skipCache`. After the refactor, `spec` is
-only available inside `RunFreshResult` arms (`cache_post_hit`, `fresh`, `do_error`). Resolution: set
-`telemetry.cache_post_attempted = true` inside the `cache_post_hit` and `fresh` arms (both confirm we passed the skip
-gate); leave it unset in `resolution_error`, `sandbox_unavailable`, `sandbox_stub_until_u6` paths (correct, because no
-cache attempt happens). The `1538` test in `score-handler-branch-and-norelease.test.ts` is the load-bearing assertion on
-this flag; it expects `cache_post_attempted=true` in the cache_post_hit path and that stays true post-refactor.
+The seam the repo recon surfaced, resolved jointly with KTD-7. Today `handler.ts` line 639 sets
+`telemetry.cache_post_attempted = true` BEFORE attempting the post-discovery cache lookup, whenever the skip gate holds
+(`spec.pm !== 'git-clone' && !skipCache`). The flag therefore stays `true` even when the request later bounces on
+`do_error`, `sandbox_unavailable`, `sandbox_stub_until_u6`, or `incomplete_response_contract` — every path that crossed
+the skip gate emits `cache_post_attempted=true`, only `resolution_error` (and git-clone / skip-cache requests) emit
+`false`. R1 (byte-identical telemetry) requires the post-refactor handler to reproduce that distribution.
+
+Resolution: with KTD-7 extending `RunFreshResult` to carry `spec` on every variant where the skip gate was crossed
+(`cache_post_hit`, `fresh`, `do_error`, `sandbox_unavailable`, `sandbox_stub_until_u6`, `incomplete_response_contract`),
+the handler computes `telemetry.cache_post_attempted = result.spec.pm !== 'git-clone' && !skipCache` inside every one of
+those arms. The `resolution_error` arm leaves the flag at its initial `false` (no spec was derived; no cache attempt
+happened). The `1538` test in `score-handler-branch-and-norelease.test.ts` is the load-bearing assertion: it expects
+`cache_post_attempted=true` in the `cache_post_hit` path, and that stays true post-refactor.
 
 ### KTD-5. `shareUrlForSpec` stays in `handler.ts`
 
@@ -138,7 +145,9 @@ arms. No change to share-URL behavior.
 
 Five error tiers participate in the variant switch:
 
-- `error_${resolution.error}` (e.g. `error_brew_only`, `error_go_no_binary`, `error_chain_no_resolve`, etc.)
+- `error_${resolution.error}` (i.e. `error_chain_no_resolve`, `error_install_unsupported`, `error_invalid_url_path` —
+  the three members of `resolve-spec.ts`'s `resolution.error` union; `brew_only` and `go_no_binary` live in
+  `resolution.details` as `pm=...` and surface through the `error_install_unsupported` tier)
 - `error_sandbox_unavailable`
 - `error_sandbox_stub_until_u6`
 - `error_${doPayload.error}`
@@ -147,6 +156,35 @@ Five error tiers participate in the variant switch:
 Every test that asserts a tier string asserts the literal — drift breaks the assertion. The refactor preserves each
 string exactly; the switch arms produce the same `tier` value the inline block produces today. Telemetry mutation
 happens BEFORE response construction inside each arm so the outer `try/finally` emits the final state.
+
+### KTD-7. `RunFreshResult` extends to carry `spec` and `resolved_step` on every variant where the skip gate was crossed
+
+The orchestrator's current `RunFreshResult` shape (post-U5a) carries `spec` and `resolved_step` only on the
+`cache_post_hit`, `fresh`, and `do_error` variants — the three paths where the orchestrator already needed spec
+information to produce its output. The `sandbox_unavailable`, `sandbox_stub_until_u6`, and
+`incomplete_response_contract` variants currently carry no `spec`, which is fine for the MCP `score_cli` consumer (it
+returns a typed error to the agent without telemetry attribution) but breaks the handler's pre-refactor telemetry
+contract. Today `handler.ts:609-612` sets `telemetry.binary`, `telemetry.pm`, and `telemetry.resolved_step` from the
+resolved spec immediately after `resolveSpec` succeeds — so every error path that follows a successful spec resolution
+(including sandbox errors and contract failures) emits a `recordScoreEvent` row carrying the resolved binary name,
+package manager, and resolved step in the Analytics Engine `writeDataPoint` payload. Operators query that AE row for
+tool attribution (`which tools hit sandbox_unavailable most often?`); a post-refactor `null` on those fields breaks the
+query without any HTTP-wire signal, which the byte-identical preflight (KTD-2) and the existing 3,360-line bun suite
+cannot catch.
+
+Resolution: extend `RunFreshResult`'s `sandbox_unavailable`, `sandbox_stub_until_u6`, and `incomplete_response_contract`
+variants to carry `spec` and `resolved_step` (both optional in the type, present whenever the orchestrator passed the
+skip gate before the DO call failed). The MCP `score_cli` consumer in `src/worker/mcp/tools/scorecard-audit.ts` already
+ignores these fields on those variants; the extension is purely additive at the orchestrator surface. The handler reads
+`result.spec.binary`, `result.spec.pm`, and `result.resolved_step` inside each spec-carrying arm and sets the three
+telemetry fields, preserving the AE-row payload byte-identical to today's behavior. Same root cause as KTD-4's
+`cache_post_attempted` seam, fixed in the same surface change.
+
+`tests/worker-score-orchestrate.test.ts` gains assertions covering the new fields on `sandbox_unavailable` and
+`sandbox_stub_until_u6` (the `incomplete_response_contract` variant already gets one assertion from U1's pin tests once
+spec is present). The handler's existing 3,360-line suite continues to pass without changes — the AE row is asserted
+indirectly via the existing tier-log assertions, and the binary/pm fields are not pinned today (which is itself the
+silent-omission shape KTD-2's byte-identical preflight cannot catch on its own).
 
 ---
 
@@ -171,7 +209,7 @@ arm could drift the string without any current test catching it.
 
 **Approach.** Two tests, each posting an input that forces the DO branch and stubbing the DO to return the malformed
 shape for the targeted reason. The first DO returns plain text (triggers `non_json_body`); the second DO returns valid
-JSON with an unrecognized envelope (triggers `unrecognized_envelope`). Both assert the response status (503), the
+JSON with an unrecognized envelope (triggers `unrecognized_envelope`). Both assert the response status (500), the
 `error` code (`incomplete_response_contract`), AND the exact `details` string. This is the only new test added by U5b;
 everything else relies on the existing 3,360-line suite.
 
@@ -189,11 +227,11 @@ them). Verify red, then commit. The strings are the contract.
 
 - **Pin `non_json_body`**: POST `/api/score` with an input that forces the DO branch (e.g. a known-no-registry GitHub
   URL). Stub `env.SCORE.idFromName(...).get(...).fetch(...)` to return `new Response('not json', { status: 200 })`.
-  Assert response status 503, `body.error === 'incomplete_response_contract'`, `body.details === 'DO returned
+  Assert response status 500, `body.error === 'incomplete_response_contract'`, `body.details === 'DO returned
   non-JSON'`.
 - **Pin `unrecognized_envelope`**: same input shape. Stub the DO fetch to return `new Response(JSON.stringify({
   unexpected: 'shape' }), { status: 200, headers: { 'Content-Type': 'application/json' } })`. Assert response status
-  503, `body.error === 'incomplete_response_contract'`, `body.details === 'DO returned unrecognized envelope shape'`.
+  500, `body.error === 'incomplete_response_contract'`, `body.details === 'DO returned unrecognized envelope shape'`.
 
 **Verification.** Both new tests fail when the assertion is flipped to `not.toBe(...)`; pass with the current handler;
 the suite total goes from 882 to 884 with 0 failures.
@@ -217,8 +255,15 @@ pin tests all stay green. No wire behavior change.
   a `switch (result.kind)`; delete `isStubError`, `isDoSuccess`, `isDoError` local definitions at lines ~884-915; remove
   now-dead imports for `getRandom`, the `Container` type, `MAX_INSTANCES` constant, and `cache` if unused elsewhere; add
   an import for `runFreshOnly` + the three classification helpers from `./orchestrate`)
-- `src/worker/score/orchestrate.ts` (modify minimally — export the three DO classification helpers if not already
-  exported so `handler.ts` can import them; verify and adjust)
+- `src/worker/score/orchestrate.ts` (modify — per KTD-7, extend the `RunFreshResult` union so the `sandbox_unavailable`,
+  `sandbox_stub_until_u6`, and `incomplete_response_contract` variants carry optional `spec` and `resolved_step` fields
+  populated whenever the orchestrator passed the skip gate before the DO call failed; add `export` to `isStubError`,
+  `isDoSuccess`, and `isDoError` so `handler.ts` can import them; the MCP `score_cli` consumer at
+  `src/worker/mcp/tools/scorecard-audit.ts` ignores the new optional fields and does not need a change)
+- `tests/worker-score-orchestrate.test.ts` (modify — extend the existing `runFreshOnly: sandbox_unavailable` and
+  `runFreshOnly: DO dispatch` assertions to confirm `result.spec` and `result.resolved_step` are populated on the
+  no-spec error variants when the orchestrator reached them after a successful `resolveSpec`; mirror the assertion shape
+  the `do_error` arm already carries)
 - `tests/score-handler.test.ts`, `tests/score-handler-branch-and-norelease.test.ts`,
   `tests/score-handler-share-url.test.ts`, `tests/score-handler-share-url-post-discovery.test.ts` (unchanged — the 3,360
   lines run as the regression net; do not edit any of these)
@@ -250,23 +295,38 @@ calls into each arm to reproduce today's wire shape.)
 
 **Variant → arm shape** (the seam map from repo recon):
 
-- `cache_post_hit` — set `telemetry.cache_post_attempted=true, cache_post_hit=true, tier='cache_post',
-  freshness='cache-hit'`; derive `shareUrl = shareUrlForSpec(result.spec)`; return
+Every spec-carrying arm (every `result.kind` other than `resolution_error`) sets the four spec-derived telemetry fields
+in the same shape today's handler sets them right after `resolveSpec` returns: `telemetry.binary = result.spec.binary`,
+`telemetry.pm = result.spec.pm`, `telemetry.resolved_step = result.resolved_step ?? null`, and
+`telemetry.cache_post_attempted = result.spec.pm !== 'git-clone' && !skipCache`. This is the KTD-4 + KTD-7 contract:
+every variant where the orchestrator passed the skip gate before bouncing produces the same AE row attribution today's
+inline block does.
+
+- `cache_post_hit` — apply the four spec-derived fields above, then set `telemetry.cache_post_hit=true,
+  tier='cache_post', freshness='cache-hit'`; derive `shareUrl = shareUrlForSpec(result.spec)`; return
   `shapeWithPreference(shapeScoreSuccess(result.scorecard, result.anc_version, 'cache-hit', shareUrl), preference,
   request)` with `setCookie` threaded.
-- `fresh` — set `telemetry.cache_post_attempted=true, tier='live', freshness='live', install_ms=result.install_ms,
-  anc_audit_ms=result.anc_audit_ms`; derive `shareUrl`; return shaped success with `setCookie`.
-- `resolution_error` — set `telemetry.tier='error_'+result.error`; return `resolutionErrorToResponse(result.error,
+- `fresh` — apply the four spec-derived fields, then set `telemetry.tier='live', freshness='live',
+  install_ms=result.install_ms, anc_audit_ms=result.anc_audit_ms`; derive `shareUrl`; return shaped success with
+  `setCookie`.
+- `resolution_error` — no spec is available (resolveSpec failed). Set `telemetry.tier='error_'+result.error`;
+  `telemetry.cache_post_attempted` stays at its initial `false`; return `resolutionErrorToResponse(result.error,
   result.details)` with `setCookie` (the existing `resolutionErrorToResponse` helper stays unchanged in handler.ts; its
   pm-extraction regex at line 924 keeps working since the `details` shape is unchanged).
-- `sandbox_unavailable` — set `telemetry.tier='error_sandbox_unavailable'`; return typed 503 with `setCookie`.
-- `sandbox_stub_until_u6` — set `telemetry.tier='error_sandbox_stub_until_u6'`; return typed 503 with `setCookie`.
-- `do_error` — set `telemetry.tier='error_'+result.doPayload.error`; return `mapDoError(result.doPayload)` with
-  `setCookie` (`mapDoError` already takes `{ error, details }`; destructure `result.doPayload` on the way in).
-- `incomplete_response_contract` — `switch (result.reason)`: `case 'non_json_body'` emits the `'DO returned non-JSON'`
-  details, `case 'unrecognized_envelope'` emits `'DO returned unrecognized envelope shape'`; both set
-  `telemetry.tier='error_incomplete_response_contract'` and return a 503 with `setCookie`. U1's pin tests catch any
-  drift on the strings.
+- `sandbox_unavailable` — apply the four spec-derived fields when `result.spec` is present (KTD-7 ensures it is whenever
+  the orchestrator reached the env.SCORE check, which is the only path that produces this variant); set
+  `telemetry.tier='error_sandbox_unavailable'`; return typed 503 with `setCookie`.
+- `sandbox_stub_until_u6` — apply the four spec-derived fields per KTD-7; set
+  `telemetry.tier='error_sandbox_stub_until_u6'`; return typed 503 with `setCookie`.
+- `do_error` — apply the four spec-derived fields (already exposed on this variant pre-KTD-7); set
+  `telemetry.tier='error_'+result.doPayload.error`; return `mapDoError(result.doPayload)` with `setCookie` (`mapDoError`
+  already takes `{ error, details }`; destructure `result.doPayload` on the way in).
+- `incomplete_response_contract` — apply the four spec-derived fields per KTD-7 (this variant only fires after the DO
+  has been dispatched, so spec is always populated). `switch (result.reason)`: `case 'non_json_body'` emits the `'DO
+  returned non-JSON'` details, `case 'unrecognized_envelope'` emits `'DO returned unrecognized envelope shape'`; both
+  set `telemetry.tier='error_incomplete_response_contract'` and return a 500 with `setCookie` (per the centralized
+  `statusForError` mapping in `src/worker/score/response-shape.ts:110-112`, already pinned by
+  `tests/score-response-shape.test.ts:65`). U1's pin tests catch any drift on the strings.
 
 **Procedural safety net during execution.** Before editing handler.ts, capture response envelopes from the running local
 dev (`bun run dev`) for a canonical input matrix: cached/live × success/error × with/without registry hint × share_url
@@ -296,9 +356,13 @@ as load-bearing checks for the seams:
 - `tests/score-handler.test.ts:392` — DO stub envelope passthrough → 503 `sandbox_stub_until_u6`. Confirms that arm.
 - `tests/score-handler.test.ts:420` and the broader R2-cache-tier describe at 571 — DO returns valid envelope → 200,
   share_url + triad correct. Confirms `fresh` arm.
-- `tests/score-handler-branch-and-norelease.test.ts:321, 350, 867, 880, 1244, 1260` — `resolution_error` variants
-  (`brew_only`, `go_no_binary`, `chain_no_resolve`, `chain_resolved_no_binary_produced`). Confirms
+- `tests/score-handler-branch-and-norelease.test.ts:321, 867, 880, 1244, 1260` — `resolution_error` variants
+  (`pm=brew_only` and `pm=go_no_binary` surfacing via `error_install_unsupported`; `chain_no_resolve`). Confirms
   `resolutionErrorToResponse` composition still works.
+- `tests/score-handler-branch-and-norelease.test.ts:350` — `do_error` variant (DO returns
+  `chain_resolved_no_binary_produced`). Confirms `mapDoError` composition still works. The label `resolution_error` in
+  earlier drafts was incorrect: discovery resolved successfully and the DO was dispatched; the error surfaces from the
+  DO, not from `resolveSpec`.
 - `tests/score-handler.test.ts` `POST pipeline error paths` (lines 364-455) — `do_error` and
   `incomplete_response_contract` paths. U1's two new tests pin the previously-unpinned `details` strings inside this
   block.
@@ -310,15 +374,20 @@ suite plus U1's additions, totaling 884 expected after merge.
 
 **Verification.**
 
-- `bun test` returns 884 pass / 0 fail.
+- `bun test` returns 884+ pass / 0 fail (882 baseline + 2 from U1 + any orchestrate.test.ts assertion adds).
 - `bun run build` succeeds with no warnings.
 - `bun x wrangler deploy --dry-run --env staging` succeeds with no warnings.
 - `src/worker/score/handler.ts` line count drops by ~140-160 lines (the deleted inline block, the three helper
   definitions, the dead imports).
+- `src/worker/score/orchestrate.ts` adds the `spec` and `resolved_step` optional fields to the three previously-no-spec
+  `RunFreshResult` variants (KTD-7); MCP `score_cli` consumer in `scorecard-audit.ts` is unchanged because it ignores
+  these fields on error variants.
 - TypeScript's unused-import diagnostic reports zero remaining unused symbols.
 - A `grep -n "isStubError\|isDoSuccess\|isDoError" src/worker/score/handler.ts` returns zero matches.
 - A `grep -n "getRandom\|MAX_INSTANCES" src/worker/score/handler.ts` returns zero matches.
-- The local canonical-input matrix diff (procedural, per KTD-2) shows zero substantive deltas pre vs post.
+- The local canonical-input matrix diff (procedural, per KTD-2) shows zero substantive deltas pre vs post on the
+  HTTP-wire side. The AE-row side rides on the `tests/worker-score-orchestrate.test.ts` extension plus the existing
+  handler tier-log assertions.
 
 ---
 
@@ -362,20 +431,32 @@ The named precedent at
 hit this exact handler in PR #100. Share-URL derivation kept reading a pre-migration input shape and silently returned
 `null` for an input class. Tests passed; the bug shipped.
 
-**Mitigation.** The procedural byte-identical preflight in U2 (KTD-2) is the named countermeasure: capture
-canonical-input response envelopes pre-edit, diff post-edit, zero substantive deltas required. The eight-to-ten input
-matrix covers the failure-mode shape PR #100 hit. Secondary mitigation: the per-variant arm-by-arm verification in U2's
-test scenarios names each load-bearing assertion explicitly.
+**Mitigation.** Three layers cover this risk together: (1) The procedural byte-identical preflight in U2 (KTD-2)
+captures HTTP-wire response envelope diffs. (2) KTD-7's `RunFreshResult` variant extension ensures every spec-resolved
+arm carries `spec` and `resolved_step`, so the handler preserves `telemetry.binary` / `telemetry.pm` /
+`telemetry.resolved_step` byte-identical on every variant other than `resolution_error` (where today's handler also
+leaves them at their defaults because `resolveSpec` never returned). (3) KTD-4 routes `cache_post_attempted` through the
+same spec-carrying arms, preserving the flag's distribution across success and DO-failure paths. The eight-to-ten input
+matrix in KTD-2 covers the wire-shape side; the orchestrator unit tests at `tests/worker-score-orchestrate.test.ts`
+cover the telemetry-side surface change for the no-spec arms.
 
-### Risk 2: Telemetry emit-ordering drift
+### Risk 2: Telemetry emit-ordering drift and AE-row value preservation
 
 `handleScore` wraps `handleScoreInner` in `try/finally` (handler.ts lines 293-305) and emits the telemetry row from the
 finally block. Per-variant `telemetry.*` mutations move from inline statements (the current handler.ts lines 642-644,
-739-742, 685, 725, 604, 708, 734, 760) into switch arms. If an arm constructs the response before mutating telemetry,
-the finally block sees the wrong state.
+739-742, 685, 725, 604, 708, 734, 760) into switch arms. Two failure modes participate. **Emit ordering**: if an arm
+constructs the response before mutating telemetry, the finally block sees the wrong state. **AE-row value drift**: if
+the handler can't read spec on the `sandbox_unavailable` / `sandbox_stub_until_u6` / `incomplete_response_contract`
+arms, the Analytics Engine `writeDataPoint` row for those errors loses tool/pm/resolved_step attribution that operators
+query for "which tools hit sandbox errors most often"; the byte-identical preflight (KTD-2) cannot catch this because
+the drift is in the AE payload, not the HTTP response.
 
-**Mitigation.** KTD-6 names the discipline: mutate telemetry before constructing the response in every arm. The `1538`
-test in `score-handler-branch-and-norelease.test.ts` asserts the cache-flag set explicitly — drift breaks the test.
+**Mitigation.** KTD-6 names the emit-ordering discipline: mutate telemetry before constructing the response in every
+arm. The `1538` test in `score-handler-branch-and-norelease.test.ts` asserts the cache-flag set explicitly — emit-order
+drift breaks the test. KTD-7 names the value-preservation discipline: extend `RunFreshResult` to carry `spec` and
+`resolved_step` on every variant where the orchestrator passed the skip gate so the handler can reproduce today's AE
+attribution. `tests/worker-score-orchestrate.test.ts` gains assertions for the new fields on the previously-no-spec
+variants.
 
 ### Risk 3: Dead-import cleanup overshoot
 
