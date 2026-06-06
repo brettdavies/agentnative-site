@@ -260,6 +260,16 @@ postflight
 postflights
 Postflight
 GitHub
+backport
+backports
+Backport
+hotfix
+hotfixed
+automatable
+envs
+CF
+PREFLIGHT
+POSTFLIGHT
 scorecard_url
 score_pct
 level_summary

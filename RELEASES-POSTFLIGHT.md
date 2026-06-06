@@ -283,11 +283,10 @@ directly from `dev` — there is no `main → dev` flow to verify.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
   smoke scope).
 -
-
-[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-the coordination trap the live-DO smoke exists to prevent. -
-[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-the rollout-readiness discipline that gates the live-DO smoke.
-
+  [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
+  the coordination trap the live-DO smoke exists to prevent.
+-
+  [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
+  the rollout-readiness discipline that gates the live-DO smoke.
 - [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
   error-tier breakdown, kill-switch flip.
