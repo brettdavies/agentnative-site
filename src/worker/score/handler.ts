@@ -92,16 +92,13 @@
 //
 // Other methods → 405.
 
-import type { Container } from '@cloudflare/containers';
-import { getRandom } from '@cloudflare/containers';
 import { detectScorePreference } from '../accept';
 import { AUDITOR_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
-import * as cache from './cache';
-import type { ResolvedStep } from './discover-binary';
+import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
-import { _resetHintsIndexCache, loadHintsIndex } from './orchestrate';
+import { _resetHintsIndexCache, loadHintsIndex, runFreshOnly } from './orchestrate';
 import {
   _resetRegistryIndexCache,
   type DiscoveryHintsIndex,
@@ -111,7 +108,6 @@ import {
   lookupRegistry,
   lookupScorecard,
 } from './registry-lookup';
-import { resolveSpec } from './resolve-spec';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import {
@@ -125,12 +121,6 @@ import {
 import { TurnstileConfigError, type TurnstileEnv, verifyTurnstile } from './turnstile';
 import { type ValidatedInput, validateInput } from './validate';
 
-// Sandbox DO instance pool size. Must match `max_instances` in
-// wrangler.jsonc `containers[]` so getRandom's hash space lines up with
-// the CF Containers app config — under-shooting wastes provisioned
-// capacity; over-shooting picks IDs that don't have a container.
-const MAX_INSTANCES = 10;
-
 // ---------------------------------------------------------------------------
 // Env contract
 // ---------------------------------------------------------------------------
@@ -143,9 +133,9 @@ export type ScoreEnv = KillSwitchEnv &
     ASSETS: Fetcher;
     // Optional because a mid-rollback Worker (between v2-drop-sandbox
     // and v3-restore-sandbox) deploys cleanly without the SCORE binding.
-    // The binding-presence guard before the DO call returns a typed 503
-    // sandbox_unavailable; without it `getRandom(env.SCORE, ...)` throws
-    // and surfaces as Cloudflare error 1101.
+    // runFreshOnly returns kind 'sandbox_unavailable' when SCORE is
+    // missing; without the binding-presence guard the SDK throws on the
+    // undefined namespace and surfaces as Cloudflare error 1101.
     SCORE?: DurableObjectNamespace;
     SCORE_LIMITER: RateLimit;
     SCORE_LIMITER_IP?: RateLimit;
@@ -583,190 +573,105 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
     }
   }
 
-  // 6. Resolve InstallSpec. Pre-2026-05-20 this happened inside the DO;
-  //    moving it to the Worker means a `chain_no_resolve` paste (e.g.
-  //    brettdavies/dotfiles) bounces here in ~200 ms instead of spinning
-  //    up a container to discover the same fact. The brew/go fallbacks
-  //    live here too — they share the discovery chain's fetcher, so a
-  //    single `globalThis.fetch` covers every outbound this step makes
-  //    (tests inject via globalThis.fetch on the request boundary;
-  //    production runs on Cloudflare's fetch).
+  // 6 + 6.5 + 7. Resolve InstallSpec, consult the post-discovery cache,
+  //    dispatch to the Sandbox DO. The orchestrator at `./orchestrate`
+  //    owns this slice and is shared with the MCP score_cli tool so
+  //    /api/score and the MCP form compose the same cache + DO pipeline.
+  //    AGENTS.md line 104's symmetry contract ("the two tools compose
+  //    the same /api/score orchestration core, so cache semantics never
+  //    drift between MCP and the human form on /") is enforced by
+  //    structure here, not by convention.
   //
-  //    Failure here exits the pipeline AFTER the metered gates have
-  //    already cleared. The discovery fan-out is the most expensive
-  //    cost-bearing operation on the live path (~5 parallel registry
-  //    calls + GitHub Releases) and the gates exist precisely to keep
-  //    unauthenticated traffic from firing it. A no-resolve still ate
-  //    one rate-limit slot and one Turnstile siteverify — that's the
-  //    designed behavior, not a leak.
-  const resolution = await resolveSpec(validated, hintsIndex);
-  if (!resolution.ok) {
-    telemetry.tier = `error_${resolution.error}`;
-    return shapeWithPreference(resolutionErrorToResponse(resolution.error, resolution.details), preference, {
-      setCookie,
-    });
-  }
-  const spec = resolution.spec;
-  telemetry.binary = spec.binary;
-  telemetry.pm = spec.pm;
-  telemetry.resolved_step = resolution.resolved_step ?? null;
+  //    Per-variant telemetry mutation happens INSIDE each switch arm
+  //    BEFORE the response is constructed so the outer try/finally in
+  //    handleScore sees the final state when it emits the AE row. Every
+  //    arm where resolveSpec succeeded (every kind other than
+  //    'resolution_error') sets four spec-derived telemetry fields
+  //    uniformly:
+  //      - binary, pm, resolved_step from the resolved InstallSpec
+  //      - cache_post_attempted = spec.pm !== 'git-clone' && !skipCache
+  //    This preserves byte-identical Analytics Engine row attribution
+  //    across success and DO-failure paths so the operator query "which
+  //    tools hit sandbox errors most often?" keeps working post-refactor.
+  const result = await runFreshOnly(validated, env, hintsIndex, {
+    specVersion: SPEC_VERSION,
+    inputHash,
+    skipCachePost: skipCache,
+  });
 
-  // 6.5. Post-discovery cache lookup. Discovery now knows `spec.binary`,
-  //      which the step-2 pre-discovery check couldn't derive for
-  //      github-url-without-hint inputs. Re-check the cache with the
-  //      resolved binary before paying the DO container cost.
-  //
-  //      Same cache binding, same key shape as step 2 — readers and
-  //      writers can't drift. A hit here is wire-indistinguishable from
-  //      a step-2 hit (same `freshness: 'cache-hit'`, same Cache-Control
-  //      `public, max-age=300`); both bypass the DO.
-  //
-  //      Skip conditions:
-  //        - `spec.pm === 'git-clone'`: branch-scoped scores aren't
-  //          cached (no share_url, ephemeral). Caching under the bare
-  //          binary name would clobber the default-branch scorecard,
-  //          so the live path skips the write too and this read has
-  //          nothing meaningful to consult.
-  //        - `skipCache` (?fromCache=false): the operator escape hatch
-  //          is documented as "do not consult any cache, force a live
-  //          run" — applies uniformly to both round-1 and round-2.
-  //
-  //      Telemetry: `cache_post_attempted` records whether we issued
-  //      the R2 read; `cache_post_hit` flips when the read returned a
-  //      payload. The combination lets us separate "we tried and the
-  //      cache was empty" from "we never tried" for hit-rate analysis.
-  if (spec.pm !== 'git-clone' && !skipCache) {
-    telemetry.cache_post_attempted = true;
-    const cached = await cache.get(env, cache.keyFor(spec.binary, SPEC_VERSION));
-    if (cached) {
+  const applySpecTelemetry = (spec: InstallSpec | undefined, resolved_step: ResolvedStep | null | undefined): void => {
+    if (!spec) return;
+    telemetry.binary = spec.binary;
+    telemetry.pm = spec.pm;
+    telemetry.resolved_step = resolved_step ?? null;
+    telemetry.cache_post_attempted = spec.pm !== 'git-clone' && !skipCache;
+  };
+
+  switch (result.kind) {
+    case 'cache_post_hit': {
+      applySpecTelemetry(result.spec, result.resolved_step);
       telemetry.cache_post_hit = true;
       telemetry.tier = 'cache_post';
       telemetry.freshness = 'cache-hit';
-      // Post-discovery share URL — derives from the resolved spec.binary
-      // (same key the DO wrote the cache under), so github-url inputs
-      // without an upfront hint still get a shareable result page.
-      const shareUrl = shareUrlForSpec(spec);
       return shapeWithPreference(
-        shapeScoreSuccess(cached.scorecard, cached.anc_version, 'cache-hit', shareUrl),
+        shapeScoreSuccess(result.scorecard, result.anc_version, 'cache-hit', shareUrlForSpec(result.spec)),
+        preference,
+        { setCookie },
+      );
+    }
+    case 'fresh': {
+      applySpecTelemetry(result.spec, result.resolved_step);
+      telemetry.tier = 'live';
+      telemetry.freshness = 'live';
+      telemetry.install_ms = result.install_ms;
+      telemetry.anc_audit_ms = result.anc_audit_ms;
+      return shapeWithPreference(
+        shapeScoreSuccess(result.scorecard, result.anc_version, 'live', shareUrlForSpec(result.spec)),
+        preference,
+        { setCookie },
+      );
+    }
+    case 'resolution_error': {
+      telemetry.tier = `error_${result.error}`;
+      return shapeWithPreference(resolutionErrorToResponse(result.error, result.details), preference, { setCookie });
+    }
+    case 'sandbox_unavailable': {
+      applySpecTelemetry(result.spec, result.resolved_step);
+      telemetry.tier = 'error_sandbox_unavailable';
+      return shapeWithPreference(
+        shapeScoreError({ code: 'sandbox_unavailable', cta_text: CTA_INSTALL_ANC }),
+        preference,
+        { setCookie },
+      );
+    }
+    case 'sandbox_stub_until_u6': {
+      applySpecTelemetry(result.spec, result.resolved_step);
+      telemetry.tier = 'error_sandbox_stub_until_u6';
+      return shapeWithPreference(
+        shapeScoreError({ code: 'sandbox_stub_until_u6', cta_text: CTA_INSTALL_ANC }),
+        preference,
+        { setCookie },
+      );
+    }
+    case 'do_error': {
+      applySpecTelemetry(result.spec, result.resolved_step);
+      telemetry.tier = `error_${result.error}`;
+      return shapeWithPreference(mapDoError({ error: result.error, details: result.details }), preference, {
+        setCookie,
+      });
+    }
+    case 'incomplete_response_contract': {
+      applySpecTelemetry(result.spec, result.resolved_step);
+      telemetry.tier = 'error_incomplete_response_contract';
+      const details =
+        result.reason === 'non_json_body' ? 'DO returned non-JSON' : 'DO returned unrecognized envelope shape';
+      return shapeWithPreference(
+        shapeScoreError({ code: 'incomplete_response_contract', details, cta_text: CTA_INSTALL_ANC }),
         preference,
         { setCookie },
       );
     }
   }
-
-  // 7. DO call — the DO now receives a resolved InstallSpec rather than
-  //    a raw ValidatedInput. The contract narrowed in the 2026-05-20
-  //    discovery-move; do.ts no longer fans out to the discovery chain
-  //    or runs brew/go fallbacks (those happen at step 6 above). The DO
-  //    returns either `{scorecard, anc_version}` on success or
-  //    `{error, details?}` on failure, mapped below into the typed
-  //    ScoreError union. The DO still writes successful scorecards to
-  //    SCORE_CACHE itself, so the next request for the same binary
-  //    short-circuits at step 2's cache tier.
-  //
-  // Pool of MAX_INSTANCES DO instances via getRandom. Each request
-  // picks a random instance — parallel load
-  // spreads across the pool instead of queuing serially behind a
-  // single container session. Critical for Show HN spike absorption
-  // (singleton bottlenecked at one exec at a time inside the SDK
-  // session, observed 2026-05-18; cold-start + parallel queue =
-  // cascading 60s timeouts).
-  //
-  // getRandom (from @cloudflare/containers) calls
-  // `binding.idFromName('instance-${0..N-1}')` + `binding.get(id)`. IDs
-  // are stable across requests so the same instance reuses its warm
-  // container session for subsequent requests routed to it.
-  //
-  // Binding-presence guard: a Worker version deployed mid-rollback
-  // (between v2-drop-sandbox and v3-restore-sandbox) has no SCORE
-  // binding. Without this check, getRandom() throws on the undefined
-  // namespace and surfaces as Cloudflare error 1101 (Worker exception).
-  if (!env.SCORE) {
-    telemetry.tier = 'error_sandbox_unavailable';
-    return shapeWithPreference(
-      shapeScoreError({ code: 'sandbox_unavailable', cta_text: CTA_INSTALL_ANC }),
-      preference,
-      { setCookie },
-    );
-  }
-  const stub = (await getRandom(
-    env.SCORE as unknown as DurableObjectNamespace<Container>,
-    MAX_INSTANCES,
-  )) as DurableObjectStub;
-  const doRes = await stub.fetch(
-    new Request('https://do.internal/score', {
-      method: 'POST',
-      body: JSON.stringify({ spec, hash: inputHash }),
-      headers: { 'content-type': 'application/json' },
-    }),
-  );
-
-  let doPayload: unknown;
-  try {
-    doPayload = await doRes.json();
-  } catch {
-    telemetry.tier = 'error_incomplete_response_contract';
-    return shapeWithPreference(
-      shapeScoreError({
-        code: 'incomplete_response_contract',
-        details: 'DO returned non-JSON',
-        cta_text: CTA_INSTALL_ANC,
-      }),
-      preference,
-      { setCookie },
-    );
-  }
-
-  // Defense-in-depth: if the binding ever points back at the legacy
-  // sandbox-stub class (botched rollback, misconfigured wrangler.jsonc)
-  // the user gets a
-  // typed 503 instead of a raw stub error envelope.
-  if (isStubError(doPayload)) {
-    telemetry.tier = 'error_sandbox_stub_until_u6';
-    return shapeWithPreference(
-      shapeScoreError({ code: 'sandbox_stub_until_u6', cta_text: CTA_INSTALL_ANC }),
-      preference,
-      { setCookie },
-    );
-  }
-
-  if (isDoError(doPayload)) {
-    telemetry.tier = `error_${doPayload.error}`;
-    return shapeWithPreference(mapDoError(doPayload), preference, { setCookie });
-  }
-
-  if (isDoSuccess(doPayload)) {
-    telemetry.tier = 'live';
-    telemetry.freshness = 'live';
-    telemetry.install_ms = typeof doPayload.install_ms === 'number' ? doPayload.install_ms : null;
-    telemetry.anc_audit_ms = typeof doPayload.anc_audit_ms === 'number' ? doPayload.anc_audit_ms : null;
-    // Post-discovery share URL — same derivation as the cache_post tier:
-    // spec.binary IS the cache key the DO just wrote under, so the share
-    // URL and the R2 entry stay in lockstep. github-url-without-hint
-    // inputs that previously returned no share_url now get one as soon
-    // as discovery resolved a slug-shaped binary.
-    const shareUrl = shareUrlForSpec(spec);
-    return shapeWithPreference(
-      shapeScoreSuccess(doPayload.scorecard, doPayload.anc_version, 'live', shareUrl),
-      preference,
-      { setCookie },
-    );
-  }
-
-  // DO returned 2xx but with an unrecognized envelope shape. Fail loud
-  // rather than synthesize a partial success — better an honest 500
-  // than a response missing the spec_version / anc_version / auditor_url
-  // triad.
-  telemetry.tier = 'error_incomplete_response_contract';
-  return shapeWithPreference(
-    shapeScoreError({
-      code: 'incomplete_response_contract',
-      details: 'DO returned unrecognized envelope shape',
-      cta_text: CTA_INSTALL_ANC,
-    }),
-    preference,
-    { setCookie },
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -881,40 +786,20 @@ function renderJsonAsMarkdown(payload: Record<string, unknown>): string {
   return ['# anc.dev — score response', '', '```json', JSON.stringify(payload, null, 2), '```', ''].join('\n');
 }
 
-function isStubError(payload: unknown): boolean {
-  return (
-    typeof payload === 'object' && payload !== null && (payload as { error?: string }).error === 'sandbox_stub_until_u6'
-  );
-}
-
 // ---------------------------------------------------------------------------
-// DO response envelope type guards + error mapping.
+// DO error mapping.
 //
-// The DO returns one of two shapes after install + score:
-//   success:  { scorecard: <anc JSON envelope>, anc_version: '0.3.1' }
-//   failure:  { error: '<ScoreErrorCode>', details?: '<string>' }
-//
-// The handler narrows on the envelope shape, then maps DO error codes to
-// user-facing ScoreError variants. Codes the DO knows about but the user
-// envelope doesn't (anc_audit_failed, anc_version_unreadable) collapse to
+// runFreshOnly classifies the DO envelope (success / sandbox_stub /
+// do_error / incomplete_response_contract) inside the orchestrator;
+// the handler receives a discriminated union and only owns the user-
+// facing error envelope mapping below. mapDoError translates the DO
+// error code into the typed ScoreError union the user-facing response
+// shape exposes. Codes the DO knows about but the user envelope
+// doesn't (anc_audit_failed, anc_version_unreadable) collapse to
 // incomplete_response_contract so the hard-gate semantics on the
 // response triad hold.
 
-function isDoSuccess(
-  payload: unknown,
-): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_audit_ms?: number } {
-  if (typeof payload !== 'object' || payload === null) return false;
-  const obj = payload as Record<string, unknown>;
-  return 'scorecard' in obj && typeof obj.anc_version === 'string';
-}
-
-function isDoError(payload: unknown): payload is { error: string; details?: string } {
-  if (typeof payload !== 'object' || payload === null) return false;
-  const obj = payload as Record<string, unknown>;
-  return typeof obj.error === 'string';
-}
-
-// Translate a `resolveSpec()` failure into a shaped ScoreError response.
+// Translate a resolveSpec failure into a shaped ScoreError response.
 // Worker-side resolution can fail in three ways: no spec discoverable
 // (chain_no_resolve), an unsupported PM after fallback (install_unsupported
 // pm=brew_only / pm=go_no_binary), or a branch-shape that bypassed
