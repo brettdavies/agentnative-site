@@ -22,6 +22,35 @@ catches mechanical regressions inside this repo. This checklist covers what CI s
 - Distribution surfaces that only exercise on real artifacts (markdown twins, canonical redirects, Static-Assets cache
   headers, skill manifest live render).
 
+## Quick start: run the automated gates
+
+```bash
+scripts/release/preflight.sh all
+```
+
+The script (`scripts/release/preflight.sh`) drives all six gate sections. Each gate is skip-safe when prerequisites are
+not met (no docker for the container-pin inspect, no 1Password access for the CF Access service token, no local Worker
+running for the MCP suite) so the operator sees the full picture rather than aborting on the first SKIP.
+
+Sub-commands let you re-run one section in isolation:
+
+| Sub-command | What it checks                                                                                                                                        | Source of truth                          |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run` |
+| `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                          |
+| `do-smoke`  | Live `/api/score` smoke against staging through CF Access (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password`    |
+| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                        | `scripts/release/mcp-smoke.sh`           |
+| `dist`      | `/check` → `/audit` redirect, served `skill.json` version vs source, `X-Robots-Tag: noindex` on staging                                               | `curl`                                   |
+| `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                    |
+| `all`       | every above sequentially                                                                                                                              |                                          |
+
+Flags:
+
+- `--binary <name>` — fresh non-registry binary for the staging do-smoke (default: `$BINARY` env var or `cowsay`)
+- `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
+- `--staging-url <url>` — override the staging Worker URL
+- `--local-url <url>` — override the local `wrangler dev` URL
+
 ## Establish the surface
 
 Everything below assumes you know what's changing. Run this first.
@@ -47,6 +76,8 @@ Note which of `wrangler.jsonc`, `docker/sandbox/`, `src/data/spec/VERSION`, `src
 
 This is the section where rename-class coordination bugs live. The fixes are mechanical but the failure mode is silent
 until traffic exercises the affected surface.
+
+Driven by `scripts/release/preflight.sh coord`.
 
 - [ ] **`anc` CLI baked in the staging container matches the Worker's invocation vocabulary.** Pull the staging image
   pin from `wrangler.jsonc` (`env.staging.containers[0].image`) and confirm the baked binary supports the subcommand the
@@ -107,6 +138,8 @@ until traffic exercises the affected surface.
 
 Catches build-time invariant drift before it reaches a deploy.
 
+Driven by `scripts/release/preflight.sh build`.
+
 - [ ] **`bun run build` exits 0 from a clean working tree.** Watches for invariant violations in
   `runScorecardInvariants` (every scorecard file in `scorecards/` must match its filename slug to a `registry.yaml`
   entry, every scorecard must declare a supported `schema_version`, `tool.version` from the filename must align with the
@@ -149,6 +182,9 @@ Catches build-time invariant drift before it reaches a deploy.
 
 The reason this preflight file exists. CI cannot catch this category, and the cost of letting it ship is a user-facing
 500 on every non-registry input. **Do not skip these checks. Do not accept "but it worked last release."**
+
+Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is the only manual step; the script accepts
+`--binary <name>` or reads `$BINARY` from the environment.
 
 - [ ] **Pick a fresh non-registry binary for this release.** Do not re-use a fixture indefinitely — once a binary is
   added to `registry.yaml`, it stops exercising the DO path because the registry-fast-path short-circuits before the
@@ -236,9 +272,121 @@ The reason this preflight file exists. CI cannot catch this category, and the co
   Expect `HTTP/2 301` and `location: /score/anc`. A 200 here means a curated tool would render twice — once at the
   live path and once at the static path — with no canonical hint.
 
+### Live MCP surface (mandatory)
+
+The MCP transport surface composes the same orchestrator core (`lookupOnly` for the read tier, `runFreshOnly` for the
+run-fresh tier) as the HTTP `/api/score` handler. What this section covers and the HTTP smoke above does not: transport
+wiring, the 9-tool surface, MCP kill switches (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`), and the orchestrator's
+MCP-side result envelope (`next_tool` bouncing, `source: "registry" | "live-cache" | "live"`).
+
+Preflight runs against `bunx wrangler dev --env staging --local` on `http://localhost:8787`. This catches MCP
+regressions on the operator's machine before the release-branch is cut, with no deploy or CF Access dependency.
+Postflight runs the same suite against both deployed envs (see [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) §
+Live MCP surface): `--env staging` exercises the staging Worker through CF Access, `--env prod` exercises
+`https://anc.dev` unauthenticated. Together they catch deploy-side regressions that only surface at the edge:
+rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift
+between `wrangler.jsonc` and the live Workers.
+
+Driven by `scripts/release/preflight.sh mcp`, which delegates to `scripts/release/mcp-smoke.sh http://localhost:8787`
+after a reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release/postflight.sh
+--env staging mcp` (staging Worker, CF Access service-token headers auto-staged from 1Password) and by
+`scripts/release/postflight.sh --env prod mcp` (`anc.dev`, no auth). The only differences between the three callers are
+the base URL and the env-driven auth headers when targeting staging.
+
+**Prerequisite:** in a separate terminal, start the local Worker:
+
+```bash
+bunx wrangler dev --env staging --local
+# leaves the Worker bound to http://localhost:8787
+```
+
+The Docker daemon must be running — the container sandbox the run-fresh tier uses is spun locally from the staging
+container image pin.
+
+- [ ] **`/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true` in the
+  `env.staging` block, content negotiation (the dual-MIME `Accept` header), and that no tool was dropped between
+  releases:
+
+  ```bash
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"preflight","version":"1"}}}' \
+    http://localhost:8787/mcp \
+    | jq '{server: .result.serverInfo.name, protocol: .result.protocolVersion}'
+  # expect: server: "anc", protocol: "2025-06-18"
+
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    http://localhost:8787/mcp \
+    | jq '.result.tools | length'
+  # expect: 9
+  ```
+
+  A 503 or `MCP_ENABLED` kill-switch envelope means the staging env block has the switch flipped. A non-9 tool count is
+  a tool-wiring regression — block.
+
+- [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Exercises the
+  curated-registry branch shared by `lookupOnly` and `runFreshOnly`. No cache write, no container invocation, no audit
+  budget consumed — purely structural:
+
+  ```bash
+  # get_scorecard hits lookupOnly's curated branch
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
+    http://localhost:8787/mcp \
+    | jq -r '.result.content[0].text' | jq '{source, scorecard_url}'
+  # expect: source: "registry", scorecard_url: "https://anc.dev/score/ripgrep"
+
+  # score_cli hits runFreshOnly's registry pre-check and bounces to get_scorecard
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
+    http://localhost:8787/mcp \
+    | jq -r '.result.content[0].text' | jq '{audited, source, next_tool}'
+  # expect: audited: false, source: "registry", next_tool: "get_scorecard"
+  ```
+
+  Both must return `source: "registry"`. Drift between the envelopes means the shared registry-hit branch in
+  `src/worker/score/orchestrate.ts` regressed — block release and investigate the `lookupOnly` / `runFreshOnly` wrappers.
+
+- [ ] **Live MCP audit via `score_cli` against a fresh non-registry binary.** Exercises the full DO path through the MCP
+  surface and confirms the container's baked `anc` binary is compatible with the Worker's MCP-side invocation
+  vocabulary. Pick a SECOND fresh binary distinct from the HTTP-smoke `${BINARY}` so both surfaces independently
+  exercise their audit paths:
+
+  ```bash
+  MCP_BINARY=figlet   # rotate per release; pick something tiny and stable, distinct from $BINARY
+  grep -E "^- name: ${MCP_BINARY}$" registry.yaml && echo "FAIL: already in registry, pick another" || echo "ok"
+
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\"}}}" \
+    http://localhost:8787/mcp \
+    | jq -r '.result.content[0].text' | jq '{audited, source, has_scorecard: (.scorecard != null), anc_version, error}'
+  ```
+
+  Green outcome (all must hold):
+
+- `audited: true`, `has_scorecard: true`, `source: "live"`
+- `anc_version` populated
+- no `error` field
+
+  Red outcomes (block release):
+
+- `error.code: "incomplete_response_contract"` with `details: anc_audit_failed` / `chain_resolved_install_failed` /
+  `timeout` / `sandbox_unavailable` — same investigation paths as the HTTP smoke above. `anc_audit_failed` here means
+  the container's baked `anc` does not understand the Worker's MCP-side invocation.
+- JSON-RPC envelope at HTTP 200 with `error.code: -32603` or similar — orchestrator wiring regression, NOT a rate-limit
+  issue (rate-limiter bindings are no-op under `wrangler dev --local`; deploy-side limiter regressions are caught in
+  postflight against `anc.dev`).
+
 ### Distribution and asset serving
 
 Surfaces that don't fail unit tests but break the user experience.
+
+Driven by `scripts/release/preflight.sh dist`.
 
 - [ ] **`/check` → `/audit` redirect still serves.** The 2026-05-29 rename PR added a 301 from the prior URL. Confirm
   against staging:
@@ -278,6 +426,10 @@ Surfaces that don't fail unit tests but break the user experience.
 These items duplicate steps from `RELEASES.md` deliberately: easy to skip, expensive to recover from. Confirm
 explicitly.
 
+Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
+branch (where the diff vs `origin/main` is the actual cherry-pick set); running on the integration `dev` branch will
+correctly report guarded planning paths as leaked.
+
 - [ ] **Leak check before pushing the release branch.** No guarded path may surface in the cherry-picked diff (these
   paths are `dev`-direct per the branching rule):
 
@@ -300,74 +452,23 @@ explicitly.
   procedure: [`RELEASES.md` § Prose scrubbing](./RELEASES.md#prose-scrubbing).
 - [ ] **No em-dashes in the PR body.** Strip `—` before submission. Use colons, periods, or parentheses.
 
-### Post-tag verification
-
-Run immediately after the `release/*` PR merges to `main`. The production deploy fires automatically; this checklist
-confirms it worked.
-
-- [ ] **Production deploy green end-to-end.** `gh run watch <run-id> --exit-status`, then verify explicitly per
-  `~/.claude/ci-watch-prompt.sh`:
-
-  ```bash
-  gh pr view <num> --json statusCheckRollup,mergeStateStatus \
-    --jq '{merge: .mergeStateStatus, checks: [.statusCheckRollup[] | {name, conclusion}]}'
-  ```
-
-  Every conclusion must be `SUCCESS`. The watcher exit code alone is not authoritative.
-- [ ] **Production container app reaches `ready`.** Same pattern as staging — if the release advanced the production
-  pin, wait for the rollout:
-
-  ```bash
-  bun x wrangler containers list | grep agentnative-site-sandbox
-  ```
-
-  State must be `ready` before smoking the live path.
-- [ ] **`anc.dev` front page + leaderboard render.** Smoke against the production custom domain (no CF Access on
-  production):
-
-  ```bash
-  curl -fSsL https://anc.dev/ | grep -q '<title>' && echo "home: ok"
-  curl -fSsL https://anc.dev/scorecards | grep -q 'leaderboard-table' && echo "leaderboard: ok"
-  curl -fSsL https://anc.dev/api/score -X POST \
-    -H 'Content-Type: application/json' \
-    -d '{"input":"ripgrep","turnstile_token":"x"}' \
-    | jq '.scorecard.kind, .anc_version, .spec_version'
-  # "registry_hit"
-  # <anc_version>
-  # <spec_version>
-  ```
-
-- [ ] **Production live-DO smoke against a non-registry binary.** Production binds the real Turnstile site key + secret
-  (staging uses Cloudflare's always-pass test pair), so the staging-style curl recipe with `turnstile_token:"x"` returns
-  `turnstile_failed` against `anc.dev`. Pick one of two paths:
-
-- **Manual (operator-only path).** Open `https://anc.dev/` in a browser, paste the same fresh non-registry binary picked
-  for staging into the form (e.g., `npm install -g cowsay`), submit, watch the live run complete, then visit the
-  resulting share URL (`/score/live/<binary>`) and confirm the four scorecard classes render (`scorecard-summary`,
-  `scorecard-audits`, `scorecard-meta`, `scorecard-embed`).
-- **Service-token (CI / scripted path).** Once the service-token bypass lands per the plan at
-  [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md),
-  re-use the staging smoke recipe with an added `X-Anc-Smoke-Token: ${SMOKE_SERVICE_TOKEN}` header. The bypass skips
-  Turnstile only; rate-limit + kill-switch stay enforced; bypassed runs emit a distinct telemetry tag (`freshness:
-  "live-smoke"`) so they stay separable from user traffic in Analytics Engine.
-
-  Either path satisfies the box. Until the bypass ships, the manual browser path is the only option.
-- [ ] **Cache-purge after deploys that change `/skill`, `/skill.json`, `/skill.md`.** Cloudflare's edge cache holds
-  these for the configured TTL; manual purge brings the new version live immediately. Token in 1Password
-  (`scripts/staging-cache-smoke.sh` references the item).
+After the `release/*` PR merges to `main` and the production deploy fires, the checklist continues in
+[`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md).
 
 ## Related docs
 
-- [`RELEASES.md`](./RELEASES.md): operational runbook this checklist gates. The "Releasing dev to main" section
-  references back here as step 0.
-- [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
-  smoke scope).
--
+- [`RELEASES-POSTFLIGHT.md`][postflight]: post-merge verification (runs AFTER this one).
+- [`RELEASES.md`][releases]: operational runbook for the full release lifecycle.
+- [`RELEASES-RATIONALE.md`][rationale]: release-flow rationale (branching model, soak-then-promote, CI smoke scope).
+- [sandbox-image-anc-cli-rename-coordination][sandbox-rename]: the rename-class failure mode this checklist gates
+  against.
+- [cloudflare-container-rollout-readiness-before-smoke][rollout]: the rollout-readiness discipline that gates the
+  live-DO smoke.
+- [live-scoring-monitoring][monitoring]: operator telemetry, error-tier breakdown, kill-switch flip.
 
-[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-the coordination trap this checklist exists to prevent. -
-[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-the rollout-readiness discipline that gates the live-DO smoke.
-
-- [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
-  error-tier breakdown, kill-switch flip.
+[postflight]: ./RELEASES-POSTFLIGHT.md
+[releases]: ./RELEASES.md
+[rationale]: ./RELEASES-RATIONALE.md
+[sandbox-rename]: ./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md
+[rollout]: ./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md
+[monitoring]: ./docs/runbooks/live-scoring-monitoring.md
