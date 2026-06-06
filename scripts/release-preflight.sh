@@ -324,9 +324,13 @@ gate_do_smoke() {
 
 # Gate: mcp (live MCP against wrangler dev --local) -------------------------
 
+# Thin wrapper around scripts/mcp-smoke.sh, which holds the actual gate logic and
+# is shared with release-postflight.sh. Preflight-specific concern: verify the
+# local Worker is reachable before delegating, since mcp-smoke.sh would otherwise
+# report all three gates as fail on a closed socket.
 gate_mcp() {
     header "Live MCP surface against wrangler dev --local"
-    require_bin curl; require_bin jq
+    require_bin curl
 
     if ! curl -fsSL -m 3 "${LOCAL_URL}/" >/dev/null 2>&1; then
         gate_skip "all MCP gates" \
@@ -335,86 +339,19 @@ gate_mcp() {
     fi
     gate_pass "local Worker reachable at $LOCAL_URL"
 
-    # Gate 1: initialize + tools/list
-    local init_resp tool_count server protocol
-    init_resp=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"preflight","version":"1"}}}' \
-        "${LOCAL_URL}/mcp" 2>/dev/null || true)
-    server=$(printf '%s' "$init_resp" | jq -r '.result.serverInfo.name // empty' 2>/dev/null || true)
-    protocol=$(printf '%s' "$init_resp" | jq -r '.result.protocolVersion // empty' 2>/dev/null || true)
-    if [[ "$server" == "anc" && "$protocol" == "2025-06-18" ]]; then
-        gate_pass "/mcp initialize: server=anc protocol=$protocol"
-    else
-        gate_fail "/mcp initialize" "server=$server protocol=$protocol (MCP_ENABLED may be off in env.staging)"
+    local result_file
+    result_file=$(mktemp)
+    "$REPO_ROOT/scripts/mcp-smoke.sh" "$LOCAL_URL" \
+        --mcp-binary "$MCP_BINARY" --result-file "$result_file" \
+        || true   # don't propagate exit; aggregate counters and let parent decide
+    if [[ -s "$result_file" ]]; then
+        local p f s
+        read -r p f s < "$result_file"
+        PASS_COUNT=$((PASS_COUNT + p))
+        FAIL_COUNT=$((FAIL_COUNT + f))
+        SKIP_COUNT=$((SKIP_COUNT + s))
     fi
-
-    tool_count=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-        "${LOCAL_URL}/mcp" 2>/dev/null | jq '.result.tools | length' 2>/dev/null || echo "0")
-    if [[ "$tool_count" == "9" ]]; then
-        gate_pass "tools/list reports 9-tool surface"
-    else
-        gate_fail "tools/list" "expected 9 tools, got $tool_count (tool-wiring regression)"
-    fi
-
-    # Gate 2: registry-tier symmetry — get_scorecard + score_cli against ripgrep.
-    local read_source read_url
-    read_source=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
-        "${LOCAL_URL}/mcp" 2>/dev/null \
-        | jq -r '.result.content[0].text' 2>/dev/null \
-        | jq -r '.source // empty' 2>/dev/null || true)
-    read_url=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
-        "${LOCAL_URL}/mcp" 2>/dev/null \
-        | jq -r '.result.content[0].text' 2>/dev/null \
-        | jq -r '.scorecard_url // empty' 2>/dev/null || true)
-
-    local audit_source audit_next
-    audit_source=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
-        "${LOCAL_URL}/mcp" 2>/dev/null \
-        | jq -r '.result.content[0].text' 2>/dev/null \
-        | jq -r '.source // empty' 2>/dev/null || true)
-    audit_next=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
-        "${LOCAL_URL}/mcp" 2>/dev/null \
-        | jq -r '.result.content[0].text' 2>/dev/null \
-        | jq -r '.next_tool // empty' 2>/dev/null || true)
-
-    if [[ "$read_source" == "registry" && "$audit_source" == "registry" && "$audit_next" == "get_scorecard" ]]; then
-        gate_pass "symmetry contract: both scorecard tools return source=registry on curated slug"
-    else
-        gate_fail "symmetry contract" \
-            "get_scorecard.source=$read_source (url=$read_url), score_cli.source=$audit_source next_tool=$audit_next"
-    fi
-
-    # Gate 3: live MCP audit via score_cli against $MCP_BINARY.
-    if grep -E "^- name: ${MCP_BINARY}$" "$REPO_ROOT/registry.yaml" >/dev/null 2>&1; then
-        gate_fail "MCP audit binary selection" "$MCP_BINARY is in registry.yaml; pick another via --mcp-binary"
-        return
-    fi
-
-    local audit_body audited has_scorecard live_source live_anc_v live_err
-    audit_body=$(curl -fsSL -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-        -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\"}}}" \
-        "${LOCAL_URL}/mcp" 2>/dev/null \
-        | jq -r '.result.content[0].text' 2>/dev/null || true)
-    if [[ -z "$audit_body" ]]; then
-        gate_fail "live MCP audit" "no result body (Docker not running? wrangler dev not bound to containers?)"
-        return
-    fi
-    audited=$(printf '%s' "$audit_body" | jq -r '.audited // empty' 2>/dev/null || true)
-    has_scorecard=$(printf '%s' "$audit_body" | jq -r '(.scorecard != null) // false' 2>/dev/null || echo "false")
-    live_source=$(printf '%s' "$audit_body" | jq -r '.source // empty' 2>/dev/null || true)
-    live_anc_v=$(printf '%s' "$audit_body" | jq -r '.anc_version // empty' 2>/dev/null || true)
-    live_err=$(printf '%s' "$audit_body" | jq -r '.error.code // empty' 2>/dev/null || true)
-    if [[ "$audited" == "true" && "$has_scorecard" == "true" && "$live_source" == "live" && -n "$live_anc_v" ]]; then
-        gate_pass "live MCP audit on $MCP_BINARY: source=live anc=$live_anc_v"
-    else
-        gate_fail "live MCP audit on $MCP_BINARY" \
-            "audited=$audited has_scorecard=$has_scorecard source=$live_source anc=$live_anc_v err=$live_err"
-    fi
+    rm -f "$result_file"
 }
 
 # Gate: dist (distribution surfaces against staging) ------------------------
