@@ -1,6 +1,6 @@
 ---
 title: 'refactor: U5b — handler.ts adopts shared runFreshOnly orchestrator'
-status: active
+status: completed
 created: 2026-06-05
 plan_type: refactor
 depth: standard
