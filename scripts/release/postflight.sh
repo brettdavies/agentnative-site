@@ -278,7 +278,8 @@ gate_pages() {
 # above when --env staging.
 
 gate_mcp() {
-    header "Live MCP surface against ${ENV_URL}/mcp"
+    # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
+    # so we delegate directly without a duplicate header here.
     delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
 }
 

@@ -308,16 +308,18 @@ gate_do_smoke() {
 # local Worker is reachable before delegating, since mcp-smoke.sh would otherwise
 # report all three gates as fail on a closed socket.
 gate_mcp() {
-    header "Live MCP surface against wrangler dev --local"
     require_bin curl
 
     if ! curl -fsSL -m 3 "${LOCAL_URL}/" >/dev/null 2>&1; then
+        header "Live MCP surface against wrangler dev --local"
         gate_skip "all MCP gates" \
             "local Worker not reachable at $LOCAL_URL — start with 'bunx wrangler dev --env staging --local'"
         return
     fi
-    gate_pass "local Worker reachable at $LOCAL_URL"
 
+    # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
+    # so we delegate directly without a duplicate header here. The local-Worker
+    # reachability precheck is silent on success — its absence in output IS the pass.
     delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$LOCAL_URL" --mcp-binary "$MCP_BINARY"
 }
 

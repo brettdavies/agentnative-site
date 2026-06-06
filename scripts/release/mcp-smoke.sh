@@ -171,16 +171,36 @@ run_gate_live_audit() {
         gate_fail "live MCP audit on $MCP_BINARY" "no result body or unexpected envelope: $(printf '%s' "$audit_body" | head -c 200)"
         return
     fi
-    audited=$(printf '%s' "$result_text" | jq -r '.audited // empty' 2>/dev/null || true)
-    has_scorecard=$(printf '%s' "$result_text" | jq -r '(.scorecard != null) // false' 2>/dev/null || echo "false")
+    # `.field // empty` treats JSON booleans (true/false) as nullish, so a
+    # legitimate `"audited": false` would silently round-trip through `// empty`
+    # as the empty string. Use `if has(...)` to preserve the boolean payload.
+    audited=$(printf '%s' "$result_text" | jq -r 'if has("audited") then .audited|tostring else "" end' 2>/dev/null || true)
+    has_scorecard=$(printf '%s' "$result_text" | jq -r '.scorecard != null | tostring' 2>/dev/null || echo "false")
     live_source=$(printf '%s' "$result_text" | jq -r '.source // empty' 2>/dev/null || true)
     live_anc_v=$(printf '%s' "$result_text" | jq -r '.anc_version // empty' 2>/dev/null || true)
     live_err=$(printf '%s' "$result_text" | jq -r '.error.code // empty' 2>/dev/null || true)
-    if [[ "$audited" == "true" && "$has_scorecard" == "true" && "$live_source" == "live" && -n "$live_anc_v" ]]; then
-        gate_pass "live MCP audit on $MCP_BINARY: source=live anc=$live_anc_v"
+    local next_tool
+    next_tool=$(printf '%s' "$result_text" | jq -r '.next_tool // empty' 2>/dev/null || true)
+
+    # Two healthy outcomes from score_cli on a non-registry input:
+    #   1. fresh-audit: the live container path ran end-to-end and wrote a scorecard
+    #      to R2. Envelope: audited=true, source=fresh-audit, scorecard present,
+    #      anc_version populated.
+    #   2. live-cache: a prior run cached the binary in R2 within the cache TTL,
+    #      so score_cli short-circuits with a bounce envelope. Envelope:
+    #      audited=false, source=live-cache, next_tool=get_scorecard, scorecard_url present.
+    # Both prove the orchestrator wiring works. To force a fresh-audit (e.g., to
+    # validate a new container pin), rotate --mcp-binary to a binary not in the
+    # cache.
+    if [[ -n "$live_err" ]]; then
+        gate_fail "live MCP audit on $MCP_BINARY" "error: $live_err"
+    elif [[ "$live_source" == "fresh-audit" && "$audited" == "true" && "$has_scorecard" == "true" && -n "$live_anc_v" ]]; then
+        gate_pass "live MCP audit on $MCP_BINARY: source=fresh-audit anc=$live_anc_v (full DO path exercised)"
+    elif [[ "$live_source" == "live-cache" && "$audited" == "false" && "$next_tool" == "get_scorecard" ]]; then
+        gate_pass "live MCP audit on $MCP_BINARY: source=live-cache (cached from prior run; rotate --mcp-binary to force fresh audit)"
     else
         gate_fail "live MCP audit on $MCP_BINARY" \
-            "audited=$audited has_scorecard=$has_scorecard source=$live_source anc=$live_anc_v err=$live_err"
+            "audited=$audited has_scorecard=$has_scorecard source=$live_source next_tool=$next_tool anc=$live_anc_v err=$live_err"
     fi
 }
 
