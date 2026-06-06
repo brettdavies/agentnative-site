@@ -442,6 +442,60 @@ describe('/api/score — POST pipeline error paths', () => {
     expect(body.spec_version).toBeTruthy();
     expect(body.auditor_url).toBeTruthy();
   });
+
+  test('DO returns non-JSON body → 500 incomplete_response_contract with details "DO returned non-JSON"', async () => {
+    // Pin the exact details string so the runFreshOnly migration's
+    // switch arm can't drift it. The wrapping error code is asserted
+    // elsewhere; this one pins the contract-violation reason string
+    // that operators read from logs to disambiguate the two
+    // incomplete_response_contract subtypes.
+    const env = makeEnv();
+    env.SCORE = {
+      idFromName(_name: string) {
+        return { id: 'stub' };
+      },
+      get(_id: unknown) {
+        return {
+          async fetch(_req: Request) {
+            return new Response('not json', { status: 200 });
+          },
+        };
+      },
+    } as unknown as DurableObjectNamespace;
+    const res = await handleScore(postScore('cargo install foo-cli'), env);
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string; details?: string } };
+    expect(body.error.code).toBe('incomplete_response_contract');
+    expect(body.error.details).toBe('DO returned non-JSON');
+  });
+
+  test('DO returns unrecognized JSON envelope → 500 incomplete_response_contract with details "DO returned unrecognized envelope shape"', async () => {
+    // Sister pin for the second incomplete_response_contract subtype:
+    // valid JSON, but neither the success shape (scorecard+anc_version)
+    // nor the error shape (error string). Same drift risk as the
+    // non-JSON pin.
+    const env = makeEnv();
+    env.SCORE = {
+      idFromName(_name: string) {
+        return { id: 'stub' };
+      },
+      get(_id: unknown) {
+        return {
+          async fetch(_req: Request) {
+            return new Response(JSON.stringify({ unexpected: 'shape' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          },
+        };
+      },
+    } as unknown as DurableObjectNamespace;
+    const res = await handleScore(postScore('cargo install foo-cli'), env);
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string; details?: string } };
+    expect(body.error.code).toBe('incomplete_response_contract');
+    expect(body.error.details).toBe('DO returned unrecognized envelope shape');
+  });
 });
 
 // ---------------------------------------------------------------------------
