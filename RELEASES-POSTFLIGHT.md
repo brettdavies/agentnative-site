@@ -47,6 +47,8 @@ Flags:
 
 ### Production deploy
 
+Driven by `scripts/release-postflight.sh deploy` and `scripts/release-postflight.sh container`.
+
 - [ ] **Production deploy green end-to-end.** The `release/<slug> → main` PR merge triggers `deploy.yml`. Watch the run
   with `gh run watch <run-id> --exit-status`, then verify explicitly per `~/.claude/ci-watch-prompt.sh`:
 
@@ -71,6 +73,8 @@ Flags:
   `scripts/release-postflight.sh container` for the automated check.
 
 ### Distribution surface
+
+Driven by `scripts/release-postflight.sh pages` and `scripts/release-postflight.sh purge`.
 
 - [ ] **`anc.dev` front page + leaderboard + registry-hit `/api/score` render.** Smoke against the production custom
   domain (no CF Access on production):
@@ -103,6 +107,11 @@ Flags:
 
 ### Live HTTP `/api/score` path
 
+NOT driven by the orchestrator — the production live-DO smoke depends on real Turnstile, which the scripted recipe
+cannot satisfy. `scripts/release-postflight.sh all` reports this gate as a SKIP with a pointer to the manual recipe
+below. See the deferred-bypass plan at
+[`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md).
+
 - [ ] **Production live-DO smoke against a non-registry binary.** Production binds the real Turnstile site key + secret
   (staging uses Cloudflare's always-pass test pair), so the staging-style curl recipe with `turnstile_token:"x"` returns
   `turnstile_failed` against `anc.dev`. Pick one of two paths:
@@ -129,6 +138,10 @@ burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and t
 (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) flipped in production.
 
 Production `anc.dev/mcp` is unauthenticated (no CF Access on the custom domain) — no service token needed.
+
+Driven by `scripts/release-postflight.sh mcp`, which delegates to `scripts/mcp-smoke.sh https://anc.dev` — the same
+script invoked from preflight against `http://localhost:8787`. The only difference between the two callers is the base
+URL.
 
 - [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
   at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:
@@ -209,6 +222,8 @@ Run `scripts/release-postflight.sh mcp` to run all three MCP gates in sequence.
 
 ### Backport
 
+Driven by `scripts/release-postflight.sh backport`.
+
 - [ ] **Backport `main` → `dev`** via a **merged PR to `dev` with the release slug in its title.** The release-branch
   flow can produce edits on `main` that didn't round-trip to `dev` (release-only CHANGELOG.md sections, RELEASES.md
   meta-edits, generator config edits). Cherry-pick those across so the next release's preflight diff-establishment step
@@ -233,10 +248,11 @@ Run `scripts/release-postflight.sh mcp` to run all three MCP gates in sequence.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
   smoke scope).
 -
-  [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-  the coordination trap the live-DO smoke exists to prevent.
--
-  [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-  the rollout-readiness discipline that gates the live-DO smoke.
+
+[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
+the coordination trap the live-DO smoke exists to prevent. -
+[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
+the rollout-readiness discipline that gates the live-DO smoke.
+
 - [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
   error-tier breakdown, kill-switch flip.

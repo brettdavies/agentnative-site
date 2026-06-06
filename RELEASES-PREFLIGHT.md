@@ -22,6 +22,35 @@ catches mechanical regressions inside this repo. This checklist covers what CI s
 - Distribution surfaces that only exercise on real artifacts (markdown twins, canonical redirects, Static-Assets cache
   headers, skill manifest live render).
 
+## Quick start: run the automated gates
+
+```bash
+scripts/release-preflight.sh all
+```
+
+The script (`scripts/release-preflight.sh`) drives all six gate sections. Each gate is skip-safe when prerequisites are
+not met (no docker for the container-pin inspect, no 1Password access for the CF Access service token, no local Worker
+running for the MCP suite) so the operator sees the full picture rather than aborting on the first SKIP.
+
+Sub-commands let you re-run one section in isolation:
+
+| Sub-command | What it checks                                                                                                                                        | Source of truth                          |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run` |
+| `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                          |
+| `do-smoke`  | Live `/api/score` smoke against staging through CF Access (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password`    |
+| `mcp`       | Delegates to `scripts/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                                | `scripts/mcp-smoke.sh`                   |
+| `dist`      | `/check` → `/audit` redirect, served `skill.json` version vs source, `X-Robots-Tag: noindex` on staging                                               | `curl`                                   |
+| `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                    |
+| `all`       | every above sequentially                                                                                                                              |                                          |
+
+Flags:
+
+- `--binary <name>` — fresh non-registry binary for the staging do-smoke (default: `$BINARY` env var or `cowsay`)
+- `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
+- `--staging-url <url>` — override the staging Worker URL
+- `--local-url <url>` — override the local `wrangler dev` URL
+
 ## Establish the surface
 
 Everything below assumes you know what's changing. Run this first.
@@ -47,6 +76,8 @@ Note which of `wrangler.jsonc`, `docker/sandbox/`, `src/data/spec/VERSION`, `src
 
 This is the section where rename-class coordination bugs live. The fixes are mechanical but the failure mode is silent
 until traffic exercises the affected surface.
+
+Driven by `scripts/release-preflight.sh coord`.
 
 - [ ] **`anc` CLI baked in the staging container matches the Worker's invocation vocabulary.** Pull the staging image
   pin from `wrangler.jsonc` (`env.staging.containers[0].image`) and confirm the baked binary supports the subcommand the
@@ -107,6 +138,8 @@ until traffic exercises the affected surface.
 
 Catches build-time invariant drift before it reaches a deploy.
 
+Driven by `scripts/release-preflight.sh build`.
+
 - [ ] **`bun run build` exits 0 from a clean working tree.** Watches for invariant violations in
   `runScorecardInvariants` (every scorecard file in `scorecards/` must match its filename slug to a `registry.yaml`
   entry, every scorecard must declare a supported `schema_version`, `tool.version` from the filename must align with the
@@ -149,6 +182,9 @@ Catches build-time invariant drift before it reaches a deploy.
 
 The reason this preflight file exists. CI cannot catch this category, and the cost of letting it ship is a user-facing
 500 on every non-registry input. **Do not skip these checks. Do not accept "but it worked last release."**
+
+Driven by `scripts/release-preflight.sh do-smoke`. The fresh-binary picker is the only manual step; the script accepts
+`--binary <name>` or reads `$BINARY` from the environment.
 
 - [ ] **Pick a fresh non-registry binary for this release.** Do not re-use a fixture indefinitely — once a binary is
   added to `registry.yaml`, it stops exercising the DO path because the registry-fast-path short-circuits before the
@@ -250,6 +286,10 @@ to catch deploy-side regressions that only surface at the edge: rate-limiter bin
 `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift between `wrangler.jsonc` and the live
 Worker.
 
+Driven by `scripts/release-preflight.sh mcp`, which delegates to `scripts/mcp-smoke.sh http://localhost:8787` after a
+reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release-postflight.sh mcp`
+against `https://anc.dev`. The only difference between the two callers is the base URL.
+
 **Prerequisite:** in a separate terminal, start the local Worker:
 
 ```bash
@@ -343,6 +383,8 @@ container image pin.
 
 Surfaces that don't fail unit tests but break the user experience.
 
+Driven by `scripts/release-preflight.sh dist`.
+
 - [ ] **`/check` → `/audit` redirect still serves.** The 2026-05-29 rename PR added a 301 from the prior URL. Confirm
   against staging:
 
@@ -381,6 +423,10 @@ Surfaces that don't fail unit tests but break the user experience.
 These items duplicate steps from `RELEASES.md` deliberately: easy to skip, expensive to recover from. Confirm
 explicitly.
 
+Driven by `scripts/release-preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
+branch (where the diff vs `origin/main` is the actual cherry-pick set); running on the integration `dev` branch will
+correctly report guarded planning paths as leaked.
+
 - [ ] **Leak check before pushing the release branch.** No guarded path may surface in the cherry-picked diff (these
   paths are `dev`-direct per the branching rule):
 
@@ -414,10 +460,11 @@ After the `release/*` PR merges to `main` and the production deploy fires, the c
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
   smoke scope).
 -
-  [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-  the coordination trap this checklist exists to prevent.
--
-  [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-  the rollout-readiness discipline that gates the live-DO smoke.
+
+[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
+the coordination trap this checklist exists to prevent. -
+[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
+the rollout-readiness discipline that gates the live-DO smoke.
+
 - [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
   error-tier breakdown, kill-switch flip.
