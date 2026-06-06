@@ -50,7 +50,7 @@ describe('.well-known/mcp pointer (built dist/)', () => {
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.version).toBe('2025-06-18');
     expect(parsed.transport).toBe('streamable-http');
-    expect(parsed.documentation).toBe('https://anc.dev/mcp-docs.md');
+    expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
   });
 });
 
@@ -98,7 +98,7 @@ describe('emitDiscovery() in isolation', () => {
 
       const mcp = JSON.parse(await readFile(stats.mcpPath, 'utf8')) as { mcp_endpoint: string; documentation: string };
       expect(mcp.mcp_endpoint).toBe('https://example.test/mcp');
-      expect(mcp.documentation).toBe('https://example.test/mcp-docs.md');
+      expect(mcp.documentation).toBe('https://example.test/mcp-skill.md');
 
       const security = await readFile(stats.securityPath, 'utf8');
       expect(security).toContain('Canonical: https://example.test/.well-known/security.txt');
@@ -125,7 +125,7 @@ describe('llms.txt Programmatic access section', () => {
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
     expect(section).toContain('https://anc.dev/mcp');
     expect(section).toContain('https://anc.dev/.well-known/mcp');
-    expect(section).toContain('https://anc.dev/mcp-docs.md');
+    expect(section).toContain('https://anc.dev/mcp-skill.md');
   });
 
   test('only one Programmatic access section exists in llms.txt', async () => {

@@ -63,8 +63,8 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - Cloudflare Worker — routes requests: `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
 - `/llms.txt`, `/llms-full.txt` — llmstxt.org convention (summary index + full concatenated spec)
-- `/mcp` — `POST`-only Model Context Protocol server. Wire contract in [`content/mcp.md`](content/mcp.md);
-  discoverability pointer at `/.well-known/mcp`; HTML + `.md` twin at `/mcp-docs`
+- `/mcp` — `POST`-only Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
+  discoverability pointer at `/.well-known/mcp`; HTML + `.md` twin at `/mcp-skill`
 - `/sitemap.xml`, `/robots.txt` — hygiene
 - `public/og-image.png` — 1200x630 designed social preview
 
@@ -74,8 +74,10 @@ render step. Deploy via `wrangler`.
 ## MCP server
 
 `POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server pinned to spec revision `2025-06-18`.
-The full wire contract is [`content/mcp.md`](content/mcp.md) (served at `/mcp-docs.md` and `/mcp-docs/`). This section
-is the agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
+The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (served at `/mcp-skill.md` and
+`/mcp-skill/`); operator-facing material lives in [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and
+is not published. This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and
+how it fails.
 
 **Discovery siblings.** `/.well-known/mcp` (JSON pointer), `/.well-known/ai.txt` (`Programmatic-API` declaration),
 `/.well-known/security.txt` (RFC 9116 contact), `/llms.txt` (Programmatic access section). The pointer's `documentation`

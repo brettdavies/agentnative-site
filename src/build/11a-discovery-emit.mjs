@@ -30,7 +30,7 @@ function buildMcpPointer(baseUrl) {
       version: MCP_SPEC_VERSION,
       description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
       transport: 'streamable-http',
-      documentation: `${baseUrl}/mcp-docs.md`,
+      documentation: `${baseUrl}/mcp-skill.md`,
     },
     null,
     2,

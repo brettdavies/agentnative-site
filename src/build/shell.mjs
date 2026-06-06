@@ -269,7 +269,7 @@ ${SOURCE_REPOS.map(
         <span> · </span>
         <a href="/llms-full.txt">llms-full.txt</a>
         <span> · </span>
-        <a href="/mcp-docs/">MCP</a>
+        <a href="/mcp-skill/">MCP</a>
         <span> · </span>
         <a href="${canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`}">This page as markdown</a>
       </p>

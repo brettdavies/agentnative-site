@@ -16,12 +16,12 @@ badge surface, and the agent-native-cli skill bundle distribution endpoint.
 | `/contribute`, `/about`                                             | Contribution map and attribution                                        |
 | `/skill`                                                            | Human-facing install for the `agent-native-cli` skill bundle            |
 | `/skill.json`                                                       | Canonical machine-primary skill manifest                                |
-| `POST /mcp`                                                         | Model Context Protocol server; wire contract at `/mcp-docs.md`          |
+| `POST /mcp`                                                         | Model Context Protocol server; client skill at `/mcp-skill.md`          |
 | `/llms.txt`, `/llms-full.txt`                                       | llmstxt.org convention (summary index plus full concatenated spec)      |
 
 Every HTML page has a markdown twin reachable via `.md` suffix or `Accept: text/markdown` content negotiation. Agents
-reach anc.dev's data programmatically via `POST /mcp`; the full wire contract lives at
-[`/mcp-docs.md`](https://anc.dev/mcp-docs.md).
+reach anc.dev's data programmatically via `POST /mcp`; the client integration guide lives at
+[`/mcp-skill.md`](https://anc.dev/mcp-skill.md).
 
 ## Scoring
 

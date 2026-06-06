@@ -8,14 +8,14 @@
 //
 // The numeric facts authored below (9 tools, 5 resources total, both
 // rate limits, the spec revision pin, the docs URL) are the same facts
-// that appear in content/mcp.md and the AGENTS.md disclosure (U8). The
-// tests in tests/worker-mcp.test.ts assert each literal digit and
+// that appear in content/mcp-skill.md and the AGENTS.md disclosure (U8).
+// The tests in tests/worker-mcp.test.ts assert each literal digit and
 // pinned URL so a change in one source forces a change in all three.
 // Drift gate per KTD-8 of the plan.
 
 const SITE_URL = 'https://anc.dev';
 const SPEC_REVISION = '2025-06-18';
-const DOCS_URL = `${SITE_URL}/mcp-docs.md`;
+const DOCS_URL = `${SITE_URL}/mcp-skill.md`;
 const TOOL_COUNT = 9;
 const RESOURCE_TOTAL = 5;
 const READ_LIMIT_REQUESTS = 60;

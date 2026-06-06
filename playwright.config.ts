@@ -84,7 +84,7 @@ export default defineConfig({
       name: 'staging-mcp',
       // Live staging Worker — MCP transport plus the four
       // discoverability surfaces (.well-known/{mcp, security.txt,
-      // ai.txt}, llms.txt Programmatic access, /mcp-docs.{html,md}).
+      // ai.txt}, llms.txt Programmatic access, /mcp-skill.{html,md}).
       // Set ANC_STAGING_BASE_URL before invoking (and
       // ANC_STAGING_ACCESS_CLIENT_ID/SECRET for headless Access auth).
       // Excluded from the default suite; run with `bun x playwright test
