@@ -39,7 +39,7 @@ Sub-commands let you re-run one section in isolation:
 | `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run` |
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                          |
 | `do-smoke`  | Live `/api/score` smoke against staging through CF Access (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password`    |
-| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                                | `scripts/release/mcp-smoke.sh`                   |
+| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                        | `scripts/release/mcp-smoke.sh`           |
 | `dist`      | `/check` → `/audit` redirect, served `skill.json` version vs source, `X-Robots-Tag: noindex` on staging                                               | `curl`                                   |
 | `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                    |
 | `all`       | every above sequentially                                                                                                                              |                                          |
@@ -287,9 +287,9 @@ Live MCP surface): `--env staging` exercises the staging Worker through CF Acces
 rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift
 between `wrangler.jsonc` and the live Workers.
 
-Driven by `scripts/release/preflight.sh mcp`, which delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` after a
-reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release/postflight.sh --env
-staging mcp` (staging Worker, CF Access service-token headers auto-staged from 1Password) and by
+Driven by `scripts/release/preflight.sh mcp`, which delegates to `scripts/release/mcp-smoke.sh http://localhost:8787`
+after a reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release/postflight.sh
+--env staging mcp` (staging Worker, CF Access service-token headers auto-staged from 1Password) and by
 `scripts/release/postflight.sh --env prod mcp` (`anc.dev`, no auth). The only differences between the three callers are
 the base URL and the env-driven auth headers when targeting staging.
 

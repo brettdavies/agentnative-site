@@ -34,8 +34,8 @@ scripts/release/postflight.sh --env prod all
 
 The script (`scripts/release/postflight.sh`) covers the automatable post-deploy gates: `deploy.yml` conclusion,
 container app readiness, front-page and leaderboard renders, the registry-fast-path `/api/score` smoke, the live MCP
-suite via `scripts/release/mcp-smoke.sh`, the cache-purge confirmation for `/skill` artifacts, and the prod-only `main → dev`
-backport signal.
+suite via `scripts/release/mcp-smoke.sh`, the cache-purge confirmation for `/skill` artifacts, and the prod-only `main →
+dev` backport signal.
 
 The production live-DO smoke against a non-registry binary requires a browser. The real Turnstile site key + secret gate
 the JSON path until the service-token bypass ships per the plan at
@@ -49,7 +49,7 @@ Sub-commands let you re-run one verification in isolation. Each is parameterized
 | `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success             | `gh run view`                          |
 | `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                             | `bunx wrangler containers list`        |
 | `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                        | `curl`                                 |
-| `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/release/mcp-smoke.sh`                 |
+| `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/release/mcp-smoke.sh`         |
 | `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                    | `curl`                                 |
 | `backport`  | Merged PR to `dev` with the release slug in its title (prod only; SKIPs on staging)                   | `gh pr list --base dev --state merged` |
 | `all`       | Every above (live-DO smoke is documented manually below)                                              |                                        |
@@ -283,10 +283,11 @@ directly from `dev` — there is no `main → dev` flow to verify.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
   smoke scope).
 -
-  [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-  the coordination trap the live-DO smoke exists to prevent.
--
-  [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-  the rollout-readiness discipline that gates the live-DO smoke.
+
+[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
+the coordination trap the live-DO smoke exists to prevent. -
+[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
+the rollout-readiness discipline that gates the live-DO smoke.
+
 - [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
   error-tier breakdown, kill-switch flip.
