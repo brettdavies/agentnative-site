@@ -460,7 +460,8 @@ After the `release/*` PR merges to `main` and the production deploy fires, the c
 - [`RELEASES-POSTFLIGHT.md`][postflight]: post-merge verification (runs AFTER this one).
 - [`RELEASES.md`][releases]: operational runbook for the full release lifecycle.
 - [`RELEASES-RATIONALE.md`][rationale]: release-flow rationale (branching model, soak-then-promote, CI smoke scope).
-- [sandbox-image-anc-cli-rename-coordination][sandbox-rename]: the coordination trap this checklist exists to prevent.
+- [sandbox-image-anc-cli-rename-coordination][sandbox-rename]: the rename-class failure mode this checklist gates
+  against.
 - [cloudflare-container-rollout-readiness-before-smoke][rollout]: the rollout-readiness discipline that gates the
   live-DO smoke.
 - [live-scoring-monitoring][monitoring]: operator telemetry, error-tier breakdown, kill-switch flip.

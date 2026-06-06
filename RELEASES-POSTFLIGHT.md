@@ -280,8 +280,7 @@ directly from `dev` — there is no `main → dev` flow to verify.
 - [`RELEASES-PREFLIGHT.md`][preflight]: pre-cut go/no-go checklist (runs BEFORE this one).
 - [`RELEASES.md`][releases]: operational runbook for the full release lifecycle.
 - [`RELEASES-RATIONALE.md`][rationale]: release-flow rationale (branching model, soak-then-promote, CI smoke scope).
-- [sandbox-image-anc-cli-rename-coordination][sandbox-rename]: the coordination trap the live-DO smoke exists to
-  prevent.
+- [sandbox-image-anc-cli-rename-coordination][sandbox-rename]: the rename-class failure mode the live-DO smoke catches.
 - [cloudflare-container-rollout-readiness-before-smoke][rollout]: the rollout-readiness discipline that gates the
   live-DO smoke.
 - [live-scoring-monitoring][monitoring]: operator telemetry, error-tier breakdown, kill-switch flip.
