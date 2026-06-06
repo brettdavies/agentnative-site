@@ -30,7 +30,7 @@ function buildMcpPointer(baseUrl) {
       version: MCP_SPEC_VERSION,
       description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
       transport: 'streamable-http',
-      documentation: `${baseUrl}/mcp-docs.md`,
+      documentation: `${baseUrl}/mcp-skill.md`,
     },
     null,
     2,
@@ -50,7 +50,7 @@ function buildSecurityTxt(baseUrl) {
 
 function buildAiTxt(baseUrl) {
   return [
-    '# ai.txt — anc.dev',
+    '# ai.txt for anc.dev',
     '# Declares AI-training and agent-access posture. Format may evolve as the',
     '# ai.txt convention ratifies; this file is the canonical statement.',
     '',

@@ -1,7 +1,7 @@
 // Live-network e2e for discoverability surfaces against the staging
 // Worker. Opt-in suite (project: staging-mcp). Asserts the four wire
 // surfaces U6 ships (.well-known/mcp, security.txt, ai.txt, plus the
-// llms.txt Programmatic access section) AND the mcp-docs HTML + .md
+// llms.txt Programmatic access section) AND the mcp-skill HTML + .md
 // twin pages U2 ships, with cross-surface drift assertions so a change
 // in any one (the JSON pointer's documentation URL, the docs page's
 // tool list, the well-known + handshake spec revision) breaks the
@@ -39,7 +39,7 @@ test.describe('staging /.well-known/mcp', () => {
     expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(body.version).toBe('2025-06-18');
     expect(body.transport).toBe('streamable-http');
-    expect(body.documentation).toBe('https://anc.dev/mcp-docs.md');
+    expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
   });
 });
 
@@ -80,29 +80,29 @@ test.describe('staging /llms.txt', () => {
     expect(princIdx).toBeGreaterThan(progIdx);
     expect(text).toContain('https://anc.dev/mcp');
     expect(text).toContain('https://anc.dev/.well-known/mcp');
-    expect(text).toContain('https://anc.dev/mcp-docs.md');
+    expect(text).toContain('https://anc.dev/mcp-skill.md');
   });
 });
 
-test.describe('staging /mcp-docs surfaces', () => {
-  test('/mcp-docs/ returns the HTML page', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp-docs/`, { headers: ACCESS_HEADERS });
+test.describe('staging /mcp-skill surfaces', () => {
+  test('/mcp-skill/ returns the HTML page', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp-skill/`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const ct = res.headers()['content-type'] ?? '';
     expect(ct).toContain('text/html');
   });
 
-  test('/mcp-docs.md returns the markdown twin', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp-docs.md`, { headers: ACCESS_HEADERS });
+  test('/mcp-skill.md returns the markdown twin', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp-skill.md`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const ct = res.headers()['content-type'] ?? '';
     expect(ct).toContain('text/markdown');
   });
 
-  test('mcp-docs.md text equality on the nine tool names + four template URIs (drift gate per KTD-8)', async ({
+  test('mcp-skill.md text equality on the nine tool names + four template URIs (drift gate per KTD-8)', async ({
     request,
   }) => {
-    const res = await request.get(`${STAGING_BASE}/mcp-docs.md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/mcp-skill.md`, { headers: ACCESS_HEADERS });
     const md = await res.text();
     for (const toolName of [
       'list_tools',

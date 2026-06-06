@@ -484,7 +484,7 @@ an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_b
    and `simple` values.
 3. **Verify discoverability surfaces.** After deploy, `curl -s https://anc.dev/.well-known/mcp | jq` returns the JSON
    pointer with `mcp_endpoint`, `version: "2025-06-18"`, `transport: "streamable-http"`, and `documentation:
-   "https://anc.dev/mcp-docs.md"`. `curl -s https://anc.dev/mcp-docs.md | head -1` returns the markdown twin's first
+   "https://anc.dev/mcp-skill.md"`. `curl -s https://anc.dev/mcp-skill.md | head -1` returns the markdown twin's first
    heading. `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
    mailto:97-boss-beetle@icloud.com`.
 4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp

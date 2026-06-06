@@ -39,7 +39,7 @@ describe('.well-known/mcp pointer (built dist/)', () => {
     ]);
   });
 
-  test('values match the wire contract pinned in content/mcp.md and instructions.ts', async () => {
+  test('values match the wire contract pinned in content/mcp-skill.md and instructions.ts', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
     const parsed = JSON.parse(raw) as {
       mcp_endpoint: string;
@@ -50,7 +50,7 @@ describe('.well-known/mcp pointer (built dist/)', () => {
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.version).toBe('2025-06-18');
     expect(parsed.transport).toBe('streamable-http');
-    expect(parsed.documentation).toBe('https://anc.dev/mcp-docs.md');
+    expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
   });
 });
 
@@ -98,7 +98,7 @@ describe('emitDiscovery() in isolation', () => {
 
       const mcp = JSON.parse(await readFile(stats.mcpPath, 'utf8')) as { mcp_endpoint: string; documentation: string };
       expect(mcp.mcp_endpoint).toBe('https://example.test/mcp');
-      expect(mcp.documentation).toBe('https://example.test/mcp-docs.md');
+      expect(mcp.documentation).toBe('https://example.test/mcp-skill.md');
 
       const security = await readFile(stats.securityPath, 'utf8');
       expect(security).toContain('Canonical: https://example.test/.well-known/security.txt');
@@ -125,12 +125,87 @@ describe('llms.txt Programmatic access section', () => {
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
     expect(section).toContain('https://anc.dev/mcp');
     expect(section).toContain('https://anc.dev/.well-known/mcp');
-    expect(section).toContain('https://anc.dev/mcp-docs.md');
+    expect(section).toContain('https://anc.dev/mcp-skill.md');
   });
 
   test('only one Programmatic access section exists in llms.txt', async () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const matches = llms.match(/## Programmatic access/g) ?? [];
     expect(matches.length).toBe(1);
+  });
+});
+
+// Operational discovery surfaces (.well-known/*, robots.txt, sitemap.xml)
+// are consumed by tooling that may not advertise UTF-8 charset on
+// download. A non-ASCII byte (em-dash, en-dash, curly quote, NBSP) in
+// these files renders as mojibake (e.g. `# ai.txt â€" anc.dev`) under
+// any client that falls back to Latin-1 / Windows-1252. The fix is to
+// keep the source files pure ASCII; this gate is the regression test.
+//
+// HTML pages and markdown twins are exempt — both carry an explicit
+// `charset=utf-8` in their Content-Type, so high-bit bytes render
+// correctly. The exempt set lives in the test below as a hard list, not
+// a glob, so adding a new operational surface forces an explicit
+// decision about whether it joins the ASCII-only gate.
+async function findNonAsciiByte(path: string): Promise<{ offset: number; byte: number } | null> {
+  const buf = await readFile(path);
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] > 0x7f) return { offset: i, byte: buf[i] };
+  }
+  return null;
+}
+
+function lineColumnForOffset(buf: Buffer, offset: number): { line: number; column: number } {
+  let line = 1;
+  let lineStart = 0;
+  for (let i = 0; i < offset; i++) {
+    if (buf[i] === 0x0a) {
+      line++;
+      lineStart = i + 1;
+    }
+  }
+  return { line, column: offset - lineStart + 1 };
+}
+
+describe('operational discovery surfaces are pure ASCII (mojibake gate)', () => {
+  const PATHS = [
+    join(DIST_DIR, '.well-known', 'mcp'),
+    join(DIST_DIR, '.well-known', 'security.txt'),
+    join(DIST_DIR, '.well-known', 'ai.txt'),
+    join(DIST_DIR, 'robots.txt'),
+    join(DIST_DIR, 'sitemap.xml'),
+  ] as const;
+
+  for (const path of PATHS) {
+    const rel = path.slice(DIST_DIR.length + 1);
+    test(`${rel} contains no high-bit bytes`, async () => {
+      const hit = await findNonAsciiByte(path);
+      if (hit) {
+        const buf = await readFile(path);
+        const { line, column } = lineColumnForOffset(buf, hit.offset);
+        throw new Error(
+          `${rel}:${line}:${column} carries byte 0x${hit.byte.toString(16).padStart(2, '0')} (non-ASCII). ` +
+            'Operational discovery surfaces must be pure ASCII to survive clients that fall back to Latin-1 / ' +
+            'Windows-1252 decoding (e.g. `—` becomes `â€"`). Replace the glyph in the source emitter.',
+        );
+      }
+      expect(hit).toBeNull();
+    });
+  }
+});
+
+describe('emitDiscovery() emits pure ASCII (isolation pass)', () => {
+  test('round-tripped output through a temp dir is byte-for-byte ASCII', async () => {
+    const tmp = join(tmpdir(), `anc-discovery-ascii-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(tmp, { recursive: true });
+    try {
+      const stats = await emitDiscovery({ distDir: tmp, baseUrl: 'https://example.test' });
+      for (const path of [stats.mcpPath, stats.securityPath, stats.aiPath]) {
+        const hit = await findNonAsciiByte(path);
+        expect(hit).toBeNull();
+      }
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });

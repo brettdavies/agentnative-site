@@ -116,7 +116,7 @@ test.describe('staging /mcp — handshake', () => {
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
     expect(instructions).toContain('2025-06-18');
-    expect(instructions).toContain('https://anc.dev/mcp-docs.md');
+    expect(instructions).toContain('https://anc.dev/mcp-skill.md');
   });
 });
 
