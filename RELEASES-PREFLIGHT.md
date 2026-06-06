@@ -403,74 +403,21 @@ explicitly.
   procedure: [`RELEASES.md` § Prose scrubbing](./RELEASES.md#prose-scrubbing).
 - [ ] **No em-dashes in the PR body.** Strip `—` before submission. Use colons, periods, or parentheses.
 
-### Post-tag verification
-
-Run immediately after the `release/*` PR merges to `main`. The production deploy fires automatically; this checklist
-confirms it worked.
-
-- [ ] **Production deploy green end-to-end.** `gh run watch <run-id> --exit-status`, then verify explicitly per
-  `~/.claude/ci-watch-prompt.sh`:
-
-  ```bash
-  gh pr view <num> --json statusCheckRollup,mergeStateStatus \
-    --jq '{merge: .mergeStateStatus, checks: [.statusCheckRollup[] | {name, conclusion}]}'
-  ```
-
-  Every conclusion must be `SUCCESS`. The watcher exit code alone is not authoritative.
-- [ ] **Production container app reaches `ready`.** Same pattern as staging — if the release advanced the production
-  pin, wait for the rollout:
-
-  ```bash
-  bun x wrangler containers list | grep agentnative-site-sandbox
-  ```
-
-  State must be `ready` before smoking the live path.
-- [ ] **`anc.dev` front page + leaderboard render.** Smoke against the production custom domain (no CF Access on
-  production):
-
-  ```bash
-  curl -fSsL https://anc.dev/ | grep -q '<title>' && echo "home: ok"
-  curl -fSsL https://anc.dev/scorecards | grep -q 'leaderboard-table' && echo "leaderboard: ok"
-  curl -fSsL https://anc.dev/api/score -X POST \
-    -H 'Content-Type: application/json' \
-    -d '{"input":"ripgrep","turnstile_token":"x"}' \
-    | jq '.scorecard.kind, .anc_version, .spec_version'
-  # "registry_hit"
-  # <anc_version>
-  # <spec_version>
-  ```
-
-- [ ] **Production live-DO smoke against a non-registry binary.** Production binds the real Turnstile site key + secret
-  (staging uses Cloudflare's always-pass test pair), so the staging-style curl recipe with `turnstile_token:"x"` returns
-  `turnstile_failed` against `anc.dev`. Pick one of two paths:
-
-- **Manual (operator-only path).** Open `https://anc.dev/` in a browser, paste the same fresh non-registry binary picked
-  for staging into the form (e.g., `npm install -g cowsay`), submit, watch the live run complete, then visit the
-  resulting share URL (`/score/live/<binary>`) and confirm the four scorecard classes render (`scorecard-summary`,
-  `scorecard-audits`, `scorecard-meta`, `scorecard-embed`).
-- **Service-token (CI / scripted path).** Once the service-token bypass lands per the plan at
-  [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md),
-  re-use the staging smoke recipe with an added `X-Anc-Smoke-Token: ${SMOKE_SERVICE_TOKEN}` header. The bypass skips
-  Turnstile only; rate-limit + kill-switch stay enforced; bypassed runs emit a distinct telemetry tag (`freshness:
-  "live-smoke"`) so they stay separable from user traffic in Analytics Engine.
-
-  Either path satisfies the box. Until the bypass ships, the manual browser path is the only option.
-- [ ] **Cache-purge after deploys that change `/skill`, `/skill.json`, `/skill.md`.** Cloudflare's edge cache holds
-  these for the configured TTL; manual purge brings the new version live immediately. Token in 1Password
-  (`scripts/staging-cache-smoke.sh` references the item).
+After the `release/*` PR merges to `main` and the production deploy fires, the checklist continues in
+[`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md).
 
 ## Related docs
 
-- [`RELEASES.md`](./RELEASES.md): operational runbook this checklist gates. The "Releasing dev to main" section
-  references back here as step 0.
+- [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md): post-merge verification (runs AFTER this one).
+- [`RELEASES.md`](./RELEASES.md): operational runbook for the full release lifecycle. The "Releasing dev to main"
+  section references back here as step 0.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
   smoke scope).
 -
-
-[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-the coordination trap this checklist exists to prevent. -
-[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-the rollout-readiness discipline that gates the live-DO smoke.
-
+  [`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
+  the coordination trap this checklist exists to prevent.
+-
+  [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
+  the rollout-readiness discipline that gates the live-DO smoke.
 - [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
   error-tier breakdown, kill-switch flip.
