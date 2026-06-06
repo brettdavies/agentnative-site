@@ -37,13 +37,8 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { loadHintsIndex, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
-import {
-  type DiscoveryHintsIndex,
-  loadRegistryIndex,
-  lookupScorecard,
-  type RegistryIndex,
-} from '../../score/registry-lookup';
+import { loadHintsIndex, lookupOnly, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
+import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import type { Catalog } from '../catalog';
@@ -174,7 +169,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
 
       // Step 3: lookupOnly — registry tier + R2 cache tier. A hit
       // short-circuits the entire audit path; cache state is data.
-      const lookup = await lookupScorecard(validated, env, registryIndex, hintsIndex, { specVersion: SPEC_VERSION });
+      const lookup = await lookupOnly(validated, env, registryIndex, hintsIndex, { specVersion: SPEC_VERSION });
 
       if (lookup.kind === 'curated') {
         const scorecardUrlPath = lookup.scorecard_url ?? `/score/${lookup.entry.name}`;

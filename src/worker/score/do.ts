@@ -159,7 +159,7 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
     }
 
     // Write the successful scorecard to R2 so the next request for the
-    // same binary short-circuits at the handler's lookupScorecard cache
+    // same binary short-circuits at the handler's lookupOnly cache
     // tier. Best-effort: the cache helpers swallow R2 failures
     // (logged, never thrown). The await delays the response by one R2
     // round-trip (~30-100 ms typical); the latency cost is paid once per

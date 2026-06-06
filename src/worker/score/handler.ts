@@ -4,7 +4,7 @@
 //
 //   1. Validate input.
 //   2. Unified scorecard lookup — pre-discovery. One call to
-//      lookupScorecard() collapses the registry-fast-path and the R2
+//      lookupOnly() collapses the registry-fast-path and the R2
 //      cache pre-check into a single tier-resolved decision. `curated`
 //      returns the registry-hit envelope pointing at /score/<slug>;
 //      `cached` returns the inline scorecard JSON; both bypass the
@@ -98,7 +98,7 @@ import type { CacheEnv } from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
-import { _resetHintsIndexCache, loadHintsIndex, runFreshOnly } from './orchestrate';
+import { _resetHintsIndexCache, loadHintsIndex, lookupOnly, runFreshOnly } from './orchestrate';
 import {
   _resetRegistryIndexCache,
   type DiscoveryHintsIndex,
@@ -106,7 +106,6 @@ import {
   deriveShareBinaryFromSpec,
   loadRegistryIndex,
   lookupRegistry,
-  lookupScorecard,
 } from './registry-lookup';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess, statusForError } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
@@ -369,10 +368,10 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   const isBranchScopedUrl = validated.kind === 'github-url' && typeof validated.branch === 'string';
   // Pre-discovery cache attempt is recorded for any non-branch input
   // that didn't opt out via ?fromCache=false. Whether the attempt
-  // results in a hit depends on lookupScorecard's tier-2 path —
+  // results in a hit depends on lookupOnly's tier-2 path —
   // install-command and hinted github-url paste have a binary upfront
   // and reach the cache read; github-url-without-hint silently skips
-  // the R2 read inside lookupScorecard (no binary derivable). We treat
+  // the R2 read inside lookupOnly (no binary derivable). We treat
   // "attempted" as the policy intent (we WOULD have looked it up if a
   // binary were available) rather than the wire fact, so the field
   // stays useful for the "what percentage of cache hits came from
@@ -383,7 +382,7 @@ async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Tele
   }
   const lookup = isBranchScopedUrl
     ? ({ kind: 'miss' } as const)
-    : await lookupScorecard(validated, env, registryIndex, hintsIndex, {
+    : await lookupOnly(validated, env, registryIndex, hintsIndex, {
         specVersion: SPEC_VERSION,
         skipCache,
       });
