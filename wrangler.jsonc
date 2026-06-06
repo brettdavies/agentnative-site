@@ -150,15 +150,16 @@
   // TURNSTILE_SECRET is set via `wrangler secret put` and is not
   // committed. env.staging.vars carries Cloudflare's always-pass test
   // sitekey for CLI verification flows.
-  // MCP_ENABLED / MCP_LIVE_SCORING_ENABLED default `"false"` in
-  // production until the operator explicitly flips via `wrangler secret
-  // put` (per KTD-11 of the MCP endpoint plan). MCP_ENABLED gates the
-  // entire /mcp branch; MCP_LIVE_SCORING_ENABLED gates only score_cli.
-  // Surgical zero-deploy off-switches.
+  // MCP_ENABLED / MCP_LIVE_SCORING_ENABLED live as `wrangler secret put`
+  // values, not `vars`, so the operator can flip them at runtime without
+  // a redeploy clobbering the change (KTD-11 of the MCP endpoint plan).
+  // Undefined reads as falsy in src/worker/index.ts (the kill-switch
+  // check is `env.MCP_ENABLED !== 'true'`), so a missing secret returns
+  // 503 with `Retry-After: 3600` and the rest of the Worker is unaffected.
+  // MCP_ENABLED gates the entire /mcp branch; MCP_LIVE_SCORING_ENABLED
+  // gates only score_cli.
   "vars": {
-    "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ",
-    "MCP_ENABLED": "false",
-    "MCP_LIVE_SCORING_ENABLED": "false"
+    "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ"
   },
   // Production (top-level): anc.dev + www.anc.dev custom domains, no
   // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
@@ -290,15 +291,13 @@
       // top-level `vars` block. REPLACE-not-merge inheritance and the
       // future-vars-mirroring requirement: RELEASES-RATIONALE.md §
       // Wrangler env inheritance traps.
-      // Staging defaults `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED`
-      // to "true" so the staging host serves /mcp end-to-end during
-      // soak; production stays gated until explicit promotion via
-      // `wrangler secret put`. See top-level `vars` for the production
-      // defaults.
+      // MCP_ENABLED / MCP_LIVE_SCORING_ENABLED live as `wrangler secret
+      // put --env staging` values for the same reason as production
+      // (see top-level `vars` comment). Set both to `"true"` after the
+      // staging deploy completes so the staging host serves /mcp
+      // end-to-end during soak.
       "vars": {
-        "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
-        "MCP_ENABLED": "true",
-        "MCP_LIVE_SCORING_ENABLED": "true"
+        "TURNSTILE_SITEKEY": "1x00000000000000000000AA"
       }
     }
   }
