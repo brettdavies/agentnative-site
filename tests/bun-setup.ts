@@ -1,27 +1,31 @@
 // Bun-test setup — registered via bunfig.toml `[test].preload`.
 //
-// Why this exists: `@cloudflare/containers` (transitive dep of
-// `@cloudflare/sandbox`, imported by `src/worker/score/do.ts`) does a
-// top-level `import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers'`
-// in its CJS bundle. `cloudflare:workers` is a workerd-runtime-only virtual
-// module — Bun can't resolve it and the import throws at module load,
-// taking down every test that transitively imports the Worker entry
-// (worker.test.ts, score-handler.test.ts via shared fixtures, etc.).
+// Bun's module resolver doesn't know about workerd's `cloudflare:*`
+// virtual modules. Without these shims, importing any file that
+// transitively pulls in `@cloudflare/containers`, `@cloudflare/sandbox`,
+// or the `agents` SDK fails at module load with
+// `Cannot find package 'cloudflare:...'`.
 //
-// This shim provides no-op `DurableObject` and `WorkerEntrypoint` classes
-// so the import succeeds. Bun-side tests that exercise pure logic (handler
-// orchestration, content negotiation, header policy) keep working.
+// The shims are a LOAD-FLOOR, not a behavior simulator. Tests that need
+// real workerd semantics belong in a follow-up vitest-pool-workers
+// layer (see U7 of the MCP endpoint plan).
 //
-// Tests that need real DO behavior (state persistence, alarms, fetch
-// dispatch through the binding) must use a different test runtime
-// (workerd via @cloudflare/vitest-pool-workers) or run as E2E against a
-// deployed Worker. The shim catches the "module loads" floor; it doesn't
-// pretend DurableObject semantics work.
+// Modules covered (driven by the agents@^0.13.3 + @cloudflare/sandbox
+// dependency trees):
+//
+//   cloudflare:workers — DurableObject, WorkerEntrypoint, RpcTarget,
+//                        WorkflowEntrypoint, exports, env. Used by
+//                        @cloudflare/containers (transitive via
+//                        @cloudflare/sandbox) and by agents.
+//   cloudflare:email   — EmailMessage. Used by agents/dist/index.js.
+//
+// If a future SDK bump adds another `cloudflare:*` import the failure
+// mode is the same; add a build.module call.
 
 import { plugin } from 'bun';
 
 plugin({
-  name: 'cloudflare-workers-shim',
+  name: 'cloudflare-virtual-modules-shim',
   setup(build) {
     build.module('cloudflare:workers', () => ({
       contents: [
@@ -31,8 +35,21 @@ plugin({
         'export class WorkerEntrypoint {',
         '  constructor(ctx, env) { this.ctx = ctx; this.env = env; }',
         '}',
-        // env wrapper sentinel — some CF helpers probe for this at module load.
+        'export class WorkflowEntrypoint {',
+        '  constructor(ctx, env) { this.ctx = ctx; this.env = env; }',
+        '}',
+        'export class RpcTarget {}',
+        'export const exports = {};',
         'export const env = undefined;',
+      ].join('\n'),
+      loader: 'js',
+    }));
+
+    build.module('cloudflare:email', () => ({
+      contents: [
+        'export class EmailMessage {',
+        '  constructor(from, to, raw) { this.from = from; this.to = to; this.raw = raw; }',
+        '}',
       ].join('\n'),
       loader: 'js',
     }));

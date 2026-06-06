@@ -455,6 +455,79 @@ FORMAT JSONCompact
 The full canonical query playbook (daily volume, p50/p99 latency, error distribution, registry-hit-rate, top tools)
 lives in [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-analytics.md).
 
+## MCP endpoint release procedure
+
+`POST /mcp` (the Model Context Protocol server) reuses the live-scoring stack's `Sandbox` DO, R2 cache, and `SCORE_KV`.
+The MCP-specific additions to a release are two rate-limit bindings, two env-var kill switches, and a per-call visitor
+log. Operational characteristics differ from `/api/score` and merit explicit verification at each release.
+
+### Bindings added by the MCP endpoint
+
+| Binding                    | Type       | Production limits   | Staging defaults | Purpose                                                                                                                            |
+| -------------------------- | ---------- | ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_LIMITER`              | Rate Limit | 60 req / 60s per IP | same             | Gates every `POST /mcp`. Anon fallback on missing `cf-connecting-ip`.                                                              |
+| `MCP_AUDIT_LIMITER`        | Rate Limit | 5 req / 60s per IP  | same             | Gates `score_cli` cache-miss audits. **No anon fallback.** Binding floor only; hourly window enforced in `SCORE_KV` (see below).   |
+| `MCP_ENABLED`              | `vars`     | `"false"`           | `"true"`         | Kill switch for the whole `/mcp` branch. Falsy returns 503 with `Retry-After: 3600` and plain text body (no JSON-RPC envelope).    |
+| `MCP_LIVE_SCORING_ENABLED` | `vars`     | `"false"`           | `"true"`         | Kill switch for `score_cli` only. Falsy returns `isError: false` with `audited: false, next_tool: get_scorecard`. Reads stay live. |
+
+Both rate-limit bindings carry `namespace_id` values pinned in `wrangler.jsonc`. The CF Rate Limiting platform only
+accepts `period: 10 | 60`, so `MCP_AUDIT_LIMITER` enforces a 5-per-60-seconds burst floor; the per-hour ceiling lives in
+an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_bucket>` with a 2-hour TTL.
+
+### Promotion checklist (first MCP release to main)
+
+1. **Flip both kill switches to live on production.** Production defaults `"false"`. Promotion requires `wrangler secret
+   put MCP_ENABLED true` and `wrangler secret put MCP_LIVE_SCORING_ENABLED true` against the production Worker. Secrets
+   are env-scoped, not migration-scoped; no deploy needed once set.
+2. **Confirm both rate-limit bindings exist in `wrangler.jsonc` for the production env.** Production inherits from the
+   top-level block by default; verify `MCP_LIMITER` and `MCP_AUDIT_LIMITER` both appear with the expected `namespace_id`
+   and `simple` values.
+3. **Verify discoverability surfaces.** After deploy, `curl -s https://anc.dev/.well-known/mcp | jq` returns the JSON
+   pointer with `mcp_endpoint`, `version: "2025-06-18"`, `transport: "streamable-http"`, and `documentation:
+   "https://anc.dev/mcp-skill.md"`. `curl -s https://anc.dev/mcp-skill.md | head -1` returns the markdown twin's first
+   heading. `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
+   mailto:97-boss-beetle@icloud.com`.
+4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp
+   Playwright project. Set `ANC_STAGING_BASE_URL` and run `bun x playwright test --project=staging-mcp` against the live
+   host. Twenty tests; both files must pass.
+
+### Cost-control posture: `score_cli` never bypasses the cache
+
+The MCP surface has no `force_refresh` flag and no path that forces a fresh audit on an already-cached binary.
+`get_scorecard` is the cheap read; `score_cli` is the cache-miss-only metered path. Operators relying on this rule
+should note: the rule is contract, not enforcement. A future PR that adds a "force refresh" parameter would silently
+break the cost model; the regression guard is `tests/worker-mcp-audit.test.ts`, which asserts that a cache hit on
+`score_cli` returns `audited: false` rather than running the container.
+
+→ Rationale and limiter-pair design:
+[`RELEASES-RATIONALE.md` § MCP endpoint rate limits and cost gates](./RELEASES-RATIONALE.md#mcp-endpoint-rate-limits-and-cost-gates).
+
+### Visitor log
+
+Every `POST /mcp` emits one `[mcp-call]` structured log line AFTER the rate-limit gate decision, carrying `Origin`,
+`User-Agent`, Cloudflare-injected IP and country, the chosen response format, and a `gate_result` of `passed` or
+`rate_limited`. Volume is bounded under attack because rate-limited requests are logged but not processed past the gate.
+Pre-data placeholders for both rate-limit ceilings are sized from streamsgrp parity; review at 14 days of visitor-log
+data.
+
+### Kill-switch flip procedure
+
+```bash
+# Take the whole endpoint offline (surface emergency).
+wrangler secret put MCP_ENABLED                  # enter `false` when prompted
+# Re-enable.
+wrangler secret put MCP_ENABLED                  # enter `true` when prompted
+
+# Disable only the cost-bearing tool (cost emergency); reads stay live.
+wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `false`
+wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `true` to restore
+```
+
+Both are env-scoped: pass `--env staging` to flip staging only. Propagation is bounded by the secret-read TTL on the
+next request to a fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery
+from a surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED`
+and keeps the read tier serving cached scorecards.
+
 ## Staging access (Cloudflare Access)
 
 Staging Worker gated by CF Access. Browser: SSO/email-OTP at `https://agentnative-site-staging.brettdavies.workers.dev`

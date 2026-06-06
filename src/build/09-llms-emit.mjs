@@ -44,6 +44,15 @@ export async function emitLlmsSurface({
     summary: introSummary,
     principles: principles.map((p) => ({ n: p.n, slug: p.slug, title: p.title })),
     subPages: subPageData.map((s) => ({ name: s.name, title: s.title })),
+    // U6 of the MCP endpoint plan: surface the MCP wire entry points
+    // ahead of the human index so agents reading llms.txt find the
+    // programmatic catalog before the prose pages. Section title
+    // matches the convention streamsgrp uses.
+    programmaticAccess: [
+      { label: 'MCP server (streamable HTTP)', path: '/mcp' },
+      { label: 'Well-known MCP pointer', path: '/.well-known/mcp' },
+      { label: 'MCP client skill', path: '/mcp-skill.md' },
+    ],
     scorecardLinks: [
       { name: 'Leaderboard', path: '/scorecards.md' },
       { name: 'Coverage Matrix', path: '/coverage.md' },

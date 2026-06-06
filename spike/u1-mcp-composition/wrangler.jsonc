@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "anc-u1-mcp-composition",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "send_metrics": false,
+  "assets": {
+    "directory": "./fixtures",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  // Container required by BaseSandbox; the stub Sandbox subclass
+  // overrides fetch() so the container is never actually exec'd, but
+  // the binding plus ContainerProxy export must resolve at construction
+  // time for the load-bearing risk to be exercised. Image pin mirrors
+  // anc.dev production so wrangler's binding resolver behaves
+  // identically.
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "registry.cloudflare.com/6c1bafea907fecbd4ad665b8d0a78e53/anc-sandbox:182da1b",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "SCORE"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox"]
+    }
+  ]
+}

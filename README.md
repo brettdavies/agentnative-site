@@ -16,9 +16,12 @@ badge surface, and the agent-native-cli skill bundle distribution endpoint.
 | `/contribute`, `/about`                                             | Contribution map and attribution                                        |
 | `/skill`                                                            | Human-facing install for the `agent-native-cli` skill bundle            |
 | `/skill.json`                                                       | Canonical machine-primary skill manifest                                |
+| `POST /mcp`                                                         | Model Context Protocol server; client skill at `/mcp-skill.md`          |
 | `/llms.txt`, `/llms-full.txt`                                       | llmstxt.org convention (summary index plus full concatenated spec)      |
 
-Every HTML page has a markdown twin reachable via `.md` suffix or `Accept: text/markdown` content negotiation.
+Every HTML page has a markdown twin reachable via `.md` suffix or `Accept: text/markdown` content negotiation. Agents
+reach anc.dev's data programmatically via `POST /mcp`; the client integration guide lives at
+[`/mcp-skill.md`](https://anc.dev/mcp-skill.md).
 
 ## Scoring
 
@@ -42,11 +45,13 @@ gated by Turnstile. Full inventory in [`wrangler.jsonc`](./wrangler.jsonc); desi
 ```bash
 bun install
 bun run build              # produces dist/
-bun run dev                # bun run build && wrangler dev --local
-wrangler dev --env staging # local Worker against staging bindings
+bun run dev                # bun run build && wrangler dev --env staging --local --port 8787 (http://localhost:8787)
 bun test                   # unit + regression
 bun run test:e2e           # Playwright
 ```
+
+`bun run dev` is the only valid local preview. Static-file servers (`python -m http.server`, `serve`, `npx http-server`)
+bypass the Worker and produce a false preview — see [AGENTS.md → Local dev](AGENTS.md#local-dev).
 
 After cloning, point git at the repo's hooks once:
 

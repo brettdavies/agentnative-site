@@ -1,6 +1,7 @@
 // Orchestrator — turn content/ into dist/.
 //
 // Pipeline:
+//   0. Regenerate src/worker/spec-version.gen.ts from VERSION files.
 //   1. Copy static assets + bundle client JS (→ css/, fonts/, js/,
 //      og-image.png, robots.txt).
 //   2. sortedGlob principle files in numeric order.
@@ -9,13 +10,19 @@
 //   5. Copy each principle's markdown source byte-for-byte.
 //   6. Build homepage — hero (title + lede) + principle listing (links to
 //      /p{N} pages). No inline principle content on the index page.
-//   7. Render audit.md + about.md into sub-pages.
+//   7. Render audit.md + about.md + the rest of content/*.md into sub-pages
+//      (HTML + markdown twins).
 //   8. Scorecard pages — leaderboard + per-tool pages from registry.yaml
-//      + scorecards/*.json.
+//      + scorecards/*.json. Emits dist/registry-index.json consumed by
+//      stage 11.
 //   9. Emit llms.txt + llms-full.txt.
 //  10. Emit sitemap.xml.
-//  11. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
+//  11. Emit dist/_internal/mcp-catalog.json — denormalized projection of
+//      registry-index + principles + vendored spec for the Worker's MCP
+//      module. Public path 404s; Worker reads via env.ASSETS.fetch.
+//  12. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
 //      <a>, locked anchors present on principle pages, md sha256 matches.
+//  13. Minify dist/ HTML, JSON, and CSS as a unified post step.
 //
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
 // exits non-zero. Regression tests are the verification net.
@@ -35,6 +42,8 @@ import { emitSubPages } from './07-subpages.mjs';
 import { emitScorecardSurface } from './08-scorecards-emit.mjs';
 import { emitLlmsSurface } from './09-llms-emit.mjs';
 import { buildSitemap } from './10-sitemap.mjs';
+import { emitMcpCatalog } from './11-mcp-catalog.mjs';
+import { emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -242,14 +251,30 @@ export async function build() {
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
-  // 11. Invariant check — fails fast if any critical contract slips.
+  // 11. MCP catalog — denormalized projection consumed by the Worker's
+  // MCP module via env.ASSETS.fetch. Runs AFTER registry-index.json is
+  // emitted (08) and AFTER sitemap so its emission cannot race with
+  // upstream artifacts. Lives at /_internal/mcp-catalog.json which the
+  // Worker's dispatch interceptor hard-404s from public access (the
+  // Worker's own ASSETS fetch bypasses by not re-entering dispatch).
+  const mcpCatalogStats = await emitMcpCatalog({ distDir: DIST_DIR, repoRoot: REPO_ROOT });
+
+  // 11a. Discoverability — .well-known/{mcp, ai.txt, security.txt}.
+  // The MCP JSON pointer's `documentation` field references
+  // /mcp-skill.md (rendered at stage 7), so this stage MUST run after
+  // the sub-pages stage. The contact address pinned in security.txt
+  // and ai.txt is the operator's canonical inbox; the constant lives
+  // in 11a-discovery-emit.mjs.
+  const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
+
+  // 12. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
     DIST_DIR,
     LOCKED_SLUGS,
     principles.map((p) => ({ n: p.n, sourcePath: p.filename })),
   );
 
-  // 12. Minify dist/ HTML, JSON, and CSS. Runs after invariants so the
+  // 13. Minify dist/ HTML, JSON, and CSS. Runs after invariants so the
   // validators see pristine output and the minifier is the last hand on
   // the wire format.
   const minifyStats = await minifyDist(DIST_DIR);
@@ -270,6 +295,8 @@ export async function build() {
     extras: extraPages,
     scorecardPages: scorecardPageCount,
     badgeSvgs: badgePaths.length,
+    mcpCatalog: mcpCatalogStats,
+    discovery: discoveryStats,
     minified: minifyStats,
   };
 }
