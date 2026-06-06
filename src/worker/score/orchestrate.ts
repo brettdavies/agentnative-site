@@ -101,6 +101,12 @@ export async function lookupOnly(
 // outbound calls (discovery fan-out and DO dispatch) fire unconditionally
 // when called.
 
+// spec + resolved_step are present on every variant where the
+// orchestrator passed the post-discovery skip gate (i.e. resolveSpec
+// returned ok) before bouncing on the DO layer. The MCP score_cli
+// consumer ignores these fields on error variants; the handler reads
+// them to preserve byte-identical Analytics Engine row attribution
+// (binary / pm / resolved_step) across success and DO-failure paths.
 export type RunFreshResult =
   | {
       kind: 'cache_post_hit';
@@ -124,8 +130,8 @@ export type RunFreshResult =
       error: 'chain_no_resolve' | 'install_unsupported' | 'invalid_url_path';
       details?: string;
     }
-  | { kind: 'sandbox_unavailable' }
-  | { kind: 'sandbox_stub_until_u6' }
+  | { kind: 'sandbox_unavailable'; spec?: InstallSpec; resolved_step?: ResolvedStep | null }
+  | { kind: 'sandbox_stub_until_u6'; spec?: InstallSpec; resolved_step?: ResolvedStep | null }
   | {
       kind: 'do_error';
       error: string;
@@ -133,7 +139,12 @@ export type RunFreshResult =
       spec: InstallSpec;
       resolved_step: ResolvedStep | null;
     }
-  | { kind: 'incomplete_response_contract'; reason: 'non_json_body' | 'unrecognized_envelope' };
+  | {
+      kind: 'incomplete_response_contract';
+      reason: 'non_json_body' | 'unrecognized_envelope';
+      spec?: InstallSpec;
+      resolved_step?: ResolvedStep | null;
+    };
 
 export interface RunFreshOptions {
   specVersion: string;
@@ -153,13 +164,16 @@ export interface RunFreshOptions {
   fetcher?: typeof fetch;
 }
 
-function isStubError(payload: unknown): boolean {
+// DO envelope classification helpers. Exported so handler.ts can
+// reuse them at its variant switch (U5b) without redeclaring locally —
+// single home, no drift between the orchestrator and the human form.
+export function isStubError(payload: unknown): boolean {
   return (
     typeof payload === 'object' && payload !== null && (payload as { error?: string }).error === 'sandbox_stub_until_u6'
   );
 }
 
-function isDoSuccess(
+export function isDoSuccess(
   payload: unknown,
 ): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_audit_ms?: number } {
   if (typeof payload !== 'object' || payload === null) return false;
@@ -167,7 +181,7 @@ function isDoSuccess(
   return 'scorecard' in obj && typeof obj.anc_version === 'string';
 }
 
-function isDoError(payload: unknown): payload is { error: string; details?: string } {
+export function isDoError(payload: unknown): payload is { error: string; details?: string } {
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return typeof obj.error === 'string';
@@ -218,8 +232,15 @@ export async function runFreshOnly(
   // so the next request for the same binary short-circuits at
   // lookupOnly's cache tier (or the post-discovery tier above, when the
   // input is a github-url-without-hint).
+  //
+  // spec + resolved_step are threaded onto every error variant from here
+  // down so the human-form caller (handler.ts) can preserve AE-row
+  // attribution (binary / pm / resolved_step) on sandbox_unavailable /
+  // sandbox_stub_until_u6 / incomplete_response_contract paths. Without
+  // this, operators querying "which tools hit sandbox errors most often"
+  // would see null attribution on those rows.
   if (!env.SCORE) {
-    return { kind: 'sandbox_unavailable' };
+    return { kind: 'sandbox_unavailable', spec, resolved_step };
   }
 
   const stub = (await getRandom(
@@ -239,10 +260,10 @@ export async function runFreshOnly(
   try {
     doPayload = await doRes.json();
   } catch {
-    return { kind: 'incomplete_response_contract', reason: 'non_json_body' };
+    return { kind: 'incomplete_response_contract', reason: 'non_json_body', spec, resolved_step };
   }
 
-  if (isStubError(doPayload)) return { kind: 'sandbox_stub_until_u6' };
+  if (isStubError(doPayload)) return { kind: 'sandbox_stub_until_u6', spec, resolved_step };
 
   if (isDoError(doPayload)) {
     return { kind: 'do_error', error: doPayload.error, details: doPayload.details, spec, resolved_step };
@@ -260,5 +281,5 @@ export async function runFreshOnly(
     };
   }
 
-  return { kind: 'incomplete_response_contract', reason: 'unrecognized_envelope' };
+  return { kind: 'incomplete_response_contract', reason: 'unrecognized_envelope', spec, resolved_step };
 }
