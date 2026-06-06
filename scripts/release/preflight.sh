@@ -3,7 +3,7 @@
 # local wrangler dev Worker.
 #
 # Usage:
-#   scripts/release-preflight.sh <subcommand>
+#   scripts/release/preflight.sh <subcommand>
 #
 # Subcommands:
 #   coord     Cross-repo coordination — vendored spec VERSION, skill manifest version, Dockerfile
@@ -38,11 +38,11 @@
 #   - docker (optional; coord's pull-and-inspect gate skips if absent)
 #   - ~/.claude/skills/1password/scripts/read_field.sh (for do-smoke CF Access token)
 #
-# Companion to scripts/release-postflight.sh (runs AFTER release/* merges to main).
+# Companion to scripts/release/postflight.sh (runs AFTER release/* merges to main).
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
 readonly OP_SKILL="$HOME/.claude/skills/1password/scripts"
 readonly OP_ITEM_TOKEN="Cloudflare Access Service Token - agentnative-site-staging"
@@ -51,7 +51,7 @@ readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 
 # Shared output helpers, gate counters, dependency checks ------------------
 
-. "$REPO_ROOT/scripts/_release-lib.sh"
+. "$REPO_ROOT/scripts/release/_lib.sh"
 
 # Argument parsing -----------------------------------------------------------
 
@@ -62,7 +62,7 @@ STAGING_URL="$DEFAULT_STAGING_URL"
 LOCAL_URL="$DEFAULT_LOCAL_URL"
 
 usage() {
-    sed -n '2,42p' "$0" | sed 's/^# \?//'
+    sed -n '2,41p' "$0" | sed 's/^# \?//'
     exit 2
 }
 
@@ -303,8 +303,8 @@ gate_do_smoke() {
 
 # Gate: mcp (live MCP against wrangler dev --local) -------------------------
 
-# Thin wrapper around scripts/mcp-smoke.sh, which holds the actual gate logic and
-# is shared with release-postflight.sh. Preflight-specific concern: verify the
+# Thin wrapper around scripts/release/mcp-smoke.sh, which holds the actual gate logic and
+# is shared with postflight.sh. Preflight-specific concern: verify the
 # local Worker is reachable before delegating, since mcp-smoke.sh would otherwise
 # report all three gates as fail on a closed socket.
 gate_mcp() {
@@ -318,7 +318,7 @@ gate_mcp() {
     fi
     gate_pass "local Worker reachable at $LOCAL_URL"
 
-    delegate_to_subscript "$REPO_ROOT/scripts/mcp-smoke.sh" "$LOCAL_URL" --mcp-binary "$MCP_BINARY"
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$LOCAL_URL" --mcp-binary "$MCP_BINARY"
 }
 
 # Gate: dist (distribution surfaces against staging) ------------------------

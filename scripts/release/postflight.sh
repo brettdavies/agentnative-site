@@ -2,7 +2,7 @@
 # Verify a freshly-deployed environment (staging OR prod) landed cleanly.
 #
 # Usage:
-#   scripts/release-postflight.sh [--env staging|prod] <subcommand>
+#   scripts/release/postflight.sh [--env staging|prod] <subcommand>
 #
 # Two environments to verify per release cycle:
 #   - staging: deploys on every push to `dev` (per `.github/workflows/deploy.yml`).
@@ -27,7 +27,7 @@
 #   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
 #              expected
 #   mcp        Live MCP suite (transport + symmetry + live audit) via
-#              scripts/mcp-smoke.sh against the env URL
+#              scripts/release/mcp-smoke.sh against the env URL
 #   purge      `/skill.json` served version matches src/data/skill/skill.json
 #   backport   Merged PR to dev with the release slug in its title (prod only;
 #              SKIPped on staging)
@@ -62,7 +62,7 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
 readonly OP_SKILL="$HOME/.claude/skills/1password/scripts"
 readonly OP_ITEM_TOKEN="Cloudflare Access Service Token - agentnative-site-staging"
@@ -71,7 +71,7 @@ readonly DEFAULT_PROD_URL="https://anc.dev"
 
 # Shared output helpers, gate counters, dependency checks ------------------
 
-. "$REPO_ROOT/scripts/_release-lib.sh"
+. "$REPO_ROOT/scripts/release/_lib.sh"
 
 # Argument parsing -----------------------------------------------------------
 
@@ -84,7 +84,7 @@ PROD_URL="$DEFAULT_PROD_URL"
 SUBCMD=""
 
 usage() {
-    sed -n '2,63p' "$0" | sed 's/^# \?//'
+    sed -n '2,61p' "$0" | sed 's/^# \?//'
     exit 2
 }
 
@@ -273,13 +273,13 @@ gate_pages() {
 }
 
 # Gate: mcp -----------------------------------------------------------------
-# Thin wrapper around scripts/mcp-smoke.sh. mcp-smoke.sh reads CF_ACCESS_CLIENT_ID
+# Thin wrapper around scripts/release/mcp-smoke.sh. mcp-smoke.sh reads CF_ACCESS_CLIENT_ID
 # / CF_ACCESS_CLIENT_SECRET from the env, which maybe_stage_cf_access exported
 # above when --env staging.
 
 gate_mcp() {
     header "Live MCP surface against ${ENV_URL}/mcp"
-    delegate_to_subscript "$REPO_ROOT/scripts/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
 }
 
 # Gate: purge ----------------------------------------------------------------

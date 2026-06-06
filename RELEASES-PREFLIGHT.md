@@ -25,10 +25,10 @@ catches mechanical regressions inside this repo. This checklist covers what CI s
 ## Quick start: run the automated gates
 
 ```bash
-scripts/release-preflight.sh all
+scripts/release/preflight.sh all
 ```
 
-The script (`scripts/release-preflight.sh`) drives all six gate sections. Each gate is skip-safe when prerequisites are
+The script (`scripts/release/preflight.sh`) drives all six gate sections. Each gate is skip-safe when prerequisites are
 not met (no docker for the container-pin inspect, no 1Password access for the CF Access service token, no local Worker
 running for the MCP suite) so the operator sees the full picture rather than aborting on the first SKIP.
 
@@ -39,7 +39,7 @@ Sub-commands let you re-run one section in isolation:
 | `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run` |
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                          |
 | `do-smoke`  | Live `/api/score` smoke against staging through CF Access (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password`    |
-| `mcp`       | Delegates to `scripts/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                                | `scripts/mcp-smoke.sh`                   |
+| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                                | `scripts/release/mcp-smoke.sh`                   |
 | `dist`      | `/check` → `/audit` redirect, served `skill.json` version vs source, `X-Robots-Tag: noindex` on staging                                               | `curl`                                   |
 | `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                    |
 | `all`       | every above sequentially                                                                                                                              |                                          |
@@ -77,7 +77,7 @@ Note which of `wrangler.jsonc`, `docker/sandbox/`, `src/data/spec/VERSION`, `src
 This is the section where rename-class coordination bugs live. The fixes are mechanical but the failure mode is silent
 until traffic exercises the affected surface.
 
-Driven by `scripts/release-preflight.sh coord`.
+Driven by `scripts/release/preflight.sh coord`.
 
 - [ ] **`anc` CLI baked in the staging container matches the Worker's invocation vocabulary.** Pull the staging image
   pin from `wrangler.jsonc` (`env.staging.containers[0].image`) and confirm the baked binary supports the subcommand the
@@ -138,7 +138,7 @@ Driven by `scripts/release-preflight.sh coord`.
 
 Catches build-time invariant drift before it reaches a deploy.
 
-Driven by `scripts/release-preflight.sh build`.
+Driven by `scripts/release/preflight.sh build`.
 
 - [ ] **`bun run build` exits 0 from a clean working tree.** Watches for invariant violations in
   `runScorecardInvariants` (every scorecard file in `scorecards/` must match its filename slug to a `registry.yaml`
@@ -183,7 +183,7 @@ Driven by `scripts/release-preflight.sh build`.
 The reason this preflight file exists. CI cannot catch this category, and the cost of letting it ship is a user-facing
 500 on every non-registry input. **Do not skip these checks. Do not accept "but it worked last release."**
 
-Driven by `scripts/release-preflight.sh do-smoke`. The fresh-binary picker is the only manual step; the script accepts
+Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is the only manual step; the script accepts
 `--binary <name>` or reads `$BINARY` from the environment.
 
 - [ ] **Pick a fresh non-registry binary for this release.** Do not re-use a fixture indefinitely — once a binary is
@@ -287,10 +287,10 @@ Live MCP surface): `--env staging` exercises the staging Worker through CF Acces
 rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift
 between `wrangler.jsonc` and the live Workers.
 
-Driven by `scripts/release-preflight.sh mcp`, which delegates to `scripts/mcp-smoke.sh http://localhost:8787` after a
-reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release-postflight.sh --env
+Driven by `scripts/release/preflight.sh mcp`, which delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` after a
+reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release/postflight.sh --env
 staging mcp` (staging Worker, CF Access service-token headers auto-staged from 1Password) and by
-`scripts/release-postflight.sh --env prod mcp` (`anc.dev`, no auth). The only differences between the three callers are
+`scripts/release/postflight.sh --env prod mcp` (`anc.dev`, no auth). The only differences between the three callers are
 the base URL and the env-driven auth headers when targeting staging.
 
 **Prerequisite:** in a separate terminal, start the local Worker:
@@ -386,7 +386,7 @@ container image pin.
 
 Surfaces that don't fail unit tests but break the user experience.
 
-Driven by `scripts/release-preflight.sh dist`.
+Driven by `scripts/release/preflight.sh dist`.
 
 - [ ] **`/check` → `/audit` redirect still serves.** The 2026-05-29 rename PR added a 301 from the prior URL. Confirm
   against staging:
@@ -426,7 +426,7 @@ Driven by `scripts/release-preflight.sh dist`.
 These items duplicate steps from `RELEASES.md` deliberately: easy to skip, expensive to recover from. Confirm
 explicitly.
 
-Driven by `scripts/release-preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
+Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
 branch (where the diff vs `origin/main` is the actual cherry-pick set); running on the integration `dev` branch will
 correctly report guarded planning paths as leaked.
 

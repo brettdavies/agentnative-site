@@ -10,12 +10,12 @@
 #      complete with audited=true, source="live", anc_version populated, no error.
 #
 # Same three gates against any base URL. Callers:
-#   - scripts/release-preflight.sh mcp                   -> http://localhost:8787 (local wrangler dev)
-#   - scripts/release-postflight.sh --env staging mcp    -> staging Worker (through CF Access)
-#   - scripts/release-postflight.sh --env prod mcp       -> https://anc.dev (no auth)
+#   - scripts/release/preflight.sh mcp                   -> http://localhost:8787 (local wrangler dev)
+#   - scripts/release/postflight.sh --env staging mcp    -> staging Worker (through CF Access)
+#   - scripts/release/postflight.sh --env prod mcp       -> https://anc.dev (no auth)
 #
 # Usage:
-#   scripts/mcp-smoke.sh <base-url> [--mcp-binary <binary>] [--result-file PATH]
+#   scripts/release/mcp-smoke.sh <base-url> [--mcp-binary <binary>] [--result-file PATH]
 #
 # Flags:
 #   --mcp-binary <binary>  Fresh non-registry binary for the live audit (default:
@@ -42,12 +42,12 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
 
 # Shared output helpers, gate counters, dependency checks ------------------
 
-. "$REPO_ROOT/scripts/_release-lib.sh"
+. "$REPO_ROOT/scripts/release/_lib.sh"
 
 # Argument parsing -----------------------------------------------------------
 
@@ -56,7 +56,7 @@ MCP_BINARY="${MCP_BINARY:-figlet}"
 RESULT_FILE=""
 
 usage() {
-    sed -n '2,32p' "$0" | sed 's/^# \?//'
+    sed -n '2,41p' "$0" | sed 's/^# \?//'
     exit 2
 }
 

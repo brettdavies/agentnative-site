@@ -2,7 +2,7 @@
 # Shared bash utilities for the release-(pre|post)flight orchestrators and the
 # extracted mcp-smoke.sh suite. Source via:
 #
-#   . "$(dirname "$0")/_release-lib.sh"
+#   . "$(dirname "$0")/_lib.sh"
 #
 # Provides:
 #   - Color helpers (C_RED, C_GRN, C_YLW, C_RST, C_BLD) — empty when stdout is
