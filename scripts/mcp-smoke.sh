@@ -10,9 +10,9 @@
 #      complete with audited=true, source="live", anc_version populated, no error.
 #
 # Same three gates against any base URL. Callers:
-#   - scripts/release-preflight.sh mcp  -> invokes us against http://localhost:8787
-#     (after checking `bunx wrangler dev --env staging --local` is running)
-#   - scripts/release-postflight.sh mcp -> invokes us against https://anc.dev
+#   - scripts/release-preflight.sh mcp                   -> http://localhost:8787 (local wrangler dev)
+#   - scripts/release-postflight.sh --env staging mcp    -> staging Worker (through CF Access)
+#   - scripts/release-postflight.sh --env prod mcp       -> https://anc.dev (no auth)
 #
 # Usage:
 #   scripts/mcp-smoke.sh <base-url> [--mcp-binary <binary>] [--result-file PATH]
@@ -24,6 +24,13 @@
 #                          at exit so a parent orchestrator script can aggregate
 #                          counters across its own gates. Without this flag, prints
 #                          a colored summary line instead.
+#
+# Auth (optional, env-driven):
+#   When CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are both set in the
+#   environment, the script attaches CF Access service-token headers to every
+#   curl invocation. This makes the same suite usable against CF-Access-gated
+#   surfaces (staging) without changing the call shape. Unset env -> no headers
+#   (local wrangler dev, prod anc.dev).
 #
 # Exit codes:
 #   0 = all gates passed (or skipped)
@@ -71,6 +78,19 @@ require_bin jq
 # Strip any trailing slash from BASE_URL so `${BASE_URL}/mcp` is always clean.
 BASE_URL="${BASE_URL%/}"
 
+# Auth headers (optional). Staged into a mode-600 curl config file when both
+# CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are present in the environment;
+# every curl invocation below passes `-K "$CF_CONFIG"` so the values never reach
+# argv. Empty config file when no auth env vars are set; curl -K reads an empty
+# file as a no-op.
+CF_CONFIG="$(mktemp)"
+chmod 600 "$CF_CONFIG"
+trap 'rm -f "$CF_CONFIG"' EXIT
+if [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+    printf 'header = "CF-Access-Client-Id: %s"\n' "$CF_ACCESS_CLIENT_ID" >> "$CF_CONFIG"
+    printf 'header = "CF-Access-Client-Secret: %s"\n' "$CF_ACCESS_CLIENT_SECRET" >> "$CF_CONFIG"
+fi
+
 emit_summary_or_result() {
     if [[ -n "$RESULT_FILE" ]]; then
         printf "%d %d %d\n" "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT" > "$RESULT_FILE"
@@ -83,7 +103,7 @@ emit_summary_or_result() {
 
 run_gate_transport() {
     local init_resp server protocol tool_count
-    init_resp=$(curl -fsSL -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    init_resp=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcp-smoke","version":"1"}}}' \
         "${BASE_URL}/mcp" 2>/dev/null || true)
     server=$(printf '%s' "$init_resp" | jq -r '.result.serverInfo.name // empty' 2>/dev/null || true)
@@ -94,7 +114,7 @@ run_gate_transport() {
         gate_fail "/mcp initialize" "server=$server protocol=$protocol (MCP_ENABLED off? transport regression?)"
     fi
 
-    tool_count=$(curl -fsSL -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    tool_count=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
         "${BASE_URL}/mcp" 2>/dev/null | jq '.result.tools | length' 2>/dev/null || echo "0")
     if [[ "$tool_count" == "9" ]]; then
@@ -106,17 +126,17 @@ run_gate_transport() {
 
 run_gate_symmetry() {
     local read_source audit_source audit_next
-    read_source=$(curl -fsSL -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    read_source=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
         "${BASE_URL}/mcp" 2>/dev/null \
         | jq -r '.result.content[0].text' 2>/dev/null \
         | jq -r '.source // empty' 2>/dev/null || true)
-    audit_source=$(curl -fsSL -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    audit_source=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
         "${BASE_URL}/mcp" 2>/dev/null \
         | jq -r '.result.content[0].text' 2>/dev/null \
         | jq -r '.source // empty' 2>/dev/null || true)
-    audit_next=$(curl -fsSL -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    audit_next=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
         "${BASE_URL}/mcp" 2>/dev/null \
         | jq -r '.result.content[0].text' 2>/dev/null \
@@ -137,7 +157,7 @@ run_gate_live_audit() {
     fi
 
     local audit_body rpc_err_code result_text audited has_scorecard live_source live_anc_v live_err
-    audit_body=$(curl -fsSL -m 60 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    audit_body=$(curl -fsSL -K "$CF_CONFIG" -m 60 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\"}}}" \
         "${BASE_URL}/mcp" 2>/dev/null || true)
     rpc_err_code=$(printf '%s' "$audit_body" | jq -r '.error.code // empty' 2>/dev/null || true)

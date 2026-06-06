@@ -256,6 +256,10 @@ streamable
 denormalized
 falsy
 preflights
+postflight
+postflights
+Postflight
+GitHub
 scorecard_url
 score_pct
 level_summary

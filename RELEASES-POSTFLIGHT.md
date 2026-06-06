@@ -1,10 +1,22 @@
-# Post-release verification: `agentnative-site`
+# Post-deploy verification: `agentnative-site`
 
-Operational post-flight checklist. Runs **after** the `release/<YYYY-MM-DD>-<slug>` PR merges to `main` and `deploy.yml`
-fires the production deploy automatically per
-[`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). Confirms the production surface came up
-cleanly, the live-scoring path works against real edge traffic, and the MCP surface composes the orchestrator core
-end-to-end at the edge (where the staging preflight could not reach the deploy-side bindings).
+Operational post-flight checklist. Runs **after a deploy lands**, against either the staging Worker or the production
+custom domain. Two environments to verify per release cycle:
+
+- **staging** (`agentnative-site-staging.brettdavies.workers.dev`). Deploys on every push to `dev` per
+  `.github/workflows/deploy.yml`. Run `--env staging` once dev is at the soak state for the release.
+- **prod** (`anc.dev`). Deploys on every `release/<YYYY-MM-DD>-<slug>` → `main` merge per
+  [`RELEASES.md` § Releasing dev to main](./RELEASES.md#releasing-dev-to-main). Run `--env prod` after the merge fires
+  `deploy.yml` at main.
+
+Same gates run against both environments. Differences the script handles transparently:
+
+- URL: staging Worker (workers.dev) vs `anc.dev` custom domain.
+- Branch the deploy gate watches: `dev` (staging deploy) vs `main` (prod deploy).
+- Container app name: `agentnative-site-staging-sandbox` vs `agentnative-site-sandbox`.
+- Auth: staging is gated by CF Access (service token auto-staged from 1Password); prod is unauthenticated.
+- Backport: the `main → dev` backport concept applies only to prod (the release branch can land edits on `main` that did
+  not round-trip to `dev`); staging deploys from `dev` directly so the gate SKIPs there.
 
 Companion to [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md), which gates the release-branch cut. Both docs follow
 the same go/no-go shape: every box is explicit, an unchecked or red item motivates a hotfix.
@@ -12,45 +24,56 @@ the same go/no-go shape: every box is explicit, an unchecked or red item motivat
 ## Quick start: run the automated gates
 
 ```bash
-scripts/release-postflight.sh all
+# After a dev push, verify staging
+scripts/release-postflight.sh --env staging all
+
+# After a release/* → main merge, verify prod
+scripts/release-postflight.sh --env prod all
+# (--env prod is the default; the flag is optional in this case)
 ```
 
 The script (`scripts/release-postflight.sh`) covers the automatable post-deploy gates: `deploy.yml` conclusion,
-container app readiness, `anc.dev` front-page and leaderboard renders, the registry-fast-path `/api/score` smoke against
-prod, the live MCP suite against `https://anc.dev/mcp`, the cache-purge confirmation for `/skill` artifacts, and the
-optional `main → dev` backport signal.
+container app readiness, front-page and leaderboard renders, the registry-fast-path `/api/score` smoke, the live MCP
+suite via `scripts/mcp-smoke.sh`, the cache-purge confirmation for `/skill` artifacts, and the prod-only `main → dev`
+backport signal.
 
 The production live-DO smoke against a non-registry binary requires a browser. The real Turnstile site key + secret gate
 the JSON path until the service-token bypass ships per the plan at
 [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md).
 The script reports that gate as a SKIP with the manual recipe; the gate body in this doc carries the steps.
 
-Sub-commands let you re-run one verification in isolation:
+Sub-commands let you re-run one verification in isolation. Each is parameterized on `--env`:
 
-| Sub-command | What it checks                                                                                      | Source of truth                        |
-| ----------- | --------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `deploy`    | `deploy.yml` on the `main` push: `gh run view ... --json conclusion` is `"success"`                 | `gh run view`                          |
-| `container` | Prod container app (`agentnative-site-sandbox`) state is `ready`                                    | `bunx wrangler containers list`        |
-| `pages`     | `anc.dev/`, `anc.dev/scorecards`, and `anc.dev/api/score` registry-hit all return expected          | `curl`                                 |
-| `mcp`       | `anc.dev/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `curl`                                 |
-| `purge`     | `/skill`, `/skill.json`, `/skill.md` versions match `src/data/skill/skill.json`                     | `curl`                                 |
-| `backport`  | merged PR to `dev` with the release slug in its title (release-only edits cross back to dev)        | `gh pr list --base dev --state merged` |
-| `all`       | every above (live-DO smoke is documented manually below)                                            |                                        |
+| Sub-command | What it checks                                                                                        | Source of truth                        |
+| ----------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success             | `gh run view`                          |
+| `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                             | `bunx wrangler containers list`        |
+| `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                        | `curl`                                 |
+| `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/mcp-smoke.sh`                 |
+| `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                    | `curl`                                 |
+| `backport`  | Merged PR to `dev` with the release slug in its title (prod only; SKIPs on staging)                   | `gh pr list --base dev --state merged` |
+| `all`       | Every above (live-DO smoke is documented manually below)                                              |                                        |
 
 Flags:
 
+- `--env staging|prod` — target environment (default: `prod`)
 - `--repo OWNER/REPO` — override the auto-detected nameWithOwner
-- `--release-slug <slug>` — override auto-detection (default: parse the most recent merged `release/*` PR title)
+- `--release-slug <slug>` — override backport-gate auto-detection (default: parse the most recent merged `release/*` PR
+  title)
 - `--mcp-binary <binary>` — override the live-audit binary (default: `${MCP_BINARY:-figlet}`)
+- `--staging-url <url>` — override the staging Worker URL
+- `--prod-url <url>` — override the prod URL
 
 ## Checklist
 
-### Production deploy
+### Deploy
 
-Driven by `scripts/release-postflight.sh deploy` and `scripts/release-postflight.sh container`.
+Driven by `scripts/release-postflight.sh --env <staging|prod> deploy` and `scripts/release-postflight.sh --env
+<staging|prod> container`.
 
-- [ ] **Production deploy green end-to-end.** The `release/<slug> → main` PR merge triggers `deploy.yml`. Watch the run
-  with `gh run watch <run-id> --exit-status`, then verify explicitly per `~/.claude/ci-watch-prompt.sh`:
+- [ ] **Env deploy green end-to-end.** The deploy gate watches `deploy.yml` on `dev` (staging) or `main` (prod). For the
+  release flow, the `release/<slug> → main` PR merge triggers the prod run. Watch with `gh run watch <run-id>
+  --exit-status`, then verify explicitly per `~/.claude/ci-watch-prompt.sh`:
 
   ```bash
   gh pr view <num> --json statusCheckRollup,mergeStateStatus \
@@ -58,31 +81,38 @@ Driven by `scripts/release-postflight.sh deploy` and `scripts/release-postflight
   ```
 
   Every conclusion must be `SUCCESS`. The watcher exit code alone is not authoritative (a completed watcher is not a
-  green watcher). Run `scripts/release-postflight.sh deploy` for the automated check.
+  green watcher).
 
-- [ ] **Production container app reaches `ready`.** If the release advanced the production container pin
-  (`containers[0].image` in `wrangler.jsonc`), the prod container app rolls asynchronously after deploy. Wait for
+- [ ] **Env container app reaches `ready`.** If the deploy advanced the env's container pin (`containers[0].image` for
+  prod, `env.staging.containers[0].image` for staging), the container app rolls asynchronously after deploy. Wait for
   `ready` before smoking the live path:
 
   ```bash
-  bunx wrangler containers list | grep agentnative-site-sandbox
+  # staging
+  bunx wrangler containers list | grep agentnative-site-staging-sandbox
+  # prod
+  bunx wrangler containers list | grep -E 'agentnative-site-sandbox(\s|$)' | grep -v staging
   # STATE must read `ready`, not `provisioning`
   ```
 
-  Loop until `ready` or escalate after ~5 minutes. A smoke during `provisioning` lands on warm OLD-image instances. Run
-  `scripts/release-postflight.sh container` for the automated check.
+  Loop until `ready` or escalate after ~5 minutes. A smoke during `provisioning` lands on warm OLD-image instances.
 
 ### Distribution surface
 
-Driven by `scripts/release-postflight.sh pages` and `scripts/release-postflight.sh purge`.
+Driven by `scripts/release-postflight.sh --env <staging|prod> pages` and `scripts/release-postflight.sh --env
+<staging|prod> purge`. For staging, the orchestrator auto-stages CF Access service-token headers from 1Password so the
+manual recipe below skips the headers; for prod the recipe runs unauthenticated.
 
-- [ ] **`anc.dev` front page + leaderboard + registry-hit `/api/score` render.** Smoke against the production custom
-  domain (no CF Access on production):
+- [ ] **Env front page + leaderboard + registry-hit `/api/score` render.** Smoke against the env URL. Substitute the
+  staging Worker URL or the prod custom domain as appropriate:
 
   ```bash
-  curl -fSsL https://anc.dev/ | grep -q '<title>' && echo "home: ok"
-  curl -fSsL https://anc.dev/scorecards | grep -q 'leaderboard-table' && echo "leaderboard: ok"
-  curl -fSsL https://anc.dev/api/score -X POST \
+  ENV_URL=https://anc.dev   # or https://agentnative-site-staging.brettdavies.workers.dev for staging
+  # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
+
+  curl -fSsL "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
+  curl -fSsL "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
+  curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"input":"ripgrep","turnstile_token":"x"}' \
     | jq '.scorecard.kind, .anc_version, .spec_version'
@@ -90,7 +120,7 @@ Driven by `scripts/release-postflight.sh pages` and `scripts/release-postflight.
   ```
 
   All three must succeed. The registry-hit `/api/score` POST confirms the read tier composes `lookupOnly`'s curated
-  branch correctly through the prod-side bindings. Run `scripts/release-postflight.sh pages` for the automated check.
+  branch correctly through the env's bindings.
 
 - [ ] **Cache-purge after deploys that change `/skill`, `/skill.json`, `/skill.md`.** Cloudflare's edge cache holds
   these for the configured TTL; manual purge brings the new version live immediately. Token in 1Password
@@ -98,18 +128,17 @@ Driven by `scripts/release-postflight.sh pages` and `scripts/release-postflight.
   source:
 
   ```bash
-  curl -fsSL https://anc.dev/skill.json | jq -r '.version'
+  curl -fsSL "${ENV_URL}/skill.json" | jq -r '.version'
   jq -r '.version' src/data/skill/skill.json
   # both must match
   ```
 
-  Run `scripts/release-postflight.sh purge` for the automated check (compares the served version against the source).
+### Live HTTP `/api/score` path (prod only)
 
-### Live HTTP `/api/score` path
-
-NOT driven by the orchestrator — the production live-DO smoke depends on real Turnstile, which the scripted recipe
-cannot satisfy. `scripts/release-postflight.sh all` reports this gate as a SKIP with a pointer to the manual recipe
-below. See the deferred-bypass plan at
+**Prod only.** Staging uses CF's always-pass test Turnstile pair, so the staging live-DO smoke is already covered by
+`scripts/release-preflight.sh do-smoke` against the staging deploy. Prod binds the real Turnstile site key + secret, so
+the scripted recipe cannot satisfy this gate; NOT driven by `scripts/release-postflight.sh all`, which reports it as a
+SKIP with a pointer to the manual recipe below. See the deferred-bypass plan at
 [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md).
 
 - [ ] **Production live-DO smoke against a non-registry binary.** Production binds the real Turnstile site key + secret
@@ -135,13 +164,18 @@ The deployed counterpart to PREFLIGHT's
 [Live MCP surface against `wrangler dev --local`](./RELEASES-PREFLIGHT.md#live-mcp-surface-mandatory). What this section
 catches and the preflight could not: deploy-side rate-limiter bindings (`MCP_LIMITER` 60/60s, `MCP_AUDIT_LIMITER` 5/60s
 burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and the live Worker, and any kill-switch
-(`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) flipped in production.
+(`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) flipped at the env's wrangler block.
 
-Production `anc.dev/mcp` is unauthenticated (no CF Access on the custom domain) — no service token needed.
+Runs against both envs:
 
-Driven by `scripts/release-postflight.sh mcp`, which delegates to `scripts/mcp-smoke.sh https://anc.dev` — the same
-script invoked from preflight against `http://localhost:8787`. The only difference between the two callers is the base
-URL.
+- Staging (`https://agentnative-site-staging.brettdavies.workers.dev/mcp`) — gated by CF Access. The orchestrator
+  auto-stages the service-token headers from 1Password; `scripts/mcp-smoke.sh` reads `CF_ACCESS_CLIENT_ID` /
+  `CF_ACCESS_CLIENT_SECRET` from the env when present and attaches them to every curl invocation.
+- Prod (`https://anc.dev/mcp`) — unauthenticated (no CF Access on the custom domain).
+
+Driven by `scripts/release-postflight.sh --env <staging|prod> mcp`, which delegates to `scripts/mcp-smoke.sh
+<env-url>`. The same script is invoked from preflight against `http://localhost:8787`. The only difference between the
+three callers is the base URL (plus the env-driven auth headers when `--env staging`).
 
 - [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
   at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:
@@ -220,9 +254,10 @@ URL.
 
 Run `scripts/release-postflight.sh mcp` to run all three MCP gates in sequence.
 
-### Backport
+### Backport (prod only)
 
-Driven by `scripts/release-postflight.sh backport`.
+Driven by `scripts/release-postflight.sh --env prod backport`. The gate SKIPs on `--env staging` because staging deploys
+directly from `dev` — there is no `main → dev` flow to verify.
 
 - [ ] **Backport `main` → `dev`** via a **merged PR to `dev` with the release slug in its title.** The release-branch
   flow can produce edits on `main` that didn't round-trip to `dev` (release-only CHANGELOG.md sections, RELEASES.md

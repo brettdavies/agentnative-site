@@ -280,15 +280,18 @@ wiring, the 9-tool surface, MCP kill switches (`MCP_ENABLED`, `MCP_LIVE_SCORING_
 MCP-side result envelope (`next_tool` bouncing, `source: "registry" | "live-cache" | "live"`).
 
 Preflight runs against `bunx wrangler dev --env staging --local` on `http://localhost:8787`. This catches MCP
-regressions on the operator's machine before the release-branch is cut, with no CF Access dependency. Postflight runs
-the same suite against `https://anc.dev` (see [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) § Live MCP surface)
-to catch deploy-side regressions that only surface at the edge: rate-limiter bindings (`MCP_LIMITER`,
-`MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift between `wrangler.jsonc` and the live
-Worker.
+regressions on the operator's machine before the release-branch is cut, with no deploy or CF Access dependency.
+Postflight runs the same suite against both deployed envs (see [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) §
+Live MCP surface): `--env staging` exercises the staging Worker through CF Access, `--env prod` exercises
+`https://anc.dev` unauthenticated. Together they catch deploy-side regressions that only surface at the edge:
+rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift
+between `wrangler.jsonc` and the live Workers.
 
 Driven by `scripts/release-preflight.sh mcp`, which delegates to `scripts/mcp-smoke.sh http://localhost:8787` after a
-reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release-postflight.sh mcp`
-against `https://anc.dev`. The only difference between the two callers is the base URL.
+reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release-postflight.sh --env
+staging mcp` (staging Worker, CF Access service-token headers auto-staged from 1Password) and by
+`scripts/release-postflight.sh --env prod mcp` (`anc.dev`, no auth). The only differences between the three callers are
+the base URL and the env-driven auth headers when targeting staging.
 
 **Prerequisite:** in a separate terminal, start the local Worker:
 
