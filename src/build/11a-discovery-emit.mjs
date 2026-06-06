@@ -50,7 +50,7 @@ function buildSecurityTxt(baseUrl) {
 
 function buildAiTxt(baseUrl) {
   return [
-    '# ai.txt — anc.dev',
+    '# ai.txt for anc.dev',
     '# Declares AI-training and agent-access posture. Format may evolve as the',
     '# ai.txt convention ratifies; this file is the canonical statement.',
     '',
