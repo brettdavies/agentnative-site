@@ -200,7 +200,7 @@ describe('runFreshOnly: resolveSpec failure exits before any DO call', () => {
 });
 
 describe('runFreshOnly: sandbox_unavailable when SCORE binding is missing', () => {
-  test('missing SCORE returns sandbox_unavailable kind', async () => {
+  test('missing SCORE returns sandbox_unavailable kind with spec attribution', async () => {
     const { env, doSpy } = makeOrchestrateEnv({ scoreBinding: false });
     const input: ValidatedInput = {
       kind: 'install-command',
@@ -211,6 +211,12 @@ describe('runFreshOnly: sandbox_unavailable when SCORE binding is missing', () =
       inputHash: 'deadbeef',
     });
     expect(result.kind).toBe('sandbox_unavailable');
+    // spec is threaded onto the error variant so handler.ts can preserve
+    // AE-row attribution (binary/pm/resolved_step) on sandbox errors.
+    if (result.kind === 'sandbox_unavailable') {
+      expect(result.spec?.binary).toBe('fakepkg');
+      expect(result.spec?.pm).toBe('npm');
+    }
     expect(doSpy.calls.length).toBe(0);
   });
 });
@@ -313,7 +319,7 @@ describe('runFreshOnly: DO dispatch', () => {
     expect(doSpy.idFromNameCalls).toBe(1);
   });
 
-  test('DO returns sandbox_stub_until_u6 envelope → kind: sandbox_stub_until_u6', async () => {
+  test('DO returns sandbox_stub_until_u6 envelope → kind: sandbox_stub_until_u6 with spec attribution', async () => {
     const { env } = makeOrchestrateEnv({
       doResponse: new Response(JSON.stringify({ error: 'sandbox_stub_until_u6' }), { status: 200 }),
     });
@@ -326,6 +332,10 @@ describe('runFreshOnly: DO dispatch', () => {
       inputHash: 'd',
     });
     expect(result.kind).toBe('sandbox_stub_until_u6');
+    if (result.kind === 'sandbox_stub_until_u6') {
+      expect(result.spec?.binary).toBe('pkg');
+      expect(result.spec?.pm).toBe('npm');
+    }
   });
 
   test('DO returns error envelope → kind: do_error', async () => {
@@ -350,7 +360,7 @@ describe('runFreshOnly: DO dispatch', () => {
     }
   });
 
-  test('DO returns non-JSON body → kind: incomplete_response_contract reason non_json_body', async () => {
+  test('DO returns non-JSON body → kind: incomplete_response_contract reason non_json_body with spec attribution', async () => {
     const { env } = makeOrchestrateEnv({
       doResponse: new Response('not json', { status: 200 }),
     });
@@ -365,10 +375,12 @@ describe('runFreshOnly: DO dispatch', () => {
     expect(result.kind).toBe('incomplete_response_contract');
     if (result.kind === 'incomplete_response_contract') {
       expect(result.reason).toBe('non_json_body');
+      expect(result.spec?.binary).toBe('pkg');
+      expect(result.spec?.pm).toBe('npm');
     }
   });
 
-  test('DO returns unrecognized JSON shape → kind: incomplete_response_contract reason unrecognized_envelope', async () => {
+  test('DO returns unrecognized JSON shape → kind: incomplete_response_contract reason unrecognized_envelope with spec attribution', async () => {
     const { env } = makeOrchestrateEnv({
       doResponse: new Response(JSON.stringify({ ok: true, payload: 42 }), { status: 200 }),
     });
@@ -383,6 +395,8 @@ describe('runFreshOnly: DO dispatch', () => {
     expect(result.kind).toBe('incomplete_response_contract');
     if (result.kind === 'incomplete_response_contract') {
       expect(result.reason).toBe('unrecognized_envelope');
+      expect(result.spec?.binary).toBe('pkg');
+      expect(result.spec?.pm).toBe('npm');
     }
   });
 });
