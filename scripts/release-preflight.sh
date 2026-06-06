@@ -49,30 +49,9 @@ readonly OP_ITEM_TOKEN="Cloudflare Access Service Token - agentnative-site-stagi
 readonly DEFAULT_STAGING_URL="https://agentnative-site-staging.brettdavies.workers.dev"
 readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 
-# Output helpers -------------------------------------------------------------
+# Shared output helpers, gate counters, dependency checks ------------------
 
-if [[ -t 1 ]]; then
-    readonly C_RED=$'\033[31m' C_GRN=$'\033[32m' C_YLW=$'\033[33m' C_RST=$'\033[0m' C_BLD=$'\033[1m'
-else
-    readonly C_RED='' C_GRN='' C_YLW='' C_RST='' C_BLD=''
-fi
-
-PASS_COUNT=0
-FAIL_COUNT=0
-SKIP_COUNT=0
-
-gate_pass() { printf "  %s✓%s %s\n" "$C_GRN" "$C_RST" "$1"; PASS_COUNT=$((PASS_COUNT + 1)); }
-gate_fail() { printf "  %s✗%s %s\n    %s\n" "$C_RED" "$C_RST" "$1" "${2:-}"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
-gate_skip() { printf "  %s⊝%s %s — %s\n" "$C_YLW" "$C_RST" "$1" "${2:-not yet ready}"; SKIP_COUNT=$((SKIP_COUNT + 1)); }
-header()    { printf "\n%s== %s ==%s\n" "$C_BLD" "$1" "$C_RST"; }
-
-require_bin() {
-    command -v "$1" >/dev/null 2>&1 || { echo "missing dependency: $1" >&2; exit 2; }
-}
-
-have_bin() {
-    command -v "$1" >/dev/null 2>&1
-}
+. "$REPO_ROOT/scripts/_release-lib.sh"
 
 # Argument parsing -----------------------------------------------------------
 
@@ -339,19 +318,7 @@ gate_mcp() {
     fi
     gate_pass "local Worker reachable at $LOCAL_URL"
 
-    local result_file
-    result_file=$(mktemp)
-    "$REPO_ROOT/scripts/mcp-smoke.sh" "$LOCAL_URL" \
-        --mcp-binary "$MCP_BINARY" --result-file "$result_file" \
-        || true   # don't propagate exit; aggregate counters and let parent decide
-    if [[ -s "$result_file" ]]; then
-        local p f s
-        read -r p f s < "$result_file"
-        PASS_COUNT=$((PASS_COUNT + p))
-        FAIL_COUNT=$((FAIL_COUNT + f))
-        SKIP_COUNT=$((SKIP_COUNT + s))
-    fi
-    rm -f "$result_file"
+    delegate_to_subscript "$REPO_ROOT/scripts/mcp-smoke.sh" "$LOCAL_URL" --mcp-binary "$MCP_BINARY"
 }
 
 # Gate: dist (distribution surfaces against staging) ------------------------
@@ -454,7 +421,6 @@ case "$SUBCMD" in
         ;;
 esac
 
-printf "\n%sSummary:%s  %s%d passed%s  %s%d failed%s  %s%d skipped%s\n" \
-    "$C_BLD" "$C_RST" "$C_GRN" "$PASS_COUNT" "$C_RST" "$C_RED" "$FAIL_COUNT" "$C_RST" "$C_YLW" "$SKIP_COUNT" "$C_RST"
+print_summary
 
 [[ $FAIL_COUNT -eq 0 ]] || exit 1
