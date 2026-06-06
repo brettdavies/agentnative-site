@@ -303,12 +303,7 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 
 **Discovery siblings.**
 
-- `https://anc.dev/.well-known/mcp` — JSON pointer carrying `mcp_endpoint`, `version`, `description`, `transport`, and
-  `documentation` (this page).
+- `https://anc.dev/.well-known/mcp` — HTTP-level JSON pointer carrying `mcp_endpoint`, `version`, `description`,
+  `transport`, and `documentation` (this page).
 - `https://anc.dev/.well-known/ai.txt` — AI-training and agent-access posture plus `Programmatic-API:
   https://anc.dev/mcp`.
-- `https://anc.dev/.well-known/security.txt` — RFC 9116 vulnerability reporting contact.
-- `https://anc.dev/llms.txt` — the llmstxt.org index lists `/mcp`, `/.well-known/mcp`, and this page under Programmatic
-  access.
-- The `InitializeResult.instructions` field of the MCP handshake carries a session-time summary plus a pointer back to
-  this page.
