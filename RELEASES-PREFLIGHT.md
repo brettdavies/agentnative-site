@@ -457,17 +457,17 @@ After the `release/*` PR merges to `main` and the production deploy fires, the c
 
 ## Related docs
 
-- [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md): post-merge verification (runs AFTER this one).
-- [`RELEASES.md`](./RELEASES.md): operational runbook for the full release lifecycle. The "Releasing dev to main"
-  section references back here as step 0.
-- [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release-flow rationale (branching model, soak-then-promote, CI
-  smoke scope).
--
+- [`RELEASES-POSTFLIGHT.md`][postflight]: post-merge verification (runs AFTER this one).
+- [`RELEASES.md`][releases]: operational runbook for the full release lifecycle.
+- [`RELEASES-RATIONALE.md`][rationale]: release-flow rationale (branching model, soak-then-promote, CI smoke scope).
+- [sandbox-image-anc-cli-rename-coordination][sandbox-rename]: the coordination trap this checklist exists to prevent.
+- [cloudflare-container-rollout-readiness-before-smoke][rollout]: the rollout-readiness discipline that gates the
+  live-DO smoke.
+- [live-scoring-monitoring][monitoring]: operator telemetry, error-tier breakdown, kill-switch flip.
 
-[`docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md`](./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md):
-the coordination trap this checklist exists to prevent. -
-[`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md):
-the rollout-readiness discipline that gates the live-DO smoke.
-
-- [`docs/runbooks/live-scoring-monitoring.md`](./docs/runbooks/live-scoring-monitoring.md): operator telemetry,
-  error-tier breakdown, kill-switch flip.
+[postflight]: ./RELEASES-POSTFLIGHT.md
+[releases]: ./RELEASES.md
+[rationale]: ./RELEASES-RATIONALE.md
+[sandbox-rename]: ./docs/solutions/integration-issues/sandbox-image-anc-cli-rename-coordination-2026-06-01.md
+[rollout]: ./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md
+[monitoring]: ./docs/runbooks/live-scoring-monitoring.md
