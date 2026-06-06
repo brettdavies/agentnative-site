@@ -51,7 +51,7 @@ export async function emitLlmsSurface({
     programmaticAccess: [
       { label: 'MCP server (streamable HTTP)', path: '/mcp' },
       { label: 'Well-known MCP pointer', path: '/.well-known/mcp' },
-      { label: 'MCP wire contract', path: '/mcp-docs.md' },
+      { label: 'MCP client skill', path: '/mcp-skill.md' },
     ],
     scorecardLinks: [
       { name: 'Leaderboard', path: '/scorecards.md' },

@@ -261,7 +261,7 @@ export async function build() {
 
   // 11a. Discoverability — .well-known/{mcp, ai.txt, security.txt}.
   // The MCP JSON pointer's `documentation` field references
-  // /mcp-docs.md (rendered at stage 7), so this stage MUST run after
+  // /mcp-skill.md (rendered at stage 7), so this stage MUST run after
   // the sub-pages stage. The contact address pinned in security.txt
   // and ai.txt is the operator's canonical inbox; the constant lives
   // in 11a-discovery-emit.mjs.

@@ -254,15 +254,15 @@ describe('built dist artifacts', () => {
     expect(parsed.spec_version).toBe(versionRaw.trim());
   });
 
-  test('content/mcp.md renders to dist/mcp-docs.html and dist/mcp-docs.md', async () => {
-    const html = await readFile(join(DIST_DIR, 'mcp-docs.html'), 'utf8');
-    const md = await readFile(join(DIST_DIR, 'mcp-docs.md'), 'utf8');
+  test('content/mcp-skill.md renders to dist/mcp-skill.html and dist/mcp-skill.md', async () => {
+    const html = await readFile(join(DIST_DIR, 'mcp-skill.html'), 'utf8');
+    const md = await readFile(join(DIST_DIR, 'mcp-skill.md'), 'utf8');
     expect(html).toContain('<html');
     expect(md).toContain('# ');
   });
 
-  test('dist/sitemap.xml includes /mcp-docs', async () => {
+  test('dist/sitemap.xml includes /mcp-skill', async () => {
     const sitemap = await readFile(join(DIST_DIR, 'sitemap.xml'), 'utf8');
-    expect(sitemap).toContain('/mcp-docs');
+    expect(sitemap).toContain('/mcp-skill');
   });
 });

@@ -36,14 +36,15 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     { name: 'contribute', path: join(contentDir, 'contribute.md') },
     { name: 'methodology', path: join(contentDir, 'methodology.md') },
     { name: 'scorecard-schema', path: join(contentDir, 'scorecard-schema.md') },
-    // /mcp-docs/ is the wire-contract docs surface advertised by the
+    // /mcp-skill/ is the client-facing skill page advertised by the
     // /.well-known/mcp pointer's `documentation` field and by the MCP
-    // server's handshake `instructions` string. The source filename is
-    // `mcp.md` (matches the URL stem in the registration list); the
-    // output paths are `dist/mcp-docs.html` + `dist/mcp-docs.md` because
-    // the canonical URL is `/mcp-docs/`, not `/mcp/` (which is the
-    // Worker-served JSON-RPC endpoint).
-    { name: 'mcp-docs', path: join(contentDir, 'mcp.md') },
+    // server's handshake `instructions` string. The source filename
+    // matches the URL stem; outputs are `dist/mcp-skill.html` +
+    // `dist/mcp-skill.md`. The canonical URL is `/mcp-skill/`, not
+    // `/mcp/` (which is the Worker-served JSON-RPC endpoint). Operator-
+    // facing material lives in the in-repo runbook at
+    // `docs/runbooks/mcp-operator.md` and is not published.
+    { name: 'mcp-skill', path: join(contentDir, 'mcp-skill.md') },
   ];
   const subPageData = [];
   for (const { name, path } of subPages) {
