@@ -110,7 +110,11 @@ case "$ENV" in
     staging)
         ENV_URL="$STAGING_URL"
         ENV_BRANCH="dev"
-        ENV_CONTAINER="agentnative-site-staging-sandbox"
+        # Wrangler appends `-staging` to env-scoped container apps even when
+        # `env.staging.name` is set in wrangler.jsonc, so the deployed container
+        # name is `<worker>-sandbox-staging`, not `<worker>-sandbox`. The
+        # wrangler.jsonc comment that claims otherwise is stale.
+        ENV_CONTAINER="agentnative-site-staging-sandbox-staging"
         ENV_LABEL="staging"
         ENV_AUTH_NEEDED=1
         ;;
@@ -224,17 +228,26 @@ gate_container() {
     fi
 
     local row state
-    row=$(bunx wrangler containers list 2>/dev/null | grep -E "${ENV_CONTAINER}(\s|$)" | head -1 || true)
+    # Match the exact container name with a trailing word boundary so a longer
+    # name with the same prefix does not collide (e.g., agentnative-site-sandbox
+    # would otherwise also match agentnative-site-sandbox-staging).
+    row=$(bunx wrangler containers list 2>/dev/null \
+        | grep -E "(^|[^[:alnum:]_-])${ENV_CONTAINER}([^[:alnum:]_-]|$)" \
+        | head -1 || true)
     if [[ -z "$row" ]]; then
         gate_skip "$ENV_CONTAINER" "not visible in 'wrangler containers list'"
         return
     fi
 
-    state=$(echo "$row" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(ready|provisioning|stopped|error)$/) print $i}' | head -1)
-    if [[ "$state" == "ready" ]]; then
-        gate_pass "$ENV_CONTAINER state=ready (safe to smoke live path)"
+    # Both `ready` and `active` are healthy steady states. `ready` is the
+    # idle-instance steady state (prod's audit DO spins instances on demand);
+    # `active` is the live-instances-handling-traffic steady state (staging
+    # serves continuous test traffic so its instance pool stays warm).
+    state=$(echo "$row" | awk '{for(i=1;i<=NF;i++) if($i ~ /^(ready|active|provisioning|stopped|error)$/) print $i}' | head -1)
+    if [[ "$state" == "ready" || "$state" == "active" ]]; then
+        gate_pass "$ENV_CONTAINER state=$state (safe to smoke live path)"
     elif [[ -n "$state" ]]; then
-        gate_fail "$ENV_CONTAINER state" "state=$state (loop until ready)"
+        gate_fail "$ENV_CONTAINER state" "state=$state (loop until ready/active)"
     else
         gate_skip "$ENV_CONTAINER state" "could not parse state from: $row"
     fi
@@ -278,7 +291,8 @@ gate_pages() {
 # above when --env staging.
 
 gate_mcp() {
-    header "Live MCP surface against ${ENV_URL}/mcp"
+    # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
+    # so we delegate directly without a duplicate header here.
     delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
 }
 
