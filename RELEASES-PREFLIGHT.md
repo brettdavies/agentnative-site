@@ -236,6 +236,115 @@ The reason this preflight file exists. CI cannot catch this category, and the co
   Expect `HTTP/2 301` and `location: /score/anc`. A 200 here means a curated tool would render twice — once at the
   live path and once at the static path — with no canonical hint.
 
+### Live MCP surface (mandatory)
+
+The MCP transport surface composes the same orchestrator core (`lookupOnly` for the read tier, `runFreshOnly` for the
+run-fresh tier) as the HTTP `/api/score` handler. What this section covers and the HTTP smoke above does not: transport
+wiring, the 9-tool surface, MCP-specific rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), MCP kill switches
+(`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`), and the Cloudflare Access OAuth resource-metadata advertisement that
+unauthenticated MCP clients discover.
+
+Re-uses the staging CF Access service token already wired into the previous section (`Cloudflare Access Service Token -
+agentnative-site-staging` in 1Password; stage `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in the shell
+environment as before).
+
+- [ ] **`/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`, content
+  negotiation (the dual-MIME `Accept` header), and that no tool was dropped between releases:
+
+  ```bash
+  curl -fsSL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"preflight","version":"1"}}}' \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | jq '{server: .result.serverInfo.name, protocol: .result.protocolVersion}'
+  # expect: server: "anc", protocol: "2025-06-18"
+
+  curl -fsSL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | jq '.result.tools | length'
+  # expect: 9
+  ```
+
+  A 302 to `*.cloudflareaccess.com` means the service token did not apply — fix before continuing. A non-9 tool count is
+  a tool-wiring regression — block.
+
+- [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Exercises the
+  curated-registry branch shared by `lookupOnly` and `runFreshOnly`. No cache write, no container invocation, no
+  `MCP_AUDIT_LIMITER` budget consumed — purely structural:
+
+  ```bash
+  # get_scorecard hits lookupOnly's curated branch
+  curl -fsSL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | jq -r '.result.content[0].text' | jq '{source, scorecard_url}'
+  # expect: source: "registry", scorecard_url: "https://anc.dev/score/ripgrep"
+
+  # score_cli hits runFreshOnly's registry pre-check and bounces to get_scorecard
+  curl -fsSL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | jq -r '.result.content[0].text' | jq '{audited, source, next_tool}'
+  # expect: audited: false, source: "registry", next_tool: "get_scorecard"
+  ```
+
+  Both must return `source: "registry"`. Drift between the envelopes means the shared registry-hit branch in
+  `src/worker/score/orchestrate.ts` regressed — block release and investigate the `lookupOnly` / `runFreshOnly` wrappers.
+
+- [ ] **Live MCP audit via `score_cli` against a fresh non-registry binary.** Exercises the full DO path through the MCP
+  surface AND the `MCP_AUDIT_LIMITER` binding. Pick a SECOND fresh binary distinct from the HTTP-smoke `${BINARY}` so
+  both surfaces independently exercise their audit paths:
+
+  ```bash
+  MCP_BINARY=figlet   # rotate per release; pick something tiny and stable, distinct from $BINARY
+  grep -E "^- name: ${MCP_BINARY}$" registry.yaml && echo "FAIL: already in registry, pick another" || echo "ok"
+
+  curl -fsSL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\"}}}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | jq -r '.result.content[0].text' | jq '{audited, source, has_scorecard: (.scorecard != null), anc_version, error}'
+  ```
+
+  Green outcome (all must hold):
+
+- `audited: true`, `has_scorecard: true`, `source: "live"`
+- `anc_version` populated
+- no `error` field
+
+  Red outcomes (block release):
+
+- `error.code: "incomplete_response_contract"` with `details: anc_audit_failed` / `chain_resolved_install_failed` /
+  `timeout` / `sandbox_unavailable` — same investigation paths as the HTTP smoke above.
+- JSON-RPC envelope carries `error.code: -32099` (rate-limit breach) — `MCP_AUDIT_LIMITER` is misconfigured (binding
+  should grant 5 / 60s) or the per-IP KV-backed hourly ceiling regressed. Inspect the wrangler `ratelimits` block AND
+  the KV `mcp_audit_hourly:*` keys before continuing.
+- A 302 to `*.cloudflareaccess.com` instead of a 200 JSON-RPC envelope — `MCP_ENABLED` flipped or the Access app config
+  drifted; the HTTP `/api/score` path may still work because they are gated independently.
+
+- [ ] **CF Access OAuth resource-metadata advertisement for unauthenticated MCP clients.** Defends against an Access app
+  misconfiguration that would break MCP OAuth discovery for clients without a service token:
+
+  ```bash
+  curl -sSI -X POST -H 'Content-Type: application/json' \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | grep -iE '^(www-authenticate|location)' | head -3
+  ```
+
+  Expect a `302` whose `location` points at `*.cloudflareaccess.com/cdn-cgi/access/login/...` AND a
+  `www-authenticate: Cloudflare-Access resource_metadata="https://...workers.dev/.well-known/cloudflare-access-protected-resource/mcp"`
+  header. Missing `www-authenticate` or a malformed `resource_metadata` URL means MCP OAuth clients cannot discover the
+  auth endpoint — investigate the Access app config (app id and policy id recorded in the 1Password item's notes).
+
 ### Distribution and asset serving
 
 Surfaces that don't fail unit tests but break the user experience.
