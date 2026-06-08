@@ -192,7 +192,7 @@ export async function build() {
   }
 
   // 6. Homepage — hero + principle listing (links to /p{N} pages).
-  const { introTitle, introSummary, introSource } = await emitHomepage({
+  const { introTitle, introSummary, introSource, specContextSource, useSource } = await emitHomepage({
     distDir: DIST_DIR,
     contentDir: CONTENT_DIR,
     themeInit,
@@ -224,6 +224,8 @@ export async function build() {
     introTitle,
     introSummary,
     introSource,
+    specContextSource,
+    useSource,
     principles,
     subPageData,
     leaderboard,
