@@ -129,6 +129,7 @@ export function emitShell({
 }) {
   const base = resolveBaseUrl(baseUrl);
   const canonical = base + canonicalPath;
+  const markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`;
   const ogImage = `${base}/og-image.png`;
 
   const orgId = `${base}/#organization`;
@@ -157,6 +158,53 @@ export function emitShell({
         },
         publisher: { '@id': orgId },
       },
+      {
+        '@type': 'SoftwareApplication',
+        '@id': `${base}/#anc-cli`,
+        name: 'anc',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'macOS, Linux, Windows',
+        description: 'Agent-native CLI auditor: scores any CLI against the eight principles.',
+        codeRepository: 'https://github.com/brettdavies/agentnative-cli',
+        downloadUrl: 'https://github.com/brettdavies/agentnative-cli/releases',
+        installUrl: `${base}/install`,
+        url: `${base}/audit`,
+        offers: { '@type': 'Offer', price: 0, priceCurrency: 'USD' },
+        publisher: { '@id': orgId },
+      },
+      {
+        '@type': 'SoftwareApplication',
+        '@id': `${base}/#mcp-server`,
+        name: 'anc.dev MCP server',
+        applicationCategory: 'WebApplication',
+        description:
+          'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, vendored spec.',
+        url: `${base}/mcp`,
+        documentation: `${base}/mcp-skill`,
+        potentialAction: {
+          '@type': 'ConsumeAction',
+          name: 'Invoke MCP',
+          target: {
+            '@type': 'EntryPoint',
+            urlTemplate: `${base}/mcp`,
+            httpMethod: 'POST',
+            contentType: 'application/json, text/event-stream',
+            encodingType: 'application/json',
+          },
+        },
+        publisher: { '@id': orgId },
+      },
+      {
+        '@type': 'SoftwareSourceCode',
+        '@id': `${base}/#skill-bundle`,
+        name: 'agent-native-cli skill bundle',
+        description: 'Skill bundle for Claude Code, Codex, Cursor, OpenCode.',
+        codeRepository: 'https://github.com/brettdavies/agentnative-skill',
+        programmingLanguage: 'Markdown',
+        url: `${base}/skill`,
+        downloadUrl: `${base}/skill.json`,
+        publisher: { '@id': orgId },
+      },
     ],
   };
 
@@ -181,6 +229,13 @@ ${principles
     <title>${esc(title)}</title>
     <meta name="description" content="${esc(description)}" />
     <link rel="canonical" href="${canonical}" />
+    <link rel="alternate" type="text/markdown" href="${markdownTwinPath}" title="This page as markdown" />
+    <link rel="alternate" type="text/markdown" href="/llms.txt" title="LLM-friendly index" />
+    <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="LLM-friendly full spec" />
+    <link rel="alternate" type="application/json" href="/.well-known/mcp" title="MCP server descriptor" />
+    <link rel="alternate" type="application/json" href="/skill.json" title="Agent-native skill bundle (canonical JSON)" />
+    <link rel="describedby" href="/.well-known/mcp" />
+    <link rel="mcp" href="/mcp" />
 ${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
@@ -271,7 +326,7 @@ ${SOURCE_REPOS.map(
         <span> · </span>
         <a href="/mcp-skill/">MCP</a>
         <span> · </span>
-        <a href="${canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`}">This page as markdown</a>
+        <a href="${markdownTwinPath}">This page as markdown</a>
       </p>
     </footer>
     <script src="/js/theme.js" defer></script>
