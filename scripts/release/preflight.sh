@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run release preflight gates against the current checkout, the staging deploy, and the
-# local wrangler dev Worker.
+# Run release preflight gates against the current checkout, plus the chosen
+# preflight target environment (--env local or --env staging; default staging).
 #
 # Usage:
 #   scripts/release/preflight.sh <subcommand>
@@ -8,21 +8,27 @@
 # Subcommands:
 #   coord     Cross-repo coordination — vendored spec VERSION, skill manifest version, Dockerfile
 #             release URL + sha, and (when docker is available) the staging container pin's baked
-#             anc binary vocabulary vs the Worker's invocation site.
-#   build     bun run build + scorecard corpus integrity + badge SVGs + markdown twins.
-#   do-smoke  Live-scoring DO smoke against agentnative-site-staging through CF Access (reads the
-#             service token from 1Password via the /1password skill).
-#   mcp       Live MCP suite against http://localhost:8787 — requires `bunx wrangler dev --env
-#             staging --local` running in another terminal. Three gates: transport + 9-tool surface,
+#             anc binary vocabulary vs the Worker's invocation site. Not env-dependent.
+#   build     bun run build + scorecard corpus integrity + badge SVGs + markdown twins. Local only.
+#   do-smoke  Live-scoring DO smoke against the --env target.
+#               - staging: hits agentnative-site-staging through CF Access (reads the service
+#                 token from 1Password via the /1password skill).
+#               - local:   hits $LOCAL_URL (no auth); requires `bunx wrangler dev --env staging
+#                 --local` running in another terminal.
+#   mcp       Live MCP suite against the --env target. Three gates: transport + 9-tool surface,
 #             registry-tier symmetry contract, live audit via score_cli against $MCP_BINARY.
-#   dist      Distribution surfaces against staging — /check -> /audit redirect, skill.json served
-#             version vs source, X-Robots-Tag: noindex.
+#             Same env semantics as do-smoke.
+#   dist      Distribution surfaces against the --env target — /check -> /audit redirect,
+#             skill.json served version vs source. The X-Robots-Tag: noindex check runs only in
+#             staging mode (the staging-host guard does not fire for localhost in local mode).
 #   mechanics Release mechanics sanity — leak check (no guarded paths in cherry-picked diff),
-#             triple-diff against origin/main.
+#             triple-diff against origin/main. Not env-dependent.
 #   all       Run every above sequentially. Sub-gates within each section continue past individual
 #             failures so the operator sees the full picture; the script exits 1 if any gate failed.
 #
 # Flags:
+#   --env <env>          Preflight target: `staging` (default) or `local`. Also honored as $ENV.
+#                        Drives do-smoke, mcp, and dist URL + auth selection.
 #   --binary <name>      Fresh non-registry binary for do-smoke (default: $BINARY or `cowsay`)
 #   --mcp-binary <name>  Fresh non-registry binary for mcp audit (default: $MCP_BINARY or `figlet`)
 #   --staging-url <url>  Override staging URL (default: https://agentnative-site-staging.brettdavies.workers.dev)
@@ -36,9 +42,10 @@
 # Dependencies:
 #   - bun, bunx, git, gh, jq, jaq, curl, grep on PATH
 #   - docker (optional; coord's pull-and-inspect gate skips if absent)
-#   - ~/.claude/skills/1password/scripts/read_field.sh (for do-smoke CF Access token)
+#   - ~/.claude/skills/1password/scripts/read_field.sh (for --env staging CF Access token)
 #
-# Companion to scripts/release/postflight.sh (runs AFTER release/* merges to main).
+# Companion to scripts/release/postflight.sh (runs AFTER release/* merges to main). Postflight
+# uses --env staging|prod with the same shape.
 
 set -euo pipefail
 
@@ -58,6 +65,7 @@ readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 SUBCMD=""
 BINARY="${BINARY:-cowsay}"
 MCP_BINARY="${MCP_BINARY:-figlet}"
+ENV="${ENV:-staging}"
 STAGING_URL="$DEFAULT_STAGING_URL"
 LOCAL_URL="$DEFAULT_LOCAL_URL"
 
@@ -68,6 +76,7 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --env)          ENV="$2"; shift 2;;
         --binary)       BINARY="$2"; shift 2;;
         --mcp-binary)   MCP_BINARY="$2"; shift 2;;
         --staging-url)  STAGING_URL="$2"; shift 2;;
@@ -79,6 +88,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$SUBCMD" ]] || usage
+
+case "$ENV" in
+    local|staging) ;;
+    *) echo "invalid --env: $ENV (must be 'local' or 'staging')" >&2; exit 2;;
+esac
+
+# Derived per-env values used by gate_do_smoke, gate_mcp, gate_dist.
+case "$ENV" in
+    staging) ENV_URL="$STAGING_URL"; ENV_AUTH_NEEDED=1;;
+    local)   ENV_URL="$LOCAL_URL";   ENV_AUTH_NEEDED=0;;
+esac
 
 # 1Password helpers (read-only) ---------------------------------------------
 
@@ -255,7 +275,7 @@ gate_build() {
 # Gate: do-smoke (live-scoring DO against staging) --------------------------
 
 gate_do_smoke() {
-    header "Live-scoring DO smoke against staging"
+    header "Live-scoring DO smoke against $ENV_URL"
     require_bin curl; require_bin jq
 
     # Check the fresh binary is not already in the registry.
@@ -265,24 +285,36 @@ gate_do_smoke() {
     fi
     gate_pass "fresh non-registry binary $BINARY confirmed outside registry.yaml"
 
-    # Stage CF Access headers.
+    # Local mode: reachability gate. wrangler dev must be running.
+    if [[ "$ENV_AUTH_NEEDED" -eq 0 ]]; then
+        if ! curl -fsSL -m 3 "${ENV_URL}/" >/dev/null 2>&1; then
+            gate_skip "live-scoring DO smoke" \
+                "local Worker not reachable at $ENV_URL — start with 'bunx wrangler dev --env staging --local'"
+            return
+        fi
+    fi
+
+    # Staging mode: stage CF Access headers. Local mode: empty cfg (curl -K
+    # with an empty file is a no-op).
     local cfg
     cfg=$(mktemp)
-    if ! stage_cf_access_headers "$cfg"; then
-        gate_skip "live-scoring DO smoke" "could not stage CF Access service token from 1Password ($OP_ITEM_TOKEN)"
-        rm -f "$cfg"
-        return
+    if [[ "$ENV_AUTH_NEEDED" -eq 1 ]]; then
+        if ! stage_cf_access_headers "$cfg"; then
+            gate_skip "live-scoring DO smoke" "could not stage CF Access service token from 1Password ($OP_ITEM_TOKEN)"
+            rm -f "$cfg"
+            return
+        fi
     fi
 
     # POST a non-registry github-url and assess.
     local body
     body=$(curl -fsSL -K "$cfg" -H 'Content-Type: application/json' \
         -d "{\"input\":\"https://github.com/sindresorhus/${BINARY}\",\"turnstile_token\":\"x\"}" \
-        "${STAGING_URL}/api/score" 2>/dev/null || true)
+        "${ENV_URL}/api/score" 2>/dev/null || true)
     rm -f "$cfg"
 
     if [[ -z "$body" ]]; then
-        gate_fail "live-scoring DO smoke" "no response body (network or CF Access?)"
+        gate_fail "live-scoring DO smoke" "no response body (network, CF Access, or Worker down?)"
         return
     fi
 
@@ -294,54 +326,82 @@ gate_do_smoke() {
     err=$(printf '%s' "$body" | jq -r '.error.code // empty' 2>/dev/null || true)
 
     if [[ "$ok" == "true" && -n "$binary_resp" && -n "$anc_v" && "$share_url" == "/score/live/${binary_resp}" ]]; then
-        gate_pass "staging /api/score returned scorecard for $binary_resp (anc $anc_v, share $share_url)"
+        gate_pass "$ENV /api/score returned scorecard for $binary_resp (anc $anc_v, share $share_url)"
     else
-        gate_fail "staging /api/score response shape" \
+        gate_fail "$ENV /api/score response shape" \
             "ok=$ok binary=$binary_resp anc=$anc_v share=$share_url error=$err"
     fi
 }
 
-# Gate: mcp (live MCP against wrangler dev --local) -------------------------
+# Gate: mcp (live MCP against the --env target) -----------------------------
 
-# Thin wrapper around scripts/release/mcp-smoke.sh, which holds the actual gate logic and
-# is shared with postflight.sh. Preflight-specific concern: verify the
-# local Worker is reachable before delegating, since mcp-smoke.sh would otherwise
-# report all three gates as fail on a closed socket.
+# Thin wrapper around scripts/release/mcp-smoke.sh, which holds the actual
+# gate logic and is shared with postflight.sh. Target picked via $ENV.
+#   - staging: mcp-smoke.sh reads CF_ACCESS_CLIENT_ID / CF_ACCESS_CLIENT_SECRET
+#     from the env, which we stage from 1Password.
+#   - local:   no auth; we verify $ENV_URL reachability before delegating.
 gate_mcp() {
     require_bin curl
 
-    if ! curl -fsSL -m 3 "${LOCAL_URL}/" >/dev/null 2>&1; then
-        header "Live MCP surface against wrangler dev --local"
-        gate_skip "all MCP gates" \
-            "local Worker not reachable at $LOCAL_URL — start with 'bunx wrangler dev --env staging --local'"
+    if [[ "$ENV_AUTH_NEEDED" -eq 0 ]]; then
+        if ! curl -fsSL -m 3 "${ENV_URL}/" >/dev/null 2>&1; then
+            header "Live MCP surface against $ENV_URL"
+            gate_skip "all MCP gates" \
+                "local Worker not reachable at $ENV_URL — start with 'bunx wrangler dev --env staging --local'"
+            return
+        fi
+        # mcp-smoke.sh prints its own section header; the local-Worker
+        # reachability precheck is silent on success.
+        delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
         return
     fi
 
-    # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
-    # so we delegate directly without a duplicate header here. The local-Worker
-    # reachability precheck is silent on success — its absence in output IS the pass.
-    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$LOCAL_URL" --mcp-binary "$MCP_BINARY"
+    # Staging: stage CF Access from 1Password and delegate.
+    local cid csec
+    cid=$(read_op_field "$OP_ITEM_TOKEN" client_id) || true
+    csec=$(read_op_field "$OP_ITEM_TOKEN" client_secret) || true
+    if [[ -z "$cid" || -z "$csec" ]]; then
+        header "Live MCP surface against $ENV_URL"
+        gate_skip "all MCP gates" \
+            "could not stage CF Access service token from 1Password ($OP_ITEM_TOKEN)"
+        return
+    fi
+    export CF_ACCESS_CLIENT_ID="$cid"
+    export CF_ACCESS_CLIENT_SECRET="$csec"
+
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
 }
 
 # Gate: dist (distribution surfaces against staging) ------------------------
 
 gate_dist() {
-    header "Distribution surfaces against staging"
+    header "Distribution surfaces against $ENV_URL"
     require_bin curl; require_bin jq
+
+    # Local mode: reachability gate. wrangler dev must be running.
+    if [[ "$ENV_AUTH_NEEDED" -eq 0 ]]; then
+        if ! curl -fsSL -m 3 "${ENV_URL}/" >/dev/null 2>&1; then
+            gate_skip "distribution surfaces" \
+                "local Worker not reachable at $ENV_URL — start with 'bunx wrangler dev --env staging --local'"
+            return
+        fi
+    fi
 
     local cfg
     cfg=$(mktemp)
-    if ! stage_cf_access_headers "$cfg"; then
-        gate_skip "all dist gates" "could not stage CF Access service token from 1Password"
-        rm -f "$cfg"
-        return
+    if [[ "$ENV_AUTH_NEEDED" -eq 1 ]]; then
+        if ! stage_cf_access_headers "$cfg"; then
+            gate_skip "all dist gates" "could not stage CF Access service token from 1Password"
+            rm -f "$cfg"
+            return
+        fi
     fi
 
     # /check -> /audit redirect.
     local check_loc
-    check_loc=$(curl -sSI -K "$cfg" "${STAGING_URL}/check" 2>/dev/null \
+    check_loc=$(curl -sSI -K "$cfg" "${ENV_URL}/check" 2>/dev/null \
         | grep -i '^location:' | head -1 | sed -E 's/^[Ll]ocation: *//' | tr -d '\r' || true)
-    if [[ "$check_loc" == "/audit" || "$check_loc" == "${STAGING_URL}/audit" ]]; then
+    if [[ "$check_loc" == "/audit" || "$check_loc" == "${ENV_URL}/audit" ]]; then
         gate_pass "/check -> /audit 301 redirect serves"
     else
         gate_fail "/check -> /audit 301 redirect" "location=$check_loc"
@@ -349,7 +409,7 @@ gate_dist() {
 
     # Skill manifest version matches source.
     local served_v src_v
-    served_v=$(curl -fsSL -K "$cfg" "${STAGING_URL}/skill.json" 2>/dev/null \
+    served_v=$(curl -fsSL -K "$cfg" "${ENV_URL}/skill.json" 2>/dev/null \
         | jq -r '.version // empty' 2>/dev/null || true)
     src_v=$(jq -r '.version' "$REPO_ROOT/src/data/skill/skill.json" 2>/dev/null || true)
     if [[ -n "$served_v" && "$served_v" == "$src_v" ]]; then
@@ -360,14 +420,21 @@ gate_dist() {
         gate_skip "skill.json served vs source" "could not read one (served=$served_v source=$src_v)"
     fi
 
-    # X-Robots-Tag: noindex on staging.
-    local robots
-    robots=$(curl -sSI -K "$cfg" "${STAGING_URL}/" 2>/dev/null \
-        | grep -i '^x-robots-tag:' | head -1 || true)
-    if [[ "$robots" == *"noindex"* ]]; then
-        gate_pass "staging Worker emits X-Robots-Tag: noindex on /"
+    # X-Robots-Tag: noindex check. Staging-only: the staging-host guard in
+    # src/worker/headers.ts matches *.workers.dev hostnames, which a local
+    # wrangler dev (host=localhost) does not.
+    if [[ "$ENV_AUTH_NEEDED" -eq 1 ]]; then
+        local robots
+        robots=$(curl -sSI -K "$cfg" "${ENV_URL}/" 2>/dev/null \
+            | grep -i '^x-robots-tag:' | head -1 || true)
+        if [[ "$robots" == *"noindex"* ]]; then
+            gate_pass "staging Worker emits X-Robots-Tag: noindex on /"
+        else
+            gate_fail "staging X-Robots-Tag noindex" "header missing or wrong: $robots"
+        fi
     else
-        gate_fail "staging X-Robots-Tag noindex" "header missing or wrong: $robots"
+        gate_skip "X-Robots-Tag noindex check" \
+            "local mode — the staging-host guard does not fire for localhost"
     fi
 
     rm -f "$cfg"
