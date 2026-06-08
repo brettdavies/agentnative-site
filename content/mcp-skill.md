@@ -2,9 +2,7 @@
 
 anc.dev exposes the agent-native CLI standard catalog over a Model Context Protocol server at `https://anc.dev/mcp`.
 Nine tools cover four surfaces (registry, principles, spec, scorecards) plus five resources for direct lookup. The
-catalog is public: no authentication, no API key. This page is the **client integration guide**: how to call each tool,
-what comes back, and what to do when something fails. Operator-facing material (kill switches, structured logging, CORS
-posture) lives in the in-repo runbook at `docs/runbooks/mcp-operator.md`.
+catalog is public: no authentication, no API key.
 
 ## Quick reference
 
