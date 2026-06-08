@@ -296,8 +296,17 @@
       // (see top-level `vars` comment). Set both to `"true"` after the
       // staging deploy completes so the staging host serves /mcp
       // end-to-end during soak.
+      //
+      // MCP_CACHE_BYPASS_ALLOWED gates the score_cli `bypass_cache: true`
+      // argument that the release MCP smoke uses to exercise BOTH the
+      // cache-hit short-circuit AND the live container DO path on every
+      // release-gate run. Staging-only: bound here in env.staging.vars but
+      // intentionally absent from the top-level `vars` block, so the same
+      // bypass argument against prod is silently ignored. Not a secret
+      // (no auth value to protect; the staging-only binding IS the gate).
       "vars": {
-        "TURNSTILE_SITEKEY": "1x00000000000000000000AA"
+        "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
+        "MCP_CACHE_BYPASS_ALLOWED": "true"
       }
     }
   }

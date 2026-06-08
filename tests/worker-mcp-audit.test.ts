@@ -96,6 +96,11 @@ interface MakeEnvOpts {
   scoreBinding?: boolean;
   doResponse?: Response;
   cacheContent?: Record<string, unknown>;
+  // Bind MCP_CACHE_BYPASS_ALLOWED on the synthetic env. Pass "true" to enable
+  // the score_cli `bypass_cache` arg; pass undefined / a different string to
+  // verify the silent-ignore behavior that protects prod (where the binding is
+  // absent).
+  cacheBypassAllowed?: string;
 }
 
 function makeEnv(opts: MakeEnvOpts = {}): {
@@ -199,6 +204,7 @@ function makeEnv(opts: MakeEnvOpts = {}): {
       },
     } as unknown as KVNamespace,
     MCP_LIVE_SCORING_ENABLED: liveScoringEnabled ? 'true' : 'false',
+    MCP_CACHE_BYPASS_ALLOWED: opts.cacheBypassAllowed,
     MCP_AUDIT_LIMITER: opts.auditLimiter
       ? {
           async limit({ key }) {
@@ -335,6 +341,83 @@ describe('score_cli: lookupOnly cache-state outcomes', () => {
     expect(body.audited).toBe(false);
     expect(body.source).toBe('live-cache');
     expect(body.next_tool).toBe('get_scorecard');
+    expect(doSpy.calls.length).toBe(0);
+  });
+});
+
+describe('score_cli: bypass_cache argument (staging-only escape hatch)', () => {
+  // Fixture: a cached scorecard for `somelib`. Without bypass, lookupOnly's
+  // R2 tier short-circuits to live-cache. With bypass + the staging env
+  // binding, lookupOnly skips R2 and the audit path runs through to the DO.
+  function makeBypassEnv(cacheBypassAllowed?: string) {
+    return makeEnv({
+      cacheContent: {
+        [`scores/somelib/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          scorecard: { tool: { binary: 'somelib' }, results: [] },
+          anc_version: SPEC_VERSION,
+          tool_version: '1.0.0',
+        },
+      },
+      cacheBypassAllowed,
+    });
+  }
+
+  test('bypass_cache: true WITH MCP_CACHE_BYPASS_ALLOWED="true" skips R2 and dispatches DO', async () => {
+    const { env, doSpy } = makeBypassEnv('true');
+    const result = await callScoreCli(env, { install: 'npm install -g somelib', bypass_cache: true }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    // With bypass + binding, the cached scorecard is ignored. The DO dispatches
+    // through runFreshOnly and returns the fixture's fresh-audit envelope.
+    expect(doSpy.calls.length).toBe(1);
+  });
+
+  test('bypass_cache: true WITHOUT MCP_CACHE_BYPASS_ALLOWED is silently ignored (prod parity)', async () => {
+    const { env, doSpy } = makeBypassEnv(undefined);
+    const result = await callScoreCli(env, { install: 'npm install -g somelib', bypass_cache: true }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { audited: boolean; source: string };
+    // Bypass arg ignored: cache wins.
+    expect(body.audited).toBe(false);
+    expect(body.source).toBe('live-cache');
+    expect(doSpy.calls.length).toBe(0);
+  });
+
+  test('bypass_cache: true WITH MCP_CACHE_BYPASS_ALLOWED="false" (typo / wrong value) is silently ignored', async () => {
+    const { env, doSpy } = makeBypassEnv('false');
+    const result = await callScoreCli(env, { install: 'npm install -g somelib', bypass_cache: true }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { audited: boolean; source: string };
+    // Strict env-var match: only the literal string "true" enables the bypass.
+    expect(body.source).toBe('live-cache');
+    expect(doSpy.calls.length).toBe(0);
+  });
+
+  test('bypass_cache: false WITH MCP_CACHE_BYPASS_ALLOWED="true" respects cache (unchanged baseline)', async () => {
+    const { env, doSpy } = makeBypassEnv('true');
+    const result = await callScoreCli(env, { install: 'npm install -g somelib', bypass_cache: false }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { source: string };
+    expect(body.source).toBe('live-cache');
+    expect(doSpy.calls.length).toBe(0);
+  });
+
+  test('bypass_cache absent WITH MCP_CACHE_BYPASS_ALLOWED="true" respects cache (unchanged baseline)', async () => {
+    const { env, doSpy } = makeBypassEnv('true');
+    const result = await callScoreCli(env, { install: 'npm install -g somelib' }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { source: string };
+    expect(body.source).toBe('live-cache');
+    expect(doSpy.calls.length).toBe(0);
+  });
+
+  test('bypass_cache: true does NOT override a curated registry slug (registry always wins)', async () => {
+    const { env, doSpy } = makeEnv({ cacheBypassAllowed: 'true' });
+    const result = await callScoreCli(env, { slug: 'curl', bypass_cache: true }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { source: string };
+    // Curated entries are upstream of the R2 cache tier; bypass cannot reach them.
+    expect(body.source).toBe('registry');
     expect(doSpy.calls.length).toBe(0);
   });
 });
