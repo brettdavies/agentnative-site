@@ -34,19 +34,23 @@ running for the MCP suite) so the operator sees the full picture rather than abo
 
 Sub-commands let you re-run one section in isolation:
 
-| Sub-command | What it checks                                                                                                                                        | Source of truth                          |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run` |
-| `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                          |
-| `do-smoke`  | Live `/api/score` smoke against staging through CF Access (fresh non-registry github URL)                                                             | `curl` + `~/.claude/skills/1password`    |
-| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` (requires `bunx wrangler dev --env staging --local` running)                        | `scripts/release/mcp-smoke.sh`           |
-| `dist`      | `/check` → `/audit` redirect, served `skill.json` version vs source, `X-Robots-Tag: noindex` on staging                                               | `curl`                                   |
-| `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                    |
-| `all`       | every above sequentially                                                                                                                              |                                          |
+| Sub-command | What it checks                                                                                                                                        | Source of truth                                                              |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run`                                     |
+| `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                                                              |
+| `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
+| `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
+| `dist`      | `/check` → `/audit` redirect and served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode       | `curl`                                                                       |
+| `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                                                        |
+| `all`       | every above sequentially                                                                                                                              |                                                                              |
 
 Flags:
 
-- `--binary <name>` — fresh non-registry binary for the staging do-smoke (default: `$BINARY` env var or `cowsay`)
+- `--env <env>` — preflight target: `staging` (default) or `local`. Also honored as the `$ENV` env var. Drives the URL
+  and auth shape for `do-smoke`, `mcp`, and `dist`. Local mode hits `$LOCAL_URL` without auth (requires `bunx wrangler
+  dev --env staging --local` running); staging mode hits the staging Worker through CF Access (service token from
+  1Password). `coord`, `build`, and `mechanics` are not env-dependent.
+- `--binary <name>` — fresh non-registry binary for do-smoke (default: `$BINARY` env var or `cowsay`)
 - `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
 - `--staging-url <url>` — override the staging Worker URL
 - `--local-url <url>` — override the local `wrangler dev` URL
@@ -279,29 +283,27 @@ run-fresh tier) as the HTTP `/api/score` handler. What this section covers and t
 wiring, the 9-tool surface, MCP kill switches (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`), and the orchestrator's
 MCP-side result envelope (`next_tool` bouncing, `source: "registry" | "live-cache" | "live"`).
 
-Preflight runs against `bunx wrangler dev --env staging --local` on `http://localhost:8787`. This catches MCP
-regressions on the operator's machine before the release-branch is cut, with no deploy or CF Access dependency.
-Postflight runs the same suite against both deployed envs (see [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) §
-Live MCP surface): `--env staging` exercises the staging Worker through CF Access, `--env prod` exercises
+Preflight defaults to the **staging** target (`https://agentnative-site-staging.brettdavies.workers.dev` through CF
+Access), matching the target shape of `do-smoke` and `dist`. This catches MCP regressions on the deployed staging code
+(which mirrors what the release branch will ship to main) without a local-wrangler prerequisite or Docker dependency.
+Pass `--env local` to opt into the historical mode: hits `http://localhost:8787` (an operator-started `bunx wrangler dev
+--env staging --local`) with no auth. Use local when iterating on Worker code locally; use staging for the release-gate
+run. Postflight runs the same suite against both deployed envs (see [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md)
+§ Live MCP surface): `--env staging` exercises the staging Worker through CF Access, `--env prod` exercises
 `https://anc.dev` unauthenticated. Together they catch deploy-side regressions that only surface at the edge:
 rate-limiter bindings (`MCP_LIMITER`, `MCP_AUDIT_LIMITER`), the KV-backed hourly audit ceiling, and any binding drift
 between `wrangler.jsonc` and the live Workers.
 
-Driven by `scripts/release/preflight.sh mcp`, which delegates to `scripts/release/mcp-smoke.sh http://localhost:8787`
-after a reachability check on the local Worker. The same `mcp-smoke.sh` is invoked by `scripts/release/postflight.sh
---env staging mcp` (staging Worker, CF Access service-token headers auto-staged from 1Password) and by
-`scripts/release/postflight.sh --env prod mcp` (`anc.dev`, no auth). The only differences between the three callers are
-the base URL and the env-driven auth headers when targeting staging.
+Driven by `scripts/release/preflight.sh mcp` (default target=staging). In staging mode the script stages the CF Access
+service token from 1Password and delegates to `scripts/release/mcp-smoke.sh
+https://agentnative-site-staging.brettdavies.workers.dev`. In local mode (`--env local`) it skips the auth staging and
+delegates to `scripts/release/mcp-smoke.sh http://localhost:8787` after a reachability check. The same `mcp-smoke.sh` is
+invoked by `scripts/release/postflight.sh --env staging mcp` (staging Worker, CF Access service-token headers also
+auto-staged from 1Password) and by `scripts/release/postflight.sh --env prod mcp` (`anc.dev`, no auth). The only
+differences between callers are the base URL and the env-driven auth headers when targeting staging.
 
-**Prerequisite:** in a separate terminal, start the local Worker:
-
-```bash
-bunx wrangler dev --env staging --local
-# leaves the Worker bound to http://localhost:8787
-```
-
-The Docker daemon must be running — the container sandbox the run-fresh tier uses is spun locally from the staging
-container image pin.
+The curl recipes below show the **staging** shape (with CF Access headers). For the **local** shape, drop the two
+`CF-Access-Client-*` header lines and replace the staging URL with `http://localhost:8787`.
 
 - [ ] **`/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true` in the
   `env.staging` block, content negotiation (the dual-MIME `Accept` header), and that no tool was dropped between
@@ -311,14 +313,18 @@ container image pin.
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"preflight","version":"1"}}}' \
-    http://localhost:8787/mcp \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq '{server: .result.serverInfo.name, protocol: .result.protocolVersion}'
   # expect: server: "anc", protocol: "2025-06-18"
 
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
-    http://localhost:8787/mcp \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq '.result.tools | length'
   # expect: 9
   ```
@@ -335,7 +341,9 @@ container image pin.
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}' \
-    http://localhost:8787/mcp \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq -r '.result.content[0].text' | jq '{source, scorecard_url}'
   # expect: source: "registry", scorecard_url: "https://anc.dev/score/ripgrep"
 
@@ -343,7 +351,9 @@ container image pin.
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"score_cli","arguments":{"slug":"ripgrep"}}}' \
-    http://localhost:8787/mcp \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq -r '.result.content[0].text' | jq '{audited, source, next_tool}'
   # expect: audited: false, source: "registry", next_tool: "get_scorecard"
   ```
@@ -363,7 +373,9 @@ container image pin.
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"score_cli\",\"arguments\":{\"install\":\"npm install -g ${MCP_BINARY}\"}}}" \
-    http://localhost:8787/mcp \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq -r '.result.content[0].text' | jq '{audited, source, has_scorecard: (.scorecard != null), anc_version, error}'
   ```
 
@@ -378,9 +390,11 @@ container image pin.
 - `error.code: "incomplete_response_contract"` with `details: anc_audit_failed` / `chain_resolved_install_failed` /
   `timeout` / `sandbox_unavailable` — same investigation paths as the HTTP smoke above. `anc_audit_failed` here means
   the container's baked `anc` does not understand the Worker's MCP-side invocation.
-- JSON-RPC envelope at HTTP 200 with `error.code: -32603` or similar — orchestrator wiring regression, NOT a rate-limit
-  issue (rate-limiter bindings are no-op under `wrangler dev --local`; deploy-side limiter regressions are caught in
-  postflight against `anc.dev`).
+- JSON-RPC envelope at HTTP 200 with `error.code: -32099` (rate-limit breach) — `MCP_AUDIT_LIMITER` is misconfigured on
+  the staging wrangler env (binding should grant 5 / 60s) OR the per-IP KV-backed hourly ceiling regressed. Inspect
+  `wrangler.jsonc env.staging.ratelimits[]` and the staging KV `mcp_audit_hourly:*` keys.
+- JSON-RPC envelope at HTTP 200 with `error.code: -32603` or similar — orchestrator wiring regression on the deployed
+  staging Worker. Inspect `src/worker/score/orchestrate.ts` and the latest staging deploy.
 
 ### Distribution and asset serving
 
