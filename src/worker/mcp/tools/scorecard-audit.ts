@@ -47,6 +47,13 @@ export interface ScorecardAuditEnv extends OrchestrateEnv {
   MCP_LIVE_SCORING_ENABLED?: string;
   MCP_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_KV?: KVNamespace;
+  // Staging-only release-smoke escape hatch. When bound to "true" (env.staging.vars
+  // in wrangler.jsonc), score_cli honors a caller's `bypass_cache: true` argument
+  // and skips the R2 read tier so the live container DO path is always exercised.
+  // Bound only on staging; absent on prod so the bypass arg is silently ignored
+  // there. Defense in depth: all rate limiters (MCP_AUDIT_LIMITER burst gate,
+  // SCORE_KV hourly ceiling) still apply, so the bypass cannot multiply audit cost.
+  MCP_CACHE_BYPASS_ALLOWED?: string;
 }
 
 const SITE_URL = 'https://anc.dev';
@@ -123,6 +130,14 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       binary: z.string().optional().describe('CLI binary name.'),
       install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
       github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo).'),
+      bypass_cache: z
+        .boolean()
+        .optional()
+        .describe(
+          'Release-smoke escape hatch: when true AND the operator has bound MCP_CACHE_BYPASS_ALLOWED="true" ' +
+            '(staging env only), skip the R2 read tier so the live container DO path is always exercised. ' +
+            'Silently ignored when the env binding is absent (prod). Rate limiters still apply.',
+        ),
     },
     async (args, extra) => {
       // Step 1: MCP_LIVE_SCORING_ENABLED kill switch.
@@ -169,7 +184,18 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
 
       // Step 3: lookupOnly — registry tier + R2 cache tier. A hit
       // short-circuits the entire audit path; cache state is data.
-      const lookup = await lookupOnly(validated, env, registryIndex, hintsIndex, { specVersion: SPEC_VERSION });
+      //
+      // Cache bypass: when the caller asks for bypass_cache and the env binding
+      // MCP_CACHE_BYPASS_ALLOWED is "true" (staging only), skip the R2 read tier
+      // so the live container path runs even on a cached binary. Curated registry
+      // entries always win regardless; the bypass only affects the R2 cache tier.
+      // Without the env binding, bypass_cache is silently ignored, so prod
+      // behavior is unchanged even if the arg is forged in the request.
+      const bypassCache = args.bypass_cache === true && env.MCP_CACHE_BYPASS_ALLOWED === 'true';
+      const lookup = await lookupOnly(validated, env, registryIndex, hintsIndex, {
+        specVersion: SPEC_VERSION,
+        skipCache: bypassCache,
+      });
 
       if (lookup.kind === 'curated') {
         const scorecardUrlPath = lookup.scorecard_url ?? `/score/${lookup.entry.name}`;
@@ -227,10 +253,17 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
 
       // Step 7: orchestrate.runFreshOnly — resolveSpec + DO dispatch.
       // The DO calls writeCacheBestEffort itself; MCP never writes R2.
+      //
+      // Cache bypass also covers the post-discovery cache tier (orchestrate.ts
+      // tier 3); otherwise a github-url input whose discovered binary IS in cache
+      // would short-circuit at step 6.5 and produce kind=cache_post_hit, which
+      // again does not exercise the DO. Same gating: caller arg + staging-only
+      // env binding.
       const inputHash = await sha256Hex(choice.raw);
       const result = await runFreshOnly(validated, env, hintsIndex, {
         specVersion: SPEC_VERSION,
         inputHash,
+        skipCachePost: bypassCache,
       });
 
       // Step 8: map kind to typed-state response.

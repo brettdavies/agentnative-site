@@ -27,7 +27,12 @@
 #   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
 #              expected
 #   mcp        Live MCP suite (transport + symmetry + live audit) via
-#              scripts/release/mcp-smoke.sh against the env URL
+#              scripts/release/mcp-smoke.sh against the env URL. Passes
+#              --full-cache-coverage to mcp-smoke.sh against staging so the
+#              live-audit gate runs as two sub-gates (cache-miss via
+#              bypass_cache=true + cache-hit on the same binary); prod runs
+#              accept either outcome (the bypass-gated path requires
+#              MCP_CACHE_BYPASS_ALLOWED which is staging-only).
 #   purge      `/skill.json` served version matches src/data/skill/skill.json
 #   backport   Merged PR to dev with the release slug in its title (prod only;
 #              SKIPped on staging)
@@ -293,7 +298,19 @@ gate_pages() {
 gate_mcp() {
     # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
     # so we delegate directly without a duplicate header here.
-    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
+    #
+    # --full-cache-coverage splits the live-audit gate into two sub-gates:
+    # cache-miss via bypass_cache=true (asserts source=fresh-audit) + cache-hit
+    # on the same binary (asserts source=live-cache). Passed only against
+    # staging; prod runs as a single relaxed gate (the bypass-gated leg
+    # requires MCP_CACHE_BYPASS_ALLOWED which is staging-only, and mcp-smoke.sh
+    # refuses the flag against anc.dev anyway).
+    local extra=()
+    if [[ "$ENV" == "staging" ]]; then
+        extra+=(--full-cache-coverage)
+    fi
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+        --mcp-binary "$MCP_BINARY" "${extra[@]}"
 }
 
 # Gate: purge ----------------------------------------------------------------

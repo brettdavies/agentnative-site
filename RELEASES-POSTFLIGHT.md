@@ -174,8 +174,13 @@ Runs against both envs:
 - Prod (`https://anc.dev/mcp`) — unauthenticated (no CF Access on the custom domain).
 
 Driven by `scripts/release/postflight.sh --env <staging|prod> mcp`, which delegates to `scripts/release/mcp-smoke.sh
-<env-url>`. The same script is invoked from preflight against `http://localhost:8787`. The only difference between the
-three callers is the base URL (plus the env-driven auth headers when `--env staging`).
+<env-url>`. The same script is invoked from preflight against `http://localhost:8787` or the staging URL. Differences
+between callers: the base URL, the env-driven auth headers when `--env staging`, and `--full-cache-coverage`. The smoke
+passes `--full-cache-coverage` against staging (both preflight `--env staging` and postflight `--env staging`) and
+against local (preflight `--env local`); it does NOT pass it against prod. With the flag set, the live-audit gate runs
+as two sub-gates: cache-miss via `bypass_cache: true` (asserts `source=fresh-audit`) followed by cache-hit on the same
+binary without bypass (asserts `source=live-cache`). Both paths must produce their expected outcome. Without the flag
+(prod), the gate runs once and accepts either outcome.
 
 - [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
   at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:
@@ -224,7 +229,8 @@ three callers is the base URL (plus the env-driven auth headers when `--env stag
 
 - [ ] **Live MCP audit via `score_cli` against a fresh non-registry binary.** Exercises the full DO path through the
   prod-side MCP surface AND the `MCP_AUDIT_LIMITER` binding. Consumes one unit of the 5/hour audit budget for the
-  caller's IP. Re-use `MCP_BINARY` from preflight (e.g., `figlet`):
+  caller's IP. Re-use `MCP_BINARY` from preflight; must be in `mcp-smoke.sh`'s bin-producing allowlist (`figlet`,
+  `prettier`, `tsx`, `nodemon`, `npm-check-updates`):
 
   ```bash
   MCP_BINARY=figlet
