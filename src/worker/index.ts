@@ -94,6 +94,56 @@ function rewriteToMarkdown(url: URL): URL {
   return rewritten;
 }
 
+const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
+
+/**
+ * Build the MCP server descriptor JSON body, rewriting the URL fields
+ * to use the inbound request's origin. The static dist/.well-known/mcp
+ * asset is emitted by 11a-discovery-emit.mjs at build time with a fixed
+ * PUBLIC_BASE_URL (defaults to https://anc.dev), so a developer curling
+ * localhost or a probe hitting staging would otherwise see prod URLs in
+ * the descriptor. Rewriting at request time keeps the descriptor
+ * env-aware without needing per-environment build artifacts.
+ *
+ * Used by all three JSON descriptor surfaces:
+ *   - GET /mcp with Accept: application/json
+ *   - GET /mcp.json
+ *   - GET /.well-known/mcp
+ */
+async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string> {
+  const wellKnown = new URL(request.url);
+  wellKnown.pathname = '/.well-known/mcp';
+  const asset = await env.ASSETS.fetch(new Request(wellKnown.toString(), { method: 'GET' }));
+  const body = await asset.text();
+  const data = JSON.parse(body) as { mcp_endpoint?: string; documentation?: string; [k: string]: unknown };
+  const origin = new URL(request.url).origin;
+  data.mcp_endpoint = `${origin}/mcp`;
+  data.documentation = `${origin}/mcp-skill.md`;
+  return `${JSON.stringify(data, null, 2)}\n`;
+}
+
+function mcpDescriptorJsonResponse(body: string): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': MCP_DESCRIPTOR_CACHE,
+      'access-control-allow-origin': '*',
+    },
+  });
+}
+
+function mcpGetOnly405(): Response {
+  return new Response('method not allowed\n', {
+    status: 405,
+    headers: {
+      Allow: 'GET',
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -104,6 +154,24 @@ export default {
     // env.ASSETS) is preserved by exclusion, not by overlap.
     if (isScorePath(pathname)) {
       return handleScore(request, env as ScoreEnv);
+    }
+
+    // /.well-known/mcp + /mcp.json — JSON descriptor surfaces. Both
+    // return the same env-aware body (URLs rewritten to the inbound
+    // origin so localhost / staging / prod each see their own URL in
+    // the descriptor) and both bypass the MCP_ENABLED kill switch —
+    // the descriptor is documentation, not the JSON-RPC handler. The
+    // static dist/.well-known/mcp asset is still emitted at build time
+    // and serves as the body seed the worker rewrites.
+    if (pathname === '/.well-known/mcp' && request.method !== 'OPTIONS') {
+      if (request.method !== 'GET') return mcpGetOnly405();
+      const body = await buildMcpDescriptorJsonBody(request, env);
+      return mcpDescriptorJsonResponse(body);
+    }
+    if (pathname === '/mcp.json' && request.method !== 'OPTIONS') {
+      if (request.method !== 'GET') return mcpGetOnly405();
+      const body = await buildMcpDescriptorJsonBody(request, env);
+      return mcpDescriptorJsonResponse(body);
     }
 
     // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
@@ -150,17 +218,8 @@ export default {
       if (request.method === 'GET') {
         const getFormat = detectMcpGetFormat(request);
         if (getFormat === 'json') {
-          const wellKnown = new URL(request.url);
-          wellKnown.pathname = '/.well-known/mcp';
-          const asset = await env.ASSETS.fetch(new Request(wellKnown.toString(), { method: 'GET' }));
-          return new Response(asset.body, {
-            status: 200,
-            headers: {
-              'content-type': 'application/json; charset=utf-8',
-              'cache-control': 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60',
-              'access-control-allow-origin': '*',
-            },
-          });
+          const body = await buildMcpDescriptorJsonBody(request, env);
+          return mcpDescriptorJsonResponse(body);
         }
         // 'html' or 'markdown' — control flows past this branch into
         // the asset-first dispatch below. dist/mcp.html ships from
