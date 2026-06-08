@@ -45,6 +45,15 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     // facing material lives in the in-repo runbook at
     // `docs/runbooks/mcp-operator.md` and is not published.
     { name: 'mcp-skill', path: join(contentDir, 'mcp-skill.md') },
+    // /mcp renders as a regular content page (HTML + MD twin) so a
+    // human or crawler clicking the literal endpoint URL lands on a
+    // shell-wrapped descriptor — same header, theme toggle, footer as
+    // every other content page. The Worker intercepts /mcp for POST
+    // (JSON-RPC) and for GET + Accept: application/json (proxies
+    // /.well-known/mcp). Other GET methods fall through to the asset-
+    // first dispatch which serves dist/mcp.html or the .md twin via
+    // the site's standard content negotiation.
+    { name: 'mcp', path: join(contentDir, 'mcp.md') },
   ];
   const subPageData = [];
   for (const { name, path } of subPages) {

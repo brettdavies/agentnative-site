@@ -10,21 +10,24 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
+import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
 
 /**
- * Build the homepage body HTML — hero, live-scoring form section,
- * principle listing, install-anc CTA. The live-score section sits between
- * hero and principles per the wireframe-first placement; layout polish is
- * deferred to /design-review after the basic surface renders.
+ * Build the homepage body HTML — hero (lede + use-it), live-scoring form
+ * section, principle listing, install-anc CTA. The live-score section
+ * sits between hero and principles per the wireframe-first placement;
+ * layout polish is deferred to /design-review after the basic surface
+ * renders.
  *
  * @param {string} introTitle
  * @param {string} introLede
+ * @param {string} useItHtml — pre-rendered <p class="hero__use-it">…</p>
  * @param {Array<{n: number, title: string, shortDesc: string}>} principles
  * @returns {string}
  */
-function buildHomepageBody(introTitle, introLede, principles) {
+function buildHomepageBody(introTitle, introLede, useItHtml, principles) {
   const entries = principles
     .map((p) => {
       const num = String(p.n).padStart(2, '0');
@@ -43,6 +46,7 @@ function buildHomepageBody(introTitle, introLede, principles) {
   return `<section class="hero">
   <h1 class="hero__title">${escHtml(introTitle)}</h1>
   <p class="hero__lede">${escHtml(introLede)}</p>
+  ${useItHtml}
 </section>
 ${buildLiveScoreSection()}
 <section class="principles-index" aria-label="The eight principles">
@@ -110,26 +114,48 @@ function buildLiveScoreSection() {
 }
 
 /**
- * Emit dist/index.html and dist/index.md. The introSource is returned so
- * downstream (llms-full.txt) can embed the homepage markdown verbatim
- * without re-reading the file.
+ * Emit dist/index.html and dist/index.md. The intro is sourced from three
+ * single-responsibility sidecars in content/:
+ *
+ *   _intro.md         — H1 + philosophy lede. Renders as the hero lede;
+ *                       sources title / description / summary extractors.
+ *   _spec-context.md  — RFC tiers + deep-linking + leaderboard pointers.
+ *                       Not rendered on /; concatenated into llms-full.txt
+ *                       for agent-facing context.
+ *   _use.md           — install/skill/MCP paragraph. Rendered in the hero
+ *                       as <p class="hero__use-it">; mirrored in index.md;
+ *                       concatenated into llms-full.txt.
+ *
+ * The three sidecar sources are returned so 09-llms-emit.mjs can
+ * concatenate them in reading order without re-reading the filesystem.
  *
  * @param {object} args
  * @param {string} args.distDir
  * @param {string} args.contentDir
  * @param {string} args.themeInit
  * @param {Array<{n: number, title: string, shortDesc: string}>} args.principles
- * @returns {Promise<{introTitle: string, introSummary: string, introSource: string, introLede: string}>}
+ * @returns {Promise<{introTitle: string, introSummary: string, introSource: string, specContextSource: string, useSource: string, introLede: string}>}
  */
 export async function emitHomepage({ distDir, contentDir, themeInit, principles }) {
-  const introPath = join(contentDir, '_intro.md');
-  const introSource = await readFile(introPath, 'utf8');
+  const [introSource, specContextSource, useSource] = await Promise.all([
+    readFile(join(contentDir, '_intro.md'), 'utf8'),
+    readFile(join(contentDir, '_spec-context.md'), 'utf8'),
+    readFile(join(contentDir, '_use.md'), 'utf8'),
+  ]);
   const introTitle = extractTitle(introSource);
   const introSummary = extractIntroSummary(introSource);
   const introDescription = extractDescription(introSource);
   const introLede = extractFirstParagraph(introSource);
 
-  const indexBody = buildHomepageBody(introTitle, introLede, principles);
+  const useRendered = (await renderMarkdown(useSource)).trim();
+  // Single-paragraph sidecar: renderMarkdown emits exactly one top-level
+  // <p>. Inject the BEM class onto it; any other shape is a content bug.
+  if (!useRendered.startsWith('<p>')) {
+    throw new Error(`_use.md must render as a single <p>; got: ${useRendered.slice(0, 80)}`);
+  }
+  const useItHtml = useRendered.replace(/^<p>/, '<p class="hero__use-it">');
+
+  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles);
   await writeFile(
     join(distDir, 'index.html'),
     emitShell({
@@ -155,6 +181,8 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles 
     '',
     introLede,
     '',
+    useSource.trim(),
+    '',
     '## Score a binary, live.',
     '',
     '[Install `anc` locally](/install) for source + project depth. The demo here is binary and behavioral audits only.',
@@ -168,5 +196,5 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles 
   ];
   await writeFile(join(distDir, 'index.md'), absolutifyMarkdownLinks(indexMdLines.join('\n')));
 
-  return { introTitle, introSummary, introSource, introLede };
+  return { introTitle, introSummary, introSource, specContextSource, useSource, introLede };
 }

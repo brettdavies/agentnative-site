@@ -15,11 +15,18 @@ import { absolutifyMarkdownLinks } from './util.mjs';
 /**
  * Emit dist/llms.txt and dist/llms-full.txt.
  *
+ * The intro section of llms-full.txt concatenates three sidecar files
+ * sourced by 06-homepage.mjs (introSource + specContextSource +
+ * useSource) so the agent-facing surface keeps the full reading order
+ * while the rendered homepage hero stays scoped to lede + use-it.
+ *
  * @param {object} args
  * @param {string} args.distDir
  * @param {string} args.introTitle
  * @param {string} args.introSummary
- * @param {string} args.introSource
+ * @param {string} args.introSource          — content/_intro.md body (H1 + lede)
+ * @param {string} args.specContextSource    — content/_spec-context.md body
+ * @param {string} args.useSource            — content/_use.md body
  * @param {Array<{n: number, slug: string, title: string, source: string}>} args.principles
  * @param {Array<{name: string, source: string, title: string}>} args.subPageData
  * @param {Array<object>} args.leaderboard         — per-tool entries; .tool.name is the canonical slug
@@ -32,6 +39,8 @@ export async function emitLlmsSurface({
   introTitle,
   introSummary,
   introSource,
+  specContextSource,
+  useSource,
   principles,
   subPageData,
   leaderboard,
@@ -72,9 +81,10 @@ export async function emitLlmsSurface({
   // llms-full.txt embeds each page's markdown body verbatim. Apply the same
   // .md-twin absolutification policy so site-relative links resolve when an
   // agent fetches /llms-full.txt directly.
+  const introFullSource = [introSource.trimEnd(), specContextSource.trim(), useSource.trim()].join('\n\n');
   const llmsFull = buildLlmsFull({
     sections: [
-      { title: introTitle, body: absolutifyMarkdownLinks(introSource), htmlPath: '/', mdPath: '/index.md' },
+      { title: introTitle, body: absolutifyMarkdownLinks(introFullSource), htmlPath: '/', mdPath: '/index.md' },
       ...principles.map((p) => ({
         title: p.title,
         body: absolutifyMarkdownLinks(p.source),

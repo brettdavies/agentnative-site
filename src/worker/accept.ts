@@ -20,6 +20,15 @@
 //                   text/plain rejection in src/worker/index.ts (no
 //                   JSON-RPC envelope at the pre-JSON-RPC layer).
 //
+// detectMcpGetFormat — GET /mcp endpoint ('html' | 'json' | 'markdown').
+//                      HTML wins ties because the canonical caller is a
+//                      human clicking the literal MCP URL from the
+//                      homepage. The worker short-circuits 'json' to
+//                      proxy /.well-known/mcp (above the kill switch);
+//                      'html' and 'markdown' fall through to the asset-
+//                      first dispatch which renders dist/mcp.html and
+//                      dist/mcp.md via the standard site shell.
+//
 // See docs/DESIGN.md §3.4 (Worker paragraph) + eng review A3. Site-side
 // test matrix lives in tests/worker.test.ts; /api/score q-value tests live
 // in the same file's /api/score describe block; /mcp q-value tests live
@@ -30,10 +39,12 @@ import accepts from 'accepts';
 export type Preference = 'html' | 'markdown';
 export type ScorePreference = 'json' | 'markdown';
 export type McpFormat = 'json' | 'sse' | false;
+export type McpGetFormat = 'html' | 'json' | 'markdown';
 
 const SITE_PREFERENCE_ORDER = ['text/html', 'text/markdown'];
 const SCORE_PREFERENCE_ORDER = ['application/json', 'text/markdown', 'text/html'];
 const MCP_FORMAT_ORDER = ['application/json', 'text/event-stream'];
+const MCP_GET_ORDER = ['text/html', 'application/json', 'text/markdown'];
 
 /**
  * Shim a Workers `Request` into the shape `accepts` expects: it only reads
@@ -74,4 +85,19 @@ export function detectMcpFormat(request: Request): McpFormat {
   const match = accepts(shim(request)).type(MCP_FORMAT_ORDER);
   if (!match) return false;
   return match === 'text/event-stream' ? 'sse' : 'json';
+}
+
+export function detectMcpGetFormat(request: Request): McpGetFormat {
+  const acceptHeader = request.headers.get('accept');
+  // Absent / empty / `*/*` reduces to 'html' so curl with no flags and
+  // browsers both land on the rendered descriptor page. Callers who
+  // want JSON or markdown ask for it explicitly.
+  if (!acceptHeader || acceptHeader.trim() === '' || acceptHeader.includes('*/*')) {
+    return 'html';
+  }
+  // @ts-expect-error — see detectPreference above.
+  const match = accepts(shim(request)).type(MCP_GET_ORDER);
+  if (match === 'application/json') return 'json';
+  if (match === 'text/markdown') return 'markdown';
+  return 'html';
 }
