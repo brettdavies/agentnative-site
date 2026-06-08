@@ -17,11 +17,11 @@
 #                 --local` running in another terminal.
 #   mcp       Live MCP suite against the --env target. Three gates: transport + 9-tool surface,
 #             registry-tier symmetry contract, live audit via score_cli against $MCP_BINARY.
-#             Same env semantics as do-smoke. Always passes --force-fresh-audit to mcp-smoke.sh
-#             (live-cache becomes FAIL) so a release-gate run cannot mask a regression in the
-#             container DO path; rotate --mcp-binary across the bin-producing allowlist
-#             (figlet, prettier, tsx, nodemon, npm-check-updates) if the gate reports
-#             "got live-cache".
+#             Same env semantics as do-smoke. Always passes --full-cache-coverage to mcp-smoke.sh
+#             so the live-audit gate runs as two sub-gates: cache-miss via bypass_cache=true
+#             (asserts source=fresh-audit) + cache-hit on the same binary without bypass
+#             (asserts source=live-cache). Both paths must produce their expected outcome; the
+#             cache-miss leg requires MCP_CACHE_BYPASS_ALLOWED bound at the Worker (staging-only).
 #   dist      Distribution surfaces against the --env target — /check -> /audit redirect,
 #             skill.json served version vs source. The X-Robots-Tag: noindex check runs only in
 #             staging mode (the staging-host guard does not fire for localhost in local mode).
@@ -355,11 +355,11 @@ gate_mcp() {
             return
         fi
         # mcp-smoke.sh prints its own section header; the local-Worker
-        # reachability precheck is silent on success. --force-fresh-audit is
+        # reachability precheck is silent on success. --full-cache-coverage is
         # safe in local mode (the prod-host refusal rule in mcp-smoke.sh covers
         # anc.dev; localhost falls through).
         delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
-            --mcp-binary "$MCP_BINARY" --force-fresh-audit
+            --mcp-binary "$MCP_BINARY" --full-cache-coverage
         return
     fi
 
@@ -376,11 +376,11 @@ gate_mcp() {
     export CF_ACCESS_CLIENT_ID="$cid"
     export CF_ACCESS_CLIENT_SECRET="$csec"
 
-    # Staging is the canonical release-smoke surface; --force-fresh-audit
+    # Staging is the canonical release-smoke surface; --full-cache-coverage
     # ensures the live container DO path is exercised every run instead of
     # silently passing on a live-cache short-circuit.
     delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
-        --mcp-binary "$MCP_BINARY" --force-fresh-audit
+        --mcp-binary "$MCP_BINARY" --full-cache-coverage
 }
 
 # Gate: dist (distribution surfaces against staging) ------------------------

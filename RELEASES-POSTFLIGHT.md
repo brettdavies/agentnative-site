@@ -175,12 +175,12 @@ Runs against both envs:
 
 Driven by `scripts/release/postflight.sh --env <staging|prod> mcp`, which delegates to `scripts/release/mcp-smoke.sh
 <env-url>`. The same script is invoked from preflight against `http://localhost:8787` or the staging URL. Differences
-between callers: the base URL, the env-driven auth headers when `--env staging`, and `--force-fresh-audit`. The smoke
-passes `--force-fresh-audit` against staging (both preflight `--env staging` and postflight `--env staging`) and against
-local (preflight `--env local`); it does NOT pass it against prod. With the flag set, a `source=live-cache` outcome on
-the live-audit gate becomes a FAIL with a "rotate `--mcp-binary`" remediation message, so a cached short-circuit cannot
-mask a regression in the container DO path. Without the flag (prod), `live-cache` remains an acceptable pass — prod runs
-read-only-by-default and the strict-mode rehearsal has already happened upstream against staging.
+between callers: the base URL, the env-driven auth headers when `--env staging`, and `--full-cache-coverage`. The smoke
+passes `--full-cache-coverage` against staging (both preflight `--env staging` and postflight `--env staging`) and
+against local (preflight `--env local`); it does NOT pass it against prod. With the flag set, the live-audit gate runs
+as two sub-gates: cache-miss via `bypass_cache: true` (asserts `source=fresh-audit`) followed by cache-hit on the same
+binary without bypass (asserts `source=live-cache`). Both paths must produce their expected outcome. Without the flag
+(prod), the gate runs once and accepts either outcome.
 
 - [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
   at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:

@@ -28,10 +28,11 @@
 #              expected
 #   mcp        Live MCP suite (transport + symmetry + live audit) via
 #              scripts/release/mcp-smoke.sh against the env URL. Passes
-#              --force-fresh-audit to mcp-smoke.sh against staging (live-cache
-#              becomes FAIL); prod accepts live-cache because the strict-mode
-#              rehearsal has already run upstream against staging and prod runs
-#              are read-only-by-default.
+#              --full-cache-coverage to mcp-smoke.sh against staging so the
+#              live-audit gate runs as two sub-gates (cache-miss via
+#              bypass_cache=true + cache-hit on the same binary); prod runs
+#              accept either outcome (the bypass-gated path requires
+#              MCP_CACHE_BYPASS_ALLOWED which is staging-only).
 #   purge      `/skill.json` served version matches src/data/skill/skill.json
 #   backport   Merged PR to dev with the release slug in its title (prod only;
 #              SKIPped on staging)
@@ -298,14 +299,15 @@ gate_mcp() {
     # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
     # so we delegate directly without a duplicate header here.
     #
-    # --force-fresh-audit upgrades live-cache from PASS to FAIL so a release smoke
-    # against a cached binary cannot mask a regression in the container DO path.
-    # Passed only against staging; prod accepts live-cache because the strict mode
-    # is unavailable there (no CF Access in front; mcp-smoke.sh refuses the flag
-    # against anc.dev by design).
+    # --full-cache-coverage splits the live-audit gate into two sub-gates:
+    # cache-miss via bypass_cache=true (asserts source=fresh-audit) + cache-hit
+    # on the same binary (asserts source=live-cache). Passed only against
+    # staging; prod runs as a single relaxed gate (the bypass-gated leg
+    # requires MCP_CACHE_BYPASS_ALLOWED which is staging-only, and mcp-smoke.sh
+    # refuses the flag against anc.dev anyway).
     local extra=()
     if [[ "$ENV" == "staging" ]]; then
-        extra+=(--force-fresh-audit)
+        extra+=(--full-cache-coverage)
     fi
     delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
         --mcp-binary "$MCP_BINARY" "${extra[@]}"
