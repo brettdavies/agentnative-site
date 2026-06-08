@@ -11,7 +11,7 @@
 //   - Response headers applied in src/worker/headers.ts (Link rel=alternate,
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
-import { detectMcpFormat, detectPreference } from './accept';
+import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { applyHeaders } from './headers';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
@@ -106,13 +106,24 @@ export default {
       return handleScore(request, env as ScoreEnv);
     }
 
-    // POST /mcp — streamable HTTP MCP server. Sits above /_internal/
-    // interception and the asset fetch so the entry-point ordering keeps
-    // the /mcp branch in front of the asset-first dispatch (KTD-10 of
-    // the MCP endpoint plan). The dispatch enforces, in order:
+    // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
+    // GET surface. Sits above /_internal/ interception and the asset
+    // fetch so the entry-point ordering keeps the /mcp branch in front
+    // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
+    //
+    // GET dispatch:
+    //   - Accept: application/json → proxy /.well-known/mcp (above the
+    //     kill switch; the URL identity documents itself even when the
+    //     JSON-RPC handler is offline).
+    //   - Accept: text/html or text/markdown → no early return; control
+    //     flows past this branch into the asset-first dispatch, which
+    //     serves dist/mcp.html (and the .md twin via the standard
+    //     detectPreference content negotiation).
+    //
+    // POST dispatch enforces, in order:
     //
     //   1. MCP_ENABLED kill switch — 503 Retry-After when disabled.
-    //   2. Method check — non-POST returns 405 Allow:POST.
+    //   2. Method check — non-POST returns 405 Allow: GET, POST.
     //   3. Accept-header check — neither MIME acceptable returns 406
     //      text/plain (no JSON-RPC envelope at the pre-JSON-RPC layer).
     //   4. MCP_LIMITER gate — breach returns the -32099 JSON-RPC error
@@ -136,77 +147,101 @@ export default {
       // R15). MCP clients are agent runtimes that never issue OPTIONS,
       // so this is the right shape.
 
-      // Step 1: MCP_ENABLED kill switch.
-      if (env.MCP_ENABLED !== 'true') {
-        return new Response('mcp is currently disabled by the operator\n', {
-          status: 503,
-          headers: {
-            'content-type': 'text/plain; charset=utf-8',
-            'retry-after': '3600',
-            'cache-control': 'no-store',
-          },
-        });
-      }
-
-      // Step 2: method check.
-      if (request.method !== 'POST') {
-        return new Response('method not allowed\n', {
-          status: 405,
-          headers: {
-            Allow: 'POST',
-            'content-type': 'text/plain; charset=utf-8',
-            'cache-control': 'no-store',
-          },
-        });
-      }
-
-      // Step 3: Accept-header check.
-      const format = detectMcpFormat(request);
-      if (format === false) {
-        // The 406 rejection happens before any JSON-RPC parsing so the
-        // body is plain text without a `jsonrpc`/`id`/`error` envelope.
-        return new Response(
-          'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
-          {
-            status: 406,
+      if (request.method === 'GET') {
+        const getFormat = detectMcpGetFormat(request);
+        if (getFormat === 'json') {
+          const wellKnown = new URL(request.url);
+          wellKnown.pathname = '/.well-known/mcp';
+          const asset = await env.ASSETS.fetch(new Request(wellKnown.toString(), { method: 'GET' }));
+          return new Response(asset.body, {
+            status: 200,
             headers: {
+              'content-type': 'application/json; charset=utf-8',
+              'cache-control': 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60',
+              'access-control-allow-origin': '*',
+            },
+          });
+        }
+        // 'html' or 'markdown' — control flows past this branch into
+        // the asset-first dispatch below. dist/mcp.html ships from
+        // emitSubPages with the full site shell (header, theme toggle,
+        // footer); detectPreference rewrites to dist/mcp.md when the
+        // caller prefers text/markdown.
+      } else {
+        // Step 1: MCP_ENABLED kill switch.
+        if (env.MCP_ENABLED !== 'true') {
+          return new Response('mcp is currently disabled by the operator\n', {
+            status: 503,
+            headers: {
+              'content-type': 'text/plain; charset=utf-8',
+              'retry-after': '3600',
+              'cache-control': 'no-store',
+            },
+          });
+        }
+
+        // Step 2: method check. GET handled above; POST falls through
+        // to the JSON-RPC pipeline; PUT/DELETE/PATCH lands here with
+        // Allow advertising the two serviceable methods.
+        if (request.method !== 'POST') {
+          return new Response('method not allowed\n', {
+            status: 405,
+            headers: {
+              Allow: 'GET, POST',
               'content-type': 'text/plain; charset=utf-8',
               'cache-control': 'no-store',
             },
-          },
-        );
-      }
+          });
+        }
 
-      // Step 4: MCP_LIMITER gate, then visitor log with gate_result.
-      let gateResult: 'passed' | 'rate_limited' = 'passed';
-      if (env.MCP_LIMITER) {
-        const key = request.headers.get('cf-connecting-ip') ?? 'anon';
-        const { success } = await env.MCP_LIMITER.limit({ key });
-        if (!success) gateResult = 'rate_limited';
-      }
-      logVisitor(request, { format, gate_result: gateResult });
-      if (gateResult === 'rate_limited') {
-        return jsonRpcError(-32099, 'rate limit exceeded');
-      }
+        // Step 3: Accept-header check.
+        const format = detectMcpFormat(request);
+        if (format === false) {
+          // The 406 rejection happens before any JSON-RPC parsing so the
+          // body is plain text without a `jsonrpc`/`id`/`error` envelope.
+          return new Response(
+            'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
+            {
+              status: 406,
+              headers: {
+                'content-type': 'text/plain; charset=utf-8',
+                'cache-control': 'no-store',
+              },
+            },
+          );
+        }
 
-      // Step 5: SDK Accept-rewrite shim.
-      const sdkHeaders = new Headers(request.headers);
-      sdkHeaders.set('accept', 'application/json, text/event-stream');
-      const sdkRequest = new Request(request, { headers: sdkHeaders });
+        // Step 4: MCP_LIMITER gate, then visitor log with gate_result.
+        let gateResult: 'passed' | 'rate_limited' = 'passed';
+        if (env.MCP_LIMITER) {
+          const key = request.headers.get('cf-connecting-ip') ?? 'anon';
+          const { success } = await env.MCP_LIMITER.limit({ key });
+          if (!success) gateResult = 'rate_limited';
+        }
+        logVisitor(request, { format, gate_result: gateResult });
+        if (gateResult === 'rate_limited') {
+          return jsonRpcError(-32099, 'rate limit exceeded');
+        }
 
-      // Step 6: build per-request handler and return its response
-      // directly. The handler sets its own content-type for both JSON
-      // and SSE; we always set Cache-Control: no-store and strip any
-      // Access-Control-Allow-Origin the SDK added because the endpoint
-      // is server-to-agent JSON-RPC, not browser-to-server (KTD-10).
-      // Browser-origin POSTs fail the browser's same-origin check;
-      // returning ACAO would defeat the deliberate posture.
-      const handler = await buildMcpHandler(env as McpEnv, { jsonResponse: format === 'json' });
-      const response = await handler(sdkRequest, env as McpEnv, ctx);
-      const headers = new Headers(response.headers);
-      headers.delete('access-control-allow-origin');
-      headers.set('cache-control', 'no-store');
-      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+        // Step 5: SDK Accept-rewrite shim.
+        const sdkHeaders = new Headers(request.headers);
+        sdkHeaders.set('accept', 'application/json, text/event-stream');
+        const sdkRequest = new Request(request, { headers: sdkHeaders });
+
+        // Step 6: build per-request handler and return its response
+        // directly. The handler sets its own content-type for both JSON
+        // and SSE; we always set Cache-Control: no-store and strip any
+        // Access-Control-Allow-Origin the SDK added because the endpoint
+        // is server-to-agent JSON-RPC, not browser-to-server (KTD-10).
+        // Browser-origin POSTs fail the browser's same-origin check;
+        // returning ACAO would defeat the deliberate posture.
+        const handler = await buildMcpHandler(env as McpEnv, { jsonResponse: format === 'json' });
+        const response = await handler(sdkRequest, env as McpEnv, ctx);
+        const headers = new Headers(response.headers);
+        headers.delete('access-control-allow-origin');
+        headers.set('cache-control', 'no-store');
+        return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      }
     }
 
     // /score/live/<binary>.html → 301 to /score/live/<binary>. Mirrors
