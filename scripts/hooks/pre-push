@@ -69,10 +69,21 @@ bold '==> bun x wrangler deploy --dry-run (staging env)'
 bun x wrangler deploy --dry-run --env staging
 
 bold '==> Pack-README drift check'
-bun scripts/generate-pack-readme.mjs site --check </dev/null
+# Pack-README + banned-fonts both consume styles/<pack>/*.yml. The
+# styles/ tree is dev-only tooling (see prose-check guard below); when
+# absent (e.g., main or release/* branches), skip rather than fail.
+if [ ! -d styles ]; then
+  echo "    WARN: styles/ absent; skipping pack-README drift check (dev-only tooling)."
+else
+  bun scripts/generate-pack-readme.mjs site --check </dev/null
+fi
 
 bold '==> Banned-font deployment scan'
-bash scripts/check-banned-fonts.sh </dev/null
+if [ ! -d styles ] || [ ! -x scripts/check-banned-fonts.sh ]; then
+  echo "    WARN: styles/ or scripts/check-banned-fonts.sh absent; skipping (dev-only tooling)."
+else
+  bash scripts/check-banned-fonts.sh </dev/null
+fi
 
 bold '==> shellcheck (severity=warning)'
 # Lint every tracked *.sh plus the pre-push hook itself. Severity threshold
@@ -92,9 +103,19 @@ else
 fi
 
 bold '==> prose-check (Vale + LanguageTool)'
-# Scope to files changed vs PROSE_CHECK_BASE (default origin/dev) so untracked
-# or pre-existing prose drift outside the pushed branch's diff can't block the
-# push. Full-scope check remains available via `bash scripts/prose-check.sh`.
-bash scripts/prose-check.sh --changed-only </dev/null
+# The prose-check stack (styles/, .vale.ini, scripts/prose-check.sh) is
+# dev-only tooling — present on `dev`, absent on `main` (and on release/*
+# branches cut from main). When the hook runs against a branch missing
+# any of those, warn and skip rather than fail; contributor work happens
+# on `dev` where the stack is present.
+if [ ! -d styles ] || [ ! -f .vale.ini ] || [ ! -x scripts/prose-check.sh ]; then
+  echo "    WARN: prose-check stack absent (styles/, .vale.ini, scripts/prose-check.sh)."
+  echo "          This is normal on main and release/* branches; the stack is dev-only tooling. Skipping."
+else
+  # Scope to files changed vs PROSE_CHECK_BASE (default origin/dev) so untracked
+  # or pre-existing prose drift outside the pushed branch's diff can't block the
+  # push. Full-scope check remains available via `bash scripts/prose-check.sh`.
+  bash scripts/prose-check.sh --changed-only </dev/null
+fi
 
 bold '==> pre-push checks passed'
