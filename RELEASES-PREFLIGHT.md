@@ -199,8 +199,11 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
   grep -E "^- name: ${BINARY}$" registry.yaml && echo "FAIL: already in registry, pick another" || echo "ok"
   ```
 
-  Suggested rotation list (small, stable, npm/cargo-available): `cowsay`, `figlet`, `sl`, `lolcat`. If all four end up
-  registered, pick another small tool with a public GitHub URL.
+  Suggested rotation list (small, stable, GitHub-hosted): `figlet`, `sl`, `lolcat`. These are for the HTTP `do-smoke`
+  gate, NOT the MCP live-audit gate; that gate uses a separate bin-producing-npm allowlist enforced by
+  `scripts/release/mcp-smoke.sh` (`figlet`, `prettier`, `tsx`, `nodemon`, `npm-check-updates`). The MCP gate now passes
+  `--force-fresh-audit` against staging, so the binary must be uncached in R2 at the time of the run; rotate
+  `--mcp-binary` to a different allowlist entry if the gate reports `--force-fresh-audit set but got live-cache`.
 - [ ] **Container app is in `ready` state on staging.** If any commit in this release modifies `docker/sandbox/` or
   advances `env.staging.containers[0].image` in `wrangler.jsonc`, the staging container app rolls asynchronously after
   deploy. Wait for `ready` before smoking. Full pattern in
@@ -367,7 +370,8 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
   exercise their audit paths:
 
   ```bash
-  MCP_BINARY=figlet   # rotate per release; pick something tiny and stable, distinct from $BINARY
+  MCP_BINARY=figlet   # rotate per release; must be in mcp-smoke's bin-producing allowlist
+                      # (figlet, prettier, tsx, nodemon, npm-check-updates) and distinct from $BINARY
   grep -E "^- name: ${MCP_BINARY}$" registry.yaml && echo "FAIL: already in registry, pick another" || echo "ok"
 
   curl -fsSL -H 'Content-Type: application/json' \

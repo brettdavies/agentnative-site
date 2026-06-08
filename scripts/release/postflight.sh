@@ -27,7 +27,11 @@
 #   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
 #              expected
 #   mcp        Live MCP suite (transport + symmetry + live audit) via
-#              scripts/release/mcp-smoke.sh against the env URL
+#              scripts/release/mcp-smoke.sh against the env URL. Passes
+#              --force-fresh-audit to mcp-smoke.sh against staging (live-cache
+#              becomes FAIL); prod accepts live-cache because the strict-mode
+#              rehearsal has already run upstream against staging and prod runs
+#              are read-only-by-default.
 #   purge      `/skill.json` served version matches src/data/skill/skill.json
 #   backport   Merged PR to dev with the release slug in its title (prod only;
 #              SKIPped on staging)
@@ -293,7 +297,18 @@ gate_pages() {
 gate_mcp() {
     # mcp-smoke.sh prints its own section header ("Live MCP surface against $BASE_URL"),
     # so we delegate directly without a duplicate header here.
-    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
+    #
+    # --force-fresh-audit upgrades live-cache from PASS to FAIL so a release smoke
+    # against a cached binary cannot mask a regression in the container DO path.
+    # Passed only against staging; prod accepts live-cache because the strict mode
+    # is unavailable there (no CF Access in front; mcp-smoke.sh refuses the flag
+    # against anc.dev by design).
+    local extra=()
+    if [[ "$ENV" == "staging" ]]; then
+        extra+=(--force-fresh-audit)
+    fi
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+        --mcp-binary "$MCP_BINARY" "${extra[@]}"
 }
 
 # Gate: purge ----------------------------------------------------------------

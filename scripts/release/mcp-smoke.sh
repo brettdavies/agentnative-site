@@ -15,11 +15,24 @@
 #   - scripts/release/postflight.sh --env prod mcp       -> https://anc.dev (no auth)
 #
 # Usage:
-#   scripts/release/mcp-smoke.sh <base-url> [--mcp-binary <binary>] [--result-file PATH]
+#   scripts/release/mcp-smoke.sh <base-url> [--mcp-binary <binary>]
+#                                [--force-fresh-audit] [--result-file PATH]
 #
 # Flags:
 #   --mcp-binary <binary>  Fresh non-registry binary for the live audit (default:
-#                          $MCP_BINARY or `figlet`)
+#                          $MCP_BINARY or `figlet`). Must be in the bin-producing
+#                          allowlist; library-only packages (lodash, chalk, etc.)
+#                          install cleanly but produce no executable, and the
+#                          sandbox correctly returns chain_resolved_no_binary_produced.
+#   --force-fresh-audit    Upgrade the live-audit gate from "live-cache OK" to
+#                          "fresh-audit required" so a release smoke against a
+#                          cached binary cannot mask a regression in the container
+#                          DO path. Refused when the base URL hostname matches a
+#                          prod surface (anc.dev), so prod runs always accept
+#                          live-cache outcomes. The flag never reaches the Worker
+#                          (no URL param, no header), only changes how the script
+#                          grades the response, so even bypassing the script can't
+#                          change prod behavior.
 #   --result-file PATH     When set, the script writes "<pass> <fail> <skip>" to PATH
 #                          at exit so a parent orchestrator script can aggregate
 #                          counters across its own gates. Without this flag, prints
@@ -54,19 +67,30 @@ readonly REPO_ROOT
 BASE_URL=""
 MCP_BINARY="${MCP_BINARY:-figlet}"
 RESULT_FILE=""
+FORCE_FRESH_AUDIT=0
+
+# Bin-producing npm allowlist. Add only after confirming `npm view <pkg> bin`
+# returns a non-empty bin map; library-only packages produce no executable and
+# the sandbox correctly returns chain_resolved_no_binary_produced for them.
+readonly MCP_BINARY_ALLOWLIST=(figlet prettier tsx nodemon npm-check-updates)
+
+# Hostnames considered "prod" for the --force-fresh-audit refusal rule. Grow
+# this list if additional production surfaces are added.
+readonly MCP_PROD_HOSTS=(anc.dev www.anc.dev)
 
 usage() {
-    sed -n '2,41p' "$0" | sed 's/^# \?//'
+    sed -n '2,55p' "$0" | sed 's/^# \?//'
     exit 2
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --mcp-binary)  MCP_BINARY="$2"; shift 2;;
-        --result-file) RESULT_FILE="$2"; shift 2;;
-        -h|--help)     usage;;
-        -*)            echo "unknown flag: $1" >&2; usage;;
-        *)             [[ -z "$BASE_URL" ]] && BASE_URL="$1" || { echo "unexpected arg: $1" >&2; usage; }; shift;;
+        --mcp-binary)        MCP_BINARY="$2"; shift 2;;
+        --force-fresh-audit) FORCE_FRESH_AUDIT=1; shift;;
+        --result-file)       RESULT_FILE="$2"; shift 2;;
+        -h|--help)           usage;;
+        -*)                  echo "unknown flag: $1" >&2; usage;;
+        *)                   [[ -z "$BASE_URL" ]] && BASE_URL="$1" || { echo "unexpected arg: $1" >&2; usage; }; shift;;
     esac
 done
 
@@ -77,6 +101,37 @@ require_bin jq
 
 # Strip any trailing slash from BASE_URL so `${BASE_URL}/mcp` is always clean.
 BASE_URL="${BASE_URL%/}"
+
+# Validate --mcp-binary against the bin-producing allowlist.
+in_allowlist() {
+    local needle=$1 hay
+    for hay in "${MCP_BINARY_ALLOWLIST[@]}"; do
+        [[ "$hay" == "$needle" ]] && return 0
+    done
+    return 1
+}
+if ! in_allowlist "$MCP_BINARY"; then
+    echo "--mcp-binary '$MCP_BINARY' is not in the bin-producing allowlist." >&2
+    echo "Allowed: ${MCP_BINARY_ALLOWLIST[*]}" >&2
+    echo "Library-only packages install cleanly but produce no executable; the sandbox" >&2
+    echo "returns chain_resolved_no_binary_produced and the live-audit gate cannot pass." >&2
+    exit 2
+fi
+
+# Refuse --force-fresh-audit against prod surfaces. The flag's mechanism is
+# script-side response grading (live-cache becomes FAIL); the Worker never sees
+# a flag value, so this script-side gate is the only enforcement needed.
+if [[ "$FORCE_FRESH_AUDIT" -eq 1 ]]; then
+    base_host=$(printf '%s' "$BASE_URL" | sed -E 's|^[a-z]+://||; s|/.*$||; s|:.*$||')
+    for prod_host in "${MCP_PROD_HOSTS[@]}"; do
+        if [[ "$base_host" == "$prod_host" ]]; then
+            echo "--force-fresh-audit is refused against prod ($base_host)." >&2
+            echo "Prod runs accept live-cache; strict mode runs against staging or local where the" >&2
+            echo "live container path can be regression-tested without risking a real-user-visible audit." >&2
+            exit 2
+        fi
+    done
+fi
 
 # Auth headers (optional). Staged into a mode-600 curl config file when both
 # CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET are present in the environment;
@@ -178,7 +233,18 @@ run_gate_live_audit() {
     has_scorecard=$(printf '%s' "$result_text" | jq -r '.scorecard != null | tostring' 2>/dev/null || echo "false")
     live_source=$(printf '%s' "$result_text" | jq -r '.source // empty' 2>/dev/null || true)
     live_anc_v=$(printf '%s' "$result_text" | jq -r '.anc_version // empty' 2>/dev/null || true)
-    live_err=$(printf '%s' "$result_text" | jq -r '.error.code // empty' 2>/dev/null || true)
+    # `.error` can arrive as:
+    #   - missing (no field) -> empty
+    #   - an object (`{"code": -1, "message": "..."}`) -> prefer `.code` then `.message`
+    #   - a string (sandbox returns `"error": "chain_resolved_no_binary_produced"`) -> use as-is
+    # Earlier shape `.error.code // empty` silently swallowed the string form, so a
+    # legit sandbox failure surfaced as empty fields with no diagnostic.
+    live_err=$(printf '%s' "$result_text" | jq -r '
+        if (has("error") | not) or .error == null then ""
+        elif (.error | type) == "string" then .error
+        elif (.error | type) == "object" then (.error.code // .error.message // (.error | tostring))
+        else (.error | tostring)
+        end' 2>/dev/null || true)
     local next_tool
     next_tool=$(printf '%s' "$result_text" | jq -r '.next_tool // empty' 2>/dev/null || true)
 
@@ -197,7 +263,12 @@ run_gate_live_audit() {
     elif [[ "$live_source" == "fresh-audit" && "$audited" == "true" && "$has_scorecard" == "true" && -n "$live_anc_v" ]]; then
         gate_pass "live MCP audit on $MCP_BINARY: source=fresh-audit anc=$live_anc_v (full DO path exercised)"
     elif [[ "$live_source" == "live-cache" && "$audited" == "false" && "$next_tool" == "get_scorecard" ]]; then
-        gate_pass "live MCP audit on $MCP_BINARY: source=live-cache (cached from prior run; rotate --mcp-binary to force fresh audit)"
+        if [[ "$FORCE_FRESH_AUDIT" -eq 1 ]]; then
+            gate_fail "live MCP audit on $MCP_BINARY" \
+                "--force-fresh-audit set but got live-cache; binary already cached in R2. Rotate --mcp-binary to a different allowlist entry (${MCP_BINARY_ALLOWLIST[*]}) or wait for cache TTL expiry."
+        else
+            gate_pass "live MCP audit on $MCP_BINARY: source=live-cache (cached from prior run; rotate --mcp-binary to force fresh audit)"
+        fi
     else
         gate_fail "live MCP audit on $MCP_BINARY" \
             "audited=$audited has_scorecard=$has_scorecard source=$live_source next_tool=$next_tool anc=$live_anc_v err=$live_err"

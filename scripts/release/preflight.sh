@@ -17,7 +17,11 @@
 #                 --local` running in another terminal.
 #   mcp       Live MCP suite against the --env target. Three gates: transport + 9-tool surface,
 #             registry-tier symmetry contract, live audit via score_cli against $MCP_BINARY.
-#             Same env semantics as do-smoke.
+#             Same env semantics as do-smoke. Always passes --force-fresh-audit to mcp-smoke.sh
+#             (live-cache becomes FAIL) so a release-gate run cannot mask a regression in the
+#             container DO path; rotate --mcp-binary across the bin-producing allowlist
+#             (figlet, prettier, tsx, nodemon, npm-check-updates) if the gate reports
+#             "got live-cache".
 #   dist      Distribution surfaces against the --env target — /check -> /audit redirect,
 #             skill.json served version vs source. The X-Robots-Tag: noindex check runs only in
 #             staging mode (the staging-host guard does not fire for localhost in local mode).
@@ -351,8 +355,11 @@ gate_mcp() {
             return
         fi
         # mcp-smoke.sh prints its own section header; the local-Worker
-        # reachability precheck is silent on success.
-        delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
+        # reachability precheck is silent on success. --force-fresh-audit is
+        # safe in local mode (the prod-host refusal rule in mcp-smoke.sh covers
+        # anc.dev; localhost falls through).
+        delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+            --mcp-binary "$MCP_BINARY" --force-fresh-audit
         return
     fi
 
@@ -369,7 +376,11 @@ gate_mcp() {
     export CF_ACCESS_CLIENT_ID="$cid"
     export CF_ACCESS_CLIENT_SECRET="$csec"
 
-    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" --mcp-binary "$MCP_BINARY"
+    # Staging is the canonical release-smoke surface; --force-fresh-audit
+    # ensures the live container DO path is exercised every run instead of
+    # silently passing on a live-cache short-circuit.
+    delegate_to_subscript "$REPO_ROOT/scripts/release/mcp-smoke.sh" "$ENV_URL" \
+        --mcp-binary "$MCP_BINARY" --force-fresh-audit
 }
 
 # Gate: dist (distribution surfaces against staging) ------------------------

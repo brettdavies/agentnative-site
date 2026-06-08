@@ -174,8 +174,13 @@ Runs against both envs:
 - Prod (`https://anc.dev/mcp`) — unauthenticated (no CF Access on the custom domain).
 
 Driven by `scripts/release/postflight.sh --env <staging|prod> mcp`, which delegates to `scripts/release/mcp-smoke.sh
-<env-url>`. The same script is invoked from preflight against `http://localhost:8787`. The only difference between the
-three callers is the base URL (plus the env-driven auth headers when `--env staging`).
+<env-url>`. The same script is invoked from preflight against `http://localhost:8787` or the staging URL. Differences
+between callers: the base URL, the env-driven auth headers when `--env staging`, and `--force-fresh-audit`. The smoke
+passes `--force-fresh-audit` against staging (both preflight `--env staging` and postflight `--env staging`) and against
+local (preflight `--env local`); it does NOT pass it against prod. With the flag set, a `source=live-cache` outcome on
+the live-audit gate becomes a FAIL with a "rotate `--mcp-binary`" remediation message, so a cached short-circuit cannot
+mask a regression in the container DO path. Without the flag (prod), `live-cache` remains an acceptable pass — prod runs
+read-only-by-default and the strict-mode rehearsal has already happened upstream against staging.
 
 - [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
   at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:
@@ -224,7 +229,8 @@ three callers is the base URL (plus the env-driven auth headers when `--env stag
 
 - [ ] **Live MCP audit via `score_cli` against a fresh non-registry binary.** Exercises the full DO path through the
   prod-side MCP surface AND the `MCP_AUDIT_LIMITER` binding. Consumes one unit of the 5/hour audit budget for the
-  caller's IP. Re-use `MCP_BINARY` from preflight (e.g., `figlet`):
+  caller's IP. Re-use `MCP_BINARY` from preflight; must be in `mcp-smoke.sh`'s bin-producing allowlist (`figlet`,
+  `prettier`, `tsx`, `nodemon`, `npm-check-updates`):
 
   ```bash
   MCP_BINARY=figlet
