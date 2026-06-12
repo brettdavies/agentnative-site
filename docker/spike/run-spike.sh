@@ -47,6 +47,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --dispose) DISPOSE=1; shift ;;
     --skip-build) SKIP_BUILD=1; shift ;;
+    --brew-only) ENTRY_ARGS+=(--brew-only); shift ;;
     --local) shift ;;
     --cf-sandbox)
       echo "error: --cf-sandbox is the deferred follow-up per KTD5; v1 ships local-only" >&2
@@ -108,18 +109,21 @@ else
   exit 2
 fi
 
-# Phase 3 + 4: arm 1 + arm 3 in parallel (independent of probe);
-# arm 2 sequentially after probe (skipped on probe-fail by the arm 2
-# wrapper itself).
-echo "==> [3/6] Running arm 1 and arm 3 in parallel..." >&2
+# Phase 3 + 4: arms 1 + 3 + 4 in parallel (independent of probe); arm 2
+# sequential after probe (the arm 2 wrapper handles probe-fail
+# internally by writing arm2-cancelled.json).
+echo "==> [3/6] Running arms 1, 3, 4 in parallel..." >&2
 
 arm1_log=$(mktemp -t spike-arm1.XXXXXX)
 arm3_log=$(mktemp -t spike-arm3.XXXXXX)
+arm4_log=$(mktemp -t spike-arm4.XXXXXX)
 
 bash "$SPIKE_DIR/run-arm1.sh" "${ENTRY_ARGS[@]}" > "$arm1_log" 2>&1 &
 arm1_pid=$!
 bash "$SPIKE_DIR/run-arm3.sh" "${ENTRY_ARGS[@]}" > "$arm3_log" 2>&1 &
 arm3_pid=$!
+bash "$SPIKE_DIR/run-arm4.sh" "${ENTRY_ARGS[@]}" > "$arm4_log" 2>&1 &
+arm4_pid=$!
 
 # Phase 4: arm 2 sequential (or skipped). The arm 2 wrapper handles
 # the probe-fail case internally by writing arm2-cancelled.json.
@@ -129,8 +133,10 @@ bash "$SPIKE_DIR/run-arm2.sh" "${ENTRY_ARGS[@]}"
 # Wait for parallel arms.
 arm1_rc=0; wait "$arm1_pid" || arm1_rc=$?
 arm3_rc=0; wait "$arm3_pid" || arm3_rc=$?
+arm4_rc=0; wait "$arm4_pid" || arm4_rc=$?
 echo "    arm 1 rc=$arm1_rc (log: $arm1_log)" >&2
 echo "    arm 3 rc=$arm3_rc (log: $arm3_log)" >&2
+echo "    arm 4 rc=$arm4_rc (log: $arm4_log)" >&2
 
 # Surface the tail of each arm's log to the orchestrator stderr so
 # the operator sees the per-arm summary without grepping.
@@ -138,7 +144,9 @@ echo "==> arm 1 tail:" >&2
 tail -n3 "$arm1_log" >&2
 echo "==> arm 3 tail:" >&2
 tail -n3 "$arm3_log" >&2
-trash "$arm1_log" "$arm3_log" 2>/dev/null || rm -f "$arm1_log" "$arm3_log"
+echo "==> arm 4 tail:" >&2
+tail -n3 "$arm4_log" >&2
+trash "$arm1_log" "$arm3_log" "$arm4_log" 2>/dev/null || rm -f "$arm1_log" "$arm3_log" "$arm4_log"
 
 # Phase 5: egress host capture
 echo "==> [5/6] Running egress host capture..." >&2

@@ -132,32 +132,38 @@ load_resolution_from_file() {
 }
 
 # list_entries — emits TSV rows (name<TAB>binary<TAB>install) one per
-# registry entry. Honors `--limit N` and `--only name1,name2` filters
-# passed as positional args. The skipped/notable distinction is up to
-# the calling arm; this helper just enumerates.
+# registry entry. Honors `--limit N`, `--only name1,name2`, and
+# `--brew-only` filters passed as positional args. The
+# skipped/notable distinction is up to the calling arm; this helper
+# just enumerates.
 list_entries() {
-  local limit=0 only=""
+  local limit=0 only="" brew_only=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --limit) limit="$2"; shift 2 ;;
       --only) only="$2"; shift 2 ;;
+      --brew-only) brew_only=1; shift ;;
       *) shift ;;
     esac
   done
 
+  local base_filter=".tools[]"
+  if [[ $brew_only -eq 1 ]]; then
+    base_filter='.tools[] | select(.install | test("^brew install "))'
+  fi
+
   if [[ -n "$only" ]]; then
-    # mikefarah yq reads env vars via env(NAME). $names is the local
-    # yq alias for the parsed list.
     # shellcheck disable=SC2016  # the single-quoted expression IS the yq filter
-    ONLY="$only" yq -r '
-      (env(ONLY) | split(",")) as $names |
-      .tools[] | select(.name as $n | $names | contains([$n])) |
+    ONLY="$only" yq -r "
+      (env(ONLY) | split(\",\")) as \$names |
+      $base_filter |
+      select(.name as \$n | \$names | contains([\$n])) |
       [.name, .binary, .install] | @tsv
-    ' "$ARM_REGISTRY_FILE"
+    " "$ARM_REGISTRY_FILE"
   elif [[ "$limit" -gt 0 ]]; then
-    yq -r '.tools[] | [.name, .binary, .install] | @tsv' "$ARM_REGISTRY_FILE" | head -n "$limit"
+    yq -r "$base_filter | [.name, .binary, .install] | @tsv" "$ARM_REGISTRY_FILE" | head -n "$limit"
   else
-    yq -r '.tools[] | [.name, .binary, .install] | @tsv' "$ARM_REGISTRY_FILE"
+    yq -r "$base_filter | [.name, .binary, .install] | @tsv" "$ARM_REGISTRY_FILE"
   fi
 }
 

@@ -41,6 +41,7 @@ ARM2_FILE="$OUT_DIR/arm2-results.json"
 # shellcheck disable=SC2034
 ARM2_CANCEL_FILE="$OUT_DIR/arm2-cancelled.json"
 ARM3_FILE="$OUT_DIR/arm3-results.json"
+ARM4_FILE="$OUT_DIR/arm4-results.json"
 EGRESS_FILE="$OUT_DIR/egress-hosts.json"
 
 for tool in jaq awk; do
@@ -169,10 +170,10 @@ generate_comparison_table() {
 ## Per-entry comparison
 
 Total elapsed (install + audit), one row per registry entry. `—` denotes skipped (not applicable to the arm) or
-errored.
+errored. Deltas are vs arm 1 (today's production path); negative means the alternative is faster.
 
-| Entry | Arm 1 | Arm 2 | Arm 3 | Δ(2−1) | Δ(3−1) |
-| --- | --- | --- | --- | --- | --- |
+| Entry | Arm 1 (fallback) | Arm 2 (brew exec) | Arm 3 (fallback') | Arm 4 (brew install) | Δ(2−1) | Δ(4−1) |
+| --- | --- | --- | --- | --- | --- | --- |
 SEC
 
   if [[ ! -f "$ARM1_FILE" ]]; then
@@ -182,7 +183,10 @@ SEC
   fi
 
   # shellcheck disable=SC2016  # $vars are jaq vars
-  jaq -r --slurpfile arm2 "${ARM2_FILE:-/dev/null}" --slurpfile arm3 "${ARM3_FILE:-/dev/null}" '
+  jaq -r \
+    --slurpfile arm2 "${ARM2_FILE:-/dev/null}" \
+    --slurpfile arm3 "${ARM3_FILE:-/dev/null}" \
+    --slurpfile arm4 "${ARM4_FILE:-/dev/null}" '
     def fmt: . * 1000 | round / 1000 | tostring + "s";
     def cell_total($a; $entry):
       if $a[$entry] == null then "—"
@@ -195,9 +199,10 @@ SEC
       else (($a.total_elapsed - $base.total_elapsed) | fmt) end;
     ($arm2 | if length > 0 then .[0] else [] end | map({(.entry): .}) | add // {}) as $a2 |
     ($arm3 | if length > 0 then .[0] else [] end | map({(.entry): .}) | add // {}) as $a3 |
+    ($arm4 | if length > 0 then .[0] else [] end | map({(.entry): .}) | add // {}) as $a4 |
     [.[]] | sort_by(.entry) | .[] as $row |
-    "| \($row.entry) | \(if ($row.skipped // false) then "—" elif $row.error != null then "—" else ($row.total_elapsed | fmt) end) | \(cell_total($a2; $row.entry)) | \(cell_total($a3; $row.entry)) | \(cell_delta($a2[$row.entry]; $row)) | \(cell_delta($a3[$row.entry]; $row)) |"
-  ' < "$ARM1_FILE" 2>/dev/null || echo "| _(comparison table generation failed)_ |  |  |  |  |  |"
+    "| \($row.entry) | \(if ($row.skipped // false) then "—" elif $row.error != null then "—" else ($row.total_elapsed | fmt) end) | \(cell_total($a2; $row.entry)) | \(cell_total($a3; $row.entry)) | \(cell_total($a4; $row.entry)) | \(cell_delta($a2[$row.entry]; $row)) | \(cell_delta($a4[$row.entry]; $row)) |"
+  ' < "$ARM1_FILE" 2>/dev/null || echo "| _(comparison table generation failed)_ |  |  |  |  |  |  |"
 
   echo
 }
@@ -214,7 +219,7 @@ Median / p75 / p95 / max are over `total_elapsed` for the same set.
 | --- | --- | --- | --- | --- | --- | --- |
 SEC
 
-  for arm_label in "Arm 1:$ARM1_FILE" "Arm 2:$ARM2_FILE" "Arm 3:$ARM3_FILE"; do
+  for arm_label in "Arm 1 (fallback):$ARM1_FILE" "Arm 2 (brew exec):$ARM2_FILE" "Arm 3 (fallback'):$ARM3_FILE" "Arm 4 (brew install):$ARM4_FILE"; do
     local label file
     label="${arm_label%%:*}"
     file="${arm_label#*:}"
