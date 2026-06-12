@@ -232,6 +232,37 @@ SEC
     echo "| $label | $n | ${pass}% | $med | $p75 | $p95 | $mx |"
   done
   echo
+
+  # Per-arm "didn't measure" breakdown so the pass-rate denominator is
+  # transparent: how many entries were excluded, why, and whether that
+  # exclusion is signal vs noise.
+  local prod_bounce=0 r15_fails=0
+  if [[ -f "$ARM1_FILE" ]]; then
+    prod_bounce=$(arm_count "$ARM1_FILE" 'select(.production_bounce != null)')
+  fi
+  if [[ -f "$ARM3_FILE" ]]; then
+    r15_fails=$(arm_count "$ARM3_FILE" 'select(.r15_fallback != null)')
+  fi
+  if (( prod_bounce > 0 || r15_fails > 0 )); then
+    echo "### Exclusions"
+    echo
+    if (( prod_bounce > 0 )); then
+      cat <<NOTE
+- **Arm 1 production-bounce count: $prod_bounce.** Entries where the resolved \`resolveBrewFallback\` returned
+  \`install_unsupported\` — production users TODAY get a \`pm=brew_only\` bounce for the same input. Treat as a
+  failure-of-the-current-path signal, not as "out of scope": each one is an anc100 entry that the live sandbox
+  cannot score TODAY.
+NOTE
+    fi
+    if (( r15_fails > 0 )); then
+      cat <<NOTE
+- **Arm 3 R15 no-result count: $r15_fails.** \`resolveBrewFallback\` could not translate these entries to a peer PM
+  (no GitHub release, no matching pip / npm / crates package). Per the R15 contract these are recorded with
+  \`error: r15-no-result\` and excluded from arm 3's wall-clock distribution.
+NOTE
+    fi
+    echo
+  fi
 }
 
 # Headroom panel — arm 1 distribution histogram

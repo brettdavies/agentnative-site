@@ -86,6 +86,15 @@ if ! docker image inspect "$SPIKE_TAG" >/dev/null 2>&1; then
   exit 2
 fi
 
+# Phase 1.5: prep resolveBrewFallback resolutions for arm 1 + arm 3.
+# Cached across runs; --regenerate via PREP_REGENERATE=1.
+PREP_FLAGS=()
+if [[ "${PREP_REGENERATE:-0}" -eq 1 ]]; then
+  PREP_FLAGS+=(--regenerate)
+fi
+echo "==> [1.5/6] Prepping resolveBrewFallback resolutions..." >&2
+bash "$SPIKE_DIR/prep-resolutions.sh" "${PREP_FLAGS[@]}"
+
 # Phase 2: R6 probe (gate for arm 2)
 echo "==> [2/6] Running R6 probe..." >&2
 probe_rc=0

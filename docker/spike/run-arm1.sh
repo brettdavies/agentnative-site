@@ -11,18 +11,32 @@
 # incrementally as the run progresses, then combined into a single
 # JSON array at the end.
 #
-# Production-fidelity note: the brainstorm describes arm 1 as the
-# "current production install path." For the 86 brew-pinned registry
-# entries the live sandbox runs them through `resolveBrewFallback` in
-# `src/worker/score/resolve-spec.ts`, NOT direct brew install (the
-# live image carries no brew). The spike image DOES carry brew, so
-# running the literal registry command here measures brew install
-# inside the spike — useful as a baseline against arm 2 and arm 3,
-# but not identical to what production sees today. Wiring
-# resolveBrewFallback into arm 1 is deferred to a follow-up
-# enhancement (see plan U4 "Deferred to implementation": Bun-script
-# vs wrangler-dev integration). The current data still tells the
-# story arms 2/3 need to be compared against.
+# Production-fidelity: for the 86 brew-pinned registry entries the
+# live sandbox does NOT run `brew install <pkg>` directly — it runs
+# the input through `resolveBrewFallback` in
+# `src/worker/score/resolve-spec.ts`, which fetches formula metadata,
+# parses the GitHub homepage, and asks `discoverBinary` to find an
+# alternative PM. Arm 1 reads the resolutions cache at
+# `docs/research/2026-06-12-brew-v6-anc100/brew-resolutions.json`
+# (produced by `docker/spike/prep-resolutions.sh`) and dispatches:
+#
+#   - resolution.ok == true       → measure the resolved install path
+#                                    (cargo-binstall, uv, direct, etc.)
+#                                    — this is what users get TODAY.
+#   - resolution.ok == false      → record as `would-bounce-in-prod`
+#                                    with the production error code
+#                                    (`install_unsupported pm=brew_only`).
+#                                    Users get bounced TODAY; no
+#                                    measurement to make.
+#   - resolutions file missing    → fall back to literal `brew install`
+#                                    in the spike image (the original
+#                                    pre-option-3 behavior). Lets the
+#                                    spike run without the prep step
+#                                    when needed for triage.
+#
+# Non-brew registry entries (uv tool install, bun add -g, etc.) bypass
+# the resolution lookup and run their literal install command — the
+# live sandbox treats those identically (no resolveBrewFallback needed).
 #
 # Usage:
 #   bash docker/spike/run-arm1.sh                       # full anc100
@@ -57,14 +71,9 @@ while IFS=$'\t' read -r name binary install; do
 
   echo "==> Arm 1 entry $i: $name ($binary)" >&2
 
-  # Build install command from the registry `install:` field. The
-  # field is already a fully-formed shell command; for brew entries we
-  # wrap in `sudo -u runner` (brew refuses root). For non-brew entries
-  # the command runs as root.
+  audit_cmd="anc audit --command $binary --output json"
+
   case "$install" in
-    "brew install "*)
-      install_cmd="sudo -u runner $install"
-      ;;
     "included with "*)
       # nvidia-smi-style entries are not installable in the spike
       # image (driver-only). Record as skipped.
@@ -78,12 +87,51 @@ while IFS=$'\t' read -r name binary install; do
         > "$TMP_DIR/$idx-$name.json"
       continue
       ;;
+    "brew install "*)
+      # Brew-pinned: prefer the cached resolveBrewFallback resolution
+      # so arm 1 measures the actual production install path. Fall
+      # back to literal `brew install` only when the resolutions
+      # cache is missing.
+      resolution=$(load_resolution_from_file "$name")
+      if [[ -z "$resolution" ]]; then
+        echo "    no resolutions cache; falling back to literal brew install in spike image" >&2
+        install_cmd="sudo -u runner $install"
+      else
+        res_ok=$(printf '%s' "$resolution" | jaq -r '.ok')
+        if [[ "$res_ok" == "true" ]]; then
+          install_cmd=$(printf '%s' "$resolution" | jaq -r '.install_cmd')
+          resolved_pm=$(printf '%s' "$resolution" | jaq -r '.pm')
+          resolved_binary=$(printf '%s' "$resolution" | jaq -r '.binary')
+          echo "    resolved via resolveBrewFallback → pm=$resolved_pm binary=$resolved_binary" >&2
+          audit_cmd="anc audit --command $resolved_binary --output json"
+        else
+          res_err=$(printf '%s' "$resolution" | jaq -r '.error')
+          res_details=$(printf '%s' "$resolution" | jaq -r '.details // ""')
+          echo "    would-bounce-in-prod: $res_err ($res_details)" >&2
+          # shellcheck disable=SC2016  # $vars in the jaq filter are jaq vars
+          jaq -nc \
+            --arg arm arm1 \
+            --arg entry "$name" \
+            --arg install_cmd "$install" \
+            --arg bounce_error "$res_err" \
+            --arg bounce_details "$res_details" \
+            --arg skip_reason "would-bounce-in-production: $res_err ($res_details)" \
+            '{
+              arm: $arm,
+              entry: $entry,
+              install_cmd: $install_cmd,
+              skipped: true,
+              skip_reason: $skip_reason,
+              production_bounce: {error: $bounce_error, details: $bounce_details}
+            }' > "$TMP_DIR/$idx-$name.json"
+          continue
+        fi
+      fi
+      ;;
     *)
       install_cmd="$install"
       ;;
   esac
-
-  audit_cmd="anc audit --command $binary --output json"
 
   measure_entry arm1 "$name" "$install_cmd" "$audit_cmd" > "$TMP_DIR/$idx-$name.json" \
     || echo "    measure_entry failed for $name; recorded in result file" >&2

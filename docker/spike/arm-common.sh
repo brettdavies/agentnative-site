@@ -112,6 +112,25 @@ resolve_brew_formula() {
   lookup_brew_override "$registry_name"
 }
 
+# load_resolution_from_file <entry_name> → prints the cached
+# resolution JSON object (the inner `.resolution` value, NOT the full
+# row) for the named entry, or empty if the file is missing OR the
+# entry is not in it. The brew-resolutions.json file is produced by
+# docker/spike/prep-resolutions.sh; it caches the result of running
+# `resolveBrewFallback` (via the Bun shim) per registry entry. Arm 1
+# and arm 3 read from this file to use the production-fidelity
+# install path rather than approximating with `brew install`.
+load_resolution_from_file() {
+  local entry="$1"
+  local file="${2:-$ARM_OUT_DIR/brew-resolutions.json}"
+  if [[ ! -f "$file" ]]; then
+    printf '\n'
+    return
+  fi
+  # shellcheck disable=SC2016  # $ENV.ENTRY is a jaq filter expression
+  ENTRY="$entry" jaq -c '.[] | select(.entry == $ENV.ENTRY) | .resolution' < "$file" 2>/dev/null
+}
+
 # list_entries — emits TSV rows (name<TAB>binary<TAB>install) one per
 # registry entry. Honors `--limit N` and `--only name1,name2` filters
 # passed as positional args. The skipped/notable distinction is up to
