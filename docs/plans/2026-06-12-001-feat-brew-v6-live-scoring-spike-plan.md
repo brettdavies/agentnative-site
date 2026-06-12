@@ -36,7 +36,10 @@ explicitly deferred and is not addressed by this plan. The decision matrix in th
   related learning at `docs/solutions/tooling-decisions/docker-anc-binary-override-and-runtime-refresh-2026-05-24.md`,
   the spike image is built as a layer on top of `cloudflare/sandbox:0.9.2` + the live sandbox's runtime stage, with brew
   added in a dedicated stage. Spike image is tagged `anc-sandbox-spike-<git-sha>` to make it visually distinct from
-  production tags and impossible to confuse with `anc-sandbox`.
+  production tags. KD1's firewall is enforced technically (not procedurally): the spike Dockerfile carries `LABEL
+  com.agentnative.image-class=spike` and a pre-push CI gate refuses to push any image carrying that label to the
+  production registry. The label propagates through `docker tag`, so retag-then-push trips the gate at the boundary that
+  matters.
 
 - **KTD2. Report tooling is bash + jaq.** Matches existing `docker/score/score-anc100.sh` conventions and avoids
   introducing a Python or Bun dependency for distribution math. `jaq` handles per-arm JSON aggregation; bash awk
@@ -55,15 +58,25 @@ explicitly deferred and is not addressed by this plan. The decision matrix in th
   `HOMEBREW_NO_SANDBOX` fallback decisions per-entry (per R11) and keeps brew exec's cache state from poisoning
   subsequent runs (matches the deferred-question concern about brew exec cache poisoning across DOs).
 
-- **KTD5. Spike runs locally first, CF Sandbox second.** R4 was reframed during doc-review to CF-Sandbox-primary with
-  local as a noted fallback. The plan honors the spirit: local runs are the iteration loop for getting the harness
-  right; the authoritative wall-clock data comes from CF Sandbox runs. The local-vs-cloud delta is captured as
-  observation in the report, not as a primary metric. CF Sandbox runs are gated to U7 (after the harness is stable
-  locally).
+- **KTD5. Spike v1 is local-only; CF Sandbox mode is a staged follow-up.** R4 reframed the brainstorm to
+  CF-Sandbox-primary, but wiring the Worker + wrangler `[[containers]]` binding + CF Containers registry upload +
+  per-entry RPC dispatch is non-trivial harness work that doesn't change the *direction* of the spike's verdict. v1 of
+  the spike runs locally and produces a report sufficient to apply the decision matrix. Whether the CF Sandbox mode is
+  worth building lands as a follow-up decision after the local data is in hand; if built, it would be a separate
+  sub-plan that adds Worker + wrangler scaffolding and re-runs arms 2 and 3 inside actual CF infrastructure for
+  production-fidelity numbers.
 
 - **KTD6. v5-vs-v6 cross-check is not included in v1 of the spike.** Origin deferred-to-planning notes this as "adds
   work; may not change the action." Confirmed not in scope — if downstream analysis disputes whether v6 changed the
   wall-clock picture, a separate cross-check runs then.
+
+- **KTD7. Runtime user model: root entrypoint, `sudo -u runner` for brew commands.** The spike image keeps `ENTRYPOINT
+  ["/sandbox"]` and runs as root at container start (preserving the sandbox SDK's expected init), with a `runner` user
+  created at build time as Linuxbrew's owner of `/home/linuxbrew/.linuxbrew`. Every brew invocation wraps in `sudo -u
+  runner brew <args>` (concentrated in `measure-entry.sh` so the wrapping is one place). `anc audit` and other read-only
+  operations run as root without wrapping. The wall-clock noise from `sudo` is sub-millisecond against install + audit
+  wall-clocks measured in seconds, so timing fidelity is preserved. This commits U1 to a definite Dockerfile shape and
+  lets U3's `measure-entry.sh` know exactly where the sudo seam lives.
 
 ---
 
@@ -117,20 +130,35 @@ harness scripts copied in.
 - `docker/spike/.dockerignore` (new)
 - `docker/spike/build.sh` (new)
 - `docker/spike/README.md` (new)
+- `.github/workflows/spike-image-firewall.yml` (new) — pre-push CI gate enforcing KD1
 
 **Approach:**
 
 - Multi-stage Dockerfile: stage 1 `FROM cloudflare/sandbox:0.9.2@sha256:...` (pinned digest from
-  `docker/sandbox/Dockerfile`); stage 2 `FROM python:3.12-slim-trixie@sha256:...` final stage copying sandbox + adding
-  brew per `docker/score/Dockerfile:67-74` pattern (non-root user, `/home/linuxbrew/.linuxbrew` prefix).
-- Env vars set: `HOMEBREW_NO_AUTO_UPDATE=1`, tap-trust bypass var (planning to resolve exact var name during U1;
-  placeholder `HOMEBREW_NO_TAP_TRUST_CHECK` per security-lens residual; confirm against actual v6 behavior at build
-  time), no `HOMEBREW_NO_SANDBOX` set (R11 default).
-- Image tag: `anc-sandbox-spike:<git-sha>` — distinct from production `anc-sandbox` tag.
+  `docker/sandbox/Dockerfile`); stage 2 `FROM python:3.12-slim-trixie@sha256:...` final stage copying sandbox + brew per
+  `docker/score/Dockerfile:67-74` pattern. Final stage keeps `ENTRYPOINT ["/sandbox"]` and runs as root; a `runner` user
+  is created at build time as the owner of `/home/linuxbrew/.linuxbrew`. Brew commands wrap in `sudo -u runner brew` at
+  measurement time (per KTD7).
+- KD1 firewall — `LABEL com.agentnative.image-class=spike` set on the spike Dockerfile so the image self-identifies
+  through any downstream `docker tag` operation.
+- Env vars set: `HOMEBREW_NO_AUTO_UPDATE=1`, tap-trust bypass var (placeholder `HOMEBREW_NO_TAP_TRUST_CHECK`; confirm
+  against actual v6 behavior at build time), no `HOMEBREW_NO_SANDBOX` set (R11 default).
+- Tap-trust fallback (if the bypass env var does not exist in v6): pre-trust an explicitly enumerated set at image build
+  via `brew tap-trust <tap>`. Initial set: `homebrew/core` (already trusted by default; present for explicitness in
+  env-state) and `oven-sh/bun` (the only third-party tap referenced by the existing `docker/score/Dockerfile` install
+  set). Any anc100 entry whose brew form requires a tap outside this enumerated set fails arm 2 with a recorded reason
+  (`tap-not-pre-trusted: <tap>`) and is excluded from arm 2 wall-clock measurement, similar to R15's arm 3 failure
+  semantics. Extending the pre-trust set is an explicit follow-up edit to U1, not an implicit retry at runtime.
+- Image tag: `anc-sandbox-spike:<git-sha>` — visually distinct from production `anc-sandbox`.
 - `build.sh` wraps `docker build` with BuildKit cache mounts on `/home/linuxbrew/.cache/Homebrew` and the apt cache
   layer, mirroring `docker/score/Dockerfile:78-86` conventions.
+- `.github/workflows/spike-image-firewall.yml` runs on every push touching `docker/spike/**` or any image-push workflow,
+  inspecting images about to be pushed (via `docker inspect --format '{{ index .Config.Labels
+  "com.agentnative.image-class" }}'`) and refusing any push of a label-`spike` image to the production registry. CI
+  fails closed if the label inspection fails.
 - `README.md` documents: how to build the spike image, how to dispose of it after the report lands (per KD1 firewall),
-  explicit warning that the spike image must not be tagged `anc-sandbox` or pushed to production registries.
+  the LABEL convention + the CI gate (why retagging won't subvert it), explicit warning that the spike image must not be
+  tagged `anc-sandbox` or pushed to production registries.
 
 **Patterns to follow:**
 
@@ -149,6 +177,17 @@ harness scripts copied in.
 - `docker run --rm anc-sandbox-spike:<sha> brew config` shows the expected prefix, glibc version, internal API mode
   default.
 - Build a second time hot — cache hits expected on brew install layer (BuildKit `--mount=type=cache` working).
+- `docker inspect --format '{{ index .Config.Labels "com.agentnative.image-class" }}' anc-sandbox-spike:<sha>` returns
+  `spike` (LABEL set correctly).
+- After `docker tag anc-sandbox-spike:<sha> anc-sandbox-fake-prod:test`, the same `docker inspect` against the new tag
+  still returns `spike` — confirming the label propagates through retag.
+- CI gate workflow on a synthetic PR that attempts to push a label-`spike` image to the production registry fails closed
+  with a clear "spike images cannot be pushed to production" error.
+- CI gate workflow does NOT fire on production image pushes (`anc-sandbox` with no spike label) — confirming the gate
+  isn't a false-positive blocker for production work.
+- `docker run --rm anc-sandbox-spike:<sha> brew tap-trust --list` returns exactly the enumerated set (`homebrew/core`,
+  `oven-sh/bun`) when the env-var bypass is unavailable; returns empty (env var path active) otherwise. Either outcome
+  is acceptable, but the test asserts the list matches the documented expectation for whichever path landed.
 
 **Verification:** Image builds in under 5 minutes cold; image carries brew 6.0+ at the expected prefix; env state is
 queryable from a one-shot `docker run`.
@@ -233,8 +272,9 @@ recorded per arm).
   equivalent monotonic timing — must capture sub-second precision).
 - Each invocation runs in a fresh ephemeral container spawned via `docker run --rm anc-sandbox-spike:<sha> ...` per
   KTD4. The harness passes install + audit commands into the container via `bash -c`.
-- Env snapshot: at the start of each entry, capture `env | grep -E '^(HOMEBREW|UV|PIP)_'` plus `brew --version` into the
-  per-arm `env-state.json` so the report can show whether NO_SANDBOX fell back per R11.
+- Env snapshot: at the start of each entry, capture `env | grep -E '^(HOMEBREW|UV|PIP)_'`, `brew --version`, and `brew
+  tap-trust --list` into the per-arm `env-state.json` so the report can show (a) whether NO_SANDBOX fell back per R11,
+  (b) whether the tap-trust env-var bypass was active or the U1 enumerated pre-trust set was in use.
 - DNF flag: if wall-clock > 60s, mark `dnf: true` in the per-entry record; the install/audit still completes (no 60s
   enforcement per R2).
 - Output schema per entry: `{entry, arm, install_cmd, install_elapsed, audit_elapsed, total_elapsed, dnf, audit_result,
@@ -384,10 +424,11 @@ arm 3 competitive band + R6 verdict).
    second-pass"; if <50% OR probe failed → "status quo or shape B, planning revisits."
 7. **Arm 3 competitive-band verdict** — within 10pp pass-rate AND 5s median of arm 2 → flag arm 3 as competitive
    translation path for product re-discussion; otherwise → arm 3 is the wall-clock floor arm 2 needs to beat.
-8. **Supply-chain summary** — R9 freshness gate feasibility (assessed during spike), R10 tap-trust state (recorded), R11
-   Bubblewrap state (recorded; if any arm fell back to NO_SANDBOX=1, named accepted risks), R13 captured egress hosts
-   (full list per arm), R14 trust-model comparison paragraph (one paragraph drafted manually as part of this unit; not
-   generated).
+8. **Supply-chain summary** — R9 freshness gate feasibility (assessed during spike), R10 tap-trust state surfaced per
+   arm with both the env-var bypass status AND the `brew tap-trust --list` output captured by U3 (so the report names
+   exactly which trust path was active for which entry), R11 Bubblewrap state (recorded; if any arm fell back to
+   NO_SANDBOX=1, named accepted risks), R13 captured egress hosts (full list per arm), R14 trust-model comparison
+   paragraph (one paragraph drafted manually as part of this unit; not generated).
 9. **v5-era closure verdict** — either "viable" (shape C or A+D candidate moves forward) or "not viable — status quo
    persists with current-data justification." Both outcomes are legitimate per success-criteria reframing.
 10. **anc100 vs brew_only caveat** — per R8, explicit note that this spike's data does not answer the `pm=brew_only`
@@ -416,13 +457,12 @@ is one of the four committed bands; supply-chain summary names per-arm Bubblewra
 
 ---
 
-### U7. Top-level orchestrator + local + CF Sandbox runs
+### U7. Top-level orchestrator (local mode)
 
-**Goal:** Single entry point that runs the full spike sequence locally for iteration, then in actual CF Sandbox for the
-authoritative numbers. Includes the post-run README index and spike-image disposal step (KD1 firewall).
+**Goal:** Single entry point that runs the full spike sequence locally. Includes the post-run README index and
+spike-image disposal step (KD1 firewall). CF Sandbox mode is a follow-up sub-plan per KTD5.
 
-**Requirements:** R4 (CF-Sandbox-primary, local-as-noted-fallback), KD1 (spike-image firewall + disposal), All R-IDs
-orchestrated end-to-end.
+**Requirements:** KD1 (spike-image firewall + disposal), All R-IDs orchestrated end-to-end (in local mode).
 
 **Dependencies:** U1, U2, U3, U4, U5, U6.
 
@@ -435,33 +475,25 @@ orchestrated end-to-end.
 
 - `run-spike.sh` runs sequence: U1 build → U2 probe → U4 arm 1 + arm 3 in parallel (independent of probe), U4 arm 2 if
   probe passed (sequentially after probe), U5 host capture wraps arms 2 + 3 → U6 report.
-- Two run modes:
-- `run-spike.sh --local` runs in the current docker daemon; fast iteration; produces a local report tagged
-  `report.md.local`.
-- `run-spike.sh --cf-sandbox` runs inside an actual ephemeral CF Sandbox container (requires CF Sandbox SDK harness —
-  implementation will use the existing `cloudflare/sandbox:0.9.2` invocation pattern from `src/worker/score/do.ts`);
-  produces the authoritative `report.md`. Local report is moved to an `appendix` subdirectory if both modes ran.
+- Single mode: local docker daemon. The `--local` flag is implicit (and accepted explicitly for forward-compatibility
+  with the deferred CF Sandbox mode).
 - After the report is written, `run-spike.sh` prompts (or auto-runs with `--dispose`): `docker image rm
   anc-sandbox-spike:<sha>` and removes any local cache layers for the spike's BuildKit cache mount. This is the KD1
   firewall enforcement step.
-- `README.md` in the research subdirectory: artifact index (what each JSON file is), how to re-run the spike, where the
-  authoritative report is, explicit "do not deploy this image to production" warning, link back to the brainstorm + this
-  plan.
+- `README.md` in the research subdirectory: artifact index (what each JSON file is), how to re-run the spike, explicit
+  "do not deploy this image to production" warning, link back to the brainstorm + this plan, and the note that CF
+  Sandbox mode is a follow-up sub-plan if the local data warrants it.
 
 **Test scenarios:**
 
-- `run-spike.sh --local` end-to-end produces all artifact JSONs + `report.md.local`; takes under 2 hours wall-clock on a
+- `run-spike.sh` end-to-end produces all artifact JSONs + `report.md`; takes under 2 hours wall-clock on a
   representative dev machine.
-- `run-spike.sh --cf-sandbox` invokes against an actual CF Sandbox container and produces the authoritative report; CF
-  Sandbox bind/wrangler config wiring is documented in README.
-- Both modes run sequentially in one invocation (`run-spike.sh --local --cf-sandbox`) and produce both reports + a
-  local-vs-cloud delta observation per KTD5.
 - Probe-fail path: orchestrator skips arm 2 cleanly, runs arm 1 + arm 3 + capture + report; report acknowledges arm 2
   cancellation.
 - Disposal step: `docker images` after `--dispose` shows no `anc-sandbox-spike:*` tags remaining.
 
-**Verification:** Running `bash docker/spike/run-spike.sh --cf-sandbox --dispose` produces `report.md` in the research
-directory AND leaves no spike image in the docker daemon AND leaves the production `anc-sandbox` image untouched.
+**Verification:** Running `bash docker/spike/run-spike.sh --dispose` produces `report.md` in the research directory AND
+leaves no spike image in the docker daemon AND leaves the production `anc-sandbox` image untouched.
 
 ---
 
@@ -475,6 +507,10 @@ directory AND leaves no spike image in the docker daemon AND leaves the producti
   picture vs v5, a separate cross-check spike runs then; not v1.
 - The `pm=brew_only` second-pass spike (origin-deferred). This is the gate for A+D/B adoption; runs only after this
   spike's data justifies the effort.
+- CF Sandbox mode for the spike (KTD5). v1 ships local-only; CF Sandbox mode is a separate follow-up sub-plan that would
+  add a throwaway Worker, wrangler `[[containers]]` binding, CF Containers registry upload, and per-entry RPC dispatch
+  from the harness to that Worker. Runs only if the local data lands and the team decides production-fidelity numbers
+  are worth the harness investment.
 
 ### Outside this plan's scope
 
