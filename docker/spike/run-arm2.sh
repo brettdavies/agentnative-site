@@ -92,16 +92,21 @@ while IFS=$'\t' read -r name binary install; do
   i=$((i + 1))
   printf -v idx '%04d' "$i"
 
-  brew_pkg=$(parse_brew_pkg_from_install "$install")
+  # Combined resolver: registry's `brew install <pkg>` wins; otherwise
+  # the manual override map in brew-overrides.yaml. Non-brew entries
+  # with no override (claude-code, codex, sgpt, cursor, nvidia-smi,
+  # ...) get skipped with a specific reason naming which lookup failed.
+  brew_pkg=$(resolve_brew_formula "$name" "$install")
 
   if [[ -z "$brew_pkg" ]]; then
-    echo "==> Arm 2 entry $i: $name — SKIP (not a brew-install registry entry)" >&2
+    local_skip_reason="no brew formula: registry pin is not 'brew install <pkg>' and no override in brew-overrides.yaml"
+    echo "==> Arm 2 entry $i: $name — SKIP ($local_skip_reason)" >&2
     # shellcheck disable=SC2016  # $vars in jaq filter are jaq vars
     jaq -nc \
       --arg arm arm2 \
       --arg entry "$name" \
       --arg install_cmd "$install" \
-      --arg skip_reason "registry entry is not 'brew install <pkg>'; arm 2 measures brew exec only" \
+      --arg skip_reason "$local_skip_reason" \
       '{arm: $arm, entry: $entry, install_cmd: $install_cmd, skipped: true, skip_reason: $skip_reason}' \
       > "$TMP_DIR/$idx-$name.json"
     continue

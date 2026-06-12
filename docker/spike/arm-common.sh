@@ -36,6 +36,7 @@ fi
 ARM_OUT_DIR="${ARM_OUT_DIR:-$ARM_REPO_ROOT/docs/research/2026-06-12-brew-v6-anc100}"
 ARM_REGISTRY_FILE="${ARM_REGISTRY_FILE:-$ARM_REPO_ROOT/registry.yaml}"
 ARM_SPIKE_DIR="${ARM_SPIKE_DIR:-$ARM_REPO_ROOT/docker/spike}"
+ARM_BREW_OVERRIDES_FILE="${ARM_BREW_OVERRIDES_FILE:-$ARM_SPIKE_DIR/brew-overrides.yaml}"
 
 load_arm_env() {
   if [[ ! -f "$ARM_REGISTRY_FILE" ]]; then
@@ -77,6 +78,38 @@ parse_brew_pkg_from_install() {
   else
     printf '\n'
   fi
+}
+
+# lookup_brew_override <registry_name> → prints brew formula name or empty.
+# Reads the manual override map at $ARM_BREW_OVERRIDES_FILE (default
+# docker/spike/brew-overrides.yaml). The map covers non-brew-pinned
+# registry entries whose brew formula has been verified at spike-prep
+# time. See the file's preamble for the verification protocol.
+lookup_brew_override() {
+  local registry_name="$1"
+  if [[ ! -f "$ARM_BREW_OVERRIDES_FILE" ]]; then
+    printf '\n'
+    return
+  fi
+  NAME="$registry_name" yq -r '.overrides[env(NAME)] // ""' "$ARM_BREW_OVERRIDES_FILE"
+}
+
+# resolve_brew_formula <registry_name> <install_field> → prints brew
+# formula name or empty. Combines registry parsing with the manual
+# override map so callers (arm 2, arm 3) get a single source of truth.
+# Registry parsing wins when the install field is `brew install <pkg>`
+# because that is the authoritative pinned form; the override map
+# applies only when registry parsing returns empty.
+resolve_brew_formula() {
+  local registry_name="$1"
+  local install_field="$2"
+  local pkg
+  pkg=$(parse_brew_pkg_from_install "$install_field")
+  if [[ -n "$pkg" ]]; then
+    printf '%s\n' "$pkg"
+    return
+  fi
+  lookup_brew_override "$registry_name"
 }
 
 # list_entries — emits TSV rows (name<TAB>binary<TAB>install) one per

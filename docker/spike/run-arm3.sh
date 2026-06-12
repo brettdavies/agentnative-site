@@ -64,28 +64,34 @@ while IFS=$'\t' read -r name binary install; do
   i=$((i + 1))
   printf -v idx '%04d' "$i"
 
-  # Resolve the brew package name to install. For brew-registered
-  # entries the registry already names the pkg; for other entries
-  # the binary name is the best heuristic short of resolveBrewFallback.
-  brew_pkg=$(parse_brew_pkg_from_install "$install")
+  # Resolve the brew formula. For registry-pinned brew entries the
+  # registry names the pkg; for non-brew-pinned entries the manual
+  # override map in brew-overrides.yaml provides verified mappings.
+  # Unverified entries skip with a specific reason rather than
+  # heuristically guessing `brew install <binary>` (which would
+  # produce false-positive measurements when brew has a same-named
+  # but unrelated formula, e.g. `cf` is a date filter, not the
+  # Cloudflare CLI).
+  brew_pkg=$(resolve_brew_formula "$name" "$install")
   if [[ -z "$brew_pkg" ]]; then
     case "$install" in
       "included with "*)
-        echo "==> Arm 3 entry $i: $name — SKIP (registered as 'included with ...')" >&2
-        # shellcheck disable=SC2016  # $vars in the jaq filter are jaq vars
-        jaq -nc \
-          --arg arm arm3 \
-          --arg entry "$name" \
-          --arg install_cmd "$install" \
-          --arg skip_reason "registered as 'included with ...' (driver-only, no brew reformulation possible)" \
-          '{arm: $arm, entry: $entry, install_cmd: $install_cmd, skipped: true, skip_reason: $skip_reason}' \
-          > "$TMP_DIR/$idx-$name.json"
-        continue
+        local_skip_reason="registered as 'included with ...' (driver-only, no brew reformulation possible)"
         ;;
       *)
-        brew_pkg="$binary"
+        local_skip_reason="no brew formula: registry pin is not 'brew install <pkg>' and no verified override in brew-overrides.yaml"
         ;;
     esac
+    echo "==> Arm 3 entry $i: $name — SKIP ($local_skip_reason)" >&2
+    # shellcheck disable=SC2016  # $vars in the jaq filter are jaq vars
+    jaq -nc \
+      --arg arm arm3 \
+      --arg entry "$name" \
+      --arg install_cmd "$install" \
+      --arg skip_reason "$local_skip_reason" \
+      '{arm: $arm, entry: $entry, install_cmd: $install_cmd, skipped: true, skip_reason: $skip_reason}' \
+      > "$TMP_DIR/$idx-$name.json"
+    continue
   fi
 
   echo "==> Arm 3 entry $i: $name (brew pkg: $brew_pkg, binary: $binary)" >&2
