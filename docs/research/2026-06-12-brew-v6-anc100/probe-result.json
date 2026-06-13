@@ -1,0 +1,14 @@
+{
+  "outcome": "succeeded",
+  "formula": "ripgrep",
+  "binary": "rg",
+  "binary_path": "brew exec --formulae=ripgrep -- rg",
+  "glue": "",
+  "attempts": 1,
+  "elapsed_seconds": 6,
+  "brew_version": "Homebrew 6.0.1",
+  "probe_started_at": "2026-06-12T21:44:10Z",
+  "probe_ended_at": "2026-06-12T21:44:16Z",
+  "spike_image": "anc-sandbox-spike:fa84b12",
+  "audit_excerpt": "{\"target\":{\"kind\":\"command\",\"path\":null,\"command\":\"rg\"},\"badge\":{\"score_pct\":82}}"
+}

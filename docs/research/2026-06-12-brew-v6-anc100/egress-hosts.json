@@ -1,0 +1,16 @@
+{
+  "capture_method": "homebrew_curl_verbose",
+  "captured_at": "2026-06-12T22:04:27Z",
+  "spike_image": "anc-sandbox-spike:fa84b12",
+  "sample_entries": [
+    "curl",
+    "git",
+    "make"
+  ],
+  "arm2": [
+    "ghcr.io"
+  ],
+  "arm3": [
+    "ghcr.io"
+  ]
+}

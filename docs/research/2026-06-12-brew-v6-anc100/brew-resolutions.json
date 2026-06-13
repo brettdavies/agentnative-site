@@ -1,0 +1,1188 @@
+[
+  {
+    "entry": "curl",
+    "attempted_brew_pkg": "curl",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "curl",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "git",
+    "attempted_brew_pkg": "git",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "git",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "make",
+    "attempted_brew_pkg": "make",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "make",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "ffmpeg",
+    "attempted_brew_pkg": "ffmpeg",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "ffmpeg",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "nvidia-smi",
+    "attempted_brew_pkg": "nvidia-smi",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "nvidia-smi",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "cmake",
+    "attempted_brew_pkg": "cmake",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "cmake",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "rsync",
+    "attempted_brew_pkg": "rsync",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "rsync",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "tmux",
+    "attempted_brew_pkg": "tmux",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "tmux",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "ripgrep",
+    "attempted_brew_pkg": "ripgrep",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "ripgrep",
+      "pm": "direct",
+      "package": null,
+      "binary": "ripgrep",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'ripgrep' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'ripgrep'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "fd",
+    "attempted_brew_pkg": "fd",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "fd",
+      "pm": "direct",
+      "package": null,
+      "binary": "fd",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/sharkdp/fd/releases/download/v10.4.2/fd-v10.4.2-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'fd' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'fd'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "fzf",
+    "attempted_brew_pkg": "fzf",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "fzf",
+      "pm": "direct",
+      "package": null,
+      "binary": "fzf",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/junegunn/fzf/releases/download/v0.73.1/fzf-0.73.1-linux_amd64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'fzf' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'fzf'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "ast-grep",
+    "attempted_brew_pkg": "ast-grep",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "ast-grep",
+      "pm": "direct",
+      "package": null,
+      "binary": "ast-grep",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/ast-grep/ast-grep/releases/download/0.43.0/app-x86_64-unknown-linux-gnu.zip' -o \"$tmp/a\"; unzip -q \"$tmp/a\" -d \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'ast-grep' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'ast-grep'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "jq",
+    "attempted_brew_pkg": "jq",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "jq",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "xsv",
+    "attempted_brew_pkg": "xsv",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "xsv",
+      "pm": "direct",
+      "package": null,
+      "binary": "xsv",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/BurntSushi/xsv/releases/download/0.13.0/xsv-0.13.0-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'xsv' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'xsv'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "bat",
+    "attempted_brew_pkg": "bat",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "bat",
+      "pm": "direct",
+      "package": null,
+      "binary": "bat",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/sharkdp/bat/releases/download/v0.26.1/bat-v0.26.1-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'bat' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'bat'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "eza",
+    "attempted_brew_pkg": "eza",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "eza",
+      "pm": "direct",
+      "package": null,
+      "binary": "eza",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/eza-community/eza/releases/download/v0.23.4/eza_x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'eza' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'eza'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "dust",
+    "attempted_brew_pkg": "dust",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "dust",
+      "pm": "direct",
+      "package": null,
+      "binary": "dust",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/bootandy/dust/releases/download/v1.2.4/dust-v1.2.4-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'dust' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'dust'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "procs",
+    "attempted_brew_pkg": "procs",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "procs",
+      "pm": "direct",
+      "package": null,
+      "binary": "procs",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/dalance/procs/releases/download/v0.14.11/procs-v0.14.11-x86_64-linux.zip' -o \"$tmp/a\"; unzip -q \"$tmp/a\" -d \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'procs' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'procs'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "bottom",
+    "attempted_brew_pkg": "bottom",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "bottom",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "glow",
+    "attempted_brew_pkg": "glow",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "glow",
+      "pm": "direct",
+      "package": null,
+      "binary": "glow",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/charmbracelet/glow/releases/download/v2.1.2/glow_2.1.2_Linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'glow' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'glow'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "lsd",
+    "attempted_brew_pkg": "lsd",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "lsd",
+      "pm": "direct",
+      "package": null,
+      "binary": "lsd",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/lsd-rs/lsd/releases/download/v1.2.0/lsd-v1.2.0-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'lsd' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'lsd'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "bandwhich",
+    "attempted_brew_pkg": "bandwhich",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "bandwhich",
+      "pm": "direct",
+      "package": null,
+      "binary": "bandwhich",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/imsnif/bandwhich/releases/download/v0.23.1/bandwhich-v0.23.1-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'bandwhich' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'bandwhich'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "sd",
+    "attempted_brew_pkg": "sd",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "sd",
+      "pm": "direct",
+      "package": null,
+      "binary": "sd",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/chmln/sd/releases/download/v1.1.0/sd-v1.1.0-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'sd' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'sd'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "miller",
+    "attempted_brew_pkg": "miller",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "miller",
+      "pm": "direct",
+      "package": null,
+      "binary": "miller",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/johnkerl/miller/releases/download/v6.18.1/miller-6.18.1-linux-amd64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'miller' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'miller'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "dasel",
+    "attempted_brew_pkg": "dasel",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "dasel",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "yq",
+    "attempted_brew_pkg": "yq",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "yq",
+      "pm": "direct",
+      "package": null,
+      "binary": "yq",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/mikefarah/yq/releases/download/v4.53.3/yq_linux_amd64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'yq' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'yq'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "pandoc",
+    "attempted_brew_pkg": "pandoc",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "pandoc",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "typst",
+    "attempted_brew_pkg": "typst",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "typst",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "gh",
+    "attempted_brew_pkg": "gh",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "gh",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "lazygit",
+    "attempted_brew_pkg": "lazygit",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "lazygit",
+      "pm": "direct",
+      "package": null,
+      "binary": "lazygit",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/jesseduffield/lazygit/releases/download/v0.62.2/lazygit_0.62.2_linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'lazygit' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'lazygit'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "git-cliff",
+    "attempted_brew_pkg": "git-cliff",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "git-cliff",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "delta",
+    "attempted_brew_pkg": "git-delta",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "git-delta",
+      "pm": "direct",
+      "package": null,
+      "binary": "delta",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/dandavison/delta/releases/download/0.19.2/delta-0.19.2-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'delta' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'delta'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "gitleaks",
+    "attempted_brew_pkg": "gitleaks",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "gitleaks",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "gitui",
+    "attempted_brew_pkg": "gitui",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "gitui",
+      "pm": "direct",
+      "package": null,
+      "binary": "gitui",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/gitui-org/gitui/releases/download/v0.28.1/gitui-linux-x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'gitui' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'gitui'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "jj",
+    "attempted_brew_pkg": "jj",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "jj",
+      "pm": "direct",
+      "package": null,
+      "binary": "jj",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/jj-vcs/jj/releases/download/v0.42.0/jj-v0.42.0-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'jj' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'jj'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "hyperfine",
+    "attempted_brew_pkg": "hyperfine",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "hyperfine",
+      "pm": "direct",
+      "package": null,
+      "binary": "hyperfine",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/sharkdp/hyperfine/releases/download/v1.20.0/hyperfine-v1.20.0-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'hyperfine' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'hyperfine'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "tokei",
+    "attempted_brew_pkg": "tokei",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "tokei",
+      "pm": "cargo-binstall",
+      "package": "tokei",
+      "binary": "tokei",
+      "install_cmd": "cargo-binstall --no-confirm --no-symlinks --install-path /usr/local/bin 'tokei'",
+      "resolved_step": "3-crates"
+    }
+  },
+  {
+    "entry": "scc",
+    "attempted_brew_pkg": "scc",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "scc",
+      "pm": "direct",
+      "package": null,
+      "binary": "scc",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/boyter/scc/releases/download/v3.7.0/scc_Linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'scc' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'scc'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "xh",
+    "attempted_brew_pkg": "xh",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "xh",
+      "pm": "direct",
+      "package": null,
+      "binary": "xh",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/ducaale/xh/releases/download/v0.25.3/xh-v0.25.3-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'xh' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'xh'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "miniserve",
+    "attempted_brew_pkg": "miniserve",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "miniserve",
+      "pm": "cargo-binstall",
+      "package": "miniserve",
+      "binary": "miniserve",
+      "install_cmd": "cargo-binstall --no-confirm --no-symlinks --install-path /usr/local/bin 'miniserve'",
+      "resolved_step": "3-crates"
+    }
+  },
+  {
+    "entry": "docker",
+    "attempted_brew_pkg": "docker",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "docker",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "kubectl",
+    "attempted_brew_pkg": "kubectl",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "kubectl",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "helm",
+    "attempted_brew_pkg": "helm",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "helm",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "terraform",
+    "attempted_brew_pkg": "hashicorp/tap/terraform",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "hashicorp/tap/terraform",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "flyctl",
+    "attempted_brew_pkg": "flyctl",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "flyctl",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "wrangler",
+    "attempted_brew_pkg": "cloudflare-wrangler",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "cloudflare-wrangler",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "cf",
+    "attempted_brew_pkg": "cf",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "cf",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "aws-cli",
+    "attempted_brew_pkg": "awscli",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "awscli",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "supabase",
+    "attempted_brew_pkg": "supabase",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "supabase",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "just",
+    "attempted_brew_pkg": "just",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "just",
+      "pm": "direct",
+      "package": null,
+      "binary": "just",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/casey/just/releases/download/1.52.0/just-1.52.0-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'just' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'just'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "watchexec",
+    "attempted_brew_pkg": "watchexec",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "watchexec",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "shellcheck",
+    "attempted_brew_pkg": "shellcheck",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "shellcheck",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "actionlint",
+    "attempted_brew_pkg": "actionlint",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "actionlint",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "act",
+    "attempted_brew_pkg": "act",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "act",
+      "pm": "direct",
+      "package": null,
+      "binary": "act",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'act' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'act'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "mise",
+    "attempted_brew_pkg": "mise",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "mise",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "direnv",
+    "attempted_brew_pkg": "direnv",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "direnv",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "starship",
+    "attempted_brew_pkg": "starship",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "starship",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "uv",
+    "attempted_brew_pkg": "uv",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "uv",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "ruff",
+    "attempted_brew_pkg": "ruff",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "ruff",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "biome",
+    "attempted_brew_pkg": "biome",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "biome",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "bun",
+    "attempted_brew_pkg": "bun",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "bun",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "deno",
+    "attempted_brew_pkg": "deno",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "deno",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "cargo-binstall",
+    "attempted_brew_pkg": "cargo-binstall",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "cargo-binstall",
+      "pm": "direct",
+      "package": null,
+      "binary": "cargo-binstall",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/cargo-bins/cargo-binstall/releases/download/v1.20.0/cargo-binstall-x86_64-unknown-linux-gnu.full.tgz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'cargo-binstall' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'cargo-binstall'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "pixi",
+    "attempted_brew_pkg": "pixi",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "pixi",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "rclone",
+    "attempted_brew_pkg": "rclone",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "rclone",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "yazi",
+    "attempted_brew_pkg": "yazi",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "yazi",
+      "pm": "direct",
+      "package": null,
+      "binary": "yazi",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/sxyazi/yazi/releases/download/v26.5.6/yazi-x86_64-unknown-linux-gnu.zip' -o \"$tmp/a\"; unzip -q \"$tmp/a\" -d \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'yazi' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'yazi'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "zoxide",
+    "attempted_brew_pkg": "zoxide",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "zoxide",
+      "pm": "direct",
+      "package": null,
+      "binary": "zoxide",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/ajeetdsouza/zoxide/releases/download/v0.9.9/zoxide-0.9.9-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'zoxide' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'zoxide'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "broot",
+    "attempted_brew_pkg": "broot",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "broot",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "age",
+    "attempted_brew_pkg": "age",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "age",
+      "pm": "direct",
+      "package": null,
+      "binary": "age",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'age' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'age'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "cosign",
+    "attempted_brew_pkg": "cosign",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "cosign",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "trivy",
+    "attempted_brew_pkg": "trivy",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "trivy",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "claude-code",
+    "attempted_brew_pkg": "claude-code",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "claude-code",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "codex",
+    "attempted_brew_pkg": "codex",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "codex",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "goose",
+    "attempted_brew_pkg": "goose",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "goose",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "shell-gpt",
+    "attempted_brew_pkg": "shell-gpt",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "shell-gpt",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "mods",
+    "attempted_brew_pkg": "mods",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "mods",
+      "pm": "direct",
+      "package": null,
+      "binary": "mods",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/charmbracelet/mods/releases/download/v1.8.1/mods_1.8.1_Linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'mods' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'mods'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "ollama",
+    "attempted_brew_pkg": "ollama",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "ollama",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "cursor",
+    "attempted_brew_pkg": "cursor",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "cursor",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "xai-grok-build",
+    "attempted_brew_pkg": "xai-grok-build",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "xai-grok-build",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "llm",
+    "attempted_brew_pkg": "llm",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "llm",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "datasette",
+    "attempted_brew_pkg": "datasette",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "datasette",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "sqlite-utils",
+    "attempted_brew_pkg": "sqlite-utils",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "sqlite-utils",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "files-to-prompt",
+    "attempted_brew_pkg": "files-to-prompt",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "files-to-prompt",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "gum",
+    "attempted_brew_pkg": "gum",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "gum",
+      "pm": "direct",
+      "package": null,
+      "binary": "gum",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/charmbracelet/gum/releases/download/v0.17.0/gum_0.17.0_Linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'gum' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'gum'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "vhs",
+    "attempted_brew_pkg": "vhs",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "vhs",
+      "pm": "direct",
+      "package": null,
+      "binary": "vhs",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/charmbracelet/vhs/releases/download/v0.11.0/vhs_0.11.0_Linux_x86_64.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'vhs' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'vhs'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "anc",
+    "attempted_brew_pkg": "brettdavies/tap/agentnative",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "brettdavies/tap/agentnative",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "bird",
+    "attempted_brew_pkg": "brettdavies/tap/bird",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "brettdavies/tap/bird",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "xr",
+    "attempted_brew_pkg": "brettdavies/tap/xurl-rs",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "brettdavies/tap/xurl-rs",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "nushell",
+    "attempted_brew_pkg": "nushell",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "nushell",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "atuin",
+    "attempted_brew_pkg": "atuin",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "atuin",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "navi",
+    "attempted_brew_pkg": "navi",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "navi",
+      "pm": "direct",
+      "package": null,
+      "binary": "navi",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/denisidoro/navi/releases/download/v2.24.0/navi-v2.24.0-x86_64-unknown-linux-musl.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'navi' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'navi'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "tealdeer",
+    "attempted_brew_pkg": "tealdeer",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "tealdeer",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "pastel",
+    "attempted_brew_pkg": "pastel",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "pastel",
+      "pm": "direct",
+      "package": null,
+      "binary": "pastel",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/sharkdp/pastel/releases/download/v0.12.0/pastel-v0.12.0-x86_64-unknown-linux-gnu.tar.gz' -o \"$tmp/a\"; tar xzf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'pastel' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'pastel'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "jnv",
+    "attempted_brew_pkg": "jnv",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": true,
+      "pkg": "jnv",
+      "pm": "direct",
+      "package": null,
+      "binary": "jnv",
+      "install_cmd": "( set -e; tmp=$(mktemp -d); mkdir \"$tmp/x\"; curl -fsSL 'https://github.com/ynqa/jnv/releases/download/v0.7.1/jnv-x86_64-unknown-linux-gnu.tar.xz' -o \"$tmp/a\"; tar xJf \"$tmp/a\" -C \"$tmp/x\"; cand=$(find \"$tmp/x\" -type f -perm /111 -name 'jnv' 2>/dev/null | head -1); if [ -z \"$cand\" ]; then cand=$(find \"$tmp/x\" -type f -perm /111 2>/dev/null | head -1); fi; install -m 0755 \"$cand\" /usr/local/bin/'jnv'; rm -rf \"$tmp\" )",
+      "resolved_step": "2-releases-asset"
+    }
+  },
+  {
+    "entry": "doggo",
+    "attempted_brew_pkg": "doggo",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "doggo",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "gemini-cli",
+    "attempted_brew_pkg": "gemini-cli",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "gemini-cli",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "opencode",
+    "attempted_brew_pkg": "anomalyco/tap/opencode",
+    "attempt_source": "resolver",
+    "resolution": {
+      "ok": false,
+      "pkg": "anomalyco/tap/opencode",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  },
+  {
+    "entry": "qmd",
+    "attempted_brew_pkg": "qmd",
+    "attempt_source": "registry-name-fallback",
+    "resolution": {
+      "ok": false,
+      "pkg": "qmd",
+      "error": "install_unsupported",
+      "details": "pm=brew_only"
+    }
+  }
+]
