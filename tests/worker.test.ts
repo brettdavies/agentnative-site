@@ -357,7 +357,8 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     expect(res.headers.get('Content-Type')).toBe('application/linkset+json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
-    expect(await res.text()).toBe('{"linkset":[]}');
+    const body = JSON.parse(await res.text()) as { linkset: unknown[] };
+    expect(body.linkset).toEqual([]);
   });
 
   test('GET /.well-known/mcp pointer alias returns the same body as the canonical server card', async () => {

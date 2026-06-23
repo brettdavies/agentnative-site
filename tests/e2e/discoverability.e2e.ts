@@ -60,11 +60,11 @@ test.describe('staging MCP descriptor aliases', () => {
       transport: { type: string };
       documentation: string;
     };
-    expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
+    expect(body.mcp_endpoint).toBe(`${STAGING_BASE}/mcp`);
     expect(body.version).toBe('1.0');
     expect(body.protocolVersion).toBe('2025-06-18');
     expect(body.transport.type).toBe('streamable-http');
-    expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
+    expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md`);
     expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);
   });
 
@@ -128,16 +128,16 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     const body = (await res.json()) as {
       linkset: Array<{ anchor: string; 'service-desc': Array<{ href: string }> }>;
     };
-    expect(body.linkset[0].anchor).toBe('https://anc.dev/mcp');
-    expect(body.linkset[0]['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp/server-card.json');
+    expect(body.linkset[0].anchor).toBe(`${STAGING_BASE}/mcp`);
+    expect(body.linkset[0]['service-desc'][0].href).toBe(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
   });
 
   test('/.well-known/oauth-protected-resource declares the MCP resource', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/.well-known/oauth-protected-resource`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { resource: string; authorization_servers: string[] };
-    expect(body.resource).toBe('https://anc.dev/mcp');
-    expect(body.authorization_servers).toContain('https://anc.dev');
+    expect(body.resource).toBe(`${STAGING_BASE}/mcp`);
+    expect(body.authorization_servers).toContain(STAGING_BASE);
   });
 
   test('/.well-known/oauth-authorization-server carries agent_auth anonymous block', async ({ request }) => {
@@ -150,9 +150,9 @@ test.describe('staging agent-readiness well-known surfaces', () => {
       token_endpoint: string;
       agent_auth: { anonymous: { claim_uri: string } };
     };
-    expect(body.issuer).toBe('https://anc.dev');
-    expect(body.token_endpoint).toBe('https://anc.dev/oauth2/token');
-    expect(body.agent_auth.anonymous.claim_uri).toBe('https://anc.dev/auth.md');
+    expect(body.issuer).toBe(STAGING_BASE);
+    expect(body.token_endpoint).toBe(`${STAGING_BASE}/oauth2/token`);
+    expect(body.agent_auth.anonymous.claim_uri).toBe(`${STAGING_BASE}/auth.md`);
   });
 
   test('/.well-known/jwks.json is a valid JWKS document', async ({ request }) => {

@@ -263,12 +263,16 @@ describe('MCP descriptor aliases — byte-identical bodies', () => {
 // ---------------------------------------------------------------------------
 
 describe('/.well-known/api-catalog — worker red-team', () => {
-  test('GET stamps application/linkset+json and does not rewrite body', async () => {
+  test('GET stamps application/linkset+json and rewrites linkset URLs to the inbound origin', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/.well-known/api-catalog'), env);
+    const res = await worker.fetch(req('https://staging.example/.well-known/api-catalog'), env);
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/linkset+json; charset=utf-8');
-    expect(await res.text()).toBe(FIXTURE_API_CATALOG);
+    const body = JSON.parse(await res.text()) as {
+      linkset: Array<{ anchor: string; 'service-desc': Array<{ href: string }> }>;
+    };
+    expect(body.linkset[0].anchor).toBe('https://staging.example/mcp');
+    expect(body.linkset[0]['service-desc'][0].href).toBe('https://staging.example/.well-known/mcp/server-card.json');
   });
 
   test('POST does not receive the linkset+json content-type stamp (GET-only intercept)', async () => {
@@ -286,7 +290,8 @@ describe('/.well-known/api-catalog — worker red-team', () => {
     );
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/linkset+json; charset=utf-8');
-    expect(await res.text()).toBe(FIXTURE_API_CATALOG);
+    const body = JSON.parse(await res.text()) as { linkset: Array<{ anchor: string }> };
+    expect(body.linkset[0].anchor).toBe('https://anc.dev/mcp');
   });
 });
 

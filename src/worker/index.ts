@@ -197,6 +197,29 @@ function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: 
   }
 }
 
+function rewriteApiCatalogHrefs(value: unknown, href: string): void {
+  if (!Array.isArray(value)) return;
+  for (const entry of value) {
+    if (entry && typeof entry === 'object') {
+      (entry as Record<string, unknown>).href = href;
+    }
+  }
+}
+
+function rewriteApiCatalog(data: Record<string, unknown>, origin: string): void {
+  const linkset = data.linkset;
+  if (!Array.isArray(linkset)) return;
+  const serverCard = `${origin}/.well-known/mcp/server-card.json`;
+  for (const entry of linkset) {
+    if (!entry || typeof entry !== 'object') continue;
+    const link = entry as Record<string, unknown>;
+    if (typeof link.anchor === 'string') link.anchor = `${origin}/mcp`;
+    rewriteApiCatalogHrefs(link['service-desc'], serverCard);
+    rewriteApiCatalogHrefs(link['service-doc'], `${origin}/mcp-skill`);
+    rewriteApiCatalogHrefs(link.status, serverCard);
+  }
+}
+
 function mcpDescriptorJsonResponse(body: string): Response {
   return new Response(body, {
     status: 200,
@@ -315,20 +338,22 @@ export default {
 
     // /.well-known/api-catalog — RFC 9727 link set. The static asset is
     // emitted extensionless (11b-agent-readiness), so CF Static Assets can't
-    // infer the content-type. Stamp `application/linkset+json` here; the
-    // body is served verbatim from the asset. CORS is opened (the catalog is
-    // a public discovery surface) and the response is marked noindex.
+    // infer the content-type. Origin-rewrite the linkset URLs so staging and
+    // local previews stay self-consistent with the other discovery surfaces,
+    // stamp `application/linkset+json`, open CORS (public discovery surface),
+    // and mark the response noindex.
     if (pathname === '/.well-known/api-catalog' && request.method === 'GET') {
-      const asset = await env.ASSETS.fetch(request);
-      if (asset.ok) {
-        const headers = new Headers(asset.headers);
-        headers.set('content-type', 'application/linkset+json; charset=utf-8');
-        headers.set('access-control-allow-origin', DISCOVERY_CORS_HEADERS['access-control-allow-origin']);
-        headers.set('x-robots-tag', 'noindex');
-        headers.set('cache-control', MCP_DESCRIPTOR_CACHE);
-        return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
-      }
-      return asset;
+      const body = await buildOriginAwareJsonBody(request, env, '/.well-known/api-catalog', rewriteApiCatalog);
+      if (body === null) return discoveryMetadataUnavailable();
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-type': 'application/linkset+json; charset=utf-8',
+          'cache-control': MCP_DESCRIPTOR_CACHE,
+          'x-robots-tag': 'noindex',
+          ...DISCOVERY_CORS_HEADERS,
+        },
+      });
     }
 
     // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
