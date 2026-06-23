@@ -258,6 +258,31 @@ describe('auth.md (built dist/)', () => {
     expect(raw).toContain('https://anc.dev/mcp');
     expect(raw).toContain('oauth-protected-resource');
     expect(raw).toContain('oauth-authorization-server');
+    expect(raw).toContain('/.well-known/mcp/server-card.json');
+  });
+});
+
+describe('emitAgentReadiness() emits pure ASCII (isolation pass)', () => {
+  test('round-tripped agent-readiness output through a temp dir is byte-for-byte ASCII', async () => {
+    const tmp = join(tmpdir(), `anc-readiness-ascii-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(tmp, { recursive: true });
+    try {
+      await writeFile(join(tmp, 'mcp-skill.md'), '# Using the MCP server\n\nhello\n');
+      const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
+      for (const path of [
+        stats.apiCatalogPath,
+        stats.oauthProtectedResourcePath,
+        stats.oauthAuthorizationServerPath,
+        stats.jwksPath,
+        stats.agentSkillsPath,
+        stats.authMdPath,
+      ]) {
+        const hit = await findNonAsciiByte(path);
+        expect(hit).toBeNull();
+      }
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });
 
@@ -323,6 +348,12 @@ describe('operational discovery surfaces are pure ASCII (mojibake gate)', () => 
     join(DIST_DIR, '_internal', 'mcp-server-card.json'),
     join(DIST_DIR, '.well-known', 'security.txt'),
     join(DIST_DIR, '.well-known', 'ai.txt'),
+    join(DIST_DIR, '.well-known', 'api-catalog'),
+    join(DIST_DIR, '.well-known', 'oauth-protected-resource'),
+    join(DIST_DIR, '.well-known', 'oauth-authorization-server'),
+    join(DIST_DIR, '.well-known', 'jwks.json'),
+    join(DIST_DIR, '.well-known', 'agent-skills', 'index.json'),
+    join(DIST_DIR, 'auth.md'),
     join(DIST_DIR, 'robots.txt'),
     join(DIST_DIR, 'sitemap.xml'),
   ] as const;
