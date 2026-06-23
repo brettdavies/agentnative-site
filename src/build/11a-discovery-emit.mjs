@@ -130,7 +130,9 @@ function buildApiCatalog(baseUrl) {
       linkset: [
         {
           anchor: `${baseUrl}/mcp`,
-          'service-desc': [{ href: `${baseUrl}/.well-known/mcp.json`, type: 'application/json' }],
+          'service-desc': [
+            { href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' },
+          ],
           'service-doc': [{ href: `${baseUrl}/mcp-skill`, type: 'text/html' }],
           status: [{ href: `${baseUrl}/.well-known/mcp`, type: 'application/json' }],
         },
@@ -219,8 +221,10 @@ function buildAuthMd(baseUrl) {
     '## Endpoints',
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
-    `- MCP server card: \`${baseUrl}/.well-known/mcp.json\`.`,
+    `- MCP server card: \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
+    `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
+    `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
     `- Client guide: \`${baseUrl}/mcp-skill.md\`.`,
     '',
     '## Authentication method',
@@ -245,12 +249,64 @@ function buildAuthMd(baseUrl) {
   ].join('\n');
 }
 
+function buildOAuthProtectedResource(baseUrl) {
+  // RFC 9728 Protected Resource Metadata. The MCP endpoint is the
+  // programmatic resource; the catalog is public/no-auth, so scopes are
+  // empty and the authorization server metadata documents anonymous access.
+  return `${JSON.stringify(
+    {
+      resource: `${baseUrl}/mcp`,
+      authorization_servers: [baseUrl],
+      scopes_supported: [],
+      bearer_methods_supported: ['header'],
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function buildOAuthAuthorizationServer(baseUrl) {
+  // RFC 8414 Authorization Server Metadata plus the auth.md agent_auth
+  // extension. The catalog is open by design; anonymous identity is the
+  // only supported registration path and issues no credentials.
+  return `${JSON.stringify(
+    {
+      issuer: baseUrl,
+      authorization_endpoint: `${baseUrl}/auth.md`,
+      token_endpoint: `${baseUrl}/oauth2/token`,
+      jwks_uri: `${baseUrl}/.well-known/jwks.json`,
+      grant_types_supported: ['urn:workos:agent-auth:grant-type:anonymous'],
+      response_types_supported: ['none'],
+      agent_auth: {
+        skill: `${baseUrl}/auth.md`,
+        register_uri: `${baseUrl}/auth.md`,
+        identity_types_supported: ['anonymous'],
+        anonymous: {
+          credential_types_supported: ['none'],
+          claim_uri: `${baseUrl}/auth.md`,
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function buildJwks() {
+  // Empty JWKS: the public catalog issues no bearer tokens. The endpoint
+  // exists so oauth-discovery scanners find a valid jwks_uri.
+  return `${JSON.stringify({ keys: [] }, null, 2)}\n`;
+}
+
 /**
  * Emit the agent-readiness discovery surfaces into distDir.
  *
  * Probed by generic agent-readiness scanners under the apex:
  *   dist/.well-known/api-catalog              (RFC 9727)
- *   dist/.well-known/mcp.json                 (SEP-1649 MCP Server Card)
+ *   dist/.well-known/mcp.json                 (SEP-1649 MCP Server Card seed)
+ *   dist/.well-known/oauth-protected-resource (RFC 9728 PRM)
+ *   dist/.well-known/oauth-authorization-server (RFC 8414 + agent_auth)
+ *   dist/.well-known/jwks.json                (empty JWKS for public catalog)
  *   dist/.well-known/agent-skills/index.json  (Agent Skills Discovery v0.2.0)
  *   dist/auth.md                              (auth declaration)
  *
@@ -260,7 +316,16 @@ function buildAuthMd(baseUrl) {
  * @param {object} args
  * @param {string} args.distDir
  * @param {string=} args.baseUrl — explicit override; defaults via resolveBaseUrl
- * @returns {Promise<{ apiCatalogPath: string, mcpServerCardPath: string, agentSkillsPath: string, authMdPath: string, skillDigest: string }>}
+ * @returns {Promise<{
+ *   apiCatalogPath: string;
+ *   mcpServerCardPath: string;
+ *   oauthProtectedResourcePath: string;
+ *   oauthAuthorizationServerPath: string;
+ *   jwksPath: string;
+ *   agentSkillsPath: string;
+ *   authMdPath: string;
+ *   skillDigest: string;
+ * }>}
  */
 export async function emitAgentReadiness({ distDir, baseUrl }) {
   const base = resolveBaseUrl(baseUrl);
@@ -275,13 +340,28 @@ export async function emitAgentReadiness({ distDir, baseUrl }) {
 
   const apiCatalogPath = join(wellKnownDir, 'api-catalog');
   const mcpServerCardPath = join(wellKnownDir, 'mcp.json');
+  const oauthProtectedResourcePath = join(wellKnownDir, 'oauth-protected-resource');
+  const oauthAuthorizationServerPath = join(wellKnownDir, 'oauth-authorization-server');
+  const jwksPath = join(wellKnownDir, 'jwks.json');
   const agentSkillsPath = join(skillsDir, 'index.json');
   const authMdPath = join(distDir, 'auth.md');
 
   await writeFile(apiCatalogPath, buildApiCatalog(base));
   await writeFile(mcpServerCardPath, buildMcpServerCard(base));
+  await writeFile(oauthProtectedResourcePath, buildOAuthProtectedResource(base));
+  await writeFile(oauthAuthorizationServerPath, buildOAuthAuthorizationServer(base));
+  await writeFile(jwksPath, buildJwks());
   await writeFile(agentSkillsPath, buildAgentSkillsIndex(base, skillDigest));
   await writeFile(authMdPath, buildAuthMd(base));
 
-  return { apiCatalogPath, mcpServerCardPath, agentSkillsPath, authMdPath, skillDigest };
+  return {
+    apiCatalogPath,
+    mcpServerCardPath,
+    oauthProtectedResourcePath,
+    oauthAuthorizationServerPath,
+    jwksPath,
+    agentSkillsPath,
+    authMdPath,
+    skillDigest,
+  };
 }

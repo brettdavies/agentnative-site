@@ -165,8 +165,58 @@ describe('.well-known/api-catalog (built dist/)', () => {
     expect(parsed.linkset.length).toBeGreaterThanOrEqual(1);
     const entry = parsed.linkset[0];
     expect(entry.anchor).toBe('https://anc.dev/mcp');
-    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp.json');
+    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp/server-card.json');
     expect(entry['service-doc'][0].href).toBe('https://anc.dev/mcp-skill');
+  });
+});
+
+describe('.well-known/oauth-protected-resource (built dist/)', () => {
+  test('declares the MCP endpoint as the protected resource', async () => {
+    const raw = await readFile(join(DIST_DIR, '.well-known', 'oauth-protected-resource'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      resource: string;
+      authorization_servers: string[];
+      bearer_methods_supported: string[];
+    };
+    expect(parsed.resource).toBe('https://anc.dev/mcp');
+    expect(parsed.authorization_servers).toEqual(['https://anc.dev']);
+    expect(parsed.bearer_methods_supported).toContain('header');
+  });
+});
+
+describe('.well-known/oauth-authorization-server (built dist/)', () => {
+  test('carries OAuth discovery fields and an agent_auth anonymous block', async () => {
+    const raw = await readFile(join(DIST_DIR, '.well-known', 'oauth-authorization-server'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      issuer: string;
+      authorization_endpoint: string;
+      token_endpoint: string;
+      jwks_uri: string;
+      grant_types_supported: string[];
+      agent_auth: {
+        skill: string;
+        register_uri: string;
+        identity_types_supported: string[];
+        anonymous: { credential_types_supported: string[]; claim_uri: string };
+      };
+    };
+    expect(parsed.issuer).toBe('https://anc.dev');
+    expect(parsed.authorization_endpoint).toBe('https://anc.dev/auth.md');
+    expect(parsed.token_endpoint).toBe('https://anc.dev/oauth2/token');
+    expect(parsed.jwks_uri).toBe('https://anc.dev/.well-known/jwks.json');
+    expect(parsed.grant_types_supported.length).toBeGreaterThanOrEqual(1);
+    expect(parsed.agent_auth.skill).toBe('https://anc.dev/auth.md');
+    expect(parsed.agent_auth.identity_types_supported).toContain('anonymous');
+    expect(parsed.agent_auth.anonymous.claim_uri).toBe('https://anc.dev/auth.md');
+  });
+});
+
+describe('.well-known/jwks.json (built dist/)', () => {
+  test('is a valid JWKS document with an empty keys array', async () => {
+    const raw = await readFile(join(DIST_DIR, '.well-known', 'jwks.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { keys: unknown[] };
+    expect(Array.isArray(parsed.keys)).toBe(true);
+    expect(parsed.keys.length).toBe(0);
   });
 });
 
@@ -229,6 +279,8 @@ describe('auth.md (built dist/)', () => {
     expect((h1 ?? '').toLowerCase()).toContain('auth.md');
     expect(raw).toContain('no authentication');
     expect(raw).toContain('https://anc.dev/mcp');
+    expect(raw).toContain('oauth-protected-resource');
+    expect(raw).toContain('oauth-authorization-server');
   });
 });
 
@@ -241,6 +293,9 @@ describe('emitAgentReadiness() in isolation', () => {
       const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
       expect(stats.apiCatalogPath).toBe(join(tmp, '.well-known', 'api-catalog'));
       expect(stats.mcpServerCardPath).toBe(join(tmp, '.well-known', 'mcp.json'));
+      expect(stats.oauthProtectedResourcePath).toBe(join(tmp, '.well-known', 'oauth-protected-resource'));
+      expect(stats.oauthAuthorizationServerPath).toBe(join(tmp, '.well-known', 'oauth-authorization-server'));
+      expect(stats.jwksPath).toBe(join(tmp, '.well-known', 'jwks.json'));
       expect(stats.agentSkillsPath).toBe(join(tmp, '.well-known', 'agent-skills', 'index.json'));
       expect(stats.authMdPath).toBe(join(tmp, 'auth.md'));
 

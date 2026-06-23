@@ -381,6 +381,77 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(await res.text()).toBe('{"skills":[]}');
   });
+
+  test('GET /.well-known/mcp/server-card.json rewrites MCP card URLs to the inbound origin', async () => {
+    const seed = JSON.stringify({
+      url: 'https://anc.dev/mcp',
+      documentation: 'https://anc.dev/mcp-skill.md',
+      transport: { endpoint: 'https://anc.dev/mcp' },
+    });
+    const env = makeEnv({ '/.well-known/mcp.json': seed });
+    const res = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    const body = JSON.parse(await res.text()) as {
+      url: string;
+      documentation: string;
+      transport: { endpoint: string };
+    };
+    expect(body.url).toBe('https://staging.example/mcp');
+    expect(body.documentation).toBe('https://staging.example/mcp-skill.md');
+    expect(body.transport.endpoint).toBe('https://staging.example/mcp');
+  });
+
+  test('GET /.well-known/oauth-protected-resource rewrites resource + authorization_servers', async () => {
+    const seed = JSON.stringify({
+      resource: 'https://anc.dev/mcp',
+      authorization_servers: ['https://anc.dev'],
+    });
+    const env = makeEnv({ '/.well-known/oauth-protected-resource': seed });
+    const res = await worker.fetch(req('https://staging.example/.well-known/oauth-protected-resource'), env);
+    const body = JSON.parse(await res.text()) as { resource: string; authorization_servers: string[] };
+    expect(body.resource).toBe('https://staging.example/mcp');
+    expect(body.authorization_servers).toEqual(['https://staging.example']);
+  });
+
+  test('GET /.well-known/oauth-authorization-server rewrites issuer + agent_auth URLs', async () => {
+    const seed = JSON.stringify({
+      issuer: 'https://anc.dev',
+      authorization_endpoint: 'https://anc.dev/auth.md',
+      token_endpoint: 'https://anc.dev/oauth2/token',
+      jwks_uri: 'https://anc.dev/.well-known/jwks.json',
+      agent_auth: {
+        skill: 'https://anc.dev/auth.md',
+        register_uri: 'https://anc.dev/auth.md',
+        anonymous: { claim_uri: 'https://anc.dev/auth.md' },
+      },
+    });
+    const env = makeEnv({ '/.well-known/oauth-authorization-server': seed });
+    const res = await worker.fetch(req('https://staging.example/.well-known/oauth-authorization-server'), env);
+    const body = JSON.parse(await res.text()) as {
+      issuer: string;
+      agent_auth: { skill: string; anonymous: { claim_uri: string } };
+    };
+    expect(body.issuer).toBe('https://staging.example');
+    expect(body.agent_auth.skill).toBe('https://staging.example/auth.md');
+    expect(body.agent_auth.anonymous.claim_uri).toBe('https://staging.example/auth.md');
+  });
+
+  test('POST /oauth2/token returns a typed public-catalog error', async () => {
+    const env = makeEnv({});
+    const res = await worker.fetch(
+      new Request('https://anc.dev/oauth2/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    const body = JSON.parse(await res.text()) as { error: string; mcp_endpoint: string };
+    expect(body.error).toBe('public_catalog');
+    expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
+  });
 });
 
 // ---------------------------------------------------------------------------

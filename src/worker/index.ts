@@ -122,6 +122,76 @@ async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<s
   return `${JSON.stringify(data, null, 2)}\n`;
 }
 
+/**
+ * Build the SEP-1649 MCP Server Card JSON body, rewriting URL fields to
+ * the inbound request's origin. The static dist/.well-known/mcp.json asset
+ * is the body seed. Served at /.well-known/mcp/server-card.json because
+ * the legacy /.well-known/mcp pointer is an extensionless file and cannot
+ * coexist with an mcp/ directory on disk.
+ */
+async function buildMcpServerCardJsonBody(request: Request, env: Env): Promise<string> {
+  const cardUrl = new URL(request.url);
+  cardUrl.pathname = '/.well-known/mcp.json';
+  const asset = await env.ASSETS.fetch(new Request(cardUrl.toString(), { method: 'GET' }));
+  const body = await asset.text();
+  const data = JSON.parse(body) as {
+    url?: string;
+    documentation?: string;
+    transport?: { endpoint?: string; [k: string]: unknown };
+    [k: string]: unknown;
+  };
+  const origin = new URL(request.url).origin;
+  data.url = `${origin}/mcp`;
+  data.documentation = `${origin}/mcp-skill.md`;
+  if (data.transport && typeof data.transport === 'object') {
+    data.transport.endpoint = `${origin}/mcp`;
+  }
+  return `${JSON.stringify(data, null, 2)}\n`;
+}
+
+/**
+ * Rewrite absolute URLs in agent-readiness JSON metadata so staging and
+ * local previews see their own origin instead of the build-time default.
+ */
+async function buildOriginAwareJsonBody(
+  request: Request,
+  env: Env,
+  assetPath: string,
+  rewrite: (data: Record<string, unknown>, origin: string) => void,
+): Promise<string> {
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = assetPath;
+  const asset = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: 'GET' }));
+  const body = await asset.text();
+  const data = JSON.parse(body) as Record<string, unknown>;
+  rewrite(data, new URL(request.url).origin);
+  return `${JSON.stringify(data, null, 2)}\n`;
+}
+
+function rewriteOAuthProtectedResource(data: Record<string, unknown>, origin: string): void {
+  data.resource = `${origin}/mcp`;
+  if (Array.isArray(data.authorization_servers)) {
+    data.authorization_servers = [origin];
+  }
+}
+
+function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: string): void {
+  data.issuer = origin;
+  data.authorization_endpoint = `${origin}/auth.md`;
+  data.token_endpoint = `${origin}/oauth2/token`;
+  data.jwks_uri = `${origin}/.well-known/jwks.json`;
+  const agentAuth = data.agent_auth;
+  if (agentAuth && typeof agentAuth === 'object') {
+    const block = agentAuth as Record<string, unknown>;
+    block.skill = `${origin}/auth.md`;
+    block.register_uri = `${origin}/auth.md`;
+    const anonymous = block.anonymous;
+    if (anonymous && typeof anonymous === 'object') {
+      (anonymous as Record<string, unknown>).claim_uri = `${origin}/auth.md`;
+    }
+  }
+}
+
 function mcpDescriptorJsonResponse(body: string): Response {
   return new Response(body, {
     status: 200,
@@ -172,6 +242,62 @@ export default {
       if (request.method !== 'GET') return mcpGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
       return mcpDescriptorJsonResponse(body);
+    }
+
+    // /.well-known/mcp/server-card.json — SEP-1649 MCP Server Card. The
+    // legacy /.well-known/mcp pointer is an extensionless file, so the
+    // canonical server-card path is served here via the Worker while the
+    // body seed lives at dist/.well-known/mcp.json.
+    if (pathname === '/.well-known/mcp/server-card.json' && request.method !== 'OPTIONS') {
+      if (request.method !== 'GET') return mcpGetOnly405();
+      const body = await buildMcpServerCardJsonBody(request, env);
+      return mcpDescriptorJsonResponse(body);
+    }
+
+    // /.well-known/oauth-protected-resource + oauth-authorization-server —
+    // agent-readiness discovery metadata. Origin-aware rewrite keeps staging
+    // and local previews self-consistent.
+    if (pathname === '/.well-known/oauth-protected-resource' && request.method === 'GET') {
+      const body = await buildOriginAwareJsonBody(
+        request,
+        env,
+        '/.well-known/oauth-protected-resource',
+        rewriteOAuthProtectedResource,
+      );
+      return mcpDescriptorJsonResponse(body);
+    }
+    if (pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
+      const body = await buildOriginAwareJsonBody(
+        request,
+        env,
+        '/.well-known/oauth-authorization-server',
+        rewriteOAuthAuthorizationServer,
+      );
+      return mcpDescriptorJsonResponse(body);
+    }
+
+    // Public-catalog token endpoint. The MCP surface requires no credentials;
+    // POSTs receive a typed JSON body explaining the no-auth posture rather
+    // than a misleading 404.
+    if (pathname === '/oauth2/token' && request.method === 'POST') {
+      const origin = new URL(request.url).origin;
+      return new Response(
+        JSON.stringify({
+          error: 'public_catalog',
+          error_description:
+            'anc.dev publishes a public catalog. No OAuth tokens are issued; call the MCP endpoint directly.',
+          documentation: `${origin}/auth.md`,
+          mcp_endpoint: `${origin}/mcp`,
+        }),
+        {
+          status: 400,
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
+            'access-control-allow-origin': '*',
+          },
+        },
+      );
     }
 
     // /.well-known/api-catalog — RFC 9727 link set. The static asset is

@@ -336,6 +336,7 @@ ${SOURCE_REPOS.map(
     </footer>
     <script src="/js/theme.js" defer></script>
     <script src="/js/clipboard.js" defer></script>
+    <script src="/js/webmcp.js" defer></script>
 ${extraScripts.map((s) => `    <script src="${s}" defer></script>`).join('\n')}
   </body>
 </html>
