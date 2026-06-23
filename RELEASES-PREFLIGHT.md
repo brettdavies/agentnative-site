@@ -50,7 +50,10 @@ Flags:
   and auth shape for `do-smoke`, `mcp`, and `dist`. Local mode hits `$LOCAL_URL` without auth (requires `bunx wrangler
   dev --env staging --local` running); staging mode hits the staging Worker through CF Access (service token from
   1Password). `coord`, `build`, and `mechanics` are not env-dependent.
-- `--binary <name>` — fresh non-registry binary for do-smoke (default: `$BINARY` env var or `cowsay`)
+- `--binary <name>` — fresh non-registry binary for do-smoke (default: `$BINARY` env var or `emoj`). The name resolves
+  to a GitHub `owner/repo` the live scorer fetches: `emoj` to `sindresorhus/emoj`, `cowsay` to `piuccio/cowsay`,
+  otherwise `sindresorhus/<name>`. Add a binary to the `do_fixture_repo` map in `scripts/release/preflight.sh` when its
+  source lives outside the `sindresorhus` namespace.
 - `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
 - `--staging-url <url>` — override the staging Worker URL
 - `--local-url <url>` — override the local `wrangler dev` URL
@@ -195,12 +198,15 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
   Sandbox is invoked. Confirm the binary is NOT in the registry:
 
   ```bash
-  BINARY=cowsay   # rotate per release; pick something tiny and stable
+  BINARY=emoj   # rotate per release; pick something tiny and stable
   grep -E "^- name: ${BINARY}$" registry.yaml && echo "FAIL: already in registry, pick another" || echo "ok"
   ```
 
-  Suggested rotation list (small, stable, GitHub-hosted): `figlet`, `sl`, `lolcat`. These are for the HTTP `do-smoke`
-  gate, NOT the MCP live-audit gate; that gate uses a separate bin-producing-npm allowlist enforced by
+  Suggested rotation (small, stable, real GitHub repos): `emoj` (`sindresorhus/emoj`), `cowsay` (`piuccio/cowsay`). The
+  binary name must resolve to a real `owner/repo` through `do_fixture_repo` in `scripts/release/preflight.sh` — a name
+  with no matching repo there falls back to `sindresorhus/<name>`, which 404s the scorer (`sindresorhus/cowsay` does not
+  exist). These are for the HTTP `do-smoke` gate, NOT the MCP live-audit gate; that gate uses a separate
+  bin-producing-npm allowlist enforced by
   `scripts/release/mcp-smoke.sh` (`figlet`, `prettier`, `tsx`, `nodemon`, `npm-check-updates`). The MCP gate now passes
   `--full-cache-coverage` against staging, which exercises BOTH a cache-miss (via `bypass_cache: true`) and a cache-hit
   (subsequent call on the same binary without bypass) sub-gate. The bypass is gated by the staging-only
