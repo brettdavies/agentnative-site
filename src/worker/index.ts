@@ -167,6 +167,7 @@ async function buildOriginAwareJsonBody(
 
 function rewriteOAuthProtectedResource(data: Record<string, unknown>, origin: string): void {
   data.resource = `${origin}/mcp`;
+  data.resource_documentation = `${origin}/auth.md`;
   if (Array.isArray(data.authorization_servers)) {
     data.authorization_servers = [origin];
   }
@@ -177,6 +178,7 @@ function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: 
   data.authorization_endpoint = `${origin}/auth.md`;
   data.token_endpoint = `${origin}/oauth2/token`;
   data.jwks_uri = `${origin}/.well-known/jwks.json`;
+  data.service_documentation = `${origin}/auth.md`;
   const agentAuth = data.agent_auth;
   if (agentAuth && typeof agentAuth === 'object') {
     const block = agentAuth as Record<string, unknown>;
@@ -195,9 +197,7 @@ function mcpDescriptorJsonResponse(body: string): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': MCP_DESCRIPTOR_CACHE,
-      // Discovery JSON is public read metadata; CORS * lets browser-based
-      // catalog tools fetch it. POST /mcp JSON-RPC deliberately omits CORS.
-      'access-control-allow-origin': '*',
+      ...DISCOVERY_CORS_HEADERS,
     },
   });
 }
@@ -228,6 +228,11 @@ const DISCOVERY_GET_ONLY_PATHS = new Set([
   '/.well-known/oauth-authorization-server',
   '/.well-known/api-catalog',
 ]);
+
+/** Read-only discovery JSON may be fetched cross-origin by agent tools and scanners. */
+const DISCOVERY_CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+} as const;
 
 function mcpGetOnly405(): Response {
   return discoveryGetOnly405();
@@ -282,7 +287,8 @@ export default {
 
     // Public-catalog token endpoint. The MCP surface requires no credentials;
     // POSTs receive a typed JSON body explaining the no-auth posture rather
-    // than a misleading 404.
+    // than a misleading 404. No CORS: browser-origin probes are not a
+    // supported client; posture is documented in auth.md and OAuth metadata.
     if (pathname === '/oauth2/token' && request.method === 'POST') {
       const origin = new URL(request.url).origin;
       return new Response(
@@ -298,7 +304,6 @@ export default {
           headers: {
             'content-type': 'application/json; charset=utf-8',
             'cache-control': 'no-store',
-            'access-control-allow-origin': '*',
           },
         },
       );
@@ -314,7 +319,7 @@ export default {
       if (asset.ok) {
         const headers = new Headers(asset.headers);
         headers.set('content-type', 'application/linkset+json; charset=utf-8');
-        headers.set('access-control-allow-origin', '*');
+        headers.set('access-control-allow-origin', DISCOVERY_CORS_HEADERS['access-control-allow-origin']);
         headers.set('x-robots-tag', 'noindex');
         headers.set('cache-control', MCP_DESCRIPTOR_CACHE);
         return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });

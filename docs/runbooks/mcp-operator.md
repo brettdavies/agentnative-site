@@ -154,6 +154,20 @@ Discovery surfaces advertise the MCP endpoint. Operators are responsible for kee
 When the client-skill URL changes (a rename, a domain move), all surfaces have to update together. The drift gate is the
 test suite; trust it, but pull the e2e suite locally before deploying to confirm.
 
+## CORS policy
+
+Discovery metadata is **read-only** and returns `Access-Control-Allow-Origin: *` (server card, api-catalog, OAuth
+PRM/AS, JWKS). This is deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin.
+No credentials or metered operations are exposed through them.
+
+**Server-to-agent paths omit CORS:**
+
+- `POST /mcp` — JSON-RPC including metered `score_cli`. A browser-reachable endpoint would let any malicious page trigger
+  audits charged to the visitor's IP (KTD-10).
+- `POST /oauth2/token` — returns a typed `public_catalog` error only; posture is in `auth.md` and OAuth metadata.
+
+Full prose lives in `/auth.md` under **CORS posture**. Do not add CORS to `POST /mcp` without an explicit KTD revision.
+
 ## Live-scoring kill switch interplay
 
 `MCP_LIVE_SCORING_ENABLED` shares a name and semantic with the live-scoring kill switch used by the human form on `/`.

@@ -74,6 +74,9 @@ const SOURCE_REPOS = [
 
 const esc = escHtml;
 
+/** Deferred client bundle for browser-agent (WebMCP) tool registration. */
+export const WEBMCP_SCRIPT = '/js/webmcp.js';
+
 /**
  * @param {object} args
  * @param {string} args.title                — document <title> + og:title.

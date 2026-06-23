@@ -196,10 +196,12 @@ describe('.well-known/oauth-protected-resource (built dist/)', () => {
       resource: string;
       authorization_servers: string[];
       bearer_methods_supported: string[];
+      resource_documentation: string;
     };
     expect(parsed.resource).toBe('https://anc.dev/mcp');
     expect(parsed.authorization_servers).toEqual(['https://anc.dev']);
     expect(parsed.bearer_methods_supported).toContain('header');
+    expect(parsed.resource_documentation).toBe('https://anc.dev/auth.md');
   });
 });
 
@@ -211,6 +213,7 @@ describe('.well-known/oauth-authorization-server (built dist/)', () => {
       authorization_endpoint: string;
       token_endpoint: string;
       jwks_uri: string;
+      service_documentation: string;
       grant_types_supported: string[];
       agent_auth: {
         skill: string;
@@ -223,6 +226,7 @@ describe('.well-known/oauth-authorization-server (built dist/)', () => {
     expect(parsed.authorization_endpoint).toBe('https://anc.dev/auth.md');
     expect(parsed.token_endpoint).toBe('https://anc.dev/oauth2/token');
     expect(parsed.jwks_uri).toBe('https://anc.dev/.well-known/jwks.json');
+    expect(parsed.service_documentation).toBe('https://anc.dev/auth.md');
     expect(parsed.grant_types_supported.length).toBeGreaterThanOrEqual(1);
     expect(parsed.agent_auth.skill).toBe('https://anc.dev/auth.md');
     expect(parsed.agent_auth.identity_types_supported).toContain('anonymous');
@@ -268,6 +272,8 @@ describe('auth.md (built dist/)', () => {
     expect((h1 ?? '').toLowerCase()).toContain('auth.md');
     expect(raw).toContain('no authentication');
     expect(raw).toContain('public_catalog');
+    expect(raw).toContain('## CORS posture');
+    expect(raw).toContain('authentication.required: false');
     expect(raw).toContain('https://anc.dev/mcp');
     expect(raw).toContain('oauth-protected-resource');
     expect(raw).toContain('oauth-authorization-server');

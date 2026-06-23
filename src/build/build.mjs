@@ -47,7 +47,7 @@ import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell, emitShellTemplate } from './shell.mjs';
+import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -179,6 +179,7 @@ export async function build() {
       canonicalPath: `/p${n}`,
       bodyHtml: html,
       themeInitJs: themeInit,
+      extraScripts: [WEBMCP_SCRIPT],
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 

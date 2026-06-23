@@ -397,16 +397,22 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
   });
 
 
-  test('GET /.well-known/oauth-protected-resource rewrites resource + authorization_servers', async () => {
+  test('GET /.well-known/oauth-protected-resource rewrites resource + documentation URLs', async () => {
     const seed = JSON.stringify({
       resource: 'https://anc.dev/mcp',
       authorization_servers: ['https://anc.dev'],
+      resource_documentation: 'https://anc.dev/auth.md',
     });
     const env = makeEnv({ '/.well-known/oauth-protected-resource': seed });
     const res = await worker.fetch(req('https://staging.example/.well-known/oauth-protected-resource'), env);
-    const body = JSON.parse(await res.text()) as { resource: string; authorization_servers: string[] };
+    const body = JSON.parse(await res.text()) as {
+      resource: string;
+      authorization_servers: string[];
+      resource_documentation: string;
+    };
     expect(body.resource).toBe('https://staging.example/mcp');
     expect(body.authorization_servers).toEqual(['https://staging.example']);
+    expect(body.resource_documentation).toBe('https://staging.example/auth.md');
   });
 
   test('GET /.well-known/oauth-authorization-server rewrites issuer + agent_auth URLs', async () => {
@@ -415,6 +421,7 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
       authorization_endpoint: 'https://anc.dev/auth.md',
       token_endpoint: 'https://anc.dev/oauth2/token',
       jwks_uri: 'https://anc.dev/.well-known/jwks.json',
+      service_documentation: 'https://anc.dev/auth.md',
       agent_auth: {
         skill: 'https://anc.dev/auth.md',
         register_uri: 'https://anc.dev/auth.md',
@@ -425,9 +432,11 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     const res = await worker.fetch(req('https://staging.example/.well-known/oauth-authorization-server'), env);
     const body = JSON.parse(await res.text()) as {
       issuer: string;
+      service_documentation: string;
       agent_auth: { skill: string; anonymous: { claim_uri: string } };
     };
     expect(body.issuer).toBe('https://staging.example');
+    expect(body.service_documentation).toBe('https://staging.example/auth.md');
     expect(body.agent_auth.skill).toBe('https://staging.example/auth.md');
     expect(body.agent_auth.anonymous.claim_uri).toBe('https://staging.example/auth.md');
   });
@@ -446,6 +455,7 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     const body = JSON.parse(await res.text()) as { error: string; mcp_endpoint: string };
     expect(body.error).toBe('public_catalog');
     expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 });
 

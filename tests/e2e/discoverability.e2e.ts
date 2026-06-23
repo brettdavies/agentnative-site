@@ -173,6 +173,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     expect(text.toLowerCase()).toContain('auth.md');
     expect(text).toContain('no authentication');
     expect(text).toContain('public_catalog');
+    expect(text).toContain('## CORS posture');
     expect(text).toContain('/.well-known/mcp/server-card.json');
   });
 

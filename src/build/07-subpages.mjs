@@ -13,7 +13,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell } from './shell.mjs';
+import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks } from './util.mjs';
 
 /**
@@ -69,7 +69,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         canonicalPath: `/${name}`,
         bodyHtml: html,
         themeInitJs: themeInit,
-        extraScripts: name === 'mcp' ? ['/js/webmcp.js'] : [],
+        extraScripts: name === 'mcp' ? [WEBMCP_SCRIPT] : [],
       }),
     );
     await writeFile(join(distDir, `${name}.md`), absolutifyMarkdownLinks(source));

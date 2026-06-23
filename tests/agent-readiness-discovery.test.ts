@@ -47,6 +47,7 @@ const FIXTURE_OAUTH_PR = JSON.stringify({
   resource: 'https://anc.dev/mcp',
   authorization_servers: ['https://anc.dev'],
   bearer_methods_supported: ['header'],
+  resource_documentation: 'https://anc.dev/auth.md',
 });
 
 const FIXTURE_OAUTH_AS = JSON.stringify({
@@ -54,6 +55,7 @@ const FIXTURE_OAUTH_AS = JSON.stringify({
   authorization_endpoint: 'https://anc.dev/auth.md',
   token_endpoint: 'https://anc.dev/oauth2/token',
   jwks_uri: 'https://anc.dev/.well-known/jwks.json',
+  service_documentation: 'https://anc.dev/auth.md',
   agent_auth: {
     skill: 'https://anc.dev/auth.md',
     register_uri: 'https://anc.dev/auth.md',
@@ -132,13 +134,15 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
     expect(llms).toContain(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`);
   });
 
-  test('shell HTML pages load /js/webmcp.js on homepage and /mcp only', async () => {
-    for (const page of ['index.html', 'mcp.html']) {
+  test('shell HTML pages load /js/webmcp.js on spec surfaces only', async () => {
+    for (const page of ['index.html', 'mcp.html', 'p1.html']) {
       const html = await readFile(join(DIST_DIR, page), 'utf8');
       expect(html).toContain('/js/webmcp.js');
     }
     const about = await readFile(join(DIST_DIR, 'about.html'), 'utf8');
     expect(about).not.toContain('/js/webmcp.js');
+    const scorecard = await readFile(join(DIST_DIR, 'score', 'curl.html'), 'utf8');
+    expect(scorecard).not.toContain('/js/webmcp.js');
   });
 });
 
@@ -311,6 +315,20 @@ describe('OAuth discovery metadata — worker red-team', () => {
     expect(res.headers.get('Allow')).toBe('GET');
   });
 
+  test('GET /.well-known/oauth-protected-resource rewrites resource_documentation to auth.md', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://staging.example/.well-known/oauth-protected-resource'), env);
+    const body = JSON.parse(await res.text()) as { resource_documentation: string };
+    expect(body.resource_documentation).toBe('https://staging.example/auth.md');
+  });
+
+  test('GET /.well-known/oauth-authorization-server rewrites service_documentation to auth.md', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://staging.example/.well-known/oauth-authorization-server'), env);
+    const body = JSON.parse(await res.text()) as { service_documentation: string };
+    expect(body.service_documentation).toBe('https://staging.example/auth.md');
+  });
+
   test('Accept: text/markdown still returns JSON (GET intercept precedes CN rewrite)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
@@ -410,7 +428,7 @@ describe('POST /oauth2/token — worker red-team', () => {
     expect(body.error).toBe('public_catalog');
     expect(body.documentation).toBe('https://staging.example/auth.md');
     expect(body.mcp_endpoint).toBe('https://staging.example/mcp');
-    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 });
 

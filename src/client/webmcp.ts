@@ -1,5 +1,6 @@
-// WebMCP imperative API — exposes key site navigation actions to browser
-// agents. Loaded on every page; no-ops when navigator.modelContext is absent.
+// WebMCP imperative API — exposes spec-navigation tools to browser agents via
+// navigator.modelContext (W3C WebMCP). No-ops when the API is absent.
+// Loaded on spec surfaces only (homepage, principles, /mcp) — not scorecards.
 // See https://webmachinelearning.github.io/webmcp/
 
 type ModelContextTool = {
