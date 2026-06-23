@@ -53,11 +53,13 @@ test.describe('staging MCP descriptor aliases', () => {
     const body = (await res.json()) as {
       mcp_endpoint: string;
       version: string;
+      protocolVersion: string;
       transport: { type: string };
       documentation: string;
     };
     expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
-    expect(body.version).toBe('2025-06-18');
+    expect(body.version).toBe('1.0');
+    expect(body.protocolVersion).toBe('2025-06-18');
     expect(body.transport.type).toBe('streamable-http');
     expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
     expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);
@@ -170,6 +172,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     const text = await res.text();
     expect(text.toLowerCase()).toContain('auth.md');
     expect(text).toContain('no authentication');
+    expect(text).toContain('public_catalog');
     expect(text).toContain('/.well-known/mcp/server-card.json');
   });
 

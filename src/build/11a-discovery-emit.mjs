@@ -27,18 +27,22 @@ import { join } from 'node:path';
 import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
 const MCP_SPEC_VERSION = '2025-06-18';
+const MCP_CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json';
+const MCP_CARD_VERSION = '1.0';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';
 
 export const MCP_DESCRIPTOR_SEED_PATH = '_internal/mcp-server-card.json';
 
 function buildMcpDescriptor(baseUrl) {
   const description = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
+  const authMd = `${baseUrl}/auth.md`;
   // SEP-1649 server card (canonical at /.well-known/mcp/server-card.json) plus
-  // U6 pointer fields retained for legacy alias consumers.
+  // U6 pointer fields retained for legacy alias consumers (mcp_endpoint, documentation).
   return `${JSON.stringify(
     {
+      $schema: MCP_CARD_SCHEMA,
       mcp_endpoint: `${baseUrl}/mcp`,
-      version: MCP_SPEC_VERSION,
+      version: MCP_CARD_VERSION,
       description,
       documentation: `${baseUrl}/mcp-skill.md`,
       serverInfo: {
@@ -52,12 +56,14 @@ function buildMcpDescriptor(baseUrl) {
         endpoint: `${baseUrl}/mcp`,
       },
       capabilities: {
-        tools: true,
-        resources: true,
-        prompts: false,
+        tools: { listChanged: false },
+        resources: { subscribe: false, listChanged: false },
+        prompts: { listChanged: false },
       },
       authentication: {
         required: false,
+        schemes: [],
+        documentation: authMd,
       },
     },
     null,
@@ -138,7 +144,12 @@ function buildApiCatalog(baseUrl) {
             { href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' },
           ],
           'service-doc': [{ href: `${baseUrl}/mcp-skill`, type: 'text/html' }],
-          status: [{ href: `${baseUrl}/mcp`, type: 'application/json' }],
+          status: [
+            {
+              href: `${baseUrl}/.well-known/mcp/server-card.json`,
+              type: 'application/json',
+            },
+          ],
         },
       ],
     },
@@ -202,8 +213,15 @@ function buildAuthMd(baseUrl) {
     '',
     '## Authentication method',
     '',
-    'None. The catalog is open by design and the inventory is published. There is no authorization',
-    'server, no token endpoint, and no registration flow. `Authorization` headers are ignored.',
+    'None. The catalog is open by design and the inventory is published. No API key and no agent',
+    'registration are required. Agents call the MCP endpoint directly over HTTPS; `Authorization`',
+    'headers are ignored.',
+    '',
+    'OAuth discovery metadata (`/.well-known/oauth-protected-resource`,',
+    '`/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`) is published for',
+    'agent-readiness scanners. The `token_endpoint` (`/oauth2/token`) exists only to answer',
+    'discovery probes: POSTs return a typed `public_catalog` error and issue no credentials.',
+    'See this file for the authoritative no-auth posture.',
     '',
     '## Credential use',
     '',
@@ -241,7 +259,8 @@ function buildOAuthProtectedResource(baseUrl) {
 function buildOAuthAuthorizationServer(baseUrl) {
   // RFC 8414 Authorization Server Metadata plus the auth.md agent_auth
   // extension. The catalog is open by design; anonymous identity is the
-  // only supported registration path and issues no credentials.
+  // only supported registration path and issues no credentials. token_endpoint
+  // is a discovery stub for scanners — POST returns public_catalog (see auth.md).
   return `${JSON.stringify(
     {
       issuer: baseUrl,

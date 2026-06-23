@@ -25,10 +25,12 @@ const MCP_DESCRIPTOR_ALIASES = [
 
 const FIXTURE_MCP_SEED = JSON.stringify({
   mcp_endpoint: 'https://anc.dev/mcp',
-  version: '2025-06-18',
+  version: '1.0',
+  protocolVersion: '2025-06-18',
   documentation: 'https://anc.dev/mcp-skill.md',
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
+  authentication: { required: false, schemes: [], documentation: 'https://anc.dev/auth.md' },
 });
 
 const FIXTURE_API_CATALOG = JSON.stringify({
@@ -130,11 +132,13 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
     expect(llms).toContain(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`);
   });
 
-  test('shell HTML pages load /js/webmcp.js', async () => {
-    for (const page of ['index.html', 'mcp.html', 'about.html']) {
+  test('shell HTML pages load /js/webmcp.js on homepage and /mcp only', async () => {
+    for (const page of ['index.html', 'mcp.html']) {
       const html = await readFile(join(DIST_DIR, page), 'utf8');
       expect(html).toContain('/js/webmcp.js');
     }
+    const about = await readFile(join(DIST_DIR, 'about.html'), 'utf8');
+    expect(about).not.toContain('/js/webmcp.js');
   });
 });
 
@@ -220,6 +224,28 @@ describe('MCP descriptor aliases — byte-identical bodies', () => {
     const res = await worker.fetch(req('https://anc.dev/_internal/mcp-server-card.json'), env);
     expect(res.status).toBe(404);
   });
+
+  test('missing seed returns 503 instead of an unhandled exception', async () => {
+    const noSeedEnv = {
+      ASSETS: {
+        async fetch(): Promise<Response> {
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+    };
+    const res = await worker.fetch(req(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`), noSeedEnv);
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('unavailable');
+  });
+
+  test('authentication.documentation rewrites to the inbound origin', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
+    const body = JSON.parse(await res.text()) as {
+      authentication: { documentation: string };
+    };
+    expect(body.authentication.documentation).toBe('https://staging.example/auth.md');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -238,8 +264,8 @@ describe('/.well-known/api-catalog — worker red-team', () => {
   test('POST does not receive the linkset+json content-type stamp (GET-only intercept)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(req('https://anc.dev/.well-known/api-catalog', { method: 'POST' }), env);
-    // Falls through to asset fetch; stub returns 200 without special headers.
-    expect(res.headers.get('Content-Type')).toBeNull();
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('GET');
   });
 
   test('Accept: text/markdown still returns linkset+json (GET intercept precedes CN rewrite)', async () => {
@@ -275,13 +301,14 @@ describe('OAuth discovery metadata — worker red-team', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 
-  test('POST on oauth-protected-resource is not intercepted (no JSON stamp)', async () => {
+  test('POST on oauth-protected-resource returns 405 Allow: GET', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
       req('https://anc.dev/.well-known/oauth-protected-resource', { method: 'POST' }),
       env,
     );
-    expect(res.headers.get('Content-Type')).toBeNull();
+    expect(res.status).toBe(405);
+    expect(res.headers.get('Allow')).toBe('GET');
   });
 
   test('Accept: text/markdown still returns JSON (GET intercept precedes CN rewrite)', async () => {

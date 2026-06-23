@@ -4,7 +4,7 @@ Operator playbook for `POST https://anc.dev/mcp`. Companion to the client-facing
 [`content/mcp-skill.md`](../../content/mcp-skill.md) (published at `https://anc.dev/mcp-skill.md`). The client skill
 covers the wire contract clients see; this runbook covers the surfaces operators see: kill switches, observability,
 posture rationale, spec-revision drift handling, and rate-limit policy. Unpublished by design: the published surface is
-the client skill plus the `.well-known/mcp` pointer, not this runbook.
+the client skill plus the server card at `/.well-known/mcp/server-card.json`, not this runbook.
 
 ## Kill switches
 
@@ -85,7 +85,7 @@ triaging unexpected traffic shape: filter by `origin` (browser probes) or `user_
 Spec revision `2025-06-18` is pinned in three places that MUST stay in lockstep:
 
 1. `src/worker/mcp/instructions.ts`: the `SPEC_REVISION` constant baked into the handshake `instructions` field.
-2. `src/build/11a-discovery-emit.mjs`: the `MCP_SPEC_VERSION` constant baked into `/.well-known/mcp`.
+2. `src/build/11a-discovery-emit.mjs`: the `MCP_SPEC_VERSION` constant baked into the server card `protocolVersion`.
 3. The MCP SDK version in `package.json`: the SDK enforces the protocol-level pin on `initialize`.
 
 Tests assert each literal value so any drift breaks the build (`tests/worker-mcp.test.ts`,
@@ -137,18 +137,22 @@ audit-window distribution from KV; tune to keep p95 traffic under the ceiling ra
 
 ## Discoverability surfaces operators own
 
-Four surfaces advertise the MCP endpoint. Operators are responsible for keeping them coherent.
+Discovery surfaces advertise the MCP endpoint. Operators are responsible for keeping them coherent.
 
-- `/.well-known/mcp`: JSON pointer. `documentation` field must equal the published client-skill URL
-  (`https://anc.dev/mcp-skill.md`). Tests assert this literal.
+- `/.well-known/mcp/server-card.json`: SEP-1649 canonical server card. `protocolVersion` must match the handshake;
+  `documentation` must equal the published client-skill URL (`https://anc.dev/mcp-skill.md`). Legacy aliases
+  (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`) serve the same JSON body via the Worker.
+- `/.well-known/api-catalog`: RFC 9727 link set; `service-desc` and `status` both point at the server card.
+- `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`,
+  `/auth.md`: agent-readiness OAuth metadata for a public/no-auth catalog. `POST /oauth2/token` returns `public_catalog`.
 - `/.well-known/ai.txt`: `Programmatic-API: https://anc.dev/mcp` plus the canonical contact
   (`97-boss-beetle@icloud.com`).
 - `/.well-known/security.txt`: RFC 9116 contact; `Expires` must stay at least 300 days in the future (tests assert).
-- `/llms.txt`: Programmatic access section listing `/mcp`, `/.well-known/mcp`, and the client-skill URL.
+- `/llms.txt`: Programmatic access section listing `/mcp`, `/.well-known/mcp/server-card.json`, and the client-skill URL.
 - `InitializeResult.instructions`: session-time summary plus a pointer back to the client-skill URL.
 
-When the client-skill URL changes (a rename, a domain move), all six surfaces have to update together. The drift gate is
-the test suite; trust it, but pull the e2e suite locally before deploying to confirm.
+When the client-skill URL changes (a rename, a domain move), all surfaces have to update together. The drift gate is the
+test suite; trust it, but pull the e2e suite locally before deploying to confirm.
 
 ## Live-scoring kill switch interplay
 

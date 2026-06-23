@@ -117,6 +117,10 @@ function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string)
   if (transport && typeof transport === 'object' && transport !== null) {
     (transport as Record<string, unknown>).endpoint = mcp;
   }
+  const authentication = data.authentication;
+  if (authentication && typeof authentication === 'object' && authentication !== null) {
+    (authentication as Record<string, unknown>).documentation = `${origin}/auth.md`;
+  }
 }
 
 /**
@@ -127,14 +131,19 @@ function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string)
  * Aliases (same body):  /.well-known/mcp, /mcp.json, /.well-known/mcp.json
  * Also:                GET /mcp with Accept: application/json
  */
-async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string> {
+async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string | null> {
   const seedUrl = new URL(request.url);
   seedUrl.pathname = MCP_DESCRIPTOR_SEED_ASSET;
   const asset = await env.ASSETS.fetch(new Request(seedUrl.toString(), { method: 'GET' }));
+  if (!asset.ok) return null;
   const body = await asset.text();
-  const data = JSON.parse(body) as Record<string, unknown>;
-  rewriteMcpDescriptorUrls(data, new URL(request.url).origin);
-  return `${JSON.stringify(data, null, 2)}\n`;
+  try {
+    const data = JSON.parse(body) as Record<string, unknown>;
+    rewriteMcpDescriptorUrls(data, new URL(request.url).origin);
+    return `${JSON.stringify(data, null, 2)}\n`;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -186,12 +195,24 @@ function mcpDescriptorJsonResponse(body: string): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': MCP_DESCRIPTOR_CACHE,
+      // Discovery JSON is public read metadata; CORS * lets browser-based
+      // catalog tools fetch it. POST /mcp JSON-RPC deliberately omits CORS.
       'access-control-allow-origin': '*',
     },
   });
 }
 
-function mcpGetOnly405(): Response {
+function mcpDescriptorUnavailable(): Response {
+  return new Response('mcp server card unavailable\n', {
+    status: 503,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+function discoveryGetOnly405(): Response {
   return new Response('method not allowed\n', {
     status: 405,
     headers: {
@@ -200,6 +221,16 @@ function mcpGetOnly405(): Response {
       'cache-control': 'no-store',
     },
   });
+}
+
+const DISCOVERY_GET_ONLY_PATHS = new Set([
+  '/.well-known/oauth-protected-resource',
+  '/.well-known/oauth-authorization-server',
+  '/.well-known/api-catalog',
+]);
+
+function mcpGetOnly405(): Response {
+  return discoveryGetOnly405();
 }
 
 export default {
@@ -219,7 +250,12 @@ export default {
     if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
       if (request.method !== 'GET') return mcpGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
+      if (body === null) return mcpDescriptorUnavailable();
       return mcpDescriptorJsonResponse(body);
+    }
+
+    if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
+      return discoveryGetOnly405();
     }
 
     // /.well-known/oauth-protected-resource + oauth-authorization-server —
@@ -331,6 +367,7 @@ export default {
         const getFormat = detectMcpGetFormat(request);
         if (getFormat === 'json') {
           const body = await buildMcpDescriptorJsonBody(request, env);
+          if (body === null) return mcpDescriptorUnavailable();
           return mcpDescriptorJsonResponse(body);
         }
         // 'html' or 'markdown' — control flows past this branch into

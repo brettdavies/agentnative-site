@@ -69,6 +69,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         canonicalPath: `/${name}`,
         bodyHtml: html,
         themeInitJs: themeInit,
+        extraScripts: name === 'mcp' ? ['/js/webmcp.js'] : [],
       }),
     );
     await writeFile(join(distDir, `${name}.md`), absolutifyMarkdownLinks(source));

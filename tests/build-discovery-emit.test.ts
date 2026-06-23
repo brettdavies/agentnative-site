@@ -31,6 +31,7 @@ describe('MCP server card seed (built dist/)', () => {
   test('carries U6 pointer fields and SEP-1649 server-card fields in one document', async () => {
     const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-server-card.json'), 'utf8');
     const parsed = JSON.parse(raw) as {
+      $schema: string;
       mcp_endpoint: string;
       version: string;
       description: string;
@@ -39,18 +40,25 @@ describe('MCP server card seed (built dist/)', () => {
       protocolVersion: string;
       url: string;
       transport: { type: string; endpoint: string };
-      capabilities: { tools: boolean; resources: boolean };
-      authentication: { required: boolean };
+      capabilities: {
+        tools: { listChanged: boolean };
+        resources: { subscribe: boolean; listChanged: boolean };
+        prompts: { listChanged: boolean };
+      };
+      authentication: { required: boolean; schemes: string[]; documentation: string };
     };
+    expect(parsed.$schema).toContain('mcp-server-card');
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
-    expect(parsed.version).toBe('2025-06-18');
+    expect(parsed.version).toBe('1.0');
     expect(parsed.protocolVersion).toBe('2025-06-18');
     expect(parsed.transport.type).toBe('streamable-http');
     expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.url).toBe('https://anc.dev/mcp');
-    expect(parsed.capabilities.tools).toBe(true);
-    expect(parsed.capabilities.resources).toBe(true);
+    expect(parsed.capabilities.tools.listChanged).toBe(false);
+    expect(parsed.capabilities.resources.subscribe).toBe(false);
     expect(parsed.authentication.required).toBe(false);
+    expect(parsed.authentication.schemes).toEqual([]);
+    expect(parsed.authentication.documentation).toBe('https://anc.dev/auth.md');
     expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
     expect(typeof parsed.serverInfo.name).toBe('string');
     expect(typeof parsed.serverInfo.version).toBe('string');
@@ -168,6 +176,7 @@ describe('.well-known/api-catalog (built dist/)', () => {
         anchor: string;
         'service-desc': Array<{ href: string }>;
         'service-doc': Array<{ href: string }>;
+        status: Array<{ href: string }>;
       }>;
     };
     expect(Array.isArray(parsed.linkset)).toBe(true);
@@ -176,6 +185,7 @@ describe('.well-known/api-catalog (built dist/)', () => {
     expect(entry.anchor).toBe('https://anc.dev/mcp');
     expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp/server-card.json');
     expect(entry['service-doc'][0].href).toBe('https://anc.dev/mcp-skill');
+    expect(entry.status[0].href).toBe('https://anc.dev/.well-known/mcp/server-card.json');
   });
 });
 
@@ -257,6 +267,7 @@ describe('auth.md (built dist/)', () => {
     expect(h1).toBeDefined();
     expect((h1 ?? '').toLowerCase()).toContain('auth.md');
     expect(raw).toContain('no authentication');
+    expect(raw).toContain('public_catalog');
     expect(raw).toContain('https://anc.dev/mcp');
     expect(raw).toContain('oauth-protected-resource');
     expect(raw).toContain('oauth-authorization-server');
