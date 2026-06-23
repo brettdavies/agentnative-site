@@ -97,7 +97,16 @@ at `/.well-known/mcp/server-card.json`, with legacy alias paths that return a by
 Any machine-readable endpoint that lets an agent find and use the MCP endpoint without reading the HTML site: the MCP
 server card, the OAuth metadata, the JWKS, the RFC 9727 api-catalog, the agent-skills index, and the AI-signal lines in
 `robots.txt` / `ai.txt`. The family is served by the Worker and is the agent-facing twin of the human navigation; every
-entry points at the same MCP endpoint, so drift between them breaks discoverability.
+entry points at the same MCP endpoint, so drift between them breaks discoverability. DNS-AID is the DNS-layer
+counterpart, discoverable before any HTTP fetch.
+
+### DNS-AID
+
+The DNS-layer member of the agent-discovery family: `SVCB` records published under the domain's `_agents` namespace that
+point an agent at the MCP endpoint's host, port, and protocol over DNS, so a resolver-only client finds the service
+without an HTTP fetch. The records carry connectivity only (host, port, ALPN), not the endpoint path; the path still
+comes from the MCP server card. Unlike the Worker-served discovery surfaces, these live in the zone's DNS, are validated
+over DNS-over-HTTPS, and are signed with DNSSEC.
 
 ### Origin rewrite
 
