@@ -10,6 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { emitShell } from '../src/build/shell.mjs';
 import worker, { MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/index';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
@@ -383,5 +384,103 @@ describe('POST /oauth2/token — worker red-team', () => {
     expect(body.documentation).toBe('https://staging.example/auth.md');
     expect(body.mcp_endpoint).toBe('https://staging.example/mcp');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Site shell + homepage — MCP prose and link drift gates
+// ---------------------------------------------------------------------------
+
+function sampleShellHtml(): string {
+  return emitShell({
+    title: 'The agent-native CLI standard',
+    description: 'Fixture page for shell MCP link drift gates.',
+    canonicalPath: '/',
+    bodyHtml: '<article>body</article>',
+    themeInitJs: '/* theme init */',
+    isIndex: true,
+  });
+}
+
+describe('site shell MCP discoverability (emitShell)', () => {
+  test('head alternate + describedby point at the SEP-1649 canonical server card', () => {
+    const html = sampleShellHtml();
+    expect(html).toContain(
+      '<link rel="alternate" type="application/json" href="/.well-known/mcp/server-card.json" title="MCP server card" />',
+    );
+    expect(html).toContain('<link rel="describedby" href="/.well-known/mcp/server-card.json" />');
+    // Retired U6-only pointer must not return as the sole JSON alternate.
+    expect(html).not.toContain('href="/.well-known/mcp" title="MCP server descriptor"');
+    expect(html).not.toMatch(/rel="describedby" href="\/\.well-known\/mcp" \/>/);
+  });
+
+  test('rel=mcp advertises the streamable-HTTP endpoint', () => {
+    const html = sampleShellHtml();
+    expect(html).toContain('<link rel="mcp" href="/mcp" />');
+  });
+
+  test('JSON-LD SoftwareApplication entry names the MCP server at /mcp', () => {
+    const html = sampleShellHtml();
+    expect(html).toContain('"@id":"https://anc.dev/#mcp-server"');
+    expect(html).toContain('"url":"https://anc.dev/mcp"');
+    expect(html).toContain('"documentation":"https://anc.dev/mcp-skill"');
+  });
+
+  test('footer MCP link targets the client integration guide', () => {
+    const html = sampleShellHtml();
+    expect(html).toContain('<a href="/mcp-skill/">MCP</a>');
+  });
+});
+
+describe('homepage MCP prose (built dist/)', () => {
+  test('hero__use-it links to the /mcp endpoint and /mcp-skill guide', async () => {
+    const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
+    const useIt = html.match(/<p class="hero__use-it">[\s\S]*?<\/p>/)?.[0] ?? '';
+    expect(useIt.length).toBeGreaterThan(0);
+    expect(useIt).toContain('MCP');
+    expect(useIt).toContain('href="/mcp"');
+    expect(useIt).toContain('href="/mcp-skill"');
+    expect(useIt).toContain('streamable-HTTP');
+    expect(useIt).toContain('wire contract');
+  });
+
+  test('index.md twin mirrors the MCP endpoint + guide links', async () => {
+    const md = await readFile(join(DIST_DIR, 'index.md'), 'utf8');
+    expect(md).toContain('https://anc.dev/mcp');
+    expect(md).toContain('/mcp-skill');
+    expect(md).toContain('streamable-HTTP');
+  });
+
+  test('content/_use.md source still names the same two surfaces', async () => {
+    const raw = await readFile(join(REPO_ROOT, 'content', '_use.md'), 'utf8');
+    expect(raw).toContain('(/mcp)');
+    expect(raw).toContain('(/mcp-skill)');
+    expect(raw).not.toContain('/.well-known/mcp"');
+  });
+});
+
+describe('homepage MCP links resolve (worker)', () => {
+  const PAGE_ENV = makeEnv({
+    '/mcp': '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>',
+    '/mcp-skill': '<!doctype html><html><body><h1>MCP skill</h1></body></html>',
+    '/mcp-skill/': '<!doctype html><html><body><h1>MCP skill</h1></body></html>',
+  });
+
+  test('GET /mcp serves the endpoint landing page as HTML', async () => {
+    const res = await worker.fetch(req('https://anc.dev/mcp'), PAGE_ENV);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('anc.dev MCP server');
+  });
+
+  test('GET /mcp-skill/ serves the client integration guide (footer link)', async () => {
+    const res = await worker.fetch(req('https://anc.dev/mcp-skill/'), PAGE_ENV);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('MCP skill');
+  });
+
+  test('GET /mcp-skill serves the same integration guide without trailing slash', async () => {
+    const res = await worker.fetch(req('https://anc.dev/mcp-skill'), PAGE_ENV);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('MCP skill');
   });
 });
