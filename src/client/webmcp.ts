@@ -56,7 +56,7 @@ function registerSiteTools(mc: ModelContext, signal: AbortSignal): void {
       inputSchema: { type: 'object', properties: {} },
       async execute() {
         return textResult(
-          `MCP endpoint: ${origin()}/mcp\nClient guide: ${origin()}/mcp-skill.md\nDescriptor: ${origin()}/.well-known/mcp`,
+          `MCP endpoint: ${origin()}/mcp\nClient guide: ${origin()}/mcp-skill.md\nServer card: ${origin()}/.well-known/mcp/server-card.json`,
         );
       },
     },

@@ -271,7 +271,7 @@ export async function build() {
 
   // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
   // oauth-*, agent-skills/index.json} + auth.md. MCP descriptor aliases are
-  // Worker-served from the single dist/.well-known/mcp seed (11a).
+  // Worker-served from dist/_internal/mcp-server-card.json (SEP-1649 canonical path).
   const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
 
   // 12. Invariant check — fails fast if any critical contract slips.

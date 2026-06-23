@@ -22,14 +22,14 @@ import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-em
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 
-describe('.well-known/mcp descriptor (built dist/)', () => {
-  test('file exists and parses as JSON', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
+describe('MCP server card seed (built dist/)', () => {
+  test('file exists at _internal/mcp-server-card.json and parses as JSON', async () => {
+    const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-server-card.json'), 'utf8');
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 
   test('carries U6 pointer fields and SEP-1649 server-card fields in one document', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
+    const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-server-card.json'), 'utf8');
     const parsed = JSON.parse(raw) as {
       mcp_endpoint: string;
       version: string;
@@ -52,6 +52,10 @@ describe('.well-known/mcp descriptor (built dist/)', () => {
     expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
     expect(typeof parsed.serverInfo.name).toBe('string');
     expect(typeof parsed.serverInfo.version).toBe('string');
+  });
+
+  test('retired static pointer file is not emitted', async () => {
+    await expect(readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8')).rejects.toThrow();
   });
 });
 
@@ -93,11 +97,14 @@ describe('emitDiscovery() in isolation', () => {
     await mkdir(tmp, { recursive: true });
     try {
       const stats = await emitDiscovery({ distDir: tmp, baseUrl: 'https://example.test' });
-      expect(stats.mcpPath).toBe(join(tmp, '.well-known', 'mcp'));
+      expect(stats.mcpDescriptorSeedPath).toBe(join(tmp, '_internal', 'mcp-server-card.json'));
       expect(stats.securityPath).toBe(join(tmp, '.well-known', 'security.txt'));
       expect(stats.aiPath).toBe(join(tmp, '.well-known', 'ai.txt'));
 
-      const mcp = JSON.parse(await readFile(stats.mcpPath, 'utf8')) as { mcp_endpoint: string; documentation: string };
+      const mcp = JSON.parse(await readFile(stats.mcpDescriptorSeedPath, 'utf8')) as {
+        mcp_endpoint: string;
+        documentation: string;
+      };
       expect(mcp.mcp_endpoint).toBe('https://example.test/mcp');
       expect(mcp.documentation).toBe('https://example.test/mcp-skill.md');
 
@@ -125,7 +132,7 @@ describe('llms.txt Programmatic access section', () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const section = llms.slice(llms.indexOf('## Programmatic access'), llms.indexOf('## Principles'));
     expect(section).toContain('https://anc.dev/mcp');
-    expect(section).toContain('https://anc.dev/.well-known/mcp');
+    expect(section).toContain('https://anc.dev/.well-known/mcp/server-card.json');
     expect(section).toContain('https://anc.dev/mcp-skill.md');
   });
 
@@ -165,7 +172,7 @@ describe('.well-known/api-catalog (built dist/)', () => {
     expect(parsed.linkset.length).toBeGreaterThanOrEqual(1);
     const entry = parsed.linkset[0];
     expect(entry.anchor).toBe('https://anc.dev/mcp');
-    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp');
+    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp/server-card.json');
     expect(entry['service-doc'][0].href).toBe('https://anc.dev/mcp-skill');
   });
 });
@@ -272,7 +279,7 @@ describe('emitAgentReadiness() in isolation', () => {
         linkset: Array<{ anchor: string; 'service-desc': Array<{ href: string }> }>;
       };
       expect(catalog.linkset[0].anchor).toBe('https://example.test/mcp');
-      expect(catalog.linkset[0]['service-desc'][0].href).toBe('https://example.test/.well-known/mcp');
+      expect(catalog.linkset[0]['service-desc'][0].href).toBe('https://example.test/.well-known/mcp/server-card.json');
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
@@ -313,7 +320,7 @@ function lineColumnForOffset(buf: Buffer, offset: number): { line: number; colum
 
 describe('operational discovery surfaces are pure ASCII (mojibake gate)', () => {
   const PATHS = [
-    join(DIST_DIR, '.well-known', 'mcp'),
+    join(DIST_DIR, '_internal', 'mcp-server-card.json'),
     join(DIST_DIR, '.well-known', 'security.txt'),
     join(DIST_DIR, '.well-known', 'ai.txt'),
     join(DIST_DIR, 'robots.txt'),
@@ -344,7 +351,7 @@ describe('emitDiscovery() emits pure ASCII (isolation pass)', () => {
     await mkdir(tmp, { recursive: true });
     try {
       const stats = await emitDiscovery({ distDir: tmp, baseUrl: 'https://example.test' });
-      for (const path of [stats.mcpPath, stats.securityPath, stats.aiPath]) {
+      for (const path of [stats.mcpDescriptorSeedPath, stats.securityPath, stats.aiPath]) {
         const hit = await findNonAsciiByte(path);
         expect(hit).toBeNull();
       }

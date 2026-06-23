@@ -26,9 +26,9 @@ if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_C
   ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
 }
 
-test.describe('staging /.well-known/mcp', () => {
+test.describe('staging /.well-known/mcp/server-card.json', () => {
   test('returns valid JSON with mcp_endpoint, version, transport, documentation', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/mcp`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/mcp/server-card.json`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as {
       mcp_endpoint: string;
@@ -79,7 +79,7 @@ test.describe('staging /llms.txt', () => {
     expect(progIdx).toBeGreaterThan(0);
     expect(princIdx).toBeGreaterThan(progIdx);
     expect(text).toContain('https://anc.dev/mcp');
-    expect(text).toContain('https://anc.dev/.well-known/mcp');
+    expect(text).toContain('https://anc.dev/.well-known/mcp/server-card.json');
     expect(text).toContain('https://anc.dev/mcp-skill.md');
   });
 });

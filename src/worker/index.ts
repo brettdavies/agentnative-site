@@ -96,14 +96,15 @@ function rewriteToMarkdown(url: URL): URL {
 
 const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 
-// Canonical MCP descriptor is dist/.well-known/mcp (PR #169 U6). The Worker
-// serves the same env-aware body at every alias so scanners and legacy clients
-// converge on one document.
-const MCP_DESCRIPTOR_PATHS = new Set([
+// SEP-1649 canonical path. Legacy pointer aliases serve the same JSON body.
+export const MCP_DESCRIPTOR_CANONICAL_PATH = '/.well-known/mcp/server-card.json';
+const MCP_DESCRIPTOR_SEED_ASSET = '/_internal/mcp-server-card.json';
+
+const MCP_DESCRIPTOR_ALIAS_PATHS = new Set([
   '/.well-known/mcp',
   '/mcp.json',
   '/.well-known/mcp.json',
-  '/.well-known/mcp/server-card.json',
+  MCP_DESCRIPTOR_CANONICAL_PATH,
 ]);
 
 function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string): void {
@@ -119,20 +120,17 @@ function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string)
 }
 
 /**
- * Build the MCP descriptor JSON body, rewriting URL fields to the inbound
- * request's origin. The static dist/.well-known/mcp asset is the sole seed.
+ * Build the MCP server-card JSON body, rewriting URL fields to the inbound
+ * request's origin. Seed: dist/_internal/mcp-server-card.json.
  *
- * Alias paths (all return identical JSON):
- *   - GET /.well-known/mcp          — canonical (PR #169)
- *   - GET /mcp.json                 — short alias (PR #181)
- *   - GET /.well-known/mcp.json     — well-known alias
- *   - GET /.well-known/mcp/server-card.json — SEP-1649 path alias
- *   - GET /mcp with Accept: application/json
+ * Canonical (SEP-1649): GET /.well-known/mcp/server-card.json
+ * Aliases (same body):  /.well-known/mcp, /mcp.json, /.well-known/mcp.json
+ * Also:                GET /mcp with Accept: application/json
  */
 async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string> {
-  const wellKnown = new URL(request.url);
-  wellKnown.pathname = '/.well-known/mcp';
-  const asset = await env.ASSETS.fetch(new Request(wellKnown.toString(), { method: 'GET' }));
+  const seedUrl = new URL(request.url);
+  seedUrl.pathname = MCP_DESCRIPTOR_SEED_ASSET;
+  const asset = await env.ASSETS.fetch(new Request(seedUrl.toString(), { method: 'GET' }));
   const body = await asset.text();
   const data = JSON.parse(body) as Record<string, unknown>;
   rewriteMcpDescriptorUrls(data, new URL(request.url).origin);
@@ -216,9 +214,9 @@ export default {
       return handleScore(request, env as ScoreEnv);
     }
 
-    // MCP descriptor aliases — one canonical JSON document (dist/.well-known/mcp)
-    // rewritten to the inbound origin. Bypasses MCP_ENABLED (documentation only).
-    if (MCP_DESCRIPTOR_PATHS.has(pathname) && request.method !== 'OPTIONS') {
+    // MCP server card (SEP-1649) + legacy pointer aliases — one JSON document
+    // from dist/_internal/mcp-server-card.json, origin-rewritten at serve time.
+    if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
       if (request.method !== 'GET') return mcpGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
       return mcpDescriptorJsonResponse(body);
@@ -294,7 +292,7 @@ export default {
     // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
     //
     // GET dispatch:
-    //   - Accept: application/json → proxy /.well-known/mcp (above the
+    //   - Accept: application/json → MCP server card (canonical + aliases above;
     //     kill switch; the URL identity documents itself even when the
     //     JSON-RPC handler is offline).
     //   - Accept: text/html or text/markdown → no early return; control

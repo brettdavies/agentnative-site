@@ -360,31 +360,31 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     expect(await res.text()).toBe('{"linkset":[]}');
   });
 
-  test('GET /.well-known/mcp.json alias returns the same descriptor as canonical path', async () => {
+  test('GET /.well-known/mcp pointer alias returns the same body as the canonical server card', async () => {
     const seed = JSON.stringify({
       mcp_endpoint: 'https://anc.dev/mcp',
       url: 'https://anc.dev/mcp',
       documentation: 'https://anc.dev/mcp-skill.md',
       transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
     });
-    const env = makeEnv({ '/.well-known/mcp': seed });
-    const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp'), env);
-    const alias = await worker.fetch(req('https://staging.example/.well-known/mcp.json'), env);
+    const env = makeEnv({ '/_internal/mcp-server-card.json': seed });
+    const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
+    const alias = await worker.fetch(req('https://staging.example/.well-known/mcp'), env);
     expect(canonical.status).toBe(200);
     expect(alias.status).toBe(200);
     expect(await alias.text()).toBe(await canonical.text());
   });
 
-  test('GET /.well-known/mcp/server-card.json alias returns the same descriptor as canonical path', async () => {
+  test('GET /mcp.json alias returns the same body as the canonical server card', async () => {
     const seed = JSON.stringify({
       mcp_endpoint: 'https://anc.dev/mcp',
       url: 'https://anc.dev/mcp',
       documentation: 'https://anc.dev/mcp-skill.md',
       transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
     });
-    const env = makeEnv({ '/.well-known/mcp': seed });
-    const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp'), env);
-    const alias = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
+    const env = makeEnv({ '/_internal/mcp-server-card.json': seed });
+    const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
+    const alias = await worker.fetch(req('https://staging.example/mcp.json'), env);
     expect(await alias.text()).toBe(await canonical.text());
   });
 

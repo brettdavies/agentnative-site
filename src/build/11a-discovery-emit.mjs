@@ -1,14 +1,15 @@
 // .well-known/* emit. Section 11a of the build pipeline (lands after
 // 11-mcp-catalog so the catalog publish order stays semantically grouped).
 //
-// Emits three operational signals:
-//   dist/.well-known/mcp           — canonical MCP descriptor JSON (U6 pointer +
-//                                    SEP-1649 server-card superset). Alias paths
-//                                    (/mcp.json, /.well-known/mcp.json,
-//                                    /.well-known/mcp/server-card.json) are served
-//                                    by the Worker from this single seed file.
-//   dist/.well-known/security.txt  — RFC 9116 vulnerability-reporting contact
-//   dist/.well-known/ai.txt        — agent / AI-access declaration
+// Emits operational signals:
+//   dist/_internal/mcp-server-card.json — build seed for the SEP-1649 MCP
+//                                       server card (served at the RFC path
+//                                       /.well-known/mcp/server-card.json).
+//   dist/.well-known/security.txt       — RFC 9116 vulnerability-reporting contact
+//   dist/.well-known/ai.txt             — agent / AI-access declaration
+//
+// Legacy pointer aliases (/.well-known/mcp, /mcp.json, /.well-known/mcp.json)
+// are Worker-served from the same seed; see src/worker/index.ts.
 //
 // All three lift from streamsgrp's 07-well-known.mjs (anc and streamsgrp
 // converged on the same wire shape during the cross-repo MCP work).
@@ -28,10 +29,12 @@ import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 const MCP_SPEC_VERSION = '2025-06-18';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';
 
+export const MCP_DESCRIPTOR_SEED_PATH = '_internal/mcp-server-card.json';
+
 function buildMcpDescriptor(baseUrl) {
   const description = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
-  // Single canonical document (PR #169 U6 pointer + SEP-1649 server-card fields).
-  // Every alias path serves this body via src/worker/index.ts origin rewrite.
+  // SEP-1649 server card (canonical at /.well-known/mcp/server-card.json) plus
+  // U6 pointer fields retained for legacy alias consumers.
   return `${JSON.stringify(
     {
       mcp_endpoint: `${baseUrl}/mcp`,
@@ -92,27 +95,31 @@ function buildAiTxt(baseUrl) {
  * @param {object} args
  * @param {string} args.distDir
  * @param {string=} args.baseUrl — explicit override; defaults via resolveBaseUrl
- * @returns {Promise<{ mcpPath: string, securityPath: string, aiPath: string }>}
+ * @returns {Promise<{ mcpDescriptorSeedPath: string, securityPath: string, aiPath: string }>}
  */
 export async function emitDiscovery({ distDir, baseUrl }) {
   const base = resolveBaseUrl(baseUrl);
   const wellKnownDir = join(distDir, '.well-known');
+  const internalDir = join(distDir, '_internal');
   await mkdir(wellKnownDir, { recursive: true });
+  await mkdir(internalDir, { recursive: true });
 
-  const mcpPath = join(wellKnownDir, 'mcp');
+  const mcpDescriptorSeedPath = join(internalDir, 'mcp-server-card.json');
   const securityPath = join(wellKnownDir, 'security.txt');
   const aiPath = join(wellKnownDir, 'ai.txt');
 
-  await writeFile(mcpPath, buildMcpDescriptor(base));
+  await writeFile(mcpDescriptorSeedPath, buildMcpDescriptor(base));
   await writeFile(securityPath, buildSecurityTxt(base));
   await writeFile(aiPath, buildAiTxt(base));
 
-  return { mcpPath, securityPath, aiPath };
+  // Retired static pointer file; aliases are Worker-served from the seed above.
+  await unlink(join(wellKnownDir, 'mcp')).catch(() => {});
+
+  return { mcpDescriptorSeedPath, securityPath, aiPath };
 }
 
 // Agent-readiness discovery surfaces (api-catalog, OAuth metadata, agent-skills,
-// auth.md). The MCP descriptor is NOT duplicated here — it lives only at
-// dist/.well-known/mcp (see buildMcpDescriptor above).
+// auth.md). MCP server card seed: emitDiscovery() → _internal/mcp-server-card.json.
 
 function buildApiCatalog(baseUrl) {
   // RFC 9727 link set (application/linkset+json). One anchor: the MCP
@@ -124,9 +131,11 @@ function buildApiCatalog(baseUrl) {
       linkset: [
         {
           anchor: `${baseUrl}/mcp`,
-          'service-desc': [{ href: `${baseUrl}/.well-known/mcp`, type: 'application/json' }],
+          'service-desc': [
+            { href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' },
+          ],
           'service-doc': [{ href: `${baseUrl}/mcp-skill`, type: 'text/html' }],
-          status: [{ href: `${baseUrl}/.well-known/mcp`, type: 'application/json' }],
+          status: [{ href: `${baseUrl}/mcp`, type: 'application/json' }],
         },
       ],
     },
@@ -181,7 +190,8 @@ function buildAuthMd(baseUrl) {
     '## Endpoints',
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
-    `- MCP descriptor: \`${baseUrl}/.well-known/mcp\` (aliases: \`/mcp.json\`, \`/.well-known/mcp/server-card.json\`).`,
+    `- MCP server card (SEP-1649): \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
+    `- MCP pointer aliases: \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
     `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
     `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
@@ -269,7 +279,7 @@ function buildJwks() {
  *   dist/.well-known/agent-skills/index.json  (Agent Skills Discovery v0.2.0)
  *   dist/auth.md                              (auth declaration)
  *
- * MCP descriptor: emitted once by emitDiscovery() at dist/.well-known/mcp.
+ * MCP server card seed: emitDiscovery() at dist/_internal/mcp-server-card.json.
  *
  * The agent-skills index digests dist/mcp-skill.md, so this stage MUST run
  * after the sub-pages stage (7) that emits the markdown twin.

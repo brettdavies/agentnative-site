@@ -97,7 +97,7 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
             }),
           );
         }
-        if (path === '/.well-known/mcp') {
+        if (path === '/_internal/mcp-server-card.json') {
           return Promise.resolve(
             new Response(FIXTURE_WELL_KNOWN_MCP, {
               status: 200,

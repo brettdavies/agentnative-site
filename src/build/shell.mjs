@@ -237,9 +237,9 @@ ${principles
     <link rel="alternate" type="text/markdown" href="${markdownTwinPath}" title="This page as markdown" />
     <link rel="alternate" type="text/markdown" href="/llms.txt" title="LLM-friendly index" />
     <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="LLM-friendly full spec" />
-    <link rel="alternate" type="application/json" href="/.well-known/mcp" title="MCP server descriptor" />
+    <link rel="alternate" type="application/json" href="/.well-known/mcp/server-card.json" title="MCP server card" />
     <link rel="alternate" type="application/json" href="/skill.json" title="Agent-native skill bundle (canonical JSON)" />
-    <link rel="describedby" href="/.well-known/mcp" />
+    <link rel="describedby" href="/.well-known/mcp/server-card.json" />
     <link rel="mcp" href="/mcp" />
 ${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
