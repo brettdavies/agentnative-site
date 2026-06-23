@@ -4,6 +4,28 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings;
 direct edits are fine. Glossary only, not a spec or catch-all.
 
+## The standard
+
+### anc
+
+The agent-native compliance auditor: the `anc` CLI inspects a tool's command-line interface against the agent-native
+principles and emits a scorecard. It is the engine behind both batch scoring and the live-scoring sandbox; this site is
+its public registry and results surface. The CLI itself lives in a separate repository.
+
+### Agent-native principle
+
+One of the eight principles (P1 through P8) that define what makes a CLI usable by an AI agent rather than only a human:
+non-interactive defaults, structured parseable output, progressive help discovery, fail-fast actionable errors, safe
+retries with explicit mutation boundaries, composable predictable commands, bounded high-signal responses, and a
+discoverable skill bundle. A scorecard asserts which principles a tool meets and at what score. The canonical principle
+text is the vendored spec; site copy is written from it deliberately, not imported at build time.
+
+### Badge
+
+The agent-native badge a tool earns when its scorecard clears the credit-weighted pass threshold. It is the headline
+compliance signal on a tool's scorecard and the mark a project displays to claim agent-native status. The threshold is a
+scoring-policy value, not fixed in this glossary.
+
 ## Live scoring
 
 ### anc100
@@ -17,6 +39,18 @@ row is a registry entry. The name is fixed; the actual count drifts above and be
 A single row in the anc100 registry. Carries the tool's URL-safe name, the binary it installs, the install command, the
 project's tier (workhorse, agent, or notable), the creator, and the audit profile that shapes how `anc audit` scores it.
 Lookup is dual-keyed by name (URL slug) and by GitHub owner/repo.
+
+### Tier
+
+The registry classification of why a tool is in the corpus, independent of the score it earns: `workhorse` (ubiquitous
+general-purpose tools), `agent` (tools built for or aimed at agents), or `notable` (included for other noteworthy
+reasons). Set per registry entry.
+
+### Audit profile
+
+A named scoring profile that adapts `anc audit` to a tool's interface style, so principles are applied appropriately
+rather than uniformly (for example, a file-traversal utility versus a human-facing TUI). Set per registry entry; it
+shapes which checks apply and how they weigh.
 
 ### Live-scoring sandbox
 
