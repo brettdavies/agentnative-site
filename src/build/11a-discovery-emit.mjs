@@ -21,7 +21,7 @@
 // flips here in one place.
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
@@ -311,6 +311,11 @@ export async function emitAgentReadiness({ distDir, baseUrl }) {
   await writeFile(jwksPath, buildJwks());
   await writeFile(agentSkillsPath, buildAgentSkillsIndex(base, skillDigest));
   await writeFile(authMdPath, buildAuthMd(base));
+
+  // Retired: dist/.well-known/mcp.json was a separate server-card seed before the
+  // descriptor unified onto /.well-known/mcp. Builds do not wipe dist/, so
+  // delete the stale file when a prior artifact is still on disk.
+  await unlink(join(wellKnownDir, 'mcp.json')).catch(() => {});
 
   return {
     apiCatalogPath,
