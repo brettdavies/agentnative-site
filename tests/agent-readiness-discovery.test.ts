@@ -11,8 +11,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShell } from '../src/build/shell.mjs';
-import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
 import worker from '../src/worker/index';
+import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
