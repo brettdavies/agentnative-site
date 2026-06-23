@@ -62,8 +62,9 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
 - `/llms.txt`, `/llms-full.txt`: llmstxt.org convention (summary index + full concatenated spec)
-- `/mcp`: `POST`-only Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
-  discoverability pointer at `/.well-known/mcp`; HTML + `.md` twin at `/mcp-skill`
+- `/mcp`: streamable HTTP Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
+  canonical server card at `/.well-known/mcp/server-card.json` (legacy aliases `/.well-known/mcp`, `/mcp.json`,
+  `/.well-known/mcp.json`); HTML + `.md` twin at `/mcp-skill`
 - `/sitemap.xml`, `/robots.txt`: hygiene
 - `public/og-image.png`: 1200x630 designed social preview
 
@@ -78,9 +79,11 @@ The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (
 is not published. This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and
 how it fails.
 
-**Discovery siblings.** `/.well-known/mcp` (JSON pointer), `/.well-known/ai.txt` (`Programmatic-API` declaration),
-`/.well-known/security.txt` (RFC 9116 contact), `/llms.txt` (Programmatic access section). The pointer's `documentation`
-field is the canonical `.md` URL; `initialize.instructions` carries the same pointer plus a session-time summary.
+**Discovery siblings.** `/.well-known/mcp/server-card.json` (SEP-1649 canonical server card; legacy aliases
+`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`), `/.well-known/ai.txt` (`Programmatic-API` declaration),
+`/.well-known/security.txt` (RFC 9116 contact), `/llms.txt` (Programmatic access section). The server card's
+`documentation` field is the client-skill `.md` URL; `initialize.instructions` carries the same pointer plus a
+session-time summary.
 
 **Nine tools, five resources.** Tools cover four surfaces:
 
@@ -133,7 +136,7 @@ log line carrying `Origin`, `User-Agent`, Cloudflare-injected client IP and coun
 attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
 inventory is published.
 
-**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp` `"version"`,
+**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json` `protocolVersion`,
 `content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
 carry the same `2025-06-18` literal. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each
 occurrence so a single-source bump breaks the build.

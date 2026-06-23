@@ -285,7 +285,7 @@ For clients that need the protocol details.
 authentication.
 
 **Transport.** Streamable HTTP per MCP spec revision `2025-06-18`. The handshake's `protocolVersion` and the
-`/.well-known/mcp` pointer's `version` are pinned in lockstep; tests assert each literal so drift breaks the build.
+server card's `protocolVersion` / `version` are pinned in lockstep; tests assert each literal so drift breaks the build.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.
@@ -301,7 +301,7 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 
 **Discovery siblings.**
 
-- `https://anc.dev/.well-known/mcp`: HTTP-level JSON pointer carrying `mcp_endpoint`, `version`, `description`,
-  `transport`, and `documentation` (this page).
+- `https://anc.dev/.well-known/mcp/server-card.json`: canonical MCP server card (SEP-1649). Pointer aliases:
+  `/.well-known/mcp`, `/mcp.json`.
 - `https://anc.dev/.well-known/ai.txt`: AI-training and agent-access posture plus `Programmatic-API:
   https://anc.dev/mcp`.
