@@ -59,7 +59,7 @@ export async function emitLlmsSurface({
     // matches the convention streamsgrp uses.
     programmaticAccess: [
       { label: 'MCP server (streamable HTTP)', path: '/mcp' },
-      { label: 'Well-known MCP pointer', path: '/.well-known/mcp' },
+      { label: 'MCP server card (SEP-1649)', path: '/.well-known/mcp/server-card.json' },
       { label: 'MCP client skill', path: '/mcp-skill.md' },
     ],
     scorecardLinks: [

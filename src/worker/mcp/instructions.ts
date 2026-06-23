@@ -3,7 +3,7 @@
 // The McpServer constructor accepts free-form usage guidance via
 // ServerOptions.instructions. It fires once per session, so the cost of
 // the prose amortizes across every subsequent tool call. Absent
-// instructions would force every agent to fetch /.well-known/mcp out of
+// instructions would force every agent to fetch the server card out of
 // band or guess the contract.
 //
 // The numeric facts authored below (9 tools, 5 resources total, both
@@ -55,7 +55,7 @@ export function buildInstructions(_env: InstructionsEnv): string {
       'falls back to a shared anon bucket, the audit tier rejects on missing IP rather than consuming a shared ' +
       'bucket. Two env-var kill switches let the operator disable the whole surface (MCP_ENABLED) or only the ' +
       'cost-bearing audit tool (MCP_LIVE_SCORING_ENABLED) without a deploy.',
-    `Spec revision is pinned to ${SPEC_REVISION}; the /.well-known/mcp pointer advertises the same value, and the ` +
+    `Spec revision is pinned to ${SPEC_REVISION}; the /.well-known/mcp/server-card.json server card advertises the same value, and the ` +
       'two are bumped in lockstep when the SDK is upgraded.',
     `Full contract at ${DOCS_URL}`,
   ].join(' ');
