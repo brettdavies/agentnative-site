@@ -13,6 +13,7 @@
 
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { applyHeaders } from './headers';
+import { MCP_DESCRIPTOR_ALIAS_PATHS } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
 import { isScorePath } from './score/content-negotiation';
@@ -96,18 +97,9 @@ function rewriteToMarkdown(url: URL): URL {
 
 const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 
-// SEP-1649 canonical path. Legacy pointer aliases serve the same JSON body.
-export const MCP_DESCRIPTOR_CANONICAL_PATH = '/.well-known/mcp/server-card.json';
 // Must match the seed file written by emitDiscovery() in src/build/11a-discovery-emit.mjs
 // (separate bundle, so the path cannot be a shared import).
 const MCP_DESCRIPTOR_SEED_ASSET = '/_internal/mcp-server-card.json';
-
-export const MCP_DESCRIPTOR_ALIAS_PATHS = new Set([
-  MCP_DESCRIPTOR_CANONICAL_PATH,
-  '/.well-known/mcp',
-  '/mcp.json',
-  '/.well-known/mcp.json',
-]);
 
 function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string): void {
   const mcp = `${origin}/mcp`;
