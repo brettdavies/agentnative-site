@@ -26,6 +26,9 @@ if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_C
   ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
 }
 
+// Source of truth: MCP_DESCRIPTOR_ALIAS_PATHS in src/worker/index.ts. Kept as a
+// literal here because the worker module is not importable in Playwright's node
+// env; a new alias must be added in both places.
 const MCP_DESCRIPTOR_ALIASES = [
   '/.well-known/mcp/server-card.json',
   '/.well-known/mcp',

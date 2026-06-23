@@ -210,7 +210,6 @@ describe('.well-known/oauth-authorization-server (built dist/)', () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'oauth-authorization-server'), 'utf8');
     const parsed = JSON.parse(raw) as {
       issuer: string;
-      authorization_endpoint: string;
       token_endpoint: string;
       jwks_uri: string;
       service_documentation: string;
@@ -223,7 +222,6 @@ describe('.well-known/oauth-authorization-server (built dist/)', () => {
       };
     };
     expect(parsed.issuer).toBe('https://anc.dev');
-    expect(parsed.authorization_endpoint).toBe('https://anc.dev/auth.md');
     expect(parsed.token_endpoint).toBe('https://anc.dev/oauth2/token');
     expect(parsed.jwks_uri).toBe('https://anc.dev/.well-known/jwks.json');
     expect(parsed.service_documentation).toBe('https://anc.dev/auth.md');

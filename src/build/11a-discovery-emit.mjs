@@ -31,8 +31,6 @@ const MCP_CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/mcp-serv
 const MCP_CARD_VERSION = '1.0';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';
 
-export const MCP_DESCRIPTOR_SEED_PATH = '_internal/mcp-server-card.json';
-
 function buildMcpDescriptor(baseUrl) {
   const description = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
   const authMd = `${baseUrl}/auth.md`;
@@ -275,10 +273,11 @@ function buildOAuthAuthorizationServer(baseUrl) {
   // extension. The catalog is open by design; anonymous identity is the
   // only supported registration path and issues no credentials. token_endpoint
   // is a discovery stub for scanners — POST returns public_catalog (see auth.md).
+  // authorization_endpoint is omitted: RFC 8414 marks it OPTIONAL when no
+  // authorization-code grant is supported, and a real probe would only hit prose.
   return `${JSON.stringify(
     {
       issuer: baseUrl,
-      authorization_endpoint: `${baseUrl}/auth.md`,
       token_endpoint: `${baseUrl}/oauth2/token`,
       jwks_uri: `${baseUrl}/.well-known/jwks.json`,
       service_documentation: `${baseUrl}/auth.md`,

@@ -75,25 +75,25 @@ function registerSiteTools(mc: ModelContext, signal: AbortSignal): void {
   }
 }
 
+function registerWithLifecycle(mc: ModelContext): void {
+  const controller = new AbortController();
+  registerSiteTools(mc, controller.signal);
+  window.addEventListener('pagehide', () => controller.abort(), { once: true });
+}
+
 function initWebMcp(): void {
   const nav = navigator as Navigator & { modelContext?: ModelContext };
   const mc = nav.modelContext;
   if (!mc) return;
 
-  const controller = new AbortController();
-  registerSiteTools(mc, controller.signal);
+  registerWithLifecycle(mc);
 
-  window.addEventListener(
-    'pagehide',
-    () => {
-      controller.abort();
-    },
-    { once: true },
-  );
+  // bfcache restore re-runs no module code but fires pageshow on return; the
+  // pagehide teardown already aborted the prior registration, so re-register.
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) registerWithLifecycle(mc);
+  });
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initWebMcp, { once: true });
-} else {
-  initWebMcp();
-}
+// Loaded with `defer`, so the document is always parsed by the time this runs.
+initWebMcp();

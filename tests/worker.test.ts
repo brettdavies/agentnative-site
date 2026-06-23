@@ -417,7 +417,6 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
   test('GET /.well-known/oauth-authorization-server rewrites issuer + agent_auth URLs', async () => {
     const seed = JSON.stringify({
       issuer: 'https://anc.dev',
-      authorization_endpoint: 'https://anc.dev/auth.md',
       token_endpoint: 'https://anc.dev/oauth2/token',
       jwks_uri: 'https://anc.dev/.well-known/jwks.json',
       service_documentation: 'https://anc.dev/auth.md',

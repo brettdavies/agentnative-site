@@ -11,17 +11,12 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShell } from '../src/build/shell.mjs';
-import worker, { MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/index';
+import worker, { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/index';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 
-const MCP_DESCRIPTOR_ALIASES = [
-  MCP_DESCRIPTOR_CANONICAL_PATH,
-  '/.well-known/mcp',
-  '/mcp.json',
-  '/.well-known/mcp.json',
-] as const;
+const MCP_DESCRIPTOR_ALIASES = [...MCP_DESCRIPTOR_ALIAS_PATHS];
 
 const FIXTURE_MCP_SEED = JSON.stringify({
   mcp_endpoint: 'https://anc.dev/mcp',
@@ -52,7 +47,6 @@ const FIXTURE_OAUTH_PR = JSON.stringify({
 
 const FIXTURE_OAUTH_AS = JSON.stringify({
   issuer: 'https://anc.dev',
-  authorization_endpoint: 'https://anc.dev/auth.md',
   token_endpoint: 'https://anc.dev/oauth2/token',
   jwks_uri: 'https://anc.dev/.well-known/jwks.json',
   service_documentation: 'https://anc.dev/auth.md',

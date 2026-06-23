@@ -492,6 +492,20 @@ an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_b
    Playwright project. Set `ANC_STAGING_BASE_URL` and run `bun x playwright test --project=staging-mcp` against the live
    host. Thirty-three tests; both files must pass.
 
+### Breaking: server-card schema moves to SEP-1649 shape
+
+This release changes the wire shape of the descriptor served at `/.well-known/mcp/server-card.json` and its legacy
+aliases (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`). Two fields changed value or type:
+
+- `version` no longer carries the MCP spec revision. It is now the card-format version (`"1.0"`); the spec revision
+  moved to a new `protocolVersion` field (`"2025-06-18"`).
+- `transport` changed from the string `"streamable-http"` to an object `{ "type": "streamable-http", "endpoint": ... }`.
+
+A client of the prior descriptor that read `version` for the spec revision, or compared `transport ===
+"streamable-http"`, must switch to `protocolVersion` and `transport.type`. The prior shape shipped to production in the
+MCP discovery release, so the consumer base is small, but the change is not backward compatible and ships without a
+compatibility shim.
+
 ### Cost-control posture: `score_cli` never bypasses the cache
 
 The MCP surface has no `force_refresh` flag and no path that forces a fresh audit on an already-cached binary.

@@ -98,13 +98,15 @@ const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-r
 
 // SEP-1649 canonical path. Legacy pointer aliases serve the same JSON body.
 export const MCP_DESCRIPTOR_CANONICAL_PATH = '/.well-known/mcp/server-card.json';
+// Must match the seed file written by emitDiscovery() in src/build/11a-discovery-emit.mjs
+// (separate bundle, so the path cannot be a shared import).
 const MCP_DESCRIPTOR_SEED_ASSET = '/_internal/mcp-server-card.json';
 
-const MCP_DESCRIPTOR_ALIAS_PATHS = new Set([
+export const MCP_DESCRIPTOR_ALIAS_PATHS = new Set([
+  MCP_DESCRIPTOR_CANONICAL_PATH,
   '/.well-known/mcp',
   '/mcp.json',
   '/.well-known/mcp.json',
-  MCP_DESCRIPTOR_CANONICAL_PATH,
 ]);
 
 function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string): void {
@@ -180,7 +182,6 @@ function rewriteOAuthProtectedResource(data: Record<string, unknown>, origin: st
 
 function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: string): void {
   data.issuer = origin;
-  data.authorization_endpoint = `${origin}/auth.md`;
   data.token_endpoint = `${origin}/oauth2/token`;
   data.jwks_uri = `${origin}/.well-known/jwks.json`;
   data.service_documentation = `${origin}/auth.md`;
@@ -239,10 +240,6 @@ const DISCOVERY_CORS_HEADERS = {
   'access-control-allow-origin': '*',
 } as const;
 
-function mcpGetOnly405(): Response {
-  return discoveryGetOnly405();
-}
-
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -258,7 +255,7 @@ export default {
     // MCP server card (SEP-1649) + legacy pointer aliases — one JSON document
     // from dist/_internal/mcp-server-card.json, origin-rewritten at serve time.
     if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return mcpGetOnly405();
+      if (request.method !== 'GET') return discoveryGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
       if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
