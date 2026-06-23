@@ -526,7 +526,7 @@ refined approach if any conflict surfaces.
 
 **Files:**
 
-- `spike/u1-mcp-composition/` (new — disposable spike directory; deleted in U2 commit)
+- `docs/research/2026-06-05-u1-mcp-composition/` (disposable spike directory, archived for reference after U1)
 
 **Approach.**
 
