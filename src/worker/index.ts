@@ -174,6 +174,24 @@ export default {
       return mcpDescriptorJsonResponse(body);
     }
 
+    // /.well-known/api-catalog — RFC 9727 link set. The static asset is
+    // emitted extensionless (11b-agent-readiness), so CF Static Assets can't
+    // infer the content-type. Stamp `application/linkset+json` here; the
+    // body is served verbatim from the asset. CORS is opened (the catalog is
+    // a public discovery surface) and the response is marked noindex.
+    if (pathname === '/.well-known/api-catalog' && request.method === 'GET') {
+      const asset = await env.ASSETS.fetch(request);
+      if (asset.ok) {
+        const headers = new Headers(asset.headers);
+        headers.set('content-type', 'application/linkset+json; charset=utf-8');
+        headers.set('access-control-allow-origin', '*');
+        headers.set('x-robots-tag', 'noindex');
+        headers.set('cache-control', MCP_DESCRIPTOR_CACHE);
+        return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
+      }
+      return asset;
+    }
+
     // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
     // GET surface. Sits above /_internal/ interception and the asset
     // fetch so the entry-point ordering keeps the /mcp branch in front

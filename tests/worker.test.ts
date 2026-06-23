@@ -345,6 +345,45 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Agent-readiness discovery surfaces (11b emit). The build emits the bodies;
+// these tests cover the Worker-level header policy each surface needs:
+//   - /.well-known/api-catalog is extensionless, so the Worker must stamp
+//     application/linkset+json (CF Static Assets can't infer it).
+//   - /.well-known/mcp.json (server card) + /.well-known/agent-skills/index.json
+//     ride the standard .json branch → application/json + CORS.
+// ---------------------------------------------------------------------------
+
+describe('worker.fetch — agent-readiness discovery surfaces', () => {
+  test('GET /.well-known/api-catalog → application/linkset+json + CORS + noindex', async () => {
+    const env = makeEnv({ '/.well-known/api-catalog': '{"linkset":[]}' });
+    const res = await worker.fetch(req('https://anc.dev/.well-known/api-catalog'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/linkset+json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+    expect(await res.text()).toBe('{"linkset":[]}');
+  });
+
+  test('GET /.well-known/mcp.json (server card) → application/json + CORS', async () => {
+    const env = makeEnv({ '/.well-known/mcp.json': '{"serverInfo":{"name":"x","version":"1"}}' });
+    const res = await worker.fetch(req('https://anc.dev/.well-known/mcp.json'), env);
+    expect(res.status).toBe(200);
+    // Must NOT be intercepted by the exact-match /.well-known/mcp pointer branch.
+    expect(res.headers.get('X-Echo-Path')).toBe('/.well-known/mcp.json');
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+
+  test('GET /.well-known/agent-skills/index.json → application/json', async () => {
+    const env = makeEnv({ '/.well-known/agent-skills/index.json': '{"skills":[]}' });
+    const res = await worker.fetch(req('https://anc.dev/.well-known/agent-skills/index.json'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
+    expect(await res.text()).toBe('{"skills":[]}');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // /api/score routing (plan U5). The handler's own behavior is covered by
 // tests/score-handler.test.ts; these tests confirm:
 //   1. /api/score requests are intercepted BEFORE the asset call (the stub

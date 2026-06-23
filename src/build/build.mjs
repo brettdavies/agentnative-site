@@ -43,7 +43,7 @@ import { emitScorecardSurface } from './08-scorecards-emit.mjs';
 import { emitLlmsSurface } from './09-llms-emit.mjs';
 import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
-import { emitDiscovery } from './11a-discovery-emit.mjs';
+import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -269,6 +269,15 @@ export async function build() {
   // in 11a-discovery-emit.mjs.
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
 
+  // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
+  // mcp/server-card.json, agent-skills/index.json} + auth.md. Answers the
+  // protocol-discovery probes a generic agent-readiness scanner runs against
+  // the apex. The agent-skills index digests dist/mcp-skill.md, so this MUST
+  // run after the sub-pages stage (7). The api-catalog file is extensionless;
+  // the Worker stamps its application/linkset+json content-type at request
+  // time (src/worker/index.ts).
+  const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
+
   // 12. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
     DIST_DIR,
@@ -299,6 +308,7 @@ export async function build() {
     badgeSvgs: badgePaths.length,
     mcpCatalog: mcpCatalogStats,
     discovery: discoveryStats,
+    agentReadiness: agentReadinessStats,
     minified: minifyStats,
   };
 }

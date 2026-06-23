@@ -12,11 +12,12 @@
 // endpoint; drift in any one breaks the discoverability story).
 
 import { describe, expect, test } from 'bun:test';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
+import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-emit.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
@@ -132,6 +133,134 @@ describe('llms.txt Programmatic access section', () => {
     const llms = await readFile(join(DIST_DIR, 'llms.txt'), 'utf8');
     const matches = llms.match(/## Programmatic access/g) ?? [];
     expect(matches.length).toBe(1);
+  });
+});
+
+describe('robots.txt Content Signals (built dist/)', () => {
+  test('declares Content-Signal preferences under the wildcard agent group', async () => {
+    const raw = await readFile(join(DIST_DIR, 'robots.txt'), 'utf8');
+    expect(raw).toContain('User-agent: *');
+    expect(raw).toMatch(/^Content-Signal:.*ai-train=/m);
+    expect(raw).toMatch(/^Content-Signal:.*search=/m);
+    expect(raw).toMatch(/^Content-Signal:.*ai-input=/m);
+  });
+
+  test('keeps the Sitemap directive intact', async () => {
+    const raw = await readFile(join(DIST_DIR, 'robots.txt'), 'utf8');
+    expect(raw).toContain('Sitemap: https://anc.dev/sitemap.xml');
+  });
+});
+
+describe('.well-known/api-catalog (built dist/)', () => {
+  test('is a valid RFC 9727 link set with the MCP endpoint as anchor', async () => {
+    const raw = await readFile(join(DIST_DIR, '.well-known', 'api-catalog'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      linkset: Array<{
+        anchor: string;
+        'service-desc': Array<{ href: string }>;
+        'service-doc': Array<{ href: string }>;
+      }>;
+    };
+    expect(Array.isArray(parsed.linkset)).toBe(true);
+    expect(parsed.linkset.length).toBeGreaterThanOrEqual(1);
+    const entry = parsed.linkset[0];
+    expect(entry.anchor).toBe('https://anc.dev/mcp');
+    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp.json');
+    expect(entry['service-doc'][0].href).toBe('https://anc.dev/mcp-skill');
+  });
+});
+
+describe('.well-known/mcp.json — MCP Server Card (built dist/)', () => {
+  test('carries serverInfo, transport endpoint, and capabilities', async () => {
+    const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp.json'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      serverInfo: { name: string; version: string };
+      protocolVersion: string;
+      transport: { type: string; endpoint: string };
+      capabilities: { tools: boolean; resources: boolean };
+      url: string;
+    };
+    expect(typeof parsed.serverInfo.name).toBe('string');
+    expect(typeof parsed.serverInfo.version).toBe('string');
+    expect(parsed.protocolVersion).toBe('2025-06-18');
+    expect(parsed.transport.type).toBe('streamable-http');
+    expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
+    expect(parsed.capabilities.tools).toBe(true);
+    expect(parsed.capabilities.resources).toBe(true);
+    expect(parsed.url).toBe('https://anc.dev/mcp');
+  });
+
+  test('does not collide with the legacy /.well-known/mcp pointer file', async () => {
+    // The legacy pointer is an extensionless file; the server card is mcp.json.
+    // Both must coexist on disk (file vs file, not file vs directory).
+    const pointer = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
+    const card = await readFile(join(DIST_DIR, '.well-known', 'mcp.json'), 'utf8');
+    expect(() => JSON.parse(pointer)).not.toThrow();
+    expect(() => JSON.parse(card)).not.toThrow();
+  });
+});
+
+describe('.well-known/agent-skills/index.json (built dist/)', () => {
+  test('is a v0.2.0 discovery index with a digest matching the served artifact', async () => {
+    const raw = await readFile(join(DIST_DIR, '.well-known', 'agent-skills', 'index.json'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      $schema: string;
+      skills: Array<{ name: string; type: string; description: string; url: string; digest: string }>;
+    };
+    expect(parsed.$schema).toBe('https://schemas.agentskills.io/discovery/0.2.0/schema.json');
+    expect(parsed.skills.length).toBeGreaterThanOrEqual(1);
+    const skill = parsed.skills[0];
+    expect(skill.name).toMatch(/^[a-z0-9-]+$/);
+    expect(skill.type).toBe('skill-md');
+    expect(skill.url).toBe('https://anc.dev/mcp-skill.md');
+    // The digest must be the SHA-256 of the served (non-minified) markdown twin.
+    const expected = createHash('sha256')
+      .update(await readFile(join(DIST_DIR, 'mcp-skill.md')))
+      .digest('hex');
+    expect(skill.digest).toBe(`sha256:${expected}`);
+  });
+});
+
+describe('auth.md (built dist/)', () => {
+  test('has an H1 containing "auth.md" and declares the no-auth posture', async () => {
+    const raw = await readFile(join(DIST_DIR, 'auth.md'), 'utf8');
+    const h1 = raw.split('\n').find((l) => l.startsWith('# '));
+    expect(h1).toBeDefined();
+    expect((h1 ?? '').toLowerCase()).toContain('auth.md');
+    expect(raw).toContain('no authentication');
+    expect(raw).toContain('https://anc.dev/mcp');
+  });
+});
+
+describe('emitAgentReadiness() in isolation', () => {
+  test('round-trips into an arbitrary distDir, digesting the local mcp-skill.md', async () => {
+    const tmp = join(tmpdir(), `anc-readiness-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(tmp, { recursive: true });
+    try {
+      await writeFile(join(tmp, 'mcp-skill.md'), '# Using the MCP server\n\nhello\n');
+      const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
+      expect(stats.apiCatalogPath).toBe(join(tmp, '.well-known', 'api-catalog'));
+      expect(stats.mcpServerCardPath).toBe(join(tmp, '.well-known', 'mcp.json'));
+      expect(stats.agentSkillsPath).toBe(join(tmp, '.well-known', 'agent-skills', 'index.json'));
+      expect(stats.authMdPath).toBe(join(tmp, 'auth.md'));
+
+      const card = JSON.parse(await readFile(stats.mcpServerCardPath, 'utf8')) as { url: string };
+      expect(card.url).toBe('https://example.test/mcp');
+
+      const skills = JSON.parse(await readFile(stats.agentSkillsPath, 'utf8')) as {
+        skills: Array<{ url: string; digest: string }>;
+      };
+      expect(skills.skills[0].url).toBe('https://example.test/mcp-skill.md');
+      const expected = createHash('sha256').update('# Using the MCP server\n\nhello\n').digest('hex');
+      expect(skills.skills[0].digest).toBe(`sha256:${expected}`);
+
+      const catalog = JSON.parse(await readFile(stats.apiCatalogPath, 'utf8')) as {
+        linkset: Array<{ anchor: string }>;
+      };
+      expect(catalog.linkset[0].anchor).toBe('https://example.test/mcp');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });
 
