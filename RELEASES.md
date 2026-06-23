@@ -482,14 +482,29 @@ an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_b
 2. **Confirm both rate-limit bindings exist in `wrangler.jsonc` for the production env.** Production inherits from the
    top-level block by default; verify `MCP_LIMITER` and `MCP_AUDIT_LIMITER` both appear with the expected `namespace_id`
    and `simple` values.
-3. **Verify discoverability surfaces.** After deploy, `curl -s https://anc.dev/.well-known/mcp | jq` returns the JSON
-   pointer with `mcp_endpoint`, `version: "2025-06-18"`, `transport: "streamable-http"`, and `documentation:
-   "https://anc.dev/mcp-skill.md"`. `curl -s https://anc.dev/mcp-skill.md | head -1` returns the markdown twin's first
-   heading. `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
+3. **Verify discoverability surfaces.** After deploy, `curl -s https://anc.dev/.well-known/mcp/server-card.json | jq`
+   returns the SEP-1649 server card with `protocolVersion: "2025-06-18"`, `authentication.required: false`, and
+   `transport.type: "streamable-http"`. Legacy alias `curl -s https://anc.dev/.well-known/mcp | jq` returns the same
+   body. `curl -s https://anc.dev/mcp-skill.md | head -1` returns the markdown twin's first heading.
+   `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
    mailto:97-boss-beetle@icloud.com`.
 4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp
    Playwright project. Set `ANC_STAGING_BASE_URL` and run `bun x playwright test --project=staging-mcp` against the live
-   host. Twenty tests; both files must pass.
+   host. Thirty-three tests; both files must pass.
+
+### Breaking: server-card schema moves to SEP-1649 shape
+
+This release changes the wire shape of the descriptor served at `/.well-known/mcp/server-card.json` and its legacy
+aliases (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`). Two fields changed value or type:
+
+- `version` no longer carries the MCP spec revision. It is now the card-format version (`"1.0"`); the spec revision
+  moved to a new `protocolVersion` field (`"2025-06-18"`).
+- `transport` changed from the string `"streamable-http"` to an object `{ "type": "streamable-http", "endpoint": ... }`.
+
+A client of the prior descriptor that read `version` for the spec revision, or compared `transport ===
+"streamable-http"`, must switch to `protocolVersion` and `transport.type`. The prior shape shipped to production in the
+MCP discovery release, so the consumer base is small, but the change is not backward compatible and ships without a
+compatibility shim.
 
 ### Cost-control posture: `score_cli` never bypasses the cache
 

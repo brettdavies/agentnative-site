@@ -11,7 +11,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell } from './shell.mjs';
+import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
 
 /**
@@ -168,7 +168,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles 
       // Homepage carries the live-scoring form. /js/live-score.js is
       // bundled in assets.mjs alongside theme/clipboard/leaderboard and
       // loads with `defer`. Lazy-loads Turnstile + handles submit/redirect.
-      extraScripts: ['/js/live-score.js'],
+      extraScripts: ['/js/live-score.js', WEBMCP_SCRIPT],
     }),
   );
 

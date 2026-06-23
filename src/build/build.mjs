@@ -43,11 +43,11 @@ import { emitScorecardSurface } from './08-scorecards-emit.mjs';
 import { emitLlmsSurface } from './09-llms-emit.mjs';
 import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
-import { emitDiscovery } from './11a-discovery-emit.mjs';
+import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
-import { emitShell, emitShellTemplate } from './shell.mjs';
+import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -179,6 +179,7 @@ export async function build() {
       canonicalPath: `/p${n}`,
       bodyHtml: html,
       themeInitJs: themeInit,
+      extraScripts: [WEBMCP_SCRIPT],
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 
@@ -269,6 +270,11 @@ export async function build() {
   // in 11a-discovery-emit.mjs.
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
 
+  // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
+  // oauth-*, agent-skills/index.json} + auth.md. MCP descriptor aliases are
+  // Worker-served from dist/_internal/mcp-server-card.json (SEP-1649 canonical path).
+  const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
+
   // 12. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
     DIST_DIR,
@@ -299,6 +305,7 @@ export async function build() {
     badgeSvgs: badgePaths.length,
     mcpCatalog: mcpCatalogStats,
     discovery: discoveryStats,
+    agentReadiness: agentReadinessStats,
     minified: minifyStats,
   };
 }

@@ -96,30 +96,128 @@ function rewriteToMarkdown(url: URL): URL {
 
 const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 
+// SEP-1649 canonical path. Legacy pointer aliases serve the same JSON body.
+export const MCP_DESCRIPTOR_CANONICAL_PATH = '/.well-known/mcp/server-card.json';
+// Must match the seed file written by emitDiscovery() in src/build/11a-discovery-emit.mjs
+// (separate bundle, so the path cannot be a shared import).
+const MCP_DESCRIPTOR_SEED_ASSET = '/_internal/mcp-server-card.json';
+
+export const MCP_DESCRIPTOR_ALIAS_PATHS = new Set([
+  MCP_DESCRIPTOR_CANONICAL_PATH,
+  '/.well-known/mcp',
+  '/mcp.json',
+  '/.well-known/mcp.json',
+]);
+
+function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string): void {
+  const mcp = `${origin}/mcp`;
+  const docs = `${origin}/mcp-skill.md`;
+  data.mcp_endpoint = mcp;
+  data.url = mcp;
+  data.documentation = docs;
+  const transport = data.transport;
+  if (transport && typeof transport === 'object' && transport !== null) {
+    (transport as Record<string, unknown>).endpoint = mcp;
+  }
+  const authentication = data.authentication;
+  if (authentication && typeof authentication === 'object' && authentication !== null) {
+    (authentication as Record<string, unknown>).documentation = `${origin}/auth.md`;
+  }
+}
+
 /**
- * Build the MCP server descriptor JSON body, rewriting the URL fields
- * to use the inbound request's origin. The static dist/.well-known/mcp
- * asset is emitted by 11a-discovery-emit.mjs at build time with a fixed
- * PUBLIC_BASE_URL (defaults to https://anc.dev), so a developer curling
- * localhost or a probe hitting staging would otherwise see prod URLs in
- * the descriptor. Rewriting at request time keeps the descriptor
- * env-aware without needing per-environment build artifacts.
+ * Build the MCP server-card JSON body, rewriting URL fields to the inbound
+ * request's origin. Seed: dist/_internal/mcp-server-card.json.
  *
- * Used by all three JSON descriptor surfaces:
- *   - GET /mcp with Accept: application/json
- *   - GET /mcp.json
- *   - GET /.well-known/mcp
+ * Canonical (SEP-1649): GET /.well-known/mcp/server-card.json
+ * Aliases (same body):  /.well-known/mcp, /mcp.json, /.well-known/mcp.json
+ * Also:                GET /mcp with Accept: application/json
  */
-async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string> {
-  const wellKnown = new URL(request.url);
-  wellKnown.pathname = '/.well-known/mcp';
-  const asset = await env.ASSETS.fetch(new Request(wellKnown.toString(), { method: 'GET' }));
+async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string | null> {
+  const seedUrl = new URL(request.url);
+  seedUrl.pathname = MCP_DESCRIPTOR_SEED_ASSET;
+  const asset = await env.ASSETS.fetch(new Request(seedUrl.toString(), { method: 'GET' }));
+  if (!asset.ok) return null;
   const body = await asset.text();
-  const data = JSON.parse(body) as { mcp_endpoint?: string; documentation?: string; [k: string]: unknown };
-  const origin = new URL(request.url).origin;
-  data.mcp_endpoint = `${origin}/mcp`;
-  data.documentation = `${origin}/mcp-skill.md`;
-  return `${JSON.stringify(data, null, 2)}\n`;
+  try {
+    const data = JSON.parse(body) as Record<string, unknown>;
+    rewriteMcpDescriptorUrls(data, new URL(request.url).origin);
+    return `${JSON.stringify(data, null, 2)}\n`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rewrite absolute URLs in agent-readiness JSON metadata so staging and
+ * local previews see their own origin instead of the build-time default.
+ */
+async function buildOriginAwareJsonBody(
+  request: Request,
+  env: Env,
+  assetPath: string,
+  rewrite: (data: Record<string, unknown>, origin: string) => void,
+): Promise<string | null> {
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = assetPath;
+  const asset = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: 'GET' }));
+  if (!asset.ok) return null;
+  const body = await asset.text();
+  try {
+    const data = JSON.parse(body) as Record<string, unknown>;
+    rewrite(data, new URL(request.url).origin);
+    return `${JSON.stringify(data, null, 2)}\n`;
+  } catch {
+    return null;
+  }
+}
+
+function rewriteOAuthProtectedResource(data: Record<string, unknown>, origin: string): void {
+  data.resource = `${origin}/mcp`;
+  data.resource_documentation = `${origin}/auth.md`;
+  if (Array.isArray(data.authorization_servers)) {
+    data.authorization_servers = [origin];
+  }
+}
+
+function rewriteOAuthAuthorizationServer(data: Record<string, unknown>, origin: string): void {
+  data.issuer = origin;
+  data.token_endpoint = `${origin}/oauth2/token`;
+  data.jwks_uri = `${origin}/.well-known/jwks.json`;
+  data.service_documentation = `${origin}/auth.md`;
+  const agentAuth = data.agent_auth;
+  if (agentAuth && typeof agentAuth === 'object') {
+    const block = agentAuth as Record<string, unknown>;
+    block.skill = `${origin}/auth.md`;
+    block.register_uri = `${origin}/auth.md`;
+    const anonymous = block.anonymous;
+    if (anonymous && typeof anonymous === 'object') {
+      (anonymous as Record<string, unknown>).claim_uri = `${origin}/auth.md`;
+    }
+  }
+}
+
+function rewriteApiCatalogHrefs(value: unknown, href: string): void {
+  if (!Array.isArray(value)) return;
+  for (const entry of value) {
+    if (entry && typeof entry === 'object') {
+      (entry as Record<string, unknown>).href = href;
+    }
+  }
+}
+
+function rewriteApiCatalog(data: Record<string, unknown>, origin: string): void {
+  const linkset = data.linkset;
+  if (!Array.isArray(linkset)) return;
+  const serverCard = `${origin}/.well-known/mcp/server-card.json`;
+  for (const entry of linkset) {
+    if (!entry || typeof entry !== 'object') continue;
+    const link = entry as Record<string, unknown>;
+    if (typeof link.anchor === 'string') link.anchor = `${origin}/mcp`;
+    rewriteApiCatalogHrefs(link['service-desc'], serverCard);
+    rewriteApiCatalogHrefs(link['service-doc'], `${origin}/mcp-skill`);
+    rewriteApiCatalogHrefs(link.status, serverCard);
+  }
 }
 
 function mcpDescriptorJsonResponse(body: string): Response {
@@ -128,12 +226,22 @@ function mcpDescriptorJsonResponse(body: string): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': MCP_DESCRIPTOR_CACHE,
-      'access-control-allow-origin': '*',
+      ...DISCOVERY_CORS_HEADERS,
     },
   });
 }
 
-function mcpGetOnly405(): Response {
+function discoveryMetadataUnavailable(): Response {
+  return new Response('discovery metadata unavailable\n', {
+    status: 503,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+function discoveryGetOnly405(): Response {
   return new Response('method not allowed\n', {
     status: 405,
     headers: {
@@ -143,6 +251,17 @@ function mcpGetOnly405(): Response {
     },
   });
 }
+
+const DISCOVERY_GET_ONLY_PATHS = new Set([
+  '/.well-known/oauth-protected-resource',
+  '/.well-known/oauth-authorization-server',
+  '/.well-known/api-catalog',
+]);
+
+/** Read-only discovery JSON may be fetched cross-origin by agent tools and scanners. */
+const DISCOVERY_CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+} as const;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -156,22 +275,85 @@ export default {
       return handleScore(request, env as ScoreEnv);
     }
 
-    // /.well-known/mcp + /mcp.json — JSON descriptor surfaces. Both
-    // return the same env-aware body (URLs rewritten to the inbound
-    // origin so localhost / staging / prod each see their own URL in
-    // the descriptor) and both bypass the MCP_ENABLED kill switch —
-    // the descriptor is documentation, not the JSON-RPC handler. The
-    // static dist/.well-known/mcp asset is still emitted at build time
-    // and serves as the body seed the worker rewrites.
-    if (pathname === '/.well-known/mcp' && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return mcpGetOnly405();
+    // MCP server card (SEP-1649) + legacy pointer aliases — one JSON document
+    // from dist/_internal/mcp-server-card.json, origin-rewritten at serve time.
+    if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
+      if (request.method !== 'GET') return discoveryGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
+      if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
     }
-    if (pathname === '/mcp.json' && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return mcpGetOnly405();
-      const body = await buildMcpDescriptorJsonBody(request, env);
+
+    if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
+      return discoveryGetOnly405();
+    }
+
+    // /.well-known/oauth-protected-resource + oauth-authorization-server —
+    // agent-readiness discovery metadata. Origin-aware rewrite keeps staging
+    // and local previews self-consistent.
+    if (pathname === '/.well-known/oauth-protected-resource' && request.method === 'GET') {
+      const body = await buildOriginAwareJsonBody(
+        request,
+        env,
+        '/.well-known/oauth-protected-resource',
+        rewriteOAuthProtectedResource,
+      );
+      if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
+    }
+    if (pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
+      const body = await buildOriginAwareJsonBody(
+        request,
+        env,
+        '/.well-known/oauth-authorization-server',
+        rewriteOAuthAuthorizationServer,
+      );
+      if (body === null) return discoveryMetadataUnavailable();
+      return mcpDescriptorJsonResponse(body);
+    }
+
+    // Public-catalog token endpoint. The MCP surface requires no credentials;
+    // POSTs receive a typed JSON body explaining the no-auth posture rather
+    // than a misleading 404. No CORS: browser-origin probes are not a
+    // supported client; posture is documented in auth.md and OAuth metadata.
+    if (pathname === '/oauth2/token' && request.method === 'POST') {
+      const origin = new URL(request.url).origin;
+      return new Response(
+        JSON.stringify({
+          error: 'public_catalog',
+          error_description:
+            'anc.dev publishes a public catalog. No OAuth tokens are issued; call the MCP endpoint directly.',
+          documentation: `${origin}/auth.md`,
+          mcp_endpoint: `${origin}/mcp`,
+        }),
+        {
+          status: 400,
+          headers: {
+            'content-type': 'application/json; charset=utf-8',
+            'cache-control': 'no-store',
+          },
+        },
+      );
+    }
+
+    // /.well-known/api-catalog — RFC 9727 link set. The static asset is
+    // emitted extensionless (11b-agent-readiness), so CF Static Assets can't
+    // infer the content-type. Origin-rewrite the linkset URLs so staging and
+    // local previews stay self-consistent with the other discovery surfaces,
+    // stamp `application/linkset+json`, open CORS (public discovery surface),
+    // and mark the response noindex.
+    if (pathname === '/.well-known/api-catalog' && request.method === 'GET') {
+      const body = await buildOriginAwareJsonBody(request, env, '/.well-known/api-catalog', rewriteApiCatalog);
+      if (body === null) return discoveryMetadataUnavailable();
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-type': 'application/linkset+json; charset=utf-8',
+          'cache-control': MCP_DESCRIPTOR_CACHE,
+          'x-robots-tag': 'noindex',
+          ...DISCOVERY_CORS_HEADERS,
+        },
+      });
     }
 
     // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
@@ -180,7 +362,7 @@ export default {
     // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
     //
     // GET dispatch:
-    //   - Accept: application/json → proxy /.well-known/mcp (above the
+    //   - Accept: application/json → MCP server card (canonical + aliases above;
     //     kill switch; the URL identity documents itself even when the
     //     JSON-RPC handler is offline).
     //   - Accept: text/html or text/markdown → no early return; control
@@ -219,6 +401,7 @@ export default {
         const getFormat = detectMcpGetFormat(request);
         if (getFormat === 'json') {
           const body = await buildMcpDescriptorJsonBody(request, env);
+          if (body === null) return discoveryMetadataUnavailable();
           return mcpDescriptorJsonResponse(body);
         }
         // 'html' or 'markdown' — control flows past this branch into

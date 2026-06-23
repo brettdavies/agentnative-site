@@ -26,20 +26,56 @@ if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_C
   ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
 }
 
-test.describe('staging /.well-known/mcp', () => {
-  test('returns valid JSON with mcp_endpoint, version, transport, documentation', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/mcp`, { headers: ACCESS_HEADERS });
+// Source of truth: MCP_DESCRIPTOR_ALIAS_PATHS in src/worker/index.ts. Kept as a
+// literal here because the worker module is not importable in Playwright's node
+// env; a new alias must be added in both places.
+const MCP_DESCRIPTOR_ALIASES = [
+  '/.well-known/mcp/server-card.json',
+  '/.well-known/mcp',
+  '/mcp.json',
+  '/.well-known/mcp.json',
+] as const;
+
+test.describe('staging MCP descriptor aliases', () => {
+  test('all four alias paths return byte-identical JSON bodies', async ({ request }) => {
+    const bodies: string[] = [];
+    for (const path of MCP_DESCRIPTOR_ALIASES) {
+      const res = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
+      expect(res.status()).toBe(200);
+      expect(res.headers()['content-type']).toContain('application/json');
+      bodies.push(await res.text());
+    }
+    for (let i = 1; i < bodies.length; i++) {
+      expect(bodies[i]).toBe(bodies[0]);
+    }
+  });
+
+  test('canonical server-card.json carries mcp_endpoint, version, transport, documentation', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/mcp/server-card.json`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as {
       mcp_endpoint: string;
       version: string;
-      transport: string;
+      protocolVersion: string;
+      transport: { type: string };
       documentation: string;
     };
-    expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
-    expect(body.version).toBe('2025-06-18');
-    expect(body.transport).toBe('streamable-http');
-    expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
+    expect(body.mcp_endpoint).toBe(`${STAGING_BASE}/mcp`);
+    expect(body.version).toBe('1.0');
+    expect(body.protocolVersion).toBe('2025-06-18');
+    expect(body.transport.type).toBe('streamable-http');
+    expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md`);
+    expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);
+  });
+
+  test('Accept: text/markdown on canonical path still returns application/json', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/mcp/server-card.json`, {
+      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
+    });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/json');
+    const text = await res.text();
+    expect(() => JSON.parse(text)).not.toThrow();
   });
 });
 
@@ -79,8 +115,109 @@ test.describe('staging /llms.txt', () => {
     expect(progIdx).toBeGreaterThan(0);
     expect(princIdx).toBeGreaterThan(progIdx);
     expect(text).toContain('https://anc.dev/mcp');
-    expect(text).toContain('https://anc.dev/.well-known/mcp');
+    expect(text).toContain('https://anc.dev/.well-known/mcp/server-card.json');
     expect(text).toContain('https://anc.dev/mcp-skill.md');
+  });
+});
+
+test.describe('staging agent-readiness well-known surfaces', () => {
+  test('/.well-known/api-catalog returns application/linkset+json with MCP anchor', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/linkset+json');
+    const body = (await res.json()) as {
+      linkset: Array<{ anchor: string; 'service-desc': Array<{ href: string }> }>;
+    };
+    expect(body.linkset[0].anchor).toBe(`${STAGING_BASE}/mcp`);
+    expect(body.linkset[0]['service-desc'][0].href).toBe(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
+  });
+
+  test('/.well-known/oauth-protected-resource declares the MCP resource', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-protected-resource`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { resource: string; authorization_servers: string[] };
+    expect(body.resource).toBe(`${STAGING_BASE}/mcp`);
+    expect(body.authorization_servers).toContain(STAGING_BASE);
+  });
+
+  test('/.well-known/oauth-authorization-server carries agent_auth anonymous block', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-authorization-server`, {
+      headers: ACCESS_HEADERS,
+    });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as {
+      issuer: string;
+      token_endpoint: string;
+      agent_auth: { anonymous: { claim_uri: string } };
+    };
+    expect(body.issuer).toBe(STAGING_BASE);
+    expect(body.token_endpoint).toBe(`${STAGING_BASE}/oauth2/token`);
+    expect(body.agent_auth.anonymous.claim_uri).toBe(`${STAGING_BASE}/auth.md`);
+  });
+
+  test('/.well-known/jwks.json is a valid JWKS document', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/jwks.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { keys: unknown[] };
+    expect(Array.isArray(body.keys)).toBe(true);
+  });
+
+  test('/.well-known/agent-skills/index.json lists the MCP skill with a digest', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { skills: Array<{ url: string; digest: string }> };
+    expect(body.skills.length).toBeGreaterThanOrEqual(1);
+    expect(body.skills[0].url).toBe('https://anc.dev/mcp-skill.md');
+    expect(body.skills[0].digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  test('/auth.md declares the no-auth posture', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/auth.md`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
+    const text = await res.text();
+    expect(text.toLowerCase()).toContain('auth.md');
+    expect(text).toContain('no authentication');
+    expect(text).toContain('public_catalog');
+    expect(text).toContain('## CORS posture');
+    expect(text).toContain('/.well-known/mcp/server-card.json');
+  });
+
+  test('/robots.txt carries Content-Signal directives', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/robots.txt`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const text = await res.text();
+    expect(text).toMatch(/^Content-Signal:.*ai-train=/m);
+    expect(text).toMatch(/^Content-Signal:.*search=/m);
+    expect(text).toMatch(/^Content-Signal:.*ai-input=/m);
+  });
+
+  test('POST /oauth2/token returns public_catalog error', async ({ request }) => {
+    const res = await request.post(`${STAGING_BASE}/oauth2/token`, {
+      headers: { ...ACCESS_HEADERS, 'content-type': 'application/json' },
+      data: {},
+    });
+    expect(res.status()).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('public_catalog');
+  });
+
+  test('GET /oauth2/token is not a token endpoint (404)', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/oauth2/token`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(404);
+  });
+
+  test('/_internal/mcp-server-card.json is not publicly reachable', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/_internal/mcp-server-card.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(404);
+  });
+
+  test('Accept: text/markdown on api-catalog still returns linkset+json', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/api-catalog`, {
+      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
+    });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/linkset+json');
   });
 });
 
