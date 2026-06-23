@@ -22,36 +22,36 @@ import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-em
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 
-describe('.well-known/mcp pointer (built dist/)', () => {
+describe('.well-known/mcp descriptor (built dist/)', () => {
   test('file exists and parses as JSON', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
     expect(() => JSON.parse(raw)).not.toThrow();
   });
 
-  test('carries exactly the keys mcp_endpoint, version, description, transport, documentation', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    expect(Object.keys(parsed).sort()).toEqual([
-      'description',
-      'documentation',
-      'mcp_endpoint',
-      'transport',
-      'version',
-    ]);
-  });
-
-  test('values match the wire contract pinned in content/mcp-skill.md and instructions.ts', async () => {
+  test('carries U6 pointer fields and SEP-1649 server-card fields in one document', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
     const parsed = JSON.parse(raw) as {
       mcp_endpoint: string;
       version: string;
-      transport: string;
+      description: string;
       documentation: string;
+      serverInfo: { name: string; version: string };
+      protocolVersion: string;
+      url: string;
+      transport: { type: string; endpoint: string };
+      capabilities: { tools: boolean; resources: boolean };
     };
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.version).toBe('2025-06-18');
-    expect(parsed.transport).toBe('streamable-http');
+    expect(parsed.protocolVersion).toBe('2025-06-18');
+    expect(parsed.transport.type).toBe('streamable-http');
+    expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
+    expect(parsed.url).toBe('https://anc.dev/mcp');
+    expect(parsed.capabilities.tools).toBe(true);
+    expect(parsed.capabilities.resources).toBe(true);
     expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
+    expect(typeof parsed.serverInfo.name).toBe('string');
+    expect(typeof parsed.serverInfo.version).toBe('string');
   });
 });
 
@@ -165,7 +165,7 @@ describe('.well-known/api-catalog (built dist/)', () => {
     expect(parsed.linkset.length).toBeGreaterThanOrEqual(1);
     const entry = parsed.linkset[0];
     expect(entry.anchor).toBe('https://anc.dev/mcp');
-    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp/server-card.json');
+    expect(entry['service-desc'][0].href).toBe('https://anc.dev/.well-known/mcp');
     expect(entry['service-doc'][0].href).toBe('https://anc.dev/mcp-skill');
   });
 });
@@ -220,36 +220,6 @@ describe('.well-known/jwks.json (built dist/)', () => {
   });
 });
 
-describe('.well-known/mcp.json — MCP Server Card (built dist/)', () => {
-  test('carries serverInfo, transport endpoint, and capabilities', async () => {
-    const raw = await readFile(join(DIST_DIR, '.well-known', 'mcp.json'), 'utf8');
-    const parsed = JSON.parse(raw) as {
-      serverInfo: { name: string; version: string };
-      protocolVersion: string;
-      transport: { type: string; endpoint: string };
-      capabilities: { tools: boolean; resources: boolean };
-      url: string;
-    };
-    expect(typeof parsed.serverInfo.name).toBe('string');
-    expect(typeof parsed.serverInfo.version).toBe('string');
-    expect(parsed.protocolVersion).toBe('2025-06-18');
-    expect(parsed.transport.type).toBe('streamable-http');
-    expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
-    expect(parsed.capabilities.tools).toBe(true);
-    expect(parsed.capabilities.resources).toBe(true);
-    expect(parsed.url).toBe('https://anc.dev/mcp');
-  });
-
-  test('does not collide with the legacy /.well-known/mcp pointer file', async () => {
-    // The legacy pointer is an extensionless file; the server card is mcp.json.
-    // Both must coexist on disk (file vs file, not file vs directory).
-    const pointer = await readFile(join(DIST_DIR, '.well-known', 'mcp'), 'utf8');
-    const card = await readFile(join(DIST_DIR, '.well-known', 'mcp.json'), 'utf8');
-    expect(() => JSON.parse(pointer)).not.toThrow();
-    expect(() => JSON.parse(card)).not.toThrow();
-  });
-});
-
 describe('.well-known/agent-skills/index.json (built dist/)', () => {
   test('is a v0.2.0 discovery index with a digest matching the served artifact', async () => {
     const raw = await readFile(join(DIST_DIR, '.well-known', 'agent-skills', 'index.json'), 'utf8');
@@ -292,27 +262,17 @@ describe('emitAgentReadiness() in isolation', () => {
       await writeFile(join(tmp, 'mcp-skill.md'), '# Using the MCP server\n\nhello\n');
       const stats = await emitAgentReadiness({ distDir: tmp, baseUrl: 'https://example.test' });
       expect(stats.apiCatalogPath).toBe(join(tmp, '.well-known', 'api-catalog'));
-      expect(stats.mcpServerCardPath).toBe(join(tmp, '.well-known', 'mcp.json'));
       expect(stats.oauthProtectedResourcePath).toBe(join(tmp, '.well-known', 'oauth-protected-resource'));
       expect(stats.oauthAuthorizationServerPath).toBe(join(tmp, '.well-known', 'oauth-authorization-server'));
       expect(stats.jwksPath).toBe(join(tmp, '.well-known', 'jwks.json'));
       expect(stats.agentSkillsPath).toBe(join(tmp, '.well-known', 'agent-skills', 'index.json'));
       expect(stats.authMdPath).toBe(join(tmp, 'auth.md'));
 
-      const card = JSON.parse(await readFile(stats.mcpServerCardPath, 'utf8')) as { url: string };
-      expect(card.url).toBe('https://example.test/mcp');
-
-      const skills = JSON.parse(await readFile(stats.agentSkillsPath, 'utf8')) as {
-        skills: Array<{ url: string; digest: string }>;
-      };
-      expect(skills.skills[0].url).toBe('https://example.test/mcp-skill.md');
-      const expected = createHash('sha256').update('# Using the MCP server\n\nhello\n').digest('hex');
-      expect(skills.skills[0].digest).toBe(`sha256:${expected}`);
-
       const catalog = JSON.parse(await readFile(stats.apiCatalogPath, 'utf8')) as {
-        linkset: Array<{ anchor: string }>;
+        linkset: Array<{ anchor: string; 'service-desc': Array<{ href: string }> }>;
       };
       expect(catalog.linkset[0].anchor).toBe('https://example.test/mcp');
+      expect(catalog.linkset[0]['service-desc'][0].href).toBe('https://example.test/.well-known/mcp');
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }

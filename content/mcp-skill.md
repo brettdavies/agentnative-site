@@ -301,7 +301,8 @@ resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request tha
 
 **Discovery siblings.**
 
-- `https://anc.dev/.well-known/mcp`: HTTP-level JSON pointer carrying `mcp_endpoint`, `version`, `description`,
-  `transport`, and `documentation` (this page).
+- `https://anc.dev/.well-known/mcp`: canonical MCP descriptor JSON (`mcp_endpoint`, `version`,
+  `description`, `transport`, `documentation`, plus SEP-1649 `serverInfo` / `capabilities`). Aliases:
+  `/mcp.json`, `/.well-known/mcp/server-card.json`.
 - `https://anc.dev/.well-known/ai.txt`: AI-training and agent-access posture plus `Programmatic-API:
   https://anc.dev/mcp`.

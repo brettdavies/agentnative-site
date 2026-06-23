@@ -33,12 +33,12 @@ test.describe('staging /.well-known/mcp', () => {
     const body = (await res.json()) as {
       mcp_endpoint: string;
       version: string;
-      transport: string;
+      transport: { type: string };
       documentation: string;
     };
     expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(body.version).toBe('2025-06-18');
-    expect(body.transport).toBe('streamable-http');
+    expect(body.transport.type).toBe('streamable-http');
     expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
   });
 });

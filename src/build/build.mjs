@@ -270,12 +270,8 @@ export async function build() {
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
 
   // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
-  // mcp/server-card.json, agent-skills/index.json} + auth.md. Answers the
-  // protocol-discovery probes a generic agent-readiness scanner runs against
-  // the apex. The agent-skills index digests dist/mcp-skill.md, so this MUST
-  // run after the sub-pages stage (7). The api-catalog file is extensionless;
-  // the Worker stamps its application/linkset+json content-type at request
-  // time (src/worker/index.ts).
+  // oauth-*, agent-skills/index.json} + auth.md. MCP descriptor aliases are
+  // Worker-served from the single dist/.well-known/mcp seed (11a).
   const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
 
   // 12. Invariant check — fails fast if any critical contract slips.

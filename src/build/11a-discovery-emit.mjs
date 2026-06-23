@@ -2,7 +2,11 @@
 // 11-mcp-catalog so the catalog publish order stays semantically grouped).
 //
 // Emits three operational signals:
-//   dist/.well-known/mcp           — JSON pointer at the MCP server
+//   dist/.well-known/mcp           — canonical MCP descriptor JSON (U6 pointer +
+//                                    SEP-1649 server-card superset). Alias paths
+//                                    (/mcp.json, /.well-known/mcp.json,
+//                                    /.well-known/mcp/server-card.json) are served
+//                                    by the Worker from this single seed file.
 //   dist/.well-known/security.txt  — RFC 9116 vulnerability-reporting contact
 //   dist/.well-known/ai.txt        — agent / AI-access declaration
 //
@@ -24,14 +28,31 @@ import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 const MCP_SPEC_VERSION = '2025-06-18';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';
 
-function buildMcpPointer(baseUrl) {
+function buildMcpDescriptor(baseUrl) {
+  const description = 'agent-native CLI standard registry: scorecards, principles, vendored spec';
+  // Single canonical document (PR #169 U6 pointer + SEP-1649 server-card fields).
+  // Every alias path serves this body via src/worker/index.ts origin rewrite.
   return `${JSON.stringify(
     {
       mcp_endpoint: `${baseUrl}/mcp`,
       version: MCP_SPEC_VERSION,
-      description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
-      transport: 'streamable-http',
+      description,
       documentation: `${baseUrl}/mcp-skill.md`,
+      serverInfo: {
+        name: 'anc.dev agent-native CLI standard registry',
+        version: ANC_VERSION,
+      },
+      protocolVersion: MCP_SPEC_VERSION,
+      url: `${baseUrl}/mcp`,
+      transport: {
+        type: 'streamable-http',
+        endpoint: `${baseUrl}/mcp`,
+      },
+      capabilities: {
+        tools: true,
+        resources: true,
+        prompts: false,
+      },
     },
     null,
     2,
@@ -82,43 +103,16 @@ export async function emitDiscovery({ distDir, baseUrl }) {
   const securityPath = join(wellKnownDir, 'security.txt');
   const aiPath = join(wellKnownDir, 'ai.txt');
 
-  await writeFile(mcpPath, buildMcpPointer(base));
+  await writeFile(mcpPath, buildMcpDescriptor(base));
   await writeFile(securityPath, buildSecurityTxt(base));
   await writeFile(aiPath, buildAiTxt(base));
 
   return { mcpPath, securityPath, aiPath };
 }
 
-// ---------------------------------------------------------------------------
-// Agent-readiness discovery surfaces. These four files answer the protocol-
-// discovery probes a generic agent-readiness scanner runs against the apex:
-//
-//   .well-known/api-catalog            — RFC 9727 link set pointing at the
-//                                        programmatic surfaces (the MCP API).
-//   .well-known/mcp.json               — SEP-1649 MCP Server Card. The legacy
-//                                        .well-known/mcp pointer is an
-//                                        extensionless FILE, so `mcp` cannot
-//                                        also be a directory holding
-//                                        server-card.json. Scanners accept
-//                                        .well-known/mcp.json as an equivalent
-//                                        candidate path, which sidesteps the
-//                                        file/directory collision while keeping
-//                                        the legacy pointer intact.
-//   .well-known/agent-skills/index.json — Agent Skills Discovery v0.2.0 index.
-//                                        References the self-hosted MCP client
-//                                        skill (/mcp-skill.md) with a SHA-256
-//                                        digest of the served artifact.
-//   auth.md                            — Self-contained auth declaration. The
-//                                        catalog is public and no-auth by
-//                                        design (AGENTS.md: "the surface is
-//                                        open, the inventory is published"), so
-//                                        auth.md states that posture honestly
-//                                        rather than advertising an OAuth
-//                                        authorization server that does not
-//                                        exist.
-//
-// All four lift their URLs from the same resolveBaseUrl() the rest of the
-// build uses, so localhost / staging / prod each get self-consistent links.
+// Agent-readiness discovery surfaces (api-catalog, OAuth metadata, agent-skills,
+// auth.md). The MCP descriptor is NOT duplicated here — it lives only at
+// dist/.well-known/mcp (see buildMcpDescriptor above).
 
 function buildApiCatalog(baseUrl) {
   // RFC 9727 link set (application/linkset+json). One anchor: the MCP
@@ -130,45 +124,11 @@ function buildApiCatalog(baseUrl) {
       linkset: [
         {
           anchor: `${baseUrl}/mcp`,
-          'service-desc': [
-            { href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' },
-          ],
+          'service-desc': [{ href: `${baseUrl}/.well-known/mcp`, type: 'application/json' }],
           'service-doc': [{ href: `${baseUrl}/mcp-skill`, type: 'text/html' }],
           status: [{ href: `${baseUrl}/.well-known/mcp`, type: 'application/json' }],
         },
       ],
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-function buildMcpServerCard(baseUrl) {
-  // SEP-1649 MCP Server Card. serverInfo.version tracks the agent-native CLI
-  // release the catalog mirrors (ANC_VERSION); protocolVersion is the MCP
-  // spec revision the streamable-HTTP transport is pinned to. capabilities
-  // mirror the live surface: 9 tools + 5 resources, no prompts.
-  return `${JSON.stringify(
-    {
-      serverInfo: {
-        name: 'anc.dev agent-native CLI standard registry',
-        version: ANC_VERSION,
-      },
-      protocolVersion: MCP_SPEC_VERSION,
-      description:
-        'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, ' +
-        'and the vendored spec. Public catalog, no authentication.',
-      url: `${baseUrl}/mcp`,
-      transport: {
-        type: 'streamable-http',
-        endpoint: `${baseUrl}/mcp`,
-      },
-      capabilities: {
-        tools: true,
-        resources: true,
-        prompts: false,
-      },
-      documentation: `${baseUrl}/mcp-skill.md`,
     },
     null,
     2,
@@ -221,7 +181,7 @@ function buildAuthMd(baseUrl) {
     '## Endpoints',
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
-    `- MCP server card: \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
+    `- MCP descriptor: \`${baseUrl}/.well-known/mcp\` (aliases: \`/mcp.json\`, \`/.well-known/mcp/server-card.json\`).`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
     `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
     `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
@@ -303,12 +263,13 @@ function buildJwks() {
  *
  * Probed by generic agent-readiness scanners under the apex:
  *   dist/.well-known/api-catalog              (RFC 9727)
- *   dist/.well-known/mcp.json                 (SEP-1649 MCP Server Card seed)
  *   dist/.well-known/oauth-protected-resource (RFC 9728 PRM)
  *   dist/.well-known/oauth-authorization-server (RFC 8414 + agent_auth)
  *   dist/.well-known/jwks.json                (empty JWKS for public catalog)
  *   dist/.well-known/agent-skills/index.json  (Agent Skills Discovery v0.2.0)
  *   dist/auth.md                              (auth declaration)
+ *
+ * MCP descriptor: emitted once by emitDiscovery() at dist/.well-known/mcp.
  *
  * The agent-skills index digests dist/mcp-skill.md, so this stage MUST run
  * after the sub-pages stage (7) that emits the markdown twin.
@@ -318,7 +279,6 @@ function buildJwks() {
  * @param {string=} args.baseUrl — explicit override; defaults via resolveBaseUrl
  * @returns {Promise<{
  *   apiCatalogPath: string;
- *   mcpServerCardPath: string;
  *   oauthProtectedResourcePath: string;
  *   oauthAuthorizationServerPath: string;
  *   jwksPath: string;
@@ -339,7 +299,6 @@ export async function emitAgentReadiness({ distDir, baseUrl }) {
   const skillDigest = createHash('sha256').update(skillArtifact).digest('hex');
 
   const apiCatalogPath = join(wellKnownDir, 'api-catalog');
-  const mcpServerCardPath = join(wellKnownDir, 'mcp.json');
   const oauthProtectedResourcePath = join(wellKnownDir, 'oauth-protected-resource');
   const oauthAuthorizationServerPath = join(wellKnownDir, 'oauth-authorization-server');
   const jwksPath = join(wellKnownDir, 'jwks.json');
@@ -347,7 +306,6 @@ export async function emitAgentReadiness({ distDir, baseUrl }) {
   const authMdPath = join(distDir, 'auth.md');
 
   await writeFile(apiCatalogPath, buildApiCatalog(base));
-  await writeFile(mcpServerCardPath, buildMcpServerCard(base));
   await writeFile(oauthProtectedResourcePath, buildOAuthProtectedResource(base));
   await writeFile(oauthAuthorizationServerPath, buildOAuthAuthorizationServer(base));
   await writeFile(jwksPath, buildJwks());
@@ -356,7 +314,6 @@ export async function emitAgentReadiness({ distDir, baseUrl }) {
 
   return {
     apiCatalogPath,
-    mcpServerCardPath,
     oauthProtectedResourcePath,
     oauthAuthorizationServerPath,
     jwksPath,

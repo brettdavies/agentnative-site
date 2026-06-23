@@ -96,56 +96,46 @@ function rewriteToMarkdown(url: URL): URL {
 
 const MCP_DESCRIPTOR_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 
+// Canonical MCP descriptor is dist/.well-known/mcp (PR #169 U6). The Worker
+// serves the same env-aware body at every alias so scanners and legacy clients
+// converge on one document.
+const MCP_DESCRIPTOR_PATHS = new Set([
+  '/.well-known/mcp',
+  '/mcp.json',
+  '/.well-known/mcp.json',
+  '/.well-known/mcp/server-card.json',
+]);
+
+function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string): void {
+  const mcp = `${origin}/mcp`;
+  const docs = `${origin}/mcp-skill.md`;
+  data.mcp_endpoint = mcp;
+  data.url = mcp;
+  data.documentation = docs;
+  const transport = data.transport;
+  if (transport && typeof transport === 'object' && transport !== null) {
+    (transport as Record<string, unknown>).endpoint = mcp;
+  }
+}
+
 /**
- * Build the MCP server descriptor JSON body, rewriting the URL fields
- * to use the inbound request's origin. The static dist/.well-known/mcp
- * asset is emitted by 11a-discovery-emit.mjs at build time with a fixed
- * PUBLIC_BASE_URL (defaults to https://anc.dev), so a developer curling
- * localhost or a probe hitting staging would otherwise see prod URLs in
- * the descriptor. Rewriting at request time keeps the descriptor
- * env-aware without needing per-environment build artifacts.
+ * Build the MCP descriptor JSON body, rewriting URL fields to the inbound
+ * request's origin. The static dist/.well-known/mcp asset is the sole seed.
  *
- * Used by all three JSON descriptor surfaces:
+ * Alias paths (all return identical JSON):
+ *   - GET /.well-known/mcp          — canonical (PR #169)
+ *   - GET /mcp.json                 — short alias (PR #181)
+ *   - GET /.well-known/mcp.json     — well-known alias
+ *   - GET /.well-known/mcp/server-card.json — SEP-1649 path alias
  *   - GET /mcp with Accept: application/json
- *   - GET /mcp.json
- *   - GET /.well-known/mcp
  */
 async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string> {
   const wellKnown = new URL(request.url);
   wellKnown.pathname = '/.well-known/mcp';
   const asset = await env.ASSETS.fetch(new Request(wellKnown.toString(), { method: 'GET' }));
   const body = await asset.text();
-  const data = JSON.parse(body) as { mcp_endpoint?: string; documentation?: string; [k: string]: unknown };
-  const origin = new URL(request.url).origin;
-  data.mcp_endpoint = `${origin}/mcp`;
-  data.documentation = `${origin}/mcp-skill.md`;
-  return `${JSON.stringify(data, null, 2)}\n`;
-}
-
-/**
- * Build the SEP-1649 MCP Server Card JSON body, rewriting URL fields to
- * the inbound request's origin. The static dist/.well-known/mcp.json asset
- * is the body seed. Served at /.well-known/mcp/server-card.json because
- * the legacy /.well-known/mcp pointer is an extensionless file and cannot
- * coexist with an mcp/ directory on disk.
- */
-async function buildMcpServerCardJsonBody(request: Request, env: Env): Promise<string> {
-  const cardUrl = new URL(request.url);
-  cardUrl.pathname = '/.well-known/mcp.json';
-  const asset = await env.ASSETS.fetch(new Request(cardUrl.toString(), { method: 'GET' }));
-  const body = await asset.text();
-  const data = JSON.parse(body) as {
-    url?: string;
-    documentation?: string;
-    transport?: { endpoint?: string; [k: string]: unknown };
-    [k: string]: unknown;
-  };
-  const origin = new URL(request.url).origin;
-  data.url = `${origin}/mcp`;
-  data.documentation = `${origin}/mcp-skill.md`;
-  if (data.transport && typeof data.transport === 'object') {
-    data.transport.endpoint = `${origin}/mcp`;
-  }
+  const data = JSON.parse(body) as Record<string, unknown>;
+  rewriteMcpDescriptorUrls(data, new URL(request.url).origin);
   return `${JSON.stringify(data, null, 2)}\n`;
 }
 
@@ -226,31 +216,11 @@ export default {
       return handleScore(request, env as ScoreEnv);
     }
 
-    // /.well-known/mcp + /mcp.json — JSON descriptor surfaces. Both
-    // return the same env-aware body (URLs rewritten to the inbound
-    // origin so localhost / staging / prod each see their own URL in
-    // the descriptor) and both bypass the MCP_ENABLED kill switch —
-    // the descriptor is documentation, not the JSON-RPC handler. The
-    // static dist/.well-known/mcp asset is still emitted at build time
-    // and serves as the body seed the worker rewrites.
-    if (pathname === '/.well-known/mcp' && request.method !== 'OPTIONS') {
+    // MCP descriptor aliases — one canonical JSON document (dist/.well-known/mcp)
+    // rewritten to the inbound origin. Bypasses MCP_ENABLED (documentation only).
+    if (MCP_DESCRIPTOR_PATHS.has(pathname) && request.method !== 'OPTIONS') {
       if (request.method !== 'GET') return mcpGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
-      return mcpDescriptorJsonResponse(body);
-    }
-    if (pathname === '/mcp.json' && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return mcpGetOnly405();
-      const body = await buildMcpDescriptorJsonBody(request, env);
-      return mcpDescriptorJsonResponse(body);
-    }
-
-    // /.well-known/mcp/server-card.json — SEP-1649 MCP Server Card. The
-    // legacy /.well-known/mcp pointer is an extensionless file, so the
-    // canonical server-card path is served here via the Worker while the
-    // body seed lives at dist/.well-known/mcp.json.
-    if (pathname === '/.well-known/mcp/server-card.json' && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return mcpGetOnly405();
-      const body = await buildMcpServerCardJsonBody(request, env);
       return mcpDescriptorJsonResponse(body);
     }
 
