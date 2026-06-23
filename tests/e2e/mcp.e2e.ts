@@ -339,10 +339,13 @@ test.describe('staging /mcp — gate posture', () => {
     expect(text).not.toContain('jsonrpc');
   });
 
-  test('GET /mcp returns 405 with Allow: POST', async ({ request }) => {
+  test('GET /mcp serves the endpoint landing page as HTML', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/mcp`, { headers: ACCESS_HEADERS });
-    expect(res.status()).toBe(405);
-    expect(res.headers().allow).toBe('POST');
+    expect(res.status()).toBe(200);
+    const ct = res.headers()['content-type'] ?? '';
+    expect(ct).toContain('text/html');
+    const text = await res.text();
+    expect(text).toContain('anc.dev MCP server');
   });
 
   test('response carries no Access-Control-Allow-Origin header (KTD-10 server-to-agent posture)', async ({

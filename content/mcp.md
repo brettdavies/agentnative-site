@@ -4,8 +4,7 @@ This URL is the streamable-HTTP [Model Context Protocol](https://modelcontextpro
 agent-native CLI standard registry. MCP clients POST JSON-RPC requests here.
 
 - Wire contract and tool catalog: [/mcp-skill](/mcp-skill)
-- JSON descriptor: [/mcp.json](/mcp.json) or [/.well-known/mcp](/.well-known/mcp) (also reachable on any of these URLs
-  with `Accept: application/json`)
+- JSON server card (SEP-1649): [/.well-known/mcp/server-card.json](/.well-known/mcp/server-card.json). Pointer aliases: [/.well-known/mcp](/.well-known/mcp), [/mcp.json](/mcp.json). Also on `/mcp` with `Accept: application/json`.
 - Markdown twin of this page: [/mcp.md](/mcp.md)
 - The standard itself: [the homepage](/)
 

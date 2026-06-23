@@ -61,11 +61,21 @@ interface RateStub {
 }
 
 const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
+  $schema: 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json',
   mcp_endpoint: 'https://anc.dev/mcp',
-  version: '2025-06-18',
+  version: '1.0',
   description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
-  transport: 'streamable-http',
   documentation: 'https://anc.dev/mcp-skill.md',
+  serverInfo: { name: 'anc.dev agent-native CLI standard registry', version: '0.5.0' },
+  protocolVersion: '2025-06-18',
+  url: 'https://anc.dev/mcp',
+  transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
+  capabilities: {
+    tools: { listChanged: false },
+    resources: { subscribe: false, listChanged: false },
+    prompts: { listChanged: false },
+  },
+  authentication: { required: false, schemes: [], documentation: 'https://anc.dev/auth.md' },
 });
 
 const FIXTURE_MCP_HTML = '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>';
@@ -93,7 +103,7 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
             }),
           );
         }
-        if (path === '/.well-known/mcp') {
+        if (path === '/_internal/mcp-server-card.json') {
           return Promise.resolve(
             new Response(FIXTURE_WELL_KNOWN_MCP, {
               status: 200,
@@ -337,13 +347,18 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(res.status).toBe(200);
     expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    const body = (await res.json()) as { mcp_endpoint: string; documentation: string; transport: string };
+    const body = (await res.json()) as {
+      mcp_endpoint: string;
+      documentation: string;
+      transport: { type: string; endpoint: string };
+    };
     // Test request URL is https://anc.dev/mcp, so the rewritten URLs
     // should also be anc.dev. Non-anc.dev origin coverage lives in the
     // env-awareness test below.
     expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
-    expect(body.transport).toBe('streamable-http');
+    expect(body.transport.type).toBe('streamable-http');
+    expect(body.transport.endpoint).toBe('https://anc.dev/mcp');
   });
 
   test('JSON descriptor rewrites URLs to the inbound request origin (env-aware)', async () => {
