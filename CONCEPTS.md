@@ -43,3 +43,31 @@ The resolved, executable form of a user's input after the Worker's resolution la
 runs. Names a package manager (`brew`, `cargo-binstall`, `bun`, `pip`, `uv`, `npm`, `go`, `direct`, `git-clone`), a
 package or URL, and the binary the post-install check verifies on `PATH`. The Durable Object only ever sees an install
 spec, never the raw user input.
+
+## Agent discovery
+
+### MCP endpoint
+
+The site's Model Context Protocol server at `/mcp`: a streamable-HTTP, JSON-RPC surface that exposes the anc100 registry
+and scoring tools to agents. GET returns the landing page (or the MCP server card under a JSON `Accept` header); POST
+carries JSON-RPC. Unauthenticated by design, because the catalog is public.
+
+### MCP server card
+
+The machine-readable descriptor of the MCP endpoint, following the SEP-1649 server-card shape: it declares the endpoint
+URL, the protocol revision, the transport, a documentation pointer, and that authentication is not required. Canonical
+at `/.well-known/mcp/server-card.json`, with legacy alias paths that return a byte-identical body.
+
+### Discovery surface
+
+Any machine-readable endpoint that lets an agent find and use the MCP endpoint without reading the HTML site: the MCP
+server card, the OAuth metadata, the JWKS, the RFC 9727 api-catalog, the agent-skills index, and the AI-signal lines in
+`robots.txt` / `ai.txt`. The family is served by the Worker and is the agent-facing twin of the human navigation; every
+entry points at the same MCP endpoint, so drift between them breaks discoverability.
+
+### Origin rewrite
+
+The Worker behavior of rewriting absolute URLs in a discovery surface to the inbound request's origin at serve time, so
+staging and local previews return self-consistent URLs (their own host) instead of the production host baked in at
+build. Every origin-aware surface must go through the one shared rewrite path; a surface served as a verbatim static
+asset silently skips it and reports the wrong origin.
