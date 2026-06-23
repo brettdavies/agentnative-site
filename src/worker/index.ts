@@ -155,14 +155,19 @@ async function buildOriginAwareJsonBody(
   env: Env,
   assetPath: string,
   rewrite: (data: Record<string, unknown>, origin: string) => void,
-): Promise<string> {
+): Promise<string | null> {
   const assetUrl = new URL(request.url);
   assetUrl.pathname = assetPath;
   const asset = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: 'GET' }));
+  if (!asset.ok) return null;
   const body = await asset.text();
-  const data = JSON.parse(body) as Record<string, unknown>;
-  rewrite(data, new URL(request.url).origin);
-  return `${JSON.stringify(data, null, 2)}\n`;
+  try {
+    const data = JSON.parse(body) as Record<string, unknown>;
+    rewrite(data, new URL(request.url).origin);
+    return `${JSON.stringify(data, null, 2)}\n`;
+  } catch {
+    return null;
+  }
 }
 
 function rewriteOAuthProtectedResource(data: Record<string, unknown>, origin: string): void {
@@ -202,8 +207,8 @@ function mcpDescriptorJsonResponse(body: string): Response {
   });
 }
 
-function mcpDescriptorUnavailable(): Response {
-  return new Response('mcp server card unavailable\n', {
+function discoveryMetadataUnavailable(): Response {
+  return new Response('discovery metadata unavailable\n', {
     status: 503,
     headers: {
       'content-type': 'text/plain; charset=utf-8',
@@ -255,7 +260,7 @@ export default {
     if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
       if (request.method !== 'GET') return mcpGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
-      if (body === null) return mcpDescriptorUnavailable();
+      if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
     }
 
@@ -273,6 +278,7 @@ export default {
         '/.well-known/oauth-protected-resource',
         rewriteOAuthProtectedResource,
       );
+      if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
     }
     if (pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
@@ -282,6 +288,7 @@ export default {
         '/.well-known/oauth-authorization-server',
         rewriteOAuthAuthorizationServer,
       );
+      if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
     }
 
@@ -372,7 +379,7 @@ export default {
         const getFormat = detectMcpGetFormat(request);
         if (getFormat === 'json') {
           const body = await buildMcpDescriptorJsonBody(request, env);
-          if (body === null) return mcpDescriptorUnavailable();
+          if (body === null) return discoveryMetadataUnavailable();
           return mcpDescriptorJsonResponse(body);
         }
         // 'html' or 'markdown' — control flows past this branch into

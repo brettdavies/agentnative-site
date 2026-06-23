@@ -490,7 +490,7 @@ an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_b
    mailto:97-boss-beetle@icloud.com`.
 4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp
    Playwright project. Set `ANC_STAGING_BASE_URL` and run `bun x playwright test --project=staging-mcp` against the live
-   host. Twenty tests; both files must pass.
+   host. Thirty-three tests; both files must pass.
 
 ### Cost-control posture: `score_cli` never bypasses the cache
 

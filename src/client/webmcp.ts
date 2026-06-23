@@ -64,13 +64,13 @@ function registerSiteTools(mc: ModelContext, signal: AbortSignal): void {
   ];
 
   if (typeof mc.provideContext === 'function') {
-    void mc.provideContext({ tools }, { signal });
+    void mc.provideContext({ tools }, { signal }).catch(() => {});
     return;
   }
 
   if (typeof mc.registerTool === 'function') {
     for (const tool of tools) {
-      void mc.registerTool(tool, { signal });
+      void mc.registerTool(tool, { signal }).catch(() => {});
     }
   }
 }

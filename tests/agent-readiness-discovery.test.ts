@@ -70,7 +70,7 @@ No authentication required.
 
 const FIXTURE_AGENT_SKILLS = JSON.stringify({
   $schema: 'https://schemas.agentskills.io/discovery/0.2.0/schema.json',
-  skills: [{ name: 'agentnative-mcp', type: 'skill-md', url: 'https://anc.dev/mcp-skill.md', digest: 'sha256:abc' }],
+  skills: [{ name: 'anc-mcp', type: 'skill-md', url: 'https://anc.dev/mcp-skill.md', digest: 'sha256:abc' }],
 });
 
 const FIXTURE_JWKS = JSON.stringify({ keys: [] });
@@ -237,6 +237,21 @@ describe('MCP descriptor aliases — byte-identical bodies', () => {
     const res = await worker.fetch(req(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`), noSeedEnv);
     expect(res.status).toBe(503);
     expect(await res.text()).toContain('unavailable');
+  });
+
+  test('missing OAuth seed returns 503 instead of an unhandled exception', async () => {
+    const noSeedEnv = {
+      ASSETS: {
+        async fetch(): Promise<Response> {
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+    };
+    for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-authorization-server']) {
+      const res = await worker.fetch(req(`https://anc.dev${path}`), noSeedEnv);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain('unavailable');
+    }
   });
 
   test('authentication.documentation rewrites to the inbound origin', async () => {
