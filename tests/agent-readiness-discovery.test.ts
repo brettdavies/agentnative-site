@@ -196,10 +196,7 @@ describe('MCP descriptor aliases — byte-identical bodies', () => {
   for (const path of MCP_DESCRIPTOR_ALIASES) {
     test(`${path} — Accept: text/markdown still returns JSON (intercept bypasses CN rewrite)`, async () => {
       const env = makeEnv();
-      const res = await worker.fetch(
-        req(`https://anc.dev${path}`, { headers: { accept: 'text/markdown' } }),
-        env,
-      );
+      const res = await worker.fetch(req(`https://anc.dev${path}`, { headers: { accept: 'text/markdown' } }), env);
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
       const text = await res.text();
@@ -388,10 +385,7 @@ describe('auth.md — worker content negotiation', () => {
 
   test('GET /auth with Accept: text/markdown rewrites to /auth.md', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(
-      req('https://anc.dev/auth', { headers: { accept: 'text/markdown' } }),
-      env,
-    );
+    const res = await worker.fetch(req('https://anc.dev/auth', { headers: { accept: 'text/markdown' } }), env);
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Echo-Path')).toBe('/auth.md');

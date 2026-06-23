@@ -140,9 +140,7 @@ function buildApiCatalog(baseUrl) {
       linkset: [
         {
           anchor: `${baseUrl}/mcp`,
-          'service-desc': [
-            { href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' },
-          ],
+          'service-desc': [{ href: `${baseUrl}/.well-known/mcp/server-card.json`, type: 'application/json' }],
           'service-doc': [{ href: `${baseUrl}/mcp-skill`, type: 'text/html' }],
           status: [
             {

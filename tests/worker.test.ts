@@ -396,7 +396,6 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     expect(await res.text()).toBe('{"skills":[]}');
   });
 
-
   test('GET /.well-known/oauth-protected-resource rewrites resource + documentation URLs', async () => {
     const seed = JSON.stringify({
       resource: 'https://anc.dev/mcp',

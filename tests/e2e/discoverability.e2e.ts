@@ -71,7 +71,8 @@ test.describe('staging MCP descriptor aliases', () => {
     });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('application/json');
-    expect(() => JSON.parse(await res.text())).not.toThrow();
+    const text = await res.text();
+    expect(() => JSON.parse(text)).not.toThrow();
   });
 });
 
@@ -137,7 +138,9 @@ test.describe('staging agent-readiness well-known surfaces', () => {
   });
 
   test('/.well-known/oauth-authorization-server carries agent_auth anonymous block', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-authorization-server`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/.well-known/oauth-authorization-server`, {
+      headers: ACCESS_HEADERS,
+    });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as {
       issuer: string;

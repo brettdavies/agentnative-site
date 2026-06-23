@@ -482,12 +482,12 @@ an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_b
 2. **Confirm both rate-limit bindings exist in `wrangler.jsonc` for the production env.** Production inherits from the
    top-level block by default; verify `MCP_LIMITER` and `MCP_AUDIT_LIMITER` both appear with the expected `namespace_id`
    and `simple` values.
-3. **Verify discoverability surfaces.** After deploy,
-   `curl -s https://anc.dev/.well-known/mcp/server-card.json | jq` returns the SEP-1649 server card with
-   `protocolVersion: "2025-06-18"`, `authentication.required: false`, and `transport.type: "streamable-http"`.
-   Legacy alias `curl -s https://anc.dev/.well-known/mcp | jq` returns the same body. `curl -s https://anc.dev/mcp-skill.md | head -1`
-   returns the markdown twin's first heading. `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and
-   `Contact: mailto:97-boss-beetle@icloud.com`.
+3. **Verify discoverability surfaces.** After deploy, `curl -s https://anc.dev/.well-known/mcp/server-card.json | jq`
+   returns the SEP-1649 server card with `protocolVersion: "2025-06-18"`, `authentication.required: false`, and
+   `transport.type: "streamable-http"`. Legacy alias `curl -s https://anc.dev/.well-known/mcp | jq` returns the same
+   body. `curl -s https://anc.dev/mcp-skill.md | head -1` returns the markdown twin's first heading.
+   `/.well-known/ai.txt` carries `Programmatic-API: https://anc.dev/mcp` and `Contact:
+   mailto:97-boss-beetle@icloud.com`.
 4. **Smoke the handshake.** `tests/e2e/mcp.e2e.ts` and `tests/e2e/discoverability.e2e.ts` ship as the staging-mcp
    Playwright project. Set `ANC_STAGING_BASE_URL` and run `bun x playwright test --project=staging-mcp` against the live
    host. Twenty tests; both files must pass.
