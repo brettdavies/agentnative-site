@@ -56,6 +56,9 @@ function buildMcpDescriptor(baseUrl) {
         resources: true,
         prompts: false,
       },
+      authentication: {
+        required: false,
+      },
     },
     null,
     2,

@@ -40,6 +40,7 @@ describe('MCP server card seed (built dist/)', () => {
       url: string;
       transport: { type: string; endpoint: string };
       capabilities: { tools: boolean; resources: boolean };
+      authentication: { required: boolean };
     };
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.version).toBe('2025-06-18');
@@ -49,6 +50,7 @@ describe('MCP server card seed (built dist/)', () => {
     expect(parsed.url).toBe('https://anc.dev/mcp');
     expect(parsed.capabilities.tools).toBe(true);
     expect(parsed.capabilities.resources).toBe(true);
+    expect(parsed.authentication.required).toBe(false);
     expect(parsed.documentation).toBe('https://anc.dev/mcp-skill.md');
     expect(typeof parsed.serverInfo.name).toBe('string');
     expect(typeof parsed.serverInfo.version).toBe('string');

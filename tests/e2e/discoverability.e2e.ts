@@ -60,6 +60,7 @@ test.describe('staging MCP descriptor aliases', () => {
     expect(body.version).toBe('2025-06-18');
     expect(body.transport.type).toBe('streamable-http');
     expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
+    expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);
   });
 
   test('Accept: text/markdown on canonical path still returns application/json', async ({ request }) => {

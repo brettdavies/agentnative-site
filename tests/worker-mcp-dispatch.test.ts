@@ -70,6 +70,7 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
   capabilities: { tools: true, resources: true, prompts: false },
+  authentication: { required: false },
 });
 
 const FIXTURE_MCP_HTML = '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>';
