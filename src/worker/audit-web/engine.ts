@@ -1,22 +1,35 @@
-// Web-audit orchestrator (plan U5). Runs MCP endpoint discovery, then
-// fans out every applicable check with bounded concurrency under a
-// per-audit deadline and a per-check timeout, yielding each result as it
-// resolves (KTD-6: streaming transport is the route's concern; the engine
-// just yields via an async iterator). Emits a terminal `complete` event
-// carrying the anc scorecard built from the collected results.
+// Web-audit orchestrator (plan U5, reworked per plan-003 KTD-2). Runs
+// MCP endpoint discovery and the single canonical root fetch, then
+// evaluates in two waves: wave 1 probes the antecedent-source checks
+// (robots, llms-txt, llms-full-txt, openapi, oauth-discovery,
+// mcp-initialize, sitemap); wave 2 runs the dependent checks with
+// antecedents resolved from wave-1 results and the root fetch reused —
+// no duplicate `/` fetch. Each check finalizes to
+// pass / broken / absent / n_a / skip / error; an applicable MAY that
+// comes back absent is re-tagged n_a with na_reason 'optional-absent',
+// while an unmet antecedent yields na_reason 'antecedent-unmet'.
 //
-// mcp-present checks are gated to n_a when discovery finds no endpoint;
-// a check that throws yields `error` and the run still completes.
+// The engine yields each result as it finalizes (KTD-6: streaming
+// transport is the route's concern) and a terminal `complete` event
+// carrying the scorecard built from the collected results.
 
+import {
+  type AntecedentContext,
+  antecedentUnmetEvidence,
+  resolveAntecedent,
+  siteTypeApplies,
+  WAVE1_CHECK_IDS,
+} from './antecedents';
+import type { ProbeResponse } from './assert';
 import { discoverMcpEndpoint } from './discovery';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runHttp } from './handlers/http';
 import { runMcp } from './handlers/mcp';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
-import type { WebAuditRegistry, WebCheck } from './registry';
+import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
-import type { GuardedFetchOptions } from './ssrf';
+import { type GuardedFetchOptions, guardedFetch } from './ssrf';
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
@@ -25,6 +38,7 @@ const DEFAULT_PER_AUDIT_DEADLINE_MS = 25_000;
 export interface RunWebAuditInput {
   url: string;
   registry: WebAuditRegistry;
+  siteType?: WebSiteType | null;
   specVersion?: string;
   concurrency?: number;
   perCheckTimeoutMs?: number;
@@ -100,8 +114,8 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   return `${evidenceItem.url ?? check.id} -> ${evidenceItem.status ?? 'error'}${isMiss && why ? ` (${why})` : ''}`;
 }
 
-async function runCheck(check: WebCheck, ctx: HandlerContext): Promise<EngineResult> {
-  const base: Omit<EngineResult, 'status' | 'evidence' | 'raw_evidence'> = {
+function baseFields(check: WebCheck): Omit<EngineResult, 'status' | 'evidence' | 'raw_evidence'> {
+  return {
     id: check.id,
     title: check.title,
     principle: check.principle,
@@ -110,30 +124,46 @@ async function runCheck(check: WebCheck, ctx: HandlerContext): Promise<EngineRes
     category: check.category,
     weight: check.weight,
   };
+}
 
-  if (check.antecedent === 'mcp-present' && !ctx.mcpEndpoint) {
-    return {
-      ...base,
-      status: 'n_a',
-      evidence: 'no MCP endpoint discovered',
-      raw_evidence: [{ why: ['no MCP endpoint'] }],
-    };
-  }
+function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
+  return {
+    ...baseFields(check),
+    status: probeStatusToScorecard(outcome.status),
+    evidence: summarizeEvidence(check, outcome),
+    raw_evidence: outcome.evidence,
+  };
+}
 
-  try {
-    const handler = HANDLERS[check.handler];
-    if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
-    const outcome = await handler(check, ctx);
-    return {
-      ...base,
-      status: probeStatusToScorecard(outcome.status),
-      evidence: summarizeEvidence(check, outcome),
-      raw_evidence: outcome.evidence,
-    };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { ...base, status: 'error', evidence: `handler error: ${message}`, raw_evidence: [{ error: message }] };
+function naResult(check: WebCheck, naReason: NonNullable<EngineResult['na_reason']>, evidence: string): EngineResult {
+  return {
+    ...baseFields(check),
+    status: 'n_a',
+    na_reason: naReason,
+    evidence,
+    raw_evidence: [{ why: [evidence] }],
+  };
+}
+
+function errorResult(check: WebCheck, message: string): EngineResult {
+  return { ...baseFields(check), status: 'error', evidence: message, raw_evidence: [{ error: message }] };
+}
+
+function skipResult(check: WebCheck): EngineResult {
+  return {
+    ...baseFields(check),
+    status: 'skip',
+    evidence: 'skipped: per-audit deadline exceeded',
+    raw_evidence: [{ why: ['per-audit deadline exceeded'] }],
+  };
+}
+
+/** An applicable MAY that is simply absent is optional, not a miss (R3). */
+function finalizeOptional(check: WebCheck, result: EngineResult): EngineResult {
+  if (check.keyword === 'may' && result.status === 'absent') {
+    return { ...result, status: 'n_a', na_reason: 'optional-absent' };
   }
+  return result;
 }
 
 /** Run tasks with a concurrency cap, yielding each result as it resolves. */
@@ -178,40 +208,109 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   });
   yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };
 
+  // The single canonical root fetch every root-HTML check and several
+  // antecedents read. null = failed at the network level.
+  const rootResp = await guardedFetch(
+    base,
+    {},
+    { ...input.fetchOptions, timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())) },
+  );
+  const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
+
   let incomplete = false;
   const results: EngineResult[] = [];
 
-  const runOne = async (check: WebCheck): Promise<EngineResult> => {
-    const remaining = deadline - now();
-    if (remaining <= 0) {
+  const handlerCtx = (): HandlerContext => ({
+    base,
+    host,
+    mcpEndpoint: discovery.endpoint,
+    protocolVersion: input.registry.mcp_discovery.protocol_version,
+    defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
+    root: root ?? undefined,
+    fetchOptions: input.fetchOptions,
+  });
+
+  const probeOne = async (
+    check: WebCheck,
+  ): Promise<{ check: WebCheck; outcome: ProbeOutcome | null; result: EngineResult }> => {
+    if (deadline - now() <= 0) {
       incomplete = true;
-      return {
-        id: check.id,
-        title: check.title,
-        principle: check.principle,
-        keyword: check.keyword,
-        tier: check.tier,
-        category: check.category,
-        weight: check.weight,
-        status: 'skip',
-        evidence: 'skipped: per-audit deadline exceeded',
-        raw_evidence: [{ why: ['per-audit deadline exceeded'] }],
-      };
+      return { check, outcome: null, result: skipResult(check) };
     }
-    const ctx: HandlerContext = {
-      base,
-      host,
-      mcpEndpoint: discovery.endpoint,
-      protocolVersion: input.registry.mcp_discovery.protocol_version,
-      defaultTimeoutMs: Math.min(perCheckTimeoutMs, remaining),
-      fetchOptions: input.fetchOptions,
-    };
-    return runCheck(check, ctx);
+    try {
+      const handler = HANDLERS[check.handler];
+      if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
+      const outcome = await handler(check, handlerCtx());
+      return { check, outcome, result: toResult(check, outcome) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { check, outcome: null, result: errorResult(check, `handler error: ${message}`) };
+    }
   };
 
-  for await (const result of mapConcurrentUnordered(input.registry.checks, concurrency, runOne)) {
+  // Wave 1: probe the antecedent-source checks unconditionally.
+  const wave1Checks = input.registry.checks.filter((c) => WAVE1_CHECK_IDS.has(c.id));
+  const wave2Checks = input.registry.checks.filter((c) => !WAVE1_CHECK_IDS.has(c.id));
+  const sources = new Map<string, ProbeOutcome>();
+  const wave1Results = new Map<string, EngineResult>();
+  for await (const { check, outcome, result } of mapConcurrentUnordered(wave1Checks, concurrency, probeOne)) {
+    if (outcome) sources.set(check.id, outcome);
+    wave1Results.set(check.id, result);
+  }
+
+  const actx: AntecedentContext = {
+    siteType: input.siteType,
+    mcpEndpoint: discovery.endpoint,
+    discoveryEvidence: discovery.evidence,
+    root,
+    sources,
+  };
+
+  // Gate: declared-type filter first, then the antecedent token. Returns
+  // the n_a/error result when the check must not be scored.
+  const gate = (check: WebCheck): EngineResult | null => {
+    if (!siteTypeApplies(check.site_types, actx)) {
+      return naResult(check, 'antecedent-unmet', 'not applicable to the declared site type');
+    }
+    const resolution = resolveAntecedent(check.antecedent, actx);
+    if (resolution === 'n_a') {
+      return naResult(check, 'antecedent-unmet', antecedentUnmetEvidence(check.antecedent));
+    }
+    if (resolution === 'error') {
+      return errorResult(check, 'antecedent unresolvable: root fetch failed');
+    }
+    return null;
+  };
+
+  // Finalize + yield wave-1 results through the same gate.
+  for (const check of wave1Checks) {
+    const gated = gate(check);
+    const result = finalizeOptional(
+      check,
+      gated ?? wave1Results.get(check.id) ?? errorResult(check, 'missing wave-1 result'),
+    );
     results.push(result);
     yield { type: 'result', result };
+  }
+
+  // Wave 2: gated checks resolve immediately; applicable ones probe with
+  // the root fetch and wave-1 signals reused.
+  const applicable: WebCheck[] = [];
+  for (const check of wave2Checks) {
+    const gated = gate(check);
+    if (gated) {
+      const result = finalizeOptional(check, gated);
+      results.push(result);
+      yield { type: 'result', result };
+    } else {
+      applicable.push(check);
+    }
+  }
+
+  for await (const { check, result } of mapConcurrentUnordered(applicable, concurrency, probeOne)) {
+    const finalized = finalizeOptional(check, result);
+    results.push(finalized);
+    yield { type: 'result', result: finalized };
   }
 
   const scorecard = buildWebScorecard(results, {

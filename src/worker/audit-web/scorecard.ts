@@ -19,6 +19,13 @@ import type { WebCheckKeyword, WebCheckTier } from './registry';
  */
 export type ScorecardStatus = 'pass' | 'broken' | 'absent' | 'n_a' | 'skip' | 'error';
 
+/**
+ * Why a row is n_a: `antecedent-unmet` = the check does not apply to
+ * this site (declared type or runtime antecedent); `optional-absent` =
+ * it applies, is a MAY, and simply is not implemented.
+ */
+export type NaReason = 'antecedent-unmet' | 'optional-absent';
+
 export interface EngineResult {
   id: string;
   title: string;
@@ -28,6 +35,7 @@ export interface EngineResult {
   category: string;
   weight: number;
   status: ScorecardStatus;
+  na_reason?: NaReason;
   /** Compact human-readable evidence string for the row. */
   evidence: string;
   /** Full structured evidence for the JSON / remediation templating. */
