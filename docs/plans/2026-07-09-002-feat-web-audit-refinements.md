@@ -33,15 +33,19 @@ audit data: `scripts/scoring/score_model.py` (guarded from main).
 
 Outcome scale per applicable check, difficulty-weighted (per-tier point values UNLOCKED pending real anc100 data):
 
-| Tier   | Present + valid | Present + broken | Absent         |
-| ------ | --------------- | ---------------- | -------------- |
-| MUST   | +weight         | -0.75 x weight   | 0 (counted)    |
-| SHOULD | +weight         | -0.75 x weight   | 0 (counted)    |
-| MAY    | +weight         | -0.75 x weight   | n_a (excluded) |
+Each cell is `(numerator credit, relative-denominator weight)`:
 
-`n_a` is null (antecedent unmet, off both scores). Absent is `0` for MUST/SHOULD (you were expected to ship it) but
-`n_a` for MAY (truly optional; skipping never counts against you). Broken is `-0.75 x weight` at every tier (a malformed
-surface misleads agents, so it costs more than absence). No partial/warn credit.
+| Tier   | Present + valid | Present + broken | Absent              |
+| ------ | --------------- | ---------------- | ------------------- |
+| MUST   | (+weight, w)    | (-0.75w, w)      | (0, w) full drag    |
+| SHOULD | (+weight, w)    | (-0.75w, w)      | (0, 0.5w) half drag |
+| MAY    | (+weight, w)    | (-0.75w, w)      | n_a (excluded)      |
+
+`n_a` is null (antecedent unmet, off both scores). Broken is `-0.75 x weight` at every tier (a malformed surface
+misleads agents, so it costs more than absence). No partial/warn credit. Absence differs by tier: a MAY absent is `n_a`
+(truly optional, skipping never counts); a MUST absent is a full-weight zero; a **SHOULD absent is a zero that occupies
+only half its weight in the relative denominator**, so a missing SHOULD hurts less than a missing MUST. The denominator
+weight is the RELATIVE-score denominator; the GLOBAL score always divides earned by a maximal site's fixed max.
 
 - **earned** = the sum over applicable checks of `weight(tier) x credit(outcome)`.
 - **RELATIVE** = `earned / (max if every applicable check passed)`, so a site perfect for its type approaches 100.
@@ -86,10 +90,11 @@ always evaluated when found regardless of the declared type. A check that doesn'
 
 ## Conditional rules (reusable types)
 
-1. **canonical-plus-redirect-aliases.** The canonical path is the requirement; alias paths satisfy it ONLY as `301`
-   redirects to the canonical. An alias serving `200` content with no canonical is a **fail** (ambiguous/duplicate); a
-   missing canonical is a **fail**. Applies to: the MCP server card (canonical `/.well-known/mcp/server-card.json`;
-   aliases `/.well-known/mcp`, `/.well-known/mcp.json`, `GET /mcp` json).
+1. **canonical-plus-redirect-aliases.** The canonical path is the requirement. Each alias is scored on its own as a MAY:
+   **absent → `n_a`** (no penalty); **`301` to the canonical → `pass`** (regardless of what the canonical itself
+   returns); **serving `200` content inline → `fail`** (ambiguous/duplicate). A missing canonical is a `fail` on the
+   canonical check. Applies to: the MCP server card (canonical `/.well-known/mcp/server-card.json`; aliases
+   `/.well-known/mcp`, `/.well-known/mcp.json`, `/mcp.json`, and `GET /mcp` with `Accept: application/json`).
 2. **antecedent-gated → n/a.** A check is `n/a` unless its antecedent holds. E.g. `oauth-protected-resource` is `n/a`
    unless an MCP endpoint is discovered; `mcp-*` are `n/a` unless an MCP endpoint is discovered (already implemented);
    `llms-full-txt` is `n/a` unless the site is a docs/content site.
@@ -286,20 +291,18 @@ evidence.
 - `/.well-known/mcp.json` → `301` `/.well-known/mcp/server-card.json`
 - `GET /mcp` + `Accept: application/json` → `301` `/.well-known/mcp/server-card.json`
 - `POST /mcp` (JSON-RPC) and `GET /mcp` + `Accept: text/html`/`text/markdown`: unchanged.
-- The root alias `/mcp.json` is dropped (or also `301`s) — decide.
+- Root `/mcp.json` → `301` to the canonical (scored by canonical-plus-redirect-aliases: 301 = pass, inline = fail,
+  absent = n_a).
+
+Settled: no universal MUSTs (all MUSTs surface-gated); leaderboard offers both sort keys (RELATIVE headline, GLOBAL as
+the alternate); no named level/band. `llms.txt`/`robots.txt` stay SHOULD.
 
 ## Open items to confirm
 
 - **Difficulty weights** (per-tier point values) — locked after real anc100 audit data (n=1 today); tune with
   `scripts/scoring/score_model.py --weights`.
-- **Leaderboard sort key**: RELATIVE (a small perfect site can top a big mostly-perfect one) vs GLOBAL (bigger routine
-  ranks higher, honoring 4/5 MUSTs > 2/2). Proposed: result-page headline = RELATIVE, leaderboard sort = GLOBAL.
-- **Universal MUSTs**: whether any check is required of every site with no antecedent. Open recommendation: none, or
-  robots.txt only; llms.txt stays SHOULD (too nascent to mandate without harming uptake).
 - Category names + membership (the two tables above).
-- Whether to add a named overall tier/level (CF's "Level 5 / Agent-Native").
 - Whether `.well-known/agent-skills/` also gets a human-readable `index.md`.
-- Drop vs `301` for the root `/mcp.json` alias.
 - **API-surface detection** for the `openapi` MUST antecedent: how the engine decides a site "has an API" when the site
   type isn't declared (candidates: declared `API/Application` type, presence of `/api/*`, an `openapi`/`swagger`
   reference in HTML, or a `service-desc` link). Under-detection makes `openapi` `n/a`; over-detection turns a MUST fail

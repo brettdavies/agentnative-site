@@ -79,13 +79,18 @@ class Rows:
 
     def score(self, m: Model) -> dict[str, float | int]:
         earned = 0.0
-        applicable_max = 0.0
+        applicable_max = 0.0  # the RELATIVE denominator (site-specific)
         for tier, outcome in self.items:
             c = credit(outcome, m.broken_factor)
-            if c is None:  # n_a excluded from both
+            if c is None:  # n_a excluded from both scores
                 continue
             earned += m.weight[tier] * c
-            applicable_max += m.weight[tier]  # if this had passed
+            # An absent SHOULD hurts less than an absent MUST: it occupies only
+            # HALF its weight in the relative denominator (0 numerator either way).
+            if outcome == "absent" and tier == "should":
+                applicable_max += 0.5 * m.weight[tier]
+            else:
+                applicable_max += m.weight[tier]
         relative = round(100 * earned / applicable_max) if applicable_max else 0
         global_ = round(100 * earned / m.universe_max())
         return {
