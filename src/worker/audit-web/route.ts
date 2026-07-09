@@ -18,6 +18,7 @@ import { type CachedWebAudit, get as cacheGet, put as cachePut, keyFor, normaliz
 import { runWebAudit } from './engine';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
+import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
@@ -310,6 +311,14 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   const hit = await lookupByDomain(env, match.domain);
   if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
 
+  // A missing remediation catalog degrades to generic prompts (R10).
+  let remediation: WebRemediationCatalog = {};
+  try {
+    remediation = await loadWebRemediationCatalog(env);
+  } catch {
+    remediation = {};
+  }
+
   const scorecard = hit.scorecard as {
     tool?: { name?: string; url?: string };
     score_pct?: number;
@@ -318,6 +327,8 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     scorecard: scorecard as never,
     domain: match.domain,
     targetUrl: scorecard.tool?.url ?? hit.targetUrl,
+    remediation,
+    origin: new URL(request.url).origin,
   };
 
   if (wantMarkdown) {

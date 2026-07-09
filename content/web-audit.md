@@ -1,9 +1,9 @@
 # Audit your website
 
-The same eight principles that score a CLI for agent-readiness also score a website and its MCP server. This audit
-probes the agent-facing surface of any public site: its MCP server shape, its MCP and agent discovery surfaces, its
-machine-readable content (`llms.txt`, OpenAPI, JSON Schemas), its root-HTML affordances, and its crawl policy. The
-result is an anc scorecard, isomorphic with a CLI scorecard, at a shareable [`/web/<domain>`](/web) page.
+This audit probes the agent-facing surface of any public site: its MCP server shape, its MCP and agent discovery
+surfaces, its machine-readable content (`llms.txt`, OpenAPI, JSON Schemas), its root-HTML affordances, and its crawl
+policy. The result is a web scorecard with per-check evidence and copy-paste fixes, at a shareable
+[`/web/<domain>`](/web) page.
 
 <section class="live-score" aria-labelledby="web-audit-heading" data-web-audit-section>
   <div class="live-score__row">
@@ -33,34 +33,36 @@ result is an anc scorecard, isomorphic with a CLI scorecard, at a shareable [`/w
 ## What it checks
 
 The audit runs entirely as network probes: HTTP requests, a JSON-RPC handshake over streamable-HTTP, a CORS preflight,
-and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. Every check maps onto one of the eight
-principles and carries a MUST, SHOULD, or MAY keyword:
+and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. Every check carries a MUST, SHOULD, or MAY
+keyword and belongs to one of five categories:
 
-- **MCP server shape** — the `initialize` handshake, `tools/list` with input schemas, JSON-RPC error codes, GET
-  fast-fail, and CORS.
-- **MCP and agent discovery** — the `.well-known` MCP server card, A2A agent card, agent-skills index, API catalog, and
-  DNS-AID records under `_agents`.
-- **Machine-readable content** — `llms.txt`, `llms-full.txt`, OpenAPI, JSON Schemas, and `Accept: text/markdown` content
-  negotiation.
-- **Root-HTML affordances** — a meta description, `<link rel>` to machine surfaces, a `<noscript>` fallback, Schema.org
-  JSON-LD, and semantic landmarks.
-- **Crawl policy** — `robots.txt`, AI-crawler rules, Content-Signal directives, `sitemap.xml`, and `security.txt`.
+- **Discoverability** — `robots.txt`, `sitemap.xml`, `Link` headers, `<link rel>` pointers, and DNS-AID records under
+  `_agents`.
+- **Content for agents** — `llms.txt` (root and per-section), `llms-full.txt`, `Accept: text/markdown` content
+  negotiation, and the root-HTML affordances (meta description, `<noscript>`, JSON-LD, semantic landmarks).
+- **Bot & crawl policy** — AI-crawler rules, Content-Signal directives, `security.txt`, and Web Bot Auth.
+- **MCP & API** — the `initialize` handshake, `tools/list` with input schemas, JSON-RPC error codes, GET fast-fail,
+  CORS, the `.well-known` server card, OpenAPI, JSON Schemas, and WebMCP.
+- **Agent discovery & auth** — the A2A agent card, agent-skills index, OAuth discovery metadata, and `auth.md`.
 
-The MCP-shape checks apply only when an MCP endpoint is discovered; on a site without one they are marked `n_a` and
-excluded from the score. The score is credit-weighted over the MUST and SHOULD checks that apply; MAY checks are
-informational.
+A check is scored only when it applies: MCP checks need a discovered endpoint, API checks need an API surface, and a
+declared site type (`content` or `api`) scopes the rest. Anything that does not apply is `n_a` and never counts against
+the site. Two scores come out of one run: the **site score** (the headline) measures the site against the checks that
+apply to it, so a site perfect for its type approaches 100%; the **global score** measures it against a maximally
+agent-ready site, so exposing and nailing more surfaces ranks higher. A present-but-broken surface costs more than an
+absent one — it misleads agents.
 
 ## From an agent
 
 An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp) exposes four web tools:
 
-- `audit_website(url)` — run a fresh audit and return the complete scorecard.
+- `audit_website(url, site_type?)` — run a fresh audit; non-passing rows carry inline remediation with a copy-paste prompt.
 - `get_website_audit(url)` — read a cached scorecard without re-running.
 - `list_website_audits()` — the curated [web leaderboard](/web).
-- `get_web_remediation(check_id)` — the canonical fix for any check.
+- `get_web_remediation(check_id, evidence?)` — the canonical fix for any check, with a ready-to-paste prompt.
 
 ## See how sites score
 
-The [web leaderboard](/web) ranks a curated set of sites by their agent-readiness score. Each row links to its
-`/web/<domain>` scorecard with full per-check evidence. For the CLI side, see the [ANC 100 leaderboard](/scorecards) and
+The [web leaderboard](/web) ranks a curated set of sites by their global agent-readiness score, with a relative-score
+toggle. Each row links to its `/web/<domain>` scorecard with full per-check evidence and fixes. For the CLI side, see the [ANC 100 leaderboard](/scorecards) and
 [audit your CLI](/audit) with `anc`.
