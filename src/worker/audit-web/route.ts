@@ -94,16 +94,21 @@ export async function handleWebAudit(
     });
   }
   // 3. Body + URL parse.
-  let body: { url?: unknown };
+  let body: { url?: unknown; site_type?: unknown };
   try {
-    body = (await request.json()) as { url?: unknown };
+    body = (await request.json()) as { url?: unknown; site_type?: unknown };
   } catch {
-    return jsonResponse({ error: 'invalid_body', message: 'POST body must be JSON { url }' }, 400);
+    return jsonResponse({ error: 'invalid_body', message: 'POST body must be JSON { url, site_type? }' }, 400);
   }
   const url = coerceUrl(body.url);
   if (!url) {
     return jsonResponse({ error: 'invalid_url', message: 'provide a valid { url }' }, 400);
   }
+  // Declared site type (R6): absent = run everything.
+  if (body.site_type !== undefined && body.site_type !== 'content' && body.site_type !== 'api') {
+    return jsonResponse({ error: 'invalid_site_type', message: 'site_type must be "content" or "api"' }, 400);
+  }
+  const siteType = (body.site_type as 'content' | 'api' | undefined) ?? null;
   const canonicalTarget = canonicalTargetOf(url);
   const shareDomain = url.host;
 
@@ -153,6 +158,7 @@ export async function handleWebAudit(
       for await (const event of runWebAudit({
         url: canonicalTarget,
         registry,
+        siteType,
         specVersion: SPEC_VERSION,
         fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
       })) {

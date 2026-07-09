@@ -191,6 +191,7 @@ describe('web scorecard conforms to the documented schema (U14)', () => {
     'tool',
     'audience',
     'audit_profile',
+    'site_type',
     'summary',
     'coverage_summary',
     'score_pct',

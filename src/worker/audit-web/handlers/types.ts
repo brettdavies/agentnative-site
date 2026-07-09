@@ -41,6 +41,12 @@ export interface HandlerContext {
    * own headers (content negotiation) still fetches independently.
    */
   root?: ProbeResponse;
+  /**
+   * Same-origin section directories enumerated from the root llms.txt
+   * link index unioned with sitemap paths (deduplicated); the
+   * scoped-llms handler probes `<dir>/llms(-full).txt` under these.
+   */
+  scopedDirs?: string[];
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
 }

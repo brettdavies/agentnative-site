@@ -16,13 +16,14 @@
   },
   "audience": null,
   "audit_profile": null,
+  "site_type": null,
   "summary": {
-    "pass": 22,
-    "broken": 1,
+    "pass": 23,
+    "broken": 2,
     "absent": 4,
-    "n_a": 5,
+    "n_a": 7,
     "skip": 0,
-    "error": 2
+    "error": 0
   },
   "coverage_summary": {
     "must": {
@@ -31,17 +32,17 @@
     },
     "should": {
       "total": 15,
-      "verified": 10
+      "verified": 9
     },
     "may": {
-      "total": 10,
-      "verified": 10
+      "total": 12,
+      "verified": 12
     }
   },
-  "score_pct": 81,
+  "score_pct": 73,
   "score": {
-    "relative": 81,
-    "global": 63
+    "relative": 73,
+    "global": 57
   },
   "categories": [
     {
@@ -66,13 +67,13 @@
       "id": "mcp-api",
       "name": "MCP & API",
       "passed": 6,
-      "counted": 9
+      "counted": 10
     },
     {
       "id": "agent-discovery-auth",
       "name": "Agent discovery & auth",
-      "passed": 3,
-      "counted": 3
+      "passed": 4,
+      "counted": 4
     }
   ],
   "results": [
@@ -212,16 +213,16 @@
       "evidence": "https://anc.dev/mcp -> 200 (status 200 not in [405, 400, 404, 406])"
     },
     {
-      "id": "mcp-tools-list",
-      "label": "tools/list returns a tools array with input schemas",
+      "id": "mcp-capabilities",
+      "label": "initialize advertises capabilities (tools / resources / prompts)",
       "category": "mcp-api",
       "group": "P2",
       "layer": "web",
-      "keyword": "must",
-      "tier": "required",
+      "keyword": "should",
+      "tier": "recommended",
       "principle": "P2",
       "status": "pass",
-      "evidence": "9 tools, 9 with input schema"
+      "evidence": "serverInfo anc, protocol 2025-06-18"
     },
     {
       "id": "webmcp",
@@ -232,8 +233,8 @@
       "keyword": "may",
       "tier": "optional",
       "principle": "P2",
-      "status": "error",
-      "evidence": "handler error: no handler registered for \"webmcp\""
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
     },
     {
       "id": "mcp-unknown-method",
@@ -246,6 +247,30 @@
       "principle": "P4",
       "status": "pass",
       "evidence": "error code -32601"
+    },
+    {
+      "id": "mcp-usage-doc",
+      "label": "A human/agent usage doc for the server resolves",
+      "category": "mcp-api",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P8",
+      "status": "pass",
+      "evidence": "https://anc.dev/mcp-skill.md -> 200"
+    },
+    {
+      "id": "mcp-tools-list",
+      "label": "tools/list returns a tools array with input schemas",
+      "category": "mcp-api",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "must",
+      "tier": "required",
+      "principle": "P2",
+      "status": "pass",
+      "evidence": "9 tools, 9 with input schema"
     },
     {
       "id": "root-meta-description",
@@ -320,30 +345,6 @@
       "evidence": "https://anc.dev/ -> 200"
     },
     {
-      "id": "accept-markdown",
-      "label": "Accept text/markdown content negotiation returns markdown",
-      "category": "content-for-agents",
-      "group": "P2",
-      "layer": "web",
-      "keyword": "should",
-      "tier": "recommended",
-      "principle": "P2",
-      "status": "pass",
-      "evidence": "https://anc.dev/ -> 200"
-    },
-    {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
-      "category": "mcp-api",
-      "group": "P8",
-      "layer": "web",
-      "keyword": "should",
-      "tier": "recommended",
-      "principle": "P8",
-      "status": "pass",
-      "evidence": "https://anc.dev/.well-known/mcp/server-card.json -> 200"
-    },
-    {
       "id": "mcp-cors-actual",
       "label": "POST response carries Access-Control-Allow-Origin",
       "category": "mcp-api",
@@ -356,8 +357,46 @@
       "evidence": "allow-origin absent"
     },
     {
-      "id": "robots-ai-rules",
-      "label": "robots.txt declares AI-crawler rules (RFC 9309)",
+      "id": "accept-markdown",
+      "label": "Accept text/markdown content negotiation returns markdown",
+      "category": "content-for-agents",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "should",
+      "tier": "recommended",
+      "principle": "P2",
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
+    },
+    {
+      "id": "llms-txt-scoped",
+      "label": "Per-section llms.txt files resolve under content subdirectories",
+      "category": "content-for-agents",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P2",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://anc.dev/.well-known/llms.txt -> 404"
+    },
+    {
+      "id": "llms-full-txt-scoped",
+      "label": "Per-section llms-full.txt files resolve under content subdirectories",
+      "category": "content-for-agents",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P2",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://anc.dev/.well-known/llms-full.txt -> 404"
+    },
+    {
+      "id": "content-signals",
+      "label": "robots.txt declares Content-Signal AI-usage preferences",
       "category": "bot-crawl-policy",
       "group": "P7",
       "layer": "web",
@@ -368,8 +407,8 @@
       "evidence": "https://anc.dev/robots.txt -> 200"
     },
     {
-      "id": "content-signals",
-      "label": "robots.txt declares Content-Signal AI-usage preferences",
+      "id": "robots-ai-rules",
+      "label": "robots.txt declares AI-crawler rules (RFC 9309)",
       "category": "bot-crawl-policy",
       "group": "P7",
       "layer": "web",
@@ -393,18 +432,6 @@
       "evidence": "https://anc.dev/.well-known/http-message-signatures-directory -> 404 (status 404 not in [200])"
     },
     {
-      "id": "security-txt",
-      "label": "/.well-known/security.txt present (RFC 9116)",
-      "category": "bot-crawl-policy",
-      "group": "P4",
-      "layer": "web",
-      "keyword": "may",
-      "tier": "optional",
-      "principle": "P4",
-      "status": "pass",
-      "evidence": "https://anc.dev/.well-known/security.txt -> 200"
-    },
-    {
       "id": "dns-aid",
       "label": "DNS for AI Discovery (DNS-AID) records under _agents (IETF draft)",
       "category": "discoverability",
@@ -417,28 +444,16 @@
       "evidence": "_index._agents.anc.dev: 1 record(s) via https://cloudflare-dns.com/dns-query"
     },
     {
-      "id": "auth-md",
-      "label": "Agent auth/registration metadata doc published",
-      "category": "agent-discovery-auth",
-      "group": "P1",
+      "id": "security-txt",
+      "label": "/.well-known/security.txt present (RFC 9116)",
+      "category": "bot-crawl-policy",
+      "group": "P4",
       "layer": "web",
       "keyword": "may",
       "tier": "optional",
-      "principle": "P1",
-      "status": "error",
-      "evidence": "handler error: no handler registered for \"auth-md\""
-    },
-    {
-      "id": "oauth-protected-resource",
-      "label": "OAuth Protected Resource Metadata published (RFC 9728)",
-      "category": "agent-discovery-auth",
-      "group": "P1",
-      "layer": "web",
-      "keyword": "may",
-      "tier": "optional",
-      "principle": "P1",
+      "principle": "P4",
       "status": "pass",
-      "evidence": "https://anc.dev/.well-known/oauth-protected-resource -> 200"
+      "evidence": "https://anc.dev/.well-known/security.txt -> 200"
     },
     {
       "id": "agent-skills",
@@ -466,28 +481,40 @@
       "evidence": "https://anc.dev/.well-known/agent-card.json -> 404 (status 404 not in [200])"
     },
     {
-      "id": "mcp-usage-doc",
-      "label": "A human/agent usage doc for the server resolves",
-      "category": "mcp-api",
-      "group": "P8",
+      "id": "oauth-protected-resource",
+      "label": "OAuth Protected Resource Metadata published (RFC 9728)",
+      "category": "agent-discovery-auth",
+      "group": "P1",
       "layer": "web",
       "keyword": "may",
       "tier": "optional",
-      "principle": "P8",
+      "principle": "P1",
       "status": "pass",
-      "evidence": "https://anc.dev/mcp-skill.md -> 200"
+      "evidence": "https://anc.dev/.well-known/oauth-protected-resource -> 200"
     },
     {
-      "id": "mcp-capabilities",
-      "label": "initialize advertises capabilities (tools / resources / prompts)",
+      "id": "well-known-mcp-card",
+      "label": "A .well-known MCP server card is published (SEP-1649)",
       "category": "mcp-api",
-      "group": "P2",
+      "group": "P8",
       "layer": "web",
       "keyword": "should",
       "tier": "recommended",
-      "principle": "P2",
+      "principle": "P8",
+      "status": "broken",
+      "evidence": "https://anc.dev/.well-known/mcp/server-card.json -> 200 (body matches /mcp_endpoint|serverInfo|transport|\"name\"/)"
+    },
+    {
+      "id": "auth-md",
+      "label": "Agent auth/registration metadata doc published",
+      "category": "agent-discovery-auth",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
       "status": "pass",
-      "evidence": "serverInfo anc, protocol 2025-06-18"
+      "evidence": "https://anc.dev/auth.md -> 200"
     }
   ]
 }

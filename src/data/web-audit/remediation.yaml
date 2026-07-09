@@ -258,6 +258,18 @@ remediation:
       Publish an `auth.md` at `/.well-known/auth.md` (or `/auth.md`): a short markdown guide that
       tells an agent how to obtain credentials — where to register, which OAuth flows are supported,
       token endpoints, and scopes. It turns "figure out our auth" into a one-fetch orientation.
+  llms-txt-scoped:
+    title: Per-section llms.txt files resolve
+    body: |
+      Serve a scoped `llms.txt` inside each major content section linked from your root index (for
+      example `/docs/llms.txt`). A section-scoped index lets an agent working inside that section
+      orient itself without re-reading the whole site index.
+  llms-full-txt-scoped:
+    title: Per-section llms-full.txt files resolve
+    body: |
+      Serve a scoped `llms-full.txt` inside each major content section (for example
+      `/docs/llms-full.txt`): the section's pages concatenated as markdown. An agent can then ingest
+      one section in one fetch instead of crawling it.
   webmcp:
     title: Root HTML exposes WebMCP browser tools
     body: |

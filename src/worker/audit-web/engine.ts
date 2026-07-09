@@ -27,6 +27,7 @@ import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
 import { runMcp } from './handlers/mcp';
+import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
@@ -63,7 +64,15 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     'dns-doh': runDnsDoh,
     'auth-md': runAuthMd,
     webmcp: runWebMcp,
+    'scoped-llms': runScopedLlms,
   };
+
+function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
+  for (const item of sources.get(checkId)?.evidence ?? []) {
+    if (typeof item.body === 'string') return item.body;
+  }
+  return '';
+}
 
 function normalizeBase(rawUrl: string): { base: string; host: string; domain: string } {
   const u = new URL(rawUrl);
@@ -223,6 +232,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
 
   let incomplete = false;
   const results: EngineResult[] = [];
+  const scopedDirs: string[] = [];
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -231,6 +241,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     protocolVersion: input.registry.mcp_discovery.protocol_version,
     defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
     root: root ?? undefined,
+    scopedDirs,
     fetchOptions: input.fetchOptions,
   });
 
@@ -269,6 +280,10 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     root,
     sources,
   };
+
+  // Section directories for the scoped-llms probes: the root llms.txt
+  // link index unioned with sitemap paths, both retained in wave 1.
+  scopedDirs.push(...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base));
 
   // Gate: declared-type filter first, then the antecedent token. Returns
   // the n_a/error result when the check must not be scored.
@@ -323,6 +338,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     mcpEndpoint: discovery.endpoint,
     discoveryEvidence: discovery.evidence,
     specVersion: input.specVersion ?? '',
+    siteType: input.siteType ?? null,
     registry: input.registry,
   });
   yield { type: 'complete', scorecard, complete: !incomplete };

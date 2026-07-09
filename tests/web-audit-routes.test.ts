@@ -228,7 +228,7 @@ describe('handleWebAudit streaming', () => {
     expect(resp.status).toBe(200);
     const events = await readNdjson(resp);
     const checks = events.filter((e) => e.type === 'check');
-    expect(checks.length).toBe(34);
+    expect(checks.length).toBe(36);
     const terminal = events.at(-1) as Record<string, unknown>;
     expect(terminal.type).toBe('complete');
     expect(terminal.share_url).toBe('/web/example.com');
@@ -347,5 +347,77 @@ describe('handleWebResultPage', () => {
     const env = resultEnv();
     const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com', { method: 'POST' }), env);
     expect(resp.status).toBe(405);
+  });
+});
+
+describe('site_type declaration (U7)', () => {
+  function typedRequest(url: string, siteType: unknown): Request {
+    return new Request('https://anc.dev/api/audit-web', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9' },
+      body: JSON.stringify({ url, site_type: siteType }),
+    });
+  }
+
+  test('an invalid site_type is rejected with 400 before any probe', async () => {
+    const env = makeEnv();
+    const resp = await handleWebAudit(typedRequest('https://example.com/', 'commerce'), env, makeCtx(), {
+      probeFetch: (() => {
+        throw new Error('probe should never run');
+      }) as unknown as typeof fetch,
+    });
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: string };
+    expect(body.error).toBe('invalid_site_type');
+  });
+
+  test('a declared content type gates api-only checks to n_a and lands in the scorecard + cache payload', async () => {
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await handleWebAudit(typedRequest('https://example.com/', 'content'), env, ctx, {
+      probeFetch: stubProbeFetch(),
+    });
+    expect(resp.status).toBe(200);
+    const events = await readNdjson(resp);
+    const terminal = events.at(-1) as {
+      scorecard: { site_type: string | null; results: Array<{ id: string; status: string }> };
+    };
+    expect(terminal.scorecard.site_type).toBe('content');
+    expect(terminal.scorecard.results.find((r) => r.id === 'openapi')?.status).toBe('n_a');
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const cachedRaw = store.get(await keyFor('https://example.com/', SPEC_VERSION));
+    expect(cachedRaw).toBeDefined();
+    const cached = JSON.parse(cachedRaw as string) as { scorecard: { site_type: string | null } };
+    expect(cached.scorecard.site_type).toBe('content');
+  });
+
+  test('no site_type runs everything: openapi is scored when the probe detects an API surface', async () => {
+    const env = makeEnv();
+    const resp = await handleWebAudit(auditRequest('https://example.com/'), env, makeCtx(), {
+      probeFetch: stubProbeFetch(),
+    });
+    const events = await readNdjson(resp);
+    const terminal = events.at(-1) as {
+      scorecard: { site_type: string | null; results: Array<{ id: string; status: string }> };
+    };
+    expect(terminal.scorecard.site_type).toBeNull();
+    // stubProbeFetch answers /openapi.json with 200, so api-surface holds
+    // and the check is scored (not n_a).
+    expect(terminal.scorecard.results.find((r) => r.id === 'openapi')?.status).not.toBe('n_a');
+  });
+
+  test('typed and untyped runs share one domain-keyed cache entry (last-writer-wins, no keyFor split)', async () => {
+    const untypedKey = await keyFor('https://example.com/', SPEC_VERSION);
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await handleWebAudit(typedRequest('https://example.com/', 'content'), env, ctx, {
+      probeFetch: stubProbeFetch(),
+    });
+    await readNdjson(resp);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    expect(store.size).toBe(1);
+    expect(store.has(untypedKey)).toBe(true);
   });
 });

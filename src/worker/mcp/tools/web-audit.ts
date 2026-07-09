@@ -113,8 +113,17 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
       'fallback); WEB_AUDIT_LIMITER burst plus a per-hour window apply. On an existing cached result, returns it ' +
       'without re-running.',
-    { url: z.string().describe('The website URL or bare domain to audit.') },
-    async ({ url }, extra) => {
+    {
+      url: z.string().describe('The website URL or bare domain to audit.'),
+      site_type: z
+        .enum(['content', 'api'])
+        .optional()
+        .describe(
+          'Declared site type scoping applicability: "content" (blog/docs/marketing) or "api" (REST API and/or ' +
+            'interactive app). Omit to run everything. MCP surfaces are auto-detected regardless.',
+        ),
+    },
+    async ({ url, site_type }, extra) => {
       // Kill switches.
       if (env.MCP_ENABLED !== 'true' || env.WEB_AUDIT_ENABLED !== 'true') {
         return textContent({
@@ -162,7 +171,12 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const registry = await loadWebAuditRegistry(env);
       let scorecard: unknown = null;
       let complete = false;
-      for await (const event of runWebAudit({ url: canonicalTarget, registry, specVersion: SPEC_VERSION })) {
+      for await (const event of runWebAudit({
+        url: canonicalTarget,
+        registry,
+        siteType: site_type ?? null,
+        specVersion: SPEC_VERSION,
+      })) {
         if (event.type === 'complete') {
           scorecard = event.scorecard;
           complete = event.complete;

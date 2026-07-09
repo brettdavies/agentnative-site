@@ -10,7 +10,7 @@
 // path; the category-grouped web renderer replaces that consumer.
 
 import type { EvidenceItem } from './handlers/types';
-import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier } from './registry';
+import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
 import { type CategoryRollup, categoryRollups, type ScoreConfig, scoreWebAudit, universeMaxOf } from './score';
 
 /**
@@ -71,6 +71,8 @@ export interface WebScorecard {
   tool: { name: string; url: string };
   audience: null;
   audit_profile: null;
+  /** The declared site type this audit ran under; null = ran everything. */
+  site_type: WebSiteType | null;
   summary: Record<ScorecardStatus, number>;
   coverage_summary: { must: WebCoverageLevel; should: WebCoverageLevel; may: WebCoverageLevel };
   score_pct: number;
@@ -107,6 +109,7 @@ export interface WebScorecardMeta {
   mcpEndpoint: string | null;
   discoveryEvidence: EvidenceItem[];
   specVersion: string;
+  siteType?: WebSiteType | null;
   registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
   scoreConfig?: ScoreConfig;
 }
@@ -143,6 +146,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     tool: { name: meta.domain, url: meta.targetUrl },
     audience: null,
     audit_profile: null,
+    site_type: meta.siteType ?? null,
     summary,
     coverage_summary: {
       must: coverageLevel(results, 'must'),

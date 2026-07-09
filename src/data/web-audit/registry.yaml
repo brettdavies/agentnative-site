@@ -276,6 +276,32 @@ checks:
       expect: { status: [200] }
     hint: For docs sites, concatenate every page as markdown at /llms-full.txt for one-fetch ingestion.
 
+  - id: llms-txt-scoped
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [content]
+    antecedent: root-llms-txt
+    eval: scoped-discovery
+    weight: 1
+    title: Per-section llms.txt files resolve under content subdirectories
+    handler: scoped-llms
+    with: { file: llms.txt, max_candidates: 8 }
+    hint: Serve scoped llms.txt files (e.g. /docs/llms.txt) for major content sections linked from the root index.
+
+  - id: llms-full-txt-scoped
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [content]
+    antecedent: root-llms-full-txt
+    eval: scoped-discovery
+    weight: 1
+    title: Per-section llms-full.txt files resolve under content subdirectories
+    handler: scoped-llms
+    with: { file: llms-full.txt, max_candidates: 8 }
+    hint: Serve scoped llms-full.txt corpora (e.g. /docs/llms-full.txt) so agents can ingest one section in one fetch.
+
   - id: accept-markdown
     category: content-for-agents
     tier: recommended

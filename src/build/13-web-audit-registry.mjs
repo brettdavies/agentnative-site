@@ -21,7 +21,15 @@ export const KEYWORD_BY_TIER = Object.freeze({
   optional: 'may',
 });
 
-export const WEB_AUDIT_HANDLERS = new Set(['http', 'cors-preflight', 'mcp', 'dns-doh', 'auth-md', 'webmcp']);
+export const WEB_AUDIT_HANDLERS = new Set([
+  'http',
+  'cors-preflight',
+  'mcp',
+  'dns-doh',
+  'auth-md',
+  'webmcp',
+  'scoped-llms',
+]);
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([
   'none',
