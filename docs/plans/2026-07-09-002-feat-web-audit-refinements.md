@@ -26,17 +26,29 @@ MCP plumbing are unchanged except where noted.
 
 ## Score + display model
 
-- **`score_pct`** (top-level int): credit-weighted. A check enters the denominator (at its `weight`) when it is MUST or
-  SHOULD and resolved `pass`/`fail`, OR it is MAY and the resource is **present** (`pass` or `fail`). Passes add their
-  weight to the numerator. Excluded from both: `n/a`, `skip`, `error`, and MAY checks whose resource is **absent**.
-- **MAY is tri-state, not merely informational** (per the design chat): a MAY that is **absent** has null impact (like
-  `n/a` — off the score, off group completion); a MAY that is **present + valid** counts as `pass` and *helps* the
-  score; a MAY that is **present + invalid** counts as `fail` and *harms* it. Rationale: a broken optional surface (a
-  malformed A2A card, an `llms.txt` with dead links) actively misleads agents, so it should cost more than an absent
-  one, while never punishing a site for simply not adopting an optional standard.
-- **Engine consequence**: for MAY checks the engine must distinguish **absent** (every candidate 404s / DNS NXDOMAIN —
-  the status assertion itself fails) from **present-but-invalid** (a candidate returns 200 but a later content/schema
-  assertion fails). MUST/SHOULD keep today's binary pass/fail (absence is a fail — you were expected to ship it).
+Three orthogonal axes decide a check's outcome — this keeps RFC 2119 for the obligation and adds correctness as a
+separate, universal rule:
+
+1. **Antecedent** — does the check apply at all? If not, `n/a` (off the score). Resolution table above.
+2. **Tier (RFC 2119 obligation = the *absence* penalty)** — how much *not shipping* it costs when it applies: `MUST`
+   absent is a `fail`, `SHOULD` absent is a `warn` (partial), `MAY` absent is `n/a` (neutral).
+3. **Correctness (universal, every tier)** — if you *did* ship it, it must be valid: present-and-valid is a `pass`,
+   present-and-invalid is a `fail`, at MUST, SHOULD, and MAY alike.
+
+Outcome table (antecedent met):
+
+| Tier   | Absent | Present + valid | Present + invalid |
+| ------ | ------ | --------------- | ----------------- |
+| MUST   | fail   | pass            | fail              |
+| SHOULD | warn   | pass            | fail              |
+| MAY    | n/a    | pass            | fail              |
+
+- **`score_pct`** (top-level int): the standard `pass`/`warn`/`fail`/`n_a` credit-weighting the CLI scorecard already
+  uses — `pass` = full `weight` to the numerator, `warn` = half, `fail` = zero, all counted in the denominator; `n_a` /
+  `skip` / `error` excluded from both. So the web audit reuses the shared scorer, not a bespoke formula.
+- **Engine's job**: map each applicable check's (tier, presence, validity) to one of `pass`/`warn`/`fail`/`n_a`. It must
+  distinguish **absent** (every candidate 404s / DNS NXDOMAIN — the status assertion itself fails) from
+  **present-but-invalid** (a candidate returns 200 but a later content/schema assertion fails).
 - **Per-category rollups**: each visible category shows `passed / counted` (CF's `4/4`), where `counted` is the
   denominator above — a correctly-absent MAY is not in it; a present MAY (valid or invalid) is.
 - **No global grade/level** by default. (CF shows "Level 5 / Agent-Native"; we can add a named tier later if wanted —
@@ -84,9 +96,9 @@ A check that doesn't apply to the declared site type is `n/a` (excluded from sco
 
 ## The check matrix (PROPOSED — redline any row)
 
-Tier philosophy: **MUST = "if you ship this surface, it must work"** (so MUSTs are antecedent-gated, not universal);
-SHOULD = expected for an agent-ready site of that type; **MAY = adopt-if-you-can — absent is neutral, present-and-valid
-helps, present-and-broken harms** (tri-state, per the score model above). `Principle` is the hidden internal tag
+`Tier` is the RFC 2119 obligation = the **absence penalty** when the antecedent holds: `MUST` absent is a `fail`,
+`SHOULD` absent is a `warn`, `MAY` absent is `n/a`. Correctness is orthogonal and universal — anything present but
+invalid is a `fail` at every tier (see the outcome table in the score model). `Principle` is the hidden internal tag
 (revised from plan 001).
 
 `Site types` is the declared-type filter (which types run the check by default); `Antecedent` is the runtime gate that
@@ -216,6 +228,7 @@ Resources   OpenAPI 3.1 ↗   ·   Skill ↗ (/web-audit/skill/openapi)
 ```json
 {
   "id": "openapi",
+  "title": "OpenAPI description published",
   "category": "MCP & API",
   "tier": "must",
   "status": "fail",
@@ -274,6 +287,8 @@ evidence.
 
 ## Open items to confirm
 
+- **SHOULD-absent penalty**: `warn` = half `weight` credit (proposed, honors RFC SHOULD < MUST) vs `fail` = zero (treat
+  a missing SHOULD as hard as a missing MUST). MUST-absent and any present-but-invalid are always `fail`.
 - Category names + membership (the two tables above).
 - Site-type set; whether to add the Commerce category and the CF candidate checks (`auth-md`, `webmcp`, `x402`, `mpp`,
   `ucp`, `acp`).
