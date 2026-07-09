@@ -26,31 +26,38 @@ MCP plumbing are unchanged except where noted.
 
 ## Score + display model
 
-Three orthogonal axes decide a check's outcome — this keeps RFC 2119 for the obligation and adds correctness as a
-separate, universal rule:
+Mirror the binary (`anc`) scoring so the web audit and the CLI audit read the same. Per methodology "How a score is
+computed": the denominator is every audit with status `pass`/`warn`/`fail`/`opt_out`; a `pass` earns 1.0, a `warn` 0.5,
+a `fail`/`opt_out` 0.0; `n_a` / `skip` / `error` drop out of both.
 
-1. **Antecedent** — does the check apply at all? If not, `n/a` (off the score). Resolution table above.
-2. **Tier (RFC 2119 obligation = the *absence* penalty)** — how much *not shipping* it costs when it applies: `MUST`
-   absent is a `fail`, `SHOULD` absent is a `warn` (partial), `MAY` absent is `n/a` (neutral).
-3. **Correctness (universal, every tier)** — if you *did* ship it, it must be valid: present-and-valid is a `pass`,
-   present-and-invalid is a `fail`, at MUST, SHOULD, and MAY alike.
+```text
+score = round(100 * (pass + 0.5*warn) / (pass + warn + fail + opt_out))
+```
 
-Outcome table (antecedent met):
+The tier sets the severity of a **miss**, not the credit of a hit: a met requirement of any tier is a full-credit
+`pass`.
 
-| Tier   | Absent | Present + valid | Present + invalid |
-| ------ | ------ | --------------- | ----------------- |
-| MUST   | fail   | pass            | fail              |
-| SHOULD | warn   | pass            | fail              |
-| MAY    | n/a    | pass            | fail              |
+| Tier   | Met (present + valid) | Not met (absent or broken) |
+| ------ | --------------------- | -------------------------- |
+| MUST   | pass (1.0)            | fail (0.0)                 |
+| SHOULD | pass (1.0)            | warn (0.5)                 |
+| MAY    | pass (1.0)            | warn (0.5)                 |
 
-- **`score_pct`** (top-level int): the standard `pass`/`warn`/`fail`/`n_a` credit-weighting the CLI scorecard already
-  uses — `pass` = full `weight` to the numerator, `warn` = half, `fail` = zero, all counted in the denominator; `n_a` /
-  `skip` / `error` excluded from both. So the web audit reuses the shared scorer, not a bespoke formula.
-- **Engine's job**: map each applicable check's (tier, presence, validity) to one of `pass`/`warn`/`fail`/`n_a`. It must
-  distinguish **absent** (every candidate 404s / DNS NXDOMAIN — the status assertion itself fails) from
-  **present-but-invalid** (a candidate returns 200 but a later content/schema assertion fails).
-- **Per-category rollups**: each visible category shows `passed / counted` (CF's `4/4`), where `counted` is the
-  denominator above — a correctly-absent MAY is not in it; a present MAY (valid or invalid) is.
+Plus `n_a` when the antecedent is absent (excluded from numerator and denominator). This reuses the shared scorer with
+no bespoke math, and is the proposed default.
+
+It drops two ideas from earlier in this chat, now flagged as opt-in deviations (see Open items):
+
+- **MAY-absent as `n_a`** (truly optional, excluded) instead of `warn` (0.5). The binary counts a missed applicable MAY
+  as `warn`, so skipping it costs half a slot; the deviation makes skipping a MAY free.
+- **Broken harder than absent** — split "present-but-invalid" into a `fail` even for SHOULD/MAY. The binary scores a
+  broken SHOULD/MAY the same as a missing one (`warn`); the deviation says a malformed surface that misleads agents
+  should cost more than an absent one.
+
+- **Engine's job**: map each applicable check to `pass` / `warn` / `fail` / `n_a`. The absent-vs-present-but-invalid
+  distinction is only needed if the second deviation is adopted; the binary model does not require it.
+- **Per-category rollups**: each visible category shows `met / counted` (CF's `4/4`), where `counted` is the denominator
+  (applicable, non-`n_a` checks).
 - **No global grade/level** by default. (CF shows "Level 5 / Agent-Native"; we can add a named tier later if wanted —
   flagged open.)
 - **Per check on the page**: **Goal** (always) · **Result** (always, human line derived from status+evidence) · **Fix**
@@ -96,10 +103,10 @@ A check that doesn't apply to the declared site type is `n/a` (excluded from sco
 
 ## The check matrix (PROPOSED — redline any row)
 
-`Tier` is the RFC 2119 obligation = the **absence penalty** when the antecedent holds: `MUST` absent is a `fail`,
-`SHOULD` absent is a `warn`, `MAY` absent is `n/a`. Correctness is orthogonal and universal — anything present but
-invalid is a `fail` at every tier (see the outcome table in the score model). `Principle` is the hidden internal tag
-(revised from plan 001).
+`Tier` is the RFC 2119 obligation = the severity of a **miss** (per the binary scoring above): a met requirement of any
+tier is a full-credit `pass`; a missed `MUST` is a `fail`, a missed `SHOULD`/`MAY` is a `warn`; `n_a` when the
+antecedent is absent. "Miss" covers both absent and present-but-broken unless a scoring deviation is adopted (Open
+items). `Principle` is the hidden internal tag (revised from plan 001).
 
 `Site types` is the declared-type filter (which types run the check by default); `Antecedent` is the runtime gate that
 can still flip it to `n/a` (resolution in the next table); `Eval` flags a non-standard evaluation rule.
@@ -287,8 +294,9 @@ evidence.
 
 ## Open items to confirm
 
-- **SHOULD-absent penalty**: `warn` = half `weight` credit (proposed, honors RFC SHOULD < MUST) vs `fail` = zero (treat
-  a missing SHOULD as hard as a missing MUST). MUST-absent and any present-but-invalid are always `fail`.
+- **Scoring deviations from the binary** (default is to mirror the binary exactly): (a) score a missed applicable MAY as
+  `n_a` (excluded) instead of `warn` (0.5); (b) score a present-but-broken SHOULD/MAY as a `fail` instead of `warn`, so
+  a malformed surface costs more than an absent one. Adopt either, both, or neither.
 - Category names + membership (the two tables above).
 - Site-type set; whether to add the Commerce category and the CF candidate checks (`auth-md`, `webmcp`, `x402`, `mpp`,
   `ucp`, `acp`).
