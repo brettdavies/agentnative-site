@@ -44,23 +44,30 @@ describe('buildSkillMarkdown', () => {
   };
   const md = buildSkillMarkdown(
     check,
-    { title: 'x', body: 'Publish it.\n\nEvidence from this audit:\n\n{{evidence}}' },
+    {
+      title: 'An OpenAPI description is published',
+      goal: 'Publish an OpenAPI description so non-MCP agents can call your API',
+      fix: 'Publish an OpenAPI 3.1 description\nat /openapi.json.',
+      resources: [{ label: 'OpenAPI 3.1', url: 'https://spec.openapis.org/oas/latest.html' }],
+    },
     { 'mcp-api': 'MCP & API' },
     'https://anc.dev',
   );
 
-  test('carries Goal, Fix, the copy-paste prompt, and the Verify tail', () => {
+  test('carries Goal, Fix, Resources, the copy-paste prompt, and the Verify tail', () => {
     expect(md).toContain('## Goal');
     expect(md).toContain('## Fix');
+    expect(md).toContain('## Resources');
+    expect(md).toContain('- [OpenAPI 3.1](https://spec.openapis.org/oas/latest.html)');
     expect(md).toContain('## Copy-paste prompt');
     expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(md).toContain('Docs: https://spec.openapis.org/oas/latest.html');
     expect(md).toContain('## Verify');
     expect(md).toContain('MCP & API, MUST');
   });
 
-  test('strips the MCP-shape evidence-injection trailer', () => {
-    expect(md).not.toContain('{{evidence}}');
-    expect(md).not.toContain('Evidence from this audit');
+  test('the prompt Fix line is the fix collapsed to one line', () => {
+    expect(md).toContain('Fix: Publish an OpenAPI 3.1 description at /openapi.json.');
   });
 });
 

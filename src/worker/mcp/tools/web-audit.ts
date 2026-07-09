@@ -24,7 +24,14 @@ import {
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
 import { loadWebAuditRegistry } from '../../audit-web/registry';
+import {
+  assembleRemediation,
+  loadWebRemediationCatalog,
+  resultLine,
+  type WebRemediationCatalog,
+} from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
+import type { NaReason, ScorecardStatus } from '../../audit-web/scorecard';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
 
@@ -63,6 +70,51 @@ async function loadCuratedProjection(env: WebAuditToolsEnv, path: string): Promi
     return await res.json();
   } catch {
     return null;
+  }
+}
+
+type ScorecardRow = {
+  id: string;
+  status: ScorecardStatus;
+  na_reason?: NaReason;
+  evidence: string | null;
+};
+
+/**
+ * Enrich audit_website scorecard rows in place-shape (R14): every row
+ * gains a derived `result` line, and a non-passing row (broken / absent)
+ * carries the inline remediation object. Passing and n_a rows carry no
+ * remediation (nothing to fix / not applicable).
+ */
+function withInlineRemediation(scorecard: unknown, catalog: WebRemediationCatalog): unknown {
+  if (!scorecard || typeof scorecard !== 'object' || !Array.isArray((scorecard as { results?: unknown }).results)) {
+    return scorecard;
+  }
+  const rows = (scorecard as { results: ScorecardRow[] }).results;
+  return {
+    ...scorecard,
+    results: rows.map((row) => {
+      const result = resultLine(row.status, row.evidence, row.na_reason);
+      if (row.status === 'broken' || row.status === 'absent') {
+        const remediation = assembleRemediation(catalog[row.id], {
+          checkId: row.id,
+          origin: SITE_URL,
+          evidence: row.evidence,
+        });
+        return { ...row, result, remediation };
+      }
+      return { ...row, result };
+    }),
+  };
+}
+
+async function catalogOrEmpty(env: WebAuditToolsEnv): Promise<WebRemediationCatalog> {
+  // A missing catalog degrades to generic prompts rather than failing the
+  // audit result (R10).
+  try {
+    return await loadWebRemediationCatalog(env);
+  } catch {
+    return {};
   }
 }
 
@@ -144,7 +196,12 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // Cache hit short-circuits (cache state is data).
       const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
       if (cached) {
-        return textContent({ audited: false, source: 'cache', scorecard: cached.scorecard, share_url: shareUrl });
+        return textContent({
+          audited: false,
+          source: 'cache',
+          scorecard: withInlineRemediation(cached.scorecard, await catalogOrEmpty(env)),
+          share_url: shareUrl,
+        });
       }
 
       // cf-connecting-ip presence (no anon fallback).
@@ -189,7 +246,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       return textContent({
         audited: true,
         source: 'fresh-audit',
-        scorecard,
+        scorecard: withInlineRemediation(scorecard, await catalogOrEmpty(env)),
         share_url: shareUrl,
         spec_version: SPEC_VERSION,
       });

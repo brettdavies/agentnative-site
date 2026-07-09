@@ -200,28 +200,17 @@ export async function emitWebAuditRegistry({ registryPath, distDir }) {
   return { checks: normalized.checks.length };
 }
 
-// MCP-shape checks that carry an evidence-template block (KTD/Round-4).
-export const EVIDENCE_TEMPLATE_CHECKS = new Set([
-  'mcp-initialize',
-  'mcp-capabilities',
-  'mcp-tools-list',
-  'mcp-unknown-method',
-  'mcp-get-fast-fail',
-  'mcp-cors-preflight',
-  'mcp-cors-actual',
-]);
-
-const EVIDENCE_SLOT = '{{evidence}}';
-
 /**
  * Validate + normalize the remediation catalog against the set of check
  * ids. Pure. Asserts 1:1 coverage (every check has remediation, no
- * orphan remediation) and that every MCP-shape check carries the
- * evidence-template slot.
+ * orphan remediation). Each entry carries title/goal/fix plus optional
+ * resources[] doc links; the run's evidence becomes the uniform Issue
+ * line at assembly time (src/worker/audit-web/remediation.ts), so no
+ * entry carries an evidence template.
  *
  * @param {object} doc — js-yaml load of remediation.yaml
  * @param {string[]} checkIds — ids from the normalized registry
- * @returns {Record<string, { title: string, body: string, evidence_template: boolean }>}
+ * @returns {Record<string, { title: string, goal: string, fix: string, resources: Array<{label: string, url: string}> }>}
  */
 export function normalizeWebRemediation(doc, checkIds) {
   const remediation = doc?.remediation;
@@ -230,14 +219,29 @@ export function normalizeWebRemediation(doc, checkIds) {
   }
   const out = {};
   for (const [id, entry] of Object.entries(remediation)) {
-    if (!entry || typeof entry.title !== 'string' || typeof entry.body !== 'string') {
-      throw new Error(`web-audit remediation: entry "${id}" needs a string title and body`);
+    if (!entry || typeof entry.title !== 'string' || typeof entry.goal !== 'string' || typeof entry.fix !== 'string') {
+      throw new Error(`web-audit remediation: entry "${id}" needs string title, goal, and fix fields`);
     }
-    const evidenceTemplate = entry.evidence_template === true;
-    if (EVIDENCE_TEMPLATE_CHECKS.has(id) && !entry.body.includes(EVIDENCE_SLOT)) {
-      throw new Error(`web-audit remediation: MCP-shape check "${id}" must carry the ${EVIDENCE_SLOT} evidence slot`);
+    if ('body' in entry || 'evidence_template' in entry) {
+      throw new Error(
+        `web-audit remediation: entry "${id}" carries a retired body/evidence_template field — use goal/fix/resources`,
+      );
     }
-    out[id] = { title: entry.title, body: entry.body, evidence_template: evidenceTemplate };
+    if (entry.fix.includes('{{evidence}}')) {
+      throw new Error(
+        `web-audit remediation: entry "${id}" carries an evidence slot — evidence is assembled at audit time`,
+      );
+    }
+    const resources = entry.resources ?? [];
+    if (!Array.isArray(resources)) {
+      throw new Error(`web-audit remediation: entry "${id}" resources must be an array`);
+    }
+    for (const resource of resources) {
+      if (!resource || typeof resource.label !== 'string' || !/^https?:\/\//.test(resource.url ?? '')) {
+        throw new Error(`web-audit remediation: entry "${id}" resource needs a label and an absolute url`);
+      }
+    }
+    out[id] = { title: entry.title, goal: entry.goal, fix: entry.fix, resources };
   }
   const ids = new Set(checkIds);
   for (const id of checkIds) {

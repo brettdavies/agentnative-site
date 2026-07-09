@@ -17,17 +17,19 @@ import { renderMarkdown } from './render.mjs';
 import { emitShell } from './shell.mjs';
 import { absolutifyMarkdownLinks, resolveBaseUrl } from './util.mjs';
 
-// The MCP-shape remediation bodies close with an evidence-injection slot
-// meant for the get_web_remediation tool; the static skill page drops it.
-const EVIDENCE_TRAILER_RE = /\n+\s*Evidence from this audit:\s*\n+\s*\{\{evidence\}\}\s*$/;
-
 const KEYWORD_LABELS = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
+
+/** Collapse multi-line markdown to the single-line prompt form (mirrors
+ * src/worker/audit-web/remediation.ts). */
+function oneLine(text) {
+  return text.replace(/\s*\n\s*/g, ' ').trim();
+}
 
 /**
  * Build the markdown source for one check's fix-skill page.
  *
  * @param {object} check — normalized registry check
- * @param {{ title: string, body: string }} remediation
+ * @param {{ title: string, goal: string, fix: string, resources: Array<{label: string, url: string}> }} remediation
  * @param {Record<string, string>} categories — slug → display label
  * @param {string} baseUrl
  * @returns {string} markdown
@@ -35,7 +37,12 @@ const KEYWORD_LABELS = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
 export function buildSkillMarkdown(check, remediation, categories, baseUrl) {
   const category = categories[check.category] ?? check.category;
   const keyword = KEYWORD_LABELS[check.keyword] ?? check.keyword;
-  const fixBody = remediation.body.replace(EVIDENCE_TRAILER_RE, '').trimEnd();
+  const docsLine =
+    remediation.resources.length > 0 ? [`Docs: ${remediation.resources.map((r) => r.url).join(', ')}`] : [];
+  const resourcesSection =
+    remediation.resources.length > 0
+      ? ['## Resources', '', ...remediation.resources.map((r) => `- [${r.label}](${r.url})`), '']
+      : [];
   return [
     `# Fix: ${check.title}`,
     '',
@@ -43,21 +50,23 @@ export function buildSkillMarkdown(check, remediation, categories, baseUrl) {
     '',
     '## Goal',
     '',
-    `${check.title}.`,
+    `${remediation.goal}.`,
     '',
     '## Fix',
     '',
-    fixBody,
+    remediation.fix.trim(),
     '',
+    ...resourcesSection,
     '## Copy-paste prompt',
     '',
     `Paste this into your coding agent, replacing the Issue line with the Result line from [your audit](${baseUrl}/web-audit):`,
     '',
     '```text',
-    `Goal: ${check.title}`,
+    `Goal: ${oneLine(remediation.goal)}`,
     "Issue: <the audit's finding for this check>",
-    `Fix: ${check.hint}`,
+    `Fix: ${oneLine(remediation.fix)}`,
     `Skill: ${baseUrl}/web-audit/skill/${check.id}`,
+    ...docsLine,
     '```',
     '',
     '## Verify',
