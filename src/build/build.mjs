@@ -45,6 +45,7 @@ import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
+import { emitWebAuditRegistry } from './13-web-audit-registry.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
@@ -275,6 +276,14 @@ export async function build() {
   // Worker-served from dist/_internal/mcp-server-card.json (SEP-1649 canonical path).
   const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
 
+  // 11c. Web-audit registry — normalized JSON projection of the vendored
+  // 32-check registry, consumed by the Worker's web-audit engine via
+  // env.ASSETS.fetch. Same /_internal/ privacy posture as the MCP catalog.
+  const webAuditRegistryStats = await emitWebAuditRegistry({
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    distDir: DIST_DIR,
+  });
+
   // 12. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
     DIST_DIR,
@@ -306,6 +315,7 @@ export async function build() {
     mcpCatalog: mcpCatalogStats,
     discovery: discoveryStats,
     agentReadiness: agentReadinessStats,
+    webAuditRegistry: webAuditRegistryStats,
     minified: minifyStats,
   };
 }
