@@ -37,14 +37,19 @@ function webTool(input: WebSummaryInput): { name: string; url: string } {
 /** HTML body for /web/<domain>, rendered through the shared renderer. */
 export function buildWebSummaryBody(input: WebSummaryInput): string {
   const headerSubline = `Website <a href="${sharedEscHtml(input.targetUrl)}">${sharedEscHtml(input.targetUrl)}</a> · agent-readiness audit`;
-  return sharedBuildScorecardBody(webTool(input), input.scorecard, {
+  const body = sharedBuildScorecardBody(webTool(input), input.scorecard, {
     breadcrumb: WEB_BREADCRUMB,
     headerSubline,
     hideBadgeEmbed: true,
     hideReproduce: true,
     hideVersionRow: true,
-    ctaNoteHtml: WEB_CTA_NOTE_HTML,
   });
+  // The shared renderer's reproduce CTA is CLI-only and suppressed above;
+  // append the web CTA (re-run + MCP tool) as its own section.
+  return `${body}
+<section class="scorecard-cta">
+  <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
+</section>`;
 }
 
 /** Markdown twin for /web/<domain>.md. Absolute principle links for cross-origin fetch. */
@@ -57,5 +62,11 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     hideBadgeEmbed: true,
     hideReproduce: true,
     hideVersionRow: true,
+    footer: [
+      '## Re-run this audit',
+      '',
+      'Re-run from [anc.dev/web-audit](https://anc.dev/web-audit), or call the `audit_website` MCP tool.',
+      '',
+    ],
   });
 }

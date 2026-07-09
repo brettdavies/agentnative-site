@@ -83,9 +83,12 @@ export async function copyAssets({ repoRoot, distDir }) {
   // redirect to /live-score/<binary>). Loaded with defer from the
   // homepage shell only.
   const liveScoreJs = await bundleClient(join(repoRoot, 'src/client/live-score.ts'), join(distDir, 'js/live-score.js'));
+  // Web-audit form (POST /api/audit-web, render the NDJSON stream). Loaded
+  // with defer from the /web-audit page shell only.
+  const webAuditJs = await bundleClient(join(repoRoot, 'src/client/web-audit.ts'), join(distDir, 'js/web-audit.js'));
   const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, 'js/webmcp.js'));
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
-  return { themeInit, themeJs, clipboardJs, leaderboardJs, liveScoreJs, webmcpJs };
+  return { themeInit, themeJs, clipboardJs, leaderboardJs, liveScoreJs, webAuditJs, webmcpJs };
 }

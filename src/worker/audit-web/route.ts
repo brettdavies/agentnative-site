@@ -269,17 +269,35 @@ function esc(s: string): string {
   );
 }
 
-/** Look up a cached audit for the domain, trying https then http. */
+/**
+ * Resolve a domain's audit for the result page. R2 (on-demand audits)
+ * wins; on a miss, fall back to the committed curated projection at
+ * /_internal/web-scorecards/<domain>.json (leaderboard seeds, static +
+ * committed, independent of R2 per KTD-8). Tries https then http for the
+ * R2 key since the cache is scheme-specific.
+ */
 async function lookupByDomain(
   env: WebAuditRouteEnv,
   domain: string,
-): Promise<{ cached: CachedWebAudit; targetUrl: string } | null> {
+): Promise<{ scorecard: unknown; targetUrl: string } | null> {
   for (const scheme of ['https', 'http']) {
     const targetUrl = normalizeTargetUrl(`${scheme}://${domain}/`);
-    const cached = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
-    if (cached) return { cached, targetUrl };
+    const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
+    if (cached) return { scorecard: cached.scorecard, targetUrl };
   }
+  const curated = await loadCuratedScorecard(env, domain);
+  if (curated) return { scorecard: curated, targetUrl: normalizeTargetUrl(`https://${domain}/`) };
   return null;
+}
+
+async function loadCuratedScorecard(env: WebAuditRouteEnv, domain: string): Promise<unknown | null> {
+  try {
+    const res = await env.ASSETS.fetch(new Request(`https://assets.internal/_internal/web-scorecards/${domain}.json`));
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export async function handleWebResultPage(request: Request, env: WebAuditRouteEnv): Promise<Response> {
@@ -294,7 +312,7 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   const hit = await lookupByDomain(env, match.domain);
   if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
 
-  const scorecard = hit.cached.scorecard as {
+  const scorecard = hit.scorecard as {
     tool?: { name?: string; url?: string };
     badge?: { score_pct?: number };
   };

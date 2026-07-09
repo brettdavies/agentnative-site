@@ -46,6 +46,7 @@ import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { emitWebAuditRegistry } from './13-web-audit-registry.mjs';
+import { emitWebScorecardSurface } from './14-web-scorecards-emit.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
@@ -249,9 +250,12 @@ export async function build() {
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
   // so it stays out of the sitemap.
+  // /web (web leaderboard) is indexable; the per-domain /web/<domain>
+  // result pages are Worker-served with X-Robots-Tag: noindex (like the
+  // live-score pages) so they stay out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', '/badge', ...scorecardPaths],
+    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', '/badge', '/web', '/web-audit', ...scorecardPaths],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -282,6 +286,16 @@ export async function build() {
   const webAuditRegistryStats = await emitWebAuditRegistry({
     registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
     distDir: DIST_DIR,
+  });
+
+  // 11d. Web leaderboard + per-seed scorecard projections. Reads the
+  // curated seed and its committed web scorecards; emits /web + the
+  // Worker-served /web/<domain> fallback JSON under _internal.
+  const webScorecardStats = await emitWebScorecardSurface({
+    distDir: DIST_DIR,
+    seedPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'),
+    scorecardsWebDir: join(REPO_ROOT, 'scorecards', 'web'),
+    themeInit,
   });
 
   // 12. Invariant check — fails fast if any critical contract slips.
@@ -316,6 +330,7 @@ export async function build() {
     discovery: discoveryStats,
     agentReadiness: agentReadinessStats,
     webAuditRegistry: webAuditRegistryStats,
+    webScorecards: webScorecardStats,
     minified: minifyStats,
   };
 }

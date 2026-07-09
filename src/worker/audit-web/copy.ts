@@ -10,5 +10,3 @@ export const WEB_CTA_NOTE_HTML =
   "This scorecard reflects the target's public agent-facing surface at audit time. " +
   'Re-run the audit from <a href="/web-audit">anc.dev/web-audit</a> to refresh it, ' +
   'or call the <code>audit_website</code> MCP tool.';
-
-export const WEB_RESULT_TITLE_SUFFIX = 'Agent-Readiness Audit';
