@@ -150,3 +150,69 @@ export async function emitWebAuditRegistry({ registryPath, distDir }) {
   await writeFile(join(distDir, '_internal', 'web-audit-registry.json'), `${JSON.stringify(normalized, null, 2)}\n`);
   return { checks: normalized.checks.length };
 }
+
+// MCP-shape checks that carry an evidence-template block (KTD/Round-4).
+export const EVIDENCE_TEMPLATE_CHECKS = new Set([
+  'mcp-initialize',
+  'mcp-capabilities',
+  'mcp-tools-list',
+  'mcp-unknown-method',
+  'mcp-get-fast-fail',
+  'mcp-cors-preflight',
+  'mcp-cors-actual',
+]);
+
+const EVIDENCE_SLOT = '{{evidence}}';
+
+/**
+ * Validate + normalize the remediation catalog against the set of check
+ * ids. Pure. Asserts 1:1 coverage (every check has remediation, no
+ * orphan remediation) and that every MCP-shape check carries the
+ * evidence-template slot.
+ *
+ * @param {object} doc — js-yaml load of remediation.yaml
+ * @param {string[]} checkIds — ids from the normalized registry
+ * @returns {Record<string, { title: string, body: string, evidence_template: boolean }>}
+ */
+export function normalizeWebRemediation(doc, checkIds) {
+  const remediation = doc?.remediation;
+  if (!remediation || typeof remediation !== 'object') {
+    throw new Error('web-audit remediation.yaml: expected a top-level "remediation" mapping');
+  }
+  const out = {};
+  for (const [id, entry] of Object.entries(remediation)) {
+    if (!entry || typeof entry.title !== 'string' || typeof entry.body !== 'string') {
+      throw new Error(`web-audit remediation: entry "${id}" needs a string title and body`);
+    }
+    const evidenceTemplate = entry.evidence_template === true;
+    if (EVIDENCE_TEMPLATE_CHECKS.has(id) && !entry.body.includes(EVIDENCE_SLOT)) {
+      throw new Error(`web-audit remediation: MCP-shape check "${id}" must carry the ${EVIDENCE_SLOT} evidence slot`);
+    }
+    out[id] = { title: entry.title, body: entry.body, evidence_template: evidenceTemplate };
+  }
+  const ids = new Set(checkIds);
+  for (const id of checkIds) {
+    if (!out[id]) throw new Error(`web-audit remediation: check "${id}" has no remediation entry`);
+  }
+  for (const id of Object.keys(out)) {
+    if (!ids.has(id)) throw new Error(`web-audit remediation: orphan remediation "${id}" matches no check`);
+  }
+  return out;
+}
+
+/**
+ * Load + validate the remediation catalog and emit its JSON projection.
+ *
+ * @param {{ remediationPath: string, registryPath: string, distDir: string }} opts
+ * @returns {Promise<{ entries: number }>}
+ */
+export async function emitWebRemediation({ remediationPath, registryPath, distDir }) {
+  const registry = normalizeWebAuditRegistry(yaml.load(await readFile(registryPath, 'utf8')));
+  const doc = yaml.load(await readFile(remediationPath, 'utf8'));
+  const normalized = normalizeWebRemediation(
+    doc,
+    registry.checks.map((c) => c.id),
+  );
+  await writeFile(join(distDir, '_internal', 'web-remediation.json'), `${JSON.stringify(normalized, null, 2)}\n`);
+  return { entries: Object.keys(normalized).length };
+}

@@ -1,0 +1,254 @@
+# Static canonical web-audit remediation catalog (plan U13). One entry per
+# check id in registry.yaml. STAR: this single data file is the source; the
+# build projects it to dist/_internal/web-remediation.json, read per-isolate
+# by the get_web_remediation MCP tool. No generated prose (KTD/Round-4): the
+# fix guidance is static; MCP-shape checks set `evidence_template: true` so
+# the audit can inject that run's own evidence into the {{evidence}} slot
+# without generating any new prose.
+#
+# Fields per entry:
+#   title             short human title (matches the check's registry title)
+#   body              the canonical fix, markdown
+#   evidence_template optional; true for MCP-shape checks that inject evidence
+
+remediation:
+  mcp-initialize:
+    title: initialize handshake returns serverInfo + protocolVersion
+    evidence_template: true
+    body: |
+      Answer the JSON-RPC `initialize` method on your MCP endpoint with a `result` that carries
+      `serverInfo` (an object with `name` and `version`) and `protocolVersion`. A client that
+      cannot read a valid `initialize` result cannot begin a session.
+
+      - Accept `POST` with `Content-Type: application/json` and `Accept: application/json, text/event-stream`.
+      - Echo the negotiated `protocolVersion` (the current pinned value is `2025-06-18`).
+      - Return `serverInfo.name` and `serverInfo.version` so clients can identify and log the server.
+
+      Evidence from this audit:
+
+      {{evidence}}
+  mcp-capabilities:
+    title: initialize advertises capabilities
+    evidence_template: true
+    body: |
+      Populate the `capabilities` object in your `initialize` result. Clients gate feature use on
+      it: an empty or missing `capabilities` tells a client nothing is available, so it will not
+      call `tools/list`, `resources/list`, or `prompts/list`.
+
+      Advertise the capability groups your server actually implements (for example `{ "tools": {} }`).
+
+      Evidence from this audit:
+
+      {{evidence}}
+  mcp-tools-list:
+    title: tools/list returns a tools array with input schemas
+    evidence_template: true
+    body: |
+      Return `result.tools` as an array from the `tools/list` method. Each tool needs a `name`, a
+      `description`, and a JSON Schema `inputSchema` so an agent can validate arguments before
+      calling. A tool without an `inputSchema` forces the agent to guess argument shapes.
+
+      Evidence from this audit:
+
+      {{evidence}}
+  mcp-unknown-method:
+    title: unknown JSON-RPC method returns -32601
+    evidence_template: true
+    body: |
+      Reject an unknown JSON-RPC method with the standard error code `-32601` (Method not found),
+      not a hang, a 500, or a silent empty body. Agents rely on `-32601` to distinguish
+      "unsupported" from "failed"; anything else looks like an outage.
+
+      Evidence from this audit:
+
+      {{evidence}}
+  mcp-get-fast-fail:
+    title: GET on the MCP endpoint fast-fails
+    evidence_template: true
+    body: |
+      A stateless streamable-HTTP MCP endpoint must fast-fail a `GET` (return `405`, `400`, `404`,
+      or `406`) rather than hold the connection open waiting for an SSE session that a probe never
+      establishes. An open-held `GET` stalls scanners and agent tooling.
+
+      Guard non-`POST` verbs at the router and return `405 Method Not Allowed` with an `Allow: POST`
+      header. See the anc.dev pattern: the `/mcp` route answers `GET` with the server card when the
+      client wants JSON and a fast `405` otherwise.
+
+      Evidence from this audit:
+
+      {{evidence}}
+  mcp-cors-preflight:
+    title: CORS preflight succeeds with Access-Control-Allow-* headers
+    evidence_template: true
+    body: |
+      Answer the `OPTIONS` preflight on your MCP endpoint with `204` (or `200`) and the
+      `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and
+      `Access-Control-Allow-Headers` response headers, so a browser-origin agent can call the
+      endpoint. If your MCP surface is deliberately server-to-agent only (no browser clients), this
+      SHOULD is a considered choice, not a defect.
+
+      Evidence from this audit:
+
+      {{evidence}}
+  mcp-cors-actual:
+    title: POST response carries Access-Control-Allow-Origin
+    evidence_template: true
+    body: |
+      Echo `Access-Control-Allow-Origin` on the actual `POST` response, not only on the preflight.
+      A browser blocks the response body when the header is absent even if the preflight passed.
+      Omit it deliberately only if browser-origin agents are not a supported client.
+
+      Evidence from this audit:
+
+      {{evidence}}
+  well-known-mcp-card:
+    title: A .well-known MCP server card is published
+    body: |
+      Publish an MCP server card at `/.well-known/mcp/server-card.json` (SEP-1649). The card names
+      the endpoint, transport, and capabilities so an agent can discover your MCP server without
+      guessing paths. Include `mcp_endpoint` (or `url`, or `transport.endpoint`), `serverInfo`, and
+      the transport type.
+  mcp-usage-doc:
+    title: A human/agent usage doc for the server resolves
+    body: |
+      Link a short markdown usage doc for your MCP server (curl examples, the tool list, auth, and
+      rate limits) at a stable path such as `/mcp-skill.md`, `/mcp.md`, or `/.well-known/mcp/usage.md`,
+      and reference it from the server card and `llms.txt`. It gives an agent a one-fetch orientation.
+  llms-txt:
+    title: /llms.txt present with a summary and link index
+    body: |
+      Serve `/llms.txt` (llmstxt.org): an H1 title, a one-line summary blockquote, and a categorized
+      index of links to your most important pages as markdown. It is the canonical entry point an
+      agent fetches to understand what a site offers and where to look next.
+  llms-full-txt:
+    title: /llms-full.txt present
+    body: |
+      For a docs site, concatenate every page as markdown at `/llms-full.txt` so an agent can ingest
+      the whole corpus in one fetch instead of crawling. Keep it generated from source so it never
+      drifts from the live pages.
+  openapi:
+    title: An OpenAPI description is published
+    body: |
+      Publish an OpenAPI 3.1 description of your REST surface at `/openapi.json` (or `/openapi.yaml`,
+      or `/.well-known/openapi.json`). Non-MCP agents use it to discover endpoints, parameters, and
+      response shapes, and to generate typed clients.
+  json-schemas:
+    title: Referenced JSON Schemas resolve
+    body: |
+      Serve the input and output JSON Schemas your API references (for example
+      `/api/schema/input.json`) as `application/schema+json`. Agents validate payloads against them
+      before calling, which turns a class of runtime failures into pre-flight validation.
+  accept-markdown:
+    title: Accept text/markdown returns markdown
+    body: |
+      Honor `Accept: text/markdown` on content URLs and return raw markdown rather than HTML chrome.
+      Agents parse markdown far more reliably than a JS-rendered page. Serve the markdown twin at the
+      same URL via content negotiation, invisibly to crawlers.
+  root-meta-description:
+    title: Root HTML has a descriptive meta description
+    body: |
+      Add a `<meta name="description">` to your root HTML that states what the service does and names
+      its agent entry points (MCP endpoint, `llms.txt`, OpenAPI). It is the cheapest machine-readable
+      summary and it feeds link previews and search snippets too.
+  root-link-rel:
+    title: Root HTML links to machine surfaces via link rel
+    body: |
+      Add `<link rel>` elements in your root HTML head pointing at your machine surfaces:
+      `rel="service-desc"` to the OpenAPI doc, `rel="service-doc"` to human docs, and
+      `rel="alternate"` to `llms.txt` and the MCP card. An agent that lands on the HTML can then
+      discover the structured surfaces without scraping.
+  noscript-fallback:
+    title: Root HTML has a noscript with machine entry points
+    body: |
+      Ship a `<noscript>` block that lists your machine entry points (`/llms.txt`, `/openapi.json`,
+      the MCP endpoint). A non-JS agent or a fetch-only crawler gets a usable path forward instead of
+      an empty single-page-app shell.
+  schema-org-jsonld:
+    title: Root HTML embeds Schema.org JSON-LD
+    body: |
+      Embed Schema.org JSON-LD (for example `TechArticle`, `WebAPI`, or `SoftwareApplication`) in a
+      `<script type="application/ld+json">` in your head. Structured metadata gives agents and search
+      engines typed facts about the page without inference.
+  semantic-html:
+    title: Root HTML uses semantic landmarks
+    body: |
+      Use `<main>`, `<article>`, `<section>`, and `<nav>` landmarks so the HTML path is parseable.
+      An agent that has to fall back to reading the DOM should find structure, not a wall of
+      `<div>`s.
+  robots:
+    title: /robots.txt present
+    body: |
+      Publish a `robots.txt`. Declare your crawl and AI-usage policy explicitly rather than leaving
+      it to inference. An absent `robots.txt` is ambiguous; a present one is a clear signal.
+  sitemap:
+    title: /sitemap.xml present
+    body: |
+      Publish a `sitemap.xml` so crawlers and agents can enumerate your content URLs instead of
+      discovering them by following links. Keep it generated so it stays current.
+  robots-ai-rules:
+    title: robots.txt declares AI-crawler rules
+    body: |
+      Add explicit `User-agent` rules for AI crawlers (GPTBot, ClaudeBot, Google-Extended,
+      PerplexityBot, CCBot, and others) to `robots.txt`, or a wildcard policy. Stating your stance
+      (RFC 9309) removes ambiguity about whether AI systems may fetch your content.
+  content-signals:
+    title: robots.txt declares Content-Signal preferences
+    body: |
+      Add `Content-Signal` directives to `robots.txt` (contentsignals.org): `ai-train`, `search`,
+      and `ai-input` set to `yes` or `no`. They express usage preferences at a finer grain than a
+      blanket allow/deny.
+  security-txt:
+    title: /.well-known/security.txt present
+    body: |
+      Publish `/.well-known/security.txt` (RFC 9116) with a `Contact` and an `Expires` field so a
+      researcher or agent can find how to report a problem. It is a small, standard trust signal.
+  web-bot-auth:
+    title: Web Bot Auth signature directory present
+    body: |
+      Informational only. If your site sends authenticated bot traffic, publish an HTTP Message
+      Signatures JWKS directory at `/.well-known/http-message-signatures-directory` so recipients can
+      verify your bot's signatures. Skip it if you do not send signed bot requests.
+  link-headers:
+    title: Homepage sends RFC 8288 Link headers
+    body: |
+      Send `Link` response headers on `/` (RFC 8288) with `rel=service-desc`, `rel=describedby`, or
+      `rel=api-catalog` pointing at your machine surfaces. Header-level discovery works even for an
+      agent that never parses the HTML body.
+  api-catalog:
+    title: /.well-known/api-catalog published
+    body: |
+      Serve `/.well-known/api-catalog` (RFC 9727) as `application/linkset+json` with a `linkset[]` of
+      anchor plus `service-desc` entries. It is the standard index that points agents at every API
+      description you publish.
+  a2a-agent-card:
+    title: A2A Agent Card published
+    body: |
+      Serve an A2A Agent Card at `/.well-known/agent-card.json` (a2a-protocol.org) with `name`,
+      `version`, and `supportedInterfaces`. It lets other agents discover and interoperate with yours
+      over the agent-to-agent protocol.
+  agent-skills:
+    title: Agent-skills discovery index published
+    body: |
+      Publish an agent-skills discovery index at `/.well-known/agent-skills/index.json` (the
+      Cloudflare agent-skills-discovery draft) with a `skills[]` array, so agents can enumerate the
+      skills your site exposes.
+  dns-aid:
+    title: DNS-AID records under _agents
+    body: |
+      Publish SVCB/HTTPS records under the `_agents` namespace (for example
+      `_index._agents.<domain>`, `_mcp._agents.<domain>`), DNSSEC-signed
+      (draft-mozleywilliams-dnsop-dnsaid). DNS-level discovery lets an agent find your endpoints
+      before any HTTP request.
+  oauth-discovery:
+    title: OAuth/OIDC discovery metadata published
+    body: |
+      If agents authenticate to your service, publish OAuth/OIDC discovery metadata at
+      `/.well-known/openid-configuration` or `/.well-known/oauth-authorization-server` (RFC 8414 /
+      OIDC Discovery). Absent metadata is expected for an open server; present metadata is required
+      for an authenticated one.
+  oauth-protected-resource:
+    title: OAuth Protected Resource Metadata published
+    body: |
+      For an authenticated MCP server, publish `/.well-known/oauth-protected-resource` (RFC 9728) so
+      a client can discover which authorization servers issue tokens for your resource. Expected
+      absent for an open, no-auth server.

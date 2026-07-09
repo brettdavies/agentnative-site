@@ -16,6 +16,7 @@ import { detectPreference } from '../accept';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { type CachedWebAudit, get as cacheGet, put as cachePut, keyFor, normalizeTargetUrl } from './cache';
 import { runWebAudit } from './engine';
+import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
 import type { EngineResult } from './scorecard';
 import { validatePublicUrl } from './ssrf';
@@ -34,10 +35,6 @@ export interface WebAuditRouteDeps {
   probeFetch?: typeof fetch;
 }
 
-const HOUR_MS = 3_600_000;
-const HOURLY_AUDIT_CEILING = 5;
-const HOURLY_KV_TTL_SECONDS = 7200;
-
 export function isWebAuditPath(pathname: string): boolean {
   return pathname === '/api/audit-web';
 }
@@ -50,7 +47,7 @@ function jsonResponse(body: unknown, status: number, extraHeaders: Record<string
 }
 
 /** Prepend https:// when the input carries no scheme; null on unparseable input. */
-function coerceUrl(raw: unknown): URL | null {
+export function coerceUrl(raw: unknown): URL | null {
   if (typeof raw !== 'string' || raw.trim().length === 0) return null;
   const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`;
   try {
@@ -60,14 +57,9 @@ function coerceUrl(raw: unknown): URL | null {
   }
 }
 
-async function consumeHourlyBudget(kv: KVNamespace, ip: string): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / HOUR_MS);
-  const key = `web_audit:${ip}:${bucket}`;
-  const currentRaw = await kv.get(key);
-  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
-  if (Number.isNaN(current) || current >= HOURLY_AUDIT_CEILING) return false;
-  await kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
-  return true;
+/** Canonical audited target: scheme + host + `/` (drops port-less path/query/fragment beyond the origin). */
+export function canonicalTargetOf(url: URL): string {
+  return `${url.protocol}//${url.host}/`;
 }
 
 function checkEvent(result: EngineResult): string {
@@ -112,7 +104,7 @@ export async function handleWebAudit(
   if (!url) {
     return jsonResponse({ error: 'invalid_url', message: 'provide a valid { url }' }, 400);
   }
-  const canonicalTarget = `${url.protocol}//${url.host}/`;
+  const canonicalTarget = canonicalTargetOf(url);
   const shareDomain = url.host;
 
   // 4. SSRF pre-flight — before any probe or limiter spend.
@@ -133,9 +125,9 @@ export async function handleWebAudit(
       return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (burst)' }, 429);
     }
   }
-  // 7. KV hourly window.
+  // 7. KV hourly window (shared with the audit_website MCP tool).
   if (env.SCORE_KV) {
-    const ok = await consumeHourlyBudget(env.SCORE_KV, ip);
+    const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ip);
     if (!ok) {
       return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (5 per hour per source)' }, 429);
     }

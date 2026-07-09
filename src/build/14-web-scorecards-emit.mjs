@@ -74,16 +74,26 @@ export async function emitWebScorecardSurface({ distDir, seedPath, scorecardsWeb
   const { entries, warnings } = await loadWebSeed(seedPath, scorecardsWebDir);
   for (const w of warnings) console.warn(`warning: ${w}`);
 
-  // Per-seed scorecard projection the Worker reads on an R2 miss.
+  // Per-seed scorecard projection the Worker reads on an R2 miss, plus an
+  // index.json the list_website_audits MCP tool reads for board summaries.
   await mkdir(join(distDir, '_internal', 'web-scorecards'), { recursive: true });
   const webPaths = ['/web'];
+  const index = [];
   for (const entry of entries) {
     await writeFile(
       join(distDir, '_internal', 'web-scorecards', `${entry.domain}.json`),
       `${JSON.stringify(entry.scorecard, null, 2)}\n`,
     );
     webPaths.push(`/web/${entry.domain}`);
+    index.push({
+      domain: entry.domain,
+      url: entry.url,
+      name: entry.name,
+      description: entry.description,
+      score_pct: entry.scorecard.badge.score_pct,
+    });
   }
+  await writeFile(join(distDir, '_internal', 'web-scorecards', 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
 
   const body = buildWebLeaderboardBody(entries);
   await writeFile(

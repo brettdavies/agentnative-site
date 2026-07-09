@@ -243,7 +243,7 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
 });
 
 describe('MCP tools/list', () => {
-  test('returns exactly nine tools in the expected order', async () => {
+  test('returns exactly thirteen tools in the expected order', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
@@ -259,6 +259,10 @@ describe('MCP tools/list', () => {
       'get_spec_section',
       'get_scorecard',
       'score_cli',
+      'get_website_audit',
+      'audit_website',
+      'list_website_audits',
+      'get_web_remediation',
     ]);
   });
 

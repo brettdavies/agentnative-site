@@ -45,7 +45,7 @@ import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
-import { emitWebAuditRegistry } from './13-web-audit-registry.mjs';
+import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
 import { emitWebScorecardSurface } from './14-web-scorecards-emit.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -288,6 +288,15 @@ export async function build() {
     distDir: DIST_DIR,
   });
 
+  // 11c-bis. Web-audit remediation catalog — projected from remediation.yaml,
+  // validated 1:1 against the registry check ids, read per-isolate by the
+  // get_web_remediation MCP tool.
+  const webRemediationStats = await emitWebRemediation({
+    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    distDir: DIST_DIR,
+  });
+
   // 11d. Web leaderboard + per-seed scorecard projections. Reads the
   // curated seed and its committed web scorecards; emits /web + the
   // Worker-served /web/<domain> fallback JSON under _internal.
@@ -330,6 +339,7 @@ export async function build() {
     discovery: discoveryStats,
     agentReadiness: agentReadinessStats,
     webAuditRegistry: webAuditRegistryStats,
+    webRemediation: webRemediationStats,
     webScorecards: webScorecardStats,
     minified: minifyStats,
   };
