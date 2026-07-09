@@ -75,13 +75,82 @@ test.describe('web audit — streaming form and shareable result', () => {
     expect(terminal?.share_url ?? lines[0].share_url).toBe(`/web/${TARGET_DOMAIN}`);
   });
 
-  test('the /web/<domain> markdown twin renders the score', async ({ request }) => {
+  test('the /web/<domain> markdown twin mirrors the category structure with both scores', async ({ request }) => {
     const res = await request.get(`/web/${TARGET_DOMAIN}.md`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     const body = await res.text();
     expect(body).toContain('Agent-Readiness Audit');
-    expect(body).toMatch(/\d+% pass rate/);
+    expect(body).toMatch(/\*\*Score:\*\* \d+%/);
+    expect(body).toMatch(/\*\*Global:\*\* \d+%/);
+    expect(body).toMatch(/## Discoverability \(\d+\/\d+\)/);
+    expect(body).toMatch(/## MCP & API \(\d+\/\d+\)/);
+  });
+
+  test('the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {
+    await page.goto(`/web/${TARGET_DOMAIN}`);
+    await expect(page.locator('.scorecard-score-badge__pct')).toContainText('%');
+    await expect(page.locator('.scorecard-score-badge__label')).toContainText('site score');
+    await expect(page.locator('.scorecard-summary__note')).toContainText('Global:');
+    const groups = page.locator('.audit-group__title');
+    await expect(groups.first()).toContainText('Discoverability');
+    await expect(page.locator('.audit-group__rollup').first()).toContainText('/');
+    // No P1..P8 principle headings on the web surface.
+    await expect(page.locator('.scorecard-audits')).not.toContainText('P2:');
+  });
+
+  test('a site_type-scoped audit gates the api-only checks to n_a', async ({ request }) => {
+    const res = await request.post('/api/audit-web', {
+      headers: { 'content-type': 'application/json' },
+      data: { url: TARGET_DOMAIN, site_type: 'content' },
+      timeout: 75_000,
+    });
+    expect(res.status()).toBe(200);
+    const text = await res.text();
+    const lines = text
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as { type?: string; cached?: boolean; scorecard?: unknown });
+    const terminal = lines.at(-1) as {
+      scorecard?: { site_type?: string | null; results?: Array<{ id: string; status: string }> };
+      cached?: boolean;
+    };
+    const scorecard = terminal.scorecard as {
+      site_type?: string | null;
+      results?: Array<{ id: string; status: string }>;
+    };
+    // A cache hit may return the earlier untyped run; only a fresh typed
+    // run asserts the gating.
+    if (scorecard.site_type === 'content') {
+      expect(scorecard.results?.find((r) => r.id === 'openapi')?.status).toBe('n_a');
+    } else {
+      expect(scorecard.results?.length ?? 0).toBeGreaterThan(0);
+    }
+  });
+});
+
+test.describe('web audit — per-check fix skills', () => {
+  test('/web-audit/skill/<id> serves HTML and the .md twin serves markdown', async ({ request }) => {
+    const html = await request.get('/web-audit/skill/openapi');
+    expect(html.status()).toBe(200);
+    expect(html.headers()['content-type']).toContain('text/html');
+    expect(await html.text()).toContain('Copy-paste prompt');
+
+    const md = await request.get('/web-audit/skill/openapi.md');
+    expect(md.status()).toBe(200);
+    expect(md.headers()['content-type']).toContain('text/markdown');
+    expect(await md.text()).toContain('# Fix: ');
+  });
+
+  test('content negotiation serves the twin for Accept: text/markdown', async ({ request }) => {
+    const res = await request.get('/web-audit/skill/llms-txt', { headers: { accept: 'text/markdown' } });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
+  });
+
+  test('an unknown check id 404s', async ({ request }) => {
+    const res = await request.get('/web-audit/skill/not-a-check');
+    expect(res.status()).toBe(404);
   });
 });
 
@@ -123,7 +192,21 @@ test.describe('web audit — MCP fresh path', () => {
     expect(body.result?.isError).toBeFalsy();
     const content = firstJsonContent(body);
     expect(content.share_url).toBe(`https://anc.dev/web/${TARGET_DOMAIN}`);
-    expect((content.scorecard as { badge?: { score_pct?: number } })?.badge?.score_pct).toBeGreaterThanOrEqual(0);
+    const scorecard = content.scorecard as {
+      score_pct?: number;
+      score?: { relative: number; global: number };
+      results?: Array<{ status: string; result?: string; remediation?: { prompt?: string; skill_url?: string } }>;
+    };
+    expect(scorecard?.score_pct).toBeGreaterThanOrEqual(0);
+    expect(scorecard?.score?.global).toBeGreaterThanOrEqual(0);
+    // Every row carries a derived result line; a non-passing row embeds
+    // the inline remediation object with the copy-paste prompt.
+    expect(scorecard?.results?.every((r) => typeof r.result === 'string')).toBe(true);
+    const nonPassing = scorecard?.results?.find((r) => r.status === 'broken' || r.status === 'absent');
+    if (nonPassing) {
+      expect(nonPassing.remediation?.prompt).toContain('Goal:');
+      expect(nonPassing.remediation?.skill_url).toContain('/web-audit/skill/');
+    }
   });
 
   test('get_web_remediation returns the fix doc for a check', async ({ request }) => {
@@ -141,6 +224,8 @@ test.describe('web audit — MCP fresh path', () => {
     const body = (await res.json()) as { result?: { content?: Array<{ text: string }> } };
     const content = firstJsonContent(body);
     expect(content.found).toBe(true);
-    expect((content.remediation as { body?: string })?.body).toContain('OpenAPI');
+    const remediation = content.remediation as { goal?: string; fix?: string; prompt?: string; skill_url?: string };
+    expect(remediation.fix).toContain('OpenAPI');
+    expect(remediation.prompt).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
   });
 });
