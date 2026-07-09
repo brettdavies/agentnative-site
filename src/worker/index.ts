@@ -12,6 +12,13 @@
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import {
+  handleWebAudit,
+  handleWebResultPage,
+  isWebAuditPath,
+  parseWebResultPath,
+  type WebAuditRouteEnv,
+} from './audit-web/route';
 import { applyHeaders } from './headers';
 import { MCP_DESCRIPTOR_ALIAS_PATHS } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
@@ -66,6 +73,13 @@ export interface Env {
   MCP_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   MCP_ENABLED?: string;
   MCP_LIVE_SCORING_ENABLED?: string;
+  // Web-audit bindings (docs/plans/2026-07-09-001 U7). WEB_AUDIT_LIMITER
+  // gates fresh /api/audit-web + audit_website audits; WEB_AUDIT_ENABLED
+  // is the secret-backed kill switch covering both the webapp route and
+  // the MCP fresh path. Optional so tests that don't exercise the web
+  // audit can stub a minimal env.
+  WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  WEB_AUDIT_ENABLED?: string;
 }
 
 /**
@@ -265,6 +279,12 @@ export default {
     // env.ASSETS) is preserved by exclusion, not by overlap.
     if (isScorePath(pathname)) {
       return handleScore(request, env as ScoreEnv);
+    }
+
+    // Web-audit streaming dispatch. Threads ctx so the engine's R2 write
+    // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
+    if (isWebAuditPath(pathname)) {
+      return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
     }
 
     // MCP server card (SEP-1649) + legacy pointer aliases — one JSON document
@@ -513,6 +533,25 @@ export default {
     // (scorecards.mjs) so no curated tool can collide with this route.
     if (parseLiveScorePath(pathname)) {
       return handleLiveScorePage(request, env as ScoreEnv);
+    }
+
+    // /web/<domain>.html → 301 to /web/<domain>. Mirrors the live-score
+    // .html canonicalization; the /web route is Worker-served so the
+    // extension redirect is explicit here.
+    const webHtmlMatch = pathname.match(/^\/web\/([^/]+)\.html$/);
+    if (webHtmlMatch) {
+      return new Response(null, {
+        status: 301,
+        headers: { Location: `/web/${webHtmlMatch[1]}`, 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+
+    // Shareable web-audit result page + markdown twin. Reads the cached
+    // web scorecard from R2 by domain slug (strict regex in
+    // parseWebResultPath bounds the R2 lookup). Sits above the asset-first
+    // dispatch like the live-score page.
+    if (parseWebResultPath(pathname)) {
+      return handleWebResultPage(request, env as WebAuditRouteEnv);
     }
 
     // /_internal/* paths are build-only assets (shell templates the

@@ -1,0 +1,163 @@
+// R2 web-audit cache tests (plan U6). Complete-only, keyed by a
+// SHA-256 of the normalized URL, mirroring src/worker/score/cache.ts.
+
+import { describe, expect, test } from 'bun:test';
+import {
+  type CachedWebAudit,
+  get,
+  keyFor,
+  normalizeTargetUrl,
+  put,
+  type WebCacheEnv,
+} from '../src/worker/audit-web/cache';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+
+type StubOpts = { throwOnGet?: boolean; throwOnPut?: boolean; prefill?: Record<string, unknown> };
+
+function makeR2Stub(opts: StubOpts = {}): { env: WebCacheEnv; store: Map<string, string>; deletedKeys: string[] } {
+  const store = new Map<string, string>();
+  const deletedKeys: string[] = [];
+  if (opts.prefill) {
+    for (const [k, v] of Object.entries(opts.prefill)) {
+      store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
+    }
+  }
+  const env: WebCacheEnv = {
+    SCORE_CACHE: {
+      async get(key: string) {
+        if (opts.throwOnGet) throw new Error('r2_get_failed');
+        const raw = store.get(key);
+        if (raw === undefined) return null;
+        return {
+          async json() {
+            return JSON.parse(raw);
+          },
+          async text() {
+            return raw;
+          },
+        };
+      },
+      async put(key: string, value: unknown) {
+        if (opts.throwOnPut) throw new Error('r2_put_failed');
+        store.set(key, typeof value === 'string' ? value : String(value));
+      },
+      async delete(key: string) {
+        deletedKeys.push(key);
+        store.delete(key);
+      },
+    } as unknown as R2Bucket,
+  };
+  return { env, store, deletedKeys };
+}
+
+function sampleScorecard(url: string) {
+  return {
+    schema_version: '0.1',
+    spec_version: SPEC_VERSION,
+    target_url: url,
+    mcp_endpoint: null,
+    tool: { name: 'example.com', url },
+    badge: { score_pct: 82, eligible: false },
+    results: [],
+    coverage_summary: {
+      must: { total: 0, verified: 0 },
+      should: { total: 0, verified: 0 },
+      may: { total: 0, verified: 0 },
+    },
+    summary: { pass: 0, fail: 0, n_a: 0, skip: 0, error: 0 },
+  };
+}
+
+describe('normalizeTargetUrl', () => {
+  test('lowercases the host and canonicalizes the scheme + trailing slash', () => {
+    expect(normalizeTargetUrl('HTTPS://Example.COM')).toBe('https://example.com/');
+    expect(normalizeTargetUrl('https://example.com')).toBe('https://example.com/');
+  });
+
+  test('two URLs differing only by trailing slash normalize identically', () => {
+    expect(normalizeTargetUrl('https://example.com/')).toBe(normalizeTargetUrl('https://example.com'));
+  });
+
+  test('drops the fragment but keeps a meaningful path', () => {
+    expect(normalizeTargetUrl('https://example.com/docs#intro')).toBe('https://example.com/docs');
+  });
+});
+
+describe('cache.keyFor', () => {
+  test('is a hex-hash key under audits/web/ with the spec-version slot', async () => {
+    const key = await keyFor('https://example.com/', '9.9.9');
+    expect(key).toMatch(/^audits\/web\/[0-9a-f]{64}\/9\.9\.9\.json$/);
+  });
+
+  test('trailing-slash and case variants collapse to the same key (no split)', async () => {
+    const a = await keyFor('https://example.com', '9.9.9');
+    const b = await keyFor('https://Example.com/', '9.9.9');
+    expect(a).toBe(b);
+  });
+
+  test('distinct hosts key distinctly', async () => {
+    const a = await keyFor('https://a.dev/', '9.9.9');
+    const b = await keyFor('https://b.dev/', '9.9.9');
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('cache.put / get', () => {
+  test('put then get round-trips a complete scorecard', async () => {
+    const { env } = makeR2Stub();
+    const url = 'https://example.com/';
+    await put(env, url, sampleScorecard(url), SPEC_VERSION);
+    const got = await get(env, await keyFor(url, SPEC_VERSION));
+    expect(got?.target_url).toBe(url);
+    expect((got?.scorecard as { badge: { score_pct: number } }).badge.score_pct).toBe(82);
+  });
+
+  test('put refuses a half-state (empty spec_version)', async () => {
+    const { env } = makeR2Stub();
+    await expect(put(env, 'https://example.com/', sampleScorecard('https://example.com/'), '')).rejects.toThrow(
+      /specVersion required/,
+    );
+  });
+
+  test('put refuses a scorecard missing target_url', async () => {
+    const { env } = makeR2Stub();
+    const bad = { ...sampleScorecard('https://example.com/'), target_url: undefined };
+    await expect(put(env, 'https://example.com/', bad, SPEC_VERSION)).rejects.toThrow(/target_url/);
+  });
+
+  test('a write failure never throws to the caller', async () => {
+    const { env } = makeR2Stub({ throwOnPut: true });
+    await expect(
+      put(env, 'https://example.com/', sampleScorecard('https://example.com/'), SPEC_VERSION),
+    ).resolves.toBeUndefined();
+  });
+
+  test('corrupted stored JSON returns null and best-effort deletes', async () => {
+    const url = 'https://example.com/';
+    const key = await keyFor(url, SPEC_VERSION);
+    const { env, deletedKeys } = makeR2Stub({ prefill: { [key]: '{not json' } });
+    expect(await get(env, key)).toBeNull();
+    expect(deletedKeys).toContain(key);
+  });
+
+  test('a schema-corrupted entry (missing scorecard) returns null', async () => {
+    const url = 'https://example.com/';
+    const key = await keyFor(url, SPEC_VERSION);
+    const { env } = makeR2Stub({ prefill: { [key]: { spec_version: SPEC_VERSION, target_url: url } } });
+    expect(await get(env, key)).toBeNull();
+  });
+
+  test('a read failure returns null instead of throwing', async () => {
+    const { env } = makeR2Stub({ throwOnGet: true });
+    expect(await get(env, await keyFor('https://example.com/', SPEC_VERSION))).toBeNull();
+  });
+
+  test('CachedWebAudit type carries target_url + spec_version + scorecard', async () => {
+    const { env } = makeR2Stub();
+    const url = 'https://example.com/';
+    await put(env, url, sampleScorecard(url), SPEC_VERSION);
+    const got = (await get(env, await keyFor(url, SPEC_VERSION))) as CachedWebAudit;
+    expect(got.spec_version).toBe(SPEC_VERSION);
+    expect(got.target_url).toBe(url);
+  });
+});

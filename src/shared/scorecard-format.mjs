@@ -428,6 +428,9 @@ function renderBelowFloorHint(pct, hasIssues) {
  *   titleSuffix?: string,
  *   showBadgePreview?: boolean,
  *   ctaNoteHtml?: string,
+ *   hideBadgeEmbed?: boolean,
+ *   hideReproduce?: boolean,
+ *   hideVersionRow?: boolean,
  * }} [opts]
  * @returns {string} HTML body
  */
@@ -553,8 +556,10 @@ ${renderAuditRows(bonusChecks)}
 
   // Details — every value escaped. tool.* fields are author-controlled
   // (registry editorial), scorecard.* fields come from CLI output that
-  // could carry HTML metacharacters.
-  const detailRows = [`<dt>Version scored</dt><dd>${escHtml(version || '—')}</dd>`];
+  // could carry HTML metacharacters. Web targets pass hideVersionRow (no
+  // binary version to report) and carry no run/target/anc blocks, so the
+  // section collapses to nothing and is omitted below.
+  const detailRows = opts.hideVersionRow ? [] : [`<dt>Version scored</dt><dd>${escHtml(version || '—')}</dd>`];
   const auditDate = formatStartedAt(meta.run?.started_at);
   if (auditDate) detailRows.push(`<dt>Audit date</dt><dd>${escHtml(auditDate)}</dd>`);
   const duration = formatDuration(meta.run?.duration_ms);
@@ -570,20 +575,30 @@ ${renderAuditRows(bonusChecks)}
   if (tool.install) {
     detailRows.push(`<dt>Install</dt><dd><code>${escHtml(tool.install)}</code></dd>`);
   }
-  html += `<section class="scorecard-meta">
+  if (detailRows.length > 0) {
+    html += `<section class="scorecard-meta">
   <h2>Details</h2>
   <dl class="meta-list">
     ${detailRows.join('\n    ')}
   </dl>
 </section>
 `;
+  }
 
-  html += scorecard.badge.eligible
-    ? renderEligibleEmbed(tool, scorecard, opts)
-    : renderBelowFloorHint(pct, topIssues.length > 0);
+  // Badge-embed block. Suppressed for web targets (no embeddable web
+  // badge — KTD-11); CLI callers leave hideBadgeEmbed unset.
+  if (!opts.hideBadgeEmbed) {
+    html += scorecard.badge.eligible
+      ? renderEligibleEmbed(tool, scorecard, opts)
+      : renderBelowFloorHint(pct, topIssues.length > 0);
+  }
 
-  // Reproduce CTA. Prefer the exact recorded invocation when target.kind
-  // is `command`; otherwise synthesize the safe canonical form.
+  // Reproduce CTA. Suppressed for web targets (no `anc audit` reproduce
+  // path); CLI callers leave hideReproduce unset.
+  if (opts.hideReproduce) return html;
+
+  // Prefer the exact recorded invocation when target.kind is `command`;
+  // otherwise synthesize the safe canonical form.
   let reproCommand;
   if (meta.target?.kind === 'command' && typeof meta.run?.invocation === 'string') {
     reproCommand = escHtml(meta.run.invocation);
@@ -617,7 +632,7 @@ ${renderAuditRows(bonusChecks)}
  *
  * @param {object} tool
  * @param {object} scorecard
- * @param {{ version?: string | null, metadata?: object, principleScore?: { met:number,total:number }, baseUrl?: string, header?: string, footer?: string[] }} [opts]
+ * @param {{ version?: string | null, metadata?: object, principleScore?: { met:number,total:number }, baseUrl?: string, header?: string, footer?: string[], hideBadgeEmbed?: boolean, hideReproduce?: boolean, hideVersionRow?: boolean }} [opts]
  * @returns {string} markdown
  */
 export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
@@ -645,25 +660,28 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
   lines.push(`**Principles:** ${principleScore.met}/${principleScore.total} met`);
   lines.push('');
 
-  if (scorecard.badge.eligible) {
-    lines.push('## Embed the badge');
-    lines.push('');
-    lines.push(
-      `This score (${pct}%) clears the [badge floor](${baseUrl}/badge) (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:`,
-    );
-    lines.push('');
-    lines.push('```markdown');
-    lines.push(scorecard.badge.embed_markdown);
-    lines.push('```');
-    lines.push('');
-  } else {
-    const gap = BADGE_ELIGIBILITY_FLOOR_PCT - pct;
-    lines.push('## Embed the badge');
-    lines.push('');
-    lines.push(
-      `The [badge floor](${baseUrl}/badge) is ${BADGE_ELIGIBILITY_FLOOR_PCT}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.`,
-    );
-    lines.push('');
+  // Badge-embed block. Suppressed for web targets (KTD-11).
+  if (!opts.hideBadgeEmbed) {
+    if (scorecard.badge.eligible) {
+      lines.push('## Embed the badge');
+      lines.push('');
+      lines.push(
+        `This score (${pct}%) clears the [badge floor](${baseUrl}/badge) (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:`,
+      );
+      lines.push('');
+      lines.push('```markdown');
+      lines.push(scorecard.badge.embed_markdown);
+      lines.push('```');
+      lines.push('');
+    } else {
+      const gap = BADGE_ELIGIBILITY_FLOOR_PCT - pct;
+      lines.push('## Embed the badge');
+      lines.push('');
+      lines.push(
+        `The [badge floor](${baseUrl}/badge) is ${BADGE_ELIGIBILITY_FLOOR_PCT}%; this scorecard is at ${pct}% (${gap} point${gap === 1 ? '' : 's'} below). Once the score clears the floor, the embed snippet will appear here.`,
+      );
+      lines.push('');
+    }
   }
 
   for (const row of formatAuditTableMarkdownLines(scorecard.results ?? [], { baseUrl })) {
@@ -677,7 +695,7 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
     lines.push(`**Source:** [${tool.url}](${tool.url})`);
   }
   if (tool.language) lines.push(`**Language:** ${tool.language}`);
-  lines.push(`**Version scored:** ${version || '—'}`);
+  if (!opts.hideVersionRow) lines.push(`**Version scored:** ${version || '—'}`);
   const auditDateMd = formatStartedAt(meta.run?.started_at);
   if (auditDateMd) lines.push(`**Audit date:** ${auditDateMd}`);
   const durationMd = formatDuration(meta.run?.duration_ms);
@@ -690,20 +708,24 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
   if (ancBuildMd) lines.push(`**Anc build:** ${ancBuildMd}`);
   if (tool.install) lines.push(`**Install:** \`${tool.install}\``);
 
-  lines.push('');
-  let reproMd;
-  if (meta.target?.kind === 'command' && typeof meta.run?.invocation === 'string') {
-    reproMd = meta.run.invocation;
-  } else {
-    const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
-    reproMd = `anc audit --command ${tool.binary}${profileFlag}`;
+  // Reproduce-locally block. Suppressed for web targets (no `anc audit`
+  // reproduce path); CLI callers leave hideReproduce unset.
+  if (!opts.hideReproduce) {
+    lines.push('');
+    let reproMd;
+    if (meta.target?.kind === 'command' && typeof meta.run?.invocation === 'string') {
+      reproMd = meta.run.invocation;
+    } else {
+      const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
+      reproMd = `anc audit --command ${tool.binary}${profileFlag}`;
+    }
+    lines.push('## Reproduce locally');
+    lines.push('');
+    lines.push('```bash');
+    lines.push(reproMd);
+    lines.push('```');
+    lines.push('');
   }
-  lines.push('## Reproduce locally');
-  lines.push('');
-  lines.push('```bash');
-  lines.push(reproMd);
-  lines.push('```');
-  lines.push('');
 
   if (Array.isArray(opts.footer)) {
     for (const line of opts.footer) lines.push(line);
