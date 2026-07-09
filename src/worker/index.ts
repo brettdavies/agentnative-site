@@ -20,7 +20,7 @@ import {
   type WebAuditRouteEnv,
 } from './audit-web/route';
 import { applyHeaders } from './headers';
-import { MCP_DESCRIPTOR_ALIAS_PATHS } from './mcp/descriptor-paths';
+import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
 import { isScorePath } from './score/content-negotiation';
@@ -136,8 +136,8 @@ function rewriteMcpDescriptorUrls(data: Record<string, unknown>, origin: string)
  * request's origin. Seed: dist/_internal/mcp-server-card.json.
  *
  * Canonical (SEP-1649): GET /.well-known/mcp/server-card.json
- * Aliases (same body):  /.well-known/mcp, /mcp.json, /.well-known/mcp.json
- * Also:                GET /mcp with Accept: application/json
+ * The pointer aliases (/.well-known/mcp, /mcp.json, /.well-known/mcp.json)
+ * and GET /mcp with Accept: application/json 301 to the canonical.
  */
 async function buildMcpDescriptorJsonBody(request: Request, env: Env): Promise<string | null> {
   const seedUrl = new URL(request.url);
@@ -226,6 +226,24 @@ function rewriteApiCatalog(data: Record<string, unknown>, origin: string): void 
   }
 }
 
+/**
+ * 301 a legacy descriptor alias (or `GET /mcp` with a JSON Accept) to
+ * the canonical SEP-1649 card path. Permanent + cacheable: the aliases
+ * are pointers, and the canonical-plus-redirect-aliases audit rule
+ * credits only 301/308.
+ */
+function mcpDescriptorRedirect(request: Request): Response {
+  const origin = new URL(request.url).origin;
+  return new Response(null, {
+    status: 301,
+    headers: {
+      location: `${origin}${MCP_DESCRIPTOR_CANONICAL_PATH}`,
+      'cache-control': MCP_DESCRIPTOR_CACHE,
+      ...DISCOVERY_CORS_HEADERS,
+    },
+  });
+}
+
 function mcpDescriptorJsonResponse(body: string): Response {
   return new Response(body, {
     status: 200,
@@ -287,13 +305,19 @@ export default {
       return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
     }
 
-    // MCP server card (SEP-1649) + legacy pointer aliases — one JSON document
-    // from dist/_internal/mcp-server-card.json, origin-rewritten at serve time.
-    if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
+    // MCP server card (SEP-1649): the canonical path serves the JSON
+    // document from dist/_internal/mcp-server-card.json, origin-rewritten
+    // at serve time; the legacy pointer aliases 301 to it (R9) so one
+    // canonical body exists with no ambiguous duplicates.
+    if (pathname === MCP_DESCRIPTOR_CANONICAL_PATH && request.method !== 'OPTIONS') {
       if (request.method !== 'GET') return discoveryGetOnly405();
       const body = await buildMcpDescriptorJsonBody(request, env);
       if (body === null) return discoveryMetadataUnavailable();
       return mcpDescriptorJsonResponse(body);
+    }
+    if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
+      if (request.method !== 'GET') return discoveryGetOnly405();
+      return mcpDescriptorRedirect(request);
     }
 
     if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
@@ -374,9 +398,9 @@ export default {
     // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
     //
     // GET dispatch:
-    //   - Accept: application/json → MCP server card (canonical + aliases above;
-    //     kill switch; the URL identity documents itself even when the
-    //     JSON-RPC handler is offline).
+    //   - Accept: application/json → 301 to the canonical server-card
+    //     path (the URL identity documents itself even when the JSON-RPC
+    //     handler is offline).
     //   - Accept: text/html or text/markdown → no early return; control
     //     flows past this branch into the asset-first dispatch, which
     //     serves dist/mcp.html (and the .md twin via the standard
@@ -412,9 +436,7 @@ export default {
       if (request.method === 'GET') {
         const getFormat = detectMcpGetFormat(request);
         if (getFormat === 'json') {
-          const body = await buildMcpDescriptorJsonBody(request, env);
-          if (body === null) return discoveryMetadataUnavailable();
-          return mcpDescriptorJsonResponse(body);
+          return mcpDescriptorRedirect(request);
         }
         // 'html' or 'markdown' — control flows past this branch into
         // the asset-first dispatch below. dist/mcp.html ships from

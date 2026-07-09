@@ -9,7 +9,7 @@
 //   dist/.well-known/ai.txt             — agent / AI-access declaration
 //
 // Legacy pointer aliases (/.well-known/mcp, /mcp.json, /.well-known/mcp.json)
-// are Worker-served from the same seed; see src/worker/index.ts.
+// 301 to the canonical path; see src/worker/index.ts.
 //
 // All three lift from streamsgrp's 07-well-known.mjs (anc and streamsgrp
 // converged on the same wire shape during the cross-repo MCP work).
@@ -201,7 +201,7 @@ function buildAuthMd(baseUrl) {
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
     `- MCP server card (SEP-1649): \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
-    `- MCP pointer aliases: \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
+    `- MCP pointer aliases (301 to the server card): \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
     `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
     `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
