@@ -49,10 +49,19 @@ UNIVERSE: dict[str, str] = {
     "llms-txt-scoped": "may", "llms-full-txt-scoped": "may", "schema-org-jsonld": "may",
     "semantic-html": "may", "sitemap": "may", "dns-aid": "may", "web-bot-auth": "may",
     "security-txt": "may", "a2a-agent-card": "may", "agent-skills": "may",
-    "oauth-discovery": "may", "oauth-protected-resource": "may",
+    "oauth-discovery": "may", "oauth-protected-resource": "may", "auth-md": "may", "webmcp": "may",
 }
 
 TIERS = ("must", "should", "may")
+
+
+def round_half_up(x: float) -> int:
+    """Half-up rounding, mirroring the engine's Math.round (Python's
+    built-in round() is banker's rounding; the parity test would diverge
+    on .5 boundaries otherwise)."""
+    import math
+
+    return math.floor(x + 0.5)
 
 
 @dataclass
@@ -91,8 +100,8 @@ class Rows:
                 applicable_max += 0.5 * m.weight[tier]
             else:
                 applicable_max += m.weight[tier]
-        relative = round(100 * earned / applicable_max) if applicable_max else 0
-        global_ = round(100 * earned / m.universe_max())
+        relative = round_half_up(100 * earned / applicable_max) if applicable_max else 0
+        global_ = round_half_up(100 * earned / m.universe_max())
         return {
             "earned": round(earned, 1),
             "relative": max(0, relative),
@@ -116,25 +125,29 @@ def from_buckets(**buckets: int) -> Rows:
 
 
 def from_scorecard(path: str) -> Rows:
-    """Map a committed web scorecard's results[] to outcomes. The current
-    engine can't tell absent from broken, so `fail` maps to `absent`; the
-    tri-state arrives with the refined engine."""
+    """Map a web scorecard's results[] (tri-state statuses) to outcomes.
+    Anything that is not pass/broken/absent (n_a, skip, error) is excluded."""
     data = json.load(open(path))
     items = []
     for row in data.get("results", []):
         tier = row.get("keyword") or UNIVERSE.get(row.get("id"), "may")
         status = row.get("status")
-        if status == "pass":
-            outcome = "pass"
-        elif status == "fail":
-            # MUST/SHOULD fail = absent (counted 0); MAY fail = absent = n_a (excluded).
-            # The old engine can't tell absent from broken, so broken MAYs aren't
-            # penalized here; the tri-state arrives with the refined engine.
-            outcome = "n_a" if tier == "may" else "absent"
-        else:
-            outcome = "n_a"
+        outcome = status if status in ("pass", "broken", "absent") else "n_a"
         items.append((tier, outcome))
     return Rows(items)
+
+
+def from_fixture(path: str) -> tuple[Model, Rows]:
+    """Load the committed parity fixture shared with the engine's scorer
+    (tests/web-audit-two-score.test.ts). The fixture pins weights, the
+    broken factor, an explicit universe_max, and (tier, outcome) rows."""
+    data = json.load(open(path))
+    weights = {t: float(data["weights"][t]) for t in TIERS}
+    model = Model(weight=weights, broken_factor=float(data["broken_factor"]))
+    # Pin the universe to the fixture's explicit denominator.
+    model.universe = {f"u{i}": tier for i, tier in enumerate(data["universe_tiers"])}
+    rows = Rows([(tier, outcome) for tier, outcome in data["rows"]])
+    return model, rows
 
 
 SCENARIOS: dict[str, Rows] = {
@@ -152,7 +165,13 @@ def main() -> int:
     ap.add_argument("--weights", default="5,3,1", help="must,should,may difficulty (default 5,3,1; UNLOCKED)")
     ap.add_argument("--broken", type=float, default=0.75, help="broken penalty factor (default 0.75)")
     ap.add_argument("--scorecard", help="score a committed web scorecard JSON instead of the scenarios")
+    ap.add_argument("--fixture", help="score the shared engine-parity fixture and print JSON")
     args = ap.parse_args()
+
+    if args.fixture:
+        model, rows = from_fixture(args.fixture)
+        print(json.dumps(rows.score(model)))
+        return 0
 
     wm, ws, wy = (float(x) for x in args.weights.split(","))
     model = Model(weight={"must": wm, "should": ws, "may": wy}, broken_factor=args.broken)

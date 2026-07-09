@@ -85,8 +85,11 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     if (w.assert === 'cors') {
       const acao = resp.headers['access-control-allow-origin'] ?? null;
       ev.allow_origin = acao;
-      ok = acao !== null;
-    } else {
+      // A missing Allow-Origin is CORS-not-implemented (absent), matching
+      // the preflight handler; only a malformed response is broken.
+      return { status: acao !== null ? 'pass' : 'absent', evidence: [ev] };
+    }
+    {
       const tools = result.tools as Array<{ name?: string; inputSchema?: unknown }> | undefined;
       ev.tools = Array.isArray(tools) ? tools.map((t) => t.name ?? null) : null;
       ev.with_input_schema = Array.isArray(tools) ? tools.filter((t) => t.inputSchema).length : 0;

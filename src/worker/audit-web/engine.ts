@@ -319,6 +319,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     mcpEndpoint: discovery.endpoint,
     discoveryEvidence: discovery.evidence,
     specVersion: input.specVersion ?? '',
+    registry: input.registry,
   });
   yield { type: 'complete', scorecard, complete: !incomplete };
 }

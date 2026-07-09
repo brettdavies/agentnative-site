@@ -229,7 +229,7 @@ describe('runWebAudit engine', () => {
     const complete = events.find((e) => e.type === 'complete');
     expect(complete?.type).toBe('complete');
     if (complete?.type === 'complete') {
-      expect(typeof complete.scorecard.badge.score_pct).toBe('number');
+      expect(typeof complete.scorecard.score_pct).toBe('number');
     }
   });
 
@@ -253,8 +253,10 @@ describe('runWebAudit engine', () => {
     if (complete?.type !== 'complete') throw new Error('no complete event');
     const sc = complete.scorecard;
     // MUST mcp-initialize (w5) pass + SHOULD llms-txt (w4) pass + SHOULD robots (w2) fail.
-    // MAY dns-aid excluded from the score. got=9, max=11 → 82.
-    expect(sc.badge.score_pct).toBe(82);
+    // MUST +5, SHOULD llms +3, SHOULD robots absent (0 over half weight),
+    // MAY absent → n_a. relative = 8/9.5 → 84; global = 8/(5+3+3+1) → 67.
+    expect(sc.score_pct).toBe(84);
+    expect(sc.score.global).toBe(67);
     expect(sc.results.find((r) => r.id === 'llms-txt')?.group).toBe('P2');
     expect(sc.results.find((r) => r.id === 'robots')?.status).toBe('absent');
     expect(sc.tool.url).toBe('https://example.com/');

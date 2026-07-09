@@ -18,8 +18,17 @@ type WebScorecardShape = {
   spec_version?: string;
   target_url?: string;
   tool?: { name?: string; url?: string };
-  badge?: { score_pct?: number };
+  score_pct?: number;
 };
+
+// The shared renderer reads `badge.score_pct` for the CLI scorecards; the
+// 0.2 web scorecard carries a top-level `score_pct` instead. Adapt at
+// this boundary so the CLI path stays untouched.
+function withBadgeShim<T extends WebScorecardShape>(
+  scorecard: T,
+): T & { badge: { score_pct: number; eligible: false } } {
+  return { ...scorecard, badge: { score_pct: scorecard.score_pct ?? 0, eligible: false } };
+}
 
 export interface WebSummaryInput {
   scorecard: WebScorecardShape;
@@ -37,7 +46,7 @@ function webTool(input: WebSummaryInput): { name: string; url: string } {
 /** HTML body for /web/<domain>, rendered through the shared renderer. */
 export function buildWebSummaryBody(input: WebSummaryInput): string {
   const headerSubline = `Website <a href="${sharedEscHtml(input.targetUrl)}">${sharedEscHtml(input.targetUrl)}</a> · agent-readiness audit`;
-  const body = sharedBuildScorecardBody(webTool(input), input.scorecard, {
+  const body = sharedBuildScorecardBody(webTool(input), withBadgeShim(input.scorecard), {
     breadcrumb: WEB_BREADCRUMB,
     headerSubline,
     hideBadgeEmbed: true,
@@ -56,7 +65,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
 export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   const tool = webTool(input);
   const header = `# ${tool.name} — Agent-Readiness Audit\n\nWebsite: [${input.targetUrl}](${input.targetUrl})`;
-  return sharedBuildScorecardMarkdown(tool, input.scorecard, {
+  return sharedBuildScorecardMarkdown(tool, withBadgeShim(input.scorecard), {
     baseUrl: 'https://anc.dev',
     header,
     hideBadgeEmbed: true,

@@ -21,7 +21,7 @@ export function rankWebEntries(entries) {
   return entries
     .map((e) => ({ ...e, principleScore: computePrincipleScore(e.scorecard) }))
     .sort((a, b) => {
-      const byScore = (b.scorecard.badge?.score_pct ?? 0) - (a.scorecard.badge?.score_pct ?? 0);
+      const byScore = (b.scorecard.score_pct ?? 0) - (a.scorecard.score_pct ?? 0);
       if (byScore !== 0) return byScore;
       const byPrinciples = b.principleScore.met - a.principleScore.met;
       if (byPrinciples !== 0) return byPrinciples;
@@ -50,7 +50,7 @@ export function buildWebLeaderboardBody(entries) {
 
   const rows = ranked
     .map((entry) => {
-      const pct = entry.scorecard.badge?.score_pct ?? 0;
+      const pct = entry.scorecard.score_pct ?? 0;
       const ps = entry.principleScore;
       return `      <tr>
         <td class="lb-rank">${entry.rank}</td>
@@ -115,7 +115,7 @@ export function buildWebLeaderboardMarkdown(entries) {
   }
   lines.push('| # | Site | Score | Principles |', '|---|------|-------|------------|');
   for (const entry of ranked) {
-    const pct = `${entry.scorecard.badge?.score_pct ?? 0}%`;
+    const pct = `${entry.scorecard.score_pct ?? 0}%`;
     const ps = entry.principleScore;
     lines.push(`| ${entry.rank} | [${entry.name}](/web/${entry.domain}) | ${pct} | ${ps.met}/${ps.total} |`);
   }

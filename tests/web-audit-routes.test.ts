@@ -243,7 +243,7 @@ describe('handleWebAudit streaming', () => {
     const cached = {
       spec_version: SPEC_VERSION,
       target_url: url,
-      scorecard: { schema_version: '0.1', target_url: url, badge: { score_pct: 77 }, results: [] },
+      scorecard: { schema_version: '0.2', target_url: url, score_pct: 77, results: [] },
     };
     const { bucket } = makeR2({ [key]: cached });
     const env = makeEnv({ SCORE_CACHE: bucket });
@@ -256,10 +256,10 @@ describe('handleWebAudit streaming', () => {
     const body = (await resp.json()) as {
       cached: boolean;
       share_url: string;
-      scorecard: { badge: { score_pct: number } };
+      scorecard: { score_pct: number };
     };
     expect(body.cached).toBe(true);
-    expect(body.scorecard.badge.score_pct).toBe(77);
+    expect(body.scorecard.score_pct).toBe(77);
     expect(body.share_url).toBe('/web/example.com');
   });
 });
@@ -290,18 +290,19 @@ describe('handleWebResultPage', () => {
         spec_version: SPEC_VERSION,
         target_url: url,
         scorecard: {
-          schema_version: '0.1',
+          schema_version: '0.2',
           spec_version: SPEC_VERSION,
           target_url: url,
           tool: { name: new URL(url).host, url },
-          badge: { score_pct: pct, eligible: false },
+          score_pct: pct,
+          score: { relative: pct, global: pct },
           coverage_summary: {
             must: { total: 1, verified: 1 },
             should: { total: 2, verified: 1 },
             may: { total: 0, verified: 0 },
           },
           results: [{ id: 'llms-txt', label: 'llms.txt', group: 'P2', status: 'pass', evidence: null }],
-          summary: { pass: 1, fail: 0, n_a: 0, skip: 0, error: 0 },
+          summary: { pass: 1, broken: 0, absent: 0, n_a: 0, skip: 0, error: 0 },
         },
       },
     };

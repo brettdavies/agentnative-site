@@ -21,8 +21,8 @@ interface CheckEvent {
 type StreamEvent =
   | { type: 'discovery'; mcp_endpoint: string | null }
   | CheckEvent
-  | { type: 'complete'; scorecard: { badge?: { score_pct?: number } }; share_url: string }
-  | { type: 'incomplete'; scorecard: { badge?: { score_pct?: number } }; share_url: null }
+  | { type: 'complete'; scorecard: { score_pct?: number }; share_url: string }
+  | { type: 'incomplete'; scorecard: { score_pct?: number }; share_url: null }
   | { type: 'error'; message: string };
 
 function q<T extends Element>(root: ParentNode, sel: string): T | null {
@@ -88,9 +88,9 @@ function init(): void {
     } else if (ev.type === 'check') {
       renderCheck(ev);
     } else if (ev.type === 'complete') {
-      finish(ev.share_url, ev.scorecard?.badge?.score_pct, true);
+      finish(ev.share_url, ev.scorecard?.score_pct, true);
     } else if (ev.type === 'incomplete') {
-      finish(null, ev.scorecard?.badge?.score_pct, false);
+      finish(null, ev.scorecard?.score_pct, false);
     } else if (ev.type === 'error') {
       setStatus(`Audit error: ${ev.message}`);
       submit.disabled = false;
@@ -128,7 +128,7 @@ function init(): void {
     if (contentType.includes('application/json')) {
       const body = (await resp.json()) as {
         cached?: boolean;
-        scorecard?: { badge?: { score_pct?: number } };
+        scorecard?: { score_pct?: number };
         share_url?: string;
         error?: string;
         message?: string;
@@ -138,7 +138,7 @@ function init(): void {
         submit.disabled = false;
         return;
       }
-      finish(body.share_url ?? null, body.scorecard?.badge?.score_pct, true);
+      finish(body.share_url ?? null, body.scorecard?.score_pct, true);
       return;
     }
 

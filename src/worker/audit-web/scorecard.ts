@@ -1,16 +1,17 @@
-// Map engine results into an anc scorecard (plan U5, KTD-4/KTD-5).
+// Map engine results into the web scorecard (plan U5, reshaped per
+// plan-003 U4/KTD-8).
 //
-// The web audit re-expresses its results in anc vernacular so the shared
-// presentation (src/shared/scorecard-format.mjs) consumes them unchanged:
-// each result row carries `group` = the check's principle (P1..P8),
-// `status` in the site's vocabulary, `label` = check title, and a compact
-// `evidence` string. Because the shared renderer reads `badge.score_pct`
-// straight from the JSON and never computes it, this module computes the
-// headline percentage itself via a site-owned MUST+SHOULD credit-weighting
-// (MAY informational only) — not a port of the skill's A-F grade.
+// Schema 0.2: the headline is a top-level `score_pct` (the RELATIVE
+// score) beside a `score { relative, global }` pair and per-category
+// `categories[]` rollups; there is no badge (no embeddable web badge).
+// Each result row carries its visible `category` plus `principle` as a
+// hidden tag (kept for internal revisits, never shown or linked on web
+// surfaces). `group` mirrors `principle` for the interim shared-renderer
+// path; the category-grouped web renderer replaces that consumer.
 
 import type { EvidenceItem } from './handlers/types';
-import type { WebCheckKeyword, WebCheckTier } from './registry';
+import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier } from './registry';
+import { type CategoryRollup, categoryRollups, type ScoreConfig, scoreWebAudit, universeMaxOf } from './score';
 
 /**
  * Web scorecard status vocabulary (tri-state outcome model): `absent`
@@ -45,10 +46,14 @@ export interface EngineResult {
 export interface WebScorecardResultRow {
   id: string;
   label: string;
+  category: string;
   group: string;
   layer: 'web';
   keyword: WebCheckKeyword;
+  tier: WebCheckTier;
+  principle: string;
   status: ScorecardStatus;
+  na_reason?: NaReason;
   evidence: string | null;
 }
 
@@ -68,33 +73,17 @@ export interface WebScorecard {
   audit_profile: null;
   summary: Record<ScorecardStatus, number>;
   coverage_summary: { must: WebCoverageLevel; should: WebCoverageLevel; may: WebCoverageLevel };
-  badge: { score_pct: number; eligible: boolean };
+  score_pct: number;
+  score: { relative: number; global: number };
+  categories: CategoryRollup[];
   results: WebScorecardResultRow[];
 }
 
-// Web scorecard schema starting version, independent of the CLI schema
-// (0.7) and of agentnative-spec. Documented in content/web-scorecard-schema.md.
-export const WEB_SCHEMA_VERSION = '0.1';
+// Web scorecard schema version, independent of the CLI schema (0.7) and
+// of agentnative-spec. Documented in content/web-scorecard-schema.md.
+export const WEB_SCHEMA_VERSION = '0.2';
 
-const SCORED_KEYWORDS = new Set<WebCheckKeyword>(['must', 'should']);
 const SCORED_STATUSES = new Set<ScorecardStatus>(['pass', 'broken', 'absent']);
-
-/**
- * Site-owned headline score: credit-weighted over MUST + SHOULD checks
- * whose status is a clean pass/fail (n_a / skip / error excluded). MAY
- * checks are informational and never counted. Returns 0 (not null) when
- * nothing is scoreable — the shared renderer reads a number.
- */
-export function computeWebScorePct(results: EngineResult[]): number {
-  let got = 0;
-  let max = 0;
-  for (const r of results) {
-    if (!SCORED_KEYWORDS.has(r.keyword) || !SCORED_STATUSES.has(r.status)) continue;
-    max += r.weight;
-    if (r.status === 'pass') got += r.weight;
-  }
-  return max === 0 ? 0 : Math.round((100 * got) / max);
-}
 
 function coverageLevel(results: EngineResult[], keyword: WebCheckKeyword): WebCoverageLevel {
   let total = 0;
@@ -118,6 +107,8 @@ export interface WebScorecardMeta {
   mcpEndpoint: string | null;
   discoveryEvidence: EvidenceItem[];
   specVersion: string;
+  registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
+  scoreConfig?: ScoreConfig;
 }
 
 export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMeta): WebScorecard {
@@ -128,13 +119,20 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     rows.push({
       id: r.id,
       label: r.title,
+      category: r.category,
       group: r.principle,
       layer: 'web',
       keyword: r.keyword,
+      tier: r.tier,
+      principle: r.principle,
       status: r.status,
+      ...(r.na_reason !== undefined ? { na_reason: r.na_reason } : {}),
       evidence: r.evidence === '' ? null : r.evidence,
     });
   }
+
+  const universeMax = universeMaxOf(meta.registry.checks, meta.scoreConfig);
+  const score = scoreWebAudit(results, universeMax, meta.scoreConfig);
 
   return {
     schema_version: WEB_SCHEMA_VERSION,
@@ -151,7 +149,9 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
       should: coverageLevel(results, 'should'),
       may: coverageLevel(results, 'may'),
     },
-    badge: { score_pct: computeWebScorePct(results), eligible: false },
+    score_pct: score.relative,
+    score: { relative: score.relative, global: score.global },
+    categories: categoryRollups(results, meta.registry.category_order, meta.registry.categories),
     results: rows,
   };
 }

@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
-import { buildWebScorecard, computeWebScorePct, type EngineResult } from '../src/worker/audit-web/scorecard';
+import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
@@ -219,45 +219,13 @@ function row(partial: Partial<EngineResult>): EngineResult {
   };
 }
 
-describe('computeWebScorePct', () => {
-  test('credits MUST + SHOULD passes, excludes MAY and n_a', () => {
-    const rows: EngineResult[] = [
-      row({ keyword: 'must', weight: 5, status: 'pass' }),
-      row({ keyword: 'must', weight: 5, status: 'pass' }),
-      row({ keyword: 'should', weight: 2, status: 'absent' }),
-      row({ keyword: 'may', weight: 3, status: 'broken' }),
-      row({ keyword: 'must', weight: 4, status: 'n_a' }),
-    ];
-    expect(computeWebScorePct(rows)).toBe(83);
-  });
-
-  test('all applicable pass yields 100', () => {
-    const rows: EngineResult[] = [
-      row({ keyword: 'must', weight: 1, status: 'pass' }),
-      row({ keyword: 'should', weight: 1, status: 'pass' }),
-    ];
-    expect(computeWebScorePct(rows)).toBe(100);
-  });
-
-  test('no applicable MUST/SHOULD checks yields 0 (never null; renderer reads a number)', () => {
-    const rows: EngineResult[] = [
-      row({ keyword: 'must', weight: 5, status: 'n_a' }),
-      row({ keyword: 'may', weight: 2, status: 'broken' }),
-    ];
-    expect(computeWebScorePct(rows)).toBe(0);
-  });
-
-  test('skip and error statuses are excluded from the denominator', () => {
-    const rows: EngineResult[] = [
-      row({ keyword: 'must', weight: 2, status: 'pass' }),
-      row({ keyword: 'should', weight: 2, status: 'skip' }),
-      row({ keyword: 'should', weight: 2, status: 'error' }),
-    ];
-    expect(computeWebScorePct(rows)).toBe(100);
-  });
-});
-
 describe('buildWebScorecard', () => {
+  const registry = {
+    category_order: ['content-for-agents'],
+    categories: { 'content-for-agents': 'Content for agents' },
+    checks: [{ keyword: 'must' }, { keyword: 'should' }, { keyword: 'should' }, { keyword: 'may' }] as never,
+  };
+
   const rows: EngineResult[] = [
     row({ id: 'mcp-initialize', principle: 'P2', keyword: 'must', weight: 5, status: 'pass', title: 'init' }),
     row({ id: 'llms-txt', principle: 'P2', keyword: 'should', weight: 4, status: 'pass', title: 'llms' }),
@@ -265,21 +233,23 @@ describe('buildWebScorecard', () => {
     row({ id: 'dns-aid', principle: 'P8', keyword: 'may', weight: 1, status: 'broken', title: 'dns' }),
   ];
 
-  test('produces a CLI-isomorphic shape: badge.score_pct, results[], coverage_summary, tool', () => {
+  test('produces the 0.2 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
     const sc = buildWebScorecard(rows, {
       targetUrl: 'https://example.com/',
       domain: 'example.com',
       mcpEndpoint: 'https://example.com/mcp',
       discoveryEvidence: [],
       specVersion: '0.3.0',
+      registry,
     });
-    expect(sc.schema_version).toBe('0.1');
+    expect(sc.schema_version).toBe('0.2');
     expect(sc.spec_version).toBe('0.3.0');
     expect(sc.tool).toEqual({ name: 'example.com', url: 'https://example.com/' });
     expect(sc.target_url).toBe('https://example.com/');
     expect(sc.mcp_endpoint).toBe('https://example.com/mcp');
-    expect(sc.badge.score_pct).toBe(82);
-    expect(sc.badge.eligible).toBe(false);
+    // earned = 5 + 3 + 0 - 0.75; relative denominator = 5 + 3 + 1.5 + 1.
+    expect(sc.score_pct).toBe(69);
+    expect(sc.score).toEqual({ relative: 69, global: 60 });
     expect(sc.results.length).toBe(4);
     expect(sc.results.every((r) => /^P[1-8]$/.test(r.group))).toBe(true);
     expect(sc.coverage_summary.must.total).toBe(1);
@@ -291,7 +261,14 @@ describe('buildWebScorecard', () => {
   test('n_a rows are excluded from coverage totals', () => {
     const sc = buildWebScorecard(
       [row({ keyword: 'must', status: 'n_a' }), row({ keyword: 'should', status: 'pass' })],
-      { targetUrl: 'https://x.dev/', domain: 'x.dev', mcpEndpoint: null, discoveryEvidence: [], specVersion: '0.3.0' },
+      {
+        targetUrl: 'https://x.dev/',
+        domain: 'x.dev',
+        mcpEndpoint: null,
+        discoveryEvidence: [],
+        specVersion: '0.3.0',
+        registry,
+      },
     );
     expect(sc.coverage_summary.must.total).toBe(0);
     expect(sc.coverage_summary.should.total).toBe(1);
@@ -304,6 +281,7 @@ describe('buildWebScorecard', () => {
       mcpEndpoint: null,
       discoveryEvidence: [],
       specVersion: '0.3.0',
+      registry,
     });
     expect(sc.summary.pass).toBe(2);
     expect(sc.summary.absent).toBe(1);

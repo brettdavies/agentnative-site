@@ -306,7 +306,7 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
 
   const scorecard = hit.scorecard as {
     tool?: { name?: string; url?: string };
-    badge?: { score_pct?: number };
+    score_pct?: number;
   };
   const input = {
     scorecard: scorecard as never,
@@ -318,7 +318,7 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     return new Response(buildWebSummaryMarkdown(input), { status: 200, headers: MARKDOWN_HEADERS });
   }
 
-  const pct = scorecard.badge?.score_pct ?? 0;
+  const pct = scorecard.score_pct ?? 0;
   const title = `${match.domain} — Agent-Readiness Audit`;
   const description = `${match.domain} scored ${pct}% for agent-readiness against the agentnative web audit (spec ${SPEC_VERSION}).`;
   let template: string;

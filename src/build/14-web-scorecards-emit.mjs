@@ -47,10 +47,8 @@ export async function loadWebSeed(seedPath, scorecardsWebDir) {
       );
       continue;
     }
-    if (typeof scorecard?.badge?.score_pct !== 'number' || typeof scorecard?.target_url !== 'string') {
-      warnings.push(
-        `web seed "${entry.domain}" scorecard is malformed (missing badge.score_pct or target_url) — excluded`,
-      );
+    if (typeof scorecard?.score_pct !== 'number' || typeof scorecard?.target_url !== 'string') {
+      warnings.push(`web seed "${entry.domain}" scorecard is malformed (missing score_pct or target_url) — excluded`);
       continue;
     }
     loaded.push({
@@ -90,7 +88,7 @@ export async function emitWebScorecardSurface({ distDir, seedPath, scorecardsWeb
       url: entry.url,
       name: entry.name,
       description: entry.description,
-      score_pct: entry.scorecard.badge.score_pct,
+      score_pct: entry.scorecard.score_pct,
     });
   }
   await writeFile(join(distDir, '_internal', 'web-scorecards', 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
