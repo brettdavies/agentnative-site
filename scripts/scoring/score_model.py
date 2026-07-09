@@ -97,10 +97,15 @@ class Rows:
 
 def from_buckets(**buckets: int) -> Rows:
     """Build rows from per-tier bucket counts, e.g.
-    from_buckets(must_pass=3, should_pass=15, may_pass=10, may_absent=6)."""
+    from_buckets(must_pass=3, should_pass=15, may_pass=10, may_absent=6).
+
+    MAY is truly optional: an absent MAY is n_a (excluded), never a 0. Only
+    MUST/SHOULD absence counts as a 0. Present-but-broken counts at every tier."""
     items: list[tuple[str, str]] = []
     for tier in TIERS:
         for outcome in ("pass", "absent", "broken"):
+            if tier == "may" and outcome == "absent":
+                continue  # MAY absent -> n_a, excluded
             items += [(tier, outcome)] * buckets.get(f"{tier}_{outcome}", 0)
     return Rows(items)
 
@@ -110,11 +115,20 @@ def from_scorecard(path: str) -> Rows:
     engine can't tell absent from broken, so `fail` maps to `absent`; the
     tri-state arrives with the refined engine."""
     data = json.load(open(path))
-    status_to_outcome = {"pass": "pass", "fail": "absent", "n_a": "n_a", "skip": "n_a", "error": "n_a"}
     items = []
     for row in data.get("results", []):
         tier = row.get("keyword") or UNIVERSE.get(row.get("id"), "may")
-        items.append((tier, status_to_outcome.get(row.get("status"), "n_a")))
+        status = row.get("status")
+        if status == "pass":
+            outcome = "pass"
+        elif status == "fail":
+            # MUST/SHOULD fail = absent (counted 0); MAY fail = absent = n_a (excluded).
+            # The old engine can't tell absent from broken, so broken MAYs aren't
+            # penalized here; the tri-state arrives with the refined engine.
+            outcome = "n_a" if tier == "may" else "absent"
+        else:
+            outcome = "n_a"
+        items.append((tier, outcome))
     return Rows(items)
 
 

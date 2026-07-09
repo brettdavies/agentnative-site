@@ -26,38 +26,33 @@ MCP plumbing are unchanged except where noted.
 
 ## Score + display model
 
-Mirror the binary (`anc`) scoring so the web audit and the CLI audit read the same. Per methodology "How a score is
-computed": the denominator is every audit with status `pass`/`warn`/`fail`/`opt_out`; a `pass` earns 1.0, a `warn` 0.5,
-a `fail`/`opt_out` 0.0; `n_a` / `skip` / `error` drop out of both.
+Two scores, both from the same per-check outcomes. **RELATIVE is the headline** — how agent-ready you are for a site of
+your type; a site perfect for its type approaches 100. **GLOBAL is context** — absolute agent capability, so exposing
+and nailing more surfaces ranks higher (4/5 MUSTs beats 2/2 MUSTs). A dev tool models both and is tuned against real
+audit data: `scripts/scoring/score_model.py` (guarded from main).
 
-```text
-score = round(100 * (pass + 0.5*warn) / (pass + warn + fail + opt_out))
-```
+Outcome scale per applicable check, difficulty-weighted (per-tier point values UNLOCKED pending real anc100 data):
 
-The tier sets the severity of a **miss**, not the credit of a hit: a met requirement of any tier is a full-credit
-`pass`.
+| Tier   | Present + valid | Present + broken | Absent         |
+| ------ | --------------- | ---------------- | -------------- |
+| MUST   | +weight         | -0.75 x weight   | 0 (counted)    |
+| SHOULD | +weight         | -0.75 x weight   | 0 (counted)    |
+| MAY    | +weight         | -0.75 x weight   | n_a (excluded) |
 
-| Tier   | Met (present + valid) | Not met (absent or broken) |
-| ------ | --------------------- | -------------------------- |
-| MUST   | pass (1.0)            | fail (0.0)                 |
-| SHOULD | pass (1.0)            | warn (0.5)                 |
-| MAY    | pass (1.0)            | warn (0.5)                 |
+`n_a` is null (antecedent unmet, off both scores). Absent is `0` for MUST/SHOULD (you were expected to ship it) but
+`n_a` for MAY (truly optional; skipping never counts against you). Broken is `-0.75 x weight` at every tier (a malformed
+surface misleads agents, so it costs more than absence). No partial/warn credit.
 
-Plus `n_a` when the antecedent is absent (excluded from numerator and denominator). This reuses the shared scorer with
-no bespoke math, and is the proposed default.
-
-It drops two ideas from earlier in this chat, now flagged as opt-in deviations (see Open items):
-
-- **MAY-absent as `n_a`** (truly optional, excluded) instead of `warn` (0.5). The binary counts a missed applicable MAY
-  as `warn`, so skipping it costs half a slot; the deviation makes skipping a MAY free.
-- **Broken harder than absent** — split "present-but-invalid" into a `fail` even for SHOULD/MAY. The binary scores a
-  broken SHOULD/MAY the same as a missing one (`warn`); the deviation says a malformed surface that misleads agents
-  should cost more than an absent one.
-
-- **Engine's job**: map each applicable check to `pass` / `warn` / `fail` / `n_a`. The absent-vs-present-but-invalid
-  distinction is only needed if the second deviation is adopted; the binary model does not require it.
-- **Per-category rollups**: each visible category shows `met / counted` (CF's `4/4`), where `counted` is the denominator
-  (applicable, non-`n_a` checks).
+- **earned** = the sum over applicable checks of `weight(tier) x credit(outcome)`.
+- **RELATIVE** = `earned / (max if every applicable check passed)`, so a site perfect for its type approaches 100.
+- **GLOBAL** = `earned / (max of a maximally agent-ready site)`, so more exposed-and-nailed surfaces raise the ceiling.
+- **Difficulty weights** (the per-tier point values) are decided after real anc100 data (n=1 today); the tool defaults
+  to 5/3/1.
+- **Leaderboard sort** is open: RELATIVE lets a small perfect site top a big mostly-perfect one, while GLOBAL honors
+  "bigger routine ranks higher." Likely split: result-page headline = RELATIVE, leaderboard sort = GLOBAL (Open items).
+- **Engine's job**: map each applicable check to `pass` / `broken` / `absent` / `n_a` — the absent-vs-broken distinction
+  is now required.
+- **Per-category rollups**: each visible category shows `passed / counted` (CF's `4/4`), where `counted` excludes `n_a`.
 - **No global grade/level** by default. (CF shows "Level 5 / Agent-Native"; we can add a named tier later if wanted —
   flagged open.)
 - **Per check on the page**: **Goal** (always) · **Result** (always, human line derived from status+evidence) · **Fix**
@@ -80,14 +75,14 @@ Mapped from the existing internal `category` field. Redline names/membership fre
 Declared site type (default: **run everything**); MCP presence is auto-detected from discovery, so the MCP surface is
 always evaluated when found regardless of declared type.
 
-| Site type       | Intent                                            |
-| --------------- | ------------------------------------------------- |
-| Content         | Blog / docs / marketing; no API or app surface    |
-| API/Application | Ships a REST API and/or an interactive app        |
-| MCP server      | Publishes an MCP server (also auto-detected)      |
-| Commerce        | Agentic-commerce surface (future; see Open items) |
+| Site type       | Intent                                         |
+| --------------- | ---------------------------------------------- |
+| Content         | Blog / docs / marketing; no API or app surface |
+| API/Application | Ships a REST API and/or an interactive app     |
 
-A check that doesn't apply to the declared site type is `n/a` (excluded from score), shown as informational.
+Two declared types only (Commerce is out of scope). MCP presence is auto-detected from discovery, so the MCP surface is
+always evaluated when found regardless of the declared type. A check that doesn't apply to the declared type is `n_a`
+(excluded from score), shown as informational.
 
 ## Conditional rules (reusable types)
 
@@ -174,8 +169,9 @@ light extra signal (a link scan of the already-fetched root HTML).
 canonical-plus-redirect-aliases rule (below) to the MCP card; `scoped-discovery` enumerates subdir `llms.txt` candidates
 (see Open items).
 
-**Candidate additions from the CF set (not in our 32; decide per row):** `auth-md` (Auth.md metadata), `webmcp` (browser
-WebMCP tools), and the Commerce set (`x402`, `mpp`, `ucp`, `acp`) as an informational Commerce category.
+**Two checks added from the CF set** (need new handlers/registry rows + remediation docs): `auth-md` (agent-registration
+metadata, category Agent discovery & auth, MAY, antecedent `auth-present`) and `webmcp` (browser WebMCP tools, category
+MCP & API, MAY, antecedent `html-root`). The Commerce set (`x402`, `mpp`, `ucp`, `acp`) is out of scope.
 
 ## Remediation format
 
@@ -294,12 +290,13 @@ evidence.
 
 ## Open items to confirm
 
-- **Scoring deviations from the binary** (default is to mirror the binary exactly): (a) score a missed applicable MAY as
-  `n_a` (excluded) instead of `warn` (0.5); (b) score a present-but-broken SHOULD/MAY as a `fail` instead of `warn`, so
-  a malformed surface costs more than an absent one. Adopt either, both, or neither.
+- **Difficulty weights** (per-tier point values) — locked after real anc100 audit data (n=1 today); tune with
+  `scripts/scoring/score_model.py --weights`.
+- **Leaderboard sort key**: RELATIVE (a small perfect site can top a big mostly-perfect one) vs GLOBAL (bigger routine
+  ranks higher, honoring 4/5 MUSTs > 2/2). Proposed: result-page headline = RELATIVE, leaderboard sort = GLOBAL.
+- **Universal MUSTs**: whether any check is required of every site with no antecedent. Open recommendation: none, or
+  robots.txt only; llms.txt stays SHOULD (too nascent to mandate without harming uptake).
 - Category names + membership (the two tables above).
-- Site-type set; whether to add the Commerce category and the CF candidate checks (`auth-md`, `webmcp`, `x402`, `mpp`,
-  `ucp`, `acp`).
 - Whether to add a named overall tier/level (CF's "Level 5 / Agent-Native").
 - Whether `.well-known/agent-skills/` also gets a human-readable `index.md`.
 - Drop vs `301` for the root `/mcp.json` alias.
