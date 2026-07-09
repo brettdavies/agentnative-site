@@ -208,12 +208,12 @@ describe('MCP handshake', () => {
 });
 
 describe('MCP instructions string (drift gate per KTD-8)', () => {
-  test('instructions carries the nine literal numeric facts', async () => {
+  test('instructions carries the literal numeric facts', async () => {
     const env = makeEnv();
     const result = await initialize(env);
     const instructions = result.result?.instructions ?? '';
     expect(instructions.length).toBeGreaterThan(0);
-    expect(instructions).toContain('9 tools');
+    expect(instructions).toContain('13 tools');
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');

@@ -111,7 +111,7 @@ test.describe('staging /mcp — handshake', () => {
     });
     const body = (await res.json()) as JsonRpcBody;
     const instructions = body.result?.instructions ?? '';
-    expect(instructions).toContain('9 tools');
+    expect(instructions).toContain('13 tools');
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
@@ -121,7 +121,7 @@ test.describe('staging /mcp — handshake', () => {
 });
 
 test.describe('staging /mcp — tools/list', () => {
-  test('returns exactly nine tools in the expected order', async ({ request }) => {
+  test('returns exactly thirteen tools in the expected order', async ({ request }) => {
     await request.post(`${STAGING_BASE}/mcp`, {
       headers: MCP_HEADERS,
       data: JSON.stringify({
@@ -148,6 +148,10 @@ test.describe('staging /mcp — tools/list', () => {
       'get_spec_section',
       'get_scorecard',
       'score_cli',
+      'get_website_audit',
+      'audit_website',
+      'list_website_audits',
+      'get_web_remediation',
     ]);
   });
 

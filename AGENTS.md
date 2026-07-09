@@ -85,36 +85,42 @@ how it fails.
 `documentation` field is the client-skill `.md` URL; `initialize.instructions` carries the same pointer plus a
 session-time summary.
 
-**Nine tools, five resources.** Tools cover four surfaces:
+**Thirteen tools, five resources.** Tools cover five surfaces:
 
 - Registry: `list_tools`, `get_tool`, `search_tools`
 - Principles: `list_principles`, `get_principle`
 - Spec: `list_spec_sections`, `get_spec_section`
 - Scorecards: `get_scorecard` (cache read), `score_cli` (cache-miss audit)
+- Web audits: `get_website_audit` (cache read), `audit_website` (fresh audit), `list_website_audits` (curated web
+  board), `get_web_remediation` (per-check fix)
 
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
 
-**Two rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
+**Three rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
-audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. Missing IP returns `-32099` rather than
-consuming a shared bucket, because container-run cost is non-trivial. The hourly window is enforced in two layers: the
-CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and an
-application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the
-hourly ceiling.
+audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `WEB_AUDIT_LIMITER` gates
+`audit_website` fresh audits identically (5 per 60 minutes per IP, no anon fallback), shared with the `/api/audit-web`
+webapp route so one IP can't double its budget across surfaces. Missing IP returns `-32099` rather than consuming a
+shared bucket, because the audit cost is non-trivial. The hourly window is enforced in two layers: the CF Rate Limiting
+binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and an application-side
+KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` / `web_audit:<ip>:<hour_bucket>`, 2-hour TTL)
+enforces the hourly ceiling.
 
 **Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
 a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; `score_cli` is the metered one. The two
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Two kill switches, surgical and zero-deploy.** Both default `"false"` in production and `"true"` in staging. Flip via
+**Three kill switches, surgical and zero-deploy.** Default `"false"` in production and `"true"` in staging. Flip via
 `wrangler secret put`.
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
 - `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
   `next_tool: get_scorecard` redirect; the read tier stays alive.
+- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the `/api/audit-web` route). Falsy returns `audited:
+  false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
