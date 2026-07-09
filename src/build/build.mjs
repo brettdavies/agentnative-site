@@ -255,7 +255,17 @@ export async function build() {
   // live-score pages) so they stay out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', '/badge', '/web', '/web-audit', ...scorecardPaths],
+    extraPaths: [
+      '/scorecards',
+      '/coverage',
+      '/install',
+      '/skill',
+      '/badge',
+      '/web',
+      '/web-audit',
+      '/web-scorecard-schema',
+      ...scorecardPaths,
+    ],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 

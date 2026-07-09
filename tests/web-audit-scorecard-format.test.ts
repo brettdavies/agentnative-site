@@ -8,6 +8,7 @@ import {
   buildWebLeaderboardMarkdown,
   rankWebEntries,
 } from '../src/build/web-leaderboard-render.mjs';
+import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
@@ -133,5 +134,86 @@ describe('web leaderboard (U10)', () => {
 
   test('the CLI leaderboard hero is not present on the web board', () => {
     expect(buildWebLeaderboardBody(entries)).toContain('Web Agent-Readiness Leaderboard');
+  });
+});
+
+// U14: the web scorecard schema doc (content/web-scorecard-schema.md) is the
+// published contract. Pin an engine-produced scorecard to the documented
+// top-level fields so engine output cannot silently drift from the doc.
+describe('web scorecard conforms to the documented schema (U14)', () => {
+  function engineRow(partial: Partial<EngineResult>): EngineResult {
+    return {
+      id: 'llms-txt',
+      title: 'llms.txt',
+      principle: 'P2',
+      keyword: 'should',
+      tier: 'recommended',
+      category: 'content-surface',
+      weight: 4,
+      status: 'pass',
+      evidence: 'https://example.com/llms.txt -> 200',
+      raw_evidence: [],
+      ...partial,
+    };
+  }
+
+  const produced = buildWebScorecard(
+    [engineRow({ keyword: 'must', tier: 'required', status: 'pass' }), engineRow({ status: 'fail' })],
+    {
+      targetUrl: 'https://example.com/',
+      domain: 'example.com',
+      mcpEndpoint: 'https://example.com/mcp',
+      discoveryEvidence: [{ source: '/mcp', probed: 'initialize' }],
+      specVersion: SPEC_VERSION,
+    },
+  );
+
+  const DOCUMENTED_TOP_LEVEL = [
+    'schema_version',
+    'spec_version',
+    'target_url',
+    'mcp_endpoint',
+    'mcp_discovery',
+    'tool',
+    'audience',
+    'audit_profile',
+    'summary',
+    'coverage_summary',
+    'badge',
+    'results',
+  ];
+
+  test('carries exactly the documented top-level fields', () => {
+    expect(Object.keys(produced).sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+  });
+
+  test('schema_version is the site-owned 0.1, independent of the CLI schema', () => {
+    expect(produced.schema_version).toBe('0.1');
+  });
+
+  test('the web tool shape is { name, url } with no CLI fields', () => {
+    expect(Object.keys(produced.tool).sort()).toEqual(['name', 'url']);
+    expect((produced.tool as Record<string, unknown>).binary).toBeUndefined();
+    expect((produced.tool as Record<string, unknown>).install).toBeUndefined();
+  });
+
+  test('badge carries score_pct and a non-eligible flag (no web badge)', () => {
+    expect(typeof produced.badge.score_pct).toBe('number');
+    expect(produced.badge.eligible).toBe(false);
+  });
+
+  test('every result row carries the documented fields', () => {
+    for (const row of produced.results) {
+      expect(Object.keys(row).sort()).toEqual(
+        ['evidence', 'group', 'id', 'keyword', 'label', 'layer', 'status'].sort(),
+      );
+      expect(row.layer).toBe('web');
+    }
+  });
+
+  test('a scorecard missing a documented required field fails conformance loudly', () => {
+    const broken = { ...produced } as Record<string, unknown>;
+    delete broken.badge;
+    expect(Object.keys(broken).sort()).not.toEqual([...DOCUMENTED_TOP_LEVEL].sort());
   });
 });

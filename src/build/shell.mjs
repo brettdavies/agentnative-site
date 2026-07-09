@@ -330,6 +330,8 @@ ${SOURCE_REPOS.map(
         <span> · </span>
         <a href="/scorecard-schema">Scorecard schema</a>
         <span> · </span>
+        <a href="/web-scorecard-schema">Web scorecard schema</a>
+        <span> · </span>
         <a href="/llms.txt">llms.txt</a>
         <span> · </span>
         <a href="/llms-full.txt">llms-full.txt</a>
