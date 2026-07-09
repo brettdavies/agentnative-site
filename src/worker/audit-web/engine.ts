@@ -24,7 +24,7 @@ import type { ProbeResponse } from './assert';
 import { discoverMcpEndpoint } from './discovery';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
-import { runHttp } from './handlers/http';
+import { runCanonicalRedirect, runHttp } from './handlers/http';
 import { runMcp } from './handlers/mcp';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
@@ -238,7 +238,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
       return { check, outcome: null, result: skipResult(check) };
     }
     try {
-      const handler = HANDLERS[check.handler];
+      const handler = check.eval === 'canonical-redirect' ? runCanonicalRedirect : HANDLERS[check.handler];
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
       return { check, outcome, result: toResult(check, outcome) };

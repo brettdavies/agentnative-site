@@ -3,7 +3,7 @@
 // headers under the check's timeout, and evaluates via assertHttp.
 // Every fetch flows through the SSRF guard.
 
-import { assertHttp, type ExpectBlock } from '../assert';
+import { assertHttp, classifyAliasProbe, type ExpectBlock } from '../assert';
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
 import { resolveUrl, substituteEndpoint, timeoutMsFor } from './shared';
@@ -77,5 +77,56 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
   // Across path_any candidates: any broken outranks absent (something is
   // there and wrong); a definitive absence outranks an operational error.
   const status = misses.includes('broken') ? 'broken' : misses.includes('absent') ? 'absent' : 'error';
+  return { status, evidence };
+}
+
+type AliasSpec = string | { path: string; headers?: Record<string, string> };
+
+/**
+ * canonical-plus-redirect-aliases eval rule (plan-003 U5, R8). The
+ * canonical path is the requirement, evaluated with the standard
+ * following fetch + assertions; each alias is probed WITHOUT following
+ * redirects (the default handler reports only the final hop, so it can
+ * never see the 301). A broken alias (inline duplicate, non-permanent or
+ * off-canonical redirect) downgrades an otherwise-passing check to
+ * broken; absent aliases carry no penalty.
+ */
+export async function runCanonicalRedirect(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
+  const w = check.with as {
+    path: string;
+    aliases?: AliasSpec[];
+    expect?: ExpectBlock;
+    timeout?: number;
+  };
+  const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
+  const expect = w.expect ?? {};
+  const canonicalUrl = resolveUrl(ctx.base, w.path);
+  if (!canonicalUrl) return { status: 'na', evidence: [{ why: ['no resolvable canonical URL'] }] };
+
+  const evidence: ProbeOutcome['evidence'] = [];
+  const canonicalResp = await guardedFetch(canonicalUrl, {}, { ...ctx.fetchOptions, timeoutMs });
+  const { ok, reasons } = assertHttp(expect, canonicalResp);
+  evidence.push({ url: canonicalUrl, role: 'canonical', status: canonicalResp.status, ok, why: reasons });
+
+  let canonicalStatus: ProbeStatus;
+  if (ok) canonicalStatus = 'pass';
+  else canonicalStatus = classifyMiss(canonicalResp, expect, w.timeout !== undefined);
+
+  let aliasBroken = false;
+  for (const alias of w.aliases ?? []) {
+    const spec = typeof alias === 'string' ? { path: alias } : alias;
+    const aliasUrl = resolveUrl(ctx.base, substituteEndpoint(spec.path, ctx.mcpEndpoint));
+    if (!aliasUrl) continue;
+    const resp = await guardedFetch(
+      aliasUrl,
+      { headers: spec.headers },
+      { ...ctx.fetchOptions, timeoutMs, followRedirects: false },
+    );
+    const { verdict, note } = classifyAliasProbe(resp, aliasUrl, canonicalUrl);
+    evidence.push({ url: aliasUrl, role: 'alias', status: resp.status, alias_verdict: verdict, why: [note] });
+    if (verdict === 'broken') aliasBroken = true;
+  }
+
+  const status = canonicalStatus === 'pass' && aliasBroken ? 'broken' : canonicalStatus;
   return { status, evidence };
 }
