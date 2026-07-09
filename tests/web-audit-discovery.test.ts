@@ -256,7 +256,7 @@ describe('runWebAudit engine', () => {
     // MAY dns-aid excluded from the score. got=9, max=11 → 82.
     expect(sc.badge.score_pct).toBe(82);
     expect(sc.results.find((r) => r.id === 'llms-txt')?.group).toBe('P2');
-    expect(sc.results.find((r) => r.id === 'robots')?.status).toBe('fail');
+    expect(sc.results.find((r) => r.id === 'robots')?.status).toBe('absent');
     expect(sc.tool.url).toBe('https://example.com/');
     expect(sc.target_url).toBe('https://example.com/');
     expect(complete.complete).toBe(true);

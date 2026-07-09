@@ -224,8 +224,8 @@ describe('computeWebScorePct', () => {
     const rows: EngineResult[] = [
       row({ keyword: 'must', weight: 5, status: 'pass' }),
       row({ keyword: 'must', weight: 5, status: 'pass' }),
-      row({ keyword: 'should', weight: 2, status: 'fail' }),
-      row({ keyword: 'may', weight: 3, status: 'fail' }),
+      row({ keyword: 'should', weight: 2, status: 'absent' }),
+      row({ keyword: 'may', weight: 3, status: 'broken' }),
       row({ keyword: 'must', weight: 4, status: 'n_a' }),
     ];
     expect(computeWebScorePct(rows)).toBe(83);
@@ -242,7 +242,7 @@ describe('computeWebScorePct', () => {
   test('no applicable MUST/SHOULD checks yields 0 (never null; renderer reads a number)', () => {
     const rows: EngineResult[] = [
       row({ keyword: 'must', weight: 5, status: 'n_a' }),
-      row({ keyword: 'may', weight: 2, status: 'fail' }),
+      row({ keyword: 'may', weight: 2, status: 'broken' }),
     ];
     expect(computeWebScorePct(rows)).toBe(0);
   });
@@ -261,8 +261,8 @@ describe('buildWebScorecard', () => {
   const rows: EngineResult[] = [
     row({ id: 'mcp-initialize', principle: 'P2', keyword: 'must', weight: 5, status: 'pass', title: 'init' }),
     row({ id: 'llms-txt', principle: 'P2', keyword: 'should', weight: 4, status: 'pass', title: 'llms' }),
-    row({ id: 'robots', principle: 'P7', keyword: 'should', weight: 2, status: 'fail', title: 'robots' }),
-    row({ id: 'dns-aid', principle: 'P8', keyword: 'may', weight: 1, status: 'fail', title: 'dns' }),
+    row({ id: 'robots', principle: 'P7', keyword: 'should', weight: 2, status: 'absent', title: 'robots' }),
+    row({ id: 'dns-aid', principle: 'P8', keyword: 'may', weight: 1, status: 'broken', title: 'dns' }),
   ];
 
   test('produces a CLI-isomorphic shape: badge.score_pct, results[], coverage_summary, tool', () => {
@@ -306,6 +306,7 @@ describe('buildWebScorecard', () => {
       specVersion: '0.3.0',
     });
     expect(sc.summary.pass).toBe(2);
-    expect(sc.summary.fail).toBe(2);
+    expect(sc.summary.absent).toBe(1);
+    expect(sc.summary.broken).toBe(1);
   });
 });

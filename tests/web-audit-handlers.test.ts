@@ -83,14 +83,82 @@ describe('runHttp', () => {
     expect(outcome.evidence[1].ok).toBe(true);
   });
 
-  test('fails when no candidate satisfies expect', async () => {
+  test('a 404 on the only candidate is absent', async () => {
     const fetchImpl = stubFetch(() => new Response('missing', { status: 404 }));
     const outcome = await runHttp(
       check({ with: { path: '/robots.txt', expect: { status: [200] } } }),
       ctx({ fetchImpl }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('absent');
     expect(outcome.evidence[0].ok).toBe(false);
+  });
+
+  test('a 200 with a content-type mismatch is broken (present but invalid)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('not json', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runHttp(
+      check({ with: { path: '/schema.json', expect: { status: [200], content_type: 'json' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a 5xx where a document is expected is broken', async () => {
+    const fetchImpl = stubFetch(() => new Response('oops', { status: 503 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a failed affordance assertion without a status expectation is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response('<html><body>no meta</body></html>', { status: 200 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/', expect: { body_regex: '<noscript' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('mixed candidates: a broken candidate outranks absent ones', async () => {
+    const fetchImpl = stubFetch((url) =>
+      url.endsWith('/openapi.json') ? new Response('oops', { status: 500 }) : new Response('no', { status: 404 }),
+    );
+    const outcome = await runHttp(
+      check({ with: { path_any: ['/openapi.json', '/openapi.yaml'], expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a timeout is broken only when the check opted into an explicit hang budget', async () => {
+    const timeoutFetch = (() => {
+      const err = new Error('deadline exceeded');
+      err.name = 'TimeoutError';
+      return Promise.reject(err);
+    }) as unknown as typeof fetch;
+    const withBudget = await runHttp(
+      check({ with: { path: '/mcp', method: 'GET', timeout: 1, expect: { status: [405] } } }),
+      ctx({ fetchImpl: timeoutFetch }),
+    );
+    expect(withBudget.status).toBe('broken');
+    const withoutBudget = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl: timeoutFetch }),
+    );
+    expect(withoutBudget.status).toBe('error');
+  });
+
+  test('retain_body keeps the passing body on the evidence row', async () => {
+    const fetchImpl = stubFetch(() => new Response('# Site\n\n- [x](https://example.com/x)', { status: 200 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', retain_body: true, expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].body).toContain('# Site');
   });
 
   test('substitutes {mcp_endpoint} in the path', async () => {
@@ -150,13 +218,24 @@ describe('runCorsPreflight', () => {
     expect(outcome.evidence[0].allow_methods).toBe('POST, OPTIONS');
   });
 
-  test('fails on 204 without Access-Control-Allow-Origin', async () => {
+  test('a 204 without Access-Control-Allow-Origin is absent (CORS not implemented)', async () => {
     const fetchImpl = stubFetch(() => new Response(null, { status: 204 }));
     const outcome = await runCorsPreflight(
       check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
       ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('an Allow-Origin on a failing preflight status is broken (misconfigured)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('oops', { status: 500, headers: { 'access-control-allow-origin': '*' } }),
+    );
+    const outcome = await runCorsPreflight(
+      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
   });
 
   test('returns n_a when the path has no endpoint to resolve', async () => {
@@ -203,7 +282,7 @@ describe('runMcp', () => {
     expect(outcome.evidence[0].capabilities).toEqual(['tools', 'resources']);
   });
 
-  test('capabilities assertion fails on an empty capabilities object', async () => {
+  test('capabilities assertion is broken on an empty capabilities object', async () => {
     const fetchImpl = stubFetch(
       () =>
         new Response(
@@ -215,7 +294,7 @@ describe('runMcp', () => {
       check({ handler: 'mcp', with: { op: 'initialize', assert: 'capabilities' } }),
       ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('broken');
   });
 
   test('tools-list parses an SSE (text/event-stream) response and counts input schemas', async () => {
@@ -279,13 +358,26 @@ describe('runMcp', () => {
     expect(called).toBe(0);
   });
 
-  test('fails when the response has no parseable JSON-RPC', async () => {
+  test('a discovered endpoint with no parseable JSON-RPC is broken', async () => {
     const fetchImpl = stubFetch(() => new Response('<html>error</html>', { status: 500 }));
     const outcome = await runMcp(
       check({ handler: 'mcp', with: { op: 'initialize' } }),
       ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('captures the WWW-Authenticate challenge for the mcp-auth antecedent', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('unauthorized', { status: 401, headers: { 'www-authenticate': 'Bearer realm="mcp"' } }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+    expect(outcome.evidence[0].status).toBe(401);
+    expect(outcome.evidence[0].www_authenticate).toBe('Bearer realm="mcp"');
   });
 });
 
@@ -346,13 +438,13 @@ describe('runDnsDoh', () => {
     expect(resolversHit).toContain('dns.google');
   });
 
-  test('fails when all resolvers network-fail', async () => {
+  test('errors (not absent) when all resolvers network-fail', async () => {
     const fetchImpl = stubFetch(() => new Response('boom', { status: 500 }));
     const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('error');
   });
 
-  test('fails when every name resolves NXDOMAIN', async () => {
+  test('is absent when every name resolves NXDOMAIN', async () => {
     const fetchImpl = stubFetch(
       () =>
         new Response(JSON.stringify({ Status: 3, Answer: [] }), {
@@ -361,6 +453,6 @@ describe('runDnsDoh', () => {
         }),
     );
     const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('absent');
   });
 });

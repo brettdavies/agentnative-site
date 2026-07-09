@@ -96,7 +96,8 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
   const why = (evidenceItem.why as string[] | undefined)?.[
     ((evidenceItem.why as string[] | undefined)?.length ?? 1) - 1
   ];
-  return `${evidenceItem.url ?? check.id} -> ${evidenceItem.status ?? 'error'}${outcome.status === 'fail' && why ? ` (${why})` : ''}`;
+  const isMiss = outcome.status === 'broken' || outcome.status === 'absent' || outcome.status === 'error';
+  return `${evidenceItem.url ?? check.id} -> ${evidenceItem.status ?? 'error'}${isMiss && why ? ` (${why})` : ''}`;
 }
 
 async function runCheck(check: WebCheck, ctx: HandlerContext): Promise<EngineResult> {

@@ -35,8 +35,15 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
   );
   const allowOrigin = resp.headers['access-control-allow-origin'] ?? null;
   const ok = (resp.status === 200 || resp.status === 204) && allowOrigin !== null;
+  // No Allow-Origin anywhere = CORS simply not implemented (absent); an
+  // Allow-Origin on a non-2xx preflight = misconfigured (broken).
+  let status: ProbeOutcome['status'];
+  if (ok) status = 'pass';
+  else if (resp.error) status = 'error';
+  else if (allowOrigin === null) status = 'absent';
+  else status = 'broken';
   return {
-    status: ok ? 'pass' : 'fail',
+    status,
     evidence: [
       {
         url,

@@ -158,7 +158,7 @@ describe('web scorecard conforms to the documented schema (U14)', () => {
   }
 
   const produced = buildWebScorecard(
-    [engineRow({ keyword: 'must', tier: 'required', status: 'pass' }), engineRow({ status: 'fail' })],
+    [engineRow({ keyword: 'must', tier: 'required', status: 'pass' }), engineRow({ status: 'absent' })],
     {
       targetUrl: 'https://example.com/',
       domain: 'example.com',

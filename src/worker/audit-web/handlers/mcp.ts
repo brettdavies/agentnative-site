@@ -58,10 +58,18 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   );
   const rpc = parseJsonRpc(resp);
   const ev: EvidenceItem = { url: endpoint, status: resp.status, error: resp.error };
+  const wwwAuthenticate = resp.headers['www-authenticate'];
+  if (wwwAuthenticate !== undefined) ev.www_authenticate = wwwAuthenticate;
 
-  if (resp.error || rpc === null) {
+  if (resp.error) {
+    ev.why = ['request failed'];
+    return { status: 'error', evidence: [ev] };
+  }
+  // The endpoint exists (discovery found it), so a response that carries
+  // no parseable JSON-RPC is a broken surface, not an absent one.
+  if (rpc === null) {
     ev.why = ['no parseable JSON-RPC response'];
-    return { status: 'fail', evidence: [ev] };
+    return { status: 'broken', evidence: [ev] };
   }
 
   const result = (rpc.result ?? {}) as Record<string, unknown>;
@@ -89,5 +97,5 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.error_code = code;
     ok = code === (w.expect_code ?? -32601);
   }
-  return { status: ok ? 'pass' : 'fail', evidence: [ev] };
+  return { status: ok ? 'pass' : 'broken', evidence: [ev] };
 }

@@ -4,10 +4,18 @@
 // the SSRF guard (src/worker/audit-web/ssrf.ts); no handler calls fetch
 // directly.
 
+import type { ProbeResponse } from '../assert';
 import type { GuardedFetchOptions } from '../ssrf';
 
-/** Internal probe status. `error`/`timeout` map to `skip`/`error` at the scorecard boundary. */
-export type ProbeStatus = 'pass' | 'fail' | 'na';
+/**
+ * Internal probe status (tri-state outcome model, KTD-1): `absent` means
+ * the surface is not there (404/410, NXDOMAIN, missing card); `broken`
+ * means it is there but invalid (malformed body, wrong content-type, an
+ * unexpected status where the surface clearly exists). `error` is an
+ * operational failure (network error, timeout) that excludes the check
+ * from scoring rather than crediting or penalizing it.
+ */
+export type ProbeStatus = 'pass' | 'broken' | 'absent' | 'na' | 'error';
 
 /** Handler-specific evidence rows, kept structurally open like the extracted JSON. */
 export type EvidenceItem = Record<string, unknown>;
@@ -27,6 +35,12 @@ export interface HandlerContext {
   protocolVersion: string;
   /** Default per-request timeout in ms; a check's `with.timeout` (seconds) overrides. */
   defaultTimeoutMs: number;
+  /**
+   * The single canonical root fetch (plain GET `/`), threaded through so
+   * root-HTML checks reuse it instead of re-fetching. A check with its
+   * own headers (content negotiation) still fetches independently.
+   */
+  root?: ProbeResponse;
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
 }

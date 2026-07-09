@@ -12,8 +12,12 @@
 import type { EvidenceItem } from './handlers/types';
 import type { WebCheckKeyword, WebCheckTier } from './registry';
 
-/** Site status vocabulary the shared renderer's STATUS_LABELS understands. */
-export type ScorecardStatus = 'pass' | 'fail' | 'n_a' | 'skip' | 'error';
+/**
+ * Web scorecard status vocabulary (tri-state outcome model): `absent`
+ * and `broken` replace the old collapsed `fail` so the scorer can price
+ * a present-but-invalid surface differently from a missing one.
+ */
+export type ScorecardStatus = 'pass' | 'broken' | 'absent' | 'n_a' | 'skip' | 'error';
 
 export interface EngineResult {
   id: string;
@@ -65,7 +69,7 @@ export interface WebScorecard {
 export const WEB_SCHEMA_VERSION = '0.1';
 
 const SCORED_KEYWORDS = new Set<WebCheckKeyword>(['must', 'should']);
-const SCORED_STATUSES = new Set<ScorecardStatus>(['pass', 'fail']);
+const SCORED_STATUSES = new Set<ScorecardStatus>(['pass', 'broken', 'absent']);
 
 /**
  * Site-owned headline score: credit-weighted over MUST + SHOULD checks
@@ -97,7 +101,7 @@ function coverageLevel(results: EngineResult[], keyword: WebCheckKeyword): WebCo
 }
 
 function emptyTally(): Record<ScorecardStatus, number> {
-  return { pass: 0, fail: 0, n_a: 0, skip: 0, error: 0 };
+  return { pass: 0, broken: 0, absent: 0, n_a: 0, skip: 0, error: 0 };
 }
 
 export interface WebScorecardMeta {

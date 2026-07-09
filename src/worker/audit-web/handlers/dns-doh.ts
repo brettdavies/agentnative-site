@@ -49,5 +49,8 @@ export async function runDnsDoh(check: WebCheck, ctx: HandlerContext): Promise<P
       break; // definitive DNS answer (e.g. NXDOMAIN) — move to the next name
     }
   }
-  return { status: 'fail', evidence: evidence.length > 0 ? evidence : [{ why: ['no DNS-AID records'] }] };
+  // Any definitive empty answer means the records are absent; nothing
+  // definitive at all (every resolver failed) is an operational error.
+  if (evidence.length > 0) return { status: 'absent', evidence };
+  return { status: 'error', evidence: [{ why: ['all DoH resolvers failed'] }] };
 }
