@@ -31,9 +31,10 @@ your type; a site perfect for its type approaches 100. **GLOBAL is context** —
 and nailing more surfaces ranks higher (4/5 MUSTs beats 2/2 MUSTs). A dev tool models both and is tuned against real
 audit data: `scripts/scoring/score_model.py` (guarded from main).
 
-Outcome scale per applicable check, difficulty-weighted (per-tier point values UNLOCKED pending real anc100 data):
-
-Each cell is `(numerator credit, relative-denominator weight)`:
+**The antecedent is evaluated first.** If it is NOT met, the check is `n_a` (excluded from both scores) and the table
+below does not apply. The table is only consulted for an **applicable** check (antecedent met), difficulty-weighted
+(per-tier point values UNLOCKED pending real anc100 data). Each cell is `(numerator credit, relative-denominator
+weight)`:
 
 | Tier   | Present + valid | Present + broken | Absent              |
 | ------ | --------------- | ---------------- | ------------------- |
