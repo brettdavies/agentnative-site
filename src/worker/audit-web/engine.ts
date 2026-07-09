@@ -39,12 +39,13 @@ export type AuditEvent =
   | { type: 'result'; result: EngineResult }
   | { type: 'complete'; scorecard: WebScorecard; complete: boolean };
 
-const HANDLERS: Record<WebCheck['handler'], (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>> = {
-  http: runHttp,
-  'cors-preflight': runCorsPreflight,
-  mcp: runMcp,
-  'dns-doh': runDnsDoh,
-};
+const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>>> =
+  {
+    http: runHttp,
+    'cors-preflight': runCorsPreflight,
+    mcp: runMcp,
+    'dns-doh': runDnsDoh,
+  };
 
 function normalizeBase(rawUrl: string): { base: string; host: string; domain: string } {
   const u = new URL(rawUrl);
@@ -109,7 +110,7 @@ async function runCheck(check: WebCheck, ctx: HandlerContext): Promise<EngineRes
     weight: check.weight,
   };
 
-  if (check.applies_to === 'mcp-present' && !ctx.mcpEndpoint) {
+  if (check.antecedent === 'mcp-present' && !ctx.mcpEndpoint) {
     return {
       ...base,
       status: 'n_a',
@@ -119,7 +120,9 @@ async function runCheck(check: WebCheck, ctx: HandlerContext): Promise<EngineRes
   }
 
   try {
-    const outcome = await HANDLERS[check.handler](check, ctx);
+    const handler = HANDLERS[check.handler];
+    if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
+    const outcome = await handler(check, ctx);
     return {
       ...base,
       status: probeStatusToScorecard(outcome.status),

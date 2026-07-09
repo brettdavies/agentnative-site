@@ -33,11 +33,12 @@ function stubFetch(handler: (url: string, init?: RequestInit) => Response): type
 function check(partial: Partial<WebCheck>): WebCheck {
   return {
     id: 'x',
-    category: 'content-surface',
+    category: 'content-for-agents',
     tier: 'recommended',
     keyword: 'should',
     principle: 'P2',
-    applies_to: 'any',
+    site_types: ['all'],
+    antecedent: 'none',
     weight: 1,
     title: 't',
     hint: 'h',

@@ -20,12 +20,12 @@ async function loadNormalized() {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 32 checks', async () => {
+  test('normalizes to exactly 34 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(32);
+    expect(registry.checks.length).toBe(34);
   });
 
-  test('every check carries id/category/tier/principle/keyword/handler/weight/title/hint', async () => {
+  test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
     const registry = await loadNormalized();
     for (const check of registry.checks) {
       expect(check.id).toMatch(/^[a-z0-9][a-z0-9-]*$/);
@@ -33,12 +33,57 @@ describe('web-audit registry shape', () => {
       expect(['required', 'recommended', 'optional']).toContain(check.tier);
       expect(check.principle).toMatch(/^P[1-8]$/);
       expect(['must', 'should', 'may']).toContain(check.keyword);
-      expect(['http', 'cors-preflight', 'mcp', 'dns-doh']).toContain(check.handler);
+      expect(['http', 'cors-preflight', 'mcp', 'dns-doh', 'auth-md', 'webmcp']).toContain(check.handler);
+      expect(Array.isArray(check.site_types) && check.site_types.length > 0).toBe(true);
+      for (const st of check.site_types) expect(['content', 'api', 'mcp', 'all']).toContain(st);
+      expect(typeof check.antecedent).toBe('string');
       expect(Number.isInteger(check.weight) && check.weight > 0).toBe(true);
       expect(check.title.length).toBeGreaterThan(0);
       expect(check.hint.length).toBeGreaterThan(0);
       expect(typeof check.with).toBe('object');
     }
+  });
+
+  test('the five visible categories are ordered by category_order and each check names one', async () => {
+    const registry = await loadNormalized();
+    expect(registry.category_order).toEqual([
+      'discoverability',
+      'content-for-agents',
+      'bot-crawl-policy',
+      'mcp-api',
+      'agent-discovery-auth',
+    ]);
+    expect(Object.keys(registry.categories).sort()).toEqual([...registry.category_order].sort());
+    for (const check of registry.checks) {
+      expect(registry.category_order).toContain(check.category);
+    }
+  });
+
+  test('auth-md and webmcp are registered with the settled applicability', async () => {
+    const registry = await loadNormalized();
+    const authMd = registry.checks.find((c) => c.id === 'auth-md');
+    expect(authMd).toMatchObject({
+      category: 'agent-discovery-auth',
+      keyword: 'may',
+      antecedent: 'auth-present',
+      site_types: ['api', 'mcp'],
+      handler: 'auth-md',
+    });
+    const webmcp = registry.checks.find((c) => c.id === 'webmcp');
+    expect(webmcp).toMatchObject({
+      category: 'mcp-api',
+      keyword: 'may',
+      antecedent: 'html-root',
+      site_types: ['all'],
+      handler: 'webmcp',
+    });
+  });
+
+  test('well-known-mcp-card carries the canonical-redirect eval rule', async () => {
+    const registry = await loadNormalized();
+    const card = registry.checks.find((c) => c.id === 'well-known-mcp-card');
+    expect(card?.eval).toBe('canonical-redirect');
+    expect(card?.antecedent).toBe('mcp-present');
   });
 
   test('keyword is derived mechanically from tier for every check', async () => {
@@ -48,25 +93,25 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 2 / recommended 15 / optional 15', async () => {
+  test('tier counts are exactly required 3 / recommended 15 / optional 16', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 2, recommended: 15, optional: 15 });
+    expect(counts).toEqual({ required: 3, recommended: 15, optional: 16 });
   });
 
-  test('derived keyword counts match must 2 / should 15 / may 15', async () => {
+  test('derived keyword counts match must 3 / should 15 / may 16', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 2, should: 15, may: 15 });
+    expect(counts).toEqual({ must: 3, should: 15, may: 16 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 3, P2: 9, P3: 4, P4: 3, P6: 3, P7: 4, P8: 6 });
+    expect(counts).toEqual({ P1: 4, P2: 10, P3: 4, P4: 3, P6: 3, P7: 4, P8: 6 });
     expect(counts.P5).toBeUndefined();
   });
 
@@ -77,78 +122,84 @@ describe('web-audit registry shape', () => {
     expect(registry.mcp_discovery.protocol_version).toBe('2025-06-18');
   });
 
+  const abortBase = {
+    version: 1,
+    mcp_discovery: { well_known: ['/x'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    category_order: ['c'],
+    categories: { c: 'c' },
+  };
+  const abortCheck = {
+    id: 'x',
+    category: 'c',
+    tier: 'optional',
+    principle: 'P2',
+    site_types: ['all'],
+    antecedent: 'none',
+    weight: 1,
+    title: 't',
+    hint: 'h',
+    handler: 'http',
+    with: {},
+  };
+
   test('a check missing principle aborts normalization with a named error', () => {
-    const doc = {
-      version: 1,
-      mcp_discovery: { well_known: ['/x'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
-      categories: { c: 'c' },
-      checks: [
-        { id: 'x', category: 'c', tier: 'required', weight: 1, title: 't', hint: 'h', handler: 'http', with: {} },
-      ],
-    };
-    expect(() => normalizeWebAuditRegistry(doc)).toThrow(/needs a principle/);
+    const { principle: _principle, ...check } = abortCheck;
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...check, tier: 'required' }] })).toThrow(
+      /needs a principle/,
+    );
   });
 
   test('a hand-authored keyword aborts normalization (no keyword drift)', () => {
-    const base = {
-      version: 1,
-      mcp_discovery: { well_known: ['/x'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
-      categories: { c: 'c' },
-    };
-    const check = {
-      id: 'x',
-      category: 'c',
-      tier: 'optional',
-      principle: 'P2',
-      weight: 1,
-      title: 't',
-      hint: 'h',
-      handler: 'http',
-      with: {},
-    };
-    expect(() => normalizeWebAuditRegistry({ ...base, checks: [{ ...check, keyword: 'must' }] })).toThrow(/keyword/);
-    expect(() => normalizeWebAuditRegistry({ ...base, checks: [{ ...check, keyword: 'may' }] })).toThrow(
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, keyword: 'must' }] })).toThrow(
+      /keyword/,
+    );
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, keyword: 'may' }] })).toThrow(
       /hand-authors a keyword/,
     );
   });
 
-  test('duplicate check ids abort normalization', () => {
-    const doc = {
-      version: 1,
-      mcp_discovery: { well_known: ['/x'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
-      categories: { c: 'c' },
-      checks: [
-        {
-          id: 'x',
-          category: 'c',
-          tier: 'optional',
-          principle: 'P2',
-          weight: 1,
-          title: 't',
-          hint: 'h',
-          handler: 'http',
-          with: {},
-        },
-        {
-          id: 'x',
-          category: 'c',
-          tier: 'optional',
-          principle: 'P2',
-          weight: 1,
-          title: 't',
-          hint: 'h',
-          handler: 'http',
-          with: {},
-        },
-      ],
-    };
-    expect(() => normalizeWebAuditRegistry(doc)).toThrow(/duplicate check id/);
+  test('an unknown antecedent token aborts normalization', () => {
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, antecedent: 'not-a-token' }] }),
+    ).toThrow(/unknown antecedent/);
   });
 
-  test('normalized JSON round-trips to 32 entries', async () => {
+  test('an unknown eval rule aborts normalization', () => {
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, eval: 'not-a-rule' }] })).toThrow(
+      /unknown eval rule/,
+    );
+  });
+
+  test('a missing or invalid site_types aborts normalization', () => {
+    const { site_types: _siteTypes, ...noSiteTypes } = abortCheck;
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [noSiteTypes] })).toThrow(/site_types/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, site_types: ['commerce'] }] }),
+    ).toThrow(/site_types entry/);
+  });
+
+  test('the retired applies_to field aborts normalization', () => {
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, applies_to: 'any' }] })).toThrow(
+      /retired applies_to/,
+    );
+  });
+
+  test('a category_order that does not match the categories keys aborts normalization', () => {
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, category_order: ['c', 'extra'], checks: [abortCheck] }),
+    ).toThrow(/category_order/);
+  });
+
+  test('duplicate check ids abort normalization', () => {
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [abortCheck, { ...abortCheck }] })).toThrow(
+      /duplicate check id/,
+    );
+  });
+
+  test('normalized JSON round-trips to 34 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(32);
+    expect(roundTripped.checks.length).toBe(34);
   });
 });
 

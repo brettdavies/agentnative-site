@@ -252,3 +252,15 @@ remediation:
       For an authenticated MCP server, publish `/.well-known/oauth-protected-resource` (RFC 9728) so
       a client can discover which authorization servers issue tokens for your resource. Expected
       absent for an open, no-auth server.
+  auth-md:
+    title: Agent auth/registration metadata doc published
+    body: |
+      Publish an `auth.md` at `/.well-known/auth.md` (or `/auth.md`): a short markdown guide that
+      tells an agent how to obtain credentials — where to register, which OAuth flows are supported,
+      token endpoints, and scopes. It turns "figure out our auth" into a one-fetch orientation.
+  webmcp:
+    title: Root HTML exposes WebMCP browser tools
+    body: |
+      Expose page functionality to browser agents via WebMCP: declare tools in a
+      `<script type="application/webmcp+json">` block or register a `navigator.modelContext`
+      provider. In-page tools let a browser-hosted agent act on the page without scraping the DOM.

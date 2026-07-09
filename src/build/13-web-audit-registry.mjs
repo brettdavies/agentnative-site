@@ -1,8 +1,8 @@
 // Web-audit registry projection: src/data/web-audit/registry.yaml →
 // dist/_internal/web-audit-registry.json.
 //
-// The YAML is the single in-repo source (STAR) for the 32-check web
-// audit; Workers have no YAML runtime, so this stage normalizes it to
+// The YAML is the single in-repo source (STAR) for the web audit;
+// Workers have no YAML runtime, so this stage normalizes it to
 // JSON the same way registry-index.mjs projects registry.yaml. The
 // Worker's /_internal/ interceptor hard-404s public access; the engine
 // reads via env.ASSETS.fetch (src/worker/audit-web/registry.ts).
@@ -21,8 +21,23 @@ export const KEYWORD_BY_TIER = Object.freeze({
   optional: 'may',
 });
 
-export const WEB_AUDIT_HANDLERS = new Set(['http', 'cors-preflight', 'mcp', 'dns-doh']);
-export const WEB_AUDIT_APPLIES_TO = new Set(['any', 'docs-site', 'mcp-present']);
+export const WEB_AUDIT_HANDLERS = new Set(['http', 'cors-preflight', 'mcp', 'dns-doh', 'auth-md', 'webmcp']);
+export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
+export const WEB_AUDIT_ANTECEDENTS = new Set([
+  'none',
+  'http-root',
+  'html-root',
+  'mcp-present',
+  'mcp-auth',
+  'api-surface',
+  'schemas-ref',
+  'docs-site',
+  'root-llms-txt',
+  'root-llms-full-txt',
+  'robots-present',
+  'auth-present',
+]);
+export const WEB_AUDIT_EVAL_RULES = new Set(['canonical-redirect', 'scoped-discovery']);
 
 const PRINCIPLE_RE = /^P[1-8]$/;
 const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -50,6 +65,14 @@ export function normalizeWebAuditRegistry(doc) {
   const categories = doc.categories;
   if (!categories || typeof categories !== 'object') {
     throw new Error('web-audit registry: expected a top-level "categories" mapping');
+  }
+  const categoryOrder = doc.category_order;
+  if (!Array.isArray(categoryOrder) || categoryOrder.length === 0) {
+    throw new Error('web-audit registry: expected a top-level "category_order" array');
+  }
+  const categoryKeys = Object.keys(categories);
+  if (categoryOrder.length !== categoryKeys.length || !categoryOrder.every((slug) => Object.hasOwn(categories, slug))) {
+    throw new Error('web-audit registry: category_order must list every categories key exactly once');
   }
   const checks = doc.checks;
   if (!Array.isArray(checks) || checks.length === 0) {
@@ -89,9 +112,24 @@ export function normalizeWebAuditRegistry(doc) {
         `web-audit registry: check "${id}" needs a principle in P1..P8 (got ${JSON.stringify(check.principle)})`,
       );
     }
-    const appliesTo = check.applies_to ?? 'any';
-    if (!WEB_AUDIT_APPLIES_TO.has(appliesTo)) {
-      throw new Error(`web-audit registry: check "${id}" has invalid applies_to "${appliesTo}"`);
+    if ('applies_to' in check) {
+      throw new Error(
+        `web-audit registry: check "${id}" carries the retired applies_to field — use site_types + antecedent`,
+      );
+    }
+    if (!Array.isArray(check.site_types) || check.site_types.length === 0) {
+      throw new Error(`web-audit registry: check "${id}" needs a non-empty site_types array`);
+    }
+    for (const st of check.site_types) {
+      if (!WEB_AUDIT_SITE_TYPES.has(st)) {
+        throw new Error(`web-audit registry: check "${id}" has invalid site_types entry "${st}"`);
+      }
+    }
+    if (!WEB_AUDIT_ANTECEDENTS.has(check.antecedent)) {
+      throw new Error(`web-audit registry: check "${id}" has unknown antecedent "${check.antecedent}"`);
+    }
+    if ('eval' in check && !WEB_AUDIT_EVAL_RULES.has(check.eval)) {
+      throw new Error(`web-audit registry: check "${id}" has unknown eval rule "${check.eval}"`);
     }
     if (!Number.isInteger(check.weight) || check.weight <= 0) {
       throw new Error(
@@ -117,7 +155,9 @@ export function normalizeWebAuditRegistry(doc) {
       tier: check.tier,
       keyword,
       principle: check.principle,
-      applies_to: appliesTo,
+      site_types: check.site_types,
+      antecedent: check.antecedent,
+      ...('eval' in check ? { eval: check.eval } : {}),
       weight: check.weight,
       title: check.title,
       hint: check.hint,
@@ -133,6 +173,7 @@ export function normalizeWebAuditRegistry(doc) {
       common_paths: discovery.common_paths,
       protocol_version: discovery.protocol_version,
     },
+    category_order: categoryOrder,
     categories,
     checks: normalized,
   };

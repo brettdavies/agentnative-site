@@ -228,7 +228,7 @@ describe('handleWebAudit streaming', () => {
     expect(resp.status).toBe(200);
     const events = await readNdjson(resp);
     const checks = events.filter((e) => e.type === 'check');
-    expect(checks.length).toBe(32);
+    expect(checks.length).toBe(34);
     const terminal = events.at(-1) as Record<string, unknown>;
     expect(terminal.type).toBe('complete');
     expect(terminal.share_url).toBe('/web/example.com');
