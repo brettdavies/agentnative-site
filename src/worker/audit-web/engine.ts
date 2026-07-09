@@ -22,11 +22,13 @@ import {
 } from './antecedents';
 import type { ProbeResponse } from './assert';
 import { discoverMcpEndpoint } from './discovery';
+import { runAuthMd } from './handlers/auth-md';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
 import { runMcp } from './handlers/mcp';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
+import { runWebMcp } from './handlers/webmcp';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
 import { type GuardedFetchOptions, guardedFetch } from './ssrf';
@@ -59,6 +61,8 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     'cors-preflight': runCorsPreflight,
     mcp: runMcp,
     'dns-doh': runDnsDoh,
+    'auth-md': runAuthMd,
+    webmcp: runWebMcp,
   };
 
 function normalizeBase(rawUrl: string): { base: string; host: string; domain: string } {
