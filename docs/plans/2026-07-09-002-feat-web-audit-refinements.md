@@ -89,42 +89,71 @@ SHOULD = expected for an agent-ready site of that type; **MAY = adopt-if-you-can
 helps, present-and-broken harms** (tri-state, per the score model above). `Principle` is the hidden internal tag
 (revised from plan 001).
 
-| Check                    | Category               | Principle | Tier   | Applies to (site types) | Conditional / antecedent                                              |
-| ------------------------ | ---------------------- | --------- | ------ | ----------------------- | --------------------------------------------------------------------- |
-| mcp-initialize           | MCP & API              | P2        | MUST   | MCP                     | antecedent: MCP endpoint discovered                                   |
-| mcp-tools-list           | MCP & API              | P2        | MUST   | MCP                     | antecedent: MCP endpoint discovered                                   |
-| mcp-capabilities         | MCP & API              | P2        | SHOULD | MCP                     | antecedent: MCP endpoint discovered                                   |
-| mcp-unknown-method       | MCP & API              | P4        | SHOULD | MCP                     | antecedent: MCP endpoint discovered                                   |
-| mcp-get-fast-fail        | MCP & API              | P4        | SHOULD | MCP                     | antecedent: MCP endpoint discovered                                   |
-| mcp-cors-preflight       | MCP & API              | P6        | SHOULD | MCP                     | antecedent: MCP endpoint; browser-origin support optional             |
-| mcp-cors-actual          | MCP & API              | P6        | SHOULD | MCP                     | antecedent: MCP endpoint; browser-origin support optional             |
-| well-known-mcp-card      | MCP & API              | P8        | SHOULD | MCP                     | canonical-plus-redirect-aliases                                       |
-| mcp-usage-doc            | MCP & API              | P8        | MAY    | MCP                     | antecedent: MCP endpoint discovered                                   |
-| openapi                  | MCP & API              | P2        | MUST   | API/Application         | antecedent: API surface (declared or detected); n/a otherwise         |
-| json-schemas             | MCP & API              | P2        | MAY    | API/Application         | antecedent: OpenAPI or schemas referenced                             |
-| api-catalog              | MCP & API              | P8        | MAY    | API/Application         | informational on Content                                              |
-| llms-txt                 | Content for agents     | P2        | SHOULD | all                     | none                                                                  |
-| llms-full-txt            | Content for agents     | P2        | MAY    | Content                 | n/a unless docs/content site                                          |
-| llms-txt-scoped          | Content for agents     | P2        | MAY    | Content                 | antecedent: root /llms.txt present; checks discovered subdir llms.txt |
-| llms-full-txt-scoped     | Content for agents     | P2        | MAY    | Content                 | antecedent: root /llms-full.txt present                               |
-| accept-markdown          | Content for agents     | P2        | SHOULD | all                     | none                                                                  |
-| root-meta-description    | Content for agents     | P3        | SHOULD | all                     | n/a if root is not HTML                                               |
-| schema-org-jsonld        | Content for agents     | P2        | MAY    | all                     | n/a if root is not HTML                                               |
-| semantic-html            | Content for agents     | P3        | MAY    | all                     | n/a if root is not HTML                                               |
-| noscript-fallback        | Content for agents     | P1        | SHOULD | all                     | n/a if root is not HTML                                               |
-| robots                   | Discoverability        | P7        | SHOULD | all                     | none                                                                  |
-| sitemap                  | Discoverability        | P7        | MAY    | all                     | none                                                                  |
-| link-headers             | Discoverability        | P3        | SHOULD | all                     | n/a if root is not HTTP-fetchable                                     |
-| root-link-rel            | Discoverability        | P3        | SHOULD | all                     | n/a if root is not HTML                                               |
-| dns-aid                  | Discoverability        | P8        | MAY    | all                     | none                                                                  |
-| robots-ai-rules          | Bot & crawl policy     | P7        | SHOULD | all                     | none                                                                  |
-| content-signals          | Bot & crawl policy     | P7        | SHOULD | all                     | none                                                                  |
-| web-bot-auth             | Bot & crawl policy     | P6        | MAY    | all                     | informational (only sites sending bot traffic)                        |
-| security-txt             | Bot & crawl policy     | P4        | MAY    | all                     | none                                                                  |
-| a2a-agent-card           | Agent discovery & auth | P8        | MAY    | all                     | informational                                                         |
-| agent-skills             | Agent discovery & auth | P8        | MAY    | all                     | none                                                                  |
-| oauth-discovery          | Agent discovery & auth | P1        | MAY    | API/Application, MCP    | antecedent: authenticated surface present                             |
-| oauth-protected-resource | Agent discovery & auth | P1        | MAY    | MCP                     | antecedent: MCP endpoint that requires auth                           |
+`Site types` is the declared-type filter (which types run the check by default); `Antecedent` is the runtime gate that
+can still flip it to `n/a` (resolution in the next table); `Eval` flags a non-standard evaluation rule.
+
+| Check                    | Category               | Principle | Tier   | Site types           | Antecedent         | Eval               |
+| ------------------------ | ---------------------- | --------- | ------ | -------------------- | ------------------ | ------------------ |
+| mcp-initialize           | MCP & API              | P2        | MUST   | MCP                  | mcp-present        | -                  |
+| mcp-tools-list           | MCP & API              | P2        | MUST   | MCP                  | mcp-present        | -                  |
+| mcp-capabilities         | MCP & API              | P2        | SHOULD | MCP                  | mcp-present        | -                  |
+| mcp-unknown-method       | MCP & API              | P4        | SHOULD | MCP                  | mcp-present        | -                  |
+| mcp-get-fast-fail        | MCP & API              | P4        | SHOULD | MCP                  | mcp-present        | -                  |
+| mcp-cors-preflight       | MCP & API              | P6        | SHOULD | MCP                  | mcp-present        | -                  |
+| mcp-cors-actual          | MCP & API              | P6        | SHOULD | MCP                  | mcp-present        | -                  |
+| well-known-mcp-card      | MCP & API              | P8        | SHOULD | MCP                  | mcp-present        | canonical+redirect |
+| mcp-usage-doc            | MCP & API              | P8        | MAY    | MCP                  | mcp-present        | -                  |
+| openapi                  | MCP & API              | P2        | MUST   | API/Application      | api-surface        | -                  |
+| json-schemas             | MCP & API              | P2        | MAY    | API/Application      | schemas-ref        | -                  |
+| api-catalog              | MCP & API              | P8        | MAY    | API/Application      | api-surface        | -                  |
+| llms-txt                 | Content for agents     | P2        | SHOULD | all                  | none               | -                  |
+| llms-full-txt            | Content for agents     | P2        | MAY    | Content              | docs-site          | -                  |
+| llms-txt-scoped          | Content for agents     | P2        | MAY    | Content              | root-llms-txt      | scoped-discovery   |
+| llms-full-txt-scoped     | Content for agents     | P2        | MAY    | Content              | root-llms-full-txt | -                  |
+| accept-markdown          | Content for agents     | P2        | SHOULD | all                  | html-root          | -                  |
+| root-meta-description    | Content for agents     | P3        | SHOULD | all                  | html-root          | -                  |
+| schema-org-jsonld        | Content for agents     | P2        | MAY    | all                  | html-root          | -                  |
+| semantic-html            | Content for agents     | P3        | MAY    | all                  | html-root          | -                  |
+| noscript-fallback        | Content for agents     | P1        | SHOULD | all                  | html-root          | -                  |
+| robots                   | Discoverability        | P7        | SHOULD | all                  | none               | -                  |
+| sitemap                  | Discoverability        | P7        | MAY    | all                  | none               | -                  |
+| link-headers             | Discoverability        | P3        | SHOULD | all                  | http-root          | -                  |
+| root-link-rel            | Discoverability        | P3        | SHOULD | all                  | html-root          | -                  |
+| dns-aid                  | Discoverability        | P8        | MAY    | all                  | none               | -                  |
+| robots-ai-rules          | Bot & crawl policy     | P7        | SHOULD | all                  | robots-present     | -                  |
+| content-signals          | Bot & crawl policy     | P7        | SHOULD | all                  | robots-present     | -                  |
+| web-bot-auth             | Bot & crawl policy     | P6        | MAY    | all                  | none               | -                  |
+| security-txt             | Bot & crawl policy     | P4        | MAY    | all                  | none               | -                  |
+| a2a-agent-card           | Agent discovery & auth | P8        | MAY    | all                  | none               | -                  |
+| agent-skills             | Agent discovery & auth | P8        | MAY    | all                  | none               | -                  |
+| oauth-discovery          | Agent discovery & auth | P1        | MAY    | API/Application, MCP | auth-present       | -                  |
+| oauth-protected-resource | Agent discovery & auth | P1        | MAY    | MCP                  | mcp-auth           | -                  |
+
+### Antecedent resolution
+
+How the engine resolves each antecedent token. The key property: antecedents resolve from the **declared site type**,
+from **discovery**, or from **another check's result** — so the engine evaluates checks in dependency order and reuses
+probe results instead of re-fetching, keeping the subrequest budget bounded. Only `api-surface` / `docs-site` may need a
+light extra signal (a link scan of the already-fetched root HTML).
+
+| Antecedent         | The check applies when...                                             | Resolved from                                                                                                   |
+| ------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| none               | always                                                                | no gate                                                                                                         |
+| http-root          | the root URL returns any HTTP response                                | the root fetch (a network error makes the check `error`/`skip`, not `n/a`)                                      |
+| html-root          | the root response Content-Type is `text/html`                         | Content-Type of the root fetch (already made for the HTML-affordance checks)                                    |
+| mcp-present        | discovery found an MCP endpoint                                       | existing MCP discovery (well-known cards, then common-path `initialize`)                                        |
+| mcp-auth           | the discovered MCP endpoint challenges for auth                       | `401` / `WWW-Authenticate` on the endpoint, or `authentication.required` in its card                            |
+| api-surface        | declared type is API/Application, OR an API is detected               | declared type short-circuits; else an `openapi`/`service-desc` link in root HTML or the `openapi` probe passing |
+| schemas-ref        | the site references JSON Schemas or publishes OpenAPI                 | the `openapi` result + a link scan of root/openapi                                                              |
+| docs-site          | declared type is Content, OR content heuristics hold                  | declared type; else `llms.txt` present + a doc-heavy sitemap                                                    |
+| root-llms-txt      | the root `/llms.txt` check passed                                     | reuse the `llms-txt` probe result                                                                               |
+| root-llms-full-txt | the root `/llms-full.txt` check passed                                | reuse the `llms-full-txt` probe result                                                                          |
+| robots-present     | `/robots.txt` returned `200`                                          | reuse the `robots` probe result                                                                                 |
+| auth-present       | OAuth discovery metadata exists, OR an API/MCP surface returned `401` | reuse the `oauth-discovery` probe + any `401` observed during the run                                           |
+
+`Eval` values: `-` is the standard evaluate-the-assertion path; `canonical+redirect` applies the
+canonical-plus-redirect-aliases rule (below) to the MCP card; `scoped-discovery` enumerates subdir `llms.txt` candidates
+(see Open items).
 
 **Candidate additions from the CF set (not in our 32; decide per row):** `auth-md` (Auth.md metadata), `webmcp` (browser
 WebMCP tools), and the Commerce set (`x402`, `mpp`, `ucp`, `acp`) as an informational Commerce category.
