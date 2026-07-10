@@ -7,6 +7,7 @@
 import {
   BADGE_ELIGIBILITY_FLOOR_PCT,
   escHtml,
+  renderMeter,
   buildScorecardBody as sharedBuildScorecardBody,
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   renderAudienceBanner as sharedRenderAudienceBanner,
@@ -36,7 +37,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   // `badge.score_pct` — the CLI is canonical for the integer.
   const scoreCell = (entry) => {
     const pct = entry.scorecard.badge.score_pct;
-    return `<td class="lb-score" data-sort="${pct}">${pct}%</td>`;
+    return `<td class="lb-score" data-sort="${pct}">${renderMeter(pct)}</td>`;
   };
 
   const principleCell = (entry) => {

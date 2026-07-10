@@ -30,6 +30,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { principleTier } from '../shared/scorecard-format.mjs';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
 // actual order-enforcer. Shared helpers (content.mjs, render.mjs,
@@ -48,7 +49,7 @@ import { minifyDist } from './12-minify-dist.mjs';
 import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
 import { emitWebScorecardSurface, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
-import { extractDefinitionParagraph, extractDescription, extractTitle, principleTier } from './content.mjs';
+import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';

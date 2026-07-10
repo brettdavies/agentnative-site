@@ -1669,8 +1669,223 @@ body:has(.leaderboard-hero) main {
 }
 
 /* ================================================================
- * Scorecard — /score/<tool>
+ * Scorecard — /score/<tool> + /score/live/<binary> (shared renderer)
  * ================================================================ */
+
+body:has(.scorecard-page) main {
+  max-width: none;
+  padding: 0;
+}
+.scorecard-page {
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-block: var(--space-7) var(--space-9);
+}
+.scorecard-page .crumb {
+  margin-bottom: var(--space-6);
+}
+
+/* Hero — mono tool name, command chip, summary chips, twin score cards. */
+.scorecard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-6);
+  align-items: start;
+  padding-bottom: var(--space-7);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-7);
+}
+.scorecard-hero h1 {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(2rem, 1.4rem + 2.4vw, 3.2rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0;
+}
+.scorecard-hero__cmd {
+  margin: var(--space-4) 0 0;
+}
+.scorecard-hero__cmd code {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.5em 0.8em;
+  border-radius: var(--radius);
+}
+.scorecard-hero__scores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(11rem, 1fr));
+  gap: var(--space-4);
+}
+.scorecell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  background: var(--bg-raised);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.chip {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.3em 0.6em;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.chip--ok {
+  color: var(--band-high);
+}
+.chip--warn {
+  color: var(--band-mid);
+}
+.chip--fail {
+  color: var(--band-low);
+}
+.chip--muted {
+  color: var(--fg-muted);
+  border-color: var(--border);
+  background: var(--bg-raised);
+  font-weight: 500;
+}
+
+/* Eight principles, scored. */
+.pscore h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 1.2rem + 0.8vw, 1.7rem);
+  letter-spacing: -0.02em;
+}
+.pscore__sub {
+  color: var(--fg-secondary);
+  margin: var(--space-3) 0 0;
+}
+.pscore__list {
+  list-style: none;
+  margin: var(--space-6) 0 0;
+  padding: 0;
+}
+.pscore__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.pscore__evidence {
+  margin: var(--space-2) 0 0;
+  color: var(--fg-secondary);
+  font-size: 0.92rem;
+  max-width: var(--measure);
+}
+.stpill {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25em 0.75em;
+  border-radius: 999px;
+  justify-self: end;
+}
+.stpill--pass {
+  color: var(--band-high);
+  background: color-mix(in oklab, var(--band-high) 12%, transparent);
+}
+.stpill--warn {
+  color: var(--band-mid);
+  background: color-mix(in oklab, var(--band-mid) 14%, transparent);
+}
+.stpill--fail {
+  color: var(--band-low);
+  background: color-mix(in oklab, var(--band-low) 12%, transparent);
+}
+.stpill--na {
+  color: var(--fg-muted);
+  background: var(--bg-raised);
+}
+
+/* Remediation box — non-pass principle rows. The pre wraps so long
+ * prompts never overflow on mobile. */
+.remediation {
+  margin-top: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+}
+.remediation__hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.82rem;
+  color: var(--fg-secondary);
+}
+.copy-prompt {
+  display: none;
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  cursor: pointer;
+}
+:root.js .copy-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.copy-prompt:hover {
+  background: var(--accent-subtle);
+}
+.copy-prompt[data-copy-state="copied"] {
+  color: var(--bg);
+  background: var(--accent);
+}
+main .remediation__body {
+  margin: 0;
+  padding: var(--space-4);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+/* The remediation header's copy-prompt button is the copy affordance;
+ * suppress the generic injected pre copy pill inside remediation boxes. */
+:root.js main .remediation .code-wrap .copy-button {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .scorecard-hero {
+    grid-template-columns: 1fr;
+  }
+  .pscore__row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .stpill {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
 
 .scorecard-breadcrumb {
   padding: 0.5rem 0 0;
@@ -1726,8 +1941,7 @@ body:has(.leaderboard-hero) main {
   margin: 1rem 0 1.5rem;
   padding: 1rem 1.15rem;
   border: 1px solid var(--border-subtle, #e5e8eb);
-  border-left: 3px solid var(--accent, #0058aa);
-  border-radius: 0.375rem;
+  border-radius: var(--radius, 0.375rem);
   background: var(--bg-raised, #f4f5f7);
 }
 .scorecard-audience-banner p {

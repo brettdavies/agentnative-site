@@ -15,14 +15,8 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { bandOf, renderMeter } from '../shared/scorecard-format.mjs';
-import {
-  extractDescription,
-  extractFirstParagraph,
-  extractIntroSummary,
-  extractTitle,
-  principleTier,
-} from './content.mjs';
+import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
+import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml } from './util.mjs';

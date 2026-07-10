@@ -30,6 +30,19 @@ export function escHtml(s) {
 }
 
 /**
+ * Headline obligation tier for a principle. P1-P7 carry MUST-tier
+ * definitions; P8's anchor requirement (p8-should-bundle-exists) is
+ * SHOULD-tier. Shared by the homepage spec index, the /p{N} tier tag,
+ * and the scorecard principle rows.
+ *
+ * @param {number} n
+ * @returns {'MUST' | 'SHOULD'}
+ */
+export function principleTier(n) {
+  return n === 8 ? 'SHOULD' : 'MUST';
+}
+
+/**
  * Score-band class for a 0-100 score (grading axis: fail / warn / pass).
  * Thresholds: <50 low, 50-79 mid, >=80 high. Shared by every meter emitter
  * (homepage boards, leaderboards, scorecards, Worker renders) so the band
@@ -398,7 +411,70 @@ export function getAncBuildVersion(anc) {
 // only), and reproducibility URL for the CTA tail.
 // -------------------------------------------------------------------
 
-const DEFAULT_BREADCRUMB = { href: '/scorecards', label: '← Leaderboard' };
+const DEFAULT_BREADCRUMB = { href: '/scorecards', label: 'ANC 100' };
+
+/**
+ * Render the "Eight principles, scored" section: one row per principle
+ * with a status pill, a one-line evidence summary, and — on non-pass
+ * rows — an inline remediation box carrying a copy-paste prompt (the
+ * copy button is wired client-side and hidden without JS).
+ *
+ * @param {{ name: string }} tool
+ * @param {Array<{ group: string, status: string, label: string, evidence: string | null }>} results
+ * @param {{ details: Array<{ group: string, status: string }> }} principleScore
+ * @returns {string}
+ */
+function renderPrincipleRows(tool, results, principleScore) {
+  const detailByGroup = new Map(principleScore.details.map((d) => [d.group, d]));
+  const rows = PRINCIPLE_GROUPS.map((group) => {
+    const n = groupToPrincipleNum(group);
+    const detail = detailByGroup.get(group) ?? { status: 'skip' };
+    const checks = results.filter((r) => r.group === group);
+    const nonPass = checks.filter((r) => r.status === 'fail' || r.status === 'warn');
+    const tier = principleTier(n);
+
+    const pillClass = { pass: 'pass', partial: 'warn', fail: 'fail', skip: 'na' }[detail.status] ?? 'na';
+    const pillText = { pass: 'pass', partial: 'warn', fail: 'fail', skip: 'n/a' }[detail.status] ?? 'n/a';
+
+    let evidence;
+    if (checks.length === 0) evidence = 'No checks apply to this tool.';
+    else if (nonPass.length === 0) evidence = `All ${checks.length} check${checks.length === 1 ? '' : 's'} pass.`;
+    else
+      evidence = nonPass
+        .slice(0, 2)
+        .map((c) => c.evidence || c.label)
+        .join(' · ');
+
+    let remediation = '';
+    if (nonPass.length > 0) {
+      const promptLines = nonPass.map((c) => `- ${c.label}${c.evidence ? ` (${c.evidence})` : ''}`).join('\n');
+      const prompt = `Make ${tool.name} satisfy ${group} (${PRINCIPLE_NAMES[group]}) from the agent-native CLI standard. Address:\n${promptLines}\nRequirements: https://anc.dev/p${n}`;
+      remediation = `
+        <div class="remediation">
+          <div class="remediation__hd"><span>Remediation · ${group}</span><button type="button" class="copy-prompt" data-copy-prompt aria-label="Copy remediation prompt for ${group}">⧉ copy prompt</button></div>
+          <pre class="remediation__body" data-remediation-prompt>${escHtml(prompt)}</pre>
+        </div>`;
+    }
+
+    return `    <li class="pscore__row tier-${tier.toLowerCase()}">
+      <span class="spec__id">${group}</span>
+      <div class="pscore__body">
+        <a class="spec__title" href="/p${n}">${escHtml(PRINCIPLE_NAMES[group] || group)}</a>
+        <p class="pscore__evidence">${escHtml(evidence)}</p>${remediation}
+      </div>
+      <span class="stpill stpill--${pillClass}">${pillText}</span>
+    </li>`;
+  });
+
+  return `<section class="pscore" aria-labelledby="pscore-heading">
+  <h2 id="pscore-heading">Eight principles, scored</h2>
+  <p class="pscore__sub">Behavioral and source checks. Every non-pass row carries a copy-paste remediation prompt.</p>
+  <ol class="pscore__list">
+${rows.join('\n')}
+  </ol>
+</section>
+`;
+}
 
 function renderEligibleEmbed(tool, scorecard, opts) {
   const pct = scorecard.badge.score_pct;
@@ -475,8 +551,10 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   const titleSuffix = opts.titleSuffix ?? '';
   const headerSubline = opts.headerSubline ?? '';
 
-  let html = `<nav class="scorecard-breadcrumb" aria-label="Breadcrumb">
-  <a href="${escHtml(breadcrumb.href)}">${escHtml(breadcrumb.label)}</a>
+  const results = Array.isArray(scorecard.results) ? scorecard.results : [];
+
+  let html = `<nav class="crumb" aria-label="Breadcrumb">
+  <a href="${escHtml(breadcrumb.href)}">${escHtml(breadcrumb.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(tool.name)}</span>
 </nav>
 `;
 
@@ -493,59 +571,50 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   if (tool.repo) metaParts.push(`<a href="https://github.com/${escHtml(tool.repo)}">${escHtml(tool.repo)}</a>`);
   else if (tool.url) metaParts.push(`<a href="${escHtml(tool.url)}">${escHtml(tool.url)}</a>`);
 
-  html += `<header class="scorecard-header">
-  <h1>${escHtml(tool.name)}${titleSuffix ? ` ${titleSuffix}` : ''}</h1>
-${headerSubline ? `  <p class="live-score-summary__meta">${headerSubline}</p>\n` : ''}${tool.description ? `  <p class="scorecard-header__desc">${escHtml(tool.description)}</p>\n` : ''}${metaParts.length > 0 ? `  <div class="scorecard-header__meta">\n    ${metaParts.join('\n    ')}\n  </div>\n` : ''}</header>
+  // Summary chips: MUST/SHOULD coverage, non-pass counts, audit stamp.
+  const chips = [];
+  const cov = scorecard.coverage_summary;
+  if (cov?.must)
+    chips.push(
+      `<span class="chip ${cov.must.verified === cov.must.total ? 'chip--ok' : 'chip--warn'}">MUST ${cov.must.verified} / ${cov.must.total}</span>`,
+    );
+  if (cov?.should)
+    chips.push(
+      `<span class="chip ${cov.should.verified === cov.should.total ? 'chip--ok' : 'chip--warn'}">SHOULD ${cov.should.verified} / ${cov.should.total}</span>`,
+    );
+  const failCount = results.filter((r) => r.status === 'fail').length;
+  const warnCount = results.filter((r) => r.status === 'warn').length;
+  if (failCount > 0) chips.push(`<span class="chip chip--fail">${failCount} failing</span>`);
+  if (warnCount > 0)
+    chips.push(`<span class="chip chip--warn">${warnCount} warning${warnCount === 1 ? '' : 's'}</span>`);
+  const auditDateShort =
+    typeof meta.run?.started_at === 'string' && meta.run.started_at.length >= 10
+      ? meta.run.started_at.slice(0, 10)
+      : null;
+  const ancChipVersion = getAncBuildVersion(meta.anc);
+  const stampParts = [
+    auditDateShort ? `audited ${auditDateShort}` : null,
+    ancChipVersion ? `anc ${ancChipVersion}` : null,
+  ].filter(Boolean);
+  if (stampParts.length > 0) chips.push(`<span class="chip chip--muted">${escHtml(stampParts.join(' · '))}</span>`);
+
+  const scoreBand = bandOf(pct);
+  const principleRatio = (principleScore.met / (principleScore.total || 1)) * 100;
+
+  html += `<header class="scorecard-hero">
+  <div class="scorecard-hero__id">
+    <h1>${escHtml(tool.name)}${titleSuffix ? ` ${titleSuffix}` : ''}</h1>
+${headerSubline ? `    <p class="live-score-summary__meta">${headerSubline}</p>\n` : ''}${tool.description ? `    <p class="scorecard-header__desc">${escHtml(tool.description)}</p>\n` : ''}    <p class="scorecard-hero__cmd"><code>$ anc audit ${escHtml(tool.binary)} --json</code></p>
+${metaParts.length > 0 ? `    <div class="scorecard-header__meta">\n      ${metaParts.join('\n      ')}\n    </div>\n` : ''}${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''}  </div>
+  <div class="scorecard-hero__scores">
+    <div class="scorecell ${scoreBand}"><span class="bigscore__n">${pct}</span><span class="bigscore__l">pass rate</span>${renderMeter(pct, { num: null })}</div>
+    <div class="scorecell ${bandOf(principleRatio)}"><span class="bigscore__n">${principleScore.met}/${principleScore.total}</span><span class="bigscore__l">principles met</span>${renderMeter(principleRatio, { num: null })}</div>
+  </div>
+</header>
 `;
 
-  html += `<section class="scorecard-summary">
-  <div class="scorecard-score-badge">
-    <span class="scorecard-score-badge__pct">${pct}%</span>
-    <span class="scorecard-score-badge__label">pass rate</span>
-  </div>
-  <div class="scorecard-principle-badge">
-    <span class="scorecard-principle-badge__count">${principleScore.met}/${principleScore.total}</span>
-    <span class="scorecard-principle-badge__label">principles met</span>
-  </div>
-</section>
-`;
-
-  html += renderCoverageSummary(scorecard.coverage_summary);
   html += renderAudienceBanner(scorecard.audience, scorecard.audit_profile);
-
-  if (topIssues.length === 0) {
-    html += `<section class="scorecard-issues scorecard-issues--clean">
-  <h2>Status</h2>
-  <p>All ${principleScore.total} principles met — no issues found.</p>
-</section>
-`;
-  } else {
-    const issueItems = topIssues
-      .map((issue) => {
-        const pNum = groupToPrincipleNum(issue.group);
-        const statusClass = issue.status === 'fail' ? 'issue--fail' : 'issue--warn';
-        const groupLink = pNum
-          ? `<a href="/p${pNum}">${escHtml(PRINCIPLE_NAMES[issue.group] || issue.group)}</a>`
-          : escHtml(issue.group);
-        const evidence = issue.evidence ? `<span class="issue__evidence">${escHtml(issue.evidence)}</span>` : '';
-        return `    <li class="issue ${statusClass}">
-      <span class="issue__status">${escHtml(issue.status.toUpperCase())}</span>
-      <span class="issue__label">${escHtml(issue.label)}</span>
-      <span class="issue__group">${groupLink}</span>
-      ${evidence}
-    </li>`;
-      })
-      .join('\n');
-    html += `<section class="scorecard-issues">
-  <h2>Top Issues</h2>
-  <ul class="issue-list">
-${issueItems}
-  </ul>
-</section>
-`;
-  }
-
-  const results = Array.isArray(scorecard.results) ? scorecard.results : [];
+  html += renderPrincipleRows(tool, results, principleScore);
   html += `<section class="scorecard-audits">
   <h2>All Audits</h2>
 `;
@@ -619,9 +688,13 @@ ${renderAuditRows(bonusChecks)}
       : renderBelowFloorHint(pct, topIssues.length > 0);
   }
 
+  // Page column wrapper — both exits pass through it so the static build
+  // and the Worker live route share the same page chrome.
+  const wrapPage = (inner) => `<article class="container scorecard-page">${inner}</article>`;
+
   // Reproduce CTA. Suppressed for web targets (no `anc audit` reproduce
   // path); CLI callers leave hideReproduce unset.
-  if (opts.hideReproduce) return html;
+  if (opts.hideReproduce) return wrapPage(html);
 
   // Prefer the exact recorded invocation when target.kind is `command`;
   // otherwise synthesize the safe canonical form.
@@ -647,7 +720,7 @@ ${renderAuditRows(bonusChecks)}
   <p class="scorecard-cta__note">${ctaNote}</p>
 </section>`;
 
-  return html;
+  return wrapPage(html);
 }
 
 /**
