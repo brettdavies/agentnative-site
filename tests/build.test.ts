@@ -1843,10 +1843,10 @@ describe('loadSkillData — fail-fast validation', () => {
 describe('badgeColor — cohort-band mapping', () => {
   const EXEMPLARY = '#005da1';
   const STRONG = '#007b80';
-  const SOLID = '#0a7e3a';
-  const QUALIFIED = '#976200';
+  const SOLID = '#00792f';
+  const QUALIFIED = '#a46400';
   const BELOW = '#bf5200';
-  const CRITICAL = '#af2b25';
+  const CRITICAL = '#b63230';
 
   test('≥ 85 → navy (Exemplary)', () => {
     expect(badgeColor(100)).toBe(EXEMPLARY);
@@ -1906,10 +1906,10 @@ describe('badgeFormat — label, message, color contract', () => {
   test('color follows badgeColor of the rounded percent across the bands', () => {
     expect(badgeFormat(0.91).color).toBe('#005da1'); // Exemplary
     expect(badgeFormat(0.8).color).toBe('#007b80'); //  Strong
-    expect(badgeFormat(0.77).color).toBe('#0a7e3a'); // Solid
-    expect(badgeFormat(0.7).color).toBe('#976200'); //  Qualified (floor)
+    expect(badgeFormat(0.77).color).toBe('#00792f'); // Solid
+    expect(badgeFormat(0.7).color).toBe('#a46400'); //  Qualified (floor)
     expect(badgeFormat(0.69).color).toBe('#bf5200'); // below floor
-    expect(badgeFormat(0.42).color).toBe('#af2b25'); // critical
+    expect(badgeFormat(0.42).color).toBe('#b63230'); // critical
   });
 
   test('style is flat — visually identical to shields.io defaults', () => {
