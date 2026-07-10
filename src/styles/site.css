@@ -1187,6 +1187,38 @@ body:has(.doc) main {
   text-decoration: var(--shiki-dark-text-decoration);
 }
 
+/* Audit-landing hero — the instrument's try-surface on /audit and
+ * /web-audit, consistent with the homepage board try-form. */
+.audit-hero {
+  margin-block: var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+}
+.doc .audit-hero__title {
+  margin: 0 0 var(--space-2);
+  font-size: 1.4rem;
+  letter-spacing: -0.015em;
+}
+.audit-hero__lede {
+  margin: 0 0 var(--space-4);
+  color: var(--fg-secondary);
+}
+.audit-hero__form input {
+  flex: 1;
+  min-width: 0;
+}
+.audit-hero .audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+.audit-hero .live-score__help {
+  margin: var(--space-3) 0 0;
+}
+
 /* Prev / next pager. */
 .pager {
   display: grid;

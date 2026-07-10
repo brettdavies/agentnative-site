@@ -5,29 +5,22 @@ surfaces, its machine-readable content (`llms.txt`, OpenAPI, JSON Schemas), its 
 policy. The result is a web scorecard with per-check evidence and copy-paste fixes, at a shareable
 [`/web/<domain>`](/web) page.
 
-<section class="live-score" aria-labelledby="web-audit-heading" data-web-audit-section>
-  <div class="live-score__row">
-    <span class="live-score__kicker" aria-hidden="true">Audit</span>
-    <div class="live-score__content">
-      <h2 id="web-audit-heading" class="live-score__title">Score a website, live.</h2>
-      <p class="live-score__lede">Enter a public URL. Each check streams in as it resolves; the finished scorecard is saved at a shareable <code>/web/&lt;domain&gt;</code> page.</p>
-      <form class="live-score__form" method="post" action="/api/audit-web" novalidate data-web-audit-form>
-        <div class="live-score__input-row">
-          <input id="web-audit-input" class="live-score__input" name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" required aria-label="Website URL" aria-describedby="web-audit-help" data-web-audit-input />
-          <button type="submit" class="live-score__submit" data-web-audit-submit>Audit</button>
-        </div>
-        <p id="web-audit-help" class="live-score__help">
-          or try
-          <button type="button" class="live-score__chip" data-web-audit-example="anc.dev" aria-label="Try example: anc.dev"><code>anc.dev</code></button>,
-          <button type="button" class="live-score__chip" data-web-audit-example="modelcontextprotocol.io" aria-label="Try example: modelcontextprotocol.io"><code>modelcontextprotocol.io</code></button>.
-        </p>
-        <p class="live-score__status" data-web-audit-status role="status" aria-live="polite" hidden></p>
-      </form>
-      <table class="audit-table">
-        <tbody data-web-audit-results></tbody>
-      </table>
-    </div>
-  </div>
+<section class="audit-hero" aria-labelledby="web-audit-heading" data-web-audit-section>
+  <h2 id="web-audit-heading" class="audit-hero__title">Score a website, live.</h2>
+  <p class="audit-hero__lede">Enter a public URL. Each check streams in as it resolves; the finished scorecard is saved at a shareable <code>/web/&lt;domain&gt;</code> page.</p>
+  <form class="board-try audit-hero__form" method="post" action="/api/audit-web" novalidate data-web-audit-form>
+    <input id="web-audit-input" name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" required aria-label="Website URL" aria-describedby="web-audit-help" data-web-audit-input />
+    <button type="submit" class="btn btn--primary" data-web-audit-submit>Audit</button>
+  </form>
+  <p id="web-audit-help" class="live-score__help">
+    or try
+    <button type="button" class="live-score__chip" data-web-audit-example="anc.dev" aria-label="Try example: anc.dev"><code>anc.dev</code></button>,
+    <button type="button" class="live-score__chip" data-web-audit-example="modelcontextprotocol.io" aria-label="Try example: modelcontextprotocol.io"><code>modelcontextprotocol.io</code></button>.
+  </p>
+  <p class="live-score__status" data-web-audit-status role="status" aria-live="polite" hidden></p>
+  <table class="audit-table">
+    <tbody data-web-audit-results></tbody>
+  </table>
 </section>
 
 ## What it checks
@@ -56,7 +49,8 @@ absent one — it misleads agents.
 
 An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp) exposes four web tools:
 
-- `audit_website(url, site_type?)` — run a fresh audit; non-passing rows carry inline remediation with a copy-paste prompt.
+- `audit_website(url, site_type?)` — run a fresh audit; non-passing rows carry inline remediation with a copy-paste
+  prompt.
 - `get_website_audit(url)` — read a cached scorecard without re-running.
 - `list_website_audits()` — the curated [web leaderboard](/web).
 - `get_web_remediation(check_id, evidence?)` — the canonical fix for any check, with a ready-to-paste prompt.
@@ -64,5 +58,5 @@ An MCP client can run the audit without the form. The [anc.dev MCP server](/mcp)
 ## See how sites score
 
 The [web leaderboard](/web) ranks a curated set of sites by their global agent-readiness score, with a relative-score
-toggle. Each row links to its `/web/<domain>` scorecard with full per-check evidence and fixes. For the CLI side, see the [ANC 100 leaderboard](/scorecards) and
-[audit your CLI](/audit) with `anc`.
+toggle. Each row links to its `/web/<domain>` scorecard with full per-check evidence and fixes. For the CLI side, see
+the [ANC 100 leaderboard](/scorecards) and [audit your CLI](/audit) with `anc`.
