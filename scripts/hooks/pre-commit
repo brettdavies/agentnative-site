@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Pre-commit hook — staged-file-scoped fast lint mirroring the checks
+# `.github/workflows/ci.yml` runs via `bun run lint` (Biome + markdownlint-cli2).
+# Heavier stages (build, tests, wrangler dry-run, prose-check) stay in
+# scripts/hooks/pre-push; they're too slow for a pre-commit gate.
+#
+# Activate once per clone:
+#   git config core.hooksPath scripts/hooks
+#
+# Each tool invocation no-ops with a notice if the binary isn't installed,
+# so the hook never blocks a commit on an unconfigured machine.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+
+mapfile -t staged_md < <(git diff --cached --name-only --diff-filter=ACM -- '*.md')
+
+bold '==> biome check --staged'
+if command -v bun &>/dev/null; then
+  bun x biome check --staged --no-errors-on-unmatched
+else
+  echo "  - biome (skipped: bun not installed; install via https://bun.sh)"
+fi
+
+bold '==> markdownlint-cli2 (staged .md files)'
+if [ ${#staged_md[@]} -eq 0 ]; then
+  echo "  - no staged .md files; skipping"
+elif command -v bun &>/dev/null; then
+  bun x markdownlint-cli2 "${staged_md[@]}"
+else
+  echo "  - markdownlint-cli2 (skipped: bun not installed; install via https://bun.sh)"
+fi
+
+bold '==> pre-commit checks passed'
