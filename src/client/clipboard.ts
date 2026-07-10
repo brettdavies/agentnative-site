@@ -54,6 +54,8 @@ function attachPreButtons() {
   const pres = document.querySelectorAll<HTMLPreElement>('main pre');
   for (const pre of pres) {
     if (pre.dataset.copyAttached === 'true') continue;
+    // Remediation prompts have their own header copy-prompt button.
+    if (pre.matches('.remediation__body')) continue;
 
     // Wrap the pre in a positioning container BEFORE attaching the copy
     // button. The pre keeps `overflow-x: auto` for its code; the button
@@ -102,9 +104,22 @@ function attachAnchorCopy() {
   }
 }
 
+function attachPromptButtons() {
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-copy-prompt]');
+  for (const btn of buttons) {
+    if (btn.dataset.copyAttached === 'true') continue;
+    btn.addEventListener('click', async () => {
+      const prompt = btn.closest('.remediation')?.querySelector('[data-remediation-prompt]')?.textContent ?? '';
+      if (prompt && (await copyText(prompt))) flashCopied(btn);
+    });
+    btn.dataset.copyAttached = 'true';
+  }
+}
+
 function init() {
   attachPreButtons();
   attachAnchorCopy();
+  attachPromptButtons();
 }
 
 if (document.readyState === 'loading') {

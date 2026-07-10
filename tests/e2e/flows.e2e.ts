@@ -286,6 +286,31 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
     await page.goto('/');
     await expect(page.locator('.site-brand__tag')).toBeHidden();
   });
+
+  test('mobile (390): Escape closes the open panel and refocuses the hamburger', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    await page.locator('.nav-burger').click();
+    await expect(nav).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(nav).toBeHidden();
+    await expect(page.locator('.nav-burger__cb')).toBeFocused();
+  });
+});
+
+test.describe('scorecard remediation copy-prompt', () => {
+  test('copy prompt writes the remediation prompt to the clipboard', async ({ page, context, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit does not support clipboard permission grants');
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/score/ripgrep');
+    const btn = page.locator('[data-copy-prompt]').first();
+    await btn.scrollIntoViewIfNeeded();
+    await btn.click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toContain('agent-native CLI standard');
+    expect(copied).toContain('Requirements: https://anc.dev/p');
+  });
 });
 
 test.describe('footer AI-provider icons', () => {

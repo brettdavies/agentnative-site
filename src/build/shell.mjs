@@ -336,6 +336,7 @@ ${SOURCE_REPOS.map(
       </div>
     </footer>
     <script src="/js/theme.js" defer></script>
+    <script src="/js/nav.js" defer></script>
     <script src="/js/clipboard.js" defer></script>
 ${extraScripts.map((s) => `    <script src="${s}" defer></script>`).join('\n')}
   </body>
