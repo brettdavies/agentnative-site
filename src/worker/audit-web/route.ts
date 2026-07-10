@@ -119,31 +119,33 @@ export async function handleWebAudit(
     return jsonResponse({ error: validation.reason }, 400);
   }
 
-  // 5. cf-connecting-ip presence (no anon fallback at the audit tier).
+  // 5. Cache hit — cache state is data, served before the fresh-audit
+  // gates so a cached read needs no source IP and consumes no budget
+  // (the audit_website MCP tool orders its gates the same way).
+  const shareUrl = `/web/${shareDomain}`;
+  const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
+  if (cached) {
+    return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+  }
+
+  // 6. cf-connecting-ip presence (no anon fallback at the audit tier).
   const ip = request.headers.get('cf-connecting-ip');
   if (!ip) {
     return jsonResponse({ error: 'rate_limit', message: 'fresh audits require a source IP (cf-connecting-ip)' }, 429);
   }
-  // 6. Burst limiter.
+  // 7. Burst limiter.
   if (env.WEB_AUDIT_LIMITER) {
     const { success } = await env.WEB_AUDIT_LIMITER.limit({ key: ip });
     if (!success) {
       return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (burst)' }, 429);
     }
   }
-  // 7. KV hourly window (shared with the audit_website MCP tool).
+  // 8. KV hourly window (shared with the audit_website MCP tool).
   if (env.SCORE_KV) {
     const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ip);
     if (!ok) {
       return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (5 per hour per source)' }, 429);
     }
-  }
-
-  // 8. Cache hit — return the cached scorecard without re-running.
-  const shareUrl = `/web/${shareDomain}`;
-  const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
-  if (cached) {
-    return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
   }
 
   // 9. Miss — stream the engine, cache the completed result via waitUntil.

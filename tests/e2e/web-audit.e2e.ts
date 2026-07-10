@@ -64,15 +64,22 @@ test.describe('web audit — streaming form and shareable result', () => {
       timeout: 75_000,
     });
     expect(res.status()).toBe(200);
+    const contentType = res.headers()['content-type'] ?? '';
+    if (contentType.includes('application/json')) {
+      // Cache hit: a single JSON envelope with the 0.2 scorecard.
+      const body = (await res.json()) as { cached?: boolean; scorecard?: { score_pct?: number }; share_url?: string };
+      expect(body.cached).toBe(true);
+      expect(body.scorecard?.score_pct).toBeGreaterThanOrEqual(0);
+      expect(body.share_url).toBe(`/web/${TARGET_DOMAIN}`);
+      return;
+    }
     const lines = (await res.text())
       .split('\n')
       .filter((l) => l.trim().length > 0)
       .map((l) => JSON.parse(l) as { type: string; share_url?: string });
     const checks = lines.filter((l) => l.type === 'check');
     expect(checks.length).toBeGreaterThan(0);
-    const terminal = lines.at(-1);
-    // complete (streamed fresh) or a cache-hit single JSON object — both carry share_url.
-    expect(terminal?.share_url ?? lines[0].share_url).toBe(`/web/${TARGET_DOMAIN}`);
+    expect(lines.at(-1)?.share_url).toBe(`/web/${TARGET_DOMAIN}`);
   });
 
   test('the /web/<domain> markdown twin mirrors the category structure with both scores', async ({ request }) => {
