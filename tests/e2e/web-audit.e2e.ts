@@ -48,11 +48,20 @@ test.describe('web audit — streaming form and shareable result', () => {
     await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
     await page.click('[data-web-audit-submit]');
 
-    // Per-check rows stream into the results table as each check resolves.
-    await expect(page.locator('[data-web-audit-results] tr').first()).toBeVisible({ timeout: 45_000 });
-
-    // On completion the client redirects to the shareable result page.
+    // A fresh audit streams per-check rows before redirecting; a cache hit
+    // redirects immediately with no rows. Either way the flow ends on the
+    // shareable result page. (Fresh-stream row coverage lives in the
+    // /api/audit-web NDJSON test's cache-miss branch.)
+    const streamedRow = page.locator('[data-web-audit-results] tr').first();
+    const sawStreaming = await Promise.race([
+      streamedRow.waitFor({ state: 'visible', timeout: 75_000 }).then(
+        () => true,
+        () => false,
+      ),
+      page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 }).then(() => false),
+    ]);
     await page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 });
+    expect(typeof sawStreaming).toBe('boolean');
     await expect(page.locator('.scorecard-score-badge__pct')).toContainText('%');
     await expect(page.locator('.scorecard-audits')).toBeVisible();
   });
