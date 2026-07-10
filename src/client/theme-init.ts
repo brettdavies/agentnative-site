@@ -5,8 +5,8 @@
 //      If none set, leave `data-theme` off and let prefers-color-scheme
 //      drive via CSS.
 //   2. Add `.js` to <html> class list so the progressive-enhancement CSS
-//      rule `:root:not(.js) .theme-toggle { display: none }` unhides the
-//      toggle buttons (docs/DESIGN.md §4.8 C6).
+//      rule `:root.js .theme-cycle { display: inline-flex }` unhides the
+//      theme button (docs/DESIGN.md §4.8 C6).
 //
 // Size budget: ≤ 500 bytes minified. Inlined into every HTML shell head.
 

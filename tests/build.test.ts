@@ -324,9 +324,9 @@ describe('emitShell — OG image alt text', () => {
     // ahead during the manual reconciliation window) and never a hardcoded
     // literal.
     const html = shell();
-    expect(html).toContain(`<span>v${SITE_SPEC_VERSION}</span>`);
+    expect(html).toContain(`· v${SITE_SPEC_VERSION}</span>`);
     // Negative assertion: the prior stub literal must never come back.
-    expect(html).not.toContain('<span>v0.1.0</span>');
+    expect(html).not.toContain('v0.1.0</span>');
   });
 });
 

@@ -20,22 +20,29 @@ test.describe('cold HN land → browse principles → theme dark → reload stil
     await expect(page.locator('h1')).toContainText('Progressive Help Discovery');
   });
 
-  test('theme toggle persists across reload via localStorage', async ({ page }) => {
+  test('theme button cycles to dark and persists across reload via localStorage', async ({ page }) => {
     await page.goto('/');
-    await page.click('button[data-theme-set="dark"]');
+    const btn = page.locator('[data-theme-cycle]').first();
+    // Cycle: system → light → dark.
+    await btn.click();
+    await btn.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    // aria-pressed reflects state after reload.
-    await expect(page.locator('button[data-theme-set="dark"]')).toHaveAttribute('aria-pressed', 'true');
+    // data-theme-choice reflects state after reload.
+    await expect(page.locator('[data-theme-cycle]').first()).toHaveAttribute('data-theme-choice', 'dark');
   });
 
-  test('system toggle clears localStorage and removes data-theme', async ({ page }) => {
+  test('cycling back to system clears localStorage and removes data-theme', async ({ page }) => {
     await page.goto('/');
-    await page.click('button[data-theme-set="dark"]');
-    await page.click('button[data-theme-set="system"]');
+    const btn = page.locator('[data-theme-cycle]').first();
+    // system → light → dark → system.
+    await btn.click();
+    await btn.click();
+    await btn.click();
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
+    await expect(btn).toHaveAttribute('data-theme-choice', 'system');
   });
 });
 
@@ -154,6 +161,61 @@ test.describe('principle listing', () => {
     await page.locator('.principle-entry__link[href="/p5"]').click();
     await expect(page).toHaveURL(/\/p5$/);
     await expect(page.locator('h1')).toContainText('Safe Retries');
+  });
+});
+
+test.describe('shell — grouped nav, hamburger, footer rows', () => {
+  test('desktop (1440): grouped nav links inline, hamburger hidden, footer rows present', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    await expect(nav).toBeVisible();
+    await expect(nav.locator('a')).toHaveCount(6);
+    await expect(page.locator('.nav-burger')).toBeHidden();
+    await expect(page.locator('.site-footer__source')).toBeVisible();
+    await expect(page.locator('.site-footer__meta')).toBeVisible();
+  });
+
+  test('mobile (390): inline links hidden, hamburger toggles the panel by pointer', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    await expect(nav).toBeHidden();
+    const burger = page.locator('.nav-burger');
+    await expect(burger).toBeVisible();
+    // 44px touch target.
+    const box = await burger.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+
+    await burger.click();
+    await expect(nav).toBeVisible();
+    await burger.click();
+    await expect(nav).toBeHidden();
+
+    await expect(page.locator('.site-footer__source')).toBeVisible();
+    await expect(page.locator('.site-footer__meta')).toBeVisible();
+  });
+
+  test('mobile (390): hamburger checkbox is keyboard-operable (Space opens and closes, no JS needed)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    const cb = page.locator('.nav-burger__cb');
+    await cb.focus();
+    await page.keyboard.press('Space');
+    await expect(nav).toBeVisible();
+    // The same focusable control closes the open panel.
+    await page.keyboard.press('Space');
+    await expect(nav).toBeHidden();
+  });
+
+  test('mobile (390): tagline is hidden under 640px', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await expect(page.locator('.site-brand__tag')).toBeHidden();
   });
 });
 

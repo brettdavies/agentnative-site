@@ -287,68 +287,146 @@ main .anchor-icon {
   top: 0;
 }
 
-/* Header / brand / nav */
+/* Header — sticky instrument nav: brand + grouped links + theme button,
+ * hamburger, install CTA. Below 900px the links drop into a panel toggled
+ * by the hamburger's checkbox. */
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.site-header__row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem clamp(1rem, 4vw, 2rem);
-  border-bottom: 1px solid var(--border, #cfd5db);
+  gap: var(--space-6);
+  height: 62px;
 }
 .site-brand {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  align-items: baseline;
+  gap: var(--space-3);
   text-decoration: none;
   color: inherit;
 }
 .site-brand__name {
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: var(--fg-heading);
+  font-size: 1.05rem;
 }
 .site-brand__tag {
-  color: var(--fg-secondary, #6a7278);
-  font-size: 0.9rem;
+  color: var(--fg-muted);
+  font-size: var(--text-secondary);
 }
 .site-nav {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  font-size: 0.95rem;
+  gap: var(--space-5);
+  margin-left: auto;
 }
 .site-nav a {
-  color: inherit;
+  font-size: var(--text-secondary);
+  color: var(--fg-secondary);
+  text-decoration: none;
   white-space: nowrap;
+  transition: color 0.15s var(--ease);
+}
+.site-nav a:hover,
+.site-nav a[aria-current] {
+  color: var(--fg-heading);
+}
+.site-header__cta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.site-header__install {
+  font-size: var(--text-secondary);
 }
 
-/* Theme toggle — hidden when JS is off (C6). */
-.theme-toggle {
+/* Theme button — cycles light / dark / system (theme.ts); hidden when JS
+ * is off (C6). */
+.theme-cycle {
   display: none;
-  gap: 0;
-  border: 1px solid var(--border, #cfd5db);
-  border-radius: 999px;
-  overflow: hidden;
-  font-size: 0.85rem;
-}
-:root.js .theme-toggle {
-  display: inline-flex;
-}
-.theme-toggle button {
-  background: transparent;
-  color: inherit;
-  padding: 0.25rem 0.7rem;
+  color: var(--fg-muted);
+  font-size: 1rem;
+  background: none;
   border: 0;
+  padding: 0;
   cursor: pointer;
-  font: inherit;
 }
-.theme-toggle button[aria-pressed="true"] {
-  background: var(--bg-code, #eef2f5);
-  font-weight: 600;
+:root.js .theme-cycle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.theme-toggle button + button {
-  border-left: 1px solid var(--border, #cfd5db);
+
+/* Hamburger — hidden on desktop. The checkbox is visually hidden but
+ * focusable and covers the whole 44px target, so pointer taps and
+ * keyboard Space both toggle the panel with zero JS; the client
+ * enhancement adds Escape-to-close. */
+.nav-burger {
+  display: none;
+}
+.nav-burger__cb {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.nav-burger:has(.nav-burger__cb:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+@media (max-width: 900px) {
+  .site-nav {
+    display: none;
+    position: absolute;
+    inset: 62px 0 auto;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: var(--space-2) var(--space-6) var(--space-5);
+    box-shadow: var(--shadow-md);
+  }
+  .site-header:has(.nav-burger__cb:checked) .site-nav {
+    display: flex;
+  }
+  .site-nav a {
+    padding: var(--space-4) 0;
+    font-size: 1.05rem;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .nav-burger {
+    display: inline-flex;
+    position: relative;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-inline: calc(-1 * var(--space-2));
+    font-size: 1.3rem;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+  :root.js .theme-cycle {
+    width: 44px;
+    height: 44px;
+  }
+  .site-header__cta {
+    gap: var(--space-2);
+  }
+}
+@media (max-width: 640px) {
+  .site-brand__tag {
+    display: none;
+  }
 }
 
 /* Copy buttons — hidden when JS is off (C6).
@@ -992,34 +1070,72 @@ main .anchor-icon {
   max-width: 65ch;
 }
 
-/* Footer */
+/* Footer — provider circles, source-of-truth row, meta row. */
 .site-footer {
-  border-top: 1px solid var(--border, #cfd5db);
-  padding: 1.25rem clamp(1rem, 4vw, 2rem);
-  color: var(--fg-secondary, #6a7278);
-  font-size: 0.9rem;
-}
-.site-footer__meta {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  justify-content: center;
+  border-top: 1px solid var(--border-subtle);
+  padding-block: var(--space-8) var(--space-7);
+  color: var(--fg-secondary);
 }
 
-/* Source-of-truth row. Sits between the AI-summary block and the meta
- * line, mirroring the meta line's centered-flex layout. Renders as
- * "[GH] Source: spec · cli · site · skill"; the icon is a quiet kicker,
- * not a primary call-out — sized smaller than the AI-summary icons and
- * tinted to fg-muted with the same hover lift as the meta links. */
+/* AI summary CTA — provider icons above the source + meta rows. */
+.ai-summary {
+  text-align: center;
+}
+.ai-summary__heading {
+  margin: 0;
+  font-size: var(--text-secondary);
+  font-weight: 560;
+  color: var(--fg-secondary);
+}
+.ai-summary__icons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+.ai-summary__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition:
+    border-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+/* iOS Safari paints a 0×0 glyph for inline <svg> with viewBox but no
+ * intrinsic width/height (per SVG2 spec). The svg carries explicit
+ * width/height attributes; this pins the rendered box regardless. */
+.ai-summary__link svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.ai-summary__link:hover {
+  border-color: var(--fg-muted);
+  color: var(--fg-heading);
+  background: var(--bg-raised);
+}
+
+/* Source-of-truth row — "[GH] Source spec · cli · site · skill". */
 .site-footer__source {
-  margin: 0 0 0.45rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--space-4);
   justify-content: center;
-  font-size: 0.85rem;
+  margin: var(--space-7) 0 0;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.82rem;
+  color: var(--fg-muted);
 }
 .site-footer__source-icon {
   display: inline-flex;
@@ -1027,8 +1143,7 @@ main .anchor-icon {
   justify-content: center;
   width: 1rem;
   height: 1rem;
-  color: var(--fg-muted, #525960);
-  margin-right: 0.15rem;
+  color: var(--fg-muted);
 }
 .site-footer__source-icon svg {
   width: 100%;
@@ -1036,60 +1151,37 @@ main .anchor-icon {
   display: block;
 }
 .site-footer__source-label {
-  color: var(--fg-muted, #525960);
   letter-spacing: 0.01em;
 }
 .site-footer__source a {
-  color: inherit;
-  transition: color 120ms ease;
+  color: var(--fg-secondary);
+  text-decoration: none;
+  transition: color 0.15s var(--ease);
 }
 .site-footer__source a:hover {
-  color: var(--fg-body, #1a2026);
+  color: var(--accent);
+}
+.site-footer__sep {
+  color: var(--border);
 }
 
-/* AI summary CTA — provider icons above the meta line. */
-.ai-summary {
+/* Meta row — version, doc links, machine-surface links. */
+.site-footer__meta {
+  margin: var(--space-5) 0 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1rem 0;
-}
-.ai-summary__heading {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--fg-secondary, #6a7278);
-  letter-spacing: 0.01em;
-}
-.ai-summary__icons {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
   flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
   justify-content: center;
+  font-size: var(--text-secondary);
+  color: var(--fg-muted);
 }
-.ai-summary__link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  color: var(--fg-muted, #525960);
-  border-radius: 50%;
-  transition:
-    color 120ms ease,
-    transform 120ms ease;
+.site-footer__meta a {
+  color: var(--fg-secondary);
+  text-decoration: none;
+  transition: color 0.15s var(--ease);
 }
-/* iOS Safari paints a 0×0 glyph for inline <svg> with viewBox but no
- * intrinsic width/height (per SVG2 spec). Size the child explicitly. */
-.ai-summary__link svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.ai-summary__link:hover {
-  color: var(--fg-body, #1a2026);
-  transform: scale(1.12);
+.site-footer__meta a:hover {
+  color: var(--accent);
 }
 
 /* ================================================================
