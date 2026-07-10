@@ -228,21 +228,38 @@ main .anchor-icon {
  * .rfc-must / .rfc-should / .rfc-may rules. */
 .normative {
   margin-block: 1.5rem;
-  padding: 1rem 1.25rem;
-  border-radius: 8px;
-  background: var(--bg-raised);
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 16px);
+  overflow: hidden;
   max-inline-size: var(--measure);
 }
 .normative > p:first-child {
-  margin: 0 0 0.5rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: var(--bg-raised);
 }
 .normative > :last-child {
   margin-block-end: 0;
 }
 .normative > p:first-child > strong:first-child {
-  font-size: var(--text-caption);
-  font-weight: 700;
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.normative > ul,
+.normative > ol {
+  margin: 0;
+  padding: 1.5rem 1.5rem 1.5rem calc(1.5rem + 1.1em);
+  display: grid;
+  gap: 0.75rem;
+}
+.normative li > p {
+  margin: 0;
 }
 
 /* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6).
@@ -796,10 +813,8 @@ main .anchor-icon {
 }
 .board-rubric a {
   color: var(--accent);
-  text-decoration: none;
-}
-.board-rubric a:hover {
   text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 .board-try {
   display: flex;
@@ -1042,6 +1057,177 @@ body:has(.hero__grid) main {
   .hero__cta .btn {
     flex: 1;
     justify-content: center;
+  }
+}
+
+/* ================================================================
+ * Reading treatment — /p{N} principle pages + prose docs (.doc)
+ * ================================================================ */
+
+body:has(.doc) main {
+  max-width: none;
+  padding: 0;
+}
+.doc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 52rem;
+  margin-inline: auto;
+  padding-block: var(--space-8) var(--space-9);
+}
+.doc a {
+  color: var(--accent);
+}
+.doc h1 {
+  font-size: clamp(2rem, 1.5rem + 2vw, 2.9rem);
+  letter-spacing: -0.03em;
+  font-weight: 660;
+  line-height: 1.1;
+  margin: var(--space-4) 0 0;
+}
+.doc h2 {
+  font-size: 1.4rem;
+  letter-spacing: -0.015em;
+  margin: var(--space-8) 0 var(--space-4);
+}
+.doc p,
+.doc li {
+  max-width: var(--measure);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  margin-bottom: var(--space-5);
+}
+.crumb a {
+  color: var(--fg-secondary);
+  text-decoration: none;
+}
+.crumb a:hover {
+  color: var(--accent);
+}
+.crumb .sep {
+  color: var(--border);
+}
+
+.doc__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.doc__num {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.tier-must .doc__num {
+  color: var(--must);
+}
+.tier-should .doc__num {
+  color: var(--should);
+}
+.tier-may .doc__num {
+  color: var(--may);
+}
+
+/* The Definition section heading holds the lede position: the heading is
+ * visually hidden (still a deep-link target and in the document outline)
+ * and its paragraph reads as the lede. */
+.doc #definition {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  margin: 0;
+}
+.doc #definition + p {
+  font-size: 1.22rem;
+  color: var(--fg-secondary);
+  line-height: 1.55;
+  margin-top: var(--space-5);
+}
+
+/* Audit callout — the instrument, quietly. */
+.audit-note {
+  margin-top: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--accent-subtle);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  color: var(--fg-body);
+  max-inline-size: var(--measure);
+}
+.audit-note code {
+  background: var(--bg);
+}
+
+/* Code blocks read dark in both themes on reading pages; Shiki's dark
+ * palette applies unconditionally inside .doc. */
+.doc pre {
+  background: oklch(20% 0.02 250);
+  border-color: oklch(30% 0.02 250);
+}
+:root .doc .shiki,
+:root .doc .shiki code span {
+  color: var(--shiki-dark);
+  background-color: var(--shiki-dark-bg);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+  text-decoration: var(--shiki-dark-text-decoration);
+}
+
+/* Prev / next pager. */
+.pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-9);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-6);
+}
+.pager a {
+  display: block;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s var(--ease);
+}
+.pager a:hover {
+  border-color: var(--fg-muted);
+}
+.pager .dir {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+}
+.pager .t {
+  display: block;
+  margin-top: var(--space-2);
+  font-weight: 560;
+  color: var(--fg-heading);
+}
+.pager .next {
+  text-align: right;
+}
+@media (max-width: 640px) {
+  .pager {
+    grid-template-columns: 1fr;
+  }
+  .pager .next {
+    text-align: left;
   }
 }
 

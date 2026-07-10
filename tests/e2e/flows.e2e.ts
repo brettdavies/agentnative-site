@@ -202,6 +202,25 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await expect(page.locator('h1')).toContainText('Safe Retries');
   });
 
+  test('/p3 renders the reading treatment: tier tag, requirement groups, pager', async ({ page }) => {
+    await page.goto('/p3');
+    await expect(page.locator('.doc__head .doc__num')).toHaveText('P3');
+    await expect(page.locator('.doc__head .tier')).toHaveText('MUST');
+    const groups = page.locator('.normative');
+    expect(await groups.count()).toBeGreaterThan(0);
+    // Full borders / bg tints, never a side-stripe.
+    const borders = await groups.first().evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { left: s.borderLeftWidth, right: s.borderRightWidth, top: s.borderTopWidth };
+    });
+    expect(borders.left).toBe(borders.right);
+    expect(borders.left).toBe(borders.top);
+    await expect(page.locator('.audit-note')).toBeVisible();
+    // Pager navigates to the neighbor principle.
+    await page.locator('.pager .next').click();
+    await expect(page).toHaveURL(/\/p4$/);
+  });
+
   test('no horizontal overflow at 390 / 768 / 1440', async ({ page }) => {
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });

@@ -16,17 +16,19 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { bandOf, renderMeter } from '../shared/scorecard-format.mjs';
-import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
+import {
+  extractDescription,
+  extractFirstParagraph,
+  extractIntroSummary,
+  extractTitle,
+  principleTier,
+} from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
 import { rankWebEntries } from './web-leaderboard-render.mjs';
 
 const BOARD_ROWS = 5;
-
-// Headline obligation tier per principle. P1-P7 carry MUST-tier definitions;
-// P8's anchor requirement (p8-should-bundle-exists) is SHOULD-tier.
-const principleTier = (n) => (n === 8 ? 'SHOULD' : 'MUST');
 
 // The five web-audit display categories (ids + names mirror
 // src/data/web-audit/registry.yaml `categories`; tier + description are

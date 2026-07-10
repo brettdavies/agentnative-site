@@ -48,10 +48,10 @@ import { minifyDist } from './12-minify-dist.mjs';
 import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
 import { emitWebScorecardSurface, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
-import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
+import { extractDefinitionParagraph, extractDescription, extractTitle, principleTier } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
-import { absolutifyMarkdownLinks, parseFilename, sortedGlob } from './util.mjs';
+import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -161,26 +161,63 @@ export async function build() {
   // 2. Sorted principle files.
   const principleFiles = await sortedGlob(PRINCIPLES_DIR);
 
-  // 3. Render each principle.
+  // 3. Render each principle. Two passes: parse + render everything first
+  // so the page pass can build prev/next pagers from neighbor titles.
   const principles = [];
   for (const file of principleFiles) {
     const { n, slug } = parseFilename(file);
     const source = await readFile(file, 'utf8');
     let html = await renderMarkdown(source);
     // Pin H1 id + permalink href to the filename-derived locked slug so
-    // authored H1 prose can't drift the §3.5 anchors.
+    // authored H1 prose can't drift the §3.5 anchors. The "P{n}:" prefix is
+    // stripped from the DISPLAYED H1 only — the doc__head numeral carries it
+    // and the markdown twin keeps the authored bytes.
     html = html
       .replace(/<h1 id="[^"]*"/, `<h1 id="p${n}-${slug}"`)
-      .replace(/(<h1 id="p\d+-[^"]*">[^<]*<a\s[^>]*href=")#[^"]*"/, `$1#p${n}-${slug}"`);
+      .replace(/(<h1 id="p\d+-[^"]*">[^<]*<a\s[^>]*href=")#[^"]*"/, `$1#p${n}-${slug}"`)
+      .replace(new RegExp(`(<h1 id="p${n}-[^"]*">)P${n}:\\s*`), '$1');
     const title = extractTitle(source);
     const description = extractDescription(source);
+    const shortDesc = extractDefinitionParagraph(source);
+    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
+  }
 
-    // 4. Per-principle HTML page.
+  // 4. Per-principle pages — the rendered markdown wrapped in the reading
+  // treatment: breadcrumb, tier-colored P# head, audit-note callout, and a
+  // prev/next pager. The markdown twin stays byte-identical to source.
+  for (const [i, p] of principles.entries()) {
+    const { n, title, description, source } = p;
+    const tier = principleTier(n);
+    const shortTitle = (t) => escHtml(t.replace(/^P\d+:\s*/, ''));
+
+    const crumb = `<div class="crumb"><a href="/#principles">The standard</a><span class="sep" aria-hidden="true">/</span><span>P${n} of ${principles.length}</span></div>`;
+    const head = `<div class="doc__head tier-${tier.toLowerCase()}"><span class="doc__num">P${n}</span><span class="tier">${tier}</span></div>`;
+    const auditNote = `<div class="audit-note">Audited live by <code>anc audit &lt;tool&gt; --principle ${n}</code>: behavioral and source checks.</div>`;
+
+    const prev =
+      i > 0
+        ? `<a class="prev" href="/p${principles[i - 1].n}"><span class="dir">◂ prev</span><span class="t">P${principles[i - 1].n} · ${shortTitle(principles[i - 1].title)}</span></a>`
+        : `<a class="prev" href="/#principles"><span class="dir">◂ prev</span><span class="t">The standard</span></a>`;
+    const next =
+      i < principles.length - 1
+        ? `<a class="next" href="/p${principles[i + 1].n}"><span class="dir">next ▸</span><span class="t">P${principles[i + 1].n} · ${shortTitle(principles[i + 1].title)}</span></a>`
+        : `<a class="next" href="/scorecards"><span class="dir">next ▸</span><span class="t">The ANC 100</span></a>`;
+    const pager = `<nav class="pager" aria-label="Principle pages">${prev}${next}</nav>`;
+
+    // The audit-note sits ahead of the Requirements section when present,
+    // else after the content.
+    let body = p.html;
+    if (body.includes('<h2 id="requirements">')) {
+      body = body.replace('<h2 id="requirements">', `${auditNote}<h2 id="requirements">`);
+    } else {
+      body += auditNote;
+    }
+
     const page = emitShell({
       title,
       description,
       canonicalPath: `/p${n}`,
-      bodyHtml: html,
+      bodyHtml: `<article class="container doc">${crumb}${head}${body}${pager}</article>`,
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],
     });
@@ -190,9 +227,6 @@ export async function build() {
     // so `Accept: text/markdown` agents fetching /p<n>.md get a self-contained
     // document. Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
     await writeFile(join(DIST_DIR, `p${n}.md`), absolutifyMarkdownLinks(source));
-
-    const shortDesc = extractDefinitionParagraph(source);
-    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
   }
 
   // 6. Scorecard surface — leaderboard, per-tool pages, badges, coverage,

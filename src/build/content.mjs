@@ -116,3 +116,15 @@ export function extractDefinitionParagraph(markdown) {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links → label only
     .replace(/`([^`]+)`/g, '$1'); // strip inline code → content only
 }
+
+/**
+ * Headline obligation tier for a principle. P1-P7 carry MUST-tier
+ * definitions; P8's anchor requirement (p8-should-bundle-exists) is
+ * SHOULD-tier. Shared by the homepage spec index and the /p{N} tier tag.
+ *
+ * @param {number} n
+ * @returns {'MUST' | 'SHOULD'}
+ */
+export function principleTier(n) {
+  return n === 8 ? 'SHOULD' : 'MUST';
+}
