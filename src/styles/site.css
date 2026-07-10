@@ -29,6 +29,99 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+
+/* ================================================================
+ * Instrument layer tokens — spacing, radius, motion, elevation.
+ * Palette + typography tokens live in the generated foundation.css;
+ * these are site-build-only primitives layered on top.
+ *
+ * Dark elevation is designed, not inverted: drop-shadows vanish on a
+ * near-black page, so depth comes from raised surfaces plus a top
+ * edge-highlight (the panel edge catching light). Components consume
+ * the indirected tokens (--shadow-card, --band-surface-bg, …) so the
+ * light/dark swap happens here once, not per component.
+ * ================================================================ */
+:root {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --container: 72rem;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --shadow-md: 0 18px 30px -24px oklch(20% 0.03 250 / 0.45);
+  --shadow-lg: 0 32px 60px -40px oklch(20% 0.03 250 / 0.5);
+  --shadow-card: var(--shadow-lg);
+  --shadow-board: none;
+  --card-border: var(--border);
+  --board-border: var(--border);
+  --band-surface-bg: var(--bg-raised);
+  --band-surface-border: var(--border-subtle);
+  --seg-bg: var(--bg);
+  --field-bg: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --shadow-lg: 0 28px 56px -36px oklch(0% 0 0 / 0.7);
+    --shadow-card: inset 0 1px 0 oklch(100% 0 0 / 0.07), var(--shadow-lg);
+    --shadow-board: inset 0 1px 0 oklch(100% 0 0 / 0.05);
+    --card-border: oklch(31% 0.02 250);
+    --board-border: oklch(30% 0.02 250);
+    --band-surface-bg: oklch(17.5% 0.016 250);
+    --band-surface-border: oklch(26% 0.02 250);
+    --seg-bg: oklch(20% 0.016 250);
+    --field-bg: oklch(11% 0.012 250);
+  }
+}
+:root[data-theme="dark"] {
+  --shadow-lg: 0 28px 56px -36px oklch(0% 0 0 / 0.7);
+  --shadow-card: inset 0 1px 0 oklch(100% 0 0 / 0.07), var(--shadow-lg);
+  --shadow-board: inset 0 1px 0 oklch(100% 0 0 / 0.05);
+  --card-border: oklch(31% 0.02 250);
+  --board-border: oklch(30% 0.02 250);
+  --band-surface-bg: oklch(17.5% 0.016 250);
+  --band-surface-border: oklch(26% 0.02 250);
+  --seg-bg: oklch(20% 0.016 250);
+  --field-bg: oklch(11% 0.012 250);
+}
+
+/* Token-based focus ring. :where() keeps specificity at zero so any
+ * component-specific focus treatment still wins. */
+:where(a, button, input, label, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: var(--space-6);
+  box-sizing: border-box;
+}
+.nowrap {
+  white-space: nowrap;
 }
 
 code,
@@ -294,6 +387,462 @@ main .anchor-icon {
   background: var(--accent, #0058aa);
   color: #fff;
   border-color: var(--accent, #0058aa);
+}
+
+/* ================================================================
+ * Instrument components — meter, bands, buttons, seg toggle,
+ * score card, board, spec index, status chips.
+ * Shared by the homepage, boards, scorecards, and audit landings.
+ * ================================================================ */
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-weight: 560;
+  line-height: 1;
+  padding: 0.7em 1.15em;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.18s var(--ease),
+    background 0.18s var(--ease),
+    border-color 0.18s var(--ease);
+}
+.btn--primary {
+  background: var(--accent);
+  color: var(--bg);
+}
+.btn--primary:hover {
+  transform: translateY(-1px);
+}
+.btn--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-heading);
+}
+.btn--ghost:hover {
+  border-color: var(--fg-muted);
+}
+
+/* Meter — the signature: a graded score. The fill's band color rides
+ * the --fc indirection so band classes recolor fill and number
+ * independently (vivid bar, AA text). A width:0 fill leaves the bare
+ * track (score 0); width:100% closes the pill (score 100); an
+ * unscored/absent value uses .meter--unscored: empty track, muted
+ * number slot. */
+.meter {
+  display: inline-grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.meter__track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--meter-track);
+  overflow: hidden;
+  min-width: 68px;
+  box-shadow: inset 0 0 0 1px oklch(50% 0.02 250 / 0.06);
+}
+.meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--fc, var(--accent)) 80%, white 20%),
+    var(--fc, var(--accent))
+  );
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.28);
+}
+.meter__num {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg-heading);
+}
+.meter--unscored .meter__fill {
+  display: none;
+}
+.meter--unscored .meter__num {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+/* Score-band coloring (grading axis; tier-* classes are the obligation
+ * axis). Applies to meters, big score numerals, and status chips. */
+.band-high .meter__fill {
+  --fc: var(--band-high-bar);
+}
+.band-mid .meter__fill {
+  --fc: var(--band-mid-bar);
+}
+.band-low .meter__fill {
+  --fc: var(--band-low-bar);
+}
+.band-high .meter__num {
+  color: var(--band-high);
+}
+.band-mid .meter__num {
+  color: var(--band-mid);
+}
+.band-low .meter__num {
+  color: var(--band-low);
+}
+/* Status chips — pass/warn/fail readings on check rows. */
+.st {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.st.pass {
+  color: var(--band-high);
+}
+.st.warn {
+  color: var(--band-mid);
+}
+.st.fail {
+  color: var(--band-low);
+}
+
+/* Score card — terminal-flavored proof panel (hero, audit landings). */
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.card__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+}
+.card__cmd {
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--fg-body);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.card__cmd .p {
+  color: var(--fg-muted);
+}
+.card__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+}
+.bigscore {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.bigscore__n {
+  font-family: var(--font-mono);
+  font-size: 2.6rem;
+  font-weight: 620;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+}
+.bigscore__l {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.band-high .bigscore__n {
+  color: var(--band-high-bar);
+}
+.band-mid .bigscore__n {
+  color: var(--band-mid-bar);
+}
+.band-low .bigscore__n {
+  color: var(--band-low-bar);
+}
+.card__rows {
+  padding: 0 var(--space-4) var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+.crow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 0.84rem;
+  color: var(--fg-secondary);
+}
+.crow .id {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  width: 2.2em;
+}
+.crow .st {
+  margin-left: auto;
+}
+
+/* Band surface — full-bleed raised section band (board section). */
+.band-surface {
+  background: var(--band-surface-bg);
+  border-block: 1px solid var(--band-surface-border);
+}
+
+/* Segmented toggle — hidden radios; labels carry the pill UI. */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--seg-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.seg input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.seg label {
+  font-size: var(--text-secondary);
+  font-weight: 560;
+  color: var(--fg-secondary);
+  padding: 0.45em 1.1em;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+.seg input:checked + label {
+  background: var(--accent);
+  color: var(--bg);
+}
+.seg input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Board — leaderboard rows with graded meters. */
+.board {
+  border: 1px solid var(--board-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: var(--shadow-board);
+}
+.lrow {
+  display: grid;
+  grid-template-columns: 2.4ch minmax(0, 1fr) 190px;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  color: inherit;
+  text-decoration: none;
+}
+.lrow:last-child {
+  border-bottom: 0;
+}
+.lrow:hover {
+  background: var(--bg-raised);
+}
+.lrow .rank {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  font-size: 0.86rem;
+}
+.lrow .name {
+  font-weight: 560;
+  color: var(--fg-heading);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lrow .name-sub {
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-size: 0.86rem;
+}
+.board-section {
+  padding-block: var(--space-8);
+}
+.board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+}
+.board-head h2 {
+  font-size: clamp(1.5rem, 1.2rem + 1.2vw, 1.9rem);
+  letter-spacing: -0.02em;
+  font-weight: 620;
+  margin: 0;
+}
+.board-head p {
+  color: var(--fg-secondary);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-secondary);
+}
+.board-controls {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.board-rubric {
+  margin-top: var(--space-4);
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+.board-rubric code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--fg-body);
+}
+.board-try {
+  display: flex;
+  gap: var(--space-2);
+}
+.board-try input {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  padding: 0.6em 0.85em;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--field-bg);
+  color: var(--fg-body);
+  min-width: 15rem;
+}
+
+/* Spec index — principle / web-check rows, tier-colored (obligation
+ * axis: MUST/SHOULD/MAY, distinct from the band-* grading axis). */
+.spec-section {
+  padding-block: var(--space-9);
+}
+.spec-section > .container > h2 {
+  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.3rem);
+  letter-spacing: -0.025em;
+  font-weight: 640;
+  margin: 0;
+}
+.spec-section > .container > .sub {
+  color: var(--fg-secondary);
+  margin: var(--space-3) 0 0;
+  max-width: 60ch;
+}
+.spec {
+  list-style: none;
+  margin: var(--space-7) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--space-8);
+}
+.spec__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.spec__id {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.tier-must .spec__id {
+  color: var(--must);
+}
+.tier-should .spec__id {
+  color: var(--should);
+}
+.tier-may .spec__id {
+  color: var(--may);
+}
+.spec__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.spec__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.tier {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.15em 0.45em;
+  border-radius: 5px;
+  border: 1px solid currentColor;
+}
+.tier-must .tier {
+  color: var(--must);
+}
+.tier-should .tier {
+  color: var(--should);
+}
+.tier-may .tier {
+  color: var(--may);
+}
+.spec__desc {
+  color: var(--fg-secondary);
+  font-size: 0.9rem;
+  margin: var(--space-2) 0 0;
+  line-height: 1.5;
+}
+.spec__desc code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Component responsive collapses (page-level layout rules live with
+ * their page sections). */
+@media (max-width: 900px) {
+  .spec {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .board-head {
+    align-items: flex-start;
+  }
+  .lrow {
+    grid-template-columns: 2.4ch minmax(0, 1fr) 130px;
+    gap: var(--space-4);
+  }
+}
+@media (max-width: 560px) {
+  .card__scores {
+    grid-template-columns: 1fr;
+  }
+  .board-try input {
+    min-width: 0;
+  }
+  .board-try {
+    flex: 1;
+  }
 }
 
 /* ================================================================
