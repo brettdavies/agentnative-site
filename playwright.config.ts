@@ -43,6 +43,10 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    // PW-managed browser downloads stall on some dev machines. Setting
+    // PW_CHANNEL=chrome points Chromium-family projects at the installed
+    // Google Chrome instead; CI leaves it unset and uses managed browsers.
+    ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}),
   },
   projects: [
     {
