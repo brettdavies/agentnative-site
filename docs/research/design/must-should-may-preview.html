@@ -281,6 +281,31 @@ struct Cli {
       </article>
     </section>
 
+    <section class="page">
+      <h2>Score-band ramp + meter (grading axis)</h2>
+      <p>
+        The <code>--band-*</code> ramp grades scores (&lt;50 low, 50–79 mid,
+        ≥80 high) and is a separate axis from the MUST/SHOULD/MAY obligation
+        tiers above. Text shades clear WCAG AA on the page background; the
+        <code>--band-*-bar</code> fills run brighter because the adjacent
+        numeral restates the value (non-text UI).
+      </p>
+      <div style="display:grid; gap:0.75rem; max-width:26rem;">
+        <span style="display:inline-grid; grid-template-columns:1fr auto; align-items:center; gap:0.75rem;">
+          <span style="height:10px; border-radius:999px; background:var(--meter-track); overflow:hidden;"><span style="display:block; height:100%; width:92%; border-radius:999px; background:var(--band-high-bar);"></span></span>
+          <span style="font-family:var(--font-mono); font-weight:600; color:var(--band-high);">92</span>
+        </span>
+        <span style="display:inline-grid; grid-template-columns:1fr auto; align-items:center; gap:0.75rem;">
+          <span style="height:10px; border-radius:999px; background:var(--meter-track); overflow:hidden;"><span style="display:block; height:100%; width:63%; border-radius:999px; background:var(--band-mid-bar);"></span></span>
+          <span style="font-family:var(--font-mono); font-weight:600; color:var(--band-mid);">63</span>
+        </span>
+        <span style="display:inline-grid; grid-template-columns:1fr auto; align-items:center; gap:0.75rem;">
+          <span style="height:10px; border-radius:999px; background:var(--meter-track); overflow:hidden;"><span style="display:block; height:100%; width:34%; border-radius:999px; background:var(--band-low-bar);"></span></span>
+          <span style="font-family:var(--font-mono); font-weight:600; color:var(--band-low);">34</span>
+        </span>
+      </div>
+    </section>
+
     <footer class="page">
       <p>
         <strong>Fonts</strong>: body + display in Pangram Pangram's
@@ -291,13 +316,13 @@ struct Cli {
         <code>var(--font-sans)</code> / <code>var(--font-mono)</code> stacks.
       </p>
       <p>
-        <strong>Deferred</strong>: block-level keyword treatments (leading
-        RFC tag, full background tint) are not in <code>foundation.css</code>.
-        The previously-proposed side-stripe variant was rejected because
-        <code>border-left &gt; 1px</code> on callouts is the #1 AI-slop
+        <strong>Block treatment</strong>: the shipped requirement groups
+        (<code>.normative</code> in <code>site.css</code>) render as tinted
+        full-border boxes with a raised header row — never side-stripes
+        (<code>border-left &gt; 1px</code> on callouts is the #1 AI-slop
         pattern per the impeccable skill's <code>&lt;absolute_bans&gt;</code>,
-        even with semantic colors. Decide block treatment with live content —
-        see <code>docs/DESIGN.md</code> §4.7.
+        even with semantic colors). See <code>docs/DESIGN.md</code> §4.7 and
+        §4.15.
       </p>
       <p>
         <strong>Contrast</strong>: every foreground / background pair used
