@@ -100,9 +100,7 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
  * @param {string} args.canonicalPath        — site-relative path, e.g. '/p3'.
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
- * @param {boolean=} args.isIndex            — true on '/', adds mini-TOC rail.
- * @param {Array<{n:number,slug:string,title:string}>=} args.principles
- *        Used by the mini-TOC on '/'.
+ * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
  * @param {string=} args.baseUrl             — absolute base (default prod).
  * @returns {string} full HTML document.
  */
@@ -129,7 +127,6 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
     bodyHtml: '{{BODY}}',
     themeInitJs: themeInitJs ?? '',
     isIndex: false,
-    principles: [],
     baseUrl,
     extraScripts: [],
   });
@@ -142,7 +139,6 @@ export function emitShell({
   bodyHtml,
   themeInitJs,
   isIndex = false,
-  principles = [],
   baseUrl,
   extraScripts = [],
 }) {
@@ -232,18 +228,6 @@ export function emitShell({
     ],
   };
 
-  const miniToc =
-    isIndex && principles.length > 0
-      ? `<nav class="mini-toc" aria-label="Principles">
-  <h2 class="mini-toc__heading">Principles</h2>
-  <ol class="mini-toc__list">
-${principles
-  .map((p) => `    <li><a href="#p${p.n}-${p.slug}">P${p.n}. ${esc(p.title.replace(/^P\d+:\s*/, ''))}</a></li>`)
-  .join('\n')}
-  </ol>
-</nav>`
-      : '';
-
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -315,7 +299,6 @@ ${NAV_LINKS.map(
       </div>
     </header>
     <main id="main">
-${miniToc}
 ${bodyHtml}
     </main>
     <footer class="site-footer">

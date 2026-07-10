@@ -6,16 +6,16 @@ import { expect, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
 
 test.describe('cold HN land → browse principles → theme dark → reload still dark', () => {
-  test('landing on / shows hero + principle listing with 8 entries', async ({ page }) => {
+  test('landing on / shows hero + spec index with 8 principle rows', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.hero__title')).toBeVisible();
-    const entries = page.locator('.principle-entry');
+    const entries = page.locator('.spec[data-s="cli"] .spec__row');
     await expect(entries).toHaveCount(8);
   });
 
-  test('clicking a principle entry navigates to its detail page', async ({ page }) => {
+  test('clicking a principle row navigates to its detail page', async ({ page }) => {
     await page.goto('/');
-    await page.locator('.principle-entry__link[href="/p3"]').click();
+    await page.locator('.spec__title[href="/p3"]').click();
     await expect(page).toHaveURL(/\/p3$/);
     await expect(page.locator('h1')).toContainText('Progressive Help Discovery');
   });
@@ -77,6 +77,20 @@ test.describe('keyboard + a11y', () => {
   });
 
   test('axe: 0 serious/critical violations on /p1', async ({ page }) => {
+    await page.goto('/p1');
+    await injectAxe(page);
+    await checkA11y(page, undefined, AXE_OPTS);
+  });
+
+  test('axe: 0 serious/critical violations on / in dark mode', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto('/');
+    await injectAxe(page);
+    await checkA11y(page, undefined, AXE_OPTS);
+  });
+
+  test('axe: 0 serious/critical violations on /p1 in dark mode', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
     await page.goto('/p1');
     await injectAxe(page);
     await checkA11y(page, undefined, AXE_OPTS);
@@ -149,18 +163,54 @@ test.describe('code-copy + anchor-copy', () => {
   });
 });
 
-test.describe('principle listing', () => {
-  test('index page has a principle listing with 8 entries', async ({ page }) => {
+test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
+  test('default (CLI) shows the CLI board, 8 principles, and the Score form', async ({ page }) => {
     await page.goto('/');
-    const entries = page.locator('.principle-entry');
-    await expect(entries).toHaveCount(8);
+    await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="web"]')).toBeHidden();
+    await expect(page.locator('.spec[data-s="cli"] .spec__row')).toHaveCount(8);
+    await expect(page.locator('.spec[data-s="web"]')).toBeHidden();
+    await expect(page.locator('form[data-live-score-form]')).toBeVisible();
+    // Board rows are threaded from the computed leaderboard — non-empty,
+    // each with a meter.
+    const rows = page.locator('.board[data-s="cli"] .lrow');
+    expect(await rows.count()).toBeGreaterThan(0);
+    await expect(rows.first().locator('.meter')).toBeVisible();
   });
 
-  test('principle entry links to its detail page', async ({ page }) => {
+  test('activating the Website radio swaps board, spec index, and input together (no JS)', async ({ browser }) => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const page = await ctx.newPage();
     await page.goto('/');
-    await page.locator('.principle-entry__link[href="/p5"]').click();
+    // CLI is the no-JS default.
+    await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+
+    await page.locator('label[for="s-web"]').click();
+    await expect(page.locator('.board[data-s="web"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
+    await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(5);
+    await expect(page.locator('.spec[data-s="cli"]')).toBeHidden();
+    await expect(page.locator('form[data-s="web"] input[name="url"]')).toBeVisible();
+    await expect(page.locator('form[data-live-score-form]')).toBeHidden();
+    await ctx.close();
+  });
+
+  test('principle row links to its detail page', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('.spec__title[href="/p5"]').click();
     await expect(page).toHaveURL(/\/p5$/);
     await expect(page.locator('h1')).toContainText('Safe Retries');
+  });
+
+  test('no horizontal overflow at 390 / 768 / 1440', async ({ page }) => {
+    for (const width of [390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/');
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `overflow at ${width}px`).toBeLessThanOrEqual(0);
+    }
   });
 });
 

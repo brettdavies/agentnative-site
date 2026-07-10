@@ -46,7 +46,7 @@ import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
-import { emitWebScorecardSurface } from './14-web-scorecards-emit.mjs';
+import { emitWebScorecardSurface, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -195,22 +195,9 @@ export async function build() {
     principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
   }
 
-  // 6. Homepage — hero + principle listing (links to /p{N} pages).
-  const { introTitle, introSummary, introSource, specContextSource, useSource } = await emitHomepage({
-    distDir: DIST_DIR,
-    contentDir: CONTENT_DIR,
-    themeInit,
-    principles,
-  });
-
-  // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
-  const subPageData = await emitSubPages({
-    distDir: DIST_DIR,
-    contentDir: CONTENT_DIR,
-    themeInit,
-  });
-
-  // 8. Scorecard surface — leaderboard, per-tool pages, badges, coverage, skill.
+  // 6. Scorecard surface — leaderboard, per-tool pages, badges, coverage,
+  // skill. Runs BEFORE the homepage because the homepage board panes render
+  // the computed leaderboard rows.
   const { leaderboard, scorecardPaths, badgePaths, coverageMarkdown, skillData, skillMarkdown } =
     await emitScorecardSurface({
       distDir: DIST_DIR,
@@ -221,6 +208,31 @@ export async function build() {
       scorecardsDir: SCORECARDS_DIR,
       themeInit,
     });
+
+  // 6a. Web seed — loaded here (not in stage 11d) because the homepage web
+  // board pane renders the same entries; 11d receives them preloaded.
+  const webSeed = await loadWebSeed(
+    join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'),
+    join(REPO_ROOT, 'scorecards', 'web'),
+  );
+  for (const w of webSeed.warnings) console.warn(`warning: ${w}`);
+
+  // 6b. Homepage — instrument hero + toggle-driven boards + spec index.
+  const { introTitle, introSummary, introSource, specContextSource, useSource } = await emitHomepage({
+    distDir: DIST_DIR,
+    contentDir: CONTENT_DIR,
+    themeInit,
+    principles,
+    leaderboard,
+    webEntries: webSeed.entries,
+  });
+
+  // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
+  const subPageData = await emitSubPages({
+    distDir: DIST_DIR,
+    contentDir: CONTENT_DIR,
+    themeInit,
+  });
 
   // 9. llms.txt + llms-full.txt (includes scorecard + skill sections).
   await emitLlmsSurface({
@@ -322,13 +334,12 @@ export async function build() {
     distDir: DIST_DIR,
   });
 
-  // 11d. Web leaderboard + per-seed scorecard projections. Reads the
-  // curated seed and its committed web scorecards; emits /web + the
-  // Worker-served /web/<domain> fallback JSON under _internal.
+  // 11d. Web leaderboard + per-seed scorecard projections. Consumes the
+  // seed loaded at stage 6a; emits /web + the Worker-served /web/<domain>
+  // fallback JSON under _internal.
   const webScorecardStats = await emitWebScorecardSurface({
     distDir: DIST_DIR,
-    seedPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'),
-    scorecardsWebDir: join(REPO_ROOT, 'scorecards', 'web'),
+    seed: webSeed,
     themeInit,
   });
 

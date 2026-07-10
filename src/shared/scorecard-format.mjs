@@ -29,6 +29,32 @@ export function escHtml(s) {
   );
 }
 
+/**
+ * Score-band class for a 0-100 score (grading axis: fail / warn / pass).
+ * Thresholds: <50 low, 50-79 mid, >=80 high. Shared by every meter emitter
+ * (homepage boards, leaderboards, scorecards, Worker renders) so the band
+ * cutoffs never drift between surfaces.
+ *
+ * @param {number} pct
+ * @returns {'band-low' | 'band-mid' | 'band-high'}
+ */
+export function bandOf(pct) {
+  return pct >= 80 ? 'band-high' : pct >= 50 ? 'band-mid' : 'band-low';
+}
+
+/**
+ * Render a score meter (track + band-colored fill, optional numeral).
+ *
+ * @param {number} pct — 0-100 fill width and band source.
+ * @param {{ num?: string | null }} [opts] — numeral text; null omits it,
+ *        default renders the integer pct.
+ * @returns {string}
+ */
+export function renderMeter(pct, { num = String(Math.round(pct)) } = {}) {
+  const numHtml = num === null ? '' : `<span class="meter__num">${escHtml(num)}</span>`;
+  return `<span class="meter ${bandOf(pct)}"><span class="meter__track"><span class="meter__fill" style="width:${Math.max(0, Math.min(100, pct))}%"></span></span>${numHtml}</span>`;
+}
+
 /** Map of principle group code → human-readable name. */
 export const PRINCIPLE_NAMES = {
   P1: 'Non-Interactive by Default',
