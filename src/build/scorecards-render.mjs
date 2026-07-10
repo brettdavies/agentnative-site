@@ -11,7 +11,6 @@ import {
   buildScorecardBody as sharedBuildScorecardBody,
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   renderAudienceBanner as sharedRenderAudienceBanner,
-  renderCoverageSummary as sharedRenderCoverageSummary,
 } from '../shared/scorecard-format.mjs';
 
 const BADGE_FLOOR_DISPLAY_PCT = BADGE_ELIGIBILITY_FLOOR_PCT;
@@ -125,7 +124,6 @@ ${methodology}
 
 // Re-exported from shared for back-compat with existing callers (build,
 // tests). Definitions live in src/shared/scorecard-format.mjs.
-export const renderCoverageSummary = sharedRenderCoverageSummary;
 export const renderAudienceBanner = sharedRenderAudienceBanner;
 
 // -------------------------------------------------------------------

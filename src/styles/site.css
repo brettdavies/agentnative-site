@@ -1606,24 +1606,6 @@ body:has(.leaderboard-hero) main {
   color: oklch(45.00% 0.1 70);
 }
 
-/* Badge callout — surface #2 of the badge plan. Sits between the
-   leaderboard table and the methodology section so a reader who has
-   just scanned the rankings sees the next step (claim the badge) before
-   the longer-form methodology prose.
-
-   Surface uses the canonical `--bg-raised` token (defined for both
-   light and dark in src/styles/foundation.css) — the same token the
-   methodology / scorecard-summary surfaces use. Earlier draft used a
-   fake `--bg-subtle` name that fell back to the light-mode hex literal
-   in dark mode, producing near-white text on near-white background. */
-.leaderboard-badge-callout {
-  margin-top: 2rem;
-  padding: 1.25rem 1.5rem;
-  border: 1px solid var(--border, #cfd5db);
-  border-radius: 8px;
-  background: var(--bg-raised, #f4f5f7);
-}
-
 .leaderboard-badge-callout h2 {
   margin: 0 0 0.5rem 0;
   font-size: 1.05rem;
@@ -1887,18 +1869,124 @@ main .remediation__body {
   }
 }
 
-.scorecard-breadcrumb {
-  padding: 0.5rem 0 0;
-  font-size: 0.88rem;
+/* Web result page — category cards with marked check rows. */
+.scorecard-hero__note {
+  margin: var(--space-3) 0 0;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  max-width: 48ch;
+}
+.catcard {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-board);
+  overflow: hidden;
+  margin-bottom: var(--space-6);
+}
+.catcard__hd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--band-surface-bg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.catcard__hd .audit-group__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.audit-group__rollup {
+  margin-left: auto;
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-weight: 600;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  white-space: nowrap;
+}
+.audit-group__rollup.band-high {
+  color: var(--band-high);
+}
+.audit-group__rollup.band-mid {
+  color: var(--band-mid);
+}
+.audit-group__rollup.band-low {
+  color: var(--band-low);
+}
+.audit-group__note {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  color: var(--fg-muted);
+  font-size: 0.9rem;
 }
 
-.scorecard-breadcrumb a {
-  color: var(--fg-muted, #525960);
-  text-decoration: none;
+.web-check + .web-check {
+  border-top: 1px solid var(--border-subtle);
 }
-.scorecard-breadcrumb a:hover {
-  color: var(--accent, #0058aa);
-  text-decoration: underline;
+.web-check summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  cursor: pointer;
+  list-style: none;
+}
+.web-check summary::-webkit-details-marker {
+  display: none;
+}
+.web-check__mark {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-weight: 600;
+  width: 1.2em;
+  flex: none;
+}
+.web-check__label {
+  flex: 1;
+  min-width: 0;
+}
+.web-check summary .audit__status {
+  margin-left: auto;
+  width: auto;
+  white-space: nowrap;
+}
+.web-check--pass .web-check__mark,
+.web-check--pass .audit__status {
+  color: var(--band-high);
+}
+.web-check--absent .web-check__mark,
+.web-check--absent .audit__status {
+  color: var(--band-mid);
+}
+.web-check--broken .web-check__mark,
+.web-check--broken .audit__status,
+.web-check--error .web-check__mark,
+.web-check--error .audit__status {
+  color: var(--band-low);
+}
+.web-check--n_a .web-check__mark,
+.web-check--n_a .audit__status,
+.web-check--skip .web-check__mark,
+.web-check--skip .audit__status {
+  color: var(--fg-muted);
+}
+.web-check__goal,
+.web-check__result,
+.web-check__fix,
+.web-check__resources,
+.web-check__prompt-label {
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-5);
+  font-size: 0.9rem;
+  color: var(--fg-secondary);
+}
+.web-check__resources a {
+  color: var(--accent);
+}
+.web-check pre {
+  margin: var(--space-2) var(--space-5) var(--space-4);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .scorecard-header {
@@ -1989,112 +2077,6 @@ main .remediation__body {
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-}
-
-/* Score + principle summary badges */
-.scorecard-summary {
-  display: flex;
-  gap: 1.5rem;
-  padding: 1.25rem 0 1.75rem;
-  border-top: 1px solid var(--border-subtle, #e5e8eb);
-  border-bottom: 1px solid var(--border-subtle, #e5e8eb);
-}
-
-.scorecard-score-badge,
-.scorecard-principle-badge {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.scorecard-score-badge__pct,
-.scorecard-principle-badge__count {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
-  font-size: 2rem;
-  font-weight: 500;
-  line-height: 1;
-  color: var(--fg-heading, #0f1419);
-}
-
-.scorecard-score-badge__label,
-.scorecard-principle-badge__label {
-  font-size: 0.8rem;
-  color: var(--fg-muted, #525960);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Top issues */
-.scorecard-issues {
-  padding: 1.5rem 0;
-}
-.scorecard-issues h2 {
-  margin-top: 0;
-}
-
-.scorecard-issues--clean p {
-  color: var(--may, #007980);
-  font-weight: 500;
-}
-
-.issue-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.issue {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
-.issue__status {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.2rem;
-  letter-spacing: 0.03em;
-}
-
-.issue--fail .issue__status {
-  background: oklch(92.00% 0.04 28);
-  color: var(--must, #af2b25);
-}
-.issue--warn .issue__status {
-  background: oklch(93.00% 0.04 70);
-  color: var(--should, #a16100);
-}
-
-.issue__label {
-  font-weight: 500;
-  color: var(--fg-body, #1a2026);
-}
-
-.issue__group {
-  font-size: 0.85rem;
-}
-.issue__group a {
-  color: var(--accent, #0058aa);
-  text-decoration: none;
-}
-.issue__group a:hover {
-  text-decoration: underline;
-}
-
-.issue__evidence {
-  font-size: 0.82rem;
-  color: var(--fg-muted, #525960);
-  flex-basis: 100%;
-  padding-left: 0;
 }
 
 /* All audits section */
@@ -2296,14 +2278,6 @@ main .remediation__body {
     background: oklch(23.00% 0.04 70);
     color: oklch(80.00% 0.08 70);
   }
-  :root:not([data-theme="light"]) .issue--fail .issue__status {
-    background: oklch(22.00% 0.04 28);
-    color: var(--must);
-  }
-  :root:not([data-theme="light"]) .issue--warn .issue__status {
-    background: oklch(23.00% 0.04 70);
-    color: var(--should);
-  }
 }
 :root[data-theme="dark"] .tier-badge--agent {
   background: oklch(22.00% 0.05 200);
@@ -2312,14 +2286,6 @@ main .remediation__body {
 :root[data-theme="dark"] .tier-badge--notable {
   background: oklch(23.00% 0.04 70);
   color: oklch(80.00% 0.08 70);
-}
-:root[data-theme="dark"] .issue--fail .issue__status {
-  background: oklch(22.00% 0.04 28);
-  color: var(--must);
-}
-:root[data-theme="dark"] .issue--warn .issue__status {
-  background: oklch(23.00% 0.04 70);
-  color: var(--should);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2677,19 +2643,6 @@ main .remediation__body {
 .live-score-summary__freshness--live {
   color: var(--may);
   border-color: var(--may);
-}
-
-.live-score-summary__score {
-  margin-block: var(--space-5);
-}
-
-.live-score-summary__issues {
-  margin-block: var(--space-5);
-}
-
-.live-score-summary__issues h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-h3);
 }
 
 .live-score-summary__cta {

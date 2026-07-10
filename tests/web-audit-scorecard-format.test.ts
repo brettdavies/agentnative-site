@@ -137,9 +137,10 @@ describe('buildWebSummaryBody (U14)', () => {
   });
 
   test('headlines RELATIVE with GLOBAL as a labeled secondary metric', () => {
-    expect(html).toContain('82%');
+    expect(html).toContain('bigscore__n">82<');
     expect(html).toContain('site score');
-    expect(html).toContain('<strong>Global:</strong> 72%');
+    expect(html).toContain('bigscore__n">72<');
+    expect(html).toContain('global-ready');
     expect(html).toContain('maximally agent-ready site');
   });
 
@@ -152,12 +153,12 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(content).toBeGreaterThan(discoverability);
     expect(mcpApi).toBeGreaterThan(content);
     expect(auth).toBeGreaterThan(mcpApi);
-    expect(html).toContain('<span class="audit-group__rollup">1/2</span>');
+    expect(html).toMatch(/audit-group__rollup[^"]*">1 \/ 2</);
   });
 
   test('a category with only n_a rows shows 0/0 and is de-emphasized', () => {
-    expect(html).toContain('audit-group--empty');
-    expect(html).toContain('<span class="audit-group__rollup">0/0</span>');
+    expect(html).toContain('catcard--empty');
+    expect(html).toContain('<span class="audit-group__rollup">0 / 0</span>');
   });
 
   test('the two n_a wordings render distinctly', () => {

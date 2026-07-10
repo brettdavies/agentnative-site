@@ -8,7 +8,7 @@
 // board table + its markdown twin; the toggle behavior lives in
 // src/client/web-leaderboard.ts.
 
-import { escHtml } from '../shared/scorecard-format.mjs';
+import { escHtml, renderMeter } from '../shared/scorecard-format.mjs';
 
 /**
  * @typedef {object} WebLeaderboardEntry
@@ -73,8 +73,8 @@ export function buildWebLeaderboardBody(entries) {
         <td class="lb-rank">${entry.rank}</td>
         <td class="lb-tool"><a href="/web/${escHtml(entry.domain)}">${escHtml(entry.name)}</a></td>
         <td class="lb-desc">${escHtml(entry.description)}</td>
-        <td class="lb-score lb-score--global" data-sort="${globalScore}">${globalScore}%</td>
-        <td class="lb-score lb-score--relative" data-sort="${relative}">${relative}%</td>
+        <td class="lb-score lb-score--global" data-sort="${globalScore}">${renderMeter(globalScore)}</td>
+        <td class="lb-score lb-score--relative" data-sort="${relative}">${renderMeter(relative)}</td>
       </tr>`;
     })
     .join('\n');

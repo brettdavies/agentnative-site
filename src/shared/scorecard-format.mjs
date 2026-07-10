@@ -265,45 +265,6 @@ export function renderAuditRows(checks) {
     .join('\n');
 }
 
-/**
- * Render the three-way MUST/SHOULD/MAY coverage summary as an HTML
- * section. Empty string when the scorecard lacks `coverage_summary`.
- *
- * @param {{ must?: { total: number, verified: number }, should?: { total: number, verified: number }, may?: { total: number, verified: number } } | undefined} coverageSummary
- * @returns {string}
- */
-export function renderCoverageSummary(coverageSummary) {
-  if (!coverageSummary) return '';
-  const row = (label, data) =>
-    `      <tr>
-        <td><strong>${escHtml(label)}</strong></td>
-        <td>${data.total}</td>
-        <td>${data.verified}</td>
-        <td>${data.total - data.verified}</td>
-      </tr>`;
-  return `<section class="scorecard-coverage">
-  <h2>Spec Coverage</h2>
-  <p>How many of the spec's requirements were verified for this tool.
-  See <a href="/coverage">/coverage</a> for the full matrix.</p>
-  <table class="coverage-level-table" aria-label="Verification coverage">
-    <thead>
-      <tr>
-        <th>Level</th>
-        <th>Total</th>
-        <th>Verified</th>
-        <th>Unverified</th>
-      </tr>
-    </thead>
-    <tbody>
-${row('MUST', coverageSummary.must)}
-${row('SHOULD', coverageSummary.should)}
-${row('MAY', coverageSummary.may)}
-    </tbody>
-  </table>
-</section>
-`;
-}
-
 const AUDIENCE_COPY = {
   mixed:
     'This tool sends mixed signals: some agent-readable affordances are present, others are not. Treat the warnings below as friction points, not defects.',
