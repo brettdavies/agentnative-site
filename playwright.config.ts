@@ -57,6 +57,7 @@ export default defineConfig({
         /homepage-score-live\.e2e\.ts/,
         /mcp\.e2e\.ts/,
         /discoverability\.e2e\.ts/,
+        /web-audit\.e2e\.ts/,
       ],
     },
     { name: 'mobile-android', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
@@ -93,6 +94,20 @@ export default defineConfig({
       // workerd.
       use: { ...devices['Desktop Chrome'] },
       testMatch: /(?:mcp|discoverability)\.e2e\.ts/,
+    },
+    {
+      name: 'web-audit',
+      // Live staging Worker — the web-audit streaming form, the
+      // /web/<domain> result page + twin, and the MCP fresh path
+      // (audit_website + get_web_remediation). Set ANC_STAGING_BASE_URL
+      // (and ANC_STAGING_ACCESS_CLIENT_ID/SECRET for headless Access
+      // auth) before invoking; excluded from the default suite because it
+      // makes real outbound probes to anc.dev. Run with:
+      //   bun x playwright test --project=web-audit
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: /web-audit\.e2e\.ts/,
+      // 32 probes + discovery + a DNS fan-out against a live target.
+      timeout: 90_000,
     },
   ],
   webServer: {

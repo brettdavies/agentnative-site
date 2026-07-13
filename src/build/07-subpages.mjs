@@ -29,6 +29,7 @@ import { absolutifyMarkdownLinks } from './util.mjs';
 export async function emitSubPages({ distDir, contentDir, themeInit }) {
   const subPages = [
     { name: 'audit', path: join(contentDir, 'audit.md') },
+    { name: 'web-audit', path: join(contentDir, 'web-audit.md'), extraScripts: ['/js/web-audit.js'] },
     { name: 'install', path: join(contentDir, 'install.md') },
     { name: 'about', path: join(contentDir, 'about.md') },
     { name: 'badge', path: join(contentDir, 'badge.md') },
@@ -36,6 +37,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     { name: 'contribute', path: join(contentDir, 'contribute.md') },
     { name: 'methodology', path: join(contentDir, 'methodology.md') },
     { name: 'scorecard-schema', path: join(contentDir, 'scorecard-schema.md') },
+    { name: 'web-scorecard-schema', path: join(contentDir, 'web-scorecard-schema.md') },
     // /mcp-skill/ is the client-facing skill page advertised by the
     // /.well-known/mcp pointer's `documentation` field and by the MCP
     // server's handshake `instructions` string. The source filename
@@ -56,7 +58,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     { name: 'mcp', path: join(contentDir, 'mcp.md') },
   ];
   const subPageData = [];
-  for (const { name, path } of subPages) {
+  for (const { name, path, extraScripts } of subPages) {
     const source = await readFile(path, 'utf8');
     const title = extractTitle(source);
     const description = extractDescription(source);
@@ -69,7 +71,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         canonicalPath: `/${name}`,
         bodyHtml: html,
         themeInitJs: themeInit,
-        extraScripts: name === 'mcp' ? [WEBMCP_SCRIPT] : [],
+        extraScripts: extraScripts ?? (name === 'mcp' ? [WEBMCP_SCRIPT] : []),
       }),
     );
     await writeFile(join(distDir, `${name}.md`), absolutifyMarkdownLinks(source));

@@ -1,0 +1,333 @@
+{
+  "schema_version": "0.1",
+  "spec_version": "0.5.0",
+  "target_url": "https://anc.dev/",
+  "mcp_endpoint": "https://anc.dev/mcp",
+  "mcp_discovery": [
+    {
+      "source": "/.well-known/mcp.json",
+      "endpoint": "https://anc.dev/mcp"
+    }
+  ],
+  "tool": {
+    "name": "anc.dev",
+    "url": "https://anc.dev/"
+  },
+  "audience": null,
+  "audit_profile": null,
+  "summary": {
+    "pass": 23,
+    "fail": 9,
+    "n_a": 0,
+    "skip": 0,
+    "error": 0
+  },
+  "coverage_summary": {
+    "must": {
+      "total": 2,
+      "verified": 2
+    },
+    "should": {
+      "total": 15,
+      "verified": 9
+    },
+    "may": {
+      "total": 15,
+      "verified": 12
+    }
+  },
+  "badge": {
+    "score_pct": 67,
+    "eligible": false
+  },
+  "results": [
+    {
+      "id": "mcp-initialize",
+      "label": "initialize handshake returns serverInfo + protocolVersion",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "must",
+      "status": "pass",
+      "evidence": "serverInfo anc, protocol 2025-06-18"
+    },
+    {
+      "id": "mcp-cors-preflight",
+      "label": "CORS preflight (OPTIONS) succeeds with Access-Control-Allow-* headers",
+      "group": "P6",
+      "layer": "web",
+      "keyword": "should",
+      "status": "fail",
+      "evidence": "405 allow-origin absent"
+    },
+    {
+      "id": "mcp-cors-actual",
+      "label": "POST response carries Access-Control-Allow-Origin",
+      "group": "P6",
+      "layer": "web",
+      "keyword": "should",
+      "status": "fail",
+      "evidence": "allow-origin absent"
+    },
+    {
+      "id": "mcp-tools-list",
+      "label": "tools/list returns a tools array with input schemas",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "must",
+      "status": "pass",
+      "evidence": "9 tools, 9 with input schema"
+    },
+    {
+      "id": "well-known-mcp-card",
+      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/mcp/server-card.json -> 200"
+    },
+    {
+      "id": "mcp-usage-doc",
+      "label": "A human/agent usage doc for the server resolves",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/mcp-skill.md -> 200"
+    },
+    {
+      "id": "llms-txt",
+      "label": "/llms.txt present with a summary and link index",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/llms.txt -> 200"
+    },
+    {
+      "id": "llms-full-txt",
+      "label": "/llms-full.txt present (single-fetch full corpus)",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/llms-full.txt -> 200"
+    },
+    {
+      "id": "accept-markdown",
+      "label": "Accept text/markdown content negotiation returns markdown",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
+    },
+    {
+      "id": "openapi",
+      "label": "An OpenAPI description is published",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "should",
+      "status": "fail",
+      "evidence": "https://anc.dev/openapi.json -> 404 (status 404 not in [200])"
+    },
+    {
+      "id": "json-schemas",
+      "label": "Referenced JSON Schemas resolve as application/schema+json",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "may",
+      "status": "fail",
+      "evidence": "https://anc.dev/api/schema/input.json -> 404 (status 404 not in [200])"
+    },
+    {
+      "id": "root-meta-description",
+      "label": "Root HTML has a descriptive <meta name=\"description\">",
+      "group": "P3",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
+    },
+    {
+      "id": "root-link-rel",
+      "label": "Root HTML links to machine surfaces via <link rel>",
+      "group": "P3",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
+    },
+    {
+      "id": "schema-org-jsonld",
+      "label": "Root HTML embeds Schema.org JSON-LD",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
+    },
+    {
+      "id": "semantic-html",
+      "label": "Root HTML uses semantic landmarks",
+      "group": "P3",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
+    },
+    {
+      "id": "noscript-fallback",
+      "label": "Root HTML has a <noscript> with machine entry points",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "should",
+      "status": "fail",
+      "evidence": "https://anc.dev/ -> 200 (body no match /<noscript/)"
+    },
+    {
+      "id": "mcp-capabilities",
+      "label": "initialize advertises capabilities (tools / resources / prompts)",
+      "group": "P2",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "serverInfo anc, protocol 2025-06-18"
+    },
+    {
+      "id": "robots",
+      "label": "/robots.txt present",
+      "group": "P7",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/robots.txt -> 200"
+    },
+    {
+      "id": "sitemap",
+      "label": "/sitemap.xml present",
+      "group": "P7",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/sitemap.xml -> 200"
+    },
+    {
+      "id": "robots-ai-rules",
+      "label": "robots.txt declares AI-crawler rules (RFC 9309)",
+      "group": "P7",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/robots.txt -> 200"
+    },
+    {
+      "id": "content-signals",
+      "label": "robots.txt declares Content-Signal AI-usage preferences",
+      "group": "P7",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "https://anc.dev/robots.txt -> 200"
+    },
+    {
+      "id": "security-txt",
+      "label": "/.well-known/security.txt present (RFC 9116)",
+      "group": "P4",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/security.txt -> 200"
+    },
+    {
+      "id": "web-bot-auth",
+      "label": "Web Bot Auth signature directory present (informational)",
+      "group": "P6",
+      "layer": "web",
+      "keyword": "may",
+      "status": "fail",
+      "evidence": "https://anc.dev/.well-known/http-message-signatures-directory -> 404 (status 404 not in [200])"
+    },
+    {
+      "id": "api-catalog",
+      "label": "/.well-known/api-catalog published (RFC 9727)",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/api-catalog -> 200"
+    },
+    {
+      "id": "link-headers",
+      "label": "Homepage sends RFC 8288 Link headers pointing at agent resources",
+      "group": "P3",
+      "layer": "web",
+      "keyword": "should",
+      "status": "fail",
+      "evidence": "https://anc.dev/ -> 200 (header link no match /rel=\"?(service-desc|describedby|api-catalog|service-doc)\"?/)"
+    },
+    {
+      "id": "agent-skills",
+      "label": "Agent-skills discovery index published",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/agent-skills/index.json -> 200"
+    },
+    {
+      "id": "a2a-agent-card",
+      "label": "A2A Agent Card published for agent-to-agent discovery",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "may",
+      "status": "fail",
+      "evidence": "https://anc.dev/.well-known/agent-card.json -> 404 (status 404 not in [200])"
+    },
+    {
+      "id": "oauth-protected-resource",
+      "label": "OAuth Protected Resource Metadata published (RFC 9728)",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/oauth-protected-resource -> 200"
+    },
+    {
+      "id": "oauth-discovery",
+      "label": "OAuth/OIDC discovery metadata published",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/oauth-authorization-server -> 200"
+    },
+    {
+      "id": "mcp-get-fast-fail",
+      "label": "GET on the MCP endpoint fast-fails (not a held-open hang)",
+      "group": "P4",
+      "layer": "web",
+      "keyword": "should",
+      "status": "fail",
+      "evidence": "https://anc.dev/mcp -> 200 (status 200 not in [405, 400, 404, 406])"
+    },
+    {
+      "id": "dns-aid",
+      "label": "DNS for AI Discovery (DNS-AID) records under _agents (IETF draft)",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "may",
+      "status": "pass",
+      "evidence": "_index._agents.anc.dev: 1 record(s) via https://cloudflare-dns.com/dns-query"
+    },
+    {
+      "id": "mcp-unknown-method",
+      "label": "unknown JSON-RPC method returns -32601",
+      "group": "P4",
+      "layer": "web",
+      "keyword": "should",
+      "status": "pass",
+      "evidence": "error code -32601"
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 # Using anc.dev's MCP server
 
 anc.dev exposes the agent-native CLI standard catalog over a Model Context Protocol server at `https://anc.dev/mcp`.
-Nine tools cover four surfaces (registry, principles, spec, scorecards) plus five resources for direct lookup. The
-catalog is public: no authentication, no API key.
+Thirteen tools cover five surfaces (registry, principles, spec, scorecards, web audits) plus five resources for direct
+lookup. The catalog is public: no authentication, no API key.
 
 ## Quick reference
 
@@ -122,6 +122,28 @@ container run, no cost). On a true cache miss it runs a metered audit and return
 
 The tools are symmetric: `get_scorecard` returns `found: true` exactly when `score_cli` returns `audited: false` on the
 same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them.
+
+## Audit a website
+
+Four tools score a website and its MCP server against the same eight principles as a CLI, mirroring the scorecard
+surface above. The web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
+DNS-over-HTTPS): no container, nothing crawled.
+
+- `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, scorecard, share_url }` on a cache hit or `{
+  found: false, next_tool: "audit_website" }` on a miss.
+- `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal scorecard plus its
+  `share_url`. There are no progress notifications: the server runs stateless per-request. On an existing cache it
+  returns the cached result. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER` (5 per hour per IP, no anon fallback).
+- `list_website_audits`: the curated web leaderboard (`anc.dev/web`).
+- `get_web_remediation`: the static canonical fix for a web-audit `check_id`; MCP-shape checks accept an `evidence`
+  string that is injected into the fix template.
+
+```jsonc
+// tools/call audit_website { "url": "anc.dev" }
+```
+
+Web scorecards share the `badge` / `results` / `coverage_summary` shape documented at
+[/web-scorecard-schema](/web-scorecard-schema); each result page is at `anc.dev/web/<domain>`.
 
 ## Browse the catalog
 
@@ -284,8 +306,8 @@ For clients that need the protocol details.
 **Endpoint.** `POST https://anc.dev/mcp`. Other methods return `405 Method Not Allowed` with `Allow: POST`. No
 authentication.
 
-**Transport.** Streamable HTTP per MCP spec revision `2025-06-18`. The handshake's `protocolVersion` and the
-server card's `protocolVersion` / `version` are pinned in lockstep; tests assert each literal so drift breaks the build.
+**Transport.** Streamable HTTP per MCP spec revision `2025-06-18`. The handshake's `protocolVersion` and the server
+card's `protocolVersion` / `version` are pinned in lockstep; tests assert each literal so drift breaks the build.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.

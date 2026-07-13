@@ -116,6 +116,19 @@
       "name": "MCP_AUDIT_LIMITER",
       "namespace_id": "1007",
       "simple": { "limit": 5, "period": 60 }
+    },
+    // WEB_AUDIT_LIMITER — keyed on `cf-connecting-ip` inside
+    // src/worker/audit-web/route.ts (the /api/audit-web streaming route)
+    // and the audit_website MCP tool. Same audit-tier posture as
+    // MCP_AUDIT_LIMITER: the CF binding enforces "5 per 60s" as the burst
+    // floor while the route layers a KV-backed per-hour window (keyed on
+    // the same IP) on top. NO anon fallback: a request without
+    // cf-connecting-ip is gated immediately, since the 32-probe fan-out is
+    // non-trivial and a shared anon bucket would be a DoS vector.
+    {
+      "name": "WEB_AUDIT_LIMITER",
+      "namespace_id": "1009",
+      "simple": { "limit": 5, "period": 60 }
     }
   ],
   // SCORE_KV — operator-flippable `scoring_disabled` kill switch. Flip
@@ -269,6 +282,11 @@
           "name": "MCP_AUDIT_LIMITER",
           "namespace_id": "1008",
           "simple": { "limit": 5, "period": 60 }
+        },
+        {
+          "name": "WEB_AUDIT_LIMITER",
+          "namespace_id": "1010",
+          "simple": { "limit": 5, "period": 60 }
         }
       ],
       "kv_namespaces": [
@@ -304,9 +322,18 @@
       // intentionally absent from the top-level `vars` block, so the same
       // bypass argument against prod is silently ignored. Not a secret
       // (no auth value to protect; the staging-only binding IS the gate).
+      // WEB_AUDIT_ENABLED gates the /api/audit-web streaming route and the
+      // audit_website MCP fresh path. Bound "true" here so the staging host
+      // serves the web audit end-to-end during soak and e2e; production
+      // stays gated (no top-level var) and flips on via `wrangler secret
+      // put WEB_AUDIT_ENABLED --env production` at promotion, matching the
+      // MCP_ENABLED secret posture. Undefined reads as falsy in the route
+      // (the check is `env.WEB_AUDIT_ENABLED !== 'true'`), so a missing
+      // value returns 503 Retry-After.
       "vars": {
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
-        "MCP_CACHE_BYPASS_ALLOWED": "true"
+        "MCP_CACHE_BYPASS_ALLOWED": "true",
+        "WEB_AUDIT_ENABLED": "true"
       }
     }
   }

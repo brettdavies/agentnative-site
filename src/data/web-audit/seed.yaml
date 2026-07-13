@@ -1,0 +1,14 @@
+# Curated web leaderboard seed (plan U10, KTD-8). The web board is
+# curated, not auto-populated from arbitrary audited URLs: each entry here
+# has a committed web scorecard at scorecards/web/<domain>.json (a real
+# audit snapshot), rendered as a build-time static page independent of R2.
+# On-demand user audits live in R2 only and never appear here.
+#
+# To add an entry: run the web audit against the site, commit its
+# scorecard as scorecards/web/<domain>.json, and add a row below.
+
+entries:
+  - domain: anc.dev
+    url: https://anc.dev/
+    name: anc.dev
+    description: The agent-native CLI standard and the agent-readiness auditor itself.

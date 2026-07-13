@@ -282,9 +282,11 @@ ${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" 
         <span class="site-brand__tag">${SITE_TAGLINE}</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
-        <a href="/scorecards">Leaderboard</a>
-        <a href="/install">Install</a>
+        <a href="/scorecards">CLI board</a>
+        <a href="/web">Web board</a>
         <a href="/audit">Audit your CLI</a>
+        <a href="/web-audit">Audit your site</a>
+        <a href="/install">Install</a>
         <a href="/skill">Skill</a>
         <a href="/methodology">Methodology</a>
         <a href="/coverage">Coverage</a>
@@ -327,6 +329,8 @@ ${SOURCE_REPOS.map(
         <a href="/changelog">Changelog</a>
         <span> · </span>
         <a href="/scorecard-schema">Scorecard schema</a>
+        <span> · </span>
+        <a href="/web-scorecard-schema">Web scorecard schema</a>
         <span> · </span>
         <a href="/llms.txt">llms.txt</a>
         <span> · </span>
