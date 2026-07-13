@@ -291,6 +291,10 @@ already bound there rather than picking a fallback.
 - `ci.yml`: fast PR gate (lint · build · test · wrangler dry-run).
 - `deep-check.yml`: scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
   last deep-check.
+- **Playwright browsers:** system-provided on the dev host — dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
+  never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
+  `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
+  what's provisioned; bump it in dotfiles first. CI runners install their own browsers.
 - `deploy.yml`: publishes to the `*.workers.dev` staging on every push to `main`.
 - `guard-main-docs.yml`: blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
 - `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.

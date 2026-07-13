@@ -14,8 +14,9 @@
 //                    not break against the still-private producer pre-cutover.
 //                    Run with `bun x playwright test --project=skill`.
 //
-// WebKit projects require `bun x playwright install webkit` locally and
-// the matching `--with-deps` line in .github/workflows/ci.yml.
+// WebKit projects use the shared browsers in $PLAYWRIGHT_BROWSERS_PATH
+// (dotfiles-provisioned on this host; never run `playwright install`), plus
+// the matching `--with-deps` line in .github/workflows/ci.yml on CI runners.
 
 import { defineConfig, devices } from '@playwright/test';
 
