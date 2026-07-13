@@ -78,19 +78,65 @@ runs. Names a package manager (`brew`, `cargo-binstall`, `bun`, `pip`, `uv`, `np
 package or URL, and the binary the post-install check verifies on `PATH`. The Durable Object only ever sees an install
 spec, never the raw user input.
 
+## Web audit
+
+### Web audit
+
+The in-Worker website agent-readiness audit: registry-driven network probes (HTTP requests, a JSON-RPC handshake, a
+CORS preflight, DNS-over-HTTPS lookups) of a site's agent-facing surfaces, streamed check-by-check and cached as a web
+scorecard at a shareable per-domain page. There is no crawler; every check is a bounded probe.
+
+### Web scorecard
+
+The structured JSON a web audit produces. Distinct from the CLI scorecard and versioned by its own schema: it carries
+the two scores (relative and global), per-category rollups, and per-check rows with tri-state outcomes and the reason
+a row is not applicable; every serving surface (result page, markdown twin, MCP tools) attaches remediation pointers
+to non-passing rows.
+
+### Antecedent
+
+The runtime gate deciding whether a web-audit check applies to a site. Resolved from the declared site type, MCP
+discovery, the canonical root fetch, or another check's probe result — never a fresh fetch. An unmet antecedent makes
+the check not applicable (excluded from scoring entirely), which is different from the check failing.
+
+### Site type
+
+The caller-declared scope of a web audit: a content site or an API/application. Checks outside the declared type are
+not applicable; declaring nothing runs everything, and MCP surfaces are auto-detected from discovery regardless of the
+declaration.
+
+### Tri-state outcome
+
+The web audit's distinction for a probed surface: absent (not there), broken (present but invalid), or not applicable.
+Broken is priced worse than absent because a malformed surface actively misleads agents; an optional surface that is
+absent counts as not applicable, never as a miss.
+
+### Relative score / Global score
+
+The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that
+apply to it, so a site perfect for its type approaches the maximum. Global measures the same outcomes against a
+maximally agent-ready site, so exposing and nailing more surfaces ranks higher; the web leaderboard sorts by it.
+
+### Fix skill
+
+The per-check remediation page for a web-audit check, served at a content URL with a markdown twin and listed as a
+pointer entry in the agent-skills discovery index. Scorecard remediation prompts point agents at it as the durable
+how-to-fix reference.
+
 ## Agent discovery
 
 ### MCP endpoint
 
 The site's Model Context Protocol server at `/mcp`: a streamable-HTTP, JSON-RPC surface that exposes the anc100 registry
-and scoring tools to agents. GET returns the landing page (or the MCP server card under a JSON `Accept` header); POST
-carries JSON-RPC. Unauthenticated by design, because the catalog is public.
+and scoring tools to agents. GET returns the landing page (or, under a JSON `Accept` header, a permanent redirect to
+the MCP server card); POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
 
 ### MCP server card
 
 The machine-readable descriptor of the MCP endpoint, following the SEP-1649 server-card shape: it declares the endpoint
 URL, the protocol revision, the transport, a documentation pointer, and that authentication is not required. Canonical
-at `/.well-known/mcp/server-card.json`, with legacy alias paths that return a byte-identical body.
+at `/.well-known/mcp/server-card.json`; the legacy alias paths permanently redirect to it, so one canonical body exists
+with no duplicates.
 
 ### Discovery surface
 

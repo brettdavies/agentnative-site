@@ -421,3 +421,40 @@ describe('site_type declaration (U7)', () => {
     expect(store.has(untypedKey)).toBe(true);
   });
 });
+
+describe('cache-first gate ordering', () => {
+  test('a cache hit is served without a source IP and consumes no fresh-audit budget', async () => {
+    const url = 'https://example.com/';
+    const key = await keyFor(url, SPEC_VERSION);
+    const cached = {
+      spec_version: SPEC_VERSION,
+      target_url: url,
+      scorecard: { schema_version: '0.2', target_url: url, score_pct: 70, results: [] },
+    };
+    const { bucket } = makeR2({ [key]: cached });
+    let budgetReads = 0;
+    const kv = {
+      async get() {
+        budgetReads += 1;
+        return null;
+      },
+      async put() {},
+    } as unknown as KVNamespace;
+    const env = makeEnv({
+      SCORE_CACHE: bucket,
+      SCORE_KV: kv,
+      WEB_AUDIT_LIMITER: {
+        limit: async () => {
+          throw new Error('limiter must not run on a cache hit');
+        },
+      },
+    });
+    // No cf-connecting-ip header: a cached read is data, not a fresh audit.
+    const resp = await handleWebAudit(auditRequest(url, {}), env, makeCtx());
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { cached: boolean; scorecard: { score_pct: number } };
+    expect(body.cached).toBe(true);
+    expect(body.scorecard.score_pct).toBe(70);
+    expect(budgetReads).toBe(0);
+  });
+});

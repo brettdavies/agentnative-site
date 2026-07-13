@@ -47,6 +47,7 @@ import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
 import { emitWebScorecardSurface } from './14-web-scorecards-emit.mjs';
+import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
@@ -285,10 +286,24 @@ export async function build() {
   // in 11a-discovery-emit.mjs.
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
 
+  // 11a-bis. Web-audit fix skills — one content page per check at
+  // /web-audit/skill/<id> (+ .md twin), generated from the registry +
+  // remediation catalog. Runs BEFORE the agent-readiness stage because
+  // the agent-skills discovery index lists these pages with digests.
+  const webAuditSkillStats = await emitWebAuditSkillPages({
+    distDir: DIST_DIR,
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
+    themeInit,
+  });
+
   // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
   // oauth-*, agent-skills/index.json} + auth.md. MCP descriptor aliases are
   // Worker-served from dist/_internal/mcp-server-card.json (SEP-1649 canonical path).
-  const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
+  const agentReadinessStats = await emitAgentReadiness({
+    distDir: DIST_DIR,
+    webAuditSkills: webAuditSkillStats.pages,
+  });
 
   // 11c. Web-audit registry — normalized JSON projection of the vendored
   // 32-check registry, consumed by the Worker's web-audit engine via

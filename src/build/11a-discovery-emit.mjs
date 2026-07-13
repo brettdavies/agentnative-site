@@ -9,7 +9,7 @@
 //   dist/.well-known/ai.txt             — agent / AI-access declaration
 //
 // Legacy pointer aliases (/.well-known/mcp, /mcp.json, /.well-known/mcp.json)
-// are Worker-served from the same seed; see src/worker/index.ts.
+// 301 to the canonical path; see src/worker/index.ts.
 //
 // All three lift from streamsgrp's 07-well-known.mjs (anc and streamsgrp
 // converged on the same wire shape during the cross-repo MCP work).
@@ -154,12 +154,13 @@ function buildApiCatalog(baseUrl) {
   )}\n`;
 }
 
-function buildAgentSkillsIndex(baseUrl, skillDigest) {
-  // Agent Skills Discovery RFC v0.2.0 index. One self-hosted skill: the MCP
-  // client integration guide served at /mcp-skill.md. The digest is the
-  // SHA-256 of the served artifact (dist/mcp-skill.md), computed at emit
-  // time so it never drifts from the bytes on the wire (the markdown twin
-  // is not minified post-build).
+export function buildAgentSkillsIndex(baseUrl, skillDigest, webAuditSkills = []) {
+  // Agent Skills Discovery RFC v0.2.0 index — a directory of pointers
+  // only (KTD-7): the MCP client integration guide plus one fix skill
+  // per web-audit check, every url targeting its content page. No skill
+  // body is mimicked under .well-known. Digests are the SHA-256 of the
+  // served artifacts, computed at emit time so they never drift from the
+  // bytes on the wire (markdown twins are not minified post-build).
   return `${JSON.stringify(
     {
       $schema: 'https://schemas.agentskills.io/discovery/0.2.0/schema.json',
@@ -173,11 +174,38 @@ function buildAgentSkillsIndex(baseUrl, skillDigest) {
           url: `${baseUrl}/mcp-skill.md`,
           digest: `sha256:${skillDigest}`,
         },
+        ...webAuditSkills.map((skill) => ({
+          name: `web-audit-fix-${skill.id}`,
+          type: 'skill-md',
+          description: skill.description,
+          url: skill.url,
+          digest: `sha256:${skill.digest}`,
+        })),
       ],
     },
     null,
     2,
   )}\n`;
+}
+
+export function buildAgentSkillsIndexMd(baseUrl, webAuditSkills = []) {
+  // Human-readable twin of the discovery index.
+  return [
+    '# Agent skills on anc.dev',
+    '',
+    'Machine-readable index: `/.well-known/agent-skills/index.json`.',
+    '',
+    '## MCP client integration',
+    '',
+    `- [anc-mcp](${baseUrl}/mcp-skill.md): connect to the anc.dev MCP server.`,
+    '',
+    '## Web-audit fix skills',
+    '',
+    `One fix skill per [web audit](${baseUrl}/web-audit) check:`,
+    '',
+    ...webAuditSkills.map((skill) => `- [web-audit-fix-${skill.id}](${skill.url}): ${skill.description}`),
+    '',
+  ].join('\n');
 }
 
 function buildAuthMd(baseUrl) {
@@ -201,7 +229,7 @@ function buildAuthMd(baseUrl) {
     '',
     `- MCP server (streamable HTTP): \`${baseUrl}/mcp\` - JSON-RPC, MCP spec revision \`${MCP_SPEC_VERSION}\`.`,
     `- MCP server card (SEP-1649): \`${baseUrl}/.well-known/mcp/server-card.json\`.`,
-    `- MCP pointer aliases: \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
+    `- MCP pointer aliases (301 to the server card): \`${baseUrl}/.well-known/mcp\`, \`${baseUrl}/mcp.json\`.`,
     `- API catalog: \`${baseUrl}/.well-known/api-catalog\`.`,
     `- OAuth protected resource: \`${baseUrl}/.well-known/oauth-protected-resource\`.`,
     `- OAuth authorization server: \`${baseUrl}/.well-known/oauth-authorization-server\`.`,
@@ -333,7 +361,7 @@ function buildJwks() {
  *   skillDigest: string;
  * }>}
  */
-export async function emitAgentReadiness({ distDir, baseUrl }) {
+export async function emitAgentReadiness({ distDir, baseUrl, webAuditSkills = [] }) {
   const base = resolveBaseUrl(baseUrl);
   const wellKnownDir = join(distDir, '.well-known');
   const skillsDir = join(wellKnownDir, 'agent-skills');
@@ -355,7 +383,8 @@ export async function emitAgentReadiness({ distDir, baseUrl }) {
   await writeFile(oauthProtectedResourcePath, buildOAuthProtectedResource(base));
   await writeFile(oauthAuthorizationServerPath, buildOAuthAuthorizationServer(base));
   await writeFile(jwksPath, buildJwks());
-  await writeFile(agentSkillsPath, buildAgentSkillsIndex(base, skillDigest));
+  await writeFile(agentSkillsPath, buildAgentSkillsIndex(base, skillDigest, webAuditSkills));
+  await writeFile(join(skillsDir, 'index.md'), buildAgentSkillsIndexMd(base, webAuditSkills));
   await writeFile(authMdPath, buildAuthMd(base));
 
   // Retired: dist/.well-known/mcp.json was a separate server-card seed before the

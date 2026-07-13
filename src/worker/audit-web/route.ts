@@ -18,6 +18,7 @@ import { type CachedWebAudit, get as cacheGet, put as cachePut, keyFor, normaliz
 import { runWebAudit } from './engine';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
+import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
@@ -118,31 +119,33 @@ export async function handleWebAudit(
     return jsonResponse({ error: validation.reason }, 400);
   }
 
-  // 5. cf-connecting-ip presence (no anon fallback at the audit tier).
+  // 5. Cache hit — cache state is data, served before the fresh-audit
+  // gates so a cached read needs no source IP and consumes no budget
+  // (the audit_website MCP tool orders its gates the same way).
+  const shareUrl = `/web/${shareDomain}`;
+  const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
+  if (cached) {
+    return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+  }
+
+  // 6. cf-connecting-ip presence (no anon fallback at the audit tier).
   const ip = request.headers.get('cf-connecting-ip');
   if (!ip) {
     return jsonResponse({ error: 'rate_limit', message: 'fresh audits require a source IP (cf-connecting-ip)' }, 429);
   }
-  // 6. Burst limiter.
+  // 7. Burst limiter.
   if (env.WEB_AUDIT_LIMITER) {
     const { success } = await env.WEB_AUDIT_LIMITER.limit({ key: ip });
     if (!success) {
       return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (burst)' }, 429);
     }
   }
-  // 7. KV hourly window (shared with the audit_website MCP tool).
+  // 8. KV hourly window (shared with the audit_website MCP tool).
   if (env.SCORE_KV) {
     const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ip);
     if (!ok) {
       return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (5 per hour per source)' }, 429);
     }
-  }
-
-  // 8. Cache hit — return the cached scorecard without re-running.
-  const shareUrl = `/web/${shareDomain}`;
-  const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
-  if (cached) {
-    return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
   }
 
   // 9. Miss — stream the engine, cache the completed result via waitUntil.
@@ -310,6 +313,14 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   const hit = await lookupByDomain(env, match.domain);
   if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
 
+  // A missing remediation catalog degrades to generic prompts (R10).
+  let remediation: WebRemediationCatalog = {};
+  try {
+    remediation = await loadWebRemediationCatalog(env);
+  } catch {
+    remediation = {};
+  }
+
   const scorecard = hit.scorecard as {
     tool?: { name?: string; url?: string };
     score_pct?: number;
@@ -318,6 +329,8 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     scorecard: scorecard as never,
     domain: match.domain,
     targetUrl: scorecard.tool?.url ?? hit.targetUrl,
+    remediation,
+    origin: new URL(request.url).origin,
   };
 
   if (wantMarkdown) {

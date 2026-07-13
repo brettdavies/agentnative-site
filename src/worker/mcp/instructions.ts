@@ -45,7 +45,7 @@ export function buildInstructions(_env: InstructionsEnv): string {
       'get_website_audit reads a cached web scorecard by URL (miss returns next_tool: audit_website); audit_website ' +
       'runs a fresh audit and returns a single terminal scorecard with no progress notifications (stateless mode); ' +
       'list_website_audits returns the curated web leaderboard; get_web_remediation returns the static fix for a ' +
-      'web-audit check id. Web scorecards share the badge/results/coverage_summary shape at ' +
+      'web-audit check id. Web scorecards carry the score_pct/score/categories/results shape at ' +
       `${SITE_URL}/web-scorecard-schema; results live at ${SITE_URL}/web/<domain>.`,
     'The two scorecard tools compose the shared /api/score orchestration so cache semantics never drift. ' +
       'get_scorecard always returns isError: false for cache-state outcomes (hit returns the inline scorecard; miss ' +

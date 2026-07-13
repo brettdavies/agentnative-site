@@ -1,14 +1,12 @@
-// get_web_remediation + catalog coverage tests (plan U13).
+// Remediation catalog coverage tests (plan U13, reshaped per plan-003
+// U12): every check carries title/goal/fix plus optional resources, and
+// the normalizer rejects the retired body/evidence-template shape.
 
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
-import {
-  EVIDENCE_TEMPLATE_CHECKS,
-  normalizeWebAuditRegistry,
-  normalizeWebRemediation,
-} from '../src/build/13-web-audit-registry.mjs';
+import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(REPO_ROOT, 'src', 'data', 'web-audit');
@@ -30,26 +28,31 @@ describe('web remediation catalog coverage', () => {
     for (const id of checkIds) {
       expect(remediation[id]).toBeDefined();
       expect(remediation[id].title.length).toBeGreaterThan(0);
-      expect(remediation[id].body.length).toBeGreaterThan(0);
+      expect(remediation[id].goal.length).toBeGreaterThan(0);
+      expect(remediation[id].fix.length).toBeGreaterThan(0);
+      expect(Array.isArray(remediation[id].resources)).toBe(true);
     }
   });
 
-  test('MCP-shape checks carry the {{evidence}} template slot', async () => {
+  test('no entry carries an evidence slot (evidence is assembled at audit time)', async () => {
     const { remediation } = await load();
-    for (const id of EVIDENCE_TEMPLATE_CHECKS) {
-      expect(remediation[id].evidence_template).toBe(true);
-      expect(remediation[id].body).toContain('{{evidence}}');
+    for (const entry of Object.values(remediation)) {
+      expect(entry.fix).not.toContain('{{evidence}}');
     }
   });
 
-  test('non-MCP-shape checks are static (no evidence template)', async () => {
+  test('every resource link is an absolute URL with a label', async () => {
     const { remediation } = await load();
-    expect(remediation['llms-txt'].evidence_template).toBe(false);
-    expect(remediation['robots'].body).not.toContain('{{evidence}}');
+    for (const entry of Object.values(remediation)) {
+      for (const resource of entry.resources) {
+        expect(resource.label.length).toBeGreaterThan(0);
+        expect(resource.url).toMatch(/^https?:\/\//);
+      }
+    }
   });
 
   test('an unknown check id aborts normalization (orphan guard)', async () => {
-    const doc = { remediation: { 'not-a-check': { title: 't', body: 'b' } } };
+    const doc = { remediation: { 'not-a-check': { title: 't', goal: 'g', fix: 'f' } } };
     expect(() => normalizeWebRemediation(doc, ['llms-txt'])).toThrow(/orphan|no remediation/);
   });
 
@@ -58,10 +61,16 @@ describe('web remediation catalog coverage', () => {
     expect(() => normalizeWebRemediation(doc, ['llms-txt'])).toThrow(/no remediation entry/);
   });
 
-  test('an MCP-shape check without the evidence slot aborts', async () => {
+  test('the retired body/evidence_template shape aborts normalization', async () => {
     const doc = {
-      remediation: { 'mcp-initialize': { title: 't', body: 'no slot here', evidence_template: true } },
+      remediation: { 'llms-txt': { title: 't', goal: 'g', fix: 'f', body: 'legacy' } },
     };
-    expect(() => normalizeWebRemediation(doc, ['mcp-initialize'])).toThrow(/evidence slot/);
+    expect(() => normalizeWebRemediation(doc, ['llms-txt'])).toThrow(/retired/);
+  });
+
+  test('an entry missing goal or fix aborts normalization', async () => {
+    expect(() =>
+      normalizeWebRemediation({ remediation: { 'llms-txt': { title: 't', fix: 'f' } } }, ['llms-txt']),
+    ).toThrow(/goal/);
   });
 });

@@ -89,6 +89,10 @@ export async function emitWebScorecardSurface({ distDir, seedPath, scorecardsWeb
       name: entry.name,
       description: entry.description,
       score_pct: entry.scorecard.score_pct,
+      score: {
+        relative: entry.scorecard.score?.relative ?? entry.scorecard.score_pct,
+        global: entry.scorecard.score?.global ?? 0,
+      },
     });
   }
   await writeFile(join(distDir, '_internal', 'web-scorecards', 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
@@ -103,6 +107,7 @@ export async function emitWebScorecardSurface({ distDir, seedPath, scorecardsWeb
       canonicalPath: '/web',
       bodyHtml: body,
       themeInitJs: themeInit,
+      extraScripts: ['/js/web-leaderboard.js'],
     }),
   );
   await writeFile(join(distDir, 'web.md'), absolutifyMarkdownLinks(buildWebLeaderboardMarkdown(entries)));

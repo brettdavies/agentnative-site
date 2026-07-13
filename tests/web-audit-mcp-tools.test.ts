@@ -287,3 +287,80 @@ describe('audit_website site_type argument (U7)', () => {
     expect(text).toContain('rate limit');
   });
 });
+
+describe('get_web_remediation (reshaped, U13)', () => {
+  test('returns the static goal/fix/skill_url/resources/prompt object by check id', async () => {
+    const env = await makeEnv();
+    const body = jsonContent(await callTool(env, 'get_web_remediation', { check_id: 'openapi' }));
+    expect(body.found).toBe(true);
+    const remediation = body.remediation as Record<string, unknown>;
+    expect(remediation.check_id).toBe('openapi');
+    expect(typeof remediation.goal).toBe('string');
+    expect(typeof remediation.fix).toBe('string');
+    expect(remediation.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(Array.isArray(remediation.resources)).toBe(true);
+    expect(String(remediation.prompt)).toContain('Issue: the check did not pass in the latest audit');
+  });
+
+  test('an evidence arg becomes the prompt Issue line', async () => {
+    const env = await makeEnv();
+    const body = jsonContent(
+      await callTool(env, 'get_web_remediation', { check_id: 'openapi', evidence: 'x.dev/openapi.json -> 404' }),
+    );
+    const remediation = body.remediation as { prompt: string };
+    expect(remediation.prompt).toContain('Issue: x.dev/openapi.json -> 404');
+  });
+
+  test('an unknown check id returns found:false', async () => {
+    const env = await makeEnv();
+    const body = jsonContent(await callTool(env, 'get_web_remediation', { check_id: 'nope' }));
+    expect(body.found).toBe(false);
+  });
+});
+
+describe('audit_website inline remediation (U13)', () => {
+  async function cachedScorecardEnv() {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const scorecard = {
+      schema_version: '0.2',
+      target_url: 'https://example.com/',
+      score_pct: 50,
+      score: { relative: 50, global: 40 },
+      results: [
+        { id: 'llms-txt', status: 'pass', evidence: 'https://example.com/llms.txt -> 200' },
+        { id: 'openapi', status: 'absent', evidence: 'https://example.com/openapi.json -> 404' },
+        { id: 'mcp-tools-list', status: 'broken', evidence: 'no tools array' },
+        { id: 'dns-aid', status: 'n_a', na_reason: 'optional-absent', evidence: 'no DNS-AID records' },
+      ],
+    };
+    return makeEnv({
+      cachePrefill: { [key]: { spec_version: SPEC_VERSION, target_url: 'https://example.com/', scorecard } },
+    });
+  }
+
+  test('non-passing rows carry result + the inline remediation object; pass and n_a rows carry none', async () => {
+    const env = await cachedScorecardEnv();
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9'));
+    const scorecard = body.scorecard as {
+      results: Array<{ id: string; result?: string; remediation?: { prompt: string; skill_url: string } }>;
+    };
+    const byId = new Map(scorecard.results.map((r) => [r.id, r]));
+
+    const pass = byId.get('llms-txt');
+    expect(pass?.result).toContain('Verified');
+    expect(pass?.remediation).toBeUndefined();
+
+    const absent = byId.get('openapi');
+    expect(absent?.result).toContain('Not found');
+    expect(absent?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(absent?.remediation?.prompt).toContain('Issue: https://example.com/openapi.json -> 404');
+
+    const broken = byId.get('mcp-tools-list');
+    expect(broken?.result).toContain('Present but broken');
+    expect(broken?.remediation?.prompt).toContain('Issue: no tools array');
+
+    const na = byId.get('dns-aid');
+    expect(na?.result).toContain('Not implemented, optional');
+    expect(na?.remediation).toBeUndefined();
+  });
+});
