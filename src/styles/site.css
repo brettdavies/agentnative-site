@@ -181,6 +181,7 @@ main :not(pre) > code {
   padding: 0.15rem 0.4rem;
   border-radius: 0.3rem;
   font-size: 0.95em;
+  overflow-wrap: anywhere;
 }
 
 /* Anchor permalinks (rehype-autolink-headings). Hidden until heading hover / focus. */
@@ -256,6 +257,7 @@ main .anchor-icon {
   margin: 0;
   padding: 1.5rem 1.5rem 1.5rem calc(1.5rem + 1.1em);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
 }
 .normative li > p {
@@ -1214,6 +1216,10 @@ body:has(.doc) main {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.88rem;
+  table-layout: fixed;
+}
+.audit-table td {
+  overflow-wrap: anywhere;
 }
 .audit-hero .live-score__help {
   margin: var(--space-3) 0 0;
@@ -1630,14 +1636,22 @@ body:has(.leaderboard-hero) main {
   font-size: 0.88rem;
 }
 
-/* Responsive: collapse description and language on small screens */
+/* Responsive: stage the board's column collapse — description first,
+ * then language + meter tracks (numerals stay), then the tier badge. */
+@media (max-width: 900px) {
+  .lb-desc {
+    display: none;
+  }
+}
 @media (max-width: 720px) {
   body:has(.leaderboard-hero) main {
     max-width: 100%;
     padding-inline: 1rem;
   }
-  .lb-desc,
   .lb-lang {
+    display: none;
+  }
+  .lb-score .meter__track {
     display: none;
   }
   .leaderboard-table th,
@@ -1647,6 +1661,11 @@ body:has(.leaderboard-hero) main {
   .tier-badge {
     font-size: 0.65rem;
     padding: 0.1rem 0.35rem;
+  }
+}
+@media (max-width: 560px) {
+  .lb-tier {
+    display: none;
   }
 }
 
@@ -1684,6 +1703,12 @@ body:has(.scorecard-page) main {
   letter-spacing: -0.02em;
   line-height: 1.1;
   margin: 0;
+}
+.scorecard-hero__id {
+  min-width: 0;
+}
+.scorecard-hero__id p {
+  overflow-wrap: anywhere;
 }
 .scorecard-hero__cmd {
   margin: var(--space-4) 0 0;
@@ -1868,6 +1893,11 @@ main .remediation__body {
     justify-self: start;
   }
 }
+@media (max-width: 560px) {
+  .scorecard-hero__scores {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 /* Web result page — category cards with marked check rows. */
 .scorecard-hero__note {
@@ -2010,6 +2040,7 @@ main .remediation__body {
 
 .scorecard-header__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   color: var(--fg-muted, #525960);
@@ -2116,6 +2147,10 @@ main .remediation__body {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.88rem;
+  table-layout: fixed;
+}
+.audit-table td {
+  overflow-wrap: anywhere;
 }
 
 .audit-table td {

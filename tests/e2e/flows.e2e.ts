@@ -95,6 +95,31 @@ test.describe('keyboard + a11y', () => {
     await injectAxe(page);
     await checkA11y(page, undefined, AXE_OPTS);
   });
+
+  // One representative page per remaining archetype, light and dark.
+  for (const path of ['/score/ripgrep', '/web/anc.dev', '/scorecards', '/web-audit']) {
+    for (const scheme of ['light', 'dark'] as const) {
+      test(`axe: 0 serious/critical violations on ${path} in ${scheme} mode`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(path);
+        await injectAxe(page);
+        await checkA11y(page, undefined, AXE_OPTS);
+      });
+    }
+  }
+
+  test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {
+    for (const path of ['/p1', '/score/ripgrep', '/web/anc.dev', '/scorecards', '/web', '/web-audit', '/install']) {
+      for (const width of [390, 768, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(path);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow, `overflow on ${path} at ${width}px`).toBeLessThanOrEqual(0);
+      }
+    }
+  });
 });
 
 test.describe('code-copy + anchor-copy', () => {

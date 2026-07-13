@@ -43,15 +43,15 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    // PW-managed browser downloads stall on some dev machines. Setting
-    // PW_CHANNEL=chrome points Chromium-family projects at the installed
-    // Google Chrome instead; CI leaves it unset and uses managed browsers.
-    ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}),
   },
+  // PW-managed browser downloads stall on some dev machines. Setting
+  // PW_CHANNEL=chrome points Chromium-family projects at the installed
+  // Google Chrome instead (WebKit projects ignore it — channel is a
+  // Chromium concept); CI leaves it unset and uses managed browsers.
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       // Live opt-in projects (skill, homepage-score-live, staging-mcp)
       // are excluded from the default suite — they hit real network
       // endpoints (github.com clone hosts, the staging Worker) that the
@@ -64,12 +64,12 @@ export default defineConfig({
         /web-audit\.e2e\.ts/,
       ],
     },
-    { name: 'mobile-android', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
+    { name: 'mobile-android', use: { ...devices['Pixel 7'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) }, testMatch: /flows\.e2e\.ts/ },
     { name: 'mobile-ios', use: { ...devices['iPhone 13'] }, testMatch: /flows\.e2e\.ts/ },
     { name: 'tablet', use: { ...devices['iPad Pro 11'] }, testMatch: /flows\.e2e\.ts/ },
     {
       name: 'skill',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /skill\.e2e\.ts/,
       // Live `git clone` against github.com over the network — give it room.
       timeout: 60_000,
@@ -79,7 +79,7 @@ export default defineConfig({
       // Live staging Worker. Set ANC_STAGING_BASE_URL before invoking;
       // see tests/e2e/homepage-score-live.e2e.ts for full env contract.
       // Excluded from the default suite; run with --project=homepage-score-live.
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /homepage-score-live\.e2e\.ts/,
       // Real Sandbox container cold starts and Turnstile siteverify
       // round-trips push the per-test budget past Playwright's default.
@@ -96,7 +96,7 @@ export default defineConfig({
       // --project=staging-mcp` after a staging deploy or when triaging
       // an MCP regression the bun unit layer can't reproduce against
       // workerd.
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /(?:mcp|discoverability)\.e2e\.ts/,
     },
     {
@@ -108,7 +108,7 @@ export default defineConfig({
       // auth) before invoking; excluded from the default suite because it
       // makes real outbound probes to anc.dev. Run with:
       //   bun x playwright test --project=web-audit
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /web-audit\.e2e\.ts/,
       // 32 probes + discovery + a DNS fan-out against a live target.
       timeout: 90_000,

@@ -66,7 +66,10 @@ async function main(): Promise<number> {
   const version = `v${specVersion}`;
   process.stderr.write(`reading og.html, injecting version=${version}\n`);
 
-  const browser = await chromium.launch();
+  // PW_CHANNEL=chrome renders with the installed Google Chrome on dev
+  // machines where Playwright-managed browser downloads stall; CI leaves
+  // it unset and uses the managed Chromium.
+  const browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {});
   let pngBuffer: Buffer;
   try {
     const ctx = await browser.newContext({

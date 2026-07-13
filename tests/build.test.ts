@@ -301,7 +301,7 @@ describe('emitShell — OG image alt text', () => {
     const html = shell();
     expect(html).toContain('property="og:image:alt"');
     expect(html).toContain(
-      'content="agent-native CLI standard — anc.dev — a standard for CLIs that agents can operate"',
+      'content="anc.dev, the agent-native standard: MUST run without prompting, SHOULD speak machine-first, MAY decorate when a TTY is open. One bar for agent-readiness, on two surfaces."',
     );
   });
 
