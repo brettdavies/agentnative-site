@@ -58,10 +58,18 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   );
   const rpc = parseJsonRpc(resp);
   const ev: EvidenceItem = { url: endpoint, status: resp.status, error: resp.error };
+  const wwwAuthenticate = resp.headers['www-authenticate'];
+  if (wwwAuthenticate !== undefined) ev.www_authenticate = wwwAuthenticate;
 
-  if (resp.error || rpc === null) {
+  if (resp.error) {
+    ev.why = ['request failed'];
+    return { status: 'error', evidence: [ev] };
+  }
+  // The endpoint exists (discovery found it), so a response that carries
+  // no parseable JSON-RPC is a broken surface, not an absent one.
+  if (rpc === null) {
     ev.why = ['no parseable JSON-RPC response'];
-    return { status: 'fail', evidence: [ev] };
+    return { status: 'broken', evidence: [ev] };
   }
 
   const result = (rpc.result ?? {}) as Record<string, unknown>;
@@ -77,8 +85,11 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     if (w.assert === 'cors') {
       const acao = resp.headers['access-control-allow-origin'] ?? null;
       ev.allow_origin = acao;
-      ok = acao !== null;
-    } else {
+      // A missing Allow-Origin is CORS-not-implemented (absent), matching
+      // the preflight handler; only a malformed response is broken.
+      return { status: acao !== null ? 'pass' : 'absent', evidence: [ev] };
+    }
+    {
       const tools = result.tools as Array<{ name?: string; inputSchema?: unknown }> | undefined;
       ev.tools = Array.isArray(tools) ? tools.map((t) => t.name ?? null) : null;
       ev.with_input_schema = Array.isArray(tools) ? tools.filter((t) => t.inputSchema).length : 0;
@@ -89,5 +100,5 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.error_code = code;
     ok = code === (w.expect_code ?? -32601);
   }
-  return { status: ok ? 'pass' : 'fail', evidence: [ev] };
+  return { status: ok ? 'pass' : 'broken', evidence: [ev] };
 }

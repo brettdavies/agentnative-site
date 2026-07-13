@@ -36,6 +36,12 @@ export type GuardedFetchOptions = {
   timeoutMs?: number;
   /** Maximum Location hops before the chain aborts. */
   maxRedirects?: number;
+  /**
+   * When false, a redirect response is returned as-is (status + Location
+   * header) instead of being followed — the canonical-redirect eval rule
+   * needs to see the 301, which following would erase.
+   */
+  followRedirects?: boolean;
   /** Injection point for tests; production uses global fetch. */
   fetchImpl?: typeof fetch;
 };
@@ -257,7 +263,7 @@ export async function guardedFetch(
       }
 
       const location = response.headers.get('location');
-      if (REDIRECT_STATUSES.has(response.status) && location) {
+      if (opts.followRedirects !== false && REDIRECT_STATUSES.has(response.status) && location) {
         let next: URL;
         try {
           next = new URL(location, current.url);

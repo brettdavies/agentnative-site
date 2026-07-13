@@ -228,7 +228,7 @@ describe('handleWebAudit streaming', () => {
     expect(resp.status).toBe(200);
     const events = await readNdjson(resp);
     const checks = events.filter((e) => e.type === 'check');
-    expect(checks.length).toBe(32);
+    expect(checks.length).toBe(36);
     const terminal = events.at(-1) as Record<string, unknown>;
     expect(terminal.type).toBe('complete');
     expect(terminal.share_url).toBe('/web/example.com');
@@ -243,7 +243,7 @@ describe('handleWebAudit streaming', () => {
     const cached = {
       spec_version: SPEC_VERSION,
       target_url: url,
-      scorecard: { schema_version: '0.1', target_url: url, badge: { score_pct: 77 }, results: [] },
+      scorecard: { schema_version: '0.2', target_url: url, score_pct: 77, results: [] },
     };
     const { bucket } = makeR2({ [key]: cached });
     const env = makeEnv({ SCORE_CACHE: bucket });
@@ -256,10 +256,10 @@ describe('handleWebAudit streaming', () => {
     const body = (await resp.json()) as {
       cached: boolean;
       share_url: string;
-      scorecard: { badge: { score_pct: number } };
+      scorecard: { score_pct: number };
     };
     expect(body.cached).toBe(true);
-    expect(body.scorecard.badge.score_pct).toBe(77);
+    expect(body.scorecard.score_pct).toBe(77);
     expect(body.share_url).toBe('/web/example.com');
   });
 });
@@ -290,18 +290,19 @@ describe('handleWebResultPage', () => {
         spec_version: SPEC_VERSION,
         target_url: url,
         scorecard: {
-          schema_version: '0.1',
+          schema_version: '0.2',
           spec_version: SPEC_VERSION,
           target_url: url,
           tool: { name: new URL(url).host, url },
-          badge: { score_pct: pct, eligible: false },
+          score_pct: pct,
+          score: { relative: pct, global: pct },
           coverage_summary: {
             must: { total: 1, verified: 1 },
             should: { total: 2, verified: 1 },
             may: { total: 0, verified: 0 },
           },
           results: [{ id: 'llms-txt', label: 'llms.txt', group: 'P2', status: 'pass', evidence: null }],
-          summary: { pass: 1, fail: 0, n_a: 0, skip: 0, error: 0 },
+          summary: { pass: 1, broken: 0, absent: 0, n_a: 0, skip: 0, error: 0 },
         },
       },
     };
@@ -346,5 +347,77 @@ describe('handleWebResultPage', () => {
     const env = resultEnv();
     const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com', { method: 'POST' }), env);
     expect(resp.status).toBe(405);
+  });
+});
+
+describe('site_type declaration (U7)', () => {
+  function typedRequest(url: string, siteType: unknown): Request {
+    return new Request('https://anc.dev/api/audit-web', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9' },
+      body: JSON.stringify({ url, site_type: siteType }),
+    });
+  }
+
+  test('an invalid site_type is rejected with 400 before any probe', async () => {
+    const env = makeEnv();
+    const resp = await handleWebAudit(typedRequest('https://example.com/', 'commerce'), env, makeCtx(), {
+      probeFetch: (() => {
+        throw new Error('probe should never run');
+      }) as unknown as typeof fetch,
+    });
+    expect(resp.status).toBe(400);
+    const body = (await resp.json()) as { error: string };
+    expect(body.error).toBe('invalid_site_type');
+  });
+
+  test('a declared content type gates api-only checks to n_a and lands in the scorecard + cache payload', async () => {
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await handleWebAudit(typedRequest('https://example.com/', 'content'), env, ctx, {
+      probeFetch: stubProbeFetch(),
+    });
+    expect(resp.status).toBe(200);
+    const events = await readNdjson(resp);
+    const terminal = events.at(-1) as {
+      scorecard: { site_type: string | null; results: Array<{ id: string; status: string }> };
+    };
+    expect(terminal.scorecard.site_type).toBe('content');
+    expect(terminal.scorecard.results.find((r) => r.id === 'openapi')?.status).toBe('n_a');
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const cachedRaw = store.get(await keyFor('https://example.com/', SPEC_VERSION));
+    expect(cachedRaw).toBeDefined();
+    const cached = JSON.parse(cachedRaw as string) as { scorecard: { site_type: string | null } };
+    expect(cached.scorecard.site_type).toBe('content');
+  });
+
+  test('no site_type runs everything: openapi is scored when the probe detects an API surface', async () => {
+    const env = makeEnv();
+    const resp = await handleWebAudit(auditRequest('https://example.com/'), env, makeCtx(), {
+      probeFetch: stubProbeFetch(),
+    });
+    const events = await readNdjson(resp);
+    const terminal = events.at(-1) as {
+      scorecard: { site_type: string | null; results: Array<{ id: string; status: string }> };
+    };
+    expect(terminal.scorecard.site_type).toBeNull();
+    // stubProbeFetch answers /openapi.json with 200, so api-surface holds
+    // and the check is scored (not n_a).
+    expect(terminal.scorecard.results.find((r) => r.id === 'openapi')?.status).not.toBe('n_a');
+  });
+
+  test('typed and untyped runs share one domain-keyed cache entry (last-writer-wins, no keyFor split)', async () => {
+    const untypedKey = await keyFor('https://example.com/', SPEC_VERSION);
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await handleWebAudit(typedRequest('https://example.com/', 'content'), env, ctx, {
+      probeFetch: stubProbeFetch(),
+    });
+    await readNdjson(resp);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    expect(store.size).toBe(1);
+    expect(store.has(untypedKey)).toBe(true);
   });
 });

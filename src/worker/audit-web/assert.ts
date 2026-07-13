@@ -74,6 +74,52 @@ export function assertHttp(expect: ExpectBlock, resp: ProbeResponse): AssertOutc
   return { ok: true, reasons };
 }
 
+// ---------------------------------------------------------------------------
+// canonical-plus-redirect-aliases eval rule (plan-003 U5, R8)
+// ---------------------------------------------------------------------------
+
+export type AliasVerdict = 'pass' | 'broken' | 'n_a';
+
+/**
+ * Classify a non-followed alias probe against the canonical URL. An
+ * absent alias is n_a (no penalty); a 301/308 whose Location resolves to
+ * the canonical passes regardless of what the canonical returns; a 2xx
+ * serving content inline is broken (ambiguous duplicate, worse than
+ * absent). Only permanent redirects credit — a 302/303/307 signals no
+ * canonical intent, so it is broken (Open Questions resolution).
+ */
+export function classifyAliasProbe(
+  resp: ProbeResponse,
+  aliasUrl: string,
+  canonicalUrl: string,
+): { verdict: AliasVerdict; note: string } {
+  if (resp.error !== null) return { verdict: 'n_a', note: `request failed: ${resp.error}` };
+  const status = resp.status ?? 0;
+  if (status === 301 || status === 308) {
+    const location = resp.headers.location;
+    if (!location) return { verdict: 'broken', note: `${status} without a Location header` };
+    let target: string;
+    try {
+      target = new URL(location, aliasUrl).toString();
+    } catch {
+      return { verdict: 'broken', note: `${status} to unparseable target ${location}` };
+    }
+    const canonical = new URL(canonicalUrl);
+    const resolved = new URL(target);
+    if (resolved.origin === canonical.origin && resolved.pathname === canonical.pathname) {
+      return { verdict: 'pass', note: `${status} -> ${canonical.pathname}` };
+    }
+    return { verdict: 'broken', note: `${status} away from the canonical (${resolved.pathname})` };
+  }
+  if (status === 302 || status === 303 || status === 307) {
+    return { verdict: 'broken', note: `${status} non-permanent redirect (301/308 expected)` };
+  }
+  if (status >= 200 && status < 300) {
+    return { verdict: 'broken', note: `${status} serves content inline (ambiguous duplicate)` };
+  }
+  return { verdict: 'n_a', note: `${status} alias not published` };
+}
+
 /**
  * Extract a JSON-RPC object from a JSON or text/event-stream response.
  * SSE bodies (by content-type or by leading `event:`/`data:` shape)

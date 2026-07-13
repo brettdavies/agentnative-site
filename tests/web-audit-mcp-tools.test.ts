@@ -271,3 +271,19 @@ describe('tool registration', () => {
     }
   });
 });
+
+describe('audit_website site_type argument (U7)', () => {
+  test('an invalid site_type is rejected by input validation', async () => {
+    const env = await makeEnv();
+    const res = await callTool(env, 'audit_website', { url: 'example.com', site_type: 'commerce' }, '203.0.113.9');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('site_type');
+  });
+
+  test('a valid site_type passes schema validation and reaches the gate chain', async () => {
+    const env = await makeEnv({ limiterOk: false });
+    const res = await callTool(env, 'audit_website', { url: 'example.com', site_type: 'content' }, '203.0.113.9');
+    const text = res.result?.content?.[0]?.text ?? '';
+    expect(text).toContain('rate limit');
+  });
+});

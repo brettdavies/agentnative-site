@@ -4,11 +4,13 @@
 // fetch is the only network path).
 
 import { describe, expect, test } from 'bun:test';
+import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
 import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
+import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebCheck } from '../src/worker/audit-web/registry';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
@@ -33,11 +35,12 @@ function stubFetch(handler: (url: string, init?: RequestInit) => Response): type
 function check(partial: Partial<WebCheck>): WebCheck {
   return {
     id: 'x',
-    category: 'content-surface',
+    category: 'content-for-agents',
     tier: 'recommended',
     keyword: 'should',
     principle: 'P2',
-    applies_to: 'any',
+    site_types: ['all'],
+    antecedent: 'none',
     weight: 1,
     title: 't',
     hint: 'h',
@@ -82,14 +85,82 @@ describe('runHttp', () => {
     expect(outcome.evidence[1].ok).toBe(true);
   });
 
-  test('fails when no candidate satisfies expect', async () => {
+  test('a 404 on the only candidate is absent', async () => {
     const fetchImpl = stubFetch(() => new Response('missing', { status: 404 }));
     const outcome = await runHttp(
       check({ with: { path: '/robots.txt', expect: { status: [200] } } }),
       ctx({ fetchImpl }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('absent');
     expect(outcome.evidence[0].ok).toBe(false);
+  });
+
+  test('a 200 with a content-type mismatch is broken (present but invalid)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('not json', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runHttp(
+      check({ with: { path: '/schema.json', expect: { status: [200], content_type: 'json' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a 5xx where a document is expected is broken', async () => {
+    const fetchImpl = stubFetch(() => new Response('oops', { status: 503 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a failed affordance assertion without a status expectation is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response('<html><body>no meta</body></html>', { status: 200 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/', expect: { body_regex: '<noscript' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('mixed candidates: a broken candidate outranks absent ones', async () => {
+    const fetchImpl = stubFetch((url) =>
+      url.endsWith('/openapi.json') ? new Response('oops', { status: 500 }) : new Response('no', { status: 404 }),
+    );
+    const outcome = await runHttp(
+      check({ with: { path_any: ['/openapi.json', '/openapi.yaml'], expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a timeout is broken only when the check opted into an explicit hang budget', async () => {
+    const timeoutFetch = (() => {
+      const err = new Error('deadline exceeded');
+      err.name = 'TimeoutError';
+      return Promise.reject(err);
+    }) as unknown as typeof fetch;
+    const withBudget = await runHttp(
+      check({ with: { path: '/mcp', method: 'GET', timeout: 1, expect: { status: [405] } } }),
+      ctx({ fetchImpl: timeoutFetch }),
+    );
+    expect(withBudget.status).toBe('broken');
+    const withoutBudget = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl: timeoutFetch }),
+    );
+    expect(withoutBudget.status).toBe('error');
+  });
+
+  test('retain_body keeps the passing body on the evidence row', async () => {
+    const fetchImpl = stubFetch(() => new Response('# Site\n\n- [x](https://example.com/x)', { status: 200 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', retain_body: true, expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].body).toContain('# Site');
   });
 
   test('substitutes {mcp_endpoint} in the path', async () => {
@@ -149,13 +220,24 @@ describe('runCorsPreflight', () => {
     expect(outcome.evidence[0].allow_methods).toBe('POST, OPTIONS');
   });
 
-  test('fails on 204 without Access-Control-Allow-Origin', async () => {
+  test('a 204 without Access-Control-Allow-Origin is absent (CORS not implemented)', async () => {
     const fetchImpl = stubFetch(() => new Response(null, { status: 204 }));
     const outcome = await runCorsPreflight(
       check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
       ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('an Allow-Origin on a failing preflight status is broken (misconfigured)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('oops', { status: 500, headers: { 'access-control-allow-origin': '*' } }),
+    );
+    const outcome = await runCorsPreflight(
+      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
   });
 
   test('returns n_a when the path has no endpoint to resolve', async () => {
@@ -202,7 +284,7 @@ describe('runMcp', () => {
     expect(outcome.evidence[0].capabilities).toEqual(['tools', 'resources']);
   });
 
-  test('capabilities assertion fails on an empty capabilities object', async () => {
+  test('capabilities assertion is broken on an empty capabilities object', async () => {
     const fetchImpl = stubFetch(
       () =>
         new Response(
@@ -214,7 +296,7 @@ describe('runMcp', () => {
       check({ handler: 'mcp', with: { op: 'initialize', assert: 'capabilities' } }),
       ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('broken');
   });
 
   test('tools-list parses an SSE (text/event-stream) response and counts input schemas', async () => {
@@ -278,13 +360,26 @@ describe('runMcp', () => {
     expect(called).toBe(0);
   });
 
-  test('fails when the response has no parseable JSON-RPC', async () => {
+  test('a discovered endpoint with no parseable JSON-RPC is broken', async () => {
     const fetchImpl = stubFetch(() => new Response('<html>error</html>', { status: 500 }));
     const outcome = await runMcp(
       check({ handler: 'mcp', with: { op: 'initialize' } }),
       ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
     );
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('captures the WWW-Authenticate challenge for the mcp-auth antecedent', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('unauthorized', { status: 401, headers: { 'www-authenticate': 'Bearer realm="mcp"' } }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+    expect(outcome.evidence[0].status).toBe(401);
+    expect(outcome.evidence[0].www_authenticate).toBe('Bearer realm="mcp"');
   });
 });
 
@@ -345,13 +440,13 @@ describe('runDnsDoh', () => {
     expect(resolversHit).toContain('dns.google');
   });
 
-  test('fails when all resolvers network-fail', async () => {
+  test('errors (not absent) when all resolvers network-fail', async () => {
     const fetchImpl = stubFetch(() => new Response('boom', { status: 500 }));
     const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('error');
   });
 
-  test('fails when every name resolves NXDOMAIN', async () => {
+  test('is absent when every name resolves NXDOMAIN', async () => {
     const fetchImpl = stubFetch(
       () =>
         new Response(JSON.stringify({ Status: 3, Answer: [] }), {
@@ -360,6 +455,100 @@ describe('runDnsDoh', () => {
         }),
     );
     const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
-    expect(outcome.status).toBe('fail');
+    expect(outcome.status).toBe('absent');
+  });
+});
+
+describe('runAuthMd', () => {
+  const authCheck = check({
+    id: 'auth-md',
+    handler: 'auth-md',
+    category: 'agent-discovery-auth',
+    tier: 'optional',
+    keyword: 'may',
+    site_types: ['api', 'mcp'],
+    antecedent: 'auth-present',
+    with: { path_any: ['/.well-known/auth.md', '/auth.md'] },
+  });
+
+  test('a markdown auth doc passes', async () => {
+    const fetchImpl = stubFetch((url) => {
+      if (url.endsWith('/.well-known/auth.md')) {
+        return new Response('# Agent auth\n\nRegister at /register.', {
+          status: 200,
+          headers: { 'content-type': 'text/markdown' },
+        });
+      }
+      return new Response('no', { status: 404 });
+    });
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('an HTML page at the auth.md path is broken (present-malformed)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('<html>login</html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('missing at every candidate path is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response('no', { status: 404 }));
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a bare markdown heading without a content-type still passes', async () => {
+    const fetchImpl = stubFetch((url) =>
+      url.endsWith('/auth.md') ? new Response('# Auth for agents') : new Response('no', { status: 404 }),
+    );
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runWebMcp', () => {
+  const webmcpCheck = check({ id: 'webmcp', handler: 'webmcp', antecedent: 'html-root', with: {} });
+  const htmlRoot = (body: string) => ({
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+    body,
+    error: null,
+  });
+
+  test('detects a webmcp script asset in the root HTML without any fetch', async () => {
+    let called = 0;
+    const fetchImpl = stubFetch(() => {
+      called++;
+      return new Response('');
+    });
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script src="/assets/webmcp-abc123.js" defer></script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(called).toBe(0);
+  });
+
+  test('detects an inline navigator.modelContext registration', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script>if (navigator.modelContext) { /* register */ }</script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('no markers is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: htmlRoot('<html><body>hi</body></html>') }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a failed root fetch is an operational error', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: undefined }));
+    expect(outcome.status).toBe('error');
   });
 });

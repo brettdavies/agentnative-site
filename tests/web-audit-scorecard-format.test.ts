@@ -14,23 +14,28 @@ import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 function webScorecard(pct = 82) {
   return {
-    schema_version: '0.1',
+    schema_version: '0.2',
     spec_version: SPEC_VERSION,
     target_url: 'https://example.com/',
     mcp_endpoint: 'https://example.com/mcp',
     tool: { name: 'example.com', url: 'https://example.com/' },
     audience: null,
     audit_profile: null,
-    badge: { score_pct: pct, eligible: false },
+    score_pct: pct,
+    score: { relative: pct, global: Math.max(0, pct - 10) },
+    categories: [
+      { id: 'mcp-api', name: 'MCP & API', passed: 1, counted: 1 },
+      { id: 'discoverability', name: 'Discoverability', passed: 0, counted: 1 },
+    ],
     coverage_summary: {
       must: { total: 2, verified: 2 },
       should: { total: 15, verified: 9 },
       may: { total: 15, verified: 12 },
     },
-    summary: { pass: 10, fail: 6, n_a: 0, skip: 0, error: 0 },
+    summary: { pass: 10, broken: 2, absent: 4, n_a: 0, skip: 0, error: 0 },
     results: [
       { id: 'mcp-initialize', label: 'initialize handshake', group: 'P2', status: 'pass', evidence: 'serverInfo anc' },
-      { id: 'robots', label: 'robots.txt present', group: 'P7', status: 'fail', evidence: '404' },
+      { id: 'robots', label: 'robots.txt present', group: 'P7', status: 'absent', evidence: '404' },
       { id: 'oauth-discovery', label: 'OAuth discovery', group: 'P1', status: 'pass', evidence: '200' },
     ],
   };
@@ -158,13 +163,22 @@ describe('web scorecard conforms to the documented schema (U14)', () => {
   }
 
   const produced = buildWebScorecard(
-    [engineRow({ keyword: 'must', tier: 'required', status: 'pass' }), engineRow({ status: 'fail' })],
+    [
+      engineRow({ keyword: 'must', tier: 'required', status: 'pass' }),
+      engineRow({ status: 'absent' }),
+      engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
+    ],
     {
       targetUrl: 'https://example.com/',
       domain: 'example.com',
       mcpEndpoint: 'https://example.com/mcp',
       discoveryEvidence: [{ source: '/mcp', probed: 'initialize' }],
       specVersion: SPEC_VERSION,
+      registry: {
+        category_order: ['content-surface'],
+        categories: { 'content-surface': 'Content for agents' },
+        checks: [{ keyword: 'must' }, { keyword: 'should' }, { keyword: 'may' }] as never,
+      },
     },
   );
 
@@ -177,18 +191,22 @@ describe('web scorecard conforms to the documented schema (U14)', () => {
     'tool',
     'audience',
     'audit_profile',
+    'site_type',
     'summary',
     'coverage_summary',
-    'badge',
+    'score_pct',
+    'score',
+    'categories',
     'results',
   ];
 
-  test('carries exactly the documented top-level fields', () => {
+  test('carries exactly the documented top-level fields (no badge)', () => {
     expect(Object.keys(produced).sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+    expect('badge' in produced).toBe(false);
   });
 
-  test('schema_version is the site-owned 0.1, independent of the CLI schema', () => {
-    expect(produced.schema_version).toBe('0.1');
+  test('schema_version is the site-owned 0.2, independent of the CLI schema', () => {
+    expect(produced.schema_version).toBe('0.2');
   });
 
   test('the web tool shape is { name, url } with no CLI fields', () => {
@@ -197,23 +215,35 @@ describe('web scorecard conforms to the documented schema (U14)', () => {
     expect((produced.tool as Record<string, unknown>).install).toBeUndefined();
   });
 
-  test('badge carries score_pct and a non-eligible flag (no web badge)', () => {
-    expect(typeof produced.badge.score_pct).toBe('number');
-    expect(produced.badge.eligible).toBe(false);
+  test('score_pct is the RELATIVE score beside the { relative, global } pair', () => {
+    expect(typeof produced.score_pct).toBe('number');
+    expect(produced.score_pct).toBe(produced.score.relative);
+    expect(typeof produced.score.global).toBe('number');
   });
 
-  test('every result row carries the documented fields', () => {
+  test('every result row carries the documented fields (na_reason only when set)', () => {
+    const REQUIRED_ROW_FIELDS = [
+      'category',
+      'evidence',
+      'group',
+      'id',
+      'keyword',
+      'label',
+      'layer',
+      'principle',
+      'status',
+      'tier',
+    ];
     for (const row of produced.results) {
-      expect(Object.keys(row).sort()).toEqual(
-        ['evidence', 'group', 'id', 'keyword', 'label', 'layer', 'status'].sort(),
-      );
+      const expected = row.status === 'n_a' ? [...REQUIRED_ROW_FIELDS, 'na_reason'] : REQUIRED_ROW_FIELDS;
+      expect(Object.keys(row).sort()).toEqual([...expected].sort());
       expect(row.layer).toBe('web');
     }
   });
 
   test('a scorecard missing a documented required field fails conformance loudly', () => {
     const broken = { ...produced } as Record<string, unknown>;
-    delete broken.badge;
+    delete broken.score_pct;
     expect(Object.keys(broken).sort()).not.toEqual([...DOCUMENTED_TOP_LEVEL].sort());
   });
 });

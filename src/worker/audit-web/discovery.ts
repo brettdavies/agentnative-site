@@ -51,7 +51,10 @@ export async function discoverMcpEndpoint(
     const ep = (card.mcp_endpoint as string) || (card.url as string) || transport?.endpoint;
     if (ep) {
       const resolved = resolveUrl(base, ep);
-      evidence.push({ source: wk, endpoint: resolved });
+      const item: EvidenceItem = { source: wk, endpoint: resolved };
+      // Surface the card's auth declaration for the mcp-auth antecedent.
+      if (card.authentication !== undefined || card.auth !== undefined) item.authentication = true;
+      evidence.push(item);
       return { endpoint: resolved, evidence };
     }
     evidence.push({ source: wk, note: 'card present, no endpoint field' });
