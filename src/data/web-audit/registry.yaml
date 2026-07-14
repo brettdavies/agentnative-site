@@ -371,7 +371,7 @@ checks:
     with:
       path: /
       expect: { body_regex: "<noscript" }
-    hint: Ship a <noscript> block listing /llms.txt, /openapi.json, and the MCP endpoint for non-JS agents.
+    hint: Link your machine entry points (llms.txt, an OpenAPI or MCP endpoint, .well-known cards) from a <noscript> block so non-JS agents get an in-body list.
 
   # ---- Discoverability -----------------------------------------------------
   - id: robots

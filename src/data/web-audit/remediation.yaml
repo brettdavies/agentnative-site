@@ -190,9 +190,10 @@ remediation:
     title: Root HTML has a noscript with machine entry points
     goal: Give non-JS agents a noscript block listing your machine entry points
     fix: |
-      Ship a `<noscript>` block that lists your machine entry points (`/llms.txt`, `/openapi.json`,
-      the MCP endpoint). A non-JS agent or a fetch-only crawler gets a usable path forward instead of
-      an empty single-page-app shell.
+      Add a `<noscript>` block to your root HTML that links your machine entry points: `llms.txt`,
+      your OpenAPI or MCP endpoint, and any `.well-known` cards. It hands a fetch-only crawler or a
+      non-JS agent a concrete, in-body list of where the structured surfaces live, so it never has to
+      run the client bundle or infer them from the visible page.
     resources:
       - { label: MDN noscript, url: "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/noscript" }
   schema-org-jsonld:
