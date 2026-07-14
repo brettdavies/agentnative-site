@@ -133,7 +133,8 @@ DNS-over-HTTPS): no container, nothing crawled.
   found: false, next_tool: "audit_website" }` on a miss.
 - `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal scorecard plus its
   `share_url`. There are no progress notifications: the server runs stateless per-request. On an existing cache it
-  returns the cached result. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER` (5 per hour per IP, no anon fallback).
+  returns the cached result. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon
+  fallback).
 - `list_website_audits`: the curated web leaderboard (`anc.dev/web`).
 - `get_web_remediation`: the static canonical fix for a web-audit `check_id`; MCP-shape checks accept an `evidence`
   string that is injected into the fix template.

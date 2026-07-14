@@ -86,9 +86,15 @@ export async function copyAssets({ repoRoot, distDir }) {
   // redirect to /live-score/<binary>). Loaded with defer from the
   // homepage shell only.
   const liveScoreJs = await bundleClient(join(repoRoot, 'src/client/live-score.ts'), join(distDir, 'js/live-score.js'));
-  // Web-audit form (POST /api/audit-web, render the NDJSON stream). Loaded
-  // with defer from the /web-audit page shell only.
+  // Web-audit form (validate + navigate to /web/scoring/<host>). Loaded with
+  // defer from the /web-audit page shell only.
   const webAuditJs = await bundleClient(join(repoRoot, 'src/client/web-audit.ts'), join(distDir, 'js/web-audit.js'));
+  // In-progress scoring page (Turnstile + POST /api/audit-web + NDJSON stream
+  // + forward to /web/<domain>). Worker-served /web/scoring/<domain> loads it.
+  const webAuditScoringJs = await bundleClient(
+    join(repoRoot, 'src/client/web-audit-scoring.ts'),
+    join(distDir, 'js/web-audit-scoring.js'),
+  );
   // Web leaderboard sort toggle (GLOBAL default, RELATIVE via ?sort=).
   // Loaded with defer from the /web page shell only.
   const webLeaderboardJs = await bundleClient(
@@ -99,5 +105,16 @@ export async function copyAssets({ repoRoot, distDir }) {
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
-  return { themeInit, themeJs, navJs, clipboardJs, leaderboardJs, liveScoreJs, webAuditJs, webLeaderboardJs, webmcpJs };
+  return {
+    themeInit,
+    themeJs,
+    navJs,
+    clipboardJs,
+    leaderboardJs,
+    liveScoreJs,
+    webAuditJs,
+    webAuditScoringJs,
+    webLeaderboardJs,
+    webmcpJs,
+  };
 }

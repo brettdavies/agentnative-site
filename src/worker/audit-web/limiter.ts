@@ -3,12 +3,12 @@
 // Both the /api/audit-web streaming route and the audit_website MCP tool
 // consume from the same per-IP hourly budget, so a caller can't get one
 // ceiling via the webapp and another via MCP. Mirrors consumeHourlyBudget
-// in scorecard-audit.ts: the CF rate-limit binding enforces the 5-per-60s
+// in scorecard-audit.ts: the CF rate-limit binding enforces the per-60s
 // burst floor; this layer enforces the hourly ceiling the binding can't
 // express (its max period is 60 seconds).
 
 const HOUR_MS = 3_600_000;
-const HOURLY_AUDIT_CEILING = 5;
+const HOURLY_AUDIT_CEILING = 30;
 const HOURLY_KV_TTL_SECONDS = 7200;
 
 /** Consume one unit of the hourly budget for `ip`. Returns false when exhausted. */

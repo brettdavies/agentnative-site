@@ -1,18 +1,22 @@
-// Web-audit Worker routes (plan U7 + U8).
+// Web-audit Worker routes.
 //
-//   POST /api/audit-web   streaming NDJSON audit dispatch (U7)
-//   GET  /web/<domain>    shareable cached result page + .md twin (U8)
+//   POST /api/audit-web         streaming NDJSON audit dispatch
+//   GET  /web/scoring/<domain>  in-progress streaming page (JS-required)
+//   GET  /web/<domain>          shareable cached result page + .md twin
 //
-// The POST path admits a request through the kill switch, SSRF pre-flight,
-// no-anon-fallback IP check, burst limiter, and a KV-backed hourly window
-// (mirroring the score_cli audit-tier posture), then runs the engine and
+// The POST path serves cache state as data ahead of every metered gate,
+// then admits a fresh audit through the same gate waterfall as /api/score:
+// kill switch, Turnstile, session mint/read, session limiter with a coarse
+// per-IP fallback, and a KV-backed hourly window, then runs the engine and
 // streams each check result as it resolves. The complete scorecard is
 // written to R2 inside a ctx.waitUntil task so a mid-stream client
-// disconnect still caches a completed run (KTD-13: only complete runs are
-// cached; a deadline-exceeded run streams an `incomplete` terminal and is
-// never persisted).
+// disconnect still caches a completed run — only complete runs are cached;
+// a deadline-exceeded run streams an `incomplete` terminal and is never
+// persisted.
 
 import { detectPreference } from '../accept';
+import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
+import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { type CachedWebAudit, get as cacheGet, put as cachePut, keyFor, normalizeTargetUrl } from './cache';
 import { runWebAudit } from './engine';
@@ -23,17 +27,33 @@ import type { EngineResult } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
 
-export interface WebAuditRouteEnv {
+type RateLimit = { limit(o: { key: string }): Promise<{ success: boolean }> };
+
+export interface WebAuditRouteEnv extends TurnstileEnv, SessionEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
   WEB_AUDIT_ENABLED?: string;
-  WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  // Public sitekey the /web/scoring page bakes into its Turnstile widget;
+  // empty on unprovisioned envs (the client disables with an MCP pointer).
+  TURNSTILE_SITEKEY?: string;
+  // Session-keyed burst limiter (`<sid>:<sha256(target)>`, 10/60s) for the
+  // fresh HTTP path; WEB_AUDIT_LIMITER_IP is the coarse per-IP fallback
+  // (30/60s) that caps a client swapping the session cookie.
+  WEB_AUDIT_LIMITER?: RateLimit;
+  WEB_AUDIT_LIMITER_IP?: RateLimit;
 }
 
 export interface WebAuditRouteDeps {
   /** Injected probe fetch for tests; production uses global fetch. */
   probeFetch?: typeof fetch;
+  /** Injected Turnstile siteverify fetch for tests; production uses global fetch. */
+  turnstileFetch?: typeof fetch;
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function isWebAuditPath(pathname: string): boolean {
@@ -45,6 +65,21 @@ function jsonResponse(body: unknown, status: number, extraHeaders: Record<string
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...extraHeaders },
   });
+}
+
+/** 429 with the session cookie threaded so a rate-limit bounce keeps the session. */
+function rateLimited(message: string, setCookie: string | null): Response {
+  return jsonResponse({ error: 'rate_limit', message, retry_after: 60 }, 429, cookieHeader(setCookie));
+}
+
+/** Fail-fast 500 for a missing bot-defense secret on the fresh path. */
+function serviceMisconfigured(err: unknown): Response {
+  const details = err instanceof Error ? err.message : String(err);
+  return jsonResponse({ error: 'service_misconfigured', message: details }, 500);
+}
+
+function cookieHeader(setCookie: string | null): Record<string, string> {
+  return setCookie ? { 'set-cookie': setCookie } : {};
 }
 
 /** Prepend https:// when the input carries no scheme; null on unparseable input. */
@@ -80,32 +115,28 @@ export async function handleWebAudit(
   ctx: ExecutionContext,
   deps: WebAuditRouteDeps = {},
 ): Promise<Response> {
-  // 1. Kill switch.
-  if (env.WEB_AUDIT_ENABLED !== 'true') {
-    return new Response('web audit is currently disabled by the operator\n', {
-      status: 503,
-      headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '3600', 'cache-control': 'no-store' },
-    });
-  }
-  // 2. Method.
+  // 1. Method.
   if (request.method !== 'POST') {
     return new Response('method not allowed\n', {
       status: 405,
       headers: { Allow: 'POST', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     });
   }
-  // 3. Body + URL parse.
-  let body: { url?: unknown; site_type?: unknown };
+  // 2. Body + URL parse.
+  let body: { url?: unknown; site_type?: unknown; turnstile_token?: unknown };
   try {
-    body = (await request.json()) as { url?: unknown; site_type?: unknown };
+    body = (await request.json()) as { url?: unknown; site_type?: unknown; turnstile_token?: unknown };
   } catch {
-    return jsonResponse({ error: 'invalid_body', message: 'POST body must be JSON { url, site_type? }' }, 400);
+    return jsonResponse(
+      { error: 'invalid_body', message: 'POST body must be JSON { url, site_type?, turnstile_token }' },
+      400,
+    );
   }
   const url = coerceUrl(body.url);
   if (!url) {
     return jsonResponse({ error: 'invalid_url', message: 'provide a valid { url }' }, 400);
   }
-  // Declared site type (R6): absent = run everything.
+  // Declared site type: absent = run everything.
   if (body.site_type !== undefined && body.site_type !== 'content' && body.site_type !== 'api') {
     return jsonResponse({ error: 'invalid_site_type', message: 'site_type must be "content" or "api"' }, 400);
   }
@@ -113,42 +144,99 @@ export async function handleWebAudit(
   const canonicalTarget = canonicalTargetOf(url);
   const shareDomain = url.host;
 
-  // 4. SSRF pre-flight — before any probe or limiter spend.
+  // 3. SSRF pre-flight — before the cache read (the cache key needs the URL)
+  // and before any probe or metered gate.
   const validation = validatePublicUrl(canonicalTarget);
   if (!validation.ok) {
     return jsonResponse({ error: validation.reason }, 400);
   }
 
-  // 5. Cache hit — cache state is data, served before the fresh-audit
-  // gates so a cached read needs no source IP and consumes no budget
-  // (the audit_website MCP tool orders its gates the same way).
+  // 4. Cache hit — cache state is data, served ahead of every metered gate
+  // including the kill switch, so a cached read needs no source IP, no
+  // Turnstile, and consumes no budget (the audit_website MCP tool orders
+  // its gates the same way).
   const shareUrl = `/web/${shareDomain}`;
   const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
   if (cached) {
     return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
   }
 
-  // 6. cf-connecting-ip presence (no anon fallback at the audit tier).
-  const ip = request.headers.get('cf-connecting-ip');
-  if (!ip) {
-    return jsonResponse({ error: 'rate_limit', message: 'fresh audits require a source IP (cf-connecting-ip)' }, 429);
+  // 5. Kill switch — fires on a cache miss only.
+  if (env.WEB_AUDIT_ENABLED !== 'true') {
+    return new Response('web audit is currently disabled by the operator\n', {
+      status: 503,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '3600', 'cache-control': 'no-store' },
+    });
   }
-  // 7. Burst limiter.
+
+  // 6. Turnstile siteverify. Missing secret is a fail-fast 500 — the fresh
+  // path MUST NOT accept traffic with the bot-defense layer silently
+  // disabled. A tokenless direct POST is not a supported surface; agents
+  // use the MCP tool.
+  const token = typeof body.turnstile_token === 'string' ? body.turnstile_token : null;
+  let verify: Awaited<ReturnType<typeof verifyTurnstile>>;
+  try {
+    verify = await verifyTurnstile(env, token, {
+      fetcher: deps.turnstileFetch,
+      remoteIp: request.headers.get('cf-connecting-ip') ?? undefined,
+    });
+  } catch (err) {
+    return serviceMisconfigured(err);
+  }
+  if (!verify.ok) {
+    if (verify.reason === 'misconfigured') return serviceMisconfigured('TURNSTILE_SECRET missing');
+    return jsonResponse({ error: 'turnstile_failed', message: 'verification challenge failed; please retry' }, 400);
+  }
+
+  // 7. Session cookie mint/read. A fresh session is minted on the first
+  // passing-Turnstile request; subsequent requests reuse it via the
+  // `__Host-anc-session` cookie (Path=/, so a cookie minted by /api/score
+  // is valid here). Missing SESSION_HMAC_SECRET is a fail-fast 500.
+  let session: { sid: string };
+  let setCookie: string | null = null;
+  try {
+    const existing = await readSession(env, request);
+    if (existing) {
+      session = existing;
+    } else {
+      const fresh = newSession();
+      setCookie = await issue(env, fresh);
+      session = fresh;
+    }
+  } catch (err) {
+    if (err instanceof SessionConfigError) return serviceMisconfigured('SESSION_HMAC_SECRET missing');
+    throw err;
+  }
+
+  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+
+  // 8. Session limiter (10/60s) keyed `<sid>:<sha256(canonical target)>`.
+  // Same session auditing the same target does not burn budget on a retry;
+  // a new session requires a fresh Turnstile solve.
   if (env.WEB_AUDIT_LIMITER) {
-    const { success } = await env.WEB_AUDIT_LIMITER.limit({ key: ip });
+    const key = `${session.sid}:${await sha256Hex(canonicalTarget)}`;
+    const { success } = await env.WEB_AUDIT_LIMITER.limit({ key });
     if (!success) {
-      return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (burst)' }, 429);
+      return rateLimited('audit rate limit exceeded (burst)', setCookie);
     }
   }
-  // 8. KV hourly window (shared with the audit_website MCP tool).
+  // 9. Coarse per-IP fallback (30/60s) — a client swapping the session
+  // cookie to dodge the session limiter still gets capped.
+  if (env.WEB_AUDIT_LIMITER_IP) {
+    const { success } = await env.WEB_AUDIT_LIMITER_IP.limit({ key: ip });
+    if (!success) {
+      return rateLimited('audit rate limit exceeded (burst)', setCookie);
+    }
+  }
+  // 10. KV hourly window (30/hr/IP), shared with the audit_website MCP tool.
   if (env.SCORE_KV) {
     const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ip);
     if (!ok) {
-      return jsonResponse({ error: 'rate_limit', message: 'audit rate limit exceeded (5 per hour per source)' }, 429);
+      return rateLimited('audit rate limit exceeded (30 per hour per source)', setCookie);
     }
   }
 
-  // 9. Miss — stream the engine, cache the completed result via waitUntil.
+  // 11. Miss — stream the engine, cache the completed result via waitUntil.
   const registry = await loadWebAuditRegistry(env);
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -198,6 +286,7 @@ export async function handleWebAudit(
       'content-type': 'application/x-ndjson; charset=utf-8',
       'cache-control': 'no-store',
       'x-robots-tag': 'noindex',
+      ...cookieHeader(setCookie),
     },
   });
 }
@@ -213,12 +302,36 @@ const DOMAIN_SLUG_RE = /^(?=.{1,253}(?::|$))[a-z0-9]([a-z0-9-]{0,62})(\.[a-z0-9]
 
 export type WebResultPathMatch = { domain: string; isMarkdown: boolean };
 
+// Segments reserved under `/web/` that must not resolve as a domain lookup.
+// `scoring` is the in-progress streaming page, so `/web/scoring` is never a
+// cached-result domain even though it passes DOMAIN_SLUG_RE.
+const WEB_RESERVED_SEGMENTS = new Set(['scoring']);
+
 export function parseWebResultPath(pathname: string): WebResultPathMatch | null {
   const md = pathname.match(/^\/web\/([^/]+)\.md$/);
-  if (md) return DOMAIN_SLUG_RE.test(md[1]) ? { domain: md[1], isMarkdown: true } : null;
+  if (md) return isDomainLookup(md[1]) ? { domain: md[1], isMarkdown: true } : null;
   const m = pathname.match(/^\/web\/([^/]+)$/);
   if (!m) return null;
-  return DOMAIN_SLUG_RE.test(m[1]) ? { domain: m[1], isMarkdown: false } : null;
+  return isDomainLookup(m[1]) ? { domain: m[1], isMarkdown: false } : null;
+}
+
+function isDomainLookup(segment: string): boolean {
+  return !WEB_RESERVED_SEGMENTS.has(segment) && DOMAIN_SLUG_RE.test(segment);
+}
+
+/** Reserved `/web/scoring` prefix — the in-progress streaming page. */
+export function isWebScoringPath(pathname: string): boolean {
+  return pathname === '/web/scoring' || pathname === '/web/scoring.md' || pathname.startsWith('/web/scoring/');
+}
+
+export type WebScoringPathMatch = { domain: string | null; isMarkdown: boolean };
+
+export function parseWebScoringPath(pathname: string): WebScoringPathMatch | null {
+  if (pathname === '/web/scoring') return { domain: null, isMarkdown: false };
+  if (pathname === '/web/scoring.md') return { domain: null, isMarkdown: true };
+  const m = pathname.match(/^\/web\/scoring\/([^/]+?)(\.md)?$/);
+  if (!m) return null;
+  return DOMAIN_SLUG_RE.test(m[1]) ? { domain: m[1], isMarkdown: m[2] === '.md' } : null;
 }
 
 const HTML_HEADERS = {
@@ -391,4 +504,111 @@ async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdow
     body,
   });
   return new Response(html, { status: 404, headers: HTML_HEADERS });
+}
+
+// ---------------------------------------------------------------------------
+// GET /web/scoring/<domain> in-progress streaming page (JS-required)
+// ---------------------------------------------------------------------------
+
+// The page is transient and carries a request-time sitekey, so it is never
+// cached and never indexed.
+const SCORING_HTML_HEADERS = {
+  'Content-Type': 'text/html; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Robots-Tag': 'noindex',
+} as const;
+
+const SCORING_MARKDOWN_HEADERS = {
+  'Content-Type': 'text/markdown; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'X-Robots-Tag': 'noindex',
+} as const;
+
+export async function handleWebScoringPage(request: Request, env: WebAuditRouteEnv): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('method not allowed', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'content-type': 'text/plain', 'cache-control': 'no-store' },
+    });
+  }
+  const url = new URL(request.url);
+  const match = parseWebScoringPath(url.pathname);
+  if (!match) return renderNotFound(env, '(invalid)', detectPreference(request) === 'markdown');
+
+  const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
+  if (wantMarkdown) {
+    return new Response(scoringMarkdown(match.domain), { status: 200, headers: SCORING_MARKDOWN_HEADERS });
+  }
+
+  const title = match.domain ? `Auditing ${match.domain} — anc.dev` : 'Audit a website — anc.dev';
+  const description = match.domain
+    ? `Running the agent-readiness audit for ${match.domain}.`
+    : 'Start an agent-readiness audit at anc.dev/web-audit.';
+  const canonicalPath = match.domain ? `/web/scoring/${match.domain}` : '/web/scoring';
+
+  let template: string;
+  try {
+    template = await loadShellTemplate(env);
+  } catch (err) {
+    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
+      status: 500,
+      headers: { 'content-type': 'text/plain' },
+    });
+  }
+  const body = match.domain ? scoringBody(match.domain, env.TURNSTILE_SITEKEY ?? '') : scoringPointerBody();
+  const html = substituteShell(template, { title, description, canonicalPath, body });
+  return new Response(html, { status: 200, headers: SCORING_HTML_HEADERS });
+}
+
+// The sitekey meta and the page script are injected in the body substitution
+// rather than the shared shell, so the shell template needs no per-page slot.
+function scoringBody(domain: string, sitekey: string): string {
+  const d = esc(domain);
+  return `<article class="container scorecard-page" data-web-audit-scoring>
+  <meta name="turnstile-sitekey" content="${esc(sitekey)}" />
+  <header class="scorecard-header">
+    <h1>Auditing <code>${d}</code>&hellip;</h1>
+    <p class="live-score-summary__meta">Each check streams in as it resolves. You'll be forwarded to the saved scorecard when the audit finishes.</p>
+  </header>
+  <p class="live-score__status" data-web-audit-status role="status" aria-live="polite">Starting audit&hellip;</p>
+  <table class="audit-table">
+    <tbody data-web-audit-results></tbody>
+  </table>
+  <p class="scorecard-cta" data-web-audit-retry hidden>
+    <a class="btn" href="/web-audit">Start another audit</a>
+  </p>
+  <noscript>
+    <p>This page streams a live audit with JavaScript. Without it, fetch <a href="/web/${d}.md">/web/${d}.md</a> for a saved result, or run the <code>audit_website</code> MCP tool at <a href="/mcp">/mcp</a>.</p>
+  </noscript>
+  <script defer src="/js/web-audit-scoring.js"></script>
+</article>`;
+}
+
+function scoringPointerBody(): string {
+  return `<article class="container scorecard-page">
+  <header class="scorecard-header">
+    <h1>Audit a website</h1>
+    <p class="live-score-summary__meta">This is the in-progress page for a running audit.</p>
+  </header>
+  <section class="scorecard-cta">
+    <p>Start an audit at <a href="/web-audit">anc.dev/web-audit</a>, or call the <code>audit_website</code> MCP tool.</p>
+  </section>
+</article>`;
+}
+
+function scoringMarkdown(domain: string | null): string {
+  if (!domain) {
+    return [
+      '# Audit a website',
+      '',
+      'This is the in-progress page for a running audit. Start one at [anc.dev/web-audit](https://anc.dev/web-audit) or call the `audit_website` MCP tool.',
+      '',
+    ].join('\n');
+  }
+  return [
+    `# Auditing ${domain}`,
+    '',
+    `A live audit for ${domain} runs in the browser. For a saved result, fetch [/web/${domain}.md](/web/${domain}.md), or call the \`audit_website\` MCP tool with \`${domain}\`.`,
+    '',
+  ].join('\n');
 }

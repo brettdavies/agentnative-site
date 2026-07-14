@@ -15,7 +15,9 @@ import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept'
 import {
   handleWebAudit,
   handleWebResultPage,
+  handleWebScoringPage,
   isWebAuditPath,
+  isWebScoringPath,
   parseWebResultPath,
   type WebAuditRouteEnv,
 } from './audit-web/route';
@@ -73,12 +75,15 @@ export interface Env {
   MCP_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   MCP_ENABLED?: string;
   MCP_LIVE_SCORING_ENABLED?: string;
-  // Web-audit bindings (docs/plans/2026-07-09-001 U7). WEB_AUDIT_LIMITER
-  // gates fresh /api/audit-web + audit_website audits; WEB_AUDIT_ENABLED
-  // is the secret-backed kill switch covering both the webapp route and
-  // the MCP fresh path. Optional so tests that don't exercise the web
-  // audit can stub a minimal env.
+  // Web-audit bindings. WEB_AUDIT_LIMITER is the session-keyed burst
+  // limiter (`<sid>:<sha256(target)>`, 10/60s) on the fresh /api/audit-web
+  // path; WEB_AUDIT_LIMITER_IP is the coarse per-IP fallback (30/60s) and
+  // also the per-IP burst limiter the audit_website MCP tool keys directly.
+  // WEB_AUDIT_ENABLED is the secret-backed kill switch covering both the
+  // webapp route and the MCP fresh path. Optional so tests that don't
+  // exercise the web audit can stub a minimal env.
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
 }
 
@@ -555,6 +560,14 @@ export default {
     // (scorecards.mjs) so no curated tool can collide with this route.
     if (parseLiveScorePath(pathname)) {
       return handleLiveScorePage(request, env as ScoreEnv);
+    }
+
+    // /web/scoring[/<domain>] — the transient in-progress streaming page.
+    // Reserved above the result-page dispatch so `scoring` is never treated
+    // as a cached-result domain (mirrors the reserved `live` segment under
+    // /score/).
+    if (isWebScoringPath(pathname)) {
+      return handleWebScoringPage(request, env as WebAuditRouteEnv);
     }
 
     // /web/<domain>.html → 301 to /web/<domain>. Mirrors the live-score

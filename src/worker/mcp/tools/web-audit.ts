@@ -6,11 +6,13 @@
 //                            server runs stateless per-request, KTD-6).
 //   list_website_audits()    the curated web leaderboard summaries.
 //
-// audit_website mirrors score_cli's audit-tier gate chain: kill switch
-// (WEB_AUDIT_ENABLED + the global MCP_ENABLED), URL validation + SSRF,
-// cf-connecting-ip presence (no anon fallback -> -32099), WEB_AUDIT_LIMITER
-// burst + a KV-backed hourly window shared with the webapp route. Cache
-// state is data, not failure: read outcomes return isError:false.
+// audit_website mirrors score_cli's audit-tier gate chain: URL validation
+// + SSRF, then cache state served as data ahead of the kill switch, then
+// on a miss the kill switch (WEB_AUDIT_ENABLED + the global MCP_ENABLED),
+// cf-connecting-ip presence (no anon fallback -> -32099), a per-IP burst
+// limiter (WEB_AUDIT_LIMITER_IP) + a KV-backed hourly window shared with
+// the webapp route. Cache state is data, not failure: read outcomes
+// return isError:false.
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -41,7 +43,7 @@ export interface WebAuditToolsEnv {
   SCORE_KV?: KVNamespace;
   WEB_AUDIT_ENABLED?: string;
   MCP_ENABLED?: string;
-  WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
 }
 
 const SITE_URL = 'https://anc.dev';
@@ -161,10 +163,10 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
   server.tool(
     'audit_website',
     'Run a fresh website agent-readiness audit and return the complete scorecard. Returns a single terminal scorecard ' +
-      '(no progress notifications — the server is stateless per-request). Gated like score_cli: disabled when ' +
+      '(no progress notifications — the server is stateless per-request). An existing cached result is returned ' +
+      'without re-running, even when the audit is disabled. A fresh audit is gated like score_cli: disabled when ' +
       'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
-      'fallback); WEB_AUDIT_LIMITER burst plus a per-hour window apply. On an existing cached result, returns it ' +
-      'without re-running.',
+      'fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply.',
     {
       url: z.string().describe('The website URL or bare domain to audit.'),
       site_type: z
@@ -176,15 +178,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         ),
     },
     async ({ url, site_type }, extra) => {
-      // Kill switches.
-      if (env.MCP_ENABLED !== 'true' || env.WEB_AUDIT_ENABLED !== 'true') {
-        return textContent({
-          audited: false,
-          message:
-            'the website audit is currently disabled by the operator; cached scorecards remain available via get_website_audit.',
-        });
-      }
-      // URL validation + SSRF.
+      // URL validation + SSRF (the cache key needs the URL, so these precede
+      // the cache read and the kill switch).
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
       const canonicalTarget = canonicalTargetOf(parsed);
@@ -193,7 +188,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const domain = parsed.host;
       const shareUrl = `${SITE_URL}/web/${domain}`;
 
-      // Cache hit short-circuits (cache state is data).
+      // Cache hit short-circuits ahead of the kill switch: cache state is
+      // data, so a cached scorecard is served even when the audit is off.
       const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
       if (cached) {
         return textContent({
@@ -201,6 +197,15 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           source: 'cache',
           scorecard: withInlineRemediation(cached.scorecard, await catalogOrEmpty(env)),
           share_url: shareUrl,
+        });
+      }
+
+      // Kill switches (fresh audit only — a cache miss reached this point).
+      if (env.MCP_ENABLED !== 'true' || env.WEB_AUDIT_ENABLED !== 'true') {
+        return textContent({
+          audited: false,
+          message:
+            'the website audit is currently disabled by the operator; cached scorecards remain available via get_website_audit.',
         });
       }
 
@@ -212,16 +217,16 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable.',
         );
       }
-      // Burst limiter.
-      if (env.WEB_AUDIT_LIMITER) {
-        const { success } = await env.WEB_AUDIT_LIMITER.limit({ key: ipString });
+      // Per-IP burst limiter.
+      if (env.WEB_AUDIT_LIMITER_IP) {
+        const { success } = await env.WEB_AUDIT_LIMITER_IP.limit({ key: ipString });
         if (!success)
-          return jsonRpcError32099('audit rate limit exceeded — burst window (5 per 60 seconds per source).');
+          return jsonRpcError32099('audit rate limit exceeded — burst window (30 per 60 seconds per source).');
       }
       // Hourly window (shared with the webapp route).
       if (env.SCORE_KV) {
         const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
-        if (!ok) return jsonRpcError32099('audit rate limit exceeded — 5 fresh audits per hour per source.');
+        if (!ok) return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
       }
 
       // Run the engine to completion (terminal-only; no streaming on MCP).
