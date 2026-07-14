@@ -266,13 +266,19 @@ remediation:
       - { label: Web Bot Auth draft, url: "https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/" }
   link-headers:
     title: Homepage sends RFC 8288 Link headers
-    goal: Send Link response headers on / pointing at your machine surfaces
+    goal: Advertise machine surfaces in a Link response header on / for header-only discovery
     fix: |
-      Send `Link` response headers on `/` (RFC 8288) with `rel=service-desc`, `rel=describedby`, or
-      `rel=api-catalog` pointing at your machine surfaces. Header-level discovery works even for an
-      agent that never parses the HTML body.
+      Send a `Link` response header on `/` (RFC 8288) whose `rel` points at your machine surfaces, so an
+      agent reading only response headers finds them without parsing HTML or probing `/.well-known`. Use
+      the RFC 8631 service trio and the RFC 9727 catalog: `rel="service-desc"` at a machine-readable
+      description (OpenAPI, or an MCP server card), `rel="service-doc"` at the human-readable doc,
+      `rel="service-meta"` at the service-context declaration, and `rel="api-catalog"` at your
+      `/.well-known/api-catalog` index. Example:
+      `Link: </.well-known/api-catalog>; rel="api-catalog", </.well-known/mcp/server-card.json>; rel="service-desc"`.
     resources:
-      - { label: RFC 8288, url: "https://www.rfc-editor.org/rfc/rfc8288" }
+      - { label: RFC 8288 (Link), url: "https://www.rfc-editor.org/rfc/rfc8288" }
+      - { label: RFC 8631 (service links), url: "https://www.rfc-editor.org/rfc/rfc8631" }
+      - { label: RFC 9727 (api-catalog), url: "https://www.rfc-editor.org/rfc/rfc9727" }
   api-catalog:
     title: /.well-known/api-catalog published
     goal: Serve an RFC 9727 api-catalog linkset indexing your API descriptions
