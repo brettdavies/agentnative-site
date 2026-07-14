@@ -183,6 +183,36 @@ describe('resolveAntecedent', () => {
     expect(resolveAntecedent('api-surface', docPageSitemap)).toBe('n_a');
   });
 
+  test('api-surface holds when llms.txt links an OpenAPI descriptor', () => {
+    const llmsSpec = ctx({
+      sources: new Map([
+        ['llms-txt', outcome('pass', [{ url: 'https://x.dev/llms.txt', status: 200, body: '- [API](/openapi.json)' }])],
+      ]),
+    });
+    expect(resolveAntecedent('api-surface', llmsSpec)).toBe('apply');
+  });
+
+  test('api-surface ignores a bare openapi mention or doc-page link in llms.txt', () => {
+    // A summary that names OpenAPI, or a link to a doc page like
+    // /web-audit/skill/openapi, is not an API surface; llms.txt is scanned
+    // for a descriptor URL or a curated /api/ path, not a bare word.
+    const llmsProse = ctx({
+      sources: new Map([
+        [
+          'llms-txt',
+          outcome('pass', [
+            {
+              url: 'https://x.dev/llms.txt',
+              status: 200,
+              body: '> We document OpenAPI and Swagger.\n- [OpenAPI check](/web-audit/skill/openapi)',
+            },
+          ]),
+        ],
+      ]),
+    });
+    expect(resolveAntecedent('api-surface', llmsProse)).toBe('n_a');
+  });
+
   test('schemas-ref holds on a passing openapi or a schema reference in the root', () => {
     const openapiPass = ctx({ sources: new Map([['openapi', outcome('pass')]]) });
     expect(resolveAntecedent('schemas-ref', openapiPass)).toBe('apply');

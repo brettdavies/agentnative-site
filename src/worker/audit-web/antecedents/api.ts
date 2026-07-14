@@ -11,17 +11,21 @@ import {
   sourcePassed,
 } from './context';
 
-const API_LLMS_RE = /openapi|swagger|\/api\//i;
 const SCHEMAS_RE = /application\/schema\+json|json-?schema|\/schema\.json/i;
 
 // A link to an actual OpenAPI/Swagger *document* (a .json/.yaml/.yml
 // descriptor), as opposed to a page whose URL merely contains the word
-// (e.g. a documentation page like /web-audit/skill/openapi). Used to scan
-// the retained sitemap.xml, an auto-generated URL list where a substring
-// match would flag every doc page. The openapi probe covers the standard
-// paths; this catches a descriptor served at a non-standard path that the
-// sitemap advertises.
+// (e.g. a documentation page like /web-audit/skill/openapi). Scans the
+// retained llms.txt and sitemap.xml bodies; a bare-word match would flag
+// every doc page whose path contains "openapi". The openapi probe covers
+// the standard paths; this catches a descriptor served at a non-standard
+// path that either index advertises.
 const API_DOC_URL_RE = /\b(?:openapi|swagger)[\w./-]*\.(?:json|ya?ml)\b/i;
+
+// A curated /api/ link in llms.txt. llms.txt is hand-authored, so an /api/
+// path there is an intentional pointer at an API surface (unlike a
+// generated sitemap, which is not scanned for it).
+const API_PATH_RE = /\/api\//i;
 
 // service-desc / service-doc (RFC 8631) advertise a machine-readable service
 // description. A REST site points them at an OpenAPI/Swagger doc; an MCP-first
@@ -47,7 +51,8 @@ function apiSurfaceHolds(ctx: AntecedentContext): boolean {
   if (ctx.siteType === 'api') return true;
   if (anyEvidenceStatus(sourceEvidence(ctx, 'openapi'), 200)) return true;
   if (restServiceDescLink(ctx)) return true;
-  if (API_LLMS_RE.test(retainedBody(ctx, 'llms-txt'))) return true;
+  const llms = retainedBody(ctx, 'llms-txt');
+  if (API_DOC_URL_RE.test(llms) || API_PATH_RE.test(llms)) return true;
   if (API_DOC_URL_RE.test(retainedBody(ctx, 'sitemap'))) return true;
   return false;
 }
