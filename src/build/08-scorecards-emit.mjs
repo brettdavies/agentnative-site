@@ -257,7 +257,7 @@ export async function emitScorecardSurface({
       title: 'Spec Coverage Matrix — anc.dev',
       description: 'Which agent-native CLI requirements have automated audits and which remain uncovered.',
       canonicalPath: '/coverage',
-      bodyHtml: coverageBody,
+      bodyHtml: `<article class="container doc">${coverageBody}</article>`,
       themeInitJs: themeInit,
     }),
   );
@@ -276,7 +276,7 @@ export async function emitScorecardSurface({
       title: `Install ${skillData.name}`,
       description: skillData.description,
       canonicalPath: '/skill',
-      bodyHtml: skillBodyHtml,
+      bodyHtml: `<article class="container doc">${skillBodyHtml}</article>`,
       themeInitJs: themeInit,
     }),
   );

@@ -71,6 +71,24 @@ describe('Worker entry — named export contract for CF Sandbox / Containers SDK
     }
   });
 
+  test('every named runtime export is a handler/DO class — no plain-value exports', () => {
+    // workerd validates the entry module's named exports when the Worker
+    // has Durable Object / Container bindings: every named runtime export
+    // must be a function (a DO/Container class or an entrypoint). A plain
+    // `export const` string/Set/object fails local `wrangler dev` boot with
+    // "Incorrect type for map entry '<Name>': the provided value is not of
+    // type 'function or ExportedHandler'". Type-only exports (interfaces)
+    // are erased and never appear here; `default` is the ExportedHandler
+    // object and is exempt.
+    for (const [name, value] of Object.entries(workerEntry)) {
+      if (name === 'default') continue;
+      expect(
+        typeof value,
+        `Worker entry export "${name}" must be a function (DO/Container class), not a plain value`,
+      ).toBe('function');
+    }
+  });
+
   test('Sandbox class exposes the entry methods the binding contract requires', () => {
     // Defends against the PR #93 / PR #94 class: the DO is invoked via
     // `stub.fetch(...)` from the Worker handler, so the Sandbox class

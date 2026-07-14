@@ -11,7 +11,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emitShell } from '../src/build/shell.mjs';
-import worker, { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/index';
+import worker from '../src/worker/index';
+import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from '../src/worker/mcp/descriptor-paths';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
@@ -153,19 +154,22 @@ describe('webmcp.js (built dist/)', () => {
 // Worker — MCP descriptor alias equivalence + red-team
 // ---------------------------------------------------------------------------
 
-describe('MCP descriptor aliases — byte-identical bodies', () => {
-  test('all four alias paths return the same JSON body for a given origin', async () => {
+describe('MCP descriptor aliases — 301 to the canonical (R9)', () => {
+  test('every alias path 301s to the canonical server-card path on its own origin', async () => {
     const env = makeEnv();
     const origin = 'https://staging.example';
-    const bodies: string[] = [];
     for (const path of MCP_DESCRIPTOR_ALIASES) {
       const res = await worker.fetch(req(`${origin}${path}`), env);
-      expect(res.status).toBe(200);
-      bodies.push(await res.text());
+      expect(res.status).toBe(301);
+      expect(res.headers.get('Location')).toBe(`${origin}${MCP_DESCRIPTOR_CANONICAL_PATH}`);
     }
-    for (let i = 1; i < bodies.length; i++) {
-      expect(bodies[i]).toBe(bodies[0]);
-    }
+  });
+
+  test('the canonical path is not an alias: it serves the card body directly', async () => {
+    const env = makeEnv();
+    expect(MCP_DESCRIPTOR_ALIAS_PATHS.has(MCP_DESCRIPTOR_CANONICAL_PATH)).toBe(false);
+    const res = await worker.fetch(req(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`), env);
+    expect(res.status).toBe(200);
   });
 
   test('canonical path stamps application/json, CORS, and cacheable Cache-Control', async () => {
@@ -188,13 +192,11 @@ describe('MCP descriptor aliases — byte-identical bodies', () => {
   }
 
   for (const path of MCP_DESCRIPTOR_ALIASES) {
-    test(`${path} — Accept: text/markdown still returns JSON (intercept bypasses CN rewrite)`, async () => {
+    test(`${path} — Accept: text/markdown still 301s (intercept bypasses CN rewrite)`, async () => {
       const env = makeEnv();
       const res = await worker.fetch(req(`https://anc.dev${path}`, { headers: { accept: 'text/markdown' } }), env);
-      expect(res.status).toBe(200);
-      expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
-      const text = await res.text();
-      expect(() => JSON.parse(text)).not.toThrow();
+      expect(res.status).toBe(301);
+      expect(res.headers.get('Location')).toBe(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`);
     });
   }
 
@@ -486,9 +488,9 @@ describe('site shell MCP discoverability (emitShell)', () => {
 });
 
 describe('homepage MCP prose (built dist/)', () => {
-  test('hero__use-it links to the /mcp endpoint and /mcp-skill guide', async () => {
+  test('use-note links to the /mcp endpoint and /mcp-skill guide', async () => {
     const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
-    const useIt = html.match(/<p class="hero__use-it">[\s\S]*?<\/p>/)?.[0] ?? '';
+    const useIt = html.match(/<p class="use-note">[\s\S]*?<\/p>/)?.[0] ?? '';
     expect(useIt.length).toBeGreaterThan(0);
     expect(useIt).toContain('MCP');
     expect(useIt).toContain('href="/mcp"');

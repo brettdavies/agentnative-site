@@ -23,7 +23,7 @@ informational; when both are present and disagree, the build aborts with an inte
 
 ```json
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "spec_version": "...",
   "tool":   { "name": "...", "binary": "...", "version": "..." },
   "anc":    { "version": "..." },
@@ -42,7 +42,7 @@ informational; when both are present and disagree, the build aborts with an inte
 
 | Field              | Type                | Source        | Meaning                                                                                                          |
 | ------------------ | ------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `schema_version`   | string              | `anc` emitted | Version of the JSON envelope itself. Pre-1.0; bumped when fields are added, removed, or renamed. Current: 0.6.   |
+| `schema_version`   | string              | `anc` emitted | Version of the JSON envelope itself. Pre-1.0; bumped when fields are added, removed, or renamed. Current: 0.7.   |
 | `spec_version`     | string              | `anc` emitted | Version of the [agentnative spec](/principles) the run conformed to. Independent of `schema_version`.            |
 | `tool`             | object              | `anc` emitted | Self-describing identity for the tool that was scored. See [tool](#tool) below. **Added in 0.4.**                |
 | `anc`              | object              | `anc` emitted | Provenance of the `anc` build that produced the scorecard. See [anc](#anc) below. **Added in 0.4.**              |
@@ -241,6 +241,7 @@ independently and carries its own `tier`.
 ```json
 {
   "id": "p3-must-help",
+  "audit_id": "p3-help",
   "label": "Help flag produces useful output",
   "group": "P3",
   "layer": "behavioral",
@@ -254,6 +255,7 @@ independently and carries its own `tier`.
 | Field        | Type           | Meaning                                                                                                                                                          |
 | ------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`         | string         | Stable identifier for the requirement row (e.g., `p3-must-help`). Citeable in commits and PRs.                                                                   |
+| `audit_id`   | string         | Identifier of the audit (probe) that produced this row (e.g., `p3-help`). Several requirement rows can share one `audit_id`. **Added in 0.7.**                   |
 | `label`      | string         | Human-readable name for the audit.                                                                                                                               |
 | `group`      | string         | Principle group this audit belongs to: `P1` through `P8`. Drives the **principles met** column on the leaderboard.                                               |
 | `layer`      | string         | `behavioral`, `project`, or `source`. Only `behavioral` rows feed the score. See [layers](/methodology#layers-behavioral-project-source).                        |

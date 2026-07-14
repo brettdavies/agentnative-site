@@ -1,0 +1,350 @@
+# Static canonical web-audit remediation catalog (plan-003 U12, R10).
+# One entry per check id in registry.yaml. STAR: this single data file is
+# the source for the get_web_remediation MCP tool, the inline remediation
+# on audit_website rows, the result-page Fix/Resources blocks, and the
+# generated /web-audit/skill/<id> pages. The build projects it to
+# dist/_internal/web-remediation.json, validated 1:1 against the registry.
+#
+# Fields per entry:
+#   title      short human title (matches the check's registry title)
+#   goal       one-line imperative goal (the prompt's `Goal:` line)
+#   fix        the canonical fix, markdown; the prompt's `Fix:` line uses
+#              it collapsed to one paragraph
+#   resources  optional [{ label, url }] doc links (the prompt's `Docs:` line)
+#
+# The run's evidence becomes the uniform `Issue:` line at assembly time
+# (src/worker/audit-web/remediation.ts); no per-entry evidence templating.
+
+remediation:
+  mcp-initialize:
+    title: initialize handshake returns serverInfo + protocolVersion
+    goal: Answer JSON-RPC initialize with serverInfo and protocolVersion so clients can begin a session
+    fix: |
+      Answer the JSON-RPC `initialize` method on your MCP endpoint with a `result` that carries
+      `serverInfo` (an object with `name` and `version`) and `protocolVersion`. Accept `POST` with
+      `Content-Type: application/json` and `Accept: application/json, text/event-stream`, and echo
+      the negotiated `protocolVersion` (the current pinned value is `2025-06-18`).
+    resources:
+      - { label: MCP lifecycle, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle" }
+  mcp-capabilities:
+    title: initialize advertises capabilities
+    goal: Advertise the capability groups your MCP server implements in the initialize result
+    fix: |
+      Populate the `capabilities` object in your `initialize` result. Clients gate feature use on
+      it: an empty or missing `capabilities` tells a client nothing is available, so it will not
+      call `tools/list`, `resources/list`, or `prompts/list`. Advertise the groups your server
+      actually implements (for example `{ "tools": {} }`).
+    resources:
+      - { label: MCP lifecycle, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle" }
+  mcp-tools-list:
+    title: tools/list returns a tools array with input schemas
+    goal: Return tools/list entries with name, description, and a JSON inputSchema
+    fix: |
+      Return `result.tools` as an array from the `tools/list` method. Each tool needs a `name`, a
+      `description`, and a JSON Schema `inputSchema` so an agent can validate arguments before
+      calling. A tool without an `inputSchema` forces the agent to guess argument shapes.
+    resources:
+      - { label: MCP tools, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/tools" }
+  mcp-unknown-method:
+    title: unknown JSON-RPC method returns -32601
+    goal: Reject unknown JSON-RPC methods with error -32601 instead of a hang or 500
+    fix: |
+      Reject an unknown JSON-RPC method with the standard error code `-32601` (Method not found),
+      not a hang, a 500, or a silent empty body. Agents rely on `-32601` to distinguish
+      "unsupported" from "failed"; anything else looks like an outage.
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-get-fast-fail:
+    title: GET on the MCP endpoint fast-fails
+    goal: Answer GET on the MCP endpoint fast (405 or a documented surface), never a held-open hang
+    fix: |
+      A stateless streamable-HTTP MCP endpoint must fast-fail a `GET` (return `405`, `400`, `404`,
+      or `406`) rather than hold the connection open waiting for an SSE session that a probe never
+      establishes. Guard non-`POST` verbs at the router and return `405 Method Not Allowed` with an
+      `Allow: POST` header.
+    resources:
+      - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
+  mcp-cors-preflight:
+    title: CORS preflight succeeds with Access-Control-Allow-* headers
+    goal: Answer OPTIONS preflights on the MCP endpoint with Access-Control-Allow-* headers
+    fix: |
+      Answer the `OPTIONS` preflight on your MCP endpoint with `204` (or `200`) and the
+      `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and
+      `Access-Control-Allow-Headers` response headers, so a browser-origin agent can call the
+      endpoint. If your MCP surface is deliberately server-to-agent only (no browser clients),
+      this SHOULD is a considered choice, not a defect.
+    resources:
+      - { label: MDN CORS preflight, url: "https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request" }
+  mcp-cors-actual:
+    title: POST response carries Access-Control-Allow-Origin
+    goal: Echo Access-Control-Allow-Origin on the actual MCP POST response
+    fix: |
+      Echo `Access-Control-Allow-Origin` on the actual `POST` response, not only on the preflight.
+      A browser blocks the response body when the header is absent even if the preflight passed.
+      Omit it deliberately only if browser-origin agents are not a supported client.
+    resources:
+      - { label: MDN CORS, url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" }
+  well-known-mcp-card:
+    title: A .well-known MCP server card is published
+    goal: Publish an MCP server card at the canonical SEP-1649 path and 301 the legacy aliases to it
+    fix: |
+      Publish an MCP server card at `/.well-known/mcp/server-card.json` (SEP-1649) naming the
+      endpoint, transport, and capabilities: include `mcp_endpoint` (or `url`, or
+      `transport.endpoint`), `serverInfo`, and the transport type. Serve the legacy pointer paths
+      (`/.well-known/mcp`, `/.well-known/mcp.json`, `/mcp.json`) as `301` redirects to the
+      canonical, never as duplicate inline copies.
+    resources:
+      - { label: SEP-1649, url: "https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127" }
+  mcp-usage-doc:
+    title: A human/agent usage doc for the server resolves
+    goal: Publish a one-fetch markdown usage doc for your MCP server
+    fix: |
+      Link a short markdown usage doc for your MCP server (curl examples, the tool list, auth, and
+      rate limits) at a stable path such as `/mcp-skill.md`, `/mcp.md`, or `/.well-known/mcp/usage.md`,
+      and reference it from the server card and `llms.txt`. It gives an agent a one-fetch orientation.
+    resources:
+      - { label: anc.dev example, url: "https://anc.dev/mcp-skill.md" }
+  llms-txt:
+    title: /llms.txt present with a summary and link index
+    goal: Serve /llms.txt with a title, summary, and categorized link index
+    fix: |
+      Serve `/llms.txt` (llmstxt.org): an H1 title, a one-line summary blockquote, and a categorized
+      index of links to your most important pages as markdown. It is the canonical entry point an
+      agent fetches to understand what a site offers and where to look next.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-full-txt:
+    title: /llms-full.txt present
+    goal: Serve the whole docs corpus as markdown at /llms-full.txt for one-fetch ingestion
+    fix: |
+      For a docs site, concatenate every page as markdown at `/llms-full.txt` so an agent can ingest
+      the whole corpus in one fetch instead of crawling. Keep it generated from source so it never
+      drifts from the live pages.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-txt-scoped:
+    title: Per-section llms.txt files resolve
+    goal: Serve a scoped llms.txt inside each major content section
+    fix: |
+      Serve a scoped `llms.txt` inside each major content section linked from your root index (for
+      example `/docs/llms.txt`). A section-scoped index lets an agent working inside that section
+      orient itself without re-reading the whole site index.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-full-txt-scoped:
+    title: Per-section llms-full.txt files resolve
+    goal: Serve a scoped llms-full.txt corpus inside each major content section
+    fix: |
+      Serve a scoped `llms-full.txt` inside each major content section (for example
+      `/docs/llms-full.txt`): the section's pages concatenated as markdown. An agent can then ingest
+      one section in one fetch instead of crawling it.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  openapi:
+    title: An OpenAPI description is published
+    goal: Publish an OpenAPI description so non-MCP agents can call your API
+    fix: |
+      Publish an OpenAPI 3.1 description of your REST surface at `/openapi.json` (or `/openapi.yaml`,
+      or `/.well-known/openapi.json`). Non-MCP agents use it to discover endpoints, parameters, and
+      response shapes, and to generate typed clients.
+    resources:
+      - { label: OpenAPI 3.1, url: "https://spec.openapis.org/oas/latest.html" }
+  json-schemas:
+    title: Referenced JSON Schemas resolve
+    goal: Serve the JSON Schemas your API references so agents can validate payloads pre-flight
+    fix: |
+      Serve the input and output JSON Schemas your API references (for example
+      `/api/schema/input.json`) as `application/schema+json`. Agents validate payloads against them
+      before calling, which turns a class of runtime failures into pre-flight validation.
+    resources:
+      - { label: JSON Schema, url: "https://json-schema.org/specification" }
+  accept-markdown:
+    title: Accept text/markdown returns markdown
+    goal: Honor Accept text/markdown on content URLs with raw markdown, not HTML chrome
+    fix: |
+      Honor `Accept: text/markdown` on content URLs and return raw markdown rather than HTML chrome.
+      Agents parse markdown far more reliably than a JS-rendered page. Serve the markdown twin at the
+      same URL via content negotiation, invisibly to crawlers.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+  root-meta-description:
+    title: Root HTML has a descriptive meta description
+    goal: Add a meta description naming what the service does and its agent entry points
+    fix: |
+      Add a `<meta name="description">` to your root HTML that states what the service does and names
+      its agent entry points (MCP endpoint, `llms.txt`, OpenAPI). It is the cheapest machine-readable
+      summary and it feeds link previews and search snippets too.
+    resources:
+      - { label: MDN meta description, url: "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name" }
+  root-link-rel:
+    title: Root HTML links to machine surfaces via link rel
+    goal: Point link rel elements at your machine surfaces from the root HTML head
+    fix: |
+      Add `<link rel>` elements in your root HTML head pointing at your machine surfaces:
+      `rel="service-desc"` to the OpenAPI doc, `rel="service-doc"` to human docs, and
+      `rel="alternate"` to `llms.txt` and the MCP card. An agent that lands on the HTML can then
+      discover the structured surfaces without scraping.
+    resources:
+      - { label: RFC 8631 (service-desc/doc), url: "https://www.rfc-editor.org/rfc/rfc8631" }
+  noscript-fallback:
+    title: Root HTML has a noscript with machine entry points
+    goal: Give non-JS agents a noscript block listing your machine entry points
+    fix: |
+      Ship a `<noscript>` block that lists your machine entry points (`/llms.txt`, `/openapi.json`,
+      the MCP endpoint). A non-JS agent or a fetch-only crawler gets a usable path forward instead of
+      an empty single-page-app shell.
+    resources:
+      - { label: MDN noscript, url: "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/noscript" }
+  schema-org-jsonld:
+    title: Root HTML embeds Schema.org JSON-LD
+    goal: Embed Schema.org JSON-LD so agents get typed facts without inference
+    fix: |
+      Embed Schema.org JSON-LD (for example `TechArticle`, `WebAPI`, or `SoftwareApplication`) in a
+      `<script type="application/ld+json">` in your head. Structured metadata gives agents and search
+      engines typed facts about the page without inference.
+    resources:
+      - { label: Schema.org, url: "https://schema.org/docs/gs.html" }
+  semantic-html:
+    title: Root HTML uses semantic landmarks
+    goal: Use semantic landmarks so the HTML path is parseable structure, not div soup
+    fix: |
+      Use `<main>`, `<article>`, `<section>`, and `<nav>` landmarks so the HTML path is parseable.
+      An agent that has to fall back to reading the DOM should find structure, not a wall of
+      `<div>`s.
+    resources:
+      - { label: MDN content sectioning, url: "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements#content_sectioning" }
+  robots:
+    title: /robots.txt present
+    goal: Publish robots.txt and state your crawl policy explicitly
+    fix: |
+      Publish a `robots.txt`. Declare your crawl and AI-usage policy explicitly rather than leaving
+      it to inference. An absent `robots.txt` is ambiguous; a present one is a clear signal.
+    resources:
+      - { label: RFC 9309, url: "https://www.rfc-editor.org/rfc/rfc9309" }
+  sitemap:
+    title: /sitemap.xml present
+    goal: Publish sitemap.xml so agents can enumerate your content URLs
+    fix: |
+      Publish a `sitemap.xml` so crawlers and agents can enumerate your content URLs instead of
+      discovering them by following links. Keep it generated so it stays current.
+    resources:
+      - { label: sitemaps.org, url: "https://www.sitemaps.org/protocol.html" }
+  robots-ai-rules:
+    title: robots.txt declares AI-crawler rules
+    goal: State your AI-crawler policy in robots.txt with explicit User-agent rules
+    fix: |
+      Add explicit `User-agent` rules for AI crawlers (GPTBot, ClaudeBot, Google-Extended,
+      PerplexityBot, CCBot, and others) to `robots.txt`, or a wildcard policy. Stating your stance
+      (RFC 9309) removes ambiguity about whether AI systems may fetch your content.
+    resources:
+      - { label: RFC 9309, url: "https://www.rfc-editor.org/rfc/rfc9309" }
+  content-signals:
+    title: robots.txt declares Content-Signal preferences
+    goal: Declare Content-Signal AI-usage preferences in robots.txt
+    fix: |
+      Add `Content-Signal` directives to `robots.txt` (contentsignals.org): `ai-train`, `search`,
+      and `ai-input` set to `yes` or `no`. They express usage preferences at a finer grain than a
+      blanket allow/deny.
+    resources:
+      - { label: contentsignals.org, url: "https://contentsignals.org/" }
+  security-txt:
+    title: /.well-known/security.txt present
+    goal: Publish security.txt with a Contact and Expires field
+    fix: |
+      Publish `/.well-known/security.txt` (RFC 9116) with a `Contact` and an `Expires` field so a
+      researcher or agent can find how to report a problem. It is a small, standard trust signal.
+    resources:
+      - { label: RFC 9116, url: "https://www.rfc-editor.org/rfc/rfc9116" }
+  web-bot-auth:
+    title: Web Bot Auth signature directory present
+    goal: Publish an HTTP Message Signatures directory if your site sends signed bot traffic
+    fix: |
+      Informational only. If your site sends authenticated bot traffic, publish an HTTP Message
+      Signatures JWKS directory at `/.well-known/http-message-signatures-directory` so recipients can
+      verify your bot's signatures. Skip it if you do not send signed bot requests.
+    resources:
+      - { label: Web Bot Auth draft, url: "https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/" }
+  link-headers:
+    title: Homepage sends RFC 8288 Link headers
+    goal: Send Link response headers on / pointing at your machine surfaces
+    fix: |
+      Send `Link` response headers on `/` (RFC 8288) with `rel=service-desc`, `rel=describedby`, or
+      `rel=api-catalog` pointing at your machine surfaces. Header-level discovery works even for an
+      agent that never parses the HTML body.
+    resources:
+      - { label: RFC 8288, url: "https://www.rfc-editor.org/rfc/rfc8288" }
+  api-catalog:
+    title: /.well-known/api-catalog published
+    goal: Serve an RFC 9727 api-catalog linkset indexing your API descriptions
+    fix: |
+      Serve `/.well-known/api-catalog` (RFC 9727) as `application/linkset+json` with a `linkset[]` of
+      anchor plus `service-desc` entries. It is the standard index that points agents at every API
+      description you publish.
+    resources:
+      - { label: RFC 9727, url: "https://www.rfc-editor.org/rfc/rfc9727" }
+  a2a-agent-card:
+    title: A2A Agent Card published
+    goal: Publish an A2A Agent Card for agent-to-agent discovery
+    fix: |
+      Serve an A2A Agent Card at `/.well-known/agent-card.json` (a2a-protocol.org) with `name`,
+      `version`, and `supportedInterfaces`. It lets other agents discover and interoperate with yours
+      over the agent-to-agent protocol.
+    resources:
+      - { label: A2A protocol, url: "https://a2a-protocol.org/latest/specification/" }
+  agent-skills:
+    title: Agent-skills discovery index published
+    goal: Publish an agent-skills discovery index so agents can enumerate your skills
+    fix: |
+      Publish an agent-skills discovery index at `/.well-known/agent-skills/index.json` (the
+      Cloudflare agent-skills-discovery draft) with a `skills[]` array, so agents can enumerate the
+      skills your site exposes.
+    resources:
+      - { label: Agent Skills Discovery, url: "https://github.com/cloudflare/agent-skills-discovery" }
+  dns-aid:
+    title: DNS-AID records under _agents
+    goal: Publish DNSSEC-signed SVCB records under _agents for DNS-level agent discovery
+    fix: |
+      Publish SVCB/HTTPS records under the `_agents` namespace (for example
+      `_index._agents.<domain>`, `_mcp._agents.<domain>`), DNSSEC-signed
+      (draft-mozleywilliams-dnsop-dnsaid). DNS-level discovery lets an agent find your endpoints
+      before any HTTP request.
+    resources:
+      - { label: DNS-AID draft, url: "https://datatracker.ietf.org/doc/draft-mozleywilliams-dnsop-dnsaid/" }
+  oauth-discovery:
+    title: OAuth/OIDC discovery metadata published
+    goal: Publish OAuth/OIDC discovery metadata if agents authenticate to your service
+    fix: |
+      If agents authenticate to your service, publish OAuth/OIDC discovery metadata at
+      `/.well-known/openid-configuration` or `/.well-known/oauth-authorization-server` (RFC 8414 /
+      OIDC Discovery). Absent metadata is expected for an open server; present metadata is required
+      for an authenticated one.
+    resources:
+      - { label: RFC 8414, url: "https://www.rfc-editor.org/rfc/rfc8414" }
+  oauth-protected-resource:
+    title: OAuth Protected Resource Metadata published
+    goal: Publish RFC 9728 protected-resource metadata for your authenticated MCP server
+    fix: |
+      For an authenticated MCP server, publish `/.well-known/oauth-protected-resource` (RFC 9728) so
+      a client can discover which authorization servers issue tokens for your resource. Expected
+      absent for an open, no-auth server.
+    resources:
+      - { label: RFC 9728, url: "https://www.rfc-editor.org/rfc/rfc9728" }
+  auth-md:
+    title: Agent auth/registration metadata doc published
+    goal: Publish an auth.md telling agents how to obtain credentials
+    fix: |
+      Publish an `auth.md` at `/.well-known/auth.md` (or `/auth.md`): a short markdown guide that
+      tells an agent how to obtain credentials, including where to register, which OAuth flows are
+      supported, token endpoints, and scopes. It turns "figure out our auth" into a one-fetch
+      orientation.
+    resources:
+      - { label: anc.dev example, url: "https://anc.dev/auth.md" }
+  webmcp:
+    title: Root HTML exposes WebMCP browser tools
+    goal: Expose page tools to browser agents via WebMCP
+    fix: |
+      Expose page functionality to browser agents via WebMCP: register a `navigator.modelContext`
+      provider or declare tools in a `<script type="application/webmcp+json">` block. In-page tools
+      let a browser-hosted agent act on the page without scraping the DOM.
+    resources:
+      - { label: WebMCP spec, url: "https://webmachinelearning.github.io/webmcp/" }

@@ -3,6 +3,8 @@
 `anc` is the reference linter for this standard. It scores any CLI tool against the eight principles and tells you, by
 audit ID, where it passes and where it falls short.
 
+{{CLI_AUDIT_FORM}}
+
 ## Install
 
 See [/install](/install) for `brew`, `cargo`, and platform-archive instructions. Once `anc` is on `$PATH`, the rest of

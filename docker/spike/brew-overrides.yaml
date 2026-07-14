@@ -1,0 +1,65 @@
+# Manual brew formula overrides for the live-scoring spike (option 2).
+#
+# anc100 registry entries pinned to `brew install <pkg>` (the 86-entry
+# majority) need no override — the brew name is parsed from the install
+# field directly. The entries here are the subset whose registered
+# `install:` is `uv tool install`, `bun add -g`, `curl | bash`, or
+# `included with <driver/IDE>`, AND for which a brew formula was
+# verified at spike-prep time to install the SAME tool the binary
+# represents.
+#
+# Verification protocol for each entry:
+#   1. `brew search --formula <candidate>` returns the candidate as a
+#      match.
+#   2. `brew info --quiet <candidate>` returns a description that
+#      matches the registry's `description:` for the entry.
+#   3. The binary the brew formula installs runs the same CLI the
+#      registry's `binary` resolves to.
+#
+# Entries that FAIL any of these three checks must NOT be added here —
+# the spike measures wall-clock; a false brew mapping would inflate
+# arm 2/3 numbers without measuring the actual tool. Re-verify each
+# override every time the registry or brew core updates a relevant
+# formula.
+#
+# Format:
+#   <registry name>: <brew formula name>
+#
+# Verified entries (2026-06-12 against Homebrew 6.0.1):
+
+overrides:
+  # Datasette: data exploration / API tool by Simon Willison. The
+  # registry installs via `uv tool install datasette`; the brew formula
+  # `datasette` installs the same Python package via a brew bottle.
+  datasette: datasette
+
+  # sqlite-utils: companion CLI to datasette. Same author, same Python
+  # package shape.
+  sqlite-utils: sqlite-utils
+
+  # gemini-cli: Google Gemini AI CLI. Registry installs via
+  # `bun add -g @google/gemini-cli` (the binary is `gemini`); brew's
+  # `gemini-cli` formula installs the same tool. Verified via
+  # `brew info --quiet gemini-cli` → "Interact with Google Gemini AI
+  # models from the command-line".
+  gemini-cli: gemini-cli
+
+# Explicitly rejected candidates (kept here so future spike runs do
+# not re-litigate):
+#
+#   cf  — brew has a formula `cf`, but it is a date-formatting filter,
+#         NOT the Cloudflare CLI the registry installs via
+#         `bun add -g cf`.
+#   grok — brew has a formula `grok`, but it is a regex DSL tool, NOT
+#          the xAI Grok CLI the registry installs via curl-piped
+#          script.
+#   claude-code — no brew formula installs the Anthropic CLI on Linux
+#                 (`claude` matches in brew but is macOS-only).
+#   codex — no brew formula matches (`codex-acp`, `coder`, `codec2`,
+#           `ode` are different tools).
+#   shell-gpt (sgpt) — only `k8sgpt` matches; not the same tool.
+#   files-to-prompt — no brew formula.
+#   cursor — Cursor IDE is not in brew (`libxcursor` etc. unrelated).
+#   xai-grok-build — see grok above; same false-match issue.
+#   qmd — no brew formula (`pmd`, `dmd` are unrelated).
+#   nvidia-smi — driver-bundled; no install path.

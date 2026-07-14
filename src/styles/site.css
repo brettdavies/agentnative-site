@@ -29,6 +29,99 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+p {
+  text-wrap: pretty;
+}
+
+/* ================================================================
+ * Instrument layer tokens — spacing, radius, motion, elevation.
+ * Palette + typography tokens live in the generated foundation.css;
+ * these are site-build-only primitives layered on top.
+ *
+ * Dark elevation is designed, not inverted: drop-shadows vanish on a
+ * near-black page, so depth comes from raised surfaces plus a top
+ * edge-highlight (the panel edge catching light). Components consume
+ * the indirected tokens (--shadow-card, --band-surface-bg, …) so the
+ * light/dark swap happens here once, not per component.
+ * ================================================================ */
+:root {
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
+  --space-10: 8rem;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --container: 72rem;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --shadow-md: 0 18px 30px -24px oklch(20% 0.03 250 / 0.45);
+  --shadow-lg: 0 32px 60px -40px oklch(20% 0.03 250 / 0.5);
+  --shadow-card: var(--shadow-lg);
+  --shadow-board: none;
+  --card-border: var(--border);
+  --board-border: var(--border);
+  --band-surface-bg: var(--bg-raised);
+  --band-surface-border: var(--border-subtle);
+  --seg-bg: var(--bg);
+  --field-bg: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --shadow-lg: 0 28px 56px -36px oklch(0% 0 0 / 0.7);
+    --shadow-card: inset 0 1px 0 oklch(100% 0 0 / 0.07), var(--shadow-lg);
+    --shadow-board: inset 0 1px 0 oklch(100% 0 0 / 0.05);
+    --card-border: oklch(31% 0.02 250);
+    --board-border: oklch(30% 0.02 250);
+    --band-surface-bg: oklch(17.5% 0.016 250);
+    --band-surface-border: oklch(26% 0.02 250);
+    --seg-bg: oklch(20% 0.016 250);
+    --field-bg: oklch(11% 0.012 250);
+  }
+}
+:root[data-theme="dark"] {
+  --shadow-lg: 0 28px 56px -36px oklch(0% 0 0 / 0.7);
+  --shadow-card: inset 0 1px 0 oklch(100% 0 0 / 0.07), var(--shadow-lg);
+  --shadow-board: inset 0 1px 0 oklch(100% 0 0 / 0.05);
+  --card-border: oklch(31% 0.02 250);
+  --board-border: oklch(30% 0.02 250);
+  --band-surface-bg: oklch(17.5% 0.016 250);
+  --band-surface-border: oklch(26% 0.02 250);
+  --seg-bg: oklch(20% 0.016 250);
+  --field-bg: oklch(11% 0.012 250);
+}
+
+/* Token-based focus ring. :where() keeps specificity at zero so any
+ * component-specific focus treatment still wins. */
+:where(a, button, input, label, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: var(--space-6);
+  box-sizing: border-box;
+}
+.nowrap {
+  white-space: nowrap;
 }
 
 code,
@@ -88,6 +181,7 @@ main :not(pre) > code {
   padding: 0.15rem 0.4rem;
   border-radius: 0.3rem;
   font-size: 0.95em;
+  overflow-wrap: anywhere;
 }
 
 /* Anchor permalinks (rehype-autolink-headings). Hidden until heading hover / focus. */
@@ -135,21 +229,39 @@ main .anchor-icon {
  * .rfc-must / .rfc-should / .rfc-may rules. */
 .normative {
   margin-block: 1.5rem;
-  padding: 1rem 1.25rem;
-  border-radius: 8px;
-  background: var(--bg-raised);
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 16px);
+  overflow: hidden;
   max-inline-size: var(--measure);
 }
 .normative > p:first-child {
-  margin: 0 0 0.5rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: var(--bg-raised);
 }
 .normative > :last-child {
   margin-block-end: 0;
 }
 .normative > p:first-child > strong:first-child {
-  font-size: var(--text-caption);
-  font-weight: 700;
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.normative > ul,
+.normative > ol {
+  margin: 0;
+  padding: 1.5rem 1.5rem 1.5rem calc(1.5rem + 1.1em);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+.normative li > p {
+  margin: 0;
 }
 
 /* Shiki dual-theme CSS bridge (docs/DESIGN.md §4.6).
@@ -194,68 +306,146 @@ main .anchor-icon {
   top: 0;
 }
 
-/* Header / brand / nav */
+/* Header — sticky instrument nav: brand + grouped links + theme button,
+ * hamburger, install CTA. Below 900px the links drop into a panel toggled
+ * by the hamburger's checkbox. */
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.site-header__row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1rem clamp(1rem, 4vw, 2rem);
-  border-bottom: 1px solid var(--border, #cfd5db);
+  gap: var(--space-6);
+  height: 62px;
 }
 .site-brand {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  align-items: baseline;
+  gap: var(--space-3);
   text-decoration: none;
   color: inherit;
 }
 .site-brand__name {
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  color: var(--fg-heading);
+  font-size: 1.05rem;
 }
 .site-brand__tag {
-  color: var(--fg-secondary, #6a7278);
-  font-size: 0.9rem;
+  color: var(--fg-muted);
+  font-size: var(--text-secondary);
 }
 .site-nav {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  font-size: 0.95rem;
+  gap: var(--space-5);
+  margin-left: auto;
 }
 .site-nav a {
-  color: inherit;
+  font-size: var(--text-secondary);
+  color: var(--fg-secondary);
+  text-decoration: none;
   white-space: nowrap;
+  transition: color 0.15s var(--ease);
+}
+.site-nav a:hover,
+.site-nav a[aria-current] {
+  color: var(--fg-heading);
+}
+.site-header__cta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.site-header__install {
+  font-size: var(--text-secondary);
 }
 
-/* Theme toggle — hidden when JS is off (C6). */
-.theme-toggle {
+/* Theme button — cycles light / dark / system (theme.ts); hidden when JS
+ * is off (C6). */
+.theme-cycle {
   display: none;
-  gap: 0;
-  border: 1px solid var(--border, #cfd5db);
-  border-radius: 999px;
-  overflow: hidden;
-  font-size: 0.85rem;
-}
-:root.js .theme-toggle {
-  display: inline-flex;
-}
-.theme-toggle button {
-  background: transparent;
-  color: inherit;
-  padding: 0.25rem 0.7rem;
+  color: var(--fg-muted);
+  font-size: 1rem;
+  background: none;
   border: 0;
+  padding: 0;
   cursor: pointer;
-  font: inherit;
 }
-.theme-toggle button[aria-pressed="true"] {
-  background: var(--bg-code, #eef2f5);
-  font-weight: 600;
+:root.js .theme-cycle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.theme-toggle button + button {
-  border-left: 1px solid var(--border, #cfd5db);
+
+/* Hamburger — hidden on desktop. The checkbox is visually hidden but
+ * focusable and covers the whole 44px target, so pointer taps and
+ * keyboard Space both toggle the panel with zero JS; the client
+ * enhancement adds Escape-to-close. */
+.nav-burger {
+  display: none;
+}
+.nav-burger__cb {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.nav-burger:has(.nav-burger__cb:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+@media (max-width: 900px) {
+  .site-nav {
+    display: none;
+    position: absolute;
+    inset: 62px 0 auto;
+    flex-direction: column;
+    gap: 0;
+    margin: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: var(--space-2) var(--space-6) var(--space-5);
+    box-shadow: var(--shadow-md);
+  }
+  .site-header:has(.nav-burger__cb:checked) .site-nav {
+    display: flex;
+  }
+  .site-nav a {
+    padding: var(--space-4) 0;
+    font-size: 1.05rem;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .nav-burger {
+    display: inline-flex;
+    position: relative;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-inline: calc(-1 * var(--space-2));
+    font-size: 1.3rem;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+  :root.js .theme-cycle {
+    width: 44px;
+    height: 44px;
+  }
+  .site-header__cta {
+    gap: var(--space-2);
+  }
+}
+@media (max-width: 640px) {
+  .site-brand__tag {
+    display: none;
+  }
 }
 
 /* Copy buttons — hidden when JS is off (C6).
@@ -290,6 +480,13 @@ main .anchor-icon {
 :root.js main .code-wrap .copy-button {
   display: inline-block;
 }
+/* Prompt-copy button is attached in normal flow (no code-wrap anchor), so
+ * it overrides the absolute positioning the pre-block variant uses. */
+:root.js main .copy-button--prompt {
+  display: inline-block;
+  position: static;
+  margin-top: 0.5rem;
+}
 .copy-button[data-copy-state="copied"] {
   background: var(--accent, #0058aa);
   color: #fff;
@@ -297,95 +494,536 @@ main .anchor-icon {
 }
 
 /* ================================================================
- * Homepage — hero + principle listing
+ * Instrument components — meter, bands, buttons, seg toggle,
+ * score card, board, spec index, status chips.
+ * Shared by the homepage, boards, scorecards, and audit landings.
  * ================================================================ */
 
-/* Hero section — title + lede. The H1 breaks out of the default heading
-   scale to create a clear "this is the landing page" signal. */
-.hero {
-  padding-top: clamp(2rem, 5vw, 4rem);
-  padding-bottom: clamp(1.5rem, 3vw, 2.5rem);
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: inherit;
+  font-weight: 560;
+  line-height: 1;
+  padding: 0.7em 1.15em;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.18s var(--ease),
+    background 0.18s var(--ease),
+    border-color 0.18s var(--ease);
+}
+.btn--primary {
+  background: var(--accent);
+  color: var(--bg);
+}
+.btn--primary:hover {
+  transform: translateY(-1px);
+}
+.btn--ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-heading);
+}
+.btn--ghost:hover {
+  border-color: var(--fg-muted);
 }
 
-.hero__title {
-  font-size: clamp(2.25rem, 3vw + 1.25rem, 3.5rem);
-  line-height: 1.08;
+/* Meter — the signature: a graded score. The fill's band color rides
+ * the --fc indirection so band classes recolor fill and number
+ * independently (vivid bar, AA text). A width:0 fill leaves the bare
+ * track (score 0); width:100% closes the pill (score 100); an
+ * unscored/absent value uses .meter--unscored: empty track, muted
+ * number slot. */
+.meter {
+  display: inline-grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.meter__track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--meter-track);
+  overflow: hidden;
+  min-width: 68px;
+  box-shadow: inset 0 0 0 1px oklch(50% 0.02 250 / 0.06);
+}
+.meter__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--fc, var(--accent)) 80%, white 20%),
+    var(--fc, var(--accent))
+  );
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.28);
+}
+.meter__num {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg-heading);
+}
+.meter--unscored .meter__fill {
+  display: none;
+}
+.meter--unscored .meter__num {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+/* Score-band coloring (grading axis; tier-* classes are the obligation
+ * axis). Applies to meters, big score numerals, and status chips. */
+.band-high .meter__fill {
+  --fc: var(--band-high-bar);
+}
+.band-mid .meter__fill {
+  --fc: var(--band-mid-bar);
+}
+.band-low .meter__fill {
+  --fc: var(--band-low-bar);
+}
+.band-high .meter__num {
+  color: var(--band-high);
+}
+.band-mid .meter__num {
+  color: var(--band-mid);
+}
+.band-low .meter__num {
+  color: var(--band-low);
+}
+/* Status chips — pass/warn/fail readings on check rows. */
+.st {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.st.pass {
+  color: var(--band-high);
+}
+.st.warn {
+  color: var(--band-mid);
+}
+.st.fail {
+  color: var(--band-low);
+}
+
+/* Score card — terminal-flavored proof panel (hero, audit landings). */
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.card__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+}
+.card__cmd {
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--fg-body);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.card__cmd .p {
+  color: var(--fg-muted);
+}
+.card__scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-4);
+}
+.bigscore {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.bigscore__n {
+  font-family: var(--font-mono);
+  font-size: 2.6rem;
+  font-weight: 620;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+}
+.bigscore__l {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.band-high .bigscore__n {
+  color: var(--band-high-bar);
+}
+.band-mid .bigscore__n {
+  color: var(--band-mid-bar);
+}
+.band-low .bigscore__n {
+  color: var(--band-low-bar);
+}
+.card__rows {
+  padding: 0 var(--space-4) var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+.crow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 0.84rem;
+  color: var(--fg-secondary);
+}
+.crow .id {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  width: 2.2em;
+}
+.crow .st {
+  margin-left: auto;
+}
+
+/* Band surface — full-bleed raised section band (board section). */
+.band-surface {
+  background: var(--band-surface-bg);
+  border-block: 1px solid var(--band-surface-border);
+}
+
+/* Segmented toggle — hidden radios; labels carry the pill UI. */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--seg-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.seg input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+.seg label {
+  font-size: var(--text-secondary);
+  font-weight: 560;
+  color: var(--fg-secondary);
+  padding: 0.45em 1.1em;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+.seg input:checked + label {
+  background: var(--accent);
+  color: var(--bg);
+}
+.seg input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Board — leaderboard rows with graded meters. */
+.board {
+  border: 1px solid var(--board-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: var(--shadow-board);
+}
+.lrow {
+  display: grid;
+  grid-template-columns: 2.4ch minmax(0, 1fr) 190px;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+  color: inherit;
+  text-decoration: none;
+}
+.lrow:last-child {
+  border-bottom: 0;
+}
+.lrow:hover {
+  background: var(--bg-raised);
+}
+.lrow .rank {
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  font-size: 0.86rem;
+}
+.lrow .name {
+  font-weight: 560;
+  color: var(--fg-heading);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lrow .name-sub {
+  color: var(--fg-muted);
+  font-weight: 400;
+  font-size: 0.86rem;
+}
+.board-section {
+  padding-block: var(--space-8);
+}
+.board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+}
+.board-head h2 {
+  font-size: clamp(1.5rem, 1.2rem + 1.2vw, 1.9rem);
+  letter-spacing: -0.02em;
+  font-weight: 620;
+  margin: 0;
+}
+.board-head p {
+  color: var(--fg-secondary);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-secondary);
+}
+.board-controls {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.board-rubric {
+  margin-top: var(--space-4);
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+.board-rubric code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--fg-body);
+}
+.board-rubric a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.board-try {
+  display: flex;
+  gap: var(--space-2);
+}
+.board-try input {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  padding: 0.6em 0.85em;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--field-bg);
+  color: var(--fg-body);
+  min-width: 15rem;
+}
+
+/* Spec index — principle / web-check rows, tier-colored (obligation
+ * axis: MUST/SHOULD/MAY, distinct from the band-* grading axis). */
+.spec-section {
+  padding-block: var(--space-9);
+}
+.spec-section > .container > h2 {
+  font-size: clamp(1.7rem, 1.3rem + 1.6vw, 2.3rem);
   letter-spacing: -0.025em;
-  font-weight: 650;
-  color: var(--fg-heading, #0f1419);
+  font-weight: 640;
   margin: 0;
-  animation: hero-enter 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-
-.hero__lede {
-  font-size: clamp(1.05rem, 0.9rem + 0.45vw, 1.2rem);
-  line-height: 1.6;
-  color: var(--fg-secondary, #6a7278);
-  max-width: 62ch;
-  margin: 1.25rem 0 0;
-  animation: hero-enter 500ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
-}
-
-.hero__use-it {
-  font-size: clamp(1rem, 0.875rem + 0.3vw, 1.0625rem);
-  line-height: 1.625;
-  color: var(--fg-secondary, #6a7278);
+.spec-section > .container > .sub {
+  color: var(--fg-secondary);
+  margin: var(--space-3) 0 0;
   max-width: 60ch;
-  margin: 1.75rem 0 0;
-  animation: hero-enter 500ms cubic-bezier(0.16, 1, 0.3, 1) 160ms both;
 }
-
-@keyframes hero-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Principle listing — numbered entries linking to /p{N} pages. */
-.principles-index {
-  padding-bottom: clamp(1.5rem, 3vw, 2.5rem);
-}
-
-.principles-index__list {
+.spec {
   list-style: none;
-  margin: 0;
+  margin: var(--space-7) 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 var(--space-8);
+}
+.spec__row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.spec__id {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.tier-must .spec__id {
+  color: var(--must);
+}
+.tier-should .spec__id {
+  color: var(--should);
+}
+.tier-may .spec__id {
+  color: var(--may);
+}
+.spec__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.spec__title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg-heading);
+  text-decoration: none;
+  transition: color 0.15s var(--ease);
+}
+a.spec__title:hover {
+  color: var(--accent);
+}
+.tier {
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.15em 0.45em;
+  border-radius: 5px;
+  border: 1px solid currentColor;
+}
+.tier-must .tier {
+  color: var(--must);
+}
+.tier-should .tier {
+  color: var(--should);
+}
+.tier-may .tier {
+  color: var(--may);
+}
+.spec__desc {
+  color: var(--fg-secondary);
+  font-size: 0.9rem;
+  margin: var(--space-2) 0 0;
+  line-height: 1.5;
+}
+.spec__desc code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Component responsive collapses (page-level layout rules live with
+ * their page sections). */
+@media (max-width: 900px) {
+  .spec {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+  .board-head {
+    align-items: flex-start;
+  }
+  .lrow {
+    grid-template-columns: 2.4ch minmax(0, 1fr) 130px;
+    gap: var(--space-4);
+  }
+}
+@media (max-width: 560px) {
+  .card__scores {
+    grid-template-columns: 1fr;
+  }
+  .board-try input {
+    min-width: 0;
+  }
+  .board-try {
+    flex: 1;
+  }
+}
+
+/* ================================================================
+ * Homepage — instrument hero + toggle-driven boards + spec index
+ * ================================================================ */
+
+/* The homepage composes full-bleed sections that manage their own
+ * .container width; escape main's reading-column constraint. */
+body:has(.hero__grid) main {
+  max-width: none;
   padding: 0;
 }
 
-.principle-entry {
-  border-top: 1px solid var(--border-subtle, #e5e8eb);
-  animation: principle-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+.hero {
+  padding-block: clamp(var(--space-8), 7vw, var(--space-10)) var(--space-8);
+}
+.hero__grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: var(--space-8);
+  align-items: center;
+}
+.hero__title {
+  font-size: clamp(2.7rem, 1.7rem + 3.6vw, 4.4rem);
+  letter-spacing: -0.038em;
+  font-weight: 660;
+  color: var(--fg-heading);
+  margin: 0;
+}
+.hero__title .accent {
+  color: var(--accent);
+}
+.hero__lede {
+  margin: var(--space-5) 0 0;
+  font-size: 1.2rem;
+  line-height: 1.55;
+  color: var(--fg-secondary);
+  max-width: 36ch;
+}
+.hero__cta {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  flex-wrap: wrap;
+}
+.card__bar-right {
+  margin-left: auto;
 }
 
-.principle-entry:last-child {
-  border-bottom: 1px solid var(--border-subtle, #e5e8eb);
+/* Toggle plumbing — the hidden radios in .seg drive the CLI/web panes
+ * (board, spec index, try form, rubric) together via :has(); CLI is the
+ * no-JS default. */
+[data-s="web"] {
+  display: none;
 }
-
-.principle-entry:nth-child(1) {
-  animation-delay: 120ms;
+.scope:has(#s-web:checked) [data-s="cli"] {
+  display: none;
 }
-.principle-entry:nth-child(2) {
-  animation-delay: 170ms;
+.scope:has(#s-web:checked) [data-s="web"] {
+  display: block;
 }
-.principle-entry:nth-child(3) {
-  animation-delay: 220ms;
+.scope:has(#s-web:checked) .board-try[data-s="web"] {
+  display: flex;
 }
-.principle-entry:nth-child(4) {
-  animation-delay: 270ms;
-}
-.principle-entry:nth-child(5) {
-  animation-delay: 320ms;
-}
-.principle-entry:nth-child(6) {
-  animation-delay: 370ms;
-}
-.principle-entry:nth-child(7) {
-  animation-delay: 420ms;
+.scope:has(#s-web:checked) .spec[data-s="web"] {
+  display: grid;
 }
 
 @keyframes principle-enter {
@@ -399,78 +1037,311 @@ main .anchor-icon {
   }
 }
 
-.principle-entry__link {
+/* Use-it outro — the install/skill/MCP pointer paragraph below the spec
+ * index. Quiet prose, not a CTA band. */
+.use-note-section {
+  padding-block: 0 var(--space-9);
+}
+.use-note {
+  margin: 0;
+  max-width: var(--measure);
+  font-size: var(--text-secondary);
+  line-height: 1.6;
+  color: var(--fg-secondary);
+}
+.use-note a {
+  color: var(--accent);
+}
+.use-note code {
+  font-size: 0.9em;
+}
+
+@media (max-width: 900px) {
+  .hero__grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-7);
+  }
+}
+@media (max-width: 560px) {
+  .hero__cta .btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* ================================================================
+ * Reading treatment — /p{N} principle pages + prose docs (.doc)
+ * ================================================================ */
+
+body:has(.doc) main {
+  max-width: none;
+  padding: 0;
+}
+.doc {
   display: grid;
-  grid-template-columns: 3rem 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 1.25rem;
-  row-gap: 0.25rem;
-  padding: 1.25rem 0.75rem;
-  margin: 0 -0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 52rem;
+  margin-inline: auto;
+  padding-block: var(--space-8) var(--space-9);
+}
+.doc a {
+  color: var(--accent);
+}
+.doc h1 {
+  font-size: clamp(2rem, 1.5rem + 2vw, 2.9rem);
+  letter-spacing: -0.03em;
+  font-weight: 660;
+  line-height: 1.1;
+  margin: var(--space-4) 0 0;
+}
+.doc h2 {
+  font-size: 1.4rem;
+  letter-spacing: -0.015em;
+  margin: var(--space-8) 0 var(--space-4);
+}
+.doc p,
+.doc li {
+  max-width: var(--measure);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  margin-bottom: var(--space-5);
+}
+.crumb a {
+  color: var(--fg-secondary);
+  text-decoration: none;
+}
+.crumb a:hover {
+  color: var(--accent);
+}
+.crumb .sep {
+  color: var(--border);
+}
+
+.doc__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.doc__num {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.tier-must .doc__num {
+  color: var(--must);
+}
+.tier-should .doc__num {
+  color: var(--should);
+}
+.tier-may .doc__num {
+  color: var(--may);
+}
+
+/* The Definition section heading holds the lede position: the heading is
+ * visually hidden (still a deep-link target and in the document outline)
+ * and its paragraph reads as the lede. */
+.doc #definition {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  margin: 0;
+}
+.doc #definition + p {
+  font-size: 1.22rem;
+  color: var(--fg-secondary);
+  line-height: 1.55;
+  margin-top: var(--space-5);
+}
+
+/* Audit callout — the instrument, quietly. */
+.audit-note {
+  margin-top: var(--space-6);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--accent-subtle);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  color: var(--fg-body);
+  max-inline-size: var(--measure);
+}
+.audit-note code {
+  background: var(--bg);
+}
+
+/* Code blocks read dark in both themes on reading pages; Shiki's dark
+ * palette applies unconditionally inside .doc. */
+.doc pre {
+  background: oklch(20% 0.02 250);
+  border-color: oklch(30% 0.02 250);
+}
+:root .doc .shiki,
+:root .doc .shiki code span {
+  color: var(--shiki-dark);
+  background-color: var(--shiki-dark-bg);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+  text-decoration: var(--shiki-dark-text-decoration);
+}
+
+/* Audit-landing hero — the instrument's try-surface on /audit and
+ * /web-audit, consistent with the homepage board try-form. */
+.audit-hero {
+  margin-block: var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-md);
+}
+.doc .audit-hero__title {
+  margin: 0 0 var(--space-2);
+  font-size: 1.4rem;
+  letter-spacing: -0.015em;
+}
+.audit-hero__lede {
+  margin: 0 0 var(--space-4);
+  color: var(--fg-secondary);
+}
+.audit-hero__form input {
+  flex: 1;
+  min-width: 0;
+}
+.audit-hero .audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  table-layout: fixed;
+}
+.audit-table td {
+  overflow-wrap: anywhere;
+}
+.audit-hero .live-score__help {
+  margin: var(--space-3) 0 0;
+}
+
+/* Prev / next pager. */
+.pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-9);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-6);
+}
+.pager a {
+  display: block;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   text-decoration: none;
   color: inherit;
-  border-radius: 0.375rem;
-  transition: background-color 120ms ease;
+  transition: border-color 0.15s var(--ease);
 }
-
-.principle-entry__link:hover,
-.principle-entry__link:focus-visible {
-  background: var(--bg-raised, #f4f5f7);
+.pager a:hover {
+  border-color: var(--fg-muted);
 }
-
-.principle-entry__num {
-  grid-row: 1 / -1;
+.pager .dir {
   font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 1.4rem;
-  font-weight: 350;
-  color: var(--accent, #0058aa);
-  line-height: 1.15;
-  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
-  padding-top: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+}
+.pager .t {
+  display: block;
+  margin-top: var(--space-2);
+  font-weight: 560;
+  color: var(--fg-heading);
+}
+.pager .next {
+  text-align: right;
+}
+@media (max-width: 640px) {
+  .pager {
+    grid-template-columns: 1fr;
+  }
+  .pager .next {
+    text-align: left;
+  }
 }
 
-.principle-entry__title {
-  font-size: 1.08rem;
-  font-weight: 600;
-  color: var(--fg-heading, #0f1419);
-  line-height: 1.35;
-}
-
-.principle-entry__desc {
-  font-size: 0.92rem;
-  color: var(--fg-secondary, #6a7278);
-  line-height: 1.5;
-  max-width: 65ch;
-}
-
-/* Footer */
+/* Footer — provider circles, source-of-truth row, meta row. */
 .site-footer {
-  border-top: 1px solid var(--border, #cfd5db);
-  padding: 1.25rem clamp(1rem, 4vw, 2rem);
-  color: var(--fg-secondary, #6a7278);
-  font-size: 0.9rem;
-}
-.site-footer__meta {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  justify-content: center;
+  border-top: 1px solid var(--border-subtle);
+  padding-block: var(--space-8) var(--space-7);
+  color: var(--fg-secondary);
 }
 
-/* Source-of-truth row. Sits between the AI-summary block and the meta
- * line, mirroring the meta line's centered-flex layout. Renders as
- * "[GH] Source: spec · cli · site · skill"; the icon is a quiet kicker,
- * not a primary call-out — sized smaller than the AI-summary icons and
- * tinted to fg-muted with the same hover lift as the meta links. */
+/* AI summary CTA — provider icons above the source + meta rows. */
+.ai-summary {
+  text-align: center;
+}
+.ai-summary__heading {
+  margin: 0;
+  font-size: var(--text-secondary);
+  font-weight: 560;
+  color: var(--fg-secondary);
+}
+.ai-summary__icons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+.ai-summary__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  transition:
+    border-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+/* iOS Safari paints a 0×0 glyph for inline <svg> with viewBox but no
+ * intrinsic width/height (per SVG2 spec). The svg carries explicit
+ * width/height attributes; this pins the rendered box regardless. */
+.ai-summary__link svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+.ai-summary__link:hover {
+  border-color: var(--fg-muted);
+  color: var(--fg-heading);
+  background: var(--bg-raised);
+}
+
+/* Source-of-truth row — "[GH] Source spec · cli · site · skill". */
 .site-footer__source {
-  margin: 0 0 0.45rem;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--space-4);
   justify-content: center;
-  font-size: 0.85rem;
+  margin: var(--space-7) 0 0;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.82rem;
+  color: var(--fg-muted);
 }
 .site-footer__source-icon {
   display: inline-flex;
@@ -478,8 +1349,7 @@ main .anchor-icon {
   justify-content: center;
   width: 1rem;
   height: 1rem;
-  color: var(--fg-muted, #525960);
-  margin-right: 0.15rem;
+  color: var(--fg-muted);
 }
 .site-footer__source-icon svg {
   width: 100%;
@@ -487,60 +1357,37 @@ main .anchor-icon {
   display: block;
 }
 .site-footer__source-label {
-  color: var(--fg-muted, #525960);
   letter-spacing: 0.01em;
 }
 .site-footer__source a {
-  color: inherit;
-  transition: color 120ms ease;
+  color: var(--fg-secondary);
+  text-decoration: none;
+  transition: color 0.15s var(--ease);
 }
 .site-footer__source a:hover {
-  color: var(--fg-body, #1a2026);
+  color: var(--accent);
+}
+.site-footer__sep {
+  color: var(--border);
 }
 
-/* AI summary CTA — provider icons above the meta line. */
-.ai-summary {
+/* Meta row — version, doc links, machine-surface links. */
+.site-footer__meta {
+  margin: var(--space-5) 0 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 1rem 0;
-}
-.ai-summary__heading {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--fg-secondary, #6a7278);
-  letter-spacing: 0.01em;
-}
-.ai-summary__icons {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
   flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
   justify-content: center;
+  font-size: var(--text-secondary);
+  color: var(--fg-muted);
 }
-.ai-summary__link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  color: var(--fg-muted, #525960);
-  border-radius: 50%;
-  transition:
-    color 120ms ease,
-    transform 120ms ease;
+.site-footer__meta a {
+  color: var(--fg-secondary);
+  text-decoration: none;
+  transition: color 0.15s var(--ease);
 }
-/* iOS Safari paints a 0×0 glyph for inline <svg> with viewBox but no
- * intrinsic width/height (per SVG2 spec). Size the child explicitly. */
-.ai-summary__link svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.ai-summary__link:hover {
-  color: var(--fg-body, #1a2026);
-  transform: scale(1.12);
+.site-footer__meta a:hover {
+  color: var(--accent);
 }
 
 /* ================================================================
@@ -772,24 +1619,6 @@ body:has(.leaderboard-hero) main {
   color: oklch(45.00% 0.1 70);
 }
 
-/* Badge callout — surface #2 of the badge plan. Sits between the
-   leaderboard table and the methodology section so a reader who has
-   just scanned the rankings sees the next step (claim the badge) before
-   the longer-form methodology prose.
-
-   Surface uses the canonical `--bg-raised` token (defined for both
-   light and dark in src/styles/foundation.css) — the same token the
-   methodology / scorecard-summary surfaces use. Earlier draft used a
-   fake `--bg-subtle` name that fell back to the light-mode hex literal
-   in dark mode, producing near-white text on near-white background. */
-.leaderboard-badge-callout {
-  margin-top: 2rem;
-  padding: 1.25rem 1.5rem;
-  border: 1px solid var(--border, #cfd5db);
-  border-radius: 8px;
-  background: var(--bg-raised, #f4f5f7);
-}
-
 .leaderboard-badge-callout h2 {
   margin: 0 0 0.5rem 0;
   font-size: 1.05rem;
@@ -814,14 +1643,22 @@ body:has(.leaderboard-hero) main {
   font-size: 0.88rem;
 }
 
-/* Responsive: collapse description and language on small screens */
+/* Responsive: stage the board's column collapse — description first,
+ * then language + meter tracks (numerals stay), then the tier badge. */
+@media (max-width: 900px) {
+  .lb-desc {
+    display: none;
+  }
+}
 @media (max-width: 720px) {
   body:has(.leaderboard-hero) main {
     max-width: 100%;
     padding-inline: 1rem;
   }
-  .lb-desc,
   .lb-lang {
+    display: none;
+  }
+  .lb-score .meter__track {
     display: none;
   }
   .leaderboard-table th,
@@ -833,23 +1670,360 @@ body:has(.leaderboard-hero) main {
     padding: 0.1rem 0.35rem;
   }
 }
+@media (max-width: 560px) {
+  .lb-tier {
+    display: none;
+  }
+}
 
 /* ================================================================
- * Scorecard — /score/<tool>
+ * Scorecard — /score/<tool> + /score/live/<binary> (shared renderer)
  * ================================================================ */
 
-.scorecard-breadcrumb {
-  padding: 0.5rem 0 0;
-  font-size: 0.88rem;
+body:has(.scorecard-page) main {
+  max-width: none;
+  padding: 0;
+}
+.scorecard-page {
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-block: var(--space-7) var(--space-9);
+}
+.scorecard-page .crumb {
+  margin-bottom: var(--space-6);
 }
 
-.scorecard-breadcrumb a {
-  color: var(--fg-muted, #525960);
-  text-decoration: none;
+/* Hero — mono tool name, command chip, summary chips, twin score cards. */
+.scorecard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-6);
+  align-items: start;
+  padding-bottom: var(--space-7);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-7);
 }
-.scorecard-breadcrumb a:hover {
-  color: var(--accent, #0058aa);
-  text-decoration: underline;
+.scorecard-hero h1 {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(2rem, 1.4rem + 2.4vw, 3.2rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0;
+}
+.scorecard-hero__id {
+  min-width: 0;
+}
+.scorecard-hero__id p {
+  overflow-wrap: anywhere;
+}
+.scorecard-hero__cmd {
+  margin: var(--space-4) 0 0;
+}
+.scorecard-hero__cmd code {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.5em 0.8em;
+  border-radius: var(--radius);
+}
+.scorecard-hero__scores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(11rem, 1fr));
+  gap: var(--space-4);
+}
+.scorecell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  background: var(--bg-raised);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.chip {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 0.3em 0.6em;
+  border-radius: 6px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.chip--ok {
+  color: var(--band-high);
+}
+.chip--warn {
+  color: var(--band-mid);
+}
+.chip--fail {
+  color: var(--band-low);
+}
+.chip--muted {
+  color: var(--fg-muted);
+  border-color: var(--border);
+  background: var(--bg-raised);
+  font-weight: 500;
+}
+
+/* Eight principles, scored. */
+.pscore h2 {
+  margin: 0;
+  font-size: clamp(1.4rem, 1.2rem + 0.8vw, 1.7rem);
+  letter-spacing: -0.02em;
+}
+.pscore__sub {
+  color: var(--fg-secondary);
+  margin: var(--space-3) 0 0;
+}
+.pscore__list {
+  list-style: none;
+  margin: var(--space-6) 0 0;
+  padding: 0;
+}
+.pscore__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.pscore__evidence {
+  margin: var(--space-2) 0 0;
+  color: var(--fg-secondary);
+  font-size: 0.92rem;
+  max-width: var(--measure);
+}
+.stpill {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25em 0.75em;
+  border-radius: 999px;
+  justify-self: end;
+}
+.stpill--pass {
+  color: var(--band-high);
+  background: color-mix(in oklab, var(--band-high) 12%, transparent);
+}
+.stpill--warn {
+  color: var(--band-mid);
+  background: color-mix(in oklab, var(--band-mid) 14%, transparent);
+}
+.stpill--fail {
+  color: var(--band-low);
+  background: color-mix(in oklab, var(--band-low) 12%, transparent);
+}
+.stpill--na {
+  color: var(--fg-muted);
+  background: var(--bg-raised);
+}
+
+/* Remediation box — non-pass principle rows. The pre wraps so long
+ * prompts never overflow on mobile. */
+.remediation {
+  margin-top: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg);
+}
+.remediation__hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.82rem;
+  color: var(--fg-secondary);
+}
+.copy-prompt {
+  display: none;
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  cursor: pointer;
+}
+:root.js .copy-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+.copy-prompt:hover {
+  background: var(--accent-subtle);
+}
+.copy-prompt[data-copy-state="copied"] {
+  color: var(--bg);
+  background: var(--accent);
+}
+main .remediation__body {
+  margin: 0;
+  padding: var(--space-4);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+/* The remediation header's copy-prompt button is the copy affordance;
+ * suppress the generic injected pre copy pill inside remediation boxes. */
+:root.js main .remediation .code-wrap .copy-button {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .scorecard-hero {
+    grid-template-columns: 1fr;
+  }
+  .pscore__row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .stpill {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+@media (max-width: 560px) {
+  .scorecard-hero__scores {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Web result page — category cards with marked check rows. */
+.scorecard-hero__note {
+  margin: var(--space-3) 0 0;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  max-width: 48ch;
+}
+.catcard {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-board);
+  overflow: hidden;
+  margin-bottom: var(--space-6);
+}
+.catcard__hd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--band-surface-bg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.catcard__hd .audit-group__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.audit-group__rollup {
+  margin-left: auto;
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-weight: 600;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  white-space: nowrap;
+}
+.audit-group__rollup.band-high {
+  color: var(--band-high);
+}
+.audit-group__rollup.band-mid {
+  color: var(--band-mid);
+}
+.audit-group__rollup.band-low {
+  color: var(--band-low);
+}
+.audit-group__note {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.web-check + .web-check {
+  border-top: 1px solid var(--border-subtle);
+}
+.web-check summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  cursor: pointer;
+  list-style: none;
+}
+.web-check summary::-webkit-details-marker {
+  display: none;
+}
+.web-check__mark {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-weight: 600;
+  width: 1.2em;
+  flex: none;
+}
+.web-check__label {
+  flex: 1;
+  min-width: 0;
+}
+.web-check summary .audit__status {
+  margin-left: auto;
+  width: auto;
+  white-space: nowrap;
+}
+.web-check--pass .web-check__mark,
+.web-check--pass .audit__status {
+  color: var(--band-high);
+}
+.web-check--absent .web-check__mark,
+.web-check--absent .audit__status {
+  color: var(--band-mid);
+}
+.web-check--broken .web-check__mark,
+.web-check--broken .audit__status,
+.web-check--error .web-check__mark,
+.web-check--error .audit__status {
+  color: var(--band-low);
+}
+.web-check--n_a .web-check__mark,
+.web-check--n_a .audit__status,
+.web-check--skip .web-check__mark,
+.web-check--skip .audit__status {
+  color: var(--fg-muted);
+}
+.web-check__goal,
+.web-check__result,
+.web-check__fix,
+.web-check__resources,
+.web-check__prompt-label {
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-5);
+  font-size: 0.9rem;
+  color: var(--fg-secondary);
+}
+.web-check__resources a {
+  color: var(--accent);
+}
+.web-check pre {
+  margin: var(--space-2) var(--space-5) var(--space-4);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .scorecard-header {
@@ -873,6 +2047,7 @@ body:has(.leaderboard-hero) main {
 
 .scorecard-header__meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   color: var(--fg-muted, #525960);
@@ -892,8 +2067,7 @@ body:has(.leaderboard-hero) main {
   margin: 1rem 0 1.5rem;
   padding: 1rem 1.15rem;
   border: 1px solid var(--border-subtle, #e5e8eb);
-  border-left: 3px solid var(--accent, #0058aa);
-  border-radius: 0.375rem;
+  border-radius: var(--radius, 0.375rem);
   background: var(--bg-raised, #f4f5f7);
 }
 .scorecard-audience-banner p {
@@ -943,112 +2117,6 @@ body:has(.leaderboard-hero) main {
   letter-spacing: 0.02em;
 }
 
-/* Score + principle summary badges */
-.scorecard-summary {
-  display: flex;
-  gap: 1.5rem;
-  padding: 1.25rem 0 1.75rem;
-  border-top: 1px solid var(--border-subtle, #e5e8eb);
-  border-bottom: 1px solid var(--border-subtle, #e5e8eb);
-}
-
-.scorecard-score-badge,
-.scorecard-principle-badge {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.scorecard-score-badge__pct,
-.scorecard-principle-badge__count {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
-  font-size: 2rem;
-  font-weight: 500;
-  line-height: 1;
-  color: var(--fg-heading, #0f1419);
-}
-
-.scorecard-score-badge__label,
-.scorecard-principle-badge__label {
-  font-size: 0.8rem;
-  color: var(--fg-muted, #525960);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Top issues */
-.scorecard-issues {
-  padding: 1.5rem 0;
-}
-.scorecard-issues h2 {
-  margin-top: 0;
-}
-
-.scorecard-issues--clean p {
-  color: var(--may, #007980);
-  font-weight: 500;
-}
-
-.issue-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.issue {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 0.92rem;
-  line-height: 1.45;
-}
-
-.issue__status {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.2rem;
-  letter-spacing: 0.03em;
-}
-
-.issue--fail .issue__status {
-  background: oklch(92.00% 0.04 28);
-  color: var(--must, #af2b25);
-}
-.issue--warn .issue__status {
-  background: oklch(93.00% 0.04 70);
-  color: var(--should, #a16100);
-}
-
-.issue__label {
-  font-weight: 500;
-  color: var(--fg-body, #1a2026);
-}
-
-.issue__group {
-  font-size: 0.85rem;
-}
-.issue__group a {
-  color: var(--accent, #0058aa);
-  text-decoration: none;
-}
-.issue__group a:hover {
-  text-decoration: underline;
-}
-
-.issue__evidence {
-  font-size: 0.82rem;
-  color: var(--fg-muted, #525960);
-  flex-basis: 100%;
-  padding-left: 0;
-}
-
 /* All audits section */
 .scorecard-audits {
   padding: 0.5rem 0;
@@ -1086,6 +2154,10 @@ body:has(.leaderboard-hero) main {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.88rem;
+  table-layout: fixed;
+}
+.audit-table td {
+  overflow-wrap: anywhere;
 }
 
 .audit-table td {
@@ -1248,14 +2320,6 @@ body:has(.leaderboard-hero) main {
     background: oklch(23.00% 0.04 70);
     color: oklch(80.00% 0.08 70);
   }
-  :root:not([data-theme="light"]) .issue--fail .issue__status {
-    background: oklch(22.00% 0.04 28);
-    color: var(--must);
-  }
-  :root:not([data-theme="light"]) .issue--warn .issue__status {
-    background: oklch(23.00% 0.04 70);
-    color: var(--should);
-  }
 }
 :root[data-theme="dark"] .tier-badge--agent {
   background: oklch(22.00% 0.05 200);
@@ -1264,14 +2328,6 @@ body:has(.leaderboard-hero) main {
 :root[data-theme="dark"] .tier-badge--notable {
   background: oklch(23.00% 0.04 70);
   color: oklch(80.00% 0.08 70);
-}
-:root[data-theme="dark"] .issue--fail .issue__status {
-  background: oklch(22.00% 0.04 28);
-  color: var(--must);
-}
-:root[data-theme="dark"] .issue--warn .issue__status {
-  background: oklch(23.00% 0.04 70);
-  color: var(--should);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1629,19 +2685,6 @@ body:has(.leaderboard-hero) main {
 .live-score-summary__freshness--live {
   color: var(--may);
   border-color: var(--may);
-}
-
-.live-score-summary__score {
-  margin-block: var(--space-5);
-}
-
-.live-score-summary__issues {
-  margin-block: var(--space-5);
-}
-
-.live-score-summary__issues h2 {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-h3);
 }
 
 .live-score-summary__cta {

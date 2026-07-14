@@ -82,6 +82,12 @@ const HUE_MUST = 28; // red-orange; requirement energy without pure error-red
 const HUE_SHOULD = 70; // amber/ochre; recommendation with visible warmth
 const HUE_MAY = 200; // cool teal; optional, calmer than accent
 
+// Score-band ramp: a GRADING axis (fail / warn / pass), deliberately separate
+// from the MUST/SHOULD/MAY OBLIGATION tiers even where the hues nearly meet.
+const HUE_BAND_LOW = 26; // grading red-orange, a touch hotter than MUST
+const HUE_BAND_MID = 70; // amber warn, shares the SHOULD hue
+const HUE_BAND_HIGH = 150; // pass green; no obligation-tier counterpart
+
 // Light-mode scale. L chosen for a long background plateau and quick dive at
 // the text end. Chroma is deliberately very low in neutrals (≤0.012) so they
 // read as gray, not tinted.
@@ -91,7 +97,7 @@ const LIGHT_SCALE = [
   { name: "gray-200", L: 92.5, C: 0.008 }, // hairline, target bg wash
   { name: "gray-300", L: 87.0, C: 0.01 }, // strong divider
   { name: "gray-400", L: 74.0, C: 0.012 }, // subtle text
-  { name: "gray-500", L: 58.0, C: 0.014 }, // muted text
+  { name: "gray-500", L: 52.0, C: 0.016 }, // muted text; L≤52 keeps AA on gray-50
   { name: "gray-600", L: 46.0, C: 0.015 }, // secondary text
   { name: "gray-700", L: 34.0, C: 0.015 }, // code default
   { name: "gray-800", L: 24.0, C: 0.015 }, // body text
@@ -102,7 +108,7 @@ const LIGHT_SCALE = [
 // inversion:
 //   1. Background is near-black but not pitch-black (~14% L). Pitch-black
 //      causes halation around body text on LCDs.
-//   2. The light ramp steps have a cliff at L=58; the dark ramp is smoother
+//   2. The light ramp steps have a cliff at L=52; the dark ramp is smoother
 //      through the mid-range because dark surfaces need more separation in
 //      the 30-60% range for secondary UI (borders, muted text).
 //   3. Chroma rises slightly in dark mode (up to 0.02) because low-chroma
@@ -117,7 +123,7 @@ const DARK_SCALE = [
   { name: "gray-200", L: 22.0, C: 0.016, H: 250 }, // raised surface
   { name: "gray-300", L: 28.0, C: 0.018, H: 250 }, // border strong
   { name: "gray-400", L: 38.0, C: 0.02, H: 250 }, // border subtle
-  { name: "gray-500", L: 55.0, C: 0.018, H: 250 }, // muted text
+  { name: "gray-500", L: 63.0, C: 0.018, H: 250 }, // muted text; L≥63 keeps AA on gray-50
   { name: "gray-600", L: 68.0, C: 0.016, H: 250 }, // secondary text
   { name: "gray-700", L: 80.0, C: 0.012, H: 250 }, // code default
   { name: "gray-800", L: 90.0, C: 0.008, H: 95 }, // body text — warm shift
@@ -155,6 +161,71 @@ light.may = mk(52, 0.1, HUE_MAY);
 dark.must = mk(82, 0.15, HUE_MUST);
 dark.should = mk(82, 0.12, HUE_SHOULD);
 dark.may = mk(80, 0.1, HUE_MAY);
+
+// Score-band grading ramp. The `band-*` shades color TEXT (score numbers,
+// band labels) and must clear AA on the page bg. The `band-*-bar` shades fill
+// meter bars: they are non-text UI whose value is always restated by an
+// adjacent number, so they run brighter and more chromatic than the AA text
+// shades. `meter-track` is the empty-meter substrate, darkened (light mode) /
+// raised (dark mode) so partial fills read against it.
+light["band-low"] = mk(52, 0.17, HUE_BAND_LOW);
+light["band-mid"] = mk(56, 0.13, HUE_BAND_MID);
+light["band-high"] = mk(50, 0.15, HUE_BAND_HIGH);
+light["band-low-bar"] = mk(50, 0.205, HUE_BAND_LOW);
+light["band-mid-bar"] = mk(62, 0.135, HUE_BAND_MID);
+light["band-high-bar"] = mk(58, 0.16, HUE_BAND_HIGH);
+light["meter-track"] = mk(90, 0.01, HUE_NEUTRAL);
+
+dark["band-low"] = mk(72, 0.16, HUE_BAND_LOW);
+dark["band-mid"] = mk(80, 0.13, HUE_BAND_MID);
+dark["band-high"] = mk(74, 0.15, HUE_BAND_HIGH);
+dark["band-low-bar"] = mk(66, 0.2, HUE_BAND_LOW);
+dark["band-mid-bar"] = mk(82, 0.15, HUE_BAND_MID);
+dark["band-high-bar"] = mk(76, 0.17, HUE_BAND_HIGH);
+dark["meter-track"] = mk(26, 0.02, HUE_NEUTRAL);
+
+// -------- Contrast assertions --------
+// Fail the whole generation (no files written) rather than ship a failing
+// token. Text-bearing tokens must clear WCAG AA small-text (4.5:1) against
+// the page background in both modes — that is the hard gate. APCA floors are
+// per-token regression guards: |Lc| >= 60 for running text, >= 45 for the
+// band shades (score numbers and labels: short, large-ish, never body copy).
+// Bar fills and the meter track are exempt (non-text UI).
+//
+// Dark fg-muted (gray-500) floor is 38, below the APCA-45 UI class: WCAG and
+// APCA diverge on light-on-dark, and lifting L past ~67 to clear 45 would
+// collapse the muted tier into gray-600 (L=63 vs 68). WCAG AA still gates it;
+// the APCA floor pins the shipped level so it cannot silently regress.
+const TEXT_TOKEN_FLOORS = {
+  "gray-500": { light: 60, dark: 38 },
+  "gray-600": 45,
+  "gray-800": 60,
+  "gray-900": 60,
+  accent: 45,
+  must: 60,
+  should: 60,
+  may: 60,
+  "band-low": 45,
+  "band-mid": 45,
+  "band-high": 45,
+};
+for (const [mode, palette] of [
+  ["light", light],
+  ["dark", dark],
+]) {
+  for (const [key, floor] of Object.entries(TEXT_TOKEN_FLOORS)) {
+    const apcaFloor = typeof floor === "number" ? floor : floor[mode];
+    const ratio = wcagContrast(palette[key], palette["gray-50"]);
+    const lc = Math.abs(lcApca(palette[key], palette["gray-50"]));
+    if (ratio < 4.5 || lc < apcaFloor) {
+      throw new Error(
+        `contrast assertion failed: ${mode}.${key} on ${mode}.gray-50 — ` +
+          `WCAG ${ratio.toFixed(2)}:1 (need >= 4.5), APCA |Lc| ${lc.toFixed(1)} ` +
+          `(need >= ${apcaFloor})`
+      );
+    }
+  }
+}
 
 // (Wash tokens for block-level MUST/SHOULD/MAY callouts were removed when
 // the 7b-plus side-stripe variant was rejected per impeccable's absolute
@@ -215,7 +286,15 @@ p(
   "4. **RFC-keyword triad is warm-centered.** MUST (hue 28, red-orange), ",
   "SHOULD (hue 70, ochre), MAY (hue 200, teal). The red and ochre are the ",
   "semantic heat; MAY is cooled and calmer because the spec deliberately ",
-  "distinguishes 'optional' from 'required.'\n"
+  "distinguishes 'optional' from 'required.'\n",
+  "5. **Score bands are a grading axis, not the obligation axis.** ",
+  "`--band-low/mid/high` (fail / warn / pass) color score numbers and band ",
+  "labels; `--band-*-bar` are decoupled, brighter meter-fill variants ",
+  "(non-text UI — the adjacent number always restates the value), and ",
+  "`--meter-track` is the empty-meter substrate. The low/mid hues sit next ",
+  "to MUST/SHOULD deliberately (shared heat metaphor); the high band's green ",
+  "has no obligation-tier counterpart, which keeps the axes readable as ",
+  "different systems.\n"
 );
 
 const renderTable = (palette, mode) => {
@@ -241,12 +320,16 @@ const contrastReport = (palette, mode) => {
   const pairs = [
     ["gray-800", "gray-50", "body text on page bg"],
     ["gray-900", "gray-50", "headings on page bg"],
-    ["gray-600", "gray-50", "muted text on page bg"],
+    ["gray-500", "gray-50", "muted text (fg-muted) on page bg"],
+    ["gray-600", "gray-50", "secondary text on page bg"],
     ["gray-800", "gray-100", "body text on code bg"],
     ["accent", "gray-50", "link on page bg"],
     ["must", "gray-50", "MUST keyword on page bg"],
     ["should", "gray-50", "SHOULD keyword on page bg"],
     ["may", "gray-50", "MAY keyword on page bg"],
+    ["band-low", "gray-50", "low-band score text on page bg"],
+    ["band-mid", "gray-50", "mid-band score text on page bg"],
+    ["band-high", "gray-50", "high-band score text on page bg"],
     ["accent", "accent-subtle", "accent on :target highlight"],
   ];
   let s =
@@ -358,6 +441,9 @@ p(
     "must",
     "should",
     "may",
+    "band-low",
+    "band-mid",
+    "band-high",
   ]),
   `</div>`
 );
@@ -379,6 +465,9 @@ p(
     "must",
     "should",
     "may",
+    "band-low",
+    "band-mid",
+    "band-high",
   ]),
   `</div>`
 );
@@ -404,6 +493,13 @@ const roleMap = {
   must: "must",
   should: "should",
   may: "may",
+  "band-low": "band-low",
+  "band-mid": "band-mid",
+  "band-high": "band-high",
+  "band-low-bar": "band-low-bar",
+  "band-mid-bar": "band-mid-bar",
+  "band-high-bar": "band-high-bar",
+  "meter-track": "meter-track",
 };
 
 const cssTokenBlock = (palette, selector, comment) => {

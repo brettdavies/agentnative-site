@@ -204,11 +204,11 @@ describe('handleLiveScorePage — happy path', () => {
     expect(html).toContain('streams stdout');
   });
 
-  test('renders principle-met badge alongside score badge', async () => {
+  test('renders principle-met score cell alongside pass-rate cell', async () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: CACHED_RIPGREP_PAYLOAD });
     const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
-    expect(html).toContain('scorecard-principle-badge');
+    expect(html).toContain('scorecell');
     expect(html).toContain('principles met');
     // SAMPLE_SCORECARD: P1 + P3 pass; P4 fail, P6 warn — 2/8 met.
     expect(html).toContain('2/8');
@@ -285,7 +285,9 @@ describe('handleLiveScorePage — happy path', () => {
     const env = makeEnv({ [CACHED_RIPGREP_KEY]: cleanPayload });
     const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     const html = await res.text();
-    expect(html).toContain('no issues found');
+    // Clean scorecard: no remediation boxes, and the scored row passes.
+    expect(html).not.toContain('class="remediation"');
+    expect(html).toContain('stpill--pass');
   });
 });
 

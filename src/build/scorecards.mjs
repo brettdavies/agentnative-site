@@ -27,7 +27,7 @@ const TOOL_NAME_RE = /^[a-z0-9-]+$/;
 // 0.5 or 0.6 until they are regenerated. Drop older versions once the full
 // rescore corpus stabilizes. Adding a version here without a corpus able to
 // satisfy it still fails the build at load.
-const SUPPORTED_SCHEMA_VERSIONS = new Set(['0.5', '0.6', '0.7']);
+export const SUPPORTED_SCHEMA_VERSIONS = new Set(['0.5', '0.6', '0.7']);
 
 // Mirrors `ExceptionCategory::to_kebab_str()` in
 // agentnative/src/principles/registry.rs (CLI v0.1.3). Adding a new variant

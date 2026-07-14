@@ -15,17 +15,19 @@ import { SPEC_VERSION } from './util.mjs';
 
 // Cohort-band fills, ascending. Bands and thresholds are the spec-side
 // contract (principles/scoring.md, docs/badge.md); this maps each to a hex
-// fill. The four eligible bands sit on the standard's own accent hues
-// (foundation.css --should/--may/--accent); orange and red are the
+// fill. Green/ochre/red sit on the generated score-band ramp's resolved
+// sRGB (foundation.css --band-high/--band-mid/--band-low); teal and navy
+// are the standard's own accent hues (--may/--accent); orange is the
 // below-floor warm alarm. Warm→cool reads as upward progress, and the navy
-// --accent crowns Exemplary. Every fill clears WCAG AA against white badge
-// text (≥ 4.75:1).
+// --accent crowns Exemplary. The SVG can't read OKLCH CSS variables, so
+// these stay hand-maintained hex (KTD5) — re-resolve them when the ramp
+// changes. Every fill clears WCAG AA against white badge text (≥ 4.75:1).
 const BAND_EXEMPLARY = '#005da1'; // navy   — oklch(47% 0.16 250), --accent
 const BAND_STRONG = '#007b80'; //    teal   — oklch(53% 0.11 200), --may
-const BAND_SOLID = '#0a7e3a'; //     green  — oklch(52% 0.14 150)
-const BAND_QUALIFIED = '#976200'; // ochre  — oklch(54% 0.13 72),  --should
+const BAND_SOLID = '#00792f'; //     green  — oklch(50% 0.15 150), --band-high
+const BAND_QUALIFIED = '#a46400'; // ochre  — oklch(56% 0.13 70),  --band-mid
 const BAND_BELOW = '#bf5200'; //     orange — oklch(57% 0.16 47)
-const BAND_CRITICAL = '#af2b25'; //  red    — oklch(50% 0.17 28),  --must
+const BAND_CRITICAL = '#b63230'; //  red    — oklch(52% 0.17 26),  --band-low
 
 // Badge eligibility floor (percent). Authoritative definition lives in
 // `src/shared/scorecard-format.mjs` so the Worker live-score renderer

@@ -30,6 +30,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { principleTier } from '../shared/scorecard-format.mjs';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
 // actual order-enforcer. Shared helpers (content.mjs, render.mjs,
@@ -45,10 +46,13 @@ import { buildSitemap } from './10-sitemap.mjs';
 import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
+import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
+import { emitWebScorecardSurface, loadWebSeed } from './14-web-scorecards-emit.mjs';
+import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
-import { absolutifyMarkdownLinks, parseFilename, sortedGlob } from './util.mjs';
+import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -158,26 +162,63 @@ export async function build() {
   // 2. Sorted principle files.
   const principleFiles = await sortedGlob(PRINCIPLES_DIR);
 
-  // 3. Render each principle.
+  // 3. Render each principle. Two passes: parse + render everything first
+  // so the page pass can build prev/next pagers from neighbor titles.
   const principles = [];
   for (const file of principleFiles) {
     const { n, slug } = parseFilename(file);
     const source = await readFile(file, 'utf8');
     let html = await renderMarkdown(source);
     // Pin H1 id + permalink href to the filename-derived locked slug so
-    // authored H1 prose can't drift the §3.5 anchors.
+    // authored H1 prose can't drift the §3.5 anchors. The "P{n}:" prefix is
+    // stripped from the DISPLAYED H1 only — the doc__head numeral carries it
+    // and the markdown twin keeps the authored bytes.
     html = html
       .replace(/<h1 id="[^"]*"/, `<h1 id="p${n}-${slug}"`)
-      .replace(/(<h1 id="p\d+-[^"]*">[^<]*<a\s[^>]*href=")#[^"]*"/, `$1#p${n}-${slug}"`);
+      .replace(/(<h1 id="p\d+-[^"]*">[^<]*<a\s[^>]*href=")#[^"]*"/, `$1#p${n}-${slug}"`)
+      .replace(new RegExp(`(<h1 id="p${n}-[^"]*">)P${n}:\\s*`), '$1');
     const title = extractTitle(source);
     const description = extractDescription(source);
+    const shortDesc = extractDefinitionParagraph(source);
+    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
+  }
 
-    // 4. Per-principle HTML page.
+  // 4. Per-principle pages — the rendered markdown wrapped in the reading
+  // treatment: breadcrumb, tier-colored P# head, audit-note callout, and a
+  // prev/next pager. The markdown twin stays byte-identical to source.
+  for (const [i, p] of principles.entries()) {
+    const { n, title, description, source } = p;
+    const tier = principleTier(n);
+    const shortTitle = (t) => escHtml(t.replace(/^P\d+:\s*/, ''));
+
+    const crumb = `<div class="crumb"><a href="/#principles">The standard</a><span class="sep" aria-hidden="true">/</span><span>P${n} of ${principles.length}</span></div>`;
+    const head = `<div class="doc__head tier-${tier.toLowerCase()}"><span class="doc__num">P${n}</span><span class="tier">${tier}</span></div>`;
+    const auditNote = `<div class="audit-note">Audited live by <code>anc audit &lt;tool&gt; --principle ${n}</code>: behavioral and source checks.</div>`;
+
+    const prev =
+      i > 0
+        ? `<a class="prev" href="/p${principles[i - 1].n}"><span class="dir">◂ prev</span><span class="t">P${principles[i - 1].n} · ${shortTitle(principles[i - 1].title)}</span></a>`
+        : `<a class="prev" href="/#principles"><span class="dir">◂ prev</span><span class="t">The standard</span></a>`;
+    const next =
+      i < principles.length - 1
+        ? `<a class="next" href="/p${principles[i + 1].n}"><span class="dir">next ▸</span><span class="t">P${principles[i + 1].n} · ${shortTitle(principles[i + 1].title)}</span></a>`
+        : `<a class="next" href="/scorecards"><span class="dir">next ▸</span><span class="t">The ANC 100</span></a>`;
+    const pager = `<nav class="pager" aria-label="Principle pages">${prev}${next}</nav>`;
+
+    // The audit-note sits ahead of the Requirements section when present,
+    // else after the content.
+    let body = p.html;
+    if (body.includes('<h2 id="requirements">')) {
+      body = body.replace('<h2 id="requirements">', `${auditNote}<h2 id="requirements">`);
+    } else {
+      body += auditNote;
+    }
+
     const page = emitShell({
       title,
       description,
       canonicalPath: `/p${n}`,
-      bodyHtml: html,
+      bodyHtml: `<article class="container doc">${crumb}${head}${body}${pager}</article>`,
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],
     });
@@ -187,27 +228,11 @@ export async function build() {
     // so `Accept: text/markdown` agents fetching /p<n>.md get a self-contained
     // document. Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
     await writeFile(join(DIST_DIR, `p${n}.md`), absolutifyMarkdownLinks(source));
-
-    const shortDesc = extractDefinitionParagraph(source);
-    principles.push({ n, slug, title, description, source, html, filename: file, shortDesc });
   }
 
-  // 6. Homepage — hero + principle listing (links to /p{N} pages).
-  const { introTitle, introSummary, introSource, specContextSource, useSource } = await emitHomepage({
-    distDir: DIST_DIR,
-    contentDir: CONTENT_DIR,
-    themeInit,
-    principles,
-  });
-
-  // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
-  const subPageData = await emitSubPages({
-    distDir: DIST_DIR,
-    contentDir: CONTENT_DIR,
-    themeInit,
-  });
-
-  // 8. Scorecard surface — leaderboard, per-tool pages, badges, coverage, skill.
+  // 6. Scorecard surface — leaderboard, per-tool pages, badges, coverage,
+  // skill. Runs BEFORE the homepage because the homepage board panes render
+  // the computed leaderboard rows.
   const { leaderboard, scorecardPaths, badgePaths, coverageMarkdown, skillData, skillMarkdown } =
     await emitScorecardSurface({
       distDir: DIST_DIR,
@@ -218,6 +243,31 @@ export async function build() {
       scorecardsDir: SCORECARDS_DIR,
       themeInit,
     });
+
+  // 6a. Web seed — loaded here (not in stage 11d) because the homepage web
+  // board pane renders the same entries; 11d receives them preloaded.
+  const webSeed = await loadWebSeed(
+    join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'),
+    join(REPO_ROOT, 'scorecards', 'web'),
+  );
+  for (const w of webSeed.warnings) console.warn(`warning: ${w}`);
+
+  // 6b. Homepage — instrument hero + toggle-driven boards + spec index.
+  const { introTitle, introSummary, introSource, specContextSource, useSource } = await emitHomepage({
+    distDir: DIST_DIR,
+    contentDir: CONTENT_DIR,
+    themeInit,
+    principles,
+    leaderboard,
+    webEntries: webSeed.entries,
+  });
+
+  // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
+  const subPageData = await emitSubPages({
+    distDir: DIST_DIR,
+    contentDir: CONTENT_DIR,
+    themeInit,
+  });
 
   // 9. llms.txt + llms-full.txt (includes scorecard + skill sections).
   await emitLlmsSurface({
@@ -248,9 +298,22 @@ export async function build() {
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
   // so it stays out of the sitemap.
+  // /web (web leaderboard) is indexable; the per-domain /web/<domain>
+  // result pages are Worker-served with X-Robots-Tag: noindex (like the
+  // live-score pages) so they stay out of the sitemap.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
-    extraPaths: ['/scorecards', '/coverage', '/install', '/skill', '/badge', ...scorecardPaths],
+    extraPaths: [
+      '/scorecards',
+      '/coverage',
+      '/install',
+      '/skill',
+      '/badge',
+      '/web',
+      '/web-audit',
+      '/web-scorecard-schema',
+      ...scorecardPaths,
+    ],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
 
@@ -270,10 +333,50 @@ export async function build() {
   // in 11a-discovery-emit.mjs.
   const discoveryStats = await emitDiscovery({ distDir: DIST_DIR });
 
+  // 11a-bis. Web-audit fix skills — one content page per check at
+  // /web-audit/skill/<id> (+ .md twin), generated from the registry +
+  // remediation catalog. Runs BEFORE the agent-readiness stage because
+  // the agent-skills discovery index lists these pages with digests.
+  const webAuditSkillStats = await emitWebAuditSkillPages({
+    distDir: DIST_DIR,
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
+    themeInit,
+  });
+
   // 11b. Agent-readiness discovery surfaces — .well-known/{api-catalog,
   // oauth-*, agent-skills/index.json} + auth.md. MCP descriptor aliases are
   // Worker-served from dist/_internal/mcp-server-card.json (SEP-1649 canonical path).
-  const agentReadinessStats = await emitAgentReadiness({ distDir: DIST_DIR });
+  const agentReadinessStats = await emitAgentReadiness({
+    distDir: DIST_DIR,
+    webAuditSkills: webAuditSkillStats.pages,
+  });
+
+  // 11c. Web-audit registry — normalized JSON projection of the vendored
+  // 32-check registry, consumed by the Worker's web-audit engine via
+  // env.ASSETS.fetch. Same /_internal/ privacy posture as the MCP catalog.
+  const webAuditRegistryStats = await emitWebAuditRegistry({
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    distDir: DIST_DIR,
+  });
+
+  // 11c-bis. Web-audit remediation catalog — projected from remediation.yaml,
+  // validated 1:1 against the registry check ids, read per-isolate by the
+  // get_web_remediation MCP tool.
+  const webRemediationStats = await emitWebRemediation({
+    remediationPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'remediation.yaml'),
+    registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
+    distDir: DIST_DIR,
+  });
+
+  // 11d. Web leaderboard + per-seed scorecard projections. Consumes the
+  // seed loaded at stage 6a; emits /web + the Worker-served /web/<domain>
+  // fallback JSON under _internal.
+  const webScorecardStats = await emitWebScorecardSurface({
+    distDir: DIST_DIR,
+    seed: webSeed,
+    themeInit,
+  });
 
   // 12. Invariant check — fails fast if any critical contract slips.
   await runInvariantChecks(
@@ -306,6 +409,9 @@ export async function build() {
     mcpCatalog: mcpCatalogStats,
     discovery: discoveryStats,
     agentReadiness: agentReadinessStats,
+    webAuditRegistry: webAuditRegistryStats,
+    webRemediation: webRemediationStats,
+    webScorecards: webScorecardStats,
     minified: minifyStats,
   };
 }

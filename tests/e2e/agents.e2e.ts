@@ -86,6 +86,7 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     // Source of truth: subPages array in src/build/07-subpages.mjs.
     const expectedPages = [
       'audit',
+      'web-audit',
       'install',
       'about',
       'badge',
@@ -93,6 +94,9 @@ test.describe('llms.txt + llms-full.txt — live', () => {
       'contribute',
       'methodology',
       'scorecard-schema',
+      'web-scorecard-schema',
+      'mcp-skill',
+      'mcp',
     ];
     const pagesSection = body.slice(body.indexOf('## Pages')).split(/\n## /)[0];
     const pageLinks = pagesSection.match(/^-\s+\[[^\]]+\]\([^)]*\/([a-z-]+)\.md\)$/gm) ?? [];

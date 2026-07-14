@@ -1,26 +1,21 @@
-// Theme toggle — three states (light / dark / system). docs/DESIGN.md §4.9.
+// Theme button — one control, three states (light / dark / system).
+// docs/DESIGN.md §4.9.
 //
 // Markup (emitted by the build shell):
-//   <div class="theme-toggle" role="group" aria-label="Theme">
-//     <button data-theme-set="light"  aria-pressed="false">Light</button>
-//     <button data-theme-set="dark"   aria-pressed="false">Dark</button>
-//     <button data-theme-set="system" aria-pressed="true" >System</button>
-//   </div>
+//   <button class="theme-cycle" data-theme-cycle aria-label="Theme: system">◐</button>
 //
 // Behavior:
-//   - Click a button → set localStorage['theme'] and <html data-theme>.
-//   - "System" clears localStorage and removes data-theme, reverting to
-//     prefers-color-scheme.
-//   - aria-pressed reflects the active state; exactly one button is
-//     pressed at a time.
-//   - matchMedia listener updates aria-pressed on the system button when
-//     OS preference flips while system is active (no layout change —
-//     CSS already responds — just keeps ARIA honest).
+//   - Click cycles system → light → dark → system.
+//   - light/dark set localStorage['theme'] and <html data-theme>; system
+//     clears both, reverting to prefers-color-scheme.
+//   - aria-label and data-theme-choice reflect the active state so
+//     assistive tech (and e2e) can read the current choice.
 
 type ThemeChoice = 'light' | 'dark' | 'system';
 
 const STORAGE_KEY = 'theme';
-const BUTTON_SELECTOR = '[data-theme-set]';
+const BUTTON_SELECTOR = '[data-theme-cycle]';
+const CYCLE: ThemeChoice[] = ['system', 'light', 'dark'];
 
 function currentChoice(): ThemeChoice {
   try {
@@ -50,35 +45,27 @@ function applyChoice(choice: ThemeChoice) {
   }
 }
 
-function refreshPressed(choice: ThemeChoice) {
-  const buttons = document.querySelectorAll<HTMLButtonElement>(BUTTON_SELECTOR);
-  for (const btn of buttons) {
-    const match = btn.dataset.themeSet === choice;
-    btn.setAttribute('aria-pressed', String(match));
-  }
+function refreshButton(btn: HTMLButtonElement, choice: ThemeChoice) {
+  btn.setAttribute('aria-label', `Theme: ${choice}`);
+  btn.dataset.themeChoice = choice;
 }
 
 function init() {
   const buttons = document.querySelectorAll<HTMLButtonElement>(BUTTON_SELECTOR);
   if (buttons.length === 0) return;
 
-  refreshPressed(currentChoice());
+  const refreshAll = (choice: ThemeChoice) => {
+    for (const btn of buttons) refreshButton(btn, choice);
+  };
+  refreshAll(currentChoice());
 
   for (const btn of buttons) {
     btn.addEventListener('click', () => {
-      const choice = (btn.dataset.themeSet as ThemeChoice) ?? 'system';
-      applyChoice(choice);
-      refreshPressed(choice);
+      const next = CYCLE[(CYCLE.indexOf(currentChoice()) + 1) % CYCLE.length];
+      applyChoice(next);
+      refreshAll(next);
     });
   }
-
-  // Keep aria-pressed honest when the system preference flips during an
-  // active "system" session.
-  const media = window.matchMedia('(prefers-color-scheme: dark)');
-  const listener = () => {
-    if (currentChoice() === 'system') refreshPressed('system');
-  };
-  media.addEventListener?.('change', listener);
 }
 
 if (document.readyState === 'loading') {

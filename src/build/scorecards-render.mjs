@@ -7,10 +7,10 @@
 import {
   BADGE_ELIGIBILITY_FLOOR_PCT,
   escHtml,
+  renderMeter,
   buildScorecardBody as sharedBuildScorecardBody,
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   renderAudienceBanner as sharedRenderAudienceBanner,
-  renderCoverageSummary as sharedRenderCoverageSummary,
 } from '../shared/scorecard-format.mjs';
 
 const BADGE_FLOOR_DISPLAY_PCT = BADGE_ELIGIBILITY_FLOOR_PCT;
@@ -36,7 +36,7 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   // `badge.score_pct` — the CLI is canonical for the integer.
   const scoreCell = (entry) => {
     const pct = entry.scorecard.badge.score_pct;
-    return `<td class="lb-score" data-sort="${pct}">${pct}%</td>`;
+    return `<td class="lb-score" data-sort="${pct}">${renderMeter(pct)}</td>`;
   };
 
   const principleCell = (entry) => {
@@ -124,7 +124,6 @@ ${methodology}
 
 // Re-exported from shared for back-compat with existing callers (build,
 // tests). Definitions live in src/shared/scorecard-format.mjs.
-export const renderCoverageSummary = sharedRenderCoverageSummary;
 export const renderAudienceBanner = sharedRenderAudienceBanner;
 
 // -------------------------------------------------------------------

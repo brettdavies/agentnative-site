@@ -59,15 +59,26 @@ wrangler dev --env staging
 The site uses Cloudflare Workers, Durable Objects (Sandbox for live scoring), R2 (score cache), and KV (kill switch +
 rate limits). The full binding inventory is in [`wrangler.jsonc`](./wrangler.jsonc).
 
-## Pre-push hook
+## Git hooks
 
-The repo ships a pre-push hook that mirrors CI plus the prose-check stages CI doesn't run. Activate once after clone:
+The repo ships a pre-commit hook and a pre-push hook under `scripts/hooks/`. Activate both once after clone:
 
 ```bash
 git config core.hooksPath scripts/hooks
 ```
 
-Seven stages:
+### pre-commit
+
+Staged-file-scoped, mirrors the fast half of CI's `bun run lint`:
+
+1. **biome** (`biome check --staged`)
+2. **markdownlint-cli2** (staged `.md` files only)
+
+Keeps the commit loop fast; heavier stages stay in pre-push.
+
+### pre-push
+
+Mirrors CI plus the prose-check stages CI doesn't run. Eight stages:
 
 1. **lint** (`biome check` + `markdownlint-cli2`)
 2. **build** (`bun src/build/build.mjs`)
@@ -75,9 +86,10 @@ Seven stages:
 4. **wrangler dry-run** (`wrangler deploy --dry-run`, config + bundle validation)
 5. **pack-README drift** (`bun scripts/generate-pack-readme.mjs site --check`)
 6. **banned-fonts** (`bash scripts/check-banned-fonts.sh`, deployment-layer scan against `styles/site/BannedFonts.yml`)
-7. **prose-check** (`bash scripts/prose-check.sh`, Vale plus LanguageTool when reachable; skips cleanly otherwise)
+7. **shellcheck** (`shellcheck --severity=warning` over every tracked `*.sh` plus `scripts/hooks/*`)
+8. **prose-check** (`bash scripts/prose-check.sh`, Vale plus LanguageTool when reachable; skips cleanly otherwise)
 
-PRs that pass the hook locally also pass CI for stages 1-4; stages 5-7 are pre-push-only. Fix locally before pushing.
+PRs that pass the hook locally also pass CI for stages 1-4; stages 5-8 are pre-push-only. Fix locally before pushing.
 
 ## Pull requests
 

@@ -361,7 +361,7 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     expect(body.linkset).toEqual([]);
   });
 
-  test('GET /.well-known/mcp pointer alias returns the same body as the canonical server card', async () => {
+  test('GET /.well-known/mcp pointer alias 301s to the canonical server card', async () => {
     const seed = JSON.stringify({
       mcp_endpoint: 'https://anc.dev/mcp',
       url: 'https://anc.dev/mcp',
@@ -372,21 +372,15 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
     const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
     const alias = await worker.fetch(req('https://staging.example/.well-known/mcp'), env);
     expect(canonical.status).toBe(200);
-    expect(alias.status).toBe(200);
-    expect(await alias.text()).toBe(await canonical.text());
+    expect(alias.status).toBe(301);
+    expect(alias.headers.get('Location')).toBe('https://staging.example/.well-known/mcp/server-card.json');
   });
 
-  test('GET /mcp.json alias returns the same body as the canonical server card', async () => {
-    const seed = JSON.stringify({
-      mcp_endpoint: 'https://anc.dev/mcp',
-      url: 'https://anc.dev/mcp',
-      documentation: 'https://anc.dev/mcp-skill.md',
-      transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
-    });
-    const env = makeEnv({ '/_internal/mcp-server-card.json': seed });
-    const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
+  test('GET /mcp.json alias 301s to the canonical server card', async () => {
+    const env = makeEnv();
     const alias = await worker.fetch(req('https://staging.example/mcp.json'), env);
-    expect(await alias.text()).toBe(await canonical.text());
+    expect(alias.status).toBe(301);
+    expect(alias.headers.get('Location')).toBe('https://staging.example/.well-known/mcp/server-card.json');
   });
 
   test('GET /.well-known/agent-skills/index.json → application/json', async () => {

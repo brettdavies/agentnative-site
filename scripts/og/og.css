@@ -85,6 +85,37 @@ body {
 }
 .brand__tag { color: var(--fg-muted); font-weight: 400; }
 
+/* Score meter — the instrument's signature, top-right. Fill and numeral
+ * read anc's own audit (anc scores 100 on the ANC 100); re-check the
+ * board before bumping the number. Band tokens come from foundation.css. */
+.brand__meter {
+  margin-left: auto;
+  display: inline-grid;
+  grid-template-columns: 220px auto;
+  align-items: center;
+  gap: 14px;
+}
+.brand__meter-track {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--meter-track);
+  overflow: hidden;
+}
+.brand__meter-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--band-high-bar) 80%, white 20%), var(--band-high-bar));
+}
+.brand__meter-num {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-mono), var(--ff-tabular);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--band-high);
+}
+
 /* Manifesto. Three telegraphic statements, each governed by a color-coded
  * RFC 2119 keyword.
  *

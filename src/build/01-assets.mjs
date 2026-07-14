@@ -74,6 +74,9 @@ export async function copyAssets({ repoRoot, distDir }) {
 
   // 7. Client JS.
   const themeJs = await bundleClient(join(repoRoot, 'src/client/theme.ts'), join(distDir, 'js/theme.js'));
+  // Nav panel Escape-to-close (the checkbox itself is keyboard-operable
+  // without JS). Loaded with defer from every shell alongside theme.js.
+  const navJs = await bundleClient(join(repoRoot, 'src/client/nav.ts'), join(distDir, 'js/nav.js'));
   const clipboardJs = await bundleClient(join(repoRoot, 'src/client/clipboard.ts'), join(distDir, 'js/clipboard.js'));
   const leaderboardJs = await bundleClient(
     join(repoRoot, 'src/client/leaderboard.ts'),
@@ -83,9 +86,35 @@ export async function copyAssets({ repoRoot, distDir }) {
   // redirect to /live-score/<binary>). Loaded with defer from the
   // homepage shell only.
   const liveScoreJs = await bundleClient(join(repoRoot, 'src/client/live-score.ts'), join(distDir, 'js/live-score.js'));
+  // Web-audit form (validate + navigate to /web/scoring/<host>). Loaded with
+  // defer from the /web-audit page shell only.
+  const webAuditJs = await bundleClient(join(repoRoot, 'src/client/web-audit.ts'), join(distDir, 'js/web-audit.js'));
+  // In-progress scoring page (Turnstile + POST /api/audit-web + NDJSON stream
+  // + forward to /web/<domain>). Worker-served /web/scoring/<domain> loads it.
+  const webAuditScoringJs = await bundleClient(
+    join(repoRoot, 'src/client/web-audit-scoring.ts'),
+    join(distDir, 'js/web-audit-scoring.js'),
+  );
+  // Web leaderboard sort toggle (GLOBAL default, RELATIVE via ?sort=).
+  // Loaded with defer from the /web page shell only.
+  const webLeaderboardJs = await bundleClient(
+    join(repoRoot, 'src/client/web-leaderboard.ts'),
+    join(distDir, 'js/web-leaderboard.js'),
+  );
   const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, 'js/webmcp.js'));
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
-  return { themeInit, themeJs, clipboardJs, leaderboardJs, liveScoreJs, webmcpJs };
+  return {
+    themeInit,
+    themeJs,
+    navJs,
+    clipboardJs,
+    leaderboardJs,
+    liveScoreJs,
+    webAuditJs,
+    webAuditScoringJs,
+    webLeaderboardJs,
+    webmcpJs,
+  };
 }

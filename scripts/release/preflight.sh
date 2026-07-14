@@ -33,7 +33,9 @@
 # Flags:
 #   --env <env>          Preflight target: `staging` (default) or `local`. Also honored as $ENV.
 #                        Drives do-smoke, mcp, and dist URL + auth selection.
-#   --binary <name>      Fresh non-registry binary for do-smoke (default: $BINARY or `cowsay`)
+#   --binary <name>      Fresh non-registry binary for do-smoke (default: $BINARY or `emoj`). The name
+#                        resolves to a GitHub owner/repo via do_fixture_repo (emoj -> sindresorhus/emoj,
+#                        cowsay -> piuccio/cowsay; otherwise sindresorhus/<name>).
 #   --mcp-binary <name>  Fresh non-registry binary for mcp audit (default: $MCP_BINARY or `figlet`)
 #   --staging-url <url>  Override staging URL (default: https://agentnative-site-staging.brettdavies.workers.dev)
 #   --local-url <url>    Override local wrangler dev URL (default: http://localhost:8787)
@@ -67,7 +69,7 @@ readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 # Argument parsing -----------------------------------------------------------
 
 SUBCMD=""
-BINARY="${BINARY:-cowsay}"
+BINARY="${BINARY:-emoj}"
 MCP_BINARY="${MCP_BINARY:-figlet}"
 ENV="${ENV:-staging}"
 STAGING_URL="$DEFAULT_STAGING_URL"
@@ -276,6 +278,19 @@ gate_build() {
     fi
 }
 
+# Resolve a do-smoke binary name to the GitHub owner/repo the live scorer
+# fetches. The binary name drives the registry-membership precheck and the
+# share_url assertion; the owner/repo is the resolvable source. Names with no
+# mapped repo fall back to the sindresorhus namespace. A case statement keeps
+# this portable to bash 3.2.
+do_fixture_repo() {
+    case "$1" in
+        emoj)   echo "sindresorhus/emoj" ;;
+        cowsay) echo "piuccio/cowsay" ;;
+        *)      echo "sindresorhus/$1" ;;
+    esac
+}
+
 # Gate: do-smoke (live-scoring DO against staging) --------------------------
 
 gate_do_smoke() {
@@ -311,9 +326,10 @@ gate_do_smoke() {
     fi
 
     # POST a non-registry github-url and assess.
-    local body
+    local repo body
+    repo=$(do_fixture_repo "$BINARY")
     body=$(curl -fsSL -K "$cfg" -H 'Content-Type: application/json' \
-        -d "{\"input\":\"https://github.com/sindresorhus/${BINARY}\",\"turnstile_token\":\"x\"}" \
+        -d "{\"input\":\"https://github.com/${repo}\",\"turnstile_token\":\"x\"}" \
         "${ENV_URL}/api/score" 2>/dev/null || true)
     rm -f "$cfg"
 

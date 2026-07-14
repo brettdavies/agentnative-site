@@ -10,8 +10,10 @@ import { registerRegistryTools } from './registry';
 import { registerScorecardAuditTool, type ScorecardAuditEnv } from './scorecard-audit';
 import { registerScorecardReadTool, type ScorecardReadEnv } from './scorecard-read';
 import { registerSpecTools } from './spec';
+import { registerWebAuditTools, type WebAuditToolsEnv } from './web-audit';
+import { registerWebRemediationTool, type WebRemediationEnv } from './web-remediation';
 
-export interface RegisterToolsEnv extends ScorecardReadEnv, ScorecardAuditEnv {}
+export interface RegisterToolsEnv extends ScorecardReadEnv, ScorecardAuditEnv, WebAuditToolsEnv, WebRemediationEnv {}
 
 export function registerTools(server: McpServer, catalog: Catalog, env: RegisterToolsEnv): void {
   registerRegistryTools(server, catalog);
@@ -19,4 +21,6 @@ export function registerTools(server: McpServer, catalog: Catalog, env: Register
   registerSpecTools(server, catalog);
   registerScorecardReadTool(server, catalog, env);
   registerScorecardAuditTool(server, catalog, env);
+  registerWebAuditTools(server, env);
+  registerWebRemediationTool(server, env);
 }

@@ -1,0 +1,168 @@
+# Spike image firewall (KD1).
+#
+# Enforces the technical control that the brew-v6 live-scoring spike image
+# cannot reach a production registry. The Dockerfile sets
+# `LABEL com.agentnative.image-class=spike`; this workflow validates the
+# label on every change to docker/spike/** and serves as the gate any
+# image-push workflow must consult before pushing to the production
+# registry.
+#
+# Plan: docs/plans/2026-06-12-001-feat-brew-v6-live-scoring-spike-plan.md
+#       (U1 — KD1 firewall as technical control)
+#
+# Layers:
+#   1. label-check (always) — grep the spike Dockerfile for the LABEL
+#      directive. Fast, catches any change that removes the label
+#      without rebuilding.
+#   2. label-propagation (on Dockerfile changes) — build the spike
+#      image, inspect the label, retag, re-inspect. Confirms the label
+#      lands on the built image and propagates through `docker tag`
+#      (so retag-then-push trips this gate).
+#   3. forbid-prod-tag (always) — scan the spike Dockerfile for any
+#      production registry references. The spike image must never
+#      tag itself as `anc-sandbox` or push to a CF managed registry.
+#
+# Any workflow that pushes Docker images (none today; this is forward-
+# looking) MUST add a step that calls `docker inspect --format
+# '{{ index .Config.Labels "com.agentnative.image-class" }}' <tag>`
+# and refuses to push if the result equals `spike`. This workflow is
+# the documented source of truth for that gate.
+
+name: spike-image-firewall
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'docker/spike/**'
+      - '.github/workflows/spike-image-firewall.yml'
+  pull_request:
+    paths:
+      - 'docker/spike/**'
+      - '.github/workflows/spike-image-firewall.yml'
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  label-check:
+    name: Spike Dockerfile carries KD1 label
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Assert LABEL com.agentnative.image-class=spike is set
+        run: |
+          set -euo pipefail
+          dockerfile=docker/spike/Dockerfile
+          if [[ ! -f "$dockerfile" ]]; then
+            echo "::error file=$dockerfile::missing — spike firewall cannot validate a missing Dockerfile" >&2
+            exit 1
+          fi
+          if ! grep -qE '^LABEL[[:space:]]+com\.agentnative\.image-class=spike([[:space:]]|$)' "$dockerfile"; then
+            echo "::error file=$dockerfile::missing LABEL com.agentnative.image-class=spike directive" >&2
+            echo "The KD1 firewall depends on this label. See docker/spike/README.md." >&2
+            exit 1
+          fi
+          echo "OK: $dockerfile carries the KD1 label."
+
+  forbid-prod-tag:
+    name: Spike Dockerfile does not reference production registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Scan for production registry references
+        run: |
+          set -euo pipefail
+          # The spike image must not tag itself, push to, or otherwise
+          # reference the CF managed production registry or the
+          # `anc-sandbox` production tag. The bare token `anc-sandbox`
+          # (not `anc-sandbox-spike`) in the Dockerfile is a smell;
+          # `registry.cloudflare.com` is the production registry host.
+          forbidden_patterns=(
+            'registry\.cloudflare\.com'
+            'anc-sandbox:[^a-z]'
+          )
+          dockerfile=docker/spike/Dockerfile
+          violations=0
+          for pattern in "${forbidden_patterns[@]}"; do
+            if grep -nE "$pattern" "$dockerfile" | grep -vE 'anc-sandbox-spike|anc-sandbox:local|# .*anc-sandbox' >/dev/null 2>&1; then
+              echo "::error file=$dockerfile::matches forbidden pattern: $pattern" >&2
+              grep -nE "$pattern" "$dockerfile" >&2 || true
+              violations=$((violations + 1))
+            fi
+          done
+          if [[ $violations -gt 0 ]]; then
+            echo "Production registry / tag references found in the spike Dockerfile. See docker/spike/README.md." >&2
+            exit 1
+          fi
+          echo "OK: $dockerfile carries no production registry references."
+
+  label-propagation:
+    name: Built image carries label and survives retag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The build is heavy (sandbox base + brew install) so this job only
+    # fires when the Dockerfile or build script actually changes. The
+    # static label-check above runs on every trigger and catches the
+    # common regression (label removal) without rebuilding.
+    if: >-
+      contains(toJSON(github.event.head_commit.modified), 'docker/spike/Dockerfile') ||
+      contains(toJSON(github.event.head_commit.added), 'docker/spike/Dockerfile') ||
+      contains(toJSON(github.event.head_commit.modified), 'docker/spike/build.sh') ||
+      github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build sandbox base
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build \
+            --progress=plain \
+            -f docker/sandbox/Dockerfile \
+            -t anc-sandbox:local \
+            docker/sandbox/
+
+      - name: Build spike image
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build \
+            --progress=plain \
+            --build-arg SANDBOX_TAG=anc-sandbox:local \
+            -f docker/spike/Dockerfile \
+            -t anc-sandbox-spike:ci \
+            .
+
+      - name: Inspect KD1 label on built image
+        run: |
+          set -euo pipefail
+          value="$(docker inspect --format '{{ index .Config.Labels "com.agentnative.image-class" }}' anc-sandbox-spike:ci)"
+          if [[ "$value" != "spike" ]]; then
+            echo "::error::built image missing com.agentnative.image-class=spike label (got: '$value')" >&2
+            exit 1
+          fi
+          echo "OK: built image carries com.agentnative.image-class=spike."
+
+      - name: Label survives `docker tag` (firewall retag-defense)
+        run: |
+          set -euo pipefail
+          docker tag anc-sandbox-spike:ci anc-sandbox-fake-prod:test
+          value="$(docker inspect --format '{{ index .Config.Labels "com.agentnative.image-class" }}' anc-sandbox-fake-prod:test)"
+          if [[ "$value" != "spike" ]]; then
+            echo "::error::label did not propagate through docker tag (got: '$value')" >&2
+            echo "If this fails, KD1 firewall cannot rely on retag-defense — the label must travel with the image." >&2
+            exit 1
+          fi
+          echo "OK: label propagates through docker tag (retag-defense intact)."

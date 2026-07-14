@@ -54,6 +54,8 @@ function attachPreButtons() {
   const pres = document.querySelectorAll<HTMLPreElement>('main pre');
   for (const pre of pres) {
     if (pre.dataset.copyAttached === 'true') continue;
+    // Remediation prompts have their own header copy-prompt button.
+    if (pre.matches('.remediation__body')) continue;
 
     // Wrap the pre in a positioning container BEFORE attaching the copy
     // button. The pre keeps `overflow-x: auto` for its code; the button
@@ -102,9 +104,46 @@ function attachAnchorCopy() {
   }
 }
 
+function attachPromptButtons() {
+  const buttons = document.querySelectorAll<HTMLButtonElement>('[data-copy-prompt]');
+  for (const btn of buttons) {
+    if (btn.dataset.copyAttached === 'true') continue;
+    btn.addEventListener('click', async () => {
+      const prompt = btn.closest('.remediation')?.querySelector('[data-remediation-prompt]')?.textContent ?? '';
+      if (prompt && (await copyText(prompt))) flashCopied(btn);
+    });
+    btn.dataset.copyAttached = 'true';
+  }
+}
+
+// Copy-without-render: a hidden `[data-copy-text]` carrier holds a prompt
+// that is never in the visible DOM. The button is attached client-side, so
+// a no-JS render shows no dead control (the prose + resource links are the
+// no-JS affordance). Used by web-audit result pages and fix-skill pages.
+function attachDataButtons() {
+  const carriers = document.querySelectorAll<HTMLElement>('[data-copy-text]');
+  for (const carrier of carriers) {
+    if (carrier.dataset.copyAttached === 'true') continue;
+    const text = carrier.getAttribute('data-copy-text') ?? '';
+    if (!text) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy-button copy-button--prompt';
+    btn.setAttribute('aria-label', 'Copy the fix prompt for your coding agent');
+    btn.innerHTML = '<span data-copy-label>Copy prompt</span>';
+    btn.addEventListener('click', async () => {
+      if (await copyText(text)) flashCopied(btn);
+    });
+    carrier.after(btn);
+    carrier.dataset.copyAttached = 'true';
+  }
+}
+
 function init() {
   attachPreButtons();
   attachAnchorCopy();
+  attachPromptButtons();
+  attachDataButtons();
 }
 
 if (document.readyState === 'loading') {
