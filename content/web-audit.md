@@ -5,20 +5,7 @@ surfaces, its machine-readable content (`llms.txt`, OpenAPI, JSON Schemas), its 
 policy. The result is a web scorecard with per-check evidence and copy-paste fixes, at a shareable
 [`/web/<domain>`](/web) page.
 
-<section class="audit-hero" aria-labelledby="web-audit-heading" data-web-audit-section>
-  <h2 id="web-audit-heading" class="audit-hero__title">Score a website, live.</h2>
-  <p class="audit-hero__lede">Enter a public URL. We open an in-progress page that streams each check as it resolves, then forwards to a shareable <code>/web/&lt;domain&gt;</code> scorecard.</p>
-  <form class="board-try audit-hero__form" method="get" action="/web/scoring" novalidate data-web-audit-form>
-    <input id="web-audit-input" name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" required aria-label="Website URL" aria-describedby="web-audit-help" data-web-audit-input />
-    <button type="submit" class="btn btn--primary" data-web-audit-submit>Audit</button>
-  </form>
-  <p id="web-audit-help" class="live-score__help">
-    or try
-    <button type="button" class="live-score__chip" data-web-audit-example="anc.dev" aria-label="Try example: anc.dev"><code>anc.dev</code></button>,
-    <button type="button" class="live-score__chip" data-web-audit-example="modelcontextprotocol.io" aria-label="Try example: modelcontextprotocol.io"><code>modelcontextprotocol.io</code></button>.
-  </p>
-  <p class="live-score__status" data-web-audit-status role="status" aria-live="polite" hidden></p>
-</section>
+{{WEB_AUDIT_FORM}}
 
 The browser audit runs with JavaScript and a Turnstile challenge. Agents and scripts should call the
 [`audit_website`](/mcp) MCP tool instead, which accepts a full URL and needs no browser.

@@ -61,6 +61,12 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `content/*.md`: markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
+- **Interactive widgets never live in `content/*.md`.** The `.md` twin and `llms-full.txt` serve the markdown source
+  verbatim, so a raw `<form>`, `<input>`, or `<button>` leaks dead controls into the agent-facing surface. A page that
+  needs a browser widget declares a `widget` slot in `src/build/07-subpages.mjs` (a `{{PLACEHOLDER}}` that renders as
+  HTML in the page and as a prose pointer in the twin); the homepage form lives the same way in
+  `src/build/06-homepage.mjs`. Content markdown stays prose. Enforced by `tests/content-no-form-widgets.test.ts` and the
+  `scripts/hooks/pre-commit` widget guard.
 - `/llms.txt`, `/llms-full.txt`: llmstxt.org convention (summary index + full concatenated spec)
 - `/mcp`: streamable HTTP Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
   canonical server card at `/.well-known/mcp/server-card.json` (legacy aliases `/.well-known/mcp`, `/mcp.json`,
