@@ -62,7 +62,7 @@ test.describe('web audit — streaming form and shareable result', () => {
     ]);
     await page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 });
     expect(typeof sawStreaming).toBe('boolean');
-    await expect(page.locator('.scorecard-score-badge__pct')).toContainText('%');
+    await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
     await expect(page.locator('.scorecard-audits')).toBeVisible();
   });
 
@@ -105,9 +105,9 @@ test.describe('web audit — streaming form and shareable result', () => {
 
   test('the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {
     await page.goto(`/web/${TARGET_DOMAIN}`);
-    await expect(page.locator('.scorecard-score-badge__pct')).toContainText('%');
-    await expect(page.locator('.scorecard-score-badge__label')).toContainText('site score');
-    await expect(page.locator('.scorecard-summary__note')).toContainText('Global:');
+    await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
+    await expect(page.locator('.scorecard-hero .bigscore__l').first()).toContainText('site score');
+    await expect(page.locator('.scorecard-hero__note')).toContainText('maximally agent-ready');
     const groups = page.locator('.audit-group__title');
     await expect(groups.first()).toContainText('Discoverability');
     await expect(page.locator('.audit-group__rollup').first()).toContainText('/');

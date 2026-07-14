@@ -65,12 +65,15 @@ export async function loadWebSeed(seedPath, scorecardsWebDir) {
 /**
  * Emit the web leaderboard page + per-seed scorecard projections.
  *
- * @param {{ distDir: string, seedPath: string, scorecardsWebDir: string, themeInit: string }} args
+ * The seed can be passed preloaded (build.mjs loads it once and shares it
+ * with the homepage board) or loaded here from seedPath/scorecardsWebDir.
+ *
+ * @param {{ distDir: string, themeInit: string, seed?: { entries: Array, warnings: string[] }, seedPath?: string, scorecardsWebDir?: string }} args
  * @returns {Promise<{ webPaths: string[], entryCount: number, warnings: string[] }>}
  */
-export async function emitWebScorecardSurface({ distDir, seedPath, scorecardsWebDir, themeInit }) {
-  const { entries, warnings } = await loadWebSeed(seedPath, scorecardsWebDir);
-  for (const w of warnings) console.warn(`warning: ${w}`);
+export async function emitWebScorecardSurface({ distDir, seedPath, scorecardsWebDir, themeInit, seed }) {
+  const { entries, warnings } = seed ?? (await loadWebSeed(seedPath, scorecardsWebDir));
+  if (!seed) for (const w of warnings) console.warn(`warning: ${w}`);
 
   // Per-seed scorecard projection the Worker reads on an R2 miss, plus an
   // index.json the list_website_audits MCP tool reads for board summaries.

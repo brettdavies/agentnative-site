@@ -69,7 +69,8 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         title,
         description,
         canonicalPath: `/${name}`,
-        bodyHtml: html,
+        // Every subpage renders inside the shared reading treatment.
+        bodyHtml: `<article class="container doc">${html}</article>`,
         themeInitJs: themeInit,
         extraScripts: extraScripts ?? (name === 'mcp' ? [WEBMCP_SCRIPT] : []),
       }),

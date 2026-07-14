@@ -32,17 +32,28 @@ function q<T extends Element>(root: ParentNode, sel: string): T | null {
 function init(): void {
   const form = q<HTMLFormElement>(document, '[data-web-audit-form]');
   if (!form) return;
+  // Chips, status, and the results table are siblings of the form inside
+  // the audit-hero section, so they resolve against the section scope.
+  const scope = (form.closest('[data-web-audit-section]') as HTMLElement | null) ?? document.body;
   const input = q<HTMLInputElement>(form, '[data-web-audit-input]');
   const submit = q<HTMLButtonElement>(form, '[data-web-audit-submit]');
-  const status = q<HTMLElement>(form, '[data-web-audit-status]');
-  const results = q<HTMLElement>(document, '[data-web-audit-results]');
+  const status = q<HTMLElement>(scope, '[data-web-audit-status]');
+  const results = q<HTMLElement>(scope, '[data-web-audit-results]');
   if (!input || !submit || !status || !results) return;
 
-  for (const chip of form.querySelectorAll<HTMLButtonElement>('[data-web-audit-example]')) {
+  for (const chip of scope.querySelectorAll<HTMLButtonElement>('[data-web-audit-example]')) {
     chip.addEventListener('click', () => {
       input.value = chip.dataset.webAuditExample ?? '';
       input.focus();
     });
+  }
+
+  // Prefill from ?url= — the homepage's web try-form navigates here as a
+  // plain GET so the toggle keeps working without JS.
+  const requested = new URL(window.location.href).searchParams.get('url');
+  if (requested && !input.value) {
+    input.value = requested;
+    input.focus();
   }
 
   const setStatus = (text: string): void => {

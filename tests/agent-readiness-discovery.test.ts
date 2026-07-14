@@ -488,9 +488,9 @@ describe('site shell MCP discoverability (emitShell)', () => {
 });
 
 describe('homepage MCP prose (built dist/)', () => {
-  test('hero__use-it links to the /mcp endpoint and /mcp-skill guide', async () => {
+  test('use-note links to the /mcp endpoint and /mcp-skill guide', async () => {
     const html = await readFile(join(DIST_DIR, 'index.html'), 'utf8');
-    const useIt = html.match(/<p class="hero__use-it">[\s\S]*?<\/p>/)?.[0] ?? '';
+    const useIt = html.match(/<p class="use-note">[\s\S]*?<\/p>/)?.[0] ?? '';
     expect(useIt.length).toBeGreaterThan(0);
     expect(useIt).toContain('MCP');
     expect(useIt).toContain('href="/mcp"');

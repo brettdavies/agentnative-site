@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Fixture for prove-has-toggle.mjs: a minimal copy of the homepage's
+     CSS-only surface toggle. Hidden radios + :has() swap every [data-s]
+     pane (board, spec list, try form) across sibling sections that share
+     the .scope ancestor, with zero JS. Mirrors the toggle-plumbing rules
+     in src/styles/site.css — if those rules change shape, update this
+     fixture to match before trusting a green run. -->
+<html lang="en"><head><meta charset="utf-8"><style>
+  [data-s="web"] { display: none; }
+  .scope:has(#s-web:checked) [data-s="cli"] { display: none; }
+  .scope:has(#s-web:checked) [data-s="web"] { display: block; }
+  .scope:has(#s-web:checked) .board-try[data-s="web"] { display: flex; }
+  .scope:has(#s-web:checked) ol[data-s="web"] { display: grid; }
+</style></head>
+<body>
+<div class="scope">
+  <section id="board">
+    <div class="seg">
+      <input type="radio" name="surface" id="s-cli" checked><label for="s-cli">CLI</label>
+      <input type="radio" name="surface" id="s-web"><label for="s-web">Website</label>
+    </div>
+    <form class="board-try" data-s="cli"><input value="ripgrep" aria-label="cli input"></form>
+    <form class="board-try" data-s="web"><input value="anc.dev" aria-label="web input"></form>
+    <div class="board" data-s="cli" id="board-cli">CLI BOARD</div>
+    <div class="board" data-s="web" id="board-web">WEB BOARD</div>
+  </section>
+  <section id="principles">
+    <ol data-s="cli" id="spec-cli"><li>P1</li></ol>
+    <ol data-s="web" id="spec-web"><li>C1</li></ol>
+  </section>
+</div>
+</body></html>

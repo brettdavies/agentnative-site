@@ -74,6 +74,9 @@ export async function copyAssets({ repoRoot, distDir }) {
 
   // 7. Client JS.
   const themeJs = await bundleClient(join(repoRoot, 'src/client/theme.ts'), join(distDir, 'js/theme.js'));
+  // Nav panel Escape-to-close (the checkbox itself is keyboard-operable
+  // without JS). Loaded with defer from every shell alongside theme.js.
+  const navJs = await bundleClient(join(repoRoot, 'src/client/nav.ts'), join(distDir, 'js/nav.js'));
   const clipboardJs = await bundleClient(join(repoRoot, 'src/client/clipboard.ts'), join(distDir, 'js/clipboard.js'));
   const leaderboardJs = await bundleClient(
     join(repoRoot, 'src/client/leaderboard.ts'),
@@ -96,5 +99,5 @@ export async function copyAssets({ repoRoot, distDir }) {
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
-  return { themeInit, themeJs, clipboardJs, leaderboardJs, liveScoreJs, webAuditJs, webLeaderboardJs, webmcpJs };
+  return { themeInit, themeJs, navJs, clipboardJs, leaderboardJs, liveScoreJs, webAuditJs, webLeaderboardJs, webmcpJs };
 }

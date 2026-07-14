@@ -6,36 +6,43 @@ import { expect, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
 
 test.describe('cold HN land → browse principles → theme dark → reload still dark', () => {
-  test('landing on / shows hero + principle listing with 8 entries', async ({ page }) => {
+  test('landing on / shows hero + spec index with 8 principle rows', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.hero__title')).toBeVisible();
-    const entries = page.locator('.principle-entry');
+    const entries = page.locator('.spec[data-s="cli"] .spec__row');
     await expect(entries).toHaveCount(8);
   });
 
-  test('clicking a principle entry navigates to its detail page', async ({ page }) => {
+  test('clicking a principle row navigates to its detail page', async ({ page }) => {
     await page.goto('/');
-    await page.locator('.principle-entry__link[href="/p3"]').click();
+    await page.locator('.spec__title[href="/p3"]').click();
     await expect(page).toHaveURL(/\/p3$/);
     await expect(page.locator('h1')).toContainText('Progressive Help Discovery');
   });
 
-  test('theme toggle persists across reload via localStorage', async ({ page }) => {
+  test('theme button cycles to dark and persists across reload via localStorage', async ({ page }) => {
     await page.goto('/');
-    await page.click('button[data-theme-set="dark"]');
+    const btn = page.locator('[data-theme-cycle]').first();
+    // Cycle: system → light → dark.
+    await btn.click();
+    await btn.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    // aria-pressed reflects state after reload.
-    await expect(page.locator('button[data-theme-set="dark"]')).toHaveAttribute('aria-pressed', 'true');
+    // data-theme-choice reflects state after reload.
+    await expect(page.locator('[data-theme-cycle]').first()).toHaveAttribute('data-theme-choice', 'dark');
   });
 
-  test('system toggle clears localStorage and removes data-theme', async ({ page }) => {
+  test('cycling back to system clears localStorage and removes data-theme', async ({ page }) => {
     await page.goto('/');
-    await page.click('button[data-theme-set="dark"]');
-    await page.click('button[data-theme-set="system"]');
+    const btn = page.locator('[data-theme-cycle]').first();
+    // system → light → dark → system.
+    await btn.click();
+    await btn.click();
+    await btn.click();
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
+    await expect(btn).toHaveAttribute('data-theme-choice', 'system');
   });
 });
 
@@ -73,6 +80,45 @@ test.describe('keyboard + a11y', () => {
     await page.goto('/p1');
     await injectAxe(page);
     await checkA11y(page, undefined, AXE_OPTS);
+  });
+
+  test('axe: 0 serious/critical violations on / in dark mode', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto('/');
+    await injectAxe(page);
+    await checkA11y(page, undefined, AXE_OPTS);
+  });
+
+  test('axe: 0 serious/critical violations on /p1 in dark mode', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto('/p1');
+    await injectAxe(page);
+    await checkA11y(page, undefined, AXE_OPTS);
+  });
+
+  // One representative page per remaining archetype, light and dark.
+  for (const path of ['/score/ripgrep', '/web/anc.dev', '/scorecards', '/web-audit']) {
+    for (const scheme of ['light', 'dark'] as const) {
+      test(`axe: 0 serious/critical violations on ${path} in ${scheme} mode`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.goto(path);
+        await injectAxe(page);
+        await checkA11y(page, undefined, AXE_OPTS);
+      });
+    }
+  }
+
+  test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {
+    for (const path of ['/p1', '/score/ripgrep', '/web/anc.dev', '/scorecards', '/web', '/web-audit', '/install']) {
+      for (const width of [390, 768, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(path);
+        const overflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(overflow, `overflow on ${path} at ${width}px`).toBeLessThanOrEqual(0);
+      }
+    }
   });
 });
 
@@ -142,18 +188,153 @@ test.describe('code-copy + anchor-copy', () => {
   });
 });
 
-test.describe('principle listing', () => {
-  test('index page has a principle listing with 8 entries', async ({ page }) => {
+test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
+  test('default (CLI) shows the CLI board, 8 principles, and the Score form', async ({ page }) => {
     await page.goto('/');
-    const entries = page.locator('.principle-entry');
-    await expect(entries).toHaveCount(8);
+    await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="web"]')).toBeHidden();
+    await expect(page.locator('.spec[data-s="cli"] .spec__row')).toHaveCount(8);
+    await expect(page.locator('.spec[data-s="web"]')).toBeHidden();
+    await expect(page.locator('form[data-live-score-form]')).toBeVisible();
+    // Board rows are threaded from the computed leaderboard — non-empty,
+    // each with a meter.
+    const rows = page.locator('.board[data-s="cli"] .lrow');
+    expect(await rows.count()).toBeGreaterThan(0);
+    await expect(rows.first().locator('.meter')).toBeVisible();
   });
 
-  test('principle entry links to its detail page', async ({ page }) => {
+  test('activating the Website radio swaps board, spec index, and input together (no JS)', async ({ browser }) => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const page = await ctx.newPage();
     await page.goto('/');
-    await page.locator('.principle-entry__link[href="/p5"]').click();
+    // CLI is the no-JS default.
+    await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+
+    await page.locator('label[for="s-web"]').click();
+    await expect(page.locator('.board[data-s="web"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
+    await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(5);
+    await expect(page.locator('.spec[data-s="cli"]')).toBeHidden();
+    await expect(page.locator('form[data-s="web"] input[name="url"]')).toBeVisible();
+    await expect(page.locator('form[data-live-score-form]')).toBeHidden();
+    await ctx.close();
+  });
+
+  test('principle row links to its detail page', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('.spec__title[href="/p5"]').click();
     await expect(page).toHaveURL(/\/p5$/);
     await expect(page.locator('h1')).toContainText('Safe Retries');
+  });
+
+  test('/p3 renders the reading treatment: tier tag, requirement groups, pager', async ({ page }) => {
+    await page.goto('/p3');
+    await expect(page.locator('.doc__head .doc__num')).toHaveText('P3');
+    await expect(page.locator('.doc__head .tier')).toHaveText('MUST');
+    const groups = page.locator('.normative');
+    expect(await groups.count()).toBeGreaterThan(0);
+    // Full borders / bg tints, never a side-stripe.
+    const borders = await groups.first().evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { left: s.borderLeftWidth, right: s.borderRightWidth, top: s.borderTopWidth };
+    });
+    expect(borders.left).toBe(borders.right);
+    expect(borders.left).toBe(borders.top);
+    await expect(page.locator('.audit-note')).toBeVisible();
+    // Pager navigates to the neighbor principle.
+    await page.locator('.pager .next').click();
+    await expect(page).toHaveURL(/\/p4$/);
+  });
+
+  test('no horizontal overflow at 390 / 768 / 1440', async ({ page }) => {
+    for (const width of [390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/');
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(overflow, `overflow at ${width}px`).toBeLessThanOrEqual(0);
+    }
+  });
+});
+
+test.describe('shell — grouped nav, hamburger, footer rows', () => {
+  test('desktop (1440): grouped nav links inline, hamburger hidden, footer rows present', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    await expect(nav).toBeVisible();
+    await expect(nav.locator('a')).toHaveCount(6);
+    await expect(page.locator('.nav-burger')).toBeHidden();
+    await expect(page.locator('.site-footer__source')).toBeVisible();
+    await expect(page.locator('.site-footer__meta')).toBeVisible();
+  });
+
+  test('mobile (390): inline links hidden, hamburger toggles the panel by pointer', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    await expect(nav).toBeHidden();
+    const burger = page.locator('.nav-burger');
+    await expect(burger).toBeVisible();
+    // 44px touch target.
+    const box = await burger.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+
+    await burger.click();
+    await expect(nav).toBeVisible();
+    await burger.click();
+    await expect(nav).toBeHidden();
+
+    await expect(page.locator('.site-footer__source')).toBeVisible();
+    await expect(page.locator('.site-footer__meta')).toBeVisible();
+  });
+
+  test('mobile (390): hamburger checkbox is keyboard-operable (Space opens and closes, no JS needed)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    const cb = page.locator('.nav-burger__cb');
+    await cb.focus();
+    await page.keyboard.press('Space');
+    await expect(nav).toBeVisible();
+    // The same focusable control closes the open panel.
+    await page.keyboard.press('Space');
+    await expect(nav).toBeHidden();
+  });
+
+  test('mobile (390): tagline is hidden under 640px', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await expect(page.locator('.site-brand__tag')).toBeHidden();
+  });
+
+  test('mobile (390): Escape closes the open panel and refocuses the hamburger', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    await page.locator('.nav-burger').click();
+    await expect(nav).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(nav).toBeHidden();
+    await expect(page.locator('.nav-burger__cb')).toBeFocused();
+  });
+});
+
+test.describe('scorecard remediation copy-prompt', () => {
+  test('copy prompt writes the remediation prompt to the clipboard', async ({ page, context, browserName }) => {
+    test.skip(browserName === 'webkit', 'WebKit does not support clipboard permission grants');
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/score/ripgrep');
+    const btn = page.locator('[data-copy-prompt]').first();
+    await btn.scrollIntoViewIfNeeded();
+    await btn.click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toContain('agent-native CLI standard');
+    expect(copied).toContain('Requirements: https://anc.dev/p');
   });
 });
 

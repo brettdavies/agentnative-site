@@ -1,4 +1,7 @@
-# The agent-native CLI standard
+# The agent-native standard
+
+One bar for agent-readiness, measured on two surfaces: your CLI and your website. Scored MUST / SHOULD / MAY, not
+asserted.
 
 CLI tools are how AI agents touch everything else. Compilers, databases, git, the cloud, the shell. An agent asked to
 ship code, rotate a credential, grep a log, or deploy a branch frequently shells out to a binary. It's the

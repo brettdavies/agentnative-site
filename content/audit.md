@@ -3,6 +3,15 @@
 `anc` is the reference linter for this standard. It scores any CLI tool against the eight principles and tells you, by
 audit ID, where it passes and where it falls short.
 
+<section class="audit-hero" aria-labelledby="audit-hero-heading">
+  <h2 id="audit-hero-heading" class="audit-hero__title">Score a binary, live.</h2>
+  <p class="audit-hero__lede">The homepage demo runs binary and behavioral audits in a sandbox. For source and project depth, run <code>anc audit</code> locally.</p>
+  <form class="board-try audit-hero__form" method="get" action="/">
+    <input name="score" type="text" autocomplete="off" spellcheck="false" placeholder="ripgrep" aria-label="Tool name, install command, or GitHub URL" />
+    <button type="submit" class="btn btn--primary">Score</button>
+  </form>
+</section>
+
 ## Install
 
 See [/install](/install) for `brew`, `cargo`, and platform-archive instructions. Once `anc` is on `$PATH`, the rest of

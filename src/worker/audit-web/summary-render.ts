@@ -10,7 +10,7 @@
 // clipboard.js attaches its Copy button (idle / Copied / fallback
 // states) with no page-specific JS.
 
-import { escHtml } from '../../shared/scorecard-format.mjs';
+import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
 import { assembleRemediation, resultLine, type WebRemediationCatalog } from './remediation';
 import type { NaReason, ScorecardStatus } from './scorecard';
@@ -65,6 +65,32 @@ function statusLabel(status: ScorecardStatus): string {
   return STATUS_LABELS[status] ?? String(status).toUpperCase();
 }
 
+// Check-row marks: pass ✓, absent (missing) !, broken/error ✕, n_a/skip –.
+// Broken outranks absent in severity — a present-but-broken surface
+// misleads agents — so it carries the fail mark.
+const STATUS_MARKS: Record<ScorecardStatus, string> = {
+  pass: '✓',
+  broken: '✕',
+  absent: '!',
+  n_a: '–',
+  skip: '–',
+  error: '✕',
+};
+
+function statusMark(status: ScorecardStatus): string {
+  return STATUS_MARKS[status] ?? '–';
+}
+
+// Display tier per registry category id — mirrors the homepage's five
+// web-check rows (src/build/06-homepage.mjs WEB_CHECKS).
+const CATEGORY_TIERS: Record<string, string> = {
+  discoverability: 'MUST',
+  'content-for-agents': 'MUST',
+  'bot-crawl-policy': 'SHOULD',
+  'mcp-api': 'MUST',
+  'agent-discovery-auth': 'MAY',
+};
+
 function isFixable(status: ScorecardStatus): boolean {
   return status === 'broken' || status === 'absent';
 }
@@ -97,29 +123,49 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   const targetUrl = sc.tool?.url ?? input.targetUrl;
   const byCategory = rowsByCategory(sc);
 
-  let html = `<nav class="scorecard-breadcrumb" aria-label="Breadcrumb">
-  <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a>
+  // Status-count chips for the hero.
+  const counts: Record<string, number> = {};
+  for (const row of sc.results ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
+  const chips: string[] = [];
+  if (counts.pass) chips.push(`<span class="chip chip--ok">${counts.pass} pass</span>`);
+  if (counts.absent) chips.push(`<span class="chip chip--warn">${counts.absent} missing</span>`);
+  if (counts.broken) chips.push(`<span class="chip chip--fail">${counts.broken} broken</span>`);
+  if (counts.error)
+    chips.push(`<span class="chip chip--fail">${counts.error} error${counts.error === 1 ? '' : 's'}</span>`);
+  const naCount = (counts.n_a ?? 0) + (counts.skip ?? 0);
+  if (naCount) chips.push(`<span class="chip chip--muted">${naCount} n/a</span>`);
+
+  let html = `<article class="container scorecard-page"><nav class="crumb" aria-label="Breadcrumb">
+  <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(name)}</span>
 </nav>
-<header class="scorecard-header">
-  <h1>${escHtml(name)}</h1>
-  <p class="live-score-summary__meta">Website <a href="${escHtml(targetUrl)}">${escHtml(targetUrl)}</a> · agent-readiness audit</p>
-</header>
-<section class="scorecard-summary">
-  <div class="scorecard-score-badge">
-    <span class="scorecard-score-badge__pct">${relative}%</span>
-    <span class="scorecard-score-badge__label">${escHtml(RELATIVE_LABEL)}</span>
+<header class="scorecard-hero">
+  <div class="scorecard-hero__id">
+    <h1>${escHtml(name)}</h1>
+    <p class="live-score-summary__meta">Website <a href="${escHtml(targetUrl)}">${escHtml(targetUrl)}</a> · agent-readiness audit</p>
+${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''}    <p class="scorecard-hero__note">${escHtml(RELATIVE_SUBLABEL)}; global measures it against a maximally agent-ready site.</p>
   </div>
-  <p class="scorecard-summary__note">${escHtml(RELATIVE_SUBLABEL)}. <strong>Global:</strong> ${globalScore}% ${escHtml(GLOBAL_LABEL)}.</p>
-</section>
-<section class="scorecard-audits">
-  <h2>Checks by category</h2>
+  <div class="scorecard-hero__scores">
+    <div class="scorecell ${bandOf(relative)}"><span class="bigscore__n">${relative}</span><span class="bigscore__l">${escHtml(RELATIVE_LABEL)}</span>${renderMeter(relative, { num: null })}</div>
+    <div class="scorecell ${bandOf(globalScore)}"><span class="bigscore__n">${globalScore}</span><span class="bigscore__l">global-ready</span>${renderMeter(globalScore, { num: null })}</div>
+  </div>
+</header>
+<section class="scorecard-audits" aria-label="Checks by category">
 `;
 
+  let catIndex = 0;
   for (const category of sc.categories ?? []) {
+    catIndex += 1;
     const rows = byCategory.get(category.id) ?? [];
     const empty = category.counted === 0;
-    html += `  <div class="audit-group${empty ? ' audit-group--empty' : ''}">
-    <h3 class="audit-group__title">${escHtml(category.name)} <span class="audit-group__rollup">${category.passed}/${category.counted}</span></h3>
+    const tier = CATEGORY_TIERS[category.id] ?? 'MUST';
+    const rollupBand = empty ? '' : ` ${bandOf((category.passed / category.counted) * 100)}`;
+    html += `  <div class="catcard${empty ? ' catcard--empty' : ''}">
+    <div class="catcard__hd tier-${tier.toLowerCase()}">
+      <span class="spec__id">C${catIndex}</span>
+      <h3 class="audit-group__title">${escHtml(category.name)}</h3>
+      <span class="tier">${tier}</span>
+      <span class="audit-group__rollup${rollupBand}">${category.passed} / ${category.counted}</span>
+    </div>
 `;
     if (empty) {
       html += `    <p class="audit-group__note">No checks in this category apply to this site.</p>\n`;
@@ -133,7 +179,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   html += `</section>
 <section class="scorecard-cta">
   <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
-</section>`;
+</section></article>`;
   return html;
 }
 
@@ -163,7 +209,7 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
   }
 
   return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>
-      <summary><span class="audit__status">${escHtml(statusLabel(row.status))}</span> <span class="web-check__label">${escHtml(row.label)}</span></summary>
+      <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> <span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;
 }

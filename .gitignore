@@ -1,4 +1,4 @@
-.DS_Store
+**/.DS_Store
 node_modules/
 .env
 # wrangler's local-secrets file (per-env variants also covered). Holds
@@ -21,6 +21,9 @@ dist/
 # Un-ignore project source (Brett's global ~/.config/git/ignore has `build/`).
 !src/
 !src/**
+# Re-assert after the un-ignore above: `!src/**` re-includes everything under
+# src/, which would otherwise override line 1 for .DS_Store files there.
+**/.DS_Store
 
 # Playwright artifacts
 test-results/
