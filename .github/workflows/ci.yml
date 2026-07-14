@@ -74,6 +74,9 @@ jobs:
       - name: Lint (Biome + markdownlint)
         run: bun run lint
 
+      - name: Typecheck (client + worker)
+        run: bun run typecheck
+
       - name: Build
         run: bun run build | tee /tmp/build.log
 
