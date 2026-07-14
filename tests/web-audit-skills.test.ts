@@ -83,7 +83,10 @@ describe('emitWebAuditSkillPages', () => {
       expect(emitted).toContain(`${check.id}.html`);
       expect(emitted).toContain(`${check.id}.md`);
     }
-  });
+    // The first emit in this file pays module cold-start plus a full-registry
+    // disk write, which exceeds bun's default 5s per-test budget on slower CI
+    // runners under parallel load; warm sibling emits finish well under 1s.
+  }, 30_000);
 
   test('a representative page serves HTML with the skill body and the twin serves markdown', async () => {
     const { distDir } = await emitToTmp();
