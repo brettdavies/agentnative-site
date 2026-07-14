@@ -26,6 +26,18 @@ The agent-native badge a tool earns when its scorecard clears the credit-weighte
 compliance signal on a tool's scorecard and the mark a project displays to claim agent-native status. The threshold is a
 scoring-policy value, not fixed in this glossary.
 
+## Content surface
+
+### Markdown twin
+
+The verbatim markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
+text/markdown`, and concatenated into `llms-full.txt`. It is the agent-facing half of the site's dual-surface contract:
+one markdown source emits both an HTML page for browsers and this twin for agents.
+
+Because the twin is served from the source verbatim, only prose belongs in the content source. Interactive HTML that
+renders correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build
+template and substituted per surface rather than authored inline.
+
 ## Live scoring
 
 ### anc100
@@ -82,16 +94,16 @@ spec, never the raw user input.
 
 ### Web audit
 
-The in-Worker website agent-readiness audit: registry-driven network probes (HTTP requests, a JSON-RPC handshake, a
-CORS preflight, DNS-over-HTTPS lookups) of a site's agent-facing surfaces, streamed check-by-check and cached as a web
+The in-Worker website agent-readiness audit: registry-driven network probes (HTTP requests, a JSON-RPC handshake, a CORS
+preflight, DNS-over-HTTPS lookups) of a site's agent-facing surfaces, streamed check-by-check and cached as a web
 scorecard at a shareable per-domain page. There is no crawler; every check is a bounded probe.
 
 ### Web scorecard
 
 The structured JSON a web audit produces. Distinct from the CLI scorecard and versioned by its own schema: it carries
-the two scores (relative and global), per-category rollups, and per-check rows with tri-state outcomes and the reason
-a row is not applicable; every serving surface (result page, markdown twin, MCP tools) attaches remediation pointers
-to non-passing rows.
+the two scores (relative and global), per-category rollups, and per-check rows with tri-state outcomes and the reason a
+row is not applicable; every serving surface (result page, markdown twin, MCP tools) attaches remediation pointers to
+non-passing rows.
 
 ### Antecedent
 
@@ -101,8 +113,8 @@ the check not applicable (excluded from scoring entirely), which is different fr
 
 ### Site type
 
-The caller-declared scope of a web audit: a content site or an API/application. Checks outside the declared type are
-not applicable; declaring nothing runs everything, and MCP surfaces are auto-detected from discovery regardless of the
+The caller-declared scope of a web audit: a content site or an API/application. Checks outside the declared type are not
+applicable; declaring nothing runs everything, and MCP surfaces are auto-detected from discovery regardless of the
 declaration.
 
 ### Tri-state outcome
@@ -113,9 +125,9 @@ absent counts as not applicable, never as a miss.
 
 ### Relative score / Global score
 
-The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that
-apply to it, so a site perfect for its type approaches the maximum. Global measures the same outcomes against a
-maximally agent-ready site, so exposing and nailing more surfaces ranks higher; the web leaderboard sorts by it.
+The two scores one web-audit run produces. Relative (the headline) measures the site against only the checks that apply
+to it, so a site perfect for its type approaches the maximum. Global measures the same outcomes against a maximally
+agent-ready site, so exposing and nailing more surfaces ranks higher; the web leaderboard sorts by it.
 
 ### Fix skill
 
@@ -128,8 +140,8 @@ how-to-fix reference.
 ### MCP endpoint
 
 The site's Model Context Protocol server at `/mcp`: a streamable-HTTP, JSON-RPC surface that exposes the anc100 registry
-and scoring tools to agents. GET returns the landing page (or, under a JSON `Accept` header, a permanent redirect to
-the MCP server card); POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
+and scoring tools to agents. GET returns the landing page (or, under a JSON `Accept` header, a permanent redirect to the
+MCP server card); POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
 
 ### MCP server card
 
