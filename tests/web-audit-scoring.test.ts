@@ -14,9 +14,37 @@ import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/sc
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
 
-async function loadNormalized() {
+interface NormalizedWebAuditCheck {
+  id: string;
+  category: string;
+  tier: string;
+  keyword: string;
+  principle: string;
+  site_types: string[];
+  antecedent: string;
+  eval?: string;
+  weight: number;
+  title: string;
+  hint: string;
+  handler: string;
+  with: object;
+}
+
+interface NormalizedWebAuditRegistry {
+  version: number;
+  mcp_discovery: {
+    well_known: string[];
+    common_paths: string[];
+    protocol_version: string;
+  };
+  category_order: string[];
+  categories: Record<string, string>;
+  checks: NormalizedWebAuditCheck[];
+}
+
+async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
   const raw = await readFile(REGISTRY_PATH, 'utf8');
-  return normalizeWebAuditRegistry(yaml.load(raw));
+  return normalizeWebAuditRegistry(yaml.load(raw) as object) as NormalizedWebAuditRegistry;
 }
 
 describe('web-audit registry shape', () => {

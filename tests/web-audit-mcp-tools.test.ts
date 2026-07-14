@@ -30,10 +30,13 @@ const FIXTURE_CATALOG = {
 let assetsJson: { registry: string; remediation: string } | null = null;
 async function projections() {
   if (!assetsJson) {
-    const registry = normalizeWebAuditRegistry(yaml.load(await readFile(join(DATA, 'registry.yaml'), 'utf8')));
+    const registry = normalizeWebAuditRegistry(
+      yaml.load(await readFile(join(DATA, 'registry.yaml'), 'utf8')) as object,
+    );
+    const checks = registry.checks as Array<{ id: string }>;
     const remediation = normalizeWebRemediation(
-      yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')),
-      registry.checks.map((c: { id: string }) => c.id),
+      yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')) as object,
+      checks.map((c) => c.id),
     );
     assetsJson = { registry: JSON.stringify(registry), remediation: JSON.stringify(remediation) };
   }
