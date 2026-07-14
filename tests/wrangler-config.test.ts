@@ -117,6 +117,22 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
     expect(names).toContain('SCORE_LIMITER_IP');
   });
 
+  // env.<env> ratelimits is replace-not-merge, so the web-audit pair must be
+  // mirrored into staging or it inherits nothing and the fresh path throws.
+  test('web-audit limiter pair is present with matching shapes in both prod and staging', () => {
+    const shapeOf = (list: unknown, name: string) =>
+      (list as Array<Record<string, unknown>>).find((r) => r.name === name)?.simple as
+        | { limit: number; period: number }
+        | undefined;
+    for (const list of [config.ratelimits, staging.ratelimits]) {
+      const names = (list as Array<Record<string, unknown>>).map((r) => r.name);
+      expect(names).toContain('WEB_AUDIT_LIMITER');
+      expect(names).toContain('WEB_AUDIT_LIMITER_IP');
+      expect(shapeOf(list, 'WEB_AUDIT_LIMITER')).toEqual({ limit: 10, period: 60 });
+      expect(shapeOf(list, 'WEB_AUDIT_LIMITER_IP')).toEqual({ limit: 30, period: 60 });
+    }
+  });
+
   test('env.staging.durable_objects declares the SCORE binding', () => {
     expect(staging.durable_objects).toBeDefined();
     const bindings = (

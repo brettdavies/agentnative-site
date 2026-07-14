@@ -14,13 +14,20 @@
 //                    not break against the still-private producer pre-cutover.
 //                    Run with `bun x playwright test --project=skill`.
 //
-// WebKit projects require `bun x playwright install webkit` locally and
-// the matching `--with-deps` line in .github/workflows/ci.yml.
+// WebKit projects use the shared browsers in $PLAYWRIGHT_BROWSERS_PATH
+// (dotfiles-provisioned on this host; never run `playwright install`), plus
+// the matching `--with-deps` line in .github/workflows/ci.yml on CI runners.
 
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 8787;
-const BASE_URL = `http://localhost:${PORT}`;
+// A remote-targeting opt-in project (web-audit, staging-mcp, homepage-score-live)
+// sets ANC_STAGING_BASE_URL to a deployed Worker. When it does, baseURL honors
+// it and the local wrangler-dev webServer is skipped — booting a Docker-backed
+// local Worker is pure overhead (and a hard dependency) for tests that never
+// touch it. Local-targeting projects leave it unset and get the local server.
+const REMOTE_BASE = process.env.ANC_STAGING_BASE_URL;
+const BASE_URL = REMOTE_BASE ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -44,10 +51,14 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
+  // PW-managed browser downloads stall on some dev machines. Setting
+  // PW_CHANNEL=chrome points Chromium-family projects at the installed
+  // Google Chrome instead (WebKit projects ignore it — channel is a
+  // Chromium concept); CI leaves it unset and uses managed browsers.
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       // Live opt-in projects (skill, homepage-score-live, staging-mcp)
       // are excluded from the default suite — they hit real network
       // endpoints (github.com clone hosts, the staging Worker) that the
@@ -57,14 +68,15 @@ export default defineConfig({
         /homepage-score-live\.e2e\.ts/,
         /mcp\.e2e\.ts/,
         /discoverability\.e2e\.ts/,
+        /web-audit\.e2e\.ts/,
       ],
     },
-    { name: 'mobile-android', use: { ...devices['Pixel 7'] }, testMatch: /flows\.e2e\.ts/ },
+    { name: 'mobile-android', use: { ...devices['Pixel 7'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) }, testMatch: /flows\.e2e\.ts/ },
     { name: 'mobile-ios', use: { ...devices['iPhone 13'] }, testMatch: /flows\.e2e\.ts/ },
     { name: 'tablet', use: { ...devices['iPad Pro 11'] }, testMatch: /flows\.e2e\.ts/ },
     {
       name: 'skill',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /skill\.e2e\.ts/,
       // Live `git clone` against github.com over the network — give it room.
       timeout: 60_000,
@@ -74,7 +86,7 @@ export default defineConfig({
       // Live staging Worker. Set ANC_STAGING_BASE_URL before invoking;
       // see tests/e2e/homepage-score-live.e2e.ts for full env contract.
       // Excluded from the default suite; run with --project=homepage-score-live.
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /homepage-score-live\.e2e\.ts/,
       // Real Sandbox container cold starts and Turnstile siteverify
       // round-trips push the per-test budget past Playwright's default.
@@ -91,24 +103,42 @@ export default defineConfig({
       // --project=staging-mcp` after a staging deploy or when triaging
       // an MCP regression the bun unit layer can't reproduce against
       // workerd.
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /(?:mcp|discoverability)\.e2e\.ts/,
     },
+    {
+      name: 'web-audit',
+      // Live staging Worker — the web-audit streaming form, the
+      // /web/<domain> result page + twin, and the MCP fresh path
+      // (audit_website + get_web_remediation). Set ANC_STAGING_BASE_URL
+      // (and ANC_STAGING_ACCESS_CLIENT_ID/SECRET for headless Access
+      // auth) before invoking; excluded from the default suite because it
+      // makes real outbound probes to anc.dev. Run with:
+      //   bun x playwright test --project=web-audit
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
+      testMatch: /web-audit\.e2e\.ts/,
+      // 32 probes + discovery + a DNS fan-out against a live target.
+      timeout: 90_000,
+    },
   ],
-  webServer: {
-    // --env staging: the staging-pinned Sandbox image is the one we keep
-    // locally; the top-level prod image is rotated less frequently and
-    // often isn't in the dev Docker cache, which makes `wrangler dev
-    // --local` (no --env) fail with a misleading "container Sandbox does
-    // not expose any ports" error during prepareContainerImagesForDev.
-    // Using --env staging also gives the homepage-score E2E suite a real
-    // TURNSTILE_SITEKEY var to substitute into the meta tag — matches
-    // staging behavior directly.
-    command: 'bun run build && bun x wrangler dev --local --env staging --port ' + PORT,
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: 'ignore',
-    stderr: 'pipe',
-  },
+  // Skipped entirely for remote-targeting runs (ANC_STAGING_BASE_URL set): those
+  // hit a deployed Worker and must not drag in a Docker-backed local boot.
+  webServer: REMOTE_BASE
+    ? undefined
+    : {
+        // --env staging: the staging-pinned Sandbox image is the one we keep
+        // locally; the top-level prod image is rotated less frequently and
+        // often isn't in the dev Docker cache, which makes `wrangler dev
+        // --local` (no --env) fail with a misleading "container Sandbox does
+        // not expose any ports" error during prepareContainerImagesForDev.
+        // Using --env staging also gives the homepage-score E2E suite a real
+        // TURNSTILE_SITEKEY var to substitute into the meta tag — matches
+        // staging behavior directly.
+        command: 'bun run build && bun x wrangler dev --local --env staging --port ' + PORT,
+        url: `http://localhost:${PORT}`,
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
 });

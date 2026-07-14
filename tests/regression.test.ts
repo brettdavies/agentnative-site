@@ -279,7 +279,7 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
     // Sample one principle page + the leaderboard page.
     for (const page of ['p3.html', 'scorecards.html', 'install.html']) {
       const html = await readFile(join(DIST, page), 'utf8');
-      expect({ page, hasInstallNav: /<a href="\/install">Install<\/a>/.test(html) }).toEqual({
+      expect({ page, hasInstallNav: /<a href="\/install"[^>]*>Install<\/a>/.test(html) }).toEqual({
         page,
         hasInstallNav: true,
       });

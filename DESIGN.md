@@ -585,7 +585,7 @@ courting developer adoption.
 | `--bg`           | `#fafbfd`   | `#060a0e`  | Page background.                                                                                                                              |
 | `--bg-code`      | `#f0f4f7`   | `#0d1218`  | Inline + block code background.                                                                                                               |
 | `--border`       | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.                                                                                                         |
-| `--fg-muted`     | `#7d848a`   | `#8d949c`  | Decorative/large-only captions (≥1.125rem). Below 4.5:1 small-text contrast by design; use `--fg-secondary` for anything readable under 18px. |
+| `--fg-muted`     | `#626a72`   | `#818a94`  | Muted captions/meta. Clears WCAG AA small-text in both modes (5.3:1 light, 5.7:1 dark).                                                       |
 | `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1.                                |
 | `--fg-body`      | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.                                                                                                      |
 | `--fg-heading`   | `#070c11`   | `#f3f2ed`  | Headings.                                                                                                                                     |
@@ -593,13 +593,18 @@ courting developer adoption.
 | `--must`         | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                                                                                                                            |
 | `--should`       | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                                                                                                                          |
 | `--may`          | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                                                                                                                             |
+| `--band-low`     | `#b63230`   | `#f9776e`  | Score-band text, <50. Grading axis (fail/warn/pass), distinct from the obligation tiers.                                                      |
+| `--band-mid`     | `#a46400`   | `#f3ae58`  | Score-band text, 50–79.                                                                                                                       |
+| `--band-high`    | `#00792f`   | `#5ac576`  | Score-band text, ≥80. The pass green has no obligation-tier counterpart, keeping the two axes readable as different systems.                  |
+| `--band-*-bar`   | (vivid)     | (vivid)    | Meter fills. Decoupled from the text shades and brighter; the adjacent numeral always restates the value (non-text UI).                       |
+| `--meter-track`  | `#d9dfe5`   | `#1d252d`  | Empty-meter substrate; darkened (light) / raised (dark) so partial fills read.                                                                |
 
 All body pairs (`--fg-body`, `--fg-secondary`, `--fg-heading`, `--accent`) pass WCAG AA (≥4.5:1) **and** APCA body
-minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` deliberately sits below AA 4.5:1 in both modes
-(≈4.3:1) because it is a decorative caption tier reserved for text ≥1.125rem where the AA large-text threshold (3:1)
-applies; use `--fg-secondary` for any small body-size secondary text. Two dark-mode tokens (`must`, `accent-subtle`)
-required a tuning pass after the first APCA run flagged them below the 60 threshold; the tuning is recorded in the
-script as a comment, and the second-pass contrast table in the report shows all body pairs clearing thresholds.
+minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` clears WCAG AA small-text in both modes; its
+dark-mode APCA sits below the 60 body floor (a known WCAG/APCA divergence on light-on-dark), so the generator pins it
+with a per-token assertion rather than letting it regress. The band text shades clear AA on the page background; the
+`--band-*-bar` fills and `--meter-track` are exempt as non-text UI. The generator fails the whole run (no files
+written) when any text-bearing token drops below its WCAG or APCA floor.
 
 ### 4.2 Dark mode is deliberately designed (not inverted)
 
@@ -1042,19 +1047,19 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
 
 ### 4.11 Layout
 
-- `<article>` at `max-inline-size: 68ch`, horizontally centered.
-- Page padding: `--space-5` mobile, `--space-7` desktop.
-- **Header (Terse package)**: wordmark `agentnative` on the left in Uncut Sans Semibold; no link (already on the
-  homepage, so clicking the wordmark scrolls to `#` / top). Three utility links right-aligned: `/audit`, `/about`,
-  `llms.txt`. The `llms.txt` link carries `title="Machine-readable index for AI agents"` for hover context. No nav tree,
-  no version pill, no search. Header is one line tall; does not duplicate the mini-TOC's role.
-- **Footer (Terse package)**: a single line. `v0.1 · 2026-04-14 · source on GitHub`. Separator is a middot (`·`) with
-  tabular-figure spacing. Version uses `font-variant-numeric: tabular-nums` so cross-version renders align. No personal
-  attribution on the spec site: the spec-is-bigger-than-the-author stance; `davies.fyi` owns the named surface.
-- **Mini-TOC ships on desktop ≥ 1100px** (resolving open question 5.2). Sticky right-rail `<aside>` in a 2-column grid
-  with the article. Lists the 7 principle anchors. Collapses to an inline `<nav>` at the top of the article below
-  1100px. Always visible in one form or the other.
-- `/audit` and `/about` use the same header + footer chrome, minus the mini-TOC.
+- **Header**: sticky 62px instrument nav — brand `anc.dev` + tagline (the tagline hides under 640px), six grouped links
+  (Leaderboards, Audit, The standard, Install, Skill, About) with `aria-current` derived from the canonical path, a
+  single theme-cycle button, and an Install CTA. Below 900px the links drop into a panel toggled by a CSS-checkbox
+  hamburger: the checkbox is visually hidden but focusable across the full 44px target, so pointer taps and keyboard
+  Space toggle it with zero JS; the nav bundle adds Escape-to-close. Routes without a nav entry (methodology, coverage,
+  contribute, the web board) stay reachable from the footer meta row and in-page cross-links.
+- **Footer**: three centered rows inside a `.container` — the "Ask an AI" provider icons in 42px circles (every inline
+  SVG carries explicit width/height; iOS Safari renders viewBox-only inline SVG at 0×0), the mono
+  `Source spec · cli · site · skill` row, and the version/doc/machine-surface meta row.
+- **Page columns**: each archetype owns its measure. The homepage composes full-bleed sections with an inner
+  `.container` (72rem). Reading pages (`/p{N}` and every content subpage) render inside `.doc` (52rem). Scorecard pages
+  (CLI, live, and web) render inside `.scorecard-page` (64rem). Boards use the leaderboard table width (92ch).
+- Responsive holds at 390/768/1440 with no horizontal overflow on any archetype.
 
 ### 4.12 Accessibility baseline
 
@@ -1109,6 +1114,41 @@ Per the agent-native documentation surface pattern. Twitter card `summary_large_
 `og:description`, `og:image`, `og:url`, `og:type="article"`, `article:published_time`, `article:modified_time`. Before
 domain purchase: canonical + og:url use the staging `workers.dev` host until production cut-over; swap via a single
 constant in the HTML shell. Documented in `wrangler.toml` per CEO plan (resolving open question 5.6 with "yes").
+
+### 4.15 The instrument component layer
+
+The site's identity is **the instrument**: measurement as the visual language. Committed color, solid surface bands, a
+score-meter motif, and the MUST/SHOULD/MAY tri-color used structurally — deliberately outside the saturated
+editorial-mono lane. Components live in `src/styles/site.css` on top of the generated `foundation.css`; the shared
+markup emitters are wider than the static build (`src/shared/scorecard-format.mjs` also feeds the Worker `/score/live`
+route, and `src/worker/audit-web/summary-render.ts` renders `/web/<domain>` on demand).
+
+- **Two axes, never conflated.** MUST/SHOULD/MAY (`tier-*` classes, `--must/--should/--may`) is the *obligation* axis:
+  spec-index ids, tier chips, requirement groups. `band-low/mid/high` (`--band-*`) is the *grading* axis: score
+  numerals, meter fills, status chips. Band cutoffs (<50 / 50–79 / ≥80) live in one place — `bandOf()` in
+  `src/shared/scorecard-format.mjs` — so every surface grades identically.
+- **Meter** (`.meter`): pill track (`--meter-track`) + band-colored fill with a top sheen; the numeral sits beside the
+  track in the band's AA text shade. Width 0 leaves the bare track (score 0), width 100 closes the pill;
+  `.meter--unscored` renders an empty track with a muted numeral slot. `renderMeter()` is the single emitter.
+- **Spec index** (`.spec`, `.spec__row`): two-column principle/check rows — tier-colored mono id, linked title, tier
+  chip (`.tier`, outline in `currentColor`), muted description. The homepage renders the eight principles and the five
+  web-check categories through it; scorecard principle rows (`.pscore__row`) reuse its id/title treatment and add a
+  status pill (`.stpill--pass/warn/fail/na`, tinted via `color-mix`) plus an inline remediation box on non-pass rows.
+- **Surface toggle** (`.seg` + `.scope`): hidden radios with pill labels. `.scope:has(#s-web:checked)` swaps every
+  `[data-s]` pane — board, spec index, try-form, rubric — together with zero JS; CLI is the no-JS default.
+- **Cards and boards**: `.card` is the terminal-flavored proof panel (title bar, command line, `.bigscore` numerals,
+  check rows with `.st` chips). `.board` renders leaderboard rows (`.lrow`: rank, name + `.name-sub`, meter). Full-bleed
+  section bands use `.band-surface`. The web result page groups checks into `.catcard`s: C1–C5 id, tier chip,
+  band-colored rollup, and mark-led check rows (pass ✓, missing !, broken/error ✕, n/a –).
+- **Dark elevation is token-indirected.** Components consume `--shadow-card`, `--shadow-board`, `--band-surface-bg`,
+  `--seg-bg`, `--field-bg`; the dark values swap drop-shadows for raised surfaces with a top edge-highlight, so the
+  light/dark fork lives in one token block (§4.2's designed-not-inverted rule, applied to elevation).
+- **Reading treatment** (`.doc`): 52rem column, accent prose links, tier-colored `P#` head + tier chip on `/p{N}`, the
+  Definition heading visually hidden so its paragraph reads as the lede, MUST/SHOULD/MAY requirement groups as tinted
+  full-border boxes (`.normative` — never side-stripes), dark code blocks in both themes, an `anc audit` callout, and a
+  prev/next pager.
+- **Badge alignment**: the badge SVG's Solid/Qualified/Critical fills are the ramp's resolved sRGB, hand-maintained in
+  `src/build/badge.mjs` (the SVG can't read OKLCH variables — re-resolve on any ramp change).
 
 ## 5. Open questions for Brett — status
 

@@ -245,6 +245,28 @@ every tool measured on the same ground.
 Note that P8 (discoverable skill bundles) spans both layers: its bundle-install and related behavioral audits count
 toward the score, while the presence of the bundle file itself is a project-layer audit that does not.
 
+## Web audits: scoring a website and its MCP server
+
+The [web audit](/web-audit) applies the same eight principles to a different surface: a website and the MCP server it
+publishes. It runs entirely as network probes from the Worker, with no binary to install and nothing crawled. There are
+four probe types:
+
+- **HTTP** — requests a path (or the first of several candidate paths) and asserts on status, content type, headers, or
+  a body pattern. Covers `llms.txt`, OpenAPI, JSON Schemas, root-HTML affordances (meta description, `<link rel>`,
+  `<noscript>`, JSON-LD, semantic landmarks), `robots.txt` rules, and the `.well-known` discovery documents.
+- **MCP** — a JSON-RPC handshake over streamable-HTTP: `initialize` for `serverInfo` and capabilities, `tools/list` for
+  the tool array and input schemas, an unknown-method probe for the `-32601` error code, and the actual-request CORS
+  header.
+- **CORS preflight** — an `OPTIONS` request that checks the MCP endpoint answers browser-origin agents.
+- **DNS-over-HTTPS** — SVCB lookups for DNS-AID records under the `_agents` namespace.
+
+The audit first discovers the MCP endpoint from the site's well-known cards, then falls back to probing common paths
+with `initialize`. MCP-shape checks apply only when an endpoint is found; on a site without one they are marked `n_a`
+and excluded from the score. The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY
+checks informational, the same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard
+is isomorphic with a CLI scorecard and renders through the same presentation. Web results carry no badge; they live at a
+shareable [`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+
 ## Re-running the same audits locally
 
 Every score on the leaderboard is reproducible. [Install `anc`](/install), then run:

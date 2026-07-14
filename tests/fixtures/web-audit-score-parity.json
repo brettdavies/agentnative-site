@@ -1,0 +1,31 @@
+{
+  "description": "Shared scoring fixture: src/worker/audit-web/score.ts (tests/web-audit-two-score.test.ts) and scripts/scoring/score_model.py --fixture must both produce `expected`. Non-default weights and broken factor exercise the config surface.",
+  "weights": { "must": 4, "should": 2.5, "may": 1 },
+  "broken_factor": 0.6,
+  "universe_tiers": [
+    "must",
+    "must",
+    "must",
+    "must",
+    "should",
+    "should",
+    "should",
+    "should",
+    "may",
+    "may",
+    "may",
+    "may"
+  ],
+  "rows": [
+    ["must", "pass"],
+    ["must", "pass"],
+    ["must", "absent"],
+    ["should", "pass"],
+    ["should", "absent"],
+    ["should", "broken"],
+    ["may", "pass"],
+    ["may", "broken"],
+    ["may", "n_a"]
+  ],
+  "expected": { "relative": 46, "global": 31 }
+}

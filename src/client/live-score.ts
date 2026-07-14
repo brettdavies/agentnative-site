@@ -62,6 +62,13 @@ const submitBtn = document.querySelector<HTMLButtonElement>('[data-live-score-su
 const statusEl = document.querySelector<HTMLParagraphElement>('[data-live-score-status]');
 
 if (form && input && submitBtn && statusEl) {
+  // Prefill from ?score= — the /audit landing's try-form navigates here as
+  // a plain GET so its input works without JS.
+  const requested = new URL(window.location.href).searchParams.get('score');
+  if (requested && !input.value) {
+    input.value = requested;
+    input.focus();
+  }
   initLiveScore({ form, input, submitBtn, statusEl });
 }
 
