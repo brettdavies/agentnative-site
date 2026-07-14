@@ -21,7 +21,13 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 8787;
-const BASE_URL = `http://localhost:${PORT}`;
+// A remote-targeting opt-in project (web-audit, staging-mcp, homepage-score-live)
+// sets ANC_STAGING_BASE_URL to a deployed Worker. When it does, baseURL honors
+// it and the local wrangler-dev webServer is skipped — booting a Docker-backed
+// local Worker is pure overhead (and a hard dependency) for tests that never
+// touch it. Local-targeting projects leave it unset and get the local server.
+const REMOTE_BASE = process.env.ANC_STAGING_BASE_URL;
+const BASE_URL = REMOTE_BASE ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -115,20 +121,24 @@ export default defineConfig({
       timeout: 90_000,
     },
   ],
-  webServer: {
-    // --env staging: the staging-pinned Sandbox image is the one we keep
-    // locally; the top-level prod image is rotated less frequently and
-    // often isn't in the dev Docker cache, which makes `wrangler dev
-    // --local` (no --env) fail with a misleading "container Sandbox does
-    // not expose any ports" error during prepareContainerImagesForDev.
-    // Using --env staging also gives the homepage-score E2E suite a real
-    // TURNSTILE_SITEKEY var to substitute into the meta tag — matches
-    // staging behavior directly.
-    command: 'bun run build && bun x wrangler dev --local --env staging --port ' + PORT,
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-    stdout: 'ignore',
-    stderr: 'pipe',
-  },
+  // Skipped entirely for remote-targeting runs (ANC_STAGING_BASE_URL set): those
+  // hit a deployed Worker and must not drag in a Docker-backed local boot.
+  webServer: REMOTE_BASE
+    ? undefined
+    : {
+        // --env staging: the staging-pinned Sandbox image is the one we keep
+        // locally; the top-level prod image is rotated less frequently and
+        // often isn't in the dev Docker cache, which makes `wrangler dev
+        // --local` (no --env) fail with a misleading "container Sandbox does
+        // not expose any ports" error during prepareContainerImagesForDev.
+        // Using --env staging also gives the homepage-score E2E suite a real
+        // TURNSTILE_SITEKEY var to substitute into the meta tag — matches
+        // staging behavior directly.
+        command: 'bun run build && bun x wrangler dev --local --env staging --port ' + PORT,
+        url: `http://localhost:${PORT}`,
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
 });
