@@ -10,7 +10,7 @@
     "test": "bun test",
     "test:e2e": "playwright test",
     "types": "wrangler types ./src/worker-configuration.d.ts",
-    "lint": "biome check . && markdownlint-cli2 \"**/*.md\" \"#node_modules\" \"#dist\" \"#docs/solutions\" \"#docs/research\" \"#docs/plans\" \"#content\" \"#CHANGELOG.md\" \"#src/data/spec/CHANGELOG.md\" \"#.claude\" \"#.context\" \"#test-results\" \"#styles/proselint\" \"#styles/write-good\" \"#styles/.vale-config\"",
+    "lint": "biome check . && markdownlint-cli2 \"**/*.md\"",
     "format": "biome format --write .",
     "deploy": "bun run build && wrangler deploy",
     "deploy:dryrun": "bun run build && wrangler deploy --dry-run",
