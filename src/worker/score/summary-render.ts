@@ -88,7 +88,7 @@ function buildFreshnessMarker(freshness: SummaryRenderInput['freshness']): strin
     : `<span class="live-score-summary__freshness live-score-summary__freshness--live" title="Just scored">just scored</span>`;
 }
 
-const LIVE_BREADCRUMB = { href: '/', label: '← Score another' };
+const LIVE_BREADCRUMB = { href: '/', label: 'Score another' };
 
 const LIVE_CTA_NOTE_HTML = `<a href="/install">Install <code>anc</code></a> first if you don't have it. Run <code>anc audit .</code> from inside the project for source-level and project-level audits.`;
 

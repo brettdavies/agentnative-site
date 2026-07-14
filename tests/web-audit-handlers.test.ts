@@ -1,0 +1,554 @@
+// Probe-handler tests (plan U4). Each handler reproduces the extracted
+// pass/fail/na outcomes for representative inputs, and every egress is
+// routed through the SSRF-guarded fetch (verified by asserting the stub
+// fetch is the only network path).
+
+import { describe, expect, test } from 'bun:test';
+import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
+import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
+import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
+import { runHttp } from '../src/worker/audit-web/handlers/http';
+import { runMcp } from '../src/worker/audit-web/handlers/mcp';
+import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
+import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
+import type { WebCheck } from '../src/worker/audit-web/registry';
+
+function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
+  return {
+    base: 'https://example.com/',
+    host: 'example.com',
+    mcpEndpoint: null,
+    protocolVersion: '2025-06-18',
+    defaultTimeoutMs: 5000,
+    fetchOptions: { fetchImpl: overrides.fetchImpl },
+    ...overrides,
+  };
+}
+
+function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    return handler(url, init);
+  }) as typeof fetch;
+}
+
+function check(partial: Partial<WebCheck>): WebCheck {
+  return {
+    id: 'x',
+    category: 'content-for-agents',
+    tier: 'recommended',
+    keyword: 'should',
+    principle: 'P2',
+    site_types: ['all'],
+    antecedent: 'none',
+    weight: 1,
+    title: 't',
+    hint: 'h',
+    handler: 'http',
+    with: {},
+    ...partial,
+  };
+}
+
+describe('runHttp', () => {
+  test('passes on a 200 /llms.txt with url + status evidence', async () => {
+    const fetchImpl = stubFetch((url) => {
+      expect(url).toBe('https://example.com/llms.txt');
+      return new Response('# Site\n\n- [x](https://example.com/x)', { status: 200 });
+    });
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200], body_regex: '^#|\\]\\(https?://' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].url).toBe('https://example.com/llms.txt');
+    expect(outcome.evidence[0].status).toBe(200);
+    expect(outcome.evidence[0].ok).toBe(true);
+  });
+
+  test('path_any passes on the second candidate', async () => {
+    const fetchImpl = stubFetch((url) => {
+      if (url.endsWith('/openapi.json')) return new Response('nope', { status: 404 });
+      return new Response('{"openapi":"3.1.0"}', { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const outcome = await runHttp(
+      check({
+        with: {
+          path_any: ['/openapi.json', '/openapi.yaml'],
+          expect: { status: [200], body_regex: 'openapi|swagger' },
+        },
+      }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence.length).toBe(2);
+    expect(outcome.evidence[1].ok).toBe(true);
+  });
+
+  test('a 404 on the only candidate is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response('missing', { status: 404 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/robots.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('absent');
+    expect(outcome.evidence[0].ok).toBe(false);
+  });
+
+  test('a 200 with a content-type mismatch is broken (present but invalid)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('not json', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runHttp(
+      check({ with: { path: '/schema.json', expect: { status: [200], content_type: 'json' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a 5xx where a document is expected is broken', async () => {
+    const fetchImpl = stubFetch(() => new Response('oops', { status: 503 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a failed affordance assertion without a status expectation is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response('<html><body>no meta</body></html>', { status: 200 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/', expect: { body_regex: '<noscript' } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('mixed candidates: a broken candidate outranks absent ones', async () => {
+    const fetchImpl = stubFetch((url) =>
+      url.endsWith('/openapi.json') ? new Response('oops', { status: 500 }) : new Response('no', { status: 404 }),
+    );
+    const outcome = await runHttp(
+      check({ with: { path_any: ['/openapi.json', '/openapi.yaml'], expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a timeout is broken only when the check opted into an explicit hang budget', async () => {
+    const timeoutFetch = (() => {
+      const err = new Error('deadline exceeded');
+      err.name = 'TimeoutError';
+      return Promise.reject(err);
+    }) as unknown as typeof fetch;
+    const withBudget = await runHttp(
+      check({ with: { path: '/mcp', method: 'GET', timeout: 1, expect: { status: [405] } } }),
+      ctx({ fetchImpl: timeoutFetch }),
+    );
+    expect(withBudget.status).toBe('broken');
+    const withoutBudget = await runHttp(
+      check({ with: { path: '/llms.txt', expect: { status: [200] } } }),
+      ctx({ fetchImpl: timeoutFetch }),
+    );
+    expect(withoutBudget.status).toBe('error');
+  });
+
+  test('retain_body keeps the passing body on the evidence row', async () => {
+    const fetchImpl = stubFetch(() => new Response('# Site\n\n- [x](https://example.com/x)', { status: 200 }));
+    const outcome = await runHttp(
+      check({ with: { path: '/llms.txt', retain_body: true, expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].body).toContain('# Site');
+  });
+
+  test('substitutes {mcp_endpoint} in the path', async () => {
+    const seen: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      seen.push(url);
+      return new Response('', { status: 405 });
+    });
+    const outcome = await runHttp(
+      check({ with: { path: '{mcp_endpoint}', method: 'GET', expect: { status: [405, 400, 404, 406] } } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(seen).toEqual(['https://example.com/mcp']);
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('honors an absolute path_any URL without rejoining the base', async () => {
+    const fetchImpl = stubFetch((url) => {
+      expect(url).toBe('https://cdn.example.com/schema.json');
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    const outcome = await runHttp(
+      check({ with: { path_any: ['https://cdn.example.com/schema.json'], expect: { status: [200] } } }),
+      ctx({ fetchImpl }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runCorsPreflight', () => {
+  test('passes on 204 with Access-Control-Allow-Origin', async () => {
+    const fetchImpl = stubFetch((_url, init) => {
+      expect(init?.method).toBe('OPTIONS');
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'POST, OPTIONS',
+          'access-control-allow-headers': 'content-type',
+        },
+      });
+    });
+    const outcome = await runCorsPreflight(
+      check({
+        handler: 'cors-preflight',
+        with: {
+          path: '{mcp_endpoint}',
+          origin: 'https://example.com',
+          request_method: 'POST',
+          request_headers: 'content-type',
+        },
+      }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].allow_origin).toBe('*');
+    expect(outcome.evidence[0].allow_methods).toBe('POST, OPTIONS');
+  });
+
+  test('a 204 without Access-Control-Allow-Origin is absent (CORS not implemented)', async () => {
+    const fetchImpl = stubFetch(() => new Response(null, { status: 204 }));
+    const outcome = await runCorsPreflight(
+      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('an Allow-Origin on a failing preflight status is broken (misconfigured)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('oops', { status: 500, headers: { 'access-control-allow-origin': '*' } }),
+    );
+    const outcome = await runCorsPreflight(
+      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('returns n_a when the path has no endpoint to resolve', async () => {
+    let called = 0;
+    const fetchImpl = stubFetch(() => {
+      called++;
+      return new Response('');
+    });
+    const outcome = await runCorsPreflight(
+      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
+      ctx({ fetchImpl, mcpEndpoint: null }),
+    );
+    expect(outcome.status).toBe('na');
+    expect(called).toBe(0);
+  });
+});
+
+describe('runMcp', () => {
+  test('initialize passes and records serverInfo / protocolVersion / capabilities', async () => {
+    const fetchImpl = stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.method).toBe('initialize');
+      expect(body.params.protocolVersion).toBe('2025-06-18');
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            serverInfo: { name: 'anc', version: '0.1.0' },
+            protocolVersion: '2025-06-18',
+            capabilities: { tools: {}, resources: {} },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].serverInfo).toEqual({ name: 'anc', version: '0.1.0' });
+    expect(outcome.evidence[0].protocolVersion).toBe('2025-06-18');
+    expect(outcome.evidence[0].capabilities).toEqual(['tools', 'resources']);
+  });
+
+  test('capabilities assertion is broken on an empty capabilities object', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({ jsonrpc: '2.0', id: 1, result: { serverInfo: { name: 'anc' }, capabilities: {} } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize', assert: 'capabilities' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('tools-list parses an SSE (text/event-stream) response and counts input schemas', async () => {
+    const sse =
+      'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"a","inputSchema":{}},{"name":"b"}]}}\n\n';
+    const fetchImpl = stubFetch(
+      () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'tools-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].tools).toEqual(['a', 'b']);
+    expect(outcome.evidence[0].with_input_schema).toBe(1);
+  });
+
+  test('error op passes when the error code matches expect_code', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'nope' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'error', method: 'nonexistent/method', expect_code: -32601 } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].error_code).toBe(-32601);
+  });
+
+  test('cors assertion checks Access-Control-Allow-Origin on the POST', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+        }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'tools-list', origin: 'https://example.com', assert: 'cors' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].allow_origin).toBe('*');
+  });
+
+  test('returns n_a when no endpoint was discovered', async () => {
+    let called = 0;
+    const fetchImpl = stubFetch(() => {
+      called++;
+      return new Response('');
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: null }),
+    );
+    expect(outcome.status).toBe('na');
+    expect(called).toBe(0);
+  });
+
+  test('a discovered endpoint with no parseable JSON-RPC is broken', async () => {
+    const fetchImpl = stubFetch(() => new Response('<html>error</html>', { status: 500 }));
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('captures the WWW-Authenticate challenge for the mcp-auth antecedent', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('unauthorized', { status: 401, headers: { 'www-authenticate': 'Bearer realm="mcp"' } }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+    expect(outcome.evidence[0].status).toBe(401);
+    expect(outcome.evidence[0].www_authenticate).toBe('Bearer realm="mcp"');
+  });
+});
+
+describe('runDnsDoh', () => {
+  const dohCheck = check({
+    id: 'dns-aid',
+    handler: 'dns-doh',
+    category: 'agent-discovery',
+    principle: 'P8',
+    tier: 'optional',
+    keyword: 'may',
+    with: { names: ['_index._agents.{host}', '_mcp._agents.{host}'], type: 'SVCB' },
+  });
+
+  test('passes on Status:0 with a non-empty Answer array', async () => {
+    const fetchImpl = stubFetch((url) => {
+      expect(url).toContain('name=_index._agents.example.com');
+      return new Response(JSON.stringify({ Status: 0, Answer: [{ name: '_index._agents.example.com' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/dns-json' },
+      });
+    });
+    const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].answers).toBe(1);
+  });
+
+  test('first name NXDOMAIN is definitive; second name Status:0 passes', async () => {
+    const fetchImpl = stubFetch((url) => {
+      if (url.includes('_index._agents')) {
+        return new Response(JSON.stringify({ Status: 3, Answer: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/dns-json' },
+        });
+      }
+      return new Response(JSON.stringify({ Status: 0, Answer: [{ name: '_mcp._agents.example.com' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/dns-json' },
+      });
+    });
+    const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('falls back to the second resolver only on resolver-level failure', async () => {
+    const resolversHit: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      resolversHit.push(new URL(url).host);
+      if (url.startsWith('https://cloudflare-dns.com')) return new Response('gateway error', { status: 502 });
+      return new Response(JSON.stringify({ Status: 0, Answer: [{ name: 'x' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/dns-json' },
+      });
+    });
+    const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+    expect(resolversHit).toContain('cloudflare-dns.com');
+    expect(resolversHit).toContain('dns.google');
+  });
+
+  test('errors (not absent) when all resolvers network-fail', async () => {
+    const fetchImpl = stubFetch(() => new Response('boom', { status: 500 }));
+    const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('error');
+  });
+
+  test('is absent when every name resolves NXDOMAIN', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(JSON.stringify({ Status: 3, Answer: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/dns-json' },
+        }),
+    );
+    const outcome = await runDnsDoh(dohCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('absent');
+  });
+});
+
+describe('runAuthMd', () => {
+  const authCheck = check({
+    id: 'auth-md',
+    handler: 'auth-md',
+    category: 'agent-discovery-auth',
+    tier: 'optional',
+    keyword: 'may',
+    site_types: ['api', 'mcp'],
+    antecedent: 'auth-present',
+    with: { path_any: ['/.well-known/auth.md', '/auth.md'] },
+  });
+
+  test('a markdown auth doc passes', async () => {
+    const fetchImpl = stubFetch((url) => {
+      if (url.endsWith('/.well-known/auth.md')) {
+        return new Response('# Agent auth\n\nRegister at /register.', {
+          status: 200,
+          headers: { 'content-type': 'text/markdown' },
+        });
+      }
+      return new Response('no', { status: 404 });
+    });
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('an HTML page at the auth.md path is broken (present-malformed)', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('<html>login</html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('missing at every candidate path is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response('no', { status: 404 }));
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a bare markdown heading without a content-type still passes', async () => {
+    const fetchImpl = stubFetch((url) =>
+      url.endsWith('/auth.md') ? new Response('# Auth for agents') : new Response('no', { status: 404 }),
+    );
+    const outcome = await runAuthMd(authCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runWebMcp', () => {
+  const webmcpCheck = check({ id: 'webmcp', handler: 'webmcp', antecedent: 'html-root', with: {} });
+  const htmlRoot = (body: string) => ({
+    status: 200,
+    headers: { 'content-type': 'text/html' },
+    body,
+    error: null,
+  });
+
+  test('detects a webmcp script asset in the root HTML without any fetch', async () => {
+    let called = 0;
+    const fetchImpl = stubFetch(() => {
+      called++;
+      return new Response('');
+    });
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script src="/assets/webmcp-abc123.js" defer></script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(called).toBe(0);
+  });
+
+  test('detects an inline navigator.modelContext registration', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script>if (navigator.modelContext) { /* register */ }</script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('no markers is absent', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: htmlRoot('<html><body>hi</body></html>') }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a failed root fetch is an operational error', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: undefined }));
+    expect(outcome.status).toBe('error');
+  });
+});

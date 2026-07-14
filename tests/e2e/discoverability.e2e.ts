@@ -26,28 +26,38 @@ if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_C
   ACCESS_HEADERS['CF-Access-Client-Secret'] = process.env.ANC_STAGING_ACCESS_CLIENT_SECRET;
 }
 
-// Source of truth: MCP_DESCRIPTOR_ALIAS_PATHS in src/worker/index.ts. Kept as a
-// literal here because the worker module is not importable in Playwright's node
-// env; a new alias must be added in both places.
-const MCP_DESCRIPTOR_ALIASES = [
-  '/.well-known/mcp/server-card.json',
-  '/.well-known/mcp',
-  '/mcp.json',
-  '/.well-known/mcp.json',
-] as const;
+// Source of truth: MCP_DESCRIPTOR_ALIAS_PATHS in src/worker/mcp/descriptor-paths.ts.
+// Kept as a literal here because the worker module is not importable in
+// Playwright's node env; a new alias must be added in both places.
+const MCP_DESCRIPTOR_ALIASES = ['/.well-known/mcp', '/mcp.json', '/.well-known/mcp.json'] as const;
 
 test.describe('staging MCP descriptor aliases', () => {
-  test('all four alias paths return byte-identical JSON bodies', async ({ request }) => {
-    const bodies: string[] = [];
+  test('every pointer alias 301s to the canonical server-card path (R9)', async ({ request }) => {
     for (const path of MCP_DESCRIPTOR_ALIASES) {
-      const res = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
-      expect(res.status()).toBe(200);
-      expect(res.headers()['content-type']).toContain('application/json');
-      bodies.push(await res.text());
+      const res = await request.get(`${STAGING_BASE}${path}`, {
+        headers: ACCESS_HEADERS,
+        maxRedirects: 0,
+      });
+      expect(res.status()).toBe(301);
+      expect(res.headers().location).toBe(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
     }
-    for (let i = 1; i < bodies.length; i++) {
-      expect(bodies[i]).toBe(bodies[0]);
-    }
+  });
+
+  test('the alias redirect chain resolves to the canonical card body', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('application/json');
+    const body = (await res.json()) as { mcp_endpoint?: string };
+    expect(body.mcp_endpoint).toBe(`${STAGING_BASE}/mcp`);
+  });
+
+  test('GET /mcp with a JSON Accept 301s to the canonical card', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/mcp`, {
+      headers: { ...ACCESS_HEADERS, accept: 'application/json' },
+      maxRedirects: 0,
+    });
+    expect(res.status()).toBe(301);
+    expect(res.headers().location).toBe(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
   });
 
   test('canonical server-card.json carries mcp_endpoint, version, transport, documentation', async ({ request }) => {
@@ -160,6 +170,31 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { keys: unknown[] };
     expect(Array.isArray(body.keys)).toBe(true);
+  });
+
+  test('/.well-known/agent-skills/index.json lists every web-audit fix skill with resolvable targets', async ({
+    request,
+  }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.json`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as { skills: Array<{ name: string; url: string; digest: string }> };
+    const fixSkills = body.skills.filter((skill) => skill.name.startsWith('web-audit-fix-'));
+    expect(fixSkills.length).toBeGreaterThanOrEqual(30);
+    // Spot-check a representative target resolves on this origin.
+    const openapi = fixSkills.find((skill) => skill.name === 'web-audit-fix-openapi');
+    expect(openapi?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const target = new URL(openapi?.url ?? '');
+    const resolved = await request.get(`${STAGING_BASE}${target.pathname}`, { headers: ACCESS_HEADERS });
+    expect(resolved.status()).toBe(200);
+    expect(resolved.headers()['content-type']).toContain('text/markdown');
+  });
+
+  test('/.well-known/agent-skills/index.md renders the human-readable twin', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/.well-known/agent-skills/index.md`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('# Agent skills on anc.dev');
+    expect(text).toContain('web-audit-fix-');
   });
 
   test('/.well-known/agent-skills/index.json lists the MCP skill with a digest', async ({ request }) => {

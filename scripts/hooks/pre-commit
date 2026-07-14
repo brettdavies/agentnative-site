@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Pre-commit hook — staged-file-scoped fast lint mirroring the checks
+# `.github/workflows/ci.yml` runs via `bun run lint` (Biome + markdownlint-cli2).
+# Heavier stages (build, tests, wrangler dry-run, prose-check) stay in
+# scripts/hooks/pre-push; they're too slow for a pre-commit gate.
+#
+# Activate once per clone:
+#   git config core.hooksPath scripts/hooks
+#
+# Each tool invocation no-ops with a notice if the binary isn't installed,
+# so the hook never blocks a commit on an unconfigured machine.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+bold() { printf '\033[1m%s\033[0m\n' "$*"; }
+
+mapfile -t staged_md < <(git diff --cached --name-only --diff-filter=ACM -- '*.md')
+
+bold '==> biome check --staged'
+if command -v bun &>/dev/null; then
+  bun x biome check --staged --no-errors-on-unmatched
+else
+  echo "  - biome (skipped: bun not installed; install via https://bun.sh)"
+fi
+
+bold '==> markdownlint-cli2 (staged .md files)'
+if [ ${#staged_md[@]} -eq 0 ]; then
+  echo "  - no staged .md files; skipping"
+elif command -v bun &>/dev/null; then
+  bun x markdownlint-cli2 "${staged_md[@]}"
+else
+  echo "  - markdownlint-cli2 (skipped: bun not installed; install via https://bun.sh)"
+fi
+
+# content/*.md is emitted as a verbatim markdown twin (and folded into
+# llms-full.txt), so a raw <form>/<input>/<button> leaks dead controls into
+# the agent-facing surface. Browser widgets go in a build-template slot
+# (src/build/07-subpages.mjs). tests/content-no-form-widgets.test.ts is the
+# CI-side gate; this is the fast local one.
+bold '==> content widget guard (staged content/*.md)'
+widget_hits=""
+for f in "${staged_md[@]}"; do
+  case "$f" in
+  content/*)
+    if grep -nEi '<form\b|<input\b|<button\b' "$f" >/dev/null 2>&1; then
+      widget_hits+="  $f"$'\n'
+    fi
+    ;;
+  esac
+done
+if [ -n "$widget_hits" ]; then
+  echo "  interactive form widgets belong in a build-template slot (src/build/07-subpages.mjs)," >&2
+  echo "  not content/*.md: the .md twin and llms-full.txt serve the source verbatim. Offending:" >&2
+  printf '%s' "$widget_hits" >&2
+  exit 1
+fi
+echo "  - clean"
+
+bold '==> pre-commit checks passed'

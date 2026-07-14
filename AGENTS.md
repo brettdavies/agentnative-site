@@ -61,6 +61,12 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `content/*.md`: markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
+- **Interactive widgets never live in `content/*.md`.** The `.md` twin and `llms-full.txt` serve the markdown source
+  verbatim, so a raw `<form>`, `<input>`, or `<button>` leaks dead controls into the agent-facing surface. A page that
+  needs a browser widget declares a `widget` slot in `src/build/07-subpages.mjs` (a `{{PLACEHOLDER}}` that renders as
+  HTML in the page and as a prose pointer in the twin); the homepage form lives the same way in
+  `src/build/06-homepage.mjs`. Content markdown stays prose. Enforced by `tests/content-no-form-widgets.test.ts` and the
+  `scripts/hooks/pre-commit` widget guard.
 - `/llms.txt`, `/llms-full.txt`: llmstxt.org convention (summary index + full concatenated spec)
 - `/mcp`: streamable HTTP Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
   canonical server card at `/.well-known/mcp/server-card.json` (legacy aliases `/.well-known/mcp`, `/mcp.json`,
@@ -85,36 +91,44 @@ how it fails.
 `documentation` field is the client-skill `.md` URL; `initialize.instructions` carries the same pointer plus a
 session-time summary.
 
-**Nine tools, five resources.** Tools cover four surfaces:
+**Thirteen tools, five resources.** Tools cover five surfaces:
 
 - Registry: `list_tools`, `get_tool`, `search_tools`
 - Principles: `list_principles`, `get_principle`
 - Spec: `list_spec_sections`, `get_spec_section`
 - Scorecards: `get_scorecard` (cache read), `score_cli` (cache-miss audit)
+- Web audits: `get_website_audit` (cache read), `audit_website` (fresh audit), `list_website_audits` (curated web
+  board), `get_web_remediation` (per-check fix)
 
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
 
-**Two rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
+**Four rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
-audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. Missing IP returns `-32099` rather than
-consuming a shared bucket, because container-run cost is non-trivial. The hourly window is enforced in two layers: the
-CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and an
-application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the
-hourly ceiling.
+audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
+`WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
+missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. The
+`/api/audit-web` webapp route reaches the same hourly counter but gates the human path like `/api/score` does: a
+Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
+`<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
+layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
+and an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` /
+`web_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the 30-per-hour ceiling.
 
 **Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
 a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; `score_cli` is the metered one. The two
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Two kill switches, surgical and zero-deploy.** Both default `"false"` in production and `"true"` in staging. Flip via
+**Three kill switches, surgical and zero-deploy.** Default `"false"` in production and `"true"` in staging. Flip via
 `wrangler secret put`.
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
 - `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
   `next_tool: get_scorecard` redirect; the read tier stays alive.
+- `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the `/api/audit-web` route). Falsy returns `audited:
+  false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
@@ -285,6 +299,10 @@ already bound there rather than picking a fallback.
 - `ci.yml`: fast PR gate (lint · build · test · wrangler dry-run).
 - `deep-check.yml`: scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
   last deep-check.
+- **Playwright browsers:** system-provided on the dev host — dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
+  never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
+  `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
+  what's provisioned; bump it in dotfiles first. CI runners install their own browsers.
 - `deploy.yml`: publishes to the `*.workers.dev` staging on every push to `main`.
 - `guard-main-docs.yml`: blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
 - `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.

@@ -341,27 +341,15 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(body).toContain('# anc.dev MCP server');
   });
 
-  test('Accept: application/json returns descriptor with request-origin URLs', async () => {
+  test('Accept: application/json 301s to the canonical server-card path', async () => {
     const env = makeEnv();
     const res = await getMcp(env, 'application/json');
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://anc.dev/.well-known/mcp/server-card.json');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    const body = (await res.json()) as {
-      mcp_endpoint: string;
-      documentation: string;
-      transport: { type: string; endpoint: string };
-    };
-    // Test request URL is https://anc.dev/mcp, so the rewritten URLs
-    // should also be anc.dev. Non-anc.dev origin coverage lives in the
-    // env-awareness test below.
-    expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
-    expect(body.documentation).toBe('https://anc.dev/mcp-skill.md');
-    expect(body.transport.type).toBe('streamable-http');
-    expect(body.transport.endpoint).toBe('https://anc.dev/mcp');
   });
 
-  test('JSON descriptor rewrites URLs to the inbound request origin (env-aware)', async () => {
+  test('the JSON redirect targets the inbound request origin (env-aware)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
       new Request('http://localhost:8788/mcp', {
@@ -371,13 +359,11 @@ describe('GET /mcp — content-negotiated descriptor', () => {
       env,
       {} as ExecutionContext,
     );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { mcp_endpoint: string; documentation: string };
-    expect(body.mcp_endpoint).toBe('http://localhost:8788/mcp');
-    expect(body.documentation).toBe('http://localhost:8788/mcp-skill.md');
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('http://localhost:8788/.well-known/mcp/server-card.json');
   });
 
-  test('JSON response uses cacheable Cache-Control (not no-store)', async () => {
+  test('JSON redirect uses cacheable Cache-Control (not no-store)', async () => {
     const env = makeEnv();
     const res = await getMcp(env, 'application/json');
     const cc = res.headers.get('cache-control') ?? '';
@@ -385,13 +371,11 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(cc).not.toContain('no-store');
   });
 
-  test('JSON descriptor served even when MCP_ENABLED is off (URL identity bypass)', async () => {
+  test('JSON redirect served even when MCP_ENABLED is off (URL identity bypass)', async () => {
     const env = makeEnv({ enabled: false });
     const res = await getMcp(env, 'application/json');
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
-    const body = (await res.json()) as { mcp_endpoint: string };
-    expect(body.mcp_endpoint).toBe('https://anc.dev/mcp');
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://anc.dev/.well-known/mcp/server-card.json');
   });
 });
 
@@ -410,20 +394,17 @@ describe('GET /mcp.md — markdown twin', () => {
   });
 });
 
-describe('GET /mcp.json — JSON twin', () => {
-  test('serves the env-aware descriptor for the inbound origin', async () => {
+describe('GET /mcp.json — pointer alias', () => {
+  test('301s to the canonical card on the inbound origin', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
       new Request('http://localhost:8788/mcp.json', { method: 'GET' }),
       env,
       {} as ExecutionContext,
     );
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('http://localhost:8788/.well-known/mcp/server-card.json');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
-    const body = (await res.json()) as { mcp_endpoint: string; documentation: string };
-    expect(body.mcp_endpoint).toBe('http://localhost:8788/mcp');
-    expect(body.documentation).toBe('http://localhost:8788/mcp-skill.md');
   });
 
   test('non-GET returns 405 Allow: GET', async () => {
@@ -437,31 +418,27 @@ describe('GET /mcp.json — JSON twin', () => {
     expect(res.headers.get('allow')).toBe('GET');
   });
 
-  test('served even when MCP_ENABLED is off (descriptor bypasses kill switch)', async () => {
+  test('redirects even when MCP_ENABLED is off (descriptor bypasses kill switch)', async () => {
     const env = makeEnv({ enabled: false });
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp.json', { method: 'GET' }),
       env,
       {} as ExecutionContext,
     );
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(res.status).toBe(301);
   });
 });
 
-describe('GET /.well-known/mcp — env-aware intercept', () => {
-  test('serves the descriptor with URLs rewritten to the inbound origin', async () => {
+describe('GET /.well-known/mcp — pointer alias', () => {
+  test('301s to the canonical card on the inbound origin', async () => {
     const env = makeEnv();
     const res = await worker.fetch(
       new Request('https://anc-staging.dev/.well-known/mcp', { method: 'GET' }),
       env,
       {} as ExecutionContext,
     );
-    expect(res.status).toBe(200);
-    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
-    const body = (await res.json()) as { mcp_endpoint: string; documentation: string };
-    expect(body.mcp_endpoint).toBe('https://anc-staging.dev/mcp');
-    expect(body.documentation).toBe('https://anc-staging.dev/mcp-skill.md');
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://anc-staging.dev/.well-known/mcp/server-card.json');
   });
 
   test('non-GET returns 405 Allow: GET', async () => {

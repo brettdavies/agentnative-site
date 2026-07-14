@@ -1,0 +1,13 @@
+# Build-context exclusions for the brew-v6 spike image. Mirrors
+# docker/sandbox/.dockerignore — the current Dockerfile uses only
+# `COPY --from=` (no copy from the build context), so this file is
+# forward-looking: any future Dockerfile change that introduces
+# `COPY <ctx> ...` benefits from these exclusions.
+
+# Standard housekeeping.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
