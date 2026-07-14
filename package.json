@@ -9,6 +9,7 @@
     "dev": "bun run build && wrangler dev --env staging --local --port 8787",
     "test": "bun test",
     "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.client.json && tsc --noEmit -p tsconfig.worker.json",
     "types": "wrangler types ./src/worker-configuration.d.ts",
     "lint": "biome check . && markdownlint-cli2 \"**/*.md\"",
     "format": "biome format --write .",

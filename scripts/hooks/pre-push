@@ -9,24 +9,25 @@
 # Steps mirror the CI workflow's build job, then add three prose-check
 # stages (CI does not run these — pre-push is the only enforcement):
 #   1. lint           — biome check + markdownlint-cli2
-#   2. build          — bun src/build/build.mjs
-#   3. tests          — bun test (unit + regression)
-#   4. wrangler       — wrangler deploy --dry-run (config + bundle validation)
-#   5. pack-README    — bun scripts/generate-pack-readme.mjs site --check
+#   2. typecheck      — tsc --noEmit over the client + worker projects
+#   3. build          — bun src/build/build.mjs
+#   4. tests          — bun test (unit + regression)
+#   5. wrangler       — wrangler deploy --dry-run (config + bundle validation)
+#   6. pack-README    — bun scripts/generate-pack-readme.mjs site --check
 #                       (drift between styles/site/*.yml and the generated
 #                       README; brand pack is vendored and not regenerated)
-#   6. banned-fonts   — bash scripts/check-banned-fonts.sh
+#   7. banned-fonts   — bash scripts/check-banned-fonts.sh
 #                       (deployment-layer scan: CSS, TS, build scripts;
 #                       reads tokens from styles/site/BannedFonts.yml)
-#   7. shellcheck     — shellcheck --severity=warning over every tracked
+#   8. shellcheck     — shellcheck --severity=warning over every tracked
 #                       *.sh plus scripts/hooks/* (catches SC2034 / SC2086
 #                       / SC2155 class bugs; skips with a one-line note
 #                       when shellcheck isn't installed)
-#   8. prose-check    — bash scripts/prose-check.sh
+#   9. prose-check    — bash scripts/prose-check.sh
 #                       (Vale + LanguageTool over *.md in scope; LT skips
 #                       cleanly when LanguageTool is unreachable)
 #
-# Stages 5-8 each redirect child stdin to </dev/null. The branch-deletion
+# Stages 6-9 each redirect child stdin to </dev/null. The branch-deletion
 # short-circuit at the top of the hook consumes the hook-protocol bytes
 # from stdin (`while read -r local_ref local_sha …`); a child that read
 # stdin would either swallow protocol bytes or fight for them.
@@ -55,6 +56,9 @@ bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 
 bold '==> bun run lint'
 bun run lint
+
+bold '==> bun run typecheck'
+bun run typecheck
 
 bold '==> bun run build'
 bun run build

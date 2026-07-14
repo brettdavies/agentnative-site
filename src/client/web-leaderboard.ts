@@ -57,3 +57,5 @@ if (table && buttons.length > 0) {
   const requested = new URL(window.location.href).searchParams.get('sort');
   if (requested === 'relative') applySort('relative', false);
 }
+
+export {};

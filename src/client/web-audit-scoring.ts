@@ -14,30 +14,7 @@
 //   { type: "error", message }
 // A cache hit returns a single application/json body { cached, scorecard, share_url }.
 
-interface TurnstileApi {
-  render(
-    element: HTMLElement | string,
-    options: {
-      sitekey: string;
-      size?: 'compact' | 'flexible' | 'normal';
-      execution?: 'render' | 'execute';
-      callback?: (token: string) => void;
-      'error-callback'?: () => void;
-      'expired-callback'?: () => void;
-    },
-  ): string;
-  execute(widgetId?: string): void;
-  reset(widgetId?: string): void;
-  remove(widgetId?: string): void;
-}
-
-declare global {
-  interface Window {
-    turnstile?: TurnstileApi;
-  }
-}
-
-const TURNSTILE_SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+import { getTurnstileToken, readSitekey, takeTurnstileToken } from './turnstile';
 
 interface CheckEvent {
   type: 'check';
@@ -56,12 +33,6 @@ type StreamEvent =
 
 function q<T extends Element>(root: ParentNode, sel: string): T | null {
   return root.querySelector<T>(sel);
-}
-
-function readSitekey(): string | null {
-  const meta = document.querySelector<HTMLMetaElement>('meta[name=turnstile-sitekey]');
-  const value = meta?.content?.trim();
-  return value ? value : null;
 }
 
 /** The audited host lives in the path: /web/scoring/<host>. */
@@ -177,13 +148,20 @@ async function run(args: RunArgs): Promise<void> {
   const { host, sitekey, scope, setStatus, handleEvent, renderErrorResponse } = args;
   const url = `https://${host}/`;
 
+  // Prefer the token the form acquired on the submit gesture; fall back to a
+  // fresh on-load acquire for direct or shared /web/scoring links (no gesture,
+  // so invisible Turnstile clears less reliably there).
   let token: string;
-  try {
-    const api = await ensureTurnstileLoaded();
-    token = await acquireTurnstileToken(sitekey, api, scope);
-  } catch {
-    setStatus('Verification challenge failed to load. Reload to try again.');
-    return;
+  const carried = takeTurnstileToken(host);
+  if (carried) {
+    token = carried;
+  } else {
+    try {
+      token = await getTurnstileToken(sitekey, scope);
+    } catch {
+      setStatus('Verification challenge failed to load. Reload to try again.');
+      return;
+    }
   }
 
   let resp: Response;
@@ -196,8 +174,6 @@ async function run(args: RunArgs): Promise<void> {
   } catch {
     setStatus('Network error — could not reach the audit service.');
     return;
-  } finally {
-    teardownTurnstile();
   }
 
   const contentType = resp.headers.get('content-type') ?? '';
@@ -245,75 +221,6 @@ async function run(args: RunArgs): Promise<void> {
     }
   }
 }
-
-// Turnstile widget lifecycle — mirrors the invisible-widget acquire/teardown
-// used on the homepage form. The widget renders into a hidden mount, executes
-// once on load, and is removed on pagehide so a bfcache-restored page renders
-// a fresh widget on the next visit.
-let turnstilePromise: Promise<TurnstileApi> | null = null;
-let widget: { id: string; container: HTMLDivElement } | null = null;
-let pending: { resolve: (token: string) => void; reject: (err: Error) => void } | null = null;
-
-function ensureTurnstileLoaded(): Promise<TurnstileApi> {
-  if (turnstilePromise) return turnstilePromise;
-  turnstilePromise = new Promise<TurnstileApi>((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = TURNSTILE_SCRIPT_URL;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.turnstile) resolve(window.turnstile);
-      else reject(new Error('Turnstile failed to attach to window'));
-    };
-    script.onerror = () => reject(new Error('Turnstile script failed to load'));
-    document.head.appendChild(script);
-  }).catch((err) => {
-    turnstilePromise = null;
-    throw err;
-  });
-  return turnstilePromise;
-}
-
-function settle(result: { token: string } | { error: Error }): void {
-  const p = pending;
-  pending = null;
-  if (!p) return;
-  if ('token' in result) p.resolve(result.token);
-  else p.reject(result.error);
-}
-
-function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountHost: HTMLElement): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (pending) {
-      reject(new Error('turnstile_already_pending'));
-      return;
-    }
-    pending = { resolve, reject };
-    const container = document.createElement('div');
-    container.setAttribute('data-turnstile-mount', '');
-    container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
-    mountHost.appendChild(container);
-    const id = api.render(container, {
-      sitekey,
-      execution: 'execute',
-      callback: (token: string) => settle({ token }),
-      'error-callback': () => settle({ error: new Error('turnstile_error') }),
-      'expired-callback': () => settle({ error: new Error('turnstile_expired') }),
-    });
-    widget = { id, container };
-    api.execute(id);
-  });
-}
-
-function teardownTurnstile(): void {
-  if (widget && window.turnstile) {
-    window.turnstile.remove(widget.id);
-  }
-  widget = null;
-  pending = null;
-}
-
-window.addEventListener('pagehide', teardownTurnstile);
 
 function escapeText(s: string): string {
   const div = document.createElement('div');

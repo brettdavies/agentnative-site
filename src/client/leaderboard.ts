@@ -132,3 +132,5 @@ function getCellValue(row: HTMLTableRowElement, col: string): string | number {
       return '';
   }
 }
+
+export {};

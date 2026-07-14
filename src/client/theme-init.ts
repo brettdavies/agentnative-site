@@ -23,3 +23,5 @@
     // fallback to OS preference is the right behavior here.
   }
 })();
+
+export {};

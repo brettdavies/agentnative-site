@@ -97,3 +97,5 @@ function initWebMcp(): void {
 
 // Loaded with `defer`, so the document is always parsed by the time this runs.
 initWebMcp();
+
+export {};

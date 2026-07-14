@@ -1,0 +1,14 @@
+// Browser client typecheck. The client runs in the browser, not Bun or the
+// Cloudflare Workers runtime, so it must see DOM lib types only. The base
+// tsconfig's `types: ["@cloudflare/workers-types", "bun-types"]` leaks Bun and
+// Workers globals into the client (e.g. Bun's ParentNode.append override, which
+// shadows the real DOM signature), so this config clears `types` to type the
+// client against the browser it actually ships to.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src/client/**/*.ts"]
+}
