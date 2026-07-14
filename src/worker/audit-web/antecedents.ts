@@ -73,6 +73,15 @@ function anyEvidenceStatus(items: EvidenceItem[], status: number): boolean {
 const API_LLMS_RE = /openapi|swagger|\/api\//i;
 const SCHEMAS_RE = /application\/schema\+json|json-?schema|\/schema\.json/i;
 
+// A link to an actual OpenAPI/Swagger *document* (a .json/.yaml/.yml
+// descriptor), as opposed to a page whose URL merely contains the word
+// (e.g. a documentation page like /web-audit/skill/openapi). Used to scan
+// the retained sitemap.xml, an auto-generated URL list where a substring
+// match would flag every doc page. The openapi probe covers the standard
+// paths; this catches a descriptor served at a non-standard path that the
+// sitemap advertises.
+const API_DOC_URL_RE = /\b(?:openapi|swagger)[\w./-]*\.(?:json|ya?ml)\b/i;
+
 // service-desc / service-doc (RFC 8631) advertise a machine-readable
 // service description. A REST site points them at an OpenAPI/Swagger doc;
 // an MCP-first site points them at its MCP server card or usage doc, which
@@ -98,6 +107,7 @@ function apiSurfaceHolds(ctx: AntecedentContext): boolean {
   if (anyEvidenceStatus(sourceEvidence(ctx, 'openapi'), 200)) return true;
   if (restServiceDescLink(ctx)) return true;
   if (API_LLMS_RE.test(retainedBody(ctx, 'llms-txt'))) return true;
+  if (API_DOC_URL_RE.test(retainedBody(ctx, 'sitemap'))) return true;
   return false;
 }
 

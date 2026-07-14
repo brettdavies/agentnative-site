@@ -145,6 +145,44 @@ describe('resolveAntecedent', () => {
     expect(resolveAntecedent('api-surface', ctx({ root: proseRoot }))).toBe('n_a');
   });
 
+  test('api-surface holds when the sitemap lists an OpenAPI/Swagger document', () => {
+    const specSitemap = ctx({
+      sources: new Map([
+        [
+          'sitemap',
+          outcome('pass', [
+            {
+              url: 'https://x.dev/sitemap.xml',
+              status: 200,
+              body: '<url><loc>https://x.dev/api/v1/openapi.json</loc></url>',
+            },
+          ]),
+        ],
+      ]),
+    });
+    expect(resolveAntecedent('api-surface', specSitemap)).toBe('apply');
+  });
+
+  test('api-surface ignores a sitemap URL that only contains the word openapi', () => {
+    // A doc page like /web-audit/skill/openapi is not an API surface; only a
+    // .json/.yaml descriptor URL counts.
+    const docPageSitemap = ctx({
+      sources: new Map([
+        [
+          'sitemap',
+          outcome('pass', [
+            {
+              url: 'https://x.dev/sitemap.xml',
+              status: 200,
+              body: '<url><loc>https://x.dev/web-audit/skill/openapi</loc></url>',
+            },
+          ]),
+        ],
+      ]),
+    });
+    expect(resolveAntecedent('api-surface', docPageSitemap)).toBe('n_a');
+  });
+
   test('schemas-ref holds on a passing openapi or a schema reference in the root', () => {
     const openapiPass = ctx({ sources: new Map([['openapi', outcome('pass')]]) });
     expect(resolveAntecedent('schemas-ref', openapiPass)).toBe('apply');
