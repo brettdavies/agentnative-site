@@ -142,11 +142,12 @@ remediation:
       - { label: llmstxt.org, url: "https://llmstxt.org/" }
   openapi:
     title: An OpenAPI description is published
-    goal: Publish an OpenAPI description so non-MCP agents can call your API
+    goal: Publish an OpenAPI description so non-MCP agents can call your HTTP API
     fix: |
-      Publish an OpenAPI 3.1 description of your REST surface at `/openapi.json` (or `/openapi.yaml`,
-      or `/.well-known/openapi.json`). Non-MCP agents use it to discover endpoints, parameters, and
-      response shapes, and to generate typed clients.
+      If your service exposes an HTTP/REST API (separate from any MCP endpoint), publish an OpenAPI
+      3.1 description of it at `/openapi.json` (or `/openapi.yaml`, or `/.well-known/openapi.json`).
+      Non-MCP agents use it to discover endpoints, parameters, and response shapes, and to generate
+      typed clients. A service whose only machine surface is MCP has no REST API to describe here.
     resources:
       - { label: OpenAPI 3.1, url: "https://spec.openapis.org/oas/latest.html" }
   json-schemas:
