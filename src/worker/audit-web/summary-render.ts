@@ -6,9 +6,10 @@
 // shared scorecard-format renderer stays CLI-only (it groups by the
 // P1-P8 principles, which are a hidden tag on web surfaces).
 //
-// The prompt renders as a <pre> block inside <main>, so the site-wide
-// clipboard.js attaches its Copy button (idle / Copied / fallback
-// states) with no page-specific JS.
+// The copy-paste prompt is not rendered in the HTML: renderCheck emits it
+// in a hidden `data-copy-text` carrier and the site-wide clipboard.js
+// attaches a Copy-prompt button client-side. The markdown twin keeps the
+// fenced prompt so fetch-only agents lose nothing.
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
@@ -203,9 +204,11 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
   }
   body += `      <p class="web-check__resources"><strong>Resources:</strong> ${resourceLinks}</p>\n`;
   if (fixable) {
-    body += `      <p class="web-check__prompt-label">Copy-paste prompt for your coding agent:</p>
-      <pre><code>${escHtml(assembled.prompt)}</code></pre>
-`;
+    // The prompt is never rendered in HTML; clipboard.js reads it from the
+    // data attribute and attaches a Copy-prompt button client-side, so a
+    // no-JS render shows the prose + resource links with no dead control.
+    // The .md twin keeps the fenced prompt for fetch-only agents.
+    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" hidden></span>\n`;
   }
 
   return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>

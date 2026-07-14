@@ -116,10 +116,34 @@ function attachPromptButtons() {
   }
 }
 
+// Copy-without-render: a hidden `[data-copy-text]` carrier holds a prompt
+// that is never in the visible DOM. The button is attached client-side, so
+// a no-JS render shows no dead control (the prose + resource links are the
+// no-JS affordance). Used by web-audit result pages and fix-skill pages.
+function attachDataButtons() {
+  const carriers = document.querySelectorAll<HTMLElement>('[data-copy-text]');
+  for (const carrier of carriers) {
+    if (carrier.dataset.copyAttached === 'true') continue;
+    const text = carrier.getAttribute('data-copy-text') ?? '';
+    if (!text) continue;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy-button copy-button--prompt';
+    btn.setAttribute('aria-label', 'Copy the fix prompt for your coding agent');
+    btn.innerHTML = '<span data-copy-label>Copy prompt</span>';
+    btn.addEventListener('click', async () => {
+      if (await copyText(text)) flashCopied(btn);
+    });
+    carrier.after(btn);
+    carrier.dataset.copyAttached = 'true';
+  }
+}
+
 function init() {
   attachPreButtons();
   attachAnchorCopy();
   attachPromptButtons();
+  attachDataButtons();
 }
 
 if (document.readyState === 'loading') {

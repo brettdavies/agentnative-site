@@ -94,6 +94,27 @@ describe('emitWebAuditSkillPages', () => {
     expect(md.startsWith('# Fix: ')).toBe(true);
   });
 
+  test('skill HTML carries the prompt in a hidden data attribute and renders no fenced prompt', async () => {
+    const { distDir } = await emitToTmp();
+    const html = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.html'), 'utf8');
+    // Goal/Fix prose still render as headings.
+    expect(html).toContain('Goal');
+    expect(html).toContain('Fix');
+    // The prompt rides in the carrier, never as a fenced/pre block.
+    expect(html).toContain('data-copy-text=');
+    expect(html).not.toContain('<pre>');
+    // The raw (unescaped) prompt Issue line is not present as visible text.
+    expect(html).not.toContain("Issue: <the audit's finding for this check>");
+  });
+
+  test('skill .md keeps the Copy-paste prompt heading and fenced prompt', async () => {
+    const { distDir } = await emitToTmp();
+    const md = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.md'), 'utf8');
+    expect(md).toContain('## Copy-paste prompt');
+    expect(md).toContain('```text');
+    expect(md).toContain("Issue: <the audit's finding for this check>");
+  });
+
   test('every returned entry url maps to an emitted markdown artifact whose digest matches', async () => {
     const { distDir, pages } = await emitToTmp();
     for (const page of pages) {
