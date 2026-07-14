@@ -89,6 +89,19 @@ const SOURCE_REPOS = [
   { name: 'skill', url: 'https://github.com/brettdavies/agentnative-skill' },
 ];
 
+// Machine entry points listed in the <noscript> fallback. An agent or
+// fetch-only crawler that never runs the client bundle still reads an
+// explicit, in-body list of the structured surfaces instead of inferring
+// them. Mirrors the rel="alternate"/rel="mcp" head links below.
+const MACHINE_ENTRY_POINTS = [
+  { href: '/llms.txt', note: 'LLM-friendly index' },
+  { href: '/llms-full.txt', note: 'full spec corpus' },
+  { href: '/mcp', note: 'Streamable-HTTP MCP endpoint' },
+  { href: '/.well-known/mcp/server-card.json', note: 'MCP server card' },
+  { href: '/skill.json', note: 'agent-native skill bundle' },
+  { href: '/.well-known/api-catalog', note: 'RFC 9727 API catalog' },
+];
+
 const esc = escHtml;
 
 /** Deferred client bundle for browser-agent (WebMCP) tool registration. */
@@ -277,6 +290,14 @@ ${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" 
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+    <noscript>
+      <nav class="machine-entry-points" aria-label="Machine entry points">
+        <p>Machine entry points for agents and non-JS clients:</p>
+        <ul>
+${MACHINE_ENTRY_POINTS.map((e) => `          <li><a href="${e.href}">${e.href}</a> (${e.note})</li>`).join('\n')}
+        </ul>
+      </nav>
+    </noscript>
     <header class="site-header">
       <div class="container site-header__row">
         <a class="site-brand" href="/">
