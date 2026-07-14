@@ -33,4 +33,28 @@ else
   echo "  - markdownlint-cli2 (skipped: bun not installed; install via https://bun.sh)"
 fi
 
+# content/*.md is emitted as a verbatim markdown twin (and folded into
+# llms-full.txt), so a raw <form>/<input>/<button> leaks dead controls into
+# the agent-facing surface. Browser widgets go in a build-template slot
+# (src/build/07-subpages.mjs). tests/content-no-form-widgets.test.ts is the
+# CI-side gate; this is the fast local one.
+bold '==> content widget guard (staged content/*.md)'
+widget_hits=""
+for f in "${staged_md[@]}"; do
+  case "$f" in
+  content/*)
+    if grep -nEi '<form\b|<input\b|<button\b' "$f" >/dev/null 2>&1; then
+      widget_hits+="  $f"$'\n'
+    fi
+    ;;
+  esac
+done
+if [ -n "$widget_hits" ]; then
+  echo "  interactive form widgets belong in a build-template slot (src/build/07-subpages.mjs)," >&2
+  echo "  not content/*.md: the .md twin and llms-full.txt serve the source verbatim. Offending:" >&2
+  printf '%s' "$widget_hits" >&2
+  exit 1
+fi
+echo "  - clean"
+
 bold '==> pre-commit checks passed'
