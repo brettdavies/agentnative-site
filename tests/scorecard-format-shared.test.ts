@@ -34,7 +34,7 @@ describe('PRINCIPLE_GROUPS + PRINCIPLE_NAMES', () => {
   test('covers P1..P8', () => {
     expect(PRINCIPLE_GROUPS).toEqual(['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8']);
     for (const g of PRINCIPLE_GROUPS) {
-      expect(PRINCIPLE_NAMES[g]).toBeTruthy();
+      expect((PRINCIPLE_NAMES as Record<string, string>)[g]).toBeTruthy();
     }
   });
   test('BONUS_GROUPS is closed set', () => {
@@ -76,8 +76,9 @@ describe('extractTopIssues', () => {
     expect(top.map((i: { label: string }) => i.label)).toEqual(['broken', 'broken2']);
   });
   test('handles null/undefined safely', () => {
-    expect(extractTopIssues(null)).toEqual([]);
-    expect(extractTopIssues(undefined)).toEqual([]);
+    type Scorecard = Parameters<typeof extractTopIssues>[0];
+    expect(extractTopIssues(null as unknown as Scorecard)).toEqual([]);
+    expect(extractTopIssues(undefined as unknown as Scorecard)).toEqual([]);
     expect(extractTopIssues({})).toEqual([]);
     expect(extractTopIssues({ results: undefined })).toEqual([]);
   });

@@ -8,7 +8,15 @@
   // Not a formal secret — just an identifier we'd rather not expose on a
   // public repo. See RELEASES.md § Secrets.
   "compatibility_date": "2026-04-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public routes every global fetch() to the public
+  // internet. The web audit probes arbitrary target URLs through the
+  // SSRF-guarded engine, including anc.dev itself; a Worker on a Custom Domain
+  // that fetches its own hostname 522s without this flag (Cloudflare error
+  // 1042 / worker-as-origin self-fetch), which the audit reports as a "broken"
+  // surface for surfaces that actually serve. Public egress is also the
+  // correct vantage point for an agent-readiness audit. External fetches
+  // (package installs, github) already go public, so they are unaffected.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   // Project-scoped opt-out of wrangler telemetry. Travels with the repo so
   // CI runs and contributor invocations stay opted out regardless of
   // per-user `WRANGLER_SEND_METRICS` or per-machine `wrangler telemetry
