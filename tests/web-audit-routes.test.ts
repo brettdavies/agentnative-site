@@ -26,7 +26,7 @@ async function registryJson(): Promise<string> {
   if (!registryJsonPromise) {
     registryJsonPromise = (async () => {
       const raw = await readFile(join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'), 'utf8');
-      return JSON.stringify(normalizeWebAuditRegistry(yaml.load(raw)));
+      return JSON.stringify(normalizeWebAuditRegistry(yaml.load(raw) as object));
     })();
   }
   return registryJsonPromise;

@@ -31,6 +31,145 @@ import {
   sortedGlob,
 } from '../src/build/util.mjs';
 
+// Shape of one registry.yaml entry as loaded by loadRegistry — narrows the
+// loosely-typed (object) return for property access in assertions below.
+type RegistryTool = {
+  name: string;
+  repo?: string;
+  binary: string;
+  language: string;
+  tier: string;
+  creator: string;
+  description: string;
+  audit_profile?: string;
+};
+
+// Shape of one loadScoredTools() result entry — narrows the loosely-typed
+// (object) return for property access in assertions below.
+type LoadedTool = {
+  tool: RegistryTool;
+  scorecard: { schema_version: string; badge: { score_pct: number } } & Record<string, unknown>;
+  version: string;
+  metadata: ScorecardMetadata;
+  scorecardFilename: string;
+};
+
+// One `results[]` row from a scorecard fixture. Covers schema 0.5 (base
+// fields only) and 0.6 (adds confidence/tier/check_id) — the extra fields
+// are optional so both shapes satisfy this type without a union.
+type ScorecardCheck = {
+  id: string;
+  label: string;
+  group: string;
+  layer: string;
+  status: string;
+  evidence: string | null;
+  confidence?: string;
+  tier?: string;
+  check_id?: string;
+};
+
+// The `summary` block. Schema 0.5 carries the first six keys; 0.6 adds
+// opt_out/n_a counters — both optional so either fixture shape fits.
+type ScorecardSummary = {
+  total: number;
+  pass: number;
+  warn: number;
+  fail: number;
+  skip: number;
+  error: number;
+  opt_out?: number;
+  n_a?: number;
+};
+
+// The `badge` block every scorecard schema 0.5+ carries.
+type ScorecardBadge = {
+  eligible: boolean;
+  score_pct: number;
+  embed_markdown: string | null;
+  scorecard_url: string;
+  badge_url: string;
+  convention_url: string;
+};
+
+// The v0.4 metadata blocks lifted to scorecard top-level fields, and mirrored
+// under loadScoredTools()'s `metadata` return field. All four sub-blocks are
+// nullable together for grandfathered pre-v0.4 scorecards.
+type ScorecardMetadata = {
+  tool: { name: string; binary: string; version: string | null } | null;
+  anc: { version: string; commit?: string | null } | null;
+  run: {
+    invocation: string;
+    started_at: string;
+    duration_ms: number;
+    platform: { os: string; arch: string };
+  } | null;
+  target: { kind: string; path: string | null; command: string | null } | null;
+};
+
+// A full scorecard fixture as produced by makeScorecard/makeV04Scorecard/
+// makeV06Scorecard — the shape consumed by computePrincipleScore,
+// computeLayerScore, extractTopIssues, computeLeaderboard,
+// buildScorecardBody, and buildScorecardMarkdown. Optional fields cover the
+// v0.4/0.5/0.6 metadata-block migration window; index signature lets
+// per-test overrides bolt on extra fields (e.g. spec_version) without
+// widening every other fixture.
+type Scorecard = {
+  schema_version: string;
+  summary: ScorecardSummary;
+  results: ScorecardCheck[];
+  badge: ScorecardBadge;
+  audience?: string | null;
+  audit_profile?: string | null;
+  coverage_summary?: {
+    must: { total: number; verified: number };
+    should: { total: number; verified: number };
+    may?: { total: number; verified: number };
+  } | null;
+  tool?: { name: string; binary: string; version: string | null };
+  anc?: { version: string; commit?: string | null };
+  run?: {
+    invocation: string;
+    started_at: string;
+    duration_ms: number;
+    platform: { os: string; arch: string };
+  };
+  target?: { kind: string; path: string | null; command: string | null };
+  [extra: string]: unknown;
+};
+
+// computePrincipleScore()'s return shape.
+type PrincipleScoreDetail = { group: string; status: string };
+type PrincipleScore = { met: number; total: number; details: PrincipleScoreDetail[] };
+
+// Minimal editorial `tool` shape used by leaderboard fixtures — a subset of
+// RegistryTool since leaderboard rows don't need every registry field.
+type LeaderboardTool = {
+  name: string;
+  tier: string;
+  language?: string;
+  description?: string;
+};
+
+// Minimal scorecard shape buildLeaderboardBody() actually reads (audience,
+// audit_profile, badge.*) — leaderboard row fixtures don't need a full
+// Scorecard (no schema_version/metadata; summary/results are often stubbed).
+type LeaderboardScorecard = {
+  audience?: string | null;
+  audit_profile?: string | null;
+  results?: unknown[];
+  summary?: Record<string, number>;
+  badge: ScorecardBadge;
+};
+
+// One computeLeaderboard()/buildLeaderboardBody() row.
+type LeaderboardEntry = {
+  tool: LeaderboardTool;
+  scorecard: LeaderboardScorecard;
+  principleScore?: PrincipleScore;
+  rank?: number;
+};
+
 describe('sortedGlob', () => {
   test('sorts principles by numeric prefix, not lexicographic', async () => {
     const dir = join(tmpdir(), `sortedGlob-${Date.now()}`);
@@ -278,7 +417,7 @@ describe('escHtml', () => {
   });
 
   test('coerces non-strings', () => {
-    expect(escHtml(42)).toBe('42');
+    expect(escHtml(42 as unknown as string)).toBe('42');
   });
 });
 
@@ -294,6 +433,7 @@ describe('emitShell — OG image alt text', () => {
       canonicalPath: '/p1',
       bodyHtml: '<article>body</article>',
       themeInitJs: '/* theme init */',
+      baseUrl: undefined,
     });
   }
 
@@ -335,7 +475,7 @@ describe('emitShell — OG image alt text', () => {
 // -------------------------------------------------------------------
 
 // Reusable scorecard fixture matching the anc audit --output json schema.
-function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}) {
+function makeScorecard(overrides: Partial<{ results: ScorecardCheck[]; summary: ScorecardSummary }> = {}) {
   const results = overrides.results ?? [
     {
       id: 'p1-non-interactive',
@@ -390,11 +530,11 @@ function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}
   ];
   const summary = overrides.summary ?? {
     total: results.length,
-    pass: results.filter((r: any) => r.status === 'pass').length,
-    warn: results.filter((r: any) => r.status === 'warn').length,
-    fail: results.filter((r: any) => r.status === 'fail').length,
-    skip: results.filter((r: any) => r.status === 'skip').length,
-    error: results.filter((r: any) => r.status === 'error').length,
+    pass: results.filter((r: ScorecardCheck) => r.status === 'pass').length,
+    warn: results.filter((r: ScorecardCheck) => r.status === 'warn').length,
+    fail: results.filter((r: ScorecardCheck) => r.status === 'fail').length,
+    skip: results.filter((r: ScorecardCheck) => r.status === 'skip').length,
+    error: results.filter((r: ScorecardCheck) => r.status === 'error').length,
   };
   return { results, summary };
 }
@@ -404,7 +544,7 @@ function makeScorecard(overrides: Partial<{ results: any[]; summary: any }> = {}
 // emits today; loadScoredTools' invariant requires schema_version === '0.5'.
 // (Function name retains "V04" as the historical reference for the metadata
 // block additions; the schema bump from 0.4 → 0.5 only added `badge`.)
-function makeV04Scorecard(overrides: Record<string, any> = {}) {
+function makeV04Scorecard(overrides: Partial<Scorecard> = {}): Scorecard {
   const base = makeScorecard();
   return {
     schema_version: '0.5',
@@ -438,7 +578,7 @@ function makeV04Scorecard(overrides: Record<string, any> = {}) {
 // `tier`, `check_id`, `confidence`; summary gains opt_out/n_a counters; `anc`
 // drops `commit`. This object validates against the CLI's published 0.6
 // scorecard JSON Schema (agentnative-cli/schema/scorecard.schema.json).
-function makeV06Scorecard(overrides: Record<string, any> = {}) {
+function makeV06Scorecard(overrides: Partial<Scorecard> = {}): Scorecard {
   const results = overrides.results ?? [
     {
       id: 'p1-must-no-interactive',
@@ -507,7 +647,7 @@ function makeV06Scorecard(overrides: Record<string, any> = {}) {
       check_id: 'p6-no-pager',
     },
   ];
-  const tally = (s: string) => results.filter((r: any) => r.status === s).length;
+  const tally = (s: string) => results.filter((r) => r.status === s).length;
   return {
     schema_version: '0.6',
     results,
@@ -575,7 +715,7 @@ describe('loadRegistry', () => {
 `,
     );
     try {
-      const tools = await loadRegistry(registryPath);
+      const tools = (await loadRegistry(registryPath)) as RegistryTool[];
       expect(tools).toHaveLength(2);
       expect(tools[0].name).toBe('gh');
       expect(tools[1].tier).toBe('notable');
@@ -680,9 +820,9 @@ describe('loadRegistry', () => {
 `,
     );
     try {
-      const tools = await loadRegistry(registryPath);
+      const tools = (await loadRegistry(registryPath)) as RegistryTool[];
       expect(tools).toHaveLength(4);
-      expect(tools.map((t: any) => t.audit_profile)).toEqual([
+      expect(tools.map((t) => t.audit_profile)).toEqual([
         'human-tui',
         'file-traversal',
         'posix-utility',
@@ -734,7 +874,7 @@ describe('loadRegistry', () => {
 `,
     );
     try {
-      const tools = await loadRegistry(registryPath);
+      const tools = (await loadRegistry(registryPath)) as RegistryTool[];
       expect(tools).toHaveLength(1);
       expect(tools[0].audit_profile).toBeUndefined();
     } finally {
@@ -804,7 +944,9 @@ describe('loadScoredTools — scorecard-driven discovery + registry editorial jo
           description: 'grep',
         },
       ];
-      const { tools, warnings } = await loadScoredTools(dir, registry);
+      const result = await loadScoredTools(dir, registry);
+      const { warnings } = result;
+      const tools = result.tools as LoadedTool[];
       expect(tools).toHaveLength(1);
       expect(tools[0].tool.name).toBe('gh');
       expect(tools[0].scorecard).not.toBeNull();
@@ -964,15 +1106,18 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
           description: 'thing',
         },
       ];
-      const { tools } = await loadScoredTools(dir, registry);
+      const result = await loadScoredTools(dir, registry);
+      const tools = result.tools as LoadedTool[];
       expect(tools).toHaveLength(1);
-      const entry: any = tools[0];
+      const entry = tools[0];
       expect(entry.metadata).not.toBeNull();
-      expect(entry.metadata.tool.name).toBe('fixture');
-      expect(entry.metadata.anc.version).toBe('0.1.0');
-      expect(entry.metadata.run.duration_ms).toBe(42);
-      expect(entry.metadata.run.platform.os).toBe('linux');
-      expect(entry.metadata.target.kind).toBe('command');
+      // Non-null: this is a v0.4 fixture (makeV04Scorecard), so all four
+      // metadata sub-blocks are populated — never the grandfathered-null shape.
+      expect(entry.metadata.tool!.name).toBe('fixture');
+      expect(entry.metadata.anc!.version).toBe('0.1.0');
+      expect(entry.metadata.run!.duration_ms).toBe(42);
+      expect(entry.metadata.run!.platform.os).toBe('linux');
+      expect(entry.metadata.target!.kind).toBe('command');
       expect(entry.scorecardFilename).toBe('fixture-v1.2.3.json');
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1032,11 +1177,13 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
           description: 'thing',
         },
       ];
-      const { tools, warnings } = await loadScoredTools(dir, registry);
+      const result = await loadScoredTools(dir, registry);
+      const { warnings } = result;
+      const tools = result.tools as LoadedTool[];
       expect(tools).toHaveLength(1);
       expect(tools[0].scorecard.schema_version).toBe('0.6');
       expect(tools[0].scorecard.badge.score_pct).toBe(62);
-      expect(tools[0].metadata.anc.version).toBe(ANC_VERSION);
+      expect(tools[0].metadata.anc!.version).toBe(ANC_VERSION);
       expect(warnings.scorecardOrphans).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1090,8 +1237,9 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
           description: 'z',
         },
       ];
-      const { tools } = await loadScoredTools(dir, registry);
-      const versions = tools.map((t: any) => t.scorecard.schema_version).sort();
+      const result = await loadScoredTools(dir, registry);
+      const tools = result.tools as LoadedTool[];
+      const versions = tools.map((t) => t.scorecard.schema_version).sort();
       expect(versions).toEqual(['0.5', '0.6', '0.7']);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1125,7 +1273,7 @@ describe('loadScoredTools — schema 0.4 metadata', () => {
 
 describe('runScorecardInvariants — v0.4 corpus invariants', () => {
   // Helper: build a registry array with one entry per provided shape override.
-  function makeRegistry(entries: Array<Record<string, any>>) {
+  function makeRegistry(entries: Array<Pick<RegistryTool, 'name' | 'binary'>>): RegistryTool[] {
     return entries.map((overrides) => ({
       repo: 'a/b',
       language: 'Rust',
@@ -1137,7 +1285,7 @@ describe('runScorecardInvariants — v0.4 corpus invariants', () => {
   }
 
   async function withCorpus(
-    files: Array<{ name: string; content: any }>,
+    files: Array<{ name: string; content: Partial<Scorecard> | string }>,
     fn: (dir: string) => Promise<void>,
   ): Promise<void> {
     const dir = join(tmpdir(), `corpus-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -1328,9 +1476,9 @@ describe('computePrincipleScore', () => {
     // P1=pass, P2=fail, P3=pass, P4=pass, P5=skip(no checks), P6=partial(has warn),
     // P7=pass, P8=skip(no checks)
     expect(ps.met).toBe(4); // P1, P3, P4, P7
-    expect(ps.details.find((d: any) => d.group === 'P2')?.status).toBe('fail');
-    expect(ps.details.find((d: any) => d.group === 'P6')?.status).toBe('partial');
-    expect(ps.details.find((d: any) => d.group === 'P8')?.status).toBe('skip');
+    expect(ps.details.find((d) => d.group === 'P2')?.status).toBe('fail');
+    expect(ps.details.find((d) => d.group === 'P6')?.status).toBe('partial');
+    expect(ps.details.find((d) => d.group === 'P8')?.status).toBe('skip');
   });
 
   test('returns 0/8 for null scorecard', () => {
@@ -1390,7 +1538,7 @@ describe('computeLeaderboard', () => {
       { tool: { name: 'high', tier: 'agent' }, scorecard: withBadge('high', 100) },
       { tool: { name: 'mid', tier: 'workhorse' }, scorecard: withBadge('mid', 75) },
     ];
-    const lb = computeLeaderboard(tools as any);
+    const lb = computeLeaderboard(tools) as Array<{ tool: { name: string; tier: string }; rank: number }>;
     expect(lb[0].tool.name).toBe('high');
     expect(lb[0].rank).toBe(1);
     expect(lb[1].tool.name).toBe('mid');
@@ -1607,7 +1755,7 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
   // Post-U3: every leaderboard entry has a scorecard. The (audience,
   // audit_profile) fields may still both be undefined on older scorecard
   // shapes — the renderer escapes them to empty strings.
-  function entry(name: string, audience: string | null, auditProfile: string | null) {
+  function entry(name: string, audience: string | null, auditProfile: string | null): LeaderboardEntry {
     return {
       tool: {
         name,
@@ -1636,7 +1784,7 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
 
   test('emits data-audience and data-audit-profile attrs on each row', () => {
     const lb = [entry('rg', 'agent-optimized', null), entry('lazygit', null, 'human-tui')];
-    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    const html = buildLeaderboardBody(lb, '<p>m</p>');
     expect(html).toContain('data-audience="agent-optimized"');
     expect(html).toContain('data-audit-profile="human-tui"');
   });
@@ -1646,13 +1794,13 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     // `audit_profile` may still be undefined on older scorecard shapes.
     // The renderer falls back to empty strings for both.
     const lb = [entry('newtool', null, null)];
-    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    const html = buildLeaderboardBody(lb, '<p>m</p>');
     expect(html).toContain('data-audience=""');
     expect(html).toContain('data-audit-profile=""');
   });
 
   test('emits the agent-optimized-only toggle and methodology link', () => {
-    const html = buildLeaderboardBody([entry('rg', 'agent-optimized', null)] as any, '<p>m</p>');
+    const html = buildLeaderboardBody([entry('rg', 'agent-optimized', null)], '<p>m</p>');
     expect(html).toContain('data-filter="agent-optimized-only"');
     expect(html).toContain('Agent-optimized only');
     // Methodology link in the hero lede.
@@ -1664,7 +1812,7 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     // that's stable under client-side audience-filter toggles. The redundant
     // (N) from the All tier-filter button is dropped.
     const lb = [entry('rg', 'agent-optimized', null), entry('lazygit', null, 'human-tui'), entry('eza', null, null)];
-    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    const html = buildLeaderboardBody(lb, '<p>m</p>');
     expect(html).toContain('class="leaderboard-hero__meta"');
     expect(html).toContain('3 audited tools in the corpus');
     // All button no longer carries the redundant "(N)" count — the new
@@ -1753,7 +1901,20 @@ describe('audience kebab-case regression guard (H6 Unit 0.5)', () => {
 });
 
 describe('loadSkillData — fail-fast validation', () => {
-  function validManifest() {
+  function validManifest(): {
+    schema_version: number;
+    type: string;
+    name: string;
+    version: string;
+    description: string;
+    principles_url: string;
+    license: string;
+    source: { type: string; url: string };
+    install: Record<string, string>;
+    update: string;
+    uninstall: string;
+    skill_page_html: string;
+  } {
     return {
       schema_version: 1,
       type: 'agent-skill',
@@ -1959,7 +2120,7 @@ describe('buildScorecardBody — embed-snippet gating', () => {
   }
 
   function sc(passes: number, fails: number) {
-    const results: any[] = [];
+    const results: ScorecardCheck[] = [];
     for (let i = 0; i < passes; i++) {
       results.push({
         id: `p${i}`,
@@ -2095,7 +2256,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
   }
 
   function sc(passes = 7, fails = 0) {
-    const results: any[] = [];
+    const results: ScorecardCheck[] = [];
     for (let i = 0; i < passes; i++) {
       results.push({
         id: `p${i}`,
@@ -2133,7 +2294,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
     };
   }
 
-  function v04Meta(overrides: Record<string, any> = {}) {
+  function v04Meta(overrides: Partial<ScorecardMetadata> = {}): ScorecardMetadata {
     return {
       tool: { name: 'rg', binary: 'rg', version: 'ripgrep 15.1.0' },
       anc: { version: '0.1.0', commit: 'fff3f13' },
@@ -2179,7 +2340,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       [],
       { met: 7, total: 7, details: [] },
       '15.1.0',
-      v04Meta({ run: { ...v04Meta().run, duration_ms: 42 } }),
+      v04Meta({ run: { ...v04Meta().run!, duration_ms: 42 } }),
     );
     expect(ms).toContain('<dt>Duration</dt><dd>42ms</dd>');
 
@@ -2189,7 +2350,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       [],
       { met: 7, total: 7, details: [] },
       '15.1.0',
-      v04Meta({ run: { ...v04Meta().run, duration_ms: 12_345 } }),
+      v04Meta({ run: { ...v04Meta().run!, duration_ms: 12_345 } }),
     );
     expect(seconds).toContain('<dt>Duration</dt><dd>12.3s</dd>');
 
@@ -2199,7 +2360,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       [],
       { met: 7, total: 7, details: [] },
       '15.1.0',
-      v04Meta({ run: { ...v04Meta().run, duration_ms: 145_234 } }),
+      v04Meta({ run: { ...v04Meta().run!, duration_ms: 145_234 } }),
     );
     expect(longRun).toContain('<dt>Duration</dt><dd>2m 25s</dd>');
   });
@@ -2253,7 +2414,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       '15.1.0',
       v04Meta({
         target: { kind: 'project', path: '/home/secret/repo', command: null },
-        run: { ...v04Meta().run, invocation: 'anc audit /home/secret/repo' },
+        run: { ...v04Meta().run!, invocation: 'anc audit /home/secret/repo' },
       }),
     );
     expect(html).toContain('<pre><code>anc audit --command rg</code></pre>');
@@ -2268,7 +2429,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
       { met: 7, total: 7, details: [] },
       '15.1.0',
       v04Meta({
-        run: { ...v04Meta().run, invocation: 'anc audit --command "<rg>" --output json' },
+        run: { ...v04Meta().run!, invocation: 'anc audit --command "<rg>" --output json' },
       }),
     );
     expect(html).not.toContain('<rg>');
@@ -2323,7 +2484,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
           badge_url: 'https://anc.dev/badge/rg.svg',
           convention_url: 'https://anc.dev/badge',
         },
-      } as any,
+      },
       [],
       { met: 7, total: 7, details: [] },
       '15.1.0',
@@ -2370,7 +2531,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
           badge_url: 'https://anc.dev/badge/rg.svg',
           convention_url: 'https://anc.dev/badge',
         },
-      } as any,
+      },
       [],
       { met: 7, total: 7, details: [] },
       '15.1.0',
@@ -2413,7 +2574,7 @@ describe('buildScorecardMarkdown — v0.4 metadata mirrors HTML', () => {
           badge_url: 'https://anc.dev/badge/rg.svg',
           convention_url: 'https://anc.dev/badge',
         },
-      } as any,
+      },
       [],
       { met: 7, total: 7, details: [] },
       '15.1.0',
@@ -2448,7 +2609,7 @@ describe('buildLeaderboardBody — badge callout', () => {
   // — there are no unscored entries to mis-count anymore (they're excluded
   // by loadScoredTools). The denominator is the audited corpus, not the
   // registry.
-  function entry(name: string, score: number) {
+  function entry(name: string, score: number): LeaderboardEntry {
     const score_pct = Math.round(score * 100);
     return {
       tool: { name, tier: 'workhorse', language: 'rust', description: name },
@@ -2462,7 +2623,7 @@ describe('buildLeaderboardBody — badge callout', () => {
           badge_url: `https://anc.dev/badge/${name}.svg`,
           convention_url: 'https://anc.dev/badge',
         },
-      } as any,
+      },
       principleScore: { met: 5, total: 7, details: [] },
       rank: 1,
     };
@@ -2470,7 +2631,7 @@ describe('buildLeaderboardBody — badge callout', () => {
 
   test('callout cites the floor and the live eligible/total count', () => {
     const lb = [entry('eza', 1.0), entry('rg', 0.89), entry('xx', 0.5), entry('yy', 0.3)];
-    const html = buildLeaderboardBody(lb as any, '<p>m</p>');
+    const html = buildLeaderboardBody(lb, '<p>m</p>');
     expect(html).toContain('leaderboard-badge-callout');
     expect(html).toContain('above 70%');
     // Two of four entries clear 0.70; denominator is the audited corpus.
@@ -2478,7 +2639,7 @@ describe('buildLeaderboardBody — badge callout', () => {
   });
 
   test('callout links to /badge', () => {
-    const html = buildLeaderboardBody([entry('eza', 1.0)] as any, '<p>m</p>');
+    const html = buildLeaderboardBody([entry('eza', 1.0)], '<p>m</p>');
     expect(html).toContain('href="/badge"');
   });
 });

@@ -9,6 +9,37 @@ import {
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 
+// Shape of one buildRegistryIndex() projected entry — narrows the
+// loosely-typed (object) by_slug/by_owner_repo maps for indexed access below.
+type RegistryIndexEntry = {
+  name: string;
+  binary: string;
+  install: string;
+  audit_profile?: string;
+  repo?: string;
+  version?: string;
+  anc_version?: string;
+  scorecard_url?: string;
+  score_pct?: number;
+};
+
+type RegistryIndex = {
+  by_slug: Record<string, RegistryIndexEntry>;
+  by_owner_repo: Record<string, RegistryIndexEntry>;
+};
+
+// Shape of one buildDiscoveryHintsIndex() projected entry.
+type DiscoveryHintEntry = {
+  pm: string;
+  package: string;
+  binary: string;
+  note?: string;
+};
+
+type DiscoveryHintsIndex = {
+  by_owner_repo: Record<string, DiscoveryHintEntry>;
+};
+
 describe('deriveOwnerRepo', () => {
   test('returns repo when present and well-formed', () => {
     expect(deriveOwnerRepo({ name: 'rg', repo: 'BurntSushi/ripgrep' })).toBe('BurntSushi/ripgrep');
@@ -57,20 +88,20 @@ describe('buildRegistryIndex', () => {
         audit_profile: 'file-traversal',
       },
     ];
-    const { index } = buildRegistryIndex(reg);
+    const { index } = buildRegistryIndex(reg) as { index: RegistryIndex; warnings: string[] };
     expect(index.by_slug.rg.audit_profile).toBe('file-traversal');
     expect(index.by_owner_repo['BurntSushi/ripgrep'].audit_profile).toBe('file-traversal');
   });
 
   test('tool with url-only (no repo) is keyed by parsed owner/repo from url', () => {
     const reg = [{ name: 'foo', binary: 'foo', install: 'brew install foo', url: 'https://github.com/owner/foo' }];
-    const { index } = buildRegistryIndex(reg);
+    const { index } = buildRegistryIndex(reg) as { index: RegistryIndex; warnings: string[] };
     expect(index.by_owner_repo['owner/foo']).toBeDefined();
   });
 
   test('tool with neither repo nor github url emits warning, by_slug entry preserved, by_owner_repo skipped', () => {
     const reg = [{ name: 'make', binary: 'make', install: 'brew install make', url: 'https://gnu.org/make' }];
-    const { index, warnings } = buildRegistryIndex(reg);
+    const { index, warnings } = buildRegistryIndex(reg) as { index: RegistryIndex; warnings: string[] };
     expect(index.by_slug.make).toBeDefined();
     expect(index.by_owner_repo).toEqual({});
     expect(warnings).toHaveLength(1);
@@ -83,7 +114,7 @@ describe('buildRegistryIndex', () => {
       { name: 'wrangler', binary: 'wrangler', install: 'npm i -g wrangler', repo: 'cloudflare/workers-sdk' },
       { name: 'cf', binary: 'cf', install: 'npm i -g wrangler', repo: 'cloudflare/workers-sdk' },
     ];
-    const { index, warnings } = buildRegistryIndex(reg);
+    const { index, warnings } = buildRegistryIndex(reg) as { index: RegistryIndex; warnings: string[] };
     expect(index.by_owner_repo['cloudflare/workers-sdk'].name).toBe('cf');
     expect(index.by_slug.wrangler).toBeDefined();
     expect(index.by_slug.cf).toBeDefined();
@@ -106,7 +137,10 @@ describe('buildDiscoveryHintsIndex', () => {
         note: 'because reasons',
       },
     ];
-    const { index, warnings } = buildDiscoveryHintsIndex(hints, emptyRegistryIndex);
+    const { index, warnings } = buildDiscoveryHintsIndex(hints, emptyRegistryIndex) as {
+      index: DiscoveryHintsIndex;
+      warnings: string[];
+    };
     expect(index.by_owner_repo['Aider-AI/aider']).toEqual({
       pm: 'pip',
       package: 'aider-chat',
@@ -137,7 +171,10 @@ describe('buildDiscoveryHintsIndex', () => {
       by_owner_repo: { 'foo/bar': { name: 'foo', binary: 'foo', install: 'brew install foo' } },
     };
     const hints = [{ owner_repo: 'foo/bar', pm: 'pip', package: 'foo', binary: 'foo' }];
-    const { index, warnings } = buildDiscoveryHintsIndex(hints, registryIndex);
+    const { index, warnings } = buildDiscoveryHintsIndex(hints, registryIndex) as {
+      index: DiscoveryHintsIndex;
+      warnings: string[];
+    };
     expect(index.by_owner_repo).toEqual({});
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('foo/bar');
@@ -149,7 +186,10 @@ describe('buildDiscoveryHintsIndex', () => {
       { owner_repo: 'foo/bar', pm: 'pip', package: 'first', binary: 'first' },
       { owner_repo: 'foo/bar', pm: 'pip', package: 'second', binary: 'second' },
     ];
-    const { index, warnings } = buildDiscoveryHintsIndex(hints, emptyRegistryIndex);
+    const { index, warnings } = buildDiscoveryHintsIndex(hints, emptyRegistryIndex) as {
+      index: DiscoveryHintsIndex;
+      warnings: string[];
+    };
     expect(index.by_owner_repo['foo/bar'].package).toBe('second');
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('duplicate hint');
@@ -157,7 +197,10 @@ describe('buildDiscoveryHintsIndex', () => {
 
   test('note is optional', () => {
     const hints = [{ owner_repo: 'foo/bar', pm: 'pip', package: 'foo', binary: 'foo' }];
-    const { index } = buildDiscoveryHintsIndex(hints, emptyRegistryIndex);
+    const { index } = buildDiscoveryHintsIndex(hints, emptyRegistryIndex) as {
+      index: DiscoveryHintsIndex;
+      warnings: string[];
+    };
     expect(index.by_owner_repo['foo/bar']).toEqual({ pm: 'pip', package: 'foo', binary: 'foo' });
   });
 });

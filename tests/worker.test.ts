@@ -274,14 +274,14 @@ describe('applyHeaders — staging-host guard (locked decision #4)', () => {
 describe('worker.fetch — CN rewrite + asset lookup', () => {
   test('/p3 no Accept → fetches /p3 (HTML, auto-trailing-slash resolves to p3.html)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/p3'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
     expect(res.headers.get('Link')).toContain('</p3.md>');
   });
 
   test('/p3 with Accept: text/markdown → fetches /p3.md (rewritten)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/p3', 'text/markdown'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', 'text/markdown'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3.md');
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
@@ -289,45 +289,49 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 
   test('/p3.md any Accept → fetches /p3.md (suffix wins)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/p3.md', 'text/html'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3.md', 'text/html'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3.md');
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
   });
 
   test('/ with Accept: text/markdown → fetches /index.md', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/', 'text/markdown'), env);
+    const res = await worker.fetch(req('https://anc.dev/', 'text/markdown'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/index.md');
   });
 
   test('/p3 with Accept: text/html,text/markdown;q=0.9 → HTML branch', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/p3', 'text/html,text/markdown;q=0.9'), env);
+    const res = await worker.fetch(
+      req('https://anc.dev/p3', 'text/html,text/markdown;q=0.9'),
+      env,
+      {} as ExecutionContext,
+    );
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 
   test('/p3 with */* → HTML branch', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/p3', '*/*'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', '*/*'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 
   test('/p3 with malformed Accept → HTML branch', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://anc.dev/p3', 'garbage,,,;;;'), env);
+    const res = await worker.fetch(req('https://anc.dev/p3', 'garbage,,,;;;'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/p3');
   });
 
   test('staging .workers.dev: HTML branch still adds noindex', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(req('https://agentnative-site.brett.workers.dev/p3'), env);
+    const res = await worker.fetch(req('https://agentnative-site.brett.workers.dev/p3'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(res.headers.get('Link')).toContain('</p3.md>');
   });
 
   test('/skill.json with Accept: text/markdown returns the JSON, not a 404 from CN rewrite', async () => {
     const env = makeEnv({ '/skill.json': '{"schema_version":1}' });
-    const res = await worker.fetch(req('https://anc.dev/skill.json', 'text/markdown'), env);
+    const res = await worker.fetch(req('https://anc.dev/skill.json', 'text/markdown'), env, {} as ExecutionContext);
     // CN rewrite must skip .json paths so the asset lookup stays on /skill.json.
     expect(res.headers.get('X-Echo-Path')).toBe('/skill.json');
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
@@ -337,7 +341,7 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 
   test('/skill.json no Accept header: JSON branch headers applied', async () => {
     const env = makeEnv({ '/skill.json': '{}' });
-    const res = await worker.fetch(req('https://anc.dev/skill.json'), env);
+    const res = await worker.fetch(req('https://anc.dev/skill.json'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/skill.json');
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -352,7 +356,7 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
 describe('worker.fetch — agent-readiness discovery surfaces', () => {
   test('GET /.well-known/api-catalog → application/linkset+json + CORS + noindex', async () => {
     const env = makeEnv({ '/.well-known/api-catalog': '{"linkset":[]}' });
-    const res = await worker.fetch(req('https://anc.dev/.well-known/api-catalog'), env);
+    const res = await worker.fetch(req('https://anc.dev/.well-known/api-catalog'), env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/linkset+json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
@@ -369,8 +373,12 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
       transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
     });
     const env = makeEnv({ '/_internal/mcp-server-card.json': seed });
-    const canonical = await worker.fetch(req('https://staging.example/.well-known/mcp/server-card.json'), env);
-    const alias = await worker.fetch(req('https://staging.example/.well-known/mcp'), env);
+    const canonical = await worker.fetch(
+      req('https://staging.example/.well-known/mcp/server-card.json'),
+      env,
+      {} as ExecutionContext,
+    );
+    const alias = await worker.fetch(req('https://staging.example/.well-known/mcp'), env, {} as ExecutionContext);
     expect(canonical.status).toBe(200);
     expect(alias.status).toBe(301);
     expect(alias.headers.get('Location')).toBe('https://staging.example/.well-known/mcp/server-card.json');
@@ -378,14 +386,18 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
 
   test('GET /mcp.json alias 301s to the canonical server card', async () => {
     const env = makeEnv();
-    const alias = await worker.fetch(req('https://staging.example/mcp.json'), env);
+    const alias = await worker.fetch(req('https://staging.example/mcp.json'), env, {} as ExecutionContext);
     expect(alias.status).toBe(301);
     expect(alias.headers.get('Location')).toBe('https://staging.example/.well-known/mcp/server-card.json');
   });
 
   test('GET /.well-known/agent-skills/index.json → application/json', async () => {
     const env = makeEnv({ '/.well-known/agent-skills/index.json': '{"skills":[]}' });
-    const res = await worker.fetch(req('https://anc.dev/.well-known/agent-skills/index.json'), env);
+    const res = await worker.fetch(
+      req('https://anc.dev/.well-known/agent-skills/index.json'),
+      env,
+      {} as ExecutionContext,
+    );
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(await res.text()).toBe('{"skills":[]}');
@@ -398,7 +410,11 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
       resource_documentation: 'https://anc.dev/auth.md',
     });
     const env = makeEnv({ '/.well-known/oauth-protected-resource': seed });
-    const res = await worker.fetch(req('https://staging.example/.well-known/oauth-protected-resource'), env);
+    const res = await worker.fetch(
+      req('https://staging.example/.well-known/oauth-protected-resource'),
+      env,
+      {} as ExecutionContext,
+    );
     const body = JSON.parse(await res.text()) as {
       resource: string;
       authorization_servers: string[];
@@ -422,7 +438,11 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
       },
     });
     const env = makeEnv({ '/.well-known/oauth-authorization-server': seed });
-    const res = await worker.fetch(req('https://staging.example/.well-known/oauth-authorization-server'), env);
+    const res = await worker.fetch(
+      req('https://staging.example/.well-known/oauth-authorization-server'),
+      env,
+      {} as ExecutionContext,
+    );
     const body = JSON.parse(await res.text()) as {
       issuer: string;
       service_documentation: string;
@@ -443,6 +463,7 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
         body: '{}',
       }),
       env,
+      {} as ExecutionContext,
     );
     expect(res.status).toBe(400);
     const body = JSON.parse(await res.text()) as { error: string; mcp_endpoint: string };
@@ -484,7 +505,7 @@ describe('worker.fetch — /api/score routing', () => {
       '/discovery-hints-index.json': '{"by_owner_repo":{}}',
     });
     const url = 'https://anc.dev/api/score?input=unknown-tool';
-    const res = await worker.fetch(req(url), env);
+    const res = await worker.fetch(req(url), env, {} as ExecutionContext);
     expect(res.headers.get('Content-Type')).toContain('application/json');
     const body = (await res.json()) as { error?: unknown; spec_version?: unknown; auditor_url?: unknown };
     expect(body.spec_version).toBeTruthy();
@@ -493,7 +514,7 @@ describe('worker.fetch — /api/score routing', () => {
 
   test('asset-first invariant: /scorecards/ripgrep still proxies to env.ASSETS', async () => {
     const env = makeEnv({ '/scorecards/ripgrep': 'scorecard html' });
-    const res = await worker.fetch(req('https://anc.dev/scorecards/ripgrep'), env);
+    const res = await worker.fetch(req('https://anc.dev/scorecards/ripgrep'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/scorecards/ripgrep');
   });
 
@@ -510,6 +531,7 @@ describe('worker.fetch — /api/score routing', () => {
     const res = await worker.fetch(
       new Request(url.toString(), { headers: { accept: 'text/markdown;q=0.1, application/json;q=0.9' } }),
       env,
+      {} as ExecutionContext,
     );
     expect(res.headers.get('Content-Type')).toContain('application/json');
   });
