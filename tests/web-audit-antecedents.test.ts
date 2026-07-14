@@ -112,6 +112,39 @@ describe('resolveAntecedent', () => {
     expect(resolveAntecedent('api-surface', ctx())).toBe('n_a');
   });
 
+  test('api-surface stays n_a for an MCP-first site advertising service-desc/doc at its MCP card', () => {
+    // Regression: a homepage Link header pointing service-desc at the MCP
+    // server card (RFC 8631) is not a REST API surface, so the openapi and
+    // api-catalog checks must not activate.
+    const mcpFirstRoot: ProbeResponse = {
+      status: 200,
+      headers: {
+        'content-type': 'text/html',
+        link: '</.well-known/api-catalog>; rel="api-catalog", </.well-known/mcp/server-card.json>; rel="service-desc", </mcp-skill>; rel="service-doc"',
+      },
+      body: '<html><body><main>anc audits MCP, llms.txt, OpenAPI, and JSON Schema.</main></body></html>',
+      error: null,
+    };
+    expect(resolveAntecedent('api-surface', ctx({ mcpEndpoint: 'https://anc.dev/mcp', root: mcpFirstRoot }))).toBe(
+      'n_a',
+    );
+  });
+
+  test('api-surface holds when service-desc/doc targets a non-MCP description', () => {
+    const restRoot: ProbeResponse = {
+      status: 200,
+      headers: { 'content-type': 'text/html', link: '</service/describe>; rel="service-desc"' },
+      body: '<html></html>',
+      error: null,
+    };
+    expect(resolveAntecedent('api-surface', ctx({ root: restRoot }))).toBe('apply');
+  });
+
+  test('api-surface ignores a bare openapi/swagger mention in page prose', () => {
+    const proseRoot = htmlRoot('<html><body><main>We support OpenAPI and Swagger in our tooling.</main></body></html>');
+    expect(resolveAntecedent('api-surface', ctx({ root: proseRoot }))).toBe('n_a');
+  });
+
   test('schemas-ref holds on a passing openapi or a schema reference in the root', () => {
     const openapiPass = ctx({ sources: new Map([['openapi', outcome('pass')]]) });
     expect(resolveAntecedent('schemas-ref', openapiPass)).toBe('apply');

@@ -70,16 +70,33 @@ function anyEvidenceStatus(items: EvidenceItem[], status: number): boolean {
   return items.some((item) => item.status === status);
 }
 
-const API_ROOT_RE = /openapi|swagger|rel=["']?(service-desc|service-doc)["']?/i;
 const API_LLMS_RE = /openapi|swagger|\/api\//i;
 const SCHEMAS_RE = /application\/schema\+json|json-?schema|\/schema\.json/i;
 
-/** KTD-4 union: any one signal makes the api-surface antecedent hold. */
+// service-desc / service-doc (RFC 8631) advertise a machine-readable
+// service description. A REST site points them at an OpenAPI/Swagger doc;
+// an MCP-first site points them at its MCP server card or usage doc, which
+// is not a REST surface. So the rel signals an API surface only when its
+// target is not an MCP surface. Matching a bare "openapi"/"swagger" word in
+// the page body is deliberately not a signal: a site that only names
+// OpenAPI in prose (e.g. as a standard it documents) has no REST API of its
+// own, and a live OpenAPI doc is caught by the openapi probe below.
+const SERVICE_DESC_REL_RE = /rel\s*=\s*["']?(?:service-desc|service-doc)\b/i;
+const MCP_TARGET_RE = /\.well-known\/mcp|server-card|mcp-skill|\/mcp\b/i;
+
+/** A service-desc/doc link (Link header or <link> tag) to a non-MCP target. */
+function restServiceDescLink(ctx: AntecedentContext): boolean {
+  const root = ctx.root;
+  if (root === null) return false;
+  const entries = [...(root.headers.link ?? '').split(','), ...(root.body.match(/<link\b[^>]*>/gi) ?? [])];
+  return entries.some((entry) => SERVICE_DESC_REL_RE.test(entry) && !MCP_TARGET_RE.test(entry));
+}
+
+/** Any one signal makes the api-surface antecedent hold. */
 function apiSurfaceHolds(ctx: AntecedentContext): boolean {
   if (ctx.siteType === 'api') return true;
-  const root = ctx.root;
-  if (root && (API_ROOT_RE.test(root.body) || API_ROOT_RE.test(root.headers.link ?? ''))) return true;
   if (anyEvidenceStatus(sourceEvidence(ctx, 'openapi'), 200)) return true;
+  if (restServiceDescLink(ctx)) return true;
   if (API_LLMS_RE.test(retainedBody(ctx, 'llms-txt'))) return true;
   return false;
 }
