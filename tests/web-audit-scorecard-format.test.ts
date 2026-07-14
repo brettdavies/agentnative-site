@@ -12,7 +12,13 @@ import {
   rankWebEntries,
 } from '../src/build/web-leaderboard-render.mjs';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
-import { buildWebScorecard, type EngineResult, WEB_SCHEMA_VERSION } from '../src/worker/audit-web/scorecard';
+import {
+  buildWebScorecard,
+  type EngineResult,
+  type NaReason,
+  type ScorecardStatus,
+  WEB_SCHEMA_VERSION,
+} from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
@@ -59,7 +65,7 @@ function webScorecard(pct = 82) {
         principle: 'P2',
         keyword: 'must',
         tier: 'required',
-        status: 'pass',
+        status: 'pass' as ScorecardStatus,
         evidence: 'serverInfo anc',
       },
       {
@@ -70,7 +76,7 @@ function webScorecard(pct = 82) {
         principle: 'P2',
         keyword: 'must',
         tier: 'required',
-        status: 'absent',
+        status: 'absent' as ScorecardStatus,
         evidence: 'https://example.com/openapi.json -> 404',
       },
       {
@@ -81,7 +87,7 @@ function webScorecard(pct = 82) {
         principle: 'P7',
         keyword: 'should',
         tier: 'recommended',
-        status: 'absent',
+        status: 'absent' as ScorecardStatus,
         evidence: 'https://example.com/robots.txt -> 404',
       },
       {
@@ -92,8 +98,8 @@ function webScorecard(pct = 82) {
         principle: 'P2',
         keyword: 'may',
         tier: 'optional',
-        status: 'n_a',
-        na_reason: 'antecedent-unmet',
+        status: 'n_a' as ScorecardStatus,
+        na_reason: 'antecedent-unmet' as NaReason,
         evidence: 'not a docs/content site',
       },
       {
@@ -104,8 +110,8 @@ function webScorecard(pct = 82) {
         principle: 'P8',
         keyword: 'may',
         tier: 'optional',
-        status: 'n_a',
-        na_reason: 'optional-absent',
+        status: 'n_a' as ScorecardStatus,
+        na_reason: 'optional-absent' as NaReason,
         evidence: 'no DNS-AID records',
       },
       {
@@ -116,7 +122,7 @@ function webScorecard(pct = 82) {
         principle: 'P1',
         keyword: 'may',
         tier: 'optional',
-        status: 'pass',
+        status: 'pass' as ScorecardStatus,
         evidence: 'https://example.com/.well-known/openid-configuration -> 200',
       },
     ],

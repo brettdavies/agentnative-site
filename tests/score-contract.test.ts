@@ -276,7 +276,7 @@ describe('score-contract — negative drift catcher', () => {
     const { index } = buildRegistryIndex(
       [{ name: 'no-card-tool', binary: 'no-card-tool', install: 'brew install no-card-tool' }],
       {},
-    );
+    ) as unknown as { index: RegistryIndex };
     expect(index.by_slug['no-card-tool']).toBeDefined();
     expect(index.by_slug['no-card-tool'].version).toBeUndefined();
     expect(index.by_slug['no-card-tool'].anc_version).toBeUndefined();

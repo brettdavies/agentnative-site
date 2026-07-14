@@ -75,11 +75,12 @@ describe('emitWebAuditSkillPages', () => {
   test('emits an HTML page and a markdown twin for every registry check', async () => {
     const { distDir, pages } = await emitToTmp();
     const raw = await readFile(REGISTRY_PATH, 'utf8');
-    const registry = normalizeWebAuditRegistry(yaml.load(raw));
-    expect(pages.length).toBe(registry.checks.length);
+    const registry = normalizeWebAuditRegistry(yaml.load(raw) as object);
+    const checks = registry.checks as Array<{ id: string }>;
+    expect(pages.length).toBe(checks.length);
     const emitted = await readdir(join(distDir, 'web-audit', 'skill'));
-    expect(emitted.length).toBe(registry.checks.length * 2);
-    for (const check of registry.checks) {
+    expect(emitted.length).toBe(checks.length * 2);
+    for (const check of checks) {
       expect(emitted).toContain(`${check.id}.html`);
       expect(emitted).toContain(`${check.id}.md`);
     }
@@ -164,8 +165,9 @@ describe('agent-skills directory of pointers (U11)', () => {
     const raw = await readFile(distIndexPath, 'utf8').catch(() => null);
     if (raw === null) return; // dist not built in this environment
     const parsed = JSON.parse(raw) as { skills: Array<{ name: string; url: string }> };
-    const registry = normalizeWebAuditRegistry(yaml.load(await readFile(REGISTRY_PATH, 'utf8')));
-    expect(parsed.skills.length).toBe(registry.checks.length + 1);
+    const registry = normalizeWebAuditRegistry(yaml.load(await readFile(REGISTRY_PATH, 'utf8')) as object);
+    const checks = registry.checks as Array<{ id: string }>;
+    expect(parsed.skills.length).toBe(checks.length + 1);
     for (const skill of parsed.skills) {
       if (!skill.name.startsWith('web-audit-fix-')) continue;
       const id = skill.name.slice('web-audit-fix-'.length);

@@ -63,7 +63,7 @@ beforeEach(() => {
 describe('/live-score URL canonicalization', () => {
   test('/score/live/<binary>.html → 301 redirect to /score/live/<binary>', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.html'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.html'), env, {} as ExecutionContext);
     expect(res.status).toBe(301);
     expect(res.headers.get('location')).toBe('/score/live/ripgrep');
   });
@@ -72,7 +72,11 @@ describe('/live-score URL canonicalization', () => {
     // Redirect is at the routing layer, so it fires before the R2 lookup
     // — a missing cache entry doesn't change the redirect behavior.
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/score/live/unknown-tool.html'), env);
+    const res = await worker.fetch(
+      new Request('https://anc.dev/score/live/unknown-tool.html'),
+      env,
+      {} as ExecutionContext,
+    );
     expect(res.status).toBe(301);
     expect(res.headers.get('location')).toBe('/score/live/unknown-tool');
   });
@@ -86,7 +90,7 @@ describe('/live-score URL canonicalization', () => {
       '/score/live/-bad.html',
       '/score/live/foo/bar.html',
     ]) {
-      const res = await worker.fetch(new Request(`https://anc.dev${path}`), env);
+      const res = await worker.fetch(new Request(`https://anc.dev${path}`), env, {} as ExecutionContext);
       // Either a 404 from ASSETS or a 301 — the must-NOT is that the
       // redirect path matches a malformed slug and serves it as canonical.
       expect(res.headers.get('location')).not.toBe(path.replace('.html', ''));
@@ -95,7 +99,7 @@ describe('/live-score URL canonicalization', () => {
 
   test('/score/live/<binary>.md → markdown twin (no redirect)', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.md'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.md'), env, {} as ExecutionContext);
     // No cache prefilled → 404, but with markdown content-type (the
     // /live-score handler is what serves it, NOT a static asset).
     expect(res.status).toBe(404);
@@ -104,7 +108,7 @@ describe('/live-score URL canonicalization', () => {
 
   test('/score/live/<binary> (no extension) → handled by handleLiveScorePage', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep'), env, {} as ExecutionContext);
     // No cache prefilled → 404 HTML (the canonical route, not a redirect).
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/html');
@@ -114,7 +118,7 @@ describe('/live-score URL canonicalization', () => {
 describe('Homepage TURNSTILE_SITEKEY substitution', () => {
   test('homepage HTML substitutes {{TURNSTILE_SITEKEY}} from env var', async () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: '1x00000000000000000000AA' });
-    const res = await worker.fetch(new Request('https://anc.dev/'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/'), env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('content="1x00000000000000000000AA"');
@@ -123,7 +127,7 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
 
   test('production (no sitekey set) substitutes empty string', async () => {
     const env = makeEnv(); // TURNSTILE_SITEKEY absent
-    const res = await worker.fetch(new Request('https://anc.dev/'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/'), env, {} as ExecutionContext);
     const html = await res.text();
     // Placeholder must NOT leak through to the response.
     expect(html).not.toContain('{{TURNSTILE_SITEKEY}}');
@@ -133,7 +137,11 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
 
   test('homepage Accept: text/markdown bypasses substitution (serves index.md)', async () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: 'test-key' });
-    const res = await worker.fetch(new Request('https://anc.dev/', { headers: { accept: 'text/markdown' } }), env);
+    const res = await worker.fetch(
+      new Request('https://anc.dev/', { headers: { accept: 'text/markdown' } }),
+      env,
+      {} as ExecutionContext,
+    );
     expect(res.headers.get('content-type')).toContain('text/markdown');
     const md = await res.text();
     // The markdown twin must not carry the meta-tag placeholder OR the
@@ -148,7 +156,7 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: 'should-not-leak' });
     // A non-homepage asset that doesn't carry the placeholder shouldn't
     // be rewritten — the substitution path is scoped to / and /index.html.
-    const res = await worker.fetch(new Request('https://anc.dev/audit'), env);
+    const res = await worker.fetch(new Request('https://anc.dev/audit'), env, {} as ExecutionContext);
     // ASSETS returns 404 in this stub (no /audit.html fixture), so just
     // confirm the path didn't blow up.
     expect(res.status).toBeLessThan(500);
@@ -158,13 +166,21 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
 describe('/_internal/* interceptor', () => {
   test('direct GET /_internal/score-live-shell.html → 404', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/_internal/score-live-shell.html'), env);
+    const res = await worker.fetch(
+      new Request('https://anc.dev/_internal/score-live-shell.html'),
+      env,
+      {} as ExecutionContext,
+    );
     expect(res.status).toBe(404);
   });
 
   test('arbitrary /_internal/anything → 404', async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request('https://anc.dev/_internal/something-else'), env);
+    const res = await worker.fetch(
+      new Request('https://anc.dev/_internal/something-else'),
+      env,
+      {} as ExecutionContext,
+    );
     expect(res.status).toBe(404);
   });
 });

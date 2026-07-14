@@ -25,11 +25,12 @@ else
 fi
 
 # Typecheck is whole-project (not per-file), so only run it when the staged set
-# touches the client/worker sources or a tsconfig — keeps doc-only commits fast.
-mapfile -t staged_tc < <(git diff --cached --name-only --diff-filter=ACM -- src/client src/worker src/shared 'tsconfig*.json')
-bold '==> typecheck (client + worker)'
+# touches a typechecked source tree (client, worker, build, tests, scripts) or a
+# tsconfig — keeps doc-only commits fast.
+mapfile -t staged_tc < <(git diff --cached --name-only --diff-filter=ACM -- src/client src/worker src/shared src/build src/data scripts tests 'tsconfig*.json')
+bold '==> typecheck (client + worker + node)'
 if [ ${#staged_tc[@]} -eq 0 ]; then
-  echo "  - no client/worker/tsconfig changes staged; skipping"
+  echo "  - no typechecked-source or tsconfig changes staged; skipping"
 elif command -v bun &>/dev/null; then
   bun run typecheck
 else

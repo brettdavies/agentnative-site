@@ -166,15 +166,15 @@ describe('runCanonicalRedirect', () => {
   });
 
   test('the /mcp alias is probed with Accept: application/json', async () => {
-    let acceptSeen: string | null = null;
+    const seen: { accept: string | null } = { accept: null };
     const { fetchImpl } = siteFetch({
       '/.well-known/mcp/server-card.json': card,
       '/mcp': (init) => {
-        acceptSeen = new Headers(init?.headers).get('accept');
+        seen.accept = new Headers(init?.headers).get('accept');
         return new Response(null, { status: 301, headers: { location: '/.well-known/mcp/server-card.json' } });
       },
     });
     await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
-    expect(acceptSeen).toBe('application/json');
+    expect(seen.accept).toBe('application/json');
   });
 });

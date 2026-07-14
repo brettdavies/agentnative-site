@@ -11,13 +11,21 @@ import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(REPO_ROOT, 'src', 'data', 'web-audit');
 
+interface RemediationEntry {
+  title: string;
+  goal: string;
+  fix: string;
+  resources: Array<{ label: string; url: string }>;
+}
+
 async function load() {
-  const registry = normalizeWebAuditRegistry(yaml.load(await readFile(join(DATA, 'registry.yaml'), 'utf8')));
-  const checkIds = registry.checks.map((c: { id: string }) => c.id);
+  const registry = normalizeWebAuditRegistry(yaml.load(await readFile(join(DATA, 'registry.yaml'), 'utf8')) as object);
+  const checks = registry.checks as Array<{ id: string }>;
+  const checkIds = checks.map((c) => c.id);
   const remediation = normalizeWebRemediation(
-    yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')),
+    yaml.load(await readFile(join(DATA, 'remediation.yaml'), 'utf8')) as object,
     checkIds,
-  );
+  ) as Record<string, RemediationEntry>;
   return { checkIds, remediation };
 }
 
