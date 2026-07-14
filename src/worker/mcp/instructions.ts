@@ -22,6 +22,7 @@ const READ_LIMIT_REQUESTS = 60;
 const READ_LIMIT_WINDOW_SECONDS = 60;
 const AUDIT_LIMIT_REQUESTS = 5;
 const AUDIT_LIMIT_WINDOW_MINUTES = 60;
+const WEB_AUDIT_HOURLY_REQUESTS = 30;
 
 export interface InstructionsEnv {
   ASSETS: Fetcher;
@@ -58,8 +59,9 @@ export function buildInstructions(_env: InstructionsEnv): string {
       'Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope.',
     `Rate limits are split. ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP gate ` +
       `every call (MCP_LIMITER). ${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per ` +
-      'IP gate score_cli cache-miss audits only (MCP_AUDIT_LIMITER). audit_website is gated the same way as score_cli ' +
-      'by WEB_AUDIT_LIMITER (5 fresh audits per 60 minutes per IP) with no anon fallback. All keyed on ' +
+      'IP gate score_cli cache-miss audits only (MCP_AUDIT_LIMITER). audit_website has its own budget: a per-IP ' +
+      `burst limiter (WEB_AUDIT_LIMITER_IP) plus ${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per 60 minutes per IP, ` +
+      'no anon fallback. All keyed on ' +
       'cf-connecting-ip; the read tier falls back to a shared anon bucket, the audit tiers reject on missing IP ' +
       'rather than consuming a shared bucket. Three env-var kill switches let the operator disable the whole surface ' +
       '(MCP_ENABLED), only the cost-bearing CLI audit tool (MCP_LIVE_SCORING_ENABLED), or the website audit ' +

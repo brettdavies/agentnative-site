@@ -101,7 +101,7 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
     } as unknown as KVNamespace,
     WEB_AUDIT_ENABLED: (opts.webEnabled ?? true) ? 'true' : undefined,
     MCP_ENABLED: (opts.mcpEnabled ?? true) ? 'true' : undefined,
-    WEB_AUDIT_LIMITER: {
+    WEB_AUDIT_LIMITER_IP: {
       async limit() {
         return { success: opts.limiterOk ?? true };
       },
@@ -223,6 +223,24 @@ describe('audit_website gates', () => {
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.4'));
     expect(body.audited).toBe(false);
     expect(body.source).toBe('cache');
+  });
+
+  test('a warm cache is served even when the kill switch is off (cache-as-data)', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const env = await makeEnv({
+      webEnabled: false,
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scorecard: { badge: { score_pct: 88 } },
+        },
+      },
+    });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.4'));
+    expect(body.audited).toBe(false);
+    expect(body.source).toBe('cache');
+    expect(String(body.message ?? '')).not.toContain('disabled');
   });
 
   test('missing cf-connecting-ip returns the -32099 envelope (no anon fallback)', async () => {

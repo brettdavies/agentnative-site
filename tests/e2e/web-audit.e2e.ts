@@ -10,11 +10,11 @@
 //   ANC_STAGING_BASE_URL=https://agentnative-site-staging.brettdavies.workers.dev \
 //     bun x playwright test --project=web-audit
 //
-// Local `wrangler dev --local` cannot serve this repo's entry module (its
-// non-handler named exports fail workerd's module validation), so like the
-// other live suites this targets the deployed staging Worker. When running
-// it, put a dummy listener on :8787 so the unconditional webServer block
-// (reuseExistingServer) skips the local wrangler-dev boot.
+// Setting ANC_STAGING_BASE_URL makes playwright.config skip the local
+// wrangler-dev webServer and target that origin. The web-audit routes run
+// entirely in-Worker (no DO/container), so pointing ANC_STAGING_BASE_URL at a
+// local `wrangler dev --local --env staging` on :8787 also runs this suite
+// locally for a pre-deploy check.
 //
 // The staging Worker is gated by Cloudflare Access. Set
 // ANC_STAGING_ACCESS_CLIENT_ID + ANC_STAGING_ACCESS_CLIENT_SECRET to a
@@ -40,18 +40,22 @@ test.use({ baseURL: STAGING_BASE, extraHTTPHeaders: ACCESS_HEADERS });
 
 const TARGET_DOMAIN = 'anc.dev';
 
-test.describe('web audit — streaming form and shareable result', () => {
-  test('form streams per-check rows then lands on the shareable /web/<domain> page', async ({ page }) => {
+test.describe('web audit — scoring-page flow and shareable result', () => {
+  test('form navigates to /web/scoring, streams, and forwards to the shareable /web/<domain> page', async ({
+    page,
+  }) => {
     await page.goto('/web-audit');
     await expect(page.locator('[data-web-audit-form]')).toBeVisible();
 
     await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
     await page.click('[data-web-audit-submit]');
 
-    // A fresh audit streams per-check rows before redirecting; a cache hit
-    // redirects immediately with no rows. Either way the flow ends on the
-    // shareable result page. (Fresh-stream row coverage lives in the
-    // /api/audit-web NDJSON test's cache-miss branch.)
+    // Submit navigates to the dedicated in-progress page.
+    await page.waitForURL(`**/web/scoring/${TARGET_DOMAIN}`, { timeout: 30_000 });
+
+    // The scoring page acquires a token, POSTs, and either streams per-check
+    // rows (fresh audit) or forwards immediately (cache hit). Either way the
+    // flow ends on the shareable result page.
     const streamedRow = page.locator('[data-web-audit-results] tr').first();
     const sawStreaming = await Promise.race([
       streamedRow.waitFor({ state: 'visible', timeout: 75_000 }).then(
@@ -64,12 +68,37 @@ test.describe('web audit — streaming form and shareable result', () => {
     expect(typeof sawStreaming).toBe('boolean');
     await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
     await expect(page.locator('.scorecard-audits')).toBeVisible();
+
+    // The scoring page used location.replace(), so it never entered history:
+    // back from the result page returns to the form, not the scoring page.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/web-audit$/);
+  });
+
+  test('/web/scoring/<domain> serves the JS-required in-progress page with a noscript fallback', async ({
+    request,
+  }) => {
+    const res = await request.get(`/web/scoring/${TARGET_DOMAIN}`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/html');
+    expect(res.headers()['cache-control']).toBe('no-store');
+    expect(res.headers()['x-robots-tag']).toBe('noindex');
+    const html = await res.text();
+    expect(html).toContain('meta name="turnstile-sitekey"');
+    expect(html).toContain('/js/web-audit-scoring.js');
+    expect(html).toContain('<noscript>');
+
+    // The transient page still answers markdown with a pointer.
+    const md = await request.get(`/web/scoring/${TARGET_DOMAIN}`, { headers: { accept: 'text/markdown' } });
+    expect(md.headers()['content-type']).toContain('text/markdown');
+    expect(await md.text()).toContain(`/web/${TARGET_DOMAIN}.md`);
   });
 
   test('/api/audit-web streams NDJSON check events then a terminal complete', async ({ request }) => {
+    // Staging binds the Turnstile always-passes test secret, so "x" verifies.
     const res = await request.post('/api/audit-web', {
       headers: { 'content-type': 'application/json' },
-      data: { url: TARGET_DOMAIN },
+      data: { url: TARGET_DOMAIN, turnstile_token: 'x' },
       timeout: 75_000,
     });
     expect(res.status()).toBe(200);
@@ -118,7 +147,7 @@ test.describe('web audit — streaming form and shareable result', () => {
   test('a site_type-scoped audit gates the api-only checks to n_a', async ({ request }) => {
     const res = await request.post('/api/audit-web', {
       headers: { 'content-type': 'application/json' },
-      data: { url: TARGET_DOMAIN, site_type: 'content' },
+      data: { url: TARGET_DOMAIN, site_type: 'content', turnstile_token: 'x' },
       timeout: 75_000,
     });
     expect(res.status()).toBe(200);
@@ -146,16 +175,25 @@ test.describe('web audit — streaming form and shareable result', () => {
 });
 
 test.describe('web audit — per-check fix skills', () => {
-  test('/web-audit/skill/<id> serves HTML and the .md twin serves markdown', async ({ request }) => {
-    const html = await request.get('/web-audit/skill/openapi');
-    expect(html.status()).toBe(200);
-    expect(html.headers()['content-type']).toContain('text/html');
-    expect(await html.text()).toContain('Copy-paste prompt');
+  test('/web-audit/skill/<id> HTML carries the copy mechanism (no fenced prompt); the .md keeps it', async ({
+    request,
+  }) => {
+    const htmlRes = await request.get('/web-audit/skill/openapi');
+    expect(htmlRes.status()).toBe(200);
+    expect(htmlRes.headers()['content-type']).toContain('text/html');
+    const html = await htmlRes.text();
+    // The prompt rides in a hidden carrier, not a rendered fence.
+    expect(html).toContain('data-copy-text=');
+    expect(html).not.toContain('<pre>');
+    expect(html).not.toContain("Issue: <the audit's finding for this check>");
 
-    const md = await request.get('/web-audit/skill/openapi.md');
-    expect(md.status()).toBe(200);
-    expect(md.headers()['content-type']).toContain('text/markdown');
-    expect(await md.text()).toContain('# Fix: ');
+    const mdRes = await request.get('/web-audit/skill/openapi.md');
+    expect(mdRes.status()).toBe(200);
+    expect(mdRes.headers()['content-type']).toContain('text/markdown');
+    const md = await mdRes.text();
+    expect(md).toContain('# Fix: ');
+    expect(md).toContain('## Copy-paste prompt');
+    expect(md).toContain('```text');
   });
 
   test('content negotiation serves the twin for Accept: text/markdown', async ({ request }) => {

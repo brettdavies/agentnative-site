@@ -7,8 +7,8 @@ policy. The result is a web scorecard with per-check evidence and copy-paste fix
 
 <section class="audit-hero" aria-labelledby="web-audit-heading" data-web-audit-section>
   <h2 id="web-audit-heading" class="audit-hero__title">Score a website, live.</h2>
-  <p class="audit-hero__lede">Enter a public URL. Each check streams in as it resolves; the finished scorecard is saved at a shareable <code>/web/&lt;domain&gt;</code> page.</p>
-  <form class="board-try audit-hero__form" method="post" action="/api/audit-web" novalidate data-web-audit-form>
+  <p class="audit-hero__lede">Enter a public URL. We open an in-progress page that streams each check as it resolves, then forwards to a shareable <code>/web/&lt;domain&gt;</code> scorecard.</p>
+  <form class="board-try audit-hero__form" method="get" action="/web/scoring" novalidate data-web-audit-form>
     <input id="web-audit-input" name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" required aria-label="Website URL" aria-describedby="web-audit-help" data-web-audit-input />
     <button type="submit" class="btn btn--primary" data-web-audit-submit>Audit</button>
   </form>
@@ -18,10 +18,10 @@ policy. The result is a web scorecard with per-check evidence and copy-paste fix
     <button type="button" class="live-score__chip" data-web-audit-example="modelcontextprotocol.io" aria-label="Try example: modelcontextprotocol.io"><code>modelcontextprotocol.io</code></button>.
   </p>
   <p class="live-score__status" data-web-audit-status role="status" aria-live="polite" hidden></p>
-  <table class="audit-table">
-    <tbody data-web-audit-results></tbody>
-  </table>
 </section>
+
+The browser audit runs with JavaScript and a Turnstile challenge. Agents and scripts should call the
+[`audit_website`](/mcp) MCP tool instead, which accepts a full URL and needs no browser.
 
 ## What it checks
 

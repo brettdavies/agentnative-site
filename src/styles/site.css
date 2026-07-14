@@ -480,6 +480,13 @@ main .anchor-icon {
 :root.js main .code-wrap .copy-button {
   display: inline-block;
 }
+/* Prompt-copy button is attached in normal flow (no code-wrap anchor), so
+ * it overrides the absolute positioning the pre-block variant uses. */
+:root.js main .copy-button--prompt {
+  display: inline-block;
+  position: static;
+  margin-top: 0.5rem;
+}
 .copy-button[data-copy-state="copied"] {
   background: var(--accent, #0058aa);
   color: #fff;

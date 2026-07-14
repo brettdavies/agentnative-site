@@ -11,9 +11,20 @@ import {
   buildWebLeaderboardMarkdown,
   rankWebEntries,
 } from '../src/build/web-leaderboard-render.mjs';
+import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import { buildWebScorecard, type EngineResult, WEB_SCHEMA_VERSION } from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+
+/** Reverse the escHtml entity set to recover the raw prompt from a carrier. */
+function htmlUnescape(s: string): string {
+  return s
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&amp;', '&');
+}
 
 function webScorecard(pct = 82) {
   return {
@@ -166,20 +177,34 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(html).toContain('Not implemented, optional (no DNS-AID records)');
   });
 
-  test('a non-passing row exposes Goal, Result, Fix, Resources, and the copy-paste prompt', () => {
+  test('a non-passing row exposes Goal, Result, Fix, Resources, and a hidden prompt carrier (no rendered prompt)', () => {
     expect(html).toContain('Publish an OpenAPI description so non-MCP agents can call your API');
     expect(html).toContain('Not found (https://example.com/openapi.json -&gt; 404)');
     expect(html).toContain('Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(html).toContain('https://spec.openapis.org/oas/latest.html');
     expect(html).toContain('https://anc.dev/web-audit/skill/openapi');
-    expect(html).toContain('<pre><code>Goal: Publish an OpenAPI description');
+    // The prompt is carried in a data attribute, never rendered as a <pre>.
+    expect(html).not.toContain('<pre>');
+    expect(html).toContain('data-copy-text="Goal: Publish an OpenAPI description');
     expect(html).toContain('Issue: https://example.com/openapi.json -&gt; 404');
   });
 
-  test('a passing row carries Goal + Result + Resources but no Fix or prompt', () => {
+  test('the carrier prompt equals assembleRemediation(...).prompt byte-for-byte (single source)', () => {
+    const m = html.match(/data-copy-text="(Goal: Publish an OpenAPI[^"]*)"/);
+    expect(m).not.toBeNull();
+    const recovered = htmlUnescape((m as RegExpMatchArray)[1]);
+    const expected = assembleRemediation(REMEDIATION_FIXTURE.openapi, {
+      checkId: 'openapi',
+      origin: 'https://anc.dev',
+      evidence: 'https://example.com/openapi.json -> 404',
+    }).prompt;
+    expect(recovered).toBe(expected);
+  });
+
+  test('a passing row carries Goal + Result + Resources but no Fix or prompt carrier', () => {
     const passBlock = html.slice(html.indexOf('initialize handshake'), html.indexOf('An OpenAPI description'));
     expect(passBlock).toContain('Verified (serverInfo anc)');
-    expect(passBlock).not.toContain('<pre>');
+    expect(passBlock).not.toContain('data-copy-text');
     expect(passBlock).not.toContain('<strong>Fix:</strong>');
   });
 

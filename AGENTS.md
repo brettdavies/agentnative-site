@@ -97,15 +97,17 @@ session-time summary.
 Resources: `anc://registry` (concrete) plus four templates `anc://tool/{slug}`, `anc://principle/{n}`,
 `anc://spec/{section}`, `anc://scorecard/{binary}`.
 
-**Three rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
+**Four rate limits, two cost profiles.** `MCP_LIMITER` gates every `POST /mcp` at 60 requests per 60 seconds per IP and
 falls back to a shared `anon` bucket on missing `cf-connecting-ip`. `MCP_AUDIT_LIMITER` gates `score_cli` cache-miss
-audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `WEB_AUDIT_LIMITER` gates
-`audit_website` fresh audits identically (5 per 60 minutes per IP, no anon fallback), shared with the `/api/audit-web`
-webapp route so one IP can't double its budget across surfaces. Missing IP returns `-32099` rather than consuming a
-shared bucket, because the audit cost is non-trivial. The hourly window is enforced in two layers: the CF Rate Limiting
-binding only accepts `period: 10 | 60`, so the binding holds the 5-per-60-seconds burst floor and an application-side
-KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` / `web_audit:<ip>:<hour_bucket>`, 2-hour TTL)
-enforces the hourly ceiling.
+audits only, at 5 fresh audits per 60 minutes per IP, with **no anon fallback**. `audit_website` fresh audits key
+`WEB_AUDIT_LIMITER_IP` (30 per 60 seconds per IP burst, no anon fallback) plus a shared 30-per-hour-per-IP ceiling;
+missing IP returns `-32099` rather than consuming a shared bucket, because the audit cost is non-trivial. The
+`/api/audit-web` webapp route reaches the same hourly counter but gates the human path like `/api/score` does: a
+Turnstile solve mints a `__Host-anc-session` cookie, `WEB_AUDIT_LIMITER` caps 10 audits per session per 60 seconds keyed
+`<sid>:<sha256(target)>`, and `WEB_AUDIT_LIMITER_IP` is the coarse per-IP fallback. The hourly window is enforced in two
+layers: the CF Rate Limiting binding only accepts `period: 10 | 60`, so the binding holds the per-60-seconds burst floor
+and an application-side KV-backed per-hour window in `SCORE_KV` (`mcp_audit:<ip>:<hour_bucket>` /
+`web_audit:<ip>:<hour_bucket>`, 2-hour TTL) enforces the 30-per-hour ceiling.
 
 **Cost gate: `score_cli` never bypasses the cache.** No `force_refresh` flag and no path through the surface that forces
 a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; `score_cli` is the metered one. The two

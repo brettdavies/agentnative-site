@@ -117,18 +117,29 @@
       "namespace_id": "1007",
       "simple": { "limit": 5, "period": 60 }
     },
-    // WEB_AUDIT_LIMITER — keyed on `cf-connecting-ip` inside
-    // src/worker/audit-web/route.ts (the /api/audit-web streaming route)
-    // and the audit_website MCP tool. Same audit-tier posture as
-    // MCP_AUDIT_LIMITER: the CF binding enforces "5 per 60s" as the burst
-    // floor while the route layers a KV-backed per-hour window (keyed on
-    // the same IP) on top. NO anon fallback: a request without
-    // cf-connecting-ip is gated immediately, since the 32-probe fan-out is
-    // non-trivial and a shared anon bucket would be a DoS vector.
+    // WEB_AUDIT_LIMITER — session-keyed burst limiter for the fresh
+    // /api/audit-web path, keyed `<sid>:<sha256(canonical target)>` inside
+    // src/worker/audit-web/route.ts (10 distinct-target audits per session
+    // per 60s). A new session requires a Turnstile solve, mirroring
+    // SCORE_LIMITER. A KV-backed per-hour window (keyed on IP) is layered
+    // on top as the hourly ceiling the binding can't express.
     {
       "name": "WEB_AUDIT_LIMITER",
       "namespace_id": "1009",
-      "simple": { "limit": 5, "period": 60 }
+      "simple": { "limit": 10, "period": 60 }
+    },
+    // WEB_AUDIT_LIMITER_IP — coarse per-IP fallback (30/60s) that catches a
+    // client swapping the session cookie to dodge WEB_AUDIT_LIMITER. The
+    // audit_website MCP tool (no cookies) keys this binding directly as its
+    // per-IP burst limiter. Distinct namespace so the per-session and
+    // per-IP windows don't share counters. NO anon fallback at the MCP
+    // tier: a request without cf-connecting-ip is gated immediately, since
+    // the 32-probe fan-out is non-trivial and a shared anon bucket would be
+    // a DoS vector.
+    {
+      "name": "WEB_AUDIT_LIMITER_IP",
+      "namespace_id": "1011",
+      "simple": { "limit": 30, "period": 60 }
     }
   ],
   // SCORE_KV — operator-flippable `scoring_disabled` kill switch. Flip
@@ -286,7 +297,12 @@
         {
           "name": "WEB_AUDIT_LIMITER",
           "namespace_id": "1010",
-          "simple": { "limit": 5, "period": 60 }
+          "simple": { "limit": 10, "period": 60 }
+        },
+        {
+          "name": "WEB_AUDIT_LIMITER_IP",
+          "namespace_id": "1012",
+          "simple": { "limit": 30, "period": 60 }
         }
       ],
       "kv_namespaces": [
