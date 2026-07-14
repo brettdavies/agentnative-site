@@ -115,13 +115,19 @@ describe('applyHeaders — HTML branch', () => {
     expect(res.headers.get('X-Robots-Tag')).toBeNull();
   });
 
-  test('/ HTML: Link points to /index.md', () => {
+  test('/ HTML: Link carries the twin alternate plus the machine-surface discovery rels', () => {
     const res = applyHeaders(new Response('html'), {
       request: req('https://anc.dev/'),
       servedMarkdown: false,
       pathname: '/',
     });
-    expect(res.headers.get('Link')).toBe('</index.md>; rel="alternate"; type="text/markdown"');
+    expect(res.headers.get('Link')).toBe(
+      '</index.md>; rel="alternate"; type="text/markdown", ' +
+        '</.well-known/api-catalog>; rel="api-catalog", ' +
+        '</.well-known/mcp/server-card.json>; rel="service-desc", ' +
+        '</mcp-skill>; rel="service-doc", ' +
+        '</.well-known/ai.txt>; rel="service-meta"',
+    );
   });
 });
 
