@@ -1,8 +1,12 @@
-// Web-audit form client. Validates the input, extracts the host, and
-// navigates to the /web/scoring/<host> in-progress page, which acquires a
-// Turnstile token, runs the audit, and streams results. The form page stays
-// in history (location.href, not replace) so the back button from the
-// result page returns here.
+// Web-audit form client. Validates the input, extracts the host, acquires a
+// Turnstile token on the submit gesture, stashes it for the scoring page, then
+// navigates to /web/scoring/<host>. Acquiring on the gesture matters: invisible
+// Turnstile clears silently far more often with a real interaction signal than
+// the scoring page's gesture-less on-load execute does. The form page stays in
+// history (location.href, not replace) so the back button from the result page
+// returns here.
+
+import { getTurnstileToken, readSitekey, stashTurnstileToken } from './turnstile';
 
 function q<T extends Element>(root: ParentNode, sel: string): T | null {
   return root.querySelector<T>(sel);
@@ -50,16 +54,34 @@ function init(): void {
     status.hidden = text.length === 0;
   };
 
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
+  const handleSubmit = async (): Promise<void> => {
     const host = hostOf(input.value);
     if (!host) {
       setStatus('Enter a valid website URL or domain.');
       return;
     }
     submit.disabled = true;
+    // No sitekey means the env is unprovisioned; navigate and let the scoring
+    // page render its "staging only" fallback rather than block here.
+    const sitekey = readSitekey();
+    if (sitekey) {
+      setStatus('Verifying…');
+      try {
+        const token = await getTurnstileToken(sitekey, scope);
+        stashTurnstileToken(host, token);
+      } catch {
+        setStatus('Verification failed. Try again.');
+        submit.disabled = false;
+        return;
+      }
+    }
     setStatus('Starting audit…');
     window.location.href = `/web/scoring/${host}`;
+  };
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    void handleSubmit();
   });
 }
 
