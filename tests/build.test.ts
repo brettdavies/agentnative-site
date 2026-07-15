@@ -456,6 +456,24 @@ describe('emitShell — OG image alt text', () => {
     expect(ogMatch![1]).toBe(twMatch![1]);
   });
 
+  test('emits a <noscript> block listing the machine entry points for non-JS agents', () => {
+    const html = shell();
+    // The noscript-fallback web-audit check greps the root HTML for `<noscript`;
+    // a fetch-only agent that never runs the client bundle reads this in-body
+    // list of the structured surfaces.
+    expect(html).toContain('<noscript>');
+    for (const href of [
+      '/llms.txt',
+      '/llms-full.txt',
+      '/mcp',
+      '/.well-known/mcp/server-card.json',
+      '/skill.json',
+      '/.well-known/api-catalog',
+    ]) {
+      expect(html).toContain(`<a href="${href}">${href}</a>`);
+    }
+  });
+
   test('footer renders v<SITE_SPEC_VERSION> from content/principles/VERSION (not a hardcoded literal)', () => {
     // Regression guard against the v0.1.0 footer drift that shipped with
     // anc.dev v0.1 — the footer must always read SITE_SPEC_VERSION from

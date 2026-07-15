@@ -251,8 +251,8 @@ gate_build() {
     # Badge SVG coverage.
     if [[ -d "$REPO_ROOT/dist/badge" && -d "$REPO_ROOT/scorecards" ]]; then
         local missing
-        missing=$(diff <(ls "$REPO_ROOT/scorecards" | sed -E 's/-v[^/]+\.json$//' | sort -u) \
-                       <(ls "$REPO_ROOT/dist/badge" | sed -E 's/\.svg$//' | sort -u) 2>/dev/null | head -10)
+        missing=$(comm -23 <(find "$REPO_ROOT/scorecards" -maxdepth 1 -name '*.json' -printf '%f\n' | sed -E 's/-v[^/]+\.json$//' | sort -u) \
+                       <(ls "$REPO_ROOT/dist/badge" | sed -E 's/\.svg$//' | sort -u) | head -10)
         if [[ -z "$missing" ]]; then
             gate_pass "badge SVGs cover every scorecard"
         else
@@ -265,9 +265,9 @@ gate_build() {
     # Markdown twin coverage.
     if [[ -d "$REPO_ROOT/dist" ]]; then
         local twin_diff
-        twin_diff=$(diff <(find "$REPO_ROOT/dist" -name '*.html' -not -path "$REPO_ROOT/dist/_internal/*" \
+        twin_diff=$(comm -23 <(find "$REPO_ROOT/dist" -name '*.html' -not -path "$REPO_ROOT/dist/_internal/*" \
                             | sed -E 's/\.html$//' | sort) \
-                        <(find "$REPO_ROOT/dist" -name '*.md' | sed -E 's/\.md$//' | sort) 2>/dev/null | head -10)
+                        <(find "$REPO_ROOT/dist" -name '*.md' | sed -E 's/\.md$//' | sort) | head -10)
         if [[ -z "$twin_diff" ]]; then
             gate_pass "markdown twin exists for every emitted HTML page"
         else

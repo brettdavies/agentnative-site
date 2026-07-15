@@ -12,6 +12,15 @@ function resp(partial: Partial<ProbeResponse>): ProbeResponse {
 const FIXTURE_CASES: Array<{ name: string; expect: object; resp: ProbeResponse; want: boolean }> = [
   { name: 'status-ok', expect: { status: [200] }, resp: resp({}), want: true },
   { name: 'status-bad', expect: { status: [200] }, resp: resp({ status: 404 }), want: false },
+  { name: 'status-below-documented-200', expect: { status_below: 500 }, resp: resp({ status: 200 }), want: true },
+  { name: 'status-below-fast-fail-405', expect: { status_below: 500 }, resp: resp({ status: 405 }), want: true },
+  { name: 'status-below-server-error-502', expect: { status_below: 500 }, resp: resp({ status: 502 }), want: false },
+  {
+    name: 'status-below-request-error',
+    expect: { status_below: 500 },
+    resp: resp({ status: null, error: 'TimeoutError: timed out' }),
+    want: false,
+  },
   {
     name: 'request-error',
     expect: { status: [200] },
@@ -151,6 +160,15 @@ describe('assertHttp — semantics', () => {
     const { ok, reasons } = assertHttp({}, resp({}));
     expect(ok).toBe(true);
     expect(reasons).toEqual([]);
+  });
+
+  test('status_below records a below/not-below reason', () => {
+    const pass = assertHttp({ status_below: 500 }, resp({ status: 301 }));
+    expect(pass.ok).toBe(true);
+    expect(pass.reasons).toEqual(['status 301 below 500']);
+    const fail = assertHttp({ status_below: 500 }, resp({ status: 503 }));
+    expect(fail.ok).toBe(false);
+    expect(fail.reasons).toEqual(['status 503 not below 500']);
   });
 });
 

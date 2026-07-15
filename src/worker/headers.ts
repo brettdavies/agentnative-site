@@ -44,6 +44,18 @@
 const SHORT_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 
+// Machine-surface discovery advertised on the site root via the Link header
+// (RFC 8288), so an agent reading only response headers finds these without
+// parsing HTML or probing /.well-known: service-desc/doc/meta are the RFC 8631
+// trio (machine description, human doc, service context), api-catalog is the
+// RFC 9727 index. Targets mirror the served /.well-known/api-catalog linkset.
+const ROOT_DISCOVERY_LINKS = [
+  '</.well-known/api-catalog>; rel="api-catalog"',
+  '</.well-known/mcp/server-card.json>; rel="service-desc"',
+  '</mcp-skill>; rel="service-doc"',
+  '</.well-known/ai.txt>; rel="service-meta"',
+].join(', ');
+
 // Content-Security-Policy for HTML responses. CSP is required to allow
 // Cloudflare Turnstile's invisible widget script + iframe + siteverify
 // XHR on the homepage form, while keeping the rest of the site locked
@@ -145,7 +157,8 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   } else if (isHashedAsset(opts.pathname)) {
     headers.set('Cache-Control', IMMUTABLE_CACHE);
   } else {
-    headers.set('Link', `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`);
+    const twinLink = `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`;
+    headers.set('Link', opts.pathname === '/' ? `${twinLink}, ${ROOT_DISCOVERY_LINKS}` : twinLink);
     headers.set('X-Llms-Txt', '/llms.txt');
     headers.set('Cache-Control', SHORT_CACHE);
     // CSP applies to HTML responses only — the markdown / JSON / SVG

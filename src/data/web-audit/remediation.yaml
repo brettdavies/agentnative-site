@@ -55,13 +55,17 @@ remediation:
     resources:
       - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
   mcp-get-fast-fail:
-    title: GET on the MCP endpoint fast-fails
-    goal: Answer GET on the MCP endpoint fast (405 or a documented surface), never a held-open hang
+    title: GET on the MCP endpoint answers fast
+    goal: Answer GET on the MCP endpoint fast (a fast-fail status or a documented surface), never a held-open hang
     fix: |
-      A stateless streamable-HTTP MCP endpoint must fast-fail a `GET` (return `405`, `400`, `404`,
-      or `406`) rather than hold the connection open waiting for an SSE session that a probe never
-      establishes. Guard non-`POST` verbs at the router and return `405 Method Not Allowed` with an
-      `Allow: POST` header.
+      Answer a `GET` on the MCP endpoint promptly; this check fails only when the connection is
+      held open. A streamable-HTTP `GET` routed into the transport opens the server-to-client SSE
+      notification stream, and a stateless server (nothing to push) parks that connection until the
+      caller times out. Answer one of two ways instead: fast-fail non-`POST` at the router with
+      `405 Method Not Allowed` and an `Allow: POST` header; or serve a documented surface on `GET`
+      (a human- and agent-readable docs page, or a redirect to your `.well-known` MCP server card)
+      so the `GET` returns content rather than a rejection. Any prompt, completed response passes
+      (a fast-fail status, or a documented `2xx`/redirect); only a held-open hang or a `5xx` fails.
     resources:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-cors-preflight:
@@ -142,11 +146,12 @@ remediation:
       - { label: llmstxt.org, url: "https://llmstxt.org/" }
   openapi:
     title: An OpenAPI description is published
-    goal: Publish an OpenAPI description so non-MCP agents can call your API
+    goal: Publish an OpenAPI description so non-MCP agents can call your HTTP API
     fix: |
-      Publish an OpenAPI 3.1 description of your REST surface at `/openapi.json` (or `/openapi.yaml`,
-      or `/.well-known/openapi.json`). Non-MCP agents use it to discover endpoints, parameters, and
-      response shapes, and to generate typed clients.
+      If your service exposes an HTTP/REST API (separate from any MCP endpoint), publish an OpenAPI
+      3.1 description of it at `/openapi.json` (or `/openapi.yaml`, or `/.well-known/openapi.json`).
+      Non-MCP agents use it to discover endpoints, parameters, and response shapes, and to generate
+      typed clients. A service whose only machine surface is MCP has no REST API to describe here.
     resources:
       - { label: OpenAPI 3.1, url: "https://spec.openapis.org/oas/latest.html" }
   json-schemas:
@@ -190,9 +195,10 @@ remediation:
     title: Root HTML has a noscript with machine entry points
     goal: Give non-JS agents a noscript block listing your machine entry points
     fix: |
-      Ship a `<noscript>` block that lists your machine entry points (`/llms.txt`, `/openapi.json`,
-      the MCP endpoint). A non-JS agent or a fetch-only crawler gets a usable path forward instead of
-      an empty single-page-app shell.
+      Add a `<noscript>` block to your root HTML that links your machine entry points: `llms.txt`,
+      your OpenAPI or MCP endpoint, and any `.well-known` cards. It hands a fetch-only crawler or a
+      non-JS agent a concrete, in-body list of where the structured surfaces live, so it never has to
+      run the client bundle or infer them from the visible page.
     resources:
       - { label: MDN noscript, url: "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/noscript" }
   schema-org-jsonld:
@@ -266,13 +272,19 @@ remediation:
       - { label: Web Bot Auth draft, url: "https://datatracker.ietf.org/doc/draft-meunier-web-bot-auth-architecture/" }
   link-headers:
     title: Homepage sends RFC 8288 Link headers
-    goal: Send Link response headers on / pointing at your machine surfaces
+    goal: Advertise machine surfaces in a Link response header on / for header-only discovery
     fix: |
-      Send `Link` response headers on `/` (RFC 8288) with `rel=service-desc`, `rel=describedby`, or
-      `rel=api-catalog` pointing at your machine surfaces. Header-level discovery works even for an
-      agent that never parses the HTML body.
+      Send a `Link` response header on `/` (RFC 8288) whose `rel` points at your machine surfaces, so an
+      agent reading only response headers finds them without parsing HTML or probing `/.well-known`. Use
+      the RFC 8631 service trio and the RFC 9727 catalog: `rel="service-desc"` at a machine-readable
+      description (OpenAPI, or an MCP server card), `rel="service-doc"` at the human-readable doc,
+      `rel="service-meta"` at the service-context declaration, and `rel="api-catalog"` at your
+      `/.well-known/api-catalog` index. Example:
+      `Link: </.well-known/api-catalog>; rel="api-catalog", </.well-known/mcp/server-card.json>; rel="service-desc"`.
     resources:
-      - { label: RFC 8288, url: "https://www.rfc-editor.org/rfc/rfc8288" }
+      - { label: RFC 8288 (Link), url: "https://www.rfc-editor.org/rfc/rfc8288" }
+      - { label: RFC 8631 (service links), url: "https://www.rfc-editor.org/rfc/rfc8631" }
+      - { label: RFC 9727 (api-catalog), url: "https://www.rfc-editor.org/rfc/rfc9727" }
   api-catalog:
     title: /.well-known/api-catalog published
     goal: Serve an RFC 9727 api-catalog linkset indexing your API descriptions

@@ -21,13 +21,13 @@ type HttpWith = {
 
 /**
  * Classify a non-passing candidate. A 404/410 is a missing surface. When
- * the check names an expected status, any other miss means the surface
- * exists but misbehaves (broken); without a status expectation the check
- * probes an affordance of an existing document, so a failed assertion
- * means the affordance is absent, not broken. A timeout is operational
- * (error) unless the check opted into an explicit hang-detection budget
- * via `with.timeout` (e.g. mcp-get-fast-fail, whose failure mode IS the
- * held-open hang).
+ * the check names an expected status (an exact list or an upper bound),
+ * any other miss means the surface exists but misbehaves (broken);
+ * without a status expectation the check probes an affordance of an
+ * existing document, so a failed assertion means the affordance is
+ * absent, not broken. A timeout is operational (error) unless the check
+ * opted into an explicit hang-detection budget via `with.timeout` (e.g.
+ * mcp-get-fast-fail, whose failure mode IS the held-open hang).
  */
 function classifyMiss(
   resp: { status: number | null; error: string | null },
@@ -38,7 +38,8 @@ function classifyMiss(
     return resp.error.startsWith('TimeoutError') && hasExplicitTimeout ? 'broken' : 'error';
   }
   if (resp.status === 404 || resp.status === 410) return 'absent';
-  return expect.status !== undefined ? 'broken' : 'absent';
+  const hasStatusExpectation = expect.status !== undefined || expect.status_below !== undefined;
+  return hasStatusExpectation ? 'broken' : 'absent';
 }
 
 export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {

@@ -2,7 +2,7 @@
 # Live MCP surface smoke. Runs three gates against `<base-url>/mcp`:
 #
 #   1. Transport: POST initialize + tools/list, confirm server=anc, protocol=2025-06-18,
-#      tools.length=9.
+#      tools.length=13.
 #   2. Symmetry contract: get_scorecard and score_cli against the curated slug `ripgrep`
 #      must BOTH return source="registry" (lookupOnly + runFreshOnly compose the same
 #      registry-hit branch). score_cli must bounce with next_tool="get_scorecard".
@@ -174,13 +174,15 @@ run_gate_transport() {
         gate_fail "/mcp initialize" "server=$server protocol=$protocol (MCP_ENABLED off? transport regression?)"
     fi
 
+    # 13 = 9 core (spec/scorecard/registry) tools + 4 web-audit tools.
+    local expected_tool_count=13
     tool_count=$(curl -fsSL -K "$CF_CONFIG" -m 15 -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
         "${BASE_URL}/mcp" 2>/dev/null | jq '.result.tools | length' 2>/dev/null || echo "0")
-    if [[ "$tool_count" == "9" ]]; then
-        gate_pass "tools/list reports 9-tool surface"
+    if [[ "$tool_count" == "$expected_tool_count" ]]; then
+        gate_pass "tools/list reports ${expected_tool_count}-tool surface"
     else
-        gate_fail "tools/list" "expected 9 tools, got $tool_count (tool-wiring regression)"
+        gate_fail "tools/list" "expected $expected_tool_count tools, got $tool_count (tool-wiring regression)"
     fi
 }
 

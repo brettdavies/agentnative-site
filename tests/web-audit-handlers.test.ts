@@ -163,6 +163,49 @@ describe('runHttp', () => {
     expect(outcome.evidence[0].body).toContain('# Site');
   });
 
+  test('mcp-get-fast-fail: a documented GET surface (fast 200) passes', async () => {
+    const fetchImpl = stubFetch(() => new Response('<html>MCP docs</html>', { status: 200 }));
+    const outcome = await runHttp(
+      check({
+        with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } },
+      }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].status).toBe(200);
+  });
+
+  test('mcp-get-fast-fail: a fast-fail 405 passes', async () => {
+    const fetchImpl = stubFetch(() => new Response('method not allowed', { status: 405 }));
+    const outcome = await runHttp(
+      check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('mcp-get-fast-fail: a 5xx on GET is broken (present but misbehaves)', async () => {
+    const fetchImpl = stubFetch(() => new Response('oops', { status: 502 }));
+    const outcome = await runHttp(
+      check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('mcp-get-fast-fail: a held-open hang (timeout) is broken', async () => {
+    const timeoutFetch = (() => {
+      const err = new Error('deadline exceeded');
+      err.name = 'TimeoutError';
+      return Promise.reject(err);
+    }) as unknown as typeof fetch;
+    const outcome = await runHttp(
+      check({ with: { path: '{mcp_endpoint}', method: 'GET', timeout: 8, expect: { status_below: 500 } } }),
+      ctx({ fetchImpl: timeoutFetch, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
   test('substitutes {mcp_endpoint} in the path', async () => {
     const seen: string[] = [];
     const fetchImpl = stubFetch((url) => {

@@ -259,6 +259,21 @@ wrangler dev --local --port 8787    # top-level (production) Worker shape, no --
 Port `8787` is pinned in the dev script per the `[Always bind local previews to port 8787]` convention; kill anything
 already bound there rather than picking a fallback.
 
+## Environments
+
+Two deploy targets, one workflow (`.github/workflows/deploy.yml`):
+
+| Branch | Worker                                     | Host                                               | Exposure                             |
+| ------ | ------------------------------------------ | -------------------------------------------------- | ------------------------------------ |
+| `dev`  | `agentnative-site-staging` (`env.staging`) | `agentnative-site-staging.<subdomain>.workers.dev` | `noindex`, behind Cloudflare Access. |
+| `main` | `agentnative-site` (top-level)             | `anc.dev` (custom domain)                          | Public, full indexing.               |
+
+**A `dev` merge deploys to staging only; `anc.dev` (production) lags until a release lands on `main`.** So the CI deploy
+that fires after a `dev` merge is the staging deploy, and production still serves the previous code and content until
+the next `main` release. For running the website audit against a target (production, staging behind Access, or the local
+engine against a public URL) and for regenerating a `scorecards/web/<domain>.json` seed, see the
+[web-audit operations runbook](./docs/runbooks/web-audit-operations.md).
+
 ## Cross-repo context
 
 | Repo / Location                                                                                     | What to read                                                                                                                   | Why                                                                                                                                                                                                                                |
