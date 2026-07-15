@@ -12,6 +12,8 @@
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { getAggregate, type WebCacheEnv } from './audit-web/cache';
+import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
 import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
@@ -32,6 +34,7 @@ import { logVisitor } from './mcp/visitor-log';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
+import { SPEC_VERSION } from './spec-version.gen';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
 // outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
@@ -60,6 +63,7 @@ export interface Env {
   ASSETS: Fetcher;
   SCORE?: DurableObjectNamespace;
   SCORE_KV?: KVNamespace;
+  SCORE_CACHE?: R2Bucket;
   SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
@@ -653,18 +657,29 @@ export default {
 
     const upstream = await env.ASSETS.fetch(assetRequest);
 
-    // Homepage HTML: substitute {{TURNSTILE_SITEKEY}} placeholder. Runs
-    // AFTER the markdown-CN rewrite above so /index.md content (no
-    // placeholder) flows through untouched. Production with no
-    // TURNSTILE_SITEKEY set substitutes with the empty string, which the
-    // homepage JS treats as "form disabled, install anc locally" per
-    // the deliberate fail-loud-pre-promotion posture.
+    // Homepage HTML: substitute the {{TURNSTILE_SITEKEY}} and
+    // {{WEB_BOARD_ROWS}} placeholders. Runs AFTER the markdown-CN rewrite
+    // above so /index.md content (no placeholders) flows through
+    // untouched. Production with no TURNSTILE_SITEKEY set substitutes
+    // with the empty string, which the homepage JS treats as "form
+    // disabled, install anc locally" per the deliberate
+    // fail-loud-pre-promotion posture. The web-board region is filled
+    // server-side from the R2 leaderboard-frontpage aggregate so the
+    // homepage stays zero-JS while its web scores stay live; an absent
+    // aggregate (cold start / spec bump) renders the scoring-in-progress
+    // state.
     if ((pathname === '/' || pathname === '/index.html') && !servedMarkdown && upstream.ok) {
       const contentType = upstream.headers.get('content-type') ?? '';
       if (contentType.toLowerCase().includes('text/html')) {
         const html = await upstream.text();
         const sitekey = env.TURNSTILE_SITEKEY ?? '';
-        const substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
+        let substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
+        if (substituted.includes('{{WEB_BOARD_ROWS}}')) {
+          const aggregate = await getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION);
+          const entries = aggregate?.entries ?? [];
+          const board = entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
+          substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', board);
+        }
         const rewritten = new Response(substituted, {
           status: upstream.status,
           statusText: upstream.statusText,

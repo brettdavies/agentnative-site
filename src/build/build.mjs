@@ -244,8 +244,9 @@ export async function build() {
       themeInit,
     });
 
-  // 6a. Web seed — loaded here (not in stage 11d) because the homepage web
-  // board pane renders the same entries; 11d receives them preloaded.
+  // 6a. Web seed — loaded for the 11d runtime projection. The homepage web
+  // board pane no longer consumes it: the Worker fills that pane from the
+  // R2 leaderboard-frontpage aggregate at request time.
   const webSeed = await loadWebSeed(
     join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'),
     join(REPO_ROOT, 'scorecards', 'web'),
@@ -259,7 +260,6 @@ export async function build() {
     themeInit,
     principles,
     leaderboard,
-    webEntries: webSeed.entries,
   });
 
   // 7. content-driven sub-pages (HTML + MD twin via shared pipeline).
