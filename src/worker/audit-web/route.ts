@@ -24,6 +24,7 @@ import {
   get as cacheGet,
   put as cachePut,
   canonicalTargetOf,
+  getAggregate,
   isStale,
   keyFor,
   normalizeTargetUrl,
@@ -33,6 +34,7 @@ import {
 export { canonicalTargetOf };
 
 import { runWebAudit } from './engine';
+import { buildWebLeaderboardBody, buildWebLeaderboardMarkdown } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
@@ -303,6 +305,54 @@ export async function handleWebAudit(
       ...cookieHeader(setCookie),
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// GET /web board + .md twin — rendered at request time from the R2
+// leaderboard aggregate (the same source the homepage pane and the
+// list_website_audits tool read, so the surfaces cannot disagree).
+// ---------------------------------------------------------------------------
+
+export function isWebLeaderboardPath(pathname: string): boolean {
+  return pathname === '/web' || pathname === '/web.md';
+}
+
+export async function handleWebLeaderboard(request: Request, env: WebAuditRouteEnv): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('method not allowed', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'content-type': 'text/plain', 'cache-control': 'no-store' },
+    });
+  }
+  const url = new URL(request.url);
+  const wantMarkdown = url.pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+  const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+  const entries = aggregate?.entries ?? [];
+
+  if (wantMarkdown) {
+    return new Response(buildWebLeaderboardMarkdown(entries, url.origin), {
+      status: 200,
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    });
+  }
+
+  let template: string;
+  try {
+    template = await loadShellTemplate(env);
+  } catch (err) {
+    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
+      status: 500,
+      headers: { 'content-type': 'text/plain' },
+    });
+  }
+  const html = substituteShell(template, {
+    title: 'Web Agent-Readiness Leaderboard — anc.dev',
+    description:
+      'Agent-readiness scores for websites and their MCP servers, scored against the eight agent-native principles.',
+    canonicalPath: '/web',
+    body: buildWebLeaderboardBody(entries),
+  });
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 // ---------------------------------------------------------------------------

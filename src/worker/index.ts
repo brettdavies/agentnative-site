@@ -16,9 +16,11 @@ import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from './
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
   handleWebAudit,
+  handleWebLeaderboard,
   handleWebResultPage,
   handleWebScoringPage,
   isWebAuditPath,
+  isWebLeaderboardPath,
   isWebScoringPath,
   parseWebResultPath,
   type WebAuditRouteEnv,
@@ -578,6 +580,23 @@ export default {
     // (scorecards.mjs) so no curated tool can collide with this route.
     if (parseLiveScorePath(pathname)) {
       return handleLiveScorePage(request, env as ScoreEnv);
+    }
+
+    // /web board + .md twin — Worker-rendered from the R2 leaderboard
+    // aggregate, dispatched ahead of the asset fetch so no static
+    // dist/web.html ever serves the board. Legacy extension/slash forms
+    // canonicalize like the rest of the site.
+    if (pathname === '/web.html' || pathname === '/web/') {
+      return new Response(null, {
+        status: 301,
+        headers: { Location: '/web', 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+    if (isWebLeaderboardPath(pathname)) {
+      const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+      const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
+      if (response.status !== 200) return response;
+      return applyHeaders(response, { request, servedMarkdown, pathname: '/web' });
     }
 
     // /web/scoring[/<domain>] — the transient in-progress streaming page.
