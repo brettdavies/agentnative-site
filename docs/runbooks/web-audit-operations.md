@@ -91,8 +91,8 @@ onto the running instance):
   # staging additionally needs the CF Access service-token headers
   ```
 
-  A 202 carries `{ started, coalesced, instance_id }`. 401 means a wrong/missing header; 500 means the Worker-side
-  secret is unset.
+  The 202 response carries `{ started, coalesced, instance_id }`. 401 means a wrong or missing header; 500 means the
+  Worker-side secret is unset.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
