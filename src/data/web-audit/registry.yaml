@@ -121,14 +121,14 @@ checks:
     site_types: [mcp]
     antecedent: mcp-present
     weight: 3
-    title: GET on the MCP endpoint fast-fails (not a held-open hang)
+    title: GET on the MCP endpoint answers fast (not a held-open hang)
     handler: http
     with:
       path: "{mcp_endpoint}"
       method: GET
       timeout: 8
-      expect: { status: [405, 400, 404, 406] }
-    hint: Guard non-POST verbs to return 405 fast; a stateless streamable-HTTP GET otherwise hangs open.
+      expect: { status_below: 500 }
+    hint: "Answer GET promptly: fast-fail non-POST with 405, or serve a documented surface (a docs page, or a redirect to your server card). A stateless streamable-HTTP GET routed into the transport otherwise holds the SSE stream open until the caller times out."
 
   - id: mcp-cors-preflight
     category: mcp-api
