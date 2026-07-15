@@ -21,8 +21,8 @@ keyword and belongs to one of five categories:
 - **Content for agents** — `llms.txt` (root and per-section), `llms-full.txt`, `Accept: text/markdown` content
   negotiation, and the root-HTML affordances (meta description, `<noscript>`, JSON-LD, semantic landmarks).
 - **Bot & crawl policy** — AI-crawler rules, Content-Signal directives, `security.txt`, and Web Bot Auth.
-- **MCP & API** — the `initialize` handshake, `tools/list` with input schemas, JSON-RPC error codes, GET fast-fail,
-  CORS, the `.well-known` server card, OpenAPI, JSON Schemas, and WebMCP.
+- **MCP & API** — the `initialize` handshake, `tools/list` with input schemas, JSON-RPC error codes, a prompt GET answer
+  (no held-open hang), CORS, the `.well-known` server card, OpenAPI, JSON Schemas, and WebMCP.
 - **Agent discovery & auth** — the A2A agent card, agent-skills index, OAuth discovery metadata, and `auth.md`.
 
 A check is scored only when it applies: MCP checks need a discovered endpoint, API checks need an API surface, and a
