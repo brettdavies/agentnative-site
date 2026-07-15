@@ -32,60 +32,40 @@ Two gates sit in front of the audit and shape how you reach it per environment:
   **cannot** audit a local `bun run dev` server (`http://localhost:8787`) through `/api/audit-web`; the root fetch is
   rejected. The target must be a public host.
 
+### Quick check: the working-tree engine (`scripts/web-audit/run.sh`)
+
+`scripts/web-audit/run.sh` runs the current working tree's audit logic (`scripts/web-audit/audit.ts`, under Bun) against
+real remote content and reports every check. It defaults to the staging host, resolves the Cloudflare Access service
+token from 1Password, and rebuilds `dist/_internal/web-audit-registry.json` first.
+
+```bash
+scripts/web-audit/run.sh                              # full report + score for staging
+scripts/web-audit/run.sh --check mcp-get-fast-fail    # one check; exit 0 = pass, 1 = failing, 3 = not evaluable
+scripts/web-audit/run.sh --target https://anc.dev/    # a public target (e.g. production after a release)
+scripts/web-audit/run.sh --json                       # the full scorecard as JSON
+scripts/web-audit/run.sh --no-build                   # reuse the existing dist/ (skip the rebuild)
+```
+
+This runs the audit **logic** you are about to ship against **live** content, so a change to an antecedent or a check
+assertion shows its effect immediately. A check whose pass depends on the target's own **content** (`noscript-fallback`,
+`link-headers`, ...) reads whatever the target currently serves, so verify content-dependent checks against a host that
+already serves the new content: staging after a `dev` merge, production after a release.
+
+Under the hood the helper calls `runWebAudit` with a `fetchImpl` that injects the Access service token on the staging
+host only. `guardedFetch` uses standard `fetch` plus hostname validation (no Workers-only APIs), so the engine runs
+under Bun.
+
+**Why not a deployed self-audit.** The staging Worker cannot audit itself. Cloudflare Access bounces unauthenticated
+requests to its login wall, and the engine's internal `guardedFetch` calls do not carry the service token, so every
+probe reads the Access page and every check lands `n_a` (score near 0). Running the engine locally and injecting the
+token on the staging host sidesteps this; that is what `run.sh` does.
+
 ### Against production (`anc.dev`)
 
-Use the site's own audit UI (`https://anc.dev/web-audit`) or the `audit_website` MCP tool. A scripted `POST` needs a
-real Turnstile token, so it is not the convenient path.
-
-### Against staging
-
-Staging sits behind Cloudflare Access, so a plain request returns `302` to the Access login. Send the service-token
-headers (item **"Cloudflare Access Service Token - agentnative-site-staging"** in the vault; fetch via the `/1password`
-skill, never inline the values):
-
-```bash
-STAGING="https://agentnative-site-staging.<subdomain>.workers.dev"
-curl -sS -X POST "$STAGING/api/audit-web" \
-  -H 'content-type: application/json' \
-  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-  -d "{\"url\":\"$STAGING/\",\"turnstile_token\":\"x\"}"
-```
-
-Auditing the staging URL itself is a faithful preview of what `main` will serve, because staging runs the `dev` code
-against the `dev`-built content.
-
-### With the local engine against a public URL (preview a fix)
-
-The reliable way to run the **current working-tree** audit logic against **real remote content** without deploying: call
-`runWebAudit` from a throwaway Bun script. `guardedFetch` uses standard `fetch` plus hostname validation (no
-Workers-only APIs), so the engine runs under Bun. This is how you confirm a change to the antecedents or scoring before
-it ships.
-
-```bash
-bun run build   # produces dist/_internal/web-audit-registry.json
-```
-
-```ts
-// audit-once.ts — bun run audit-once.ts
-import { readFileSync } from 'node:fs';
-import { runWebAudit } from './src/worker/audit-web/engine';
-
-const registry = JSON.parse(readFileSync('dist/_internal/web-audit-registry.json', 'utf8'));
-const audit = runWebAudit({ url: 'https://anc.dev/', registry, specVersion: '0.5.0', fetchOptions: {} });
-
-let scorecard: unknown = null;
-let ev = await audit.next();
-while (!ev.done) {
-  if (ev.value.type === 'complete') scorecard = ev.value.scorecard;
-  ev = await audit.next();
-}
-console.log(JSON.stringify(scorecard, null, 2));
-```
-
-The audit logic is the local code; the content is whatever the target serves live. So a fix to the audit **logic** (e.g.
-an antecedent) shows its effect immediately, but a check whose pass depends on the target's **content** (e.g.
-`noscript-fallback` needs the page to ship a `<noscript>`) still reads the target's currently-deployed content.
+For a real user-facing audit, use the site's audit UI (`https://anc.dev/web-audit`) or the `audit_website` MCP tool. A
+scripted `POST /api/audit-web` needs a real Turnstile token, which you cannot mint from a script. To preview the
+working-tree engine against live production content, point the helper at it: `scripts/web-audit/run.sh --target
+https://anc.dev/` (a public host, so no Access token is fetched).
 
 ## Regenerating a web seed scorecard
 
@@ -93,18 +73,21 @@ The web leaderboard is curated, not crawled. Each board entry has a committed sn
 (web scorecard schema `0.2`), listed in `src/data/web-audit/seed.yaml`. The build renders the static board pages from
 these files; on-demand user audits live only in R2 and never appear here.
 
-To regenerate an entry: run the audit against the live site and save the terminal `complete` event's `scorecard` as
-`scorecards/web/<domain>.json`.
+To regenerate an entry, run the helper against the live site and write its `--json` output:
+
+```bash
+scripts/web-audit/run.sh --target https://<domain>/ --json > scorecards/web/<domain>.json
+```
 
 **Regenerate against live production, after the content is on `main`.** The seed represents `anc.dev` as the public sees
 it, so it must be captured from production once the relevant code **and** content are live there. Capturing it earlier
 bakes in a transient state:
 
-- The local-engine recipe against `anc.dev` shows a **logic** fix (say an antecedent now resolving `n_a`) but reads the
-  old production **content**, so content-dependent checks (`noscript-fallback`, `link-headers`, ...) read as `absent`
-  until their PRs reach `main`.
+- The helper against `anc.dev` shows a **logic** fix (say an antecedent now resolving `n_a`) but reads the old
+  production **content**, so content-dependent checks (`noscript-fallback`, `link-headers`, ...) read as `absent` until
+  their PRs reach `main`.
 - Staging is a faithful preview but its scorecard's `target_url` is the staging host, not `anc.dev`.
 
-So the correct order is: land the code and content on `main`, let the production deploy finish, run the audit against
+So the correct order is: land the code and content on `main`, let the production deploy finish, run the helper against
 `https://anc.dev/`, then commit the resulting `scorecards/web/anc.dev.json`. Auditing before the production release
 produces a scorecard that is wrong the moment the release lands.
