@@ -12,6 +12,8 @@
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from './audit-web/rescore-trigger';
+import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
   handleWebAudit,
   handleWebResultPage,
@@ -38,6 +40,10 @@ import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render'
 // (Sandbox `fetch()` missing) — documented in
 // docs/solutions/integration-issues/cloudflare-workers-do-mock-must-mirror-binding-shape-2026-05-15.md.
 export { ContainerProxy } from '@cloudflare/sandbox';
+// Web-rescore Workflow class. Re-exported so wrangler's binding resolver
+// can find `class_name: "WebRescoreWorkflow"` from wrangler.jsonc's
+// workflows section.
+export { WebRescoreWorkflow } from './audit-web/rescore-workflow';
 // Live-scoring DO class. Re-exported so wrangler's binding resolver can
 // find `class_name: "Sandbox"` from wrangler.jsonc's containers +
 // durable_objects sections.
@@ -85,6 +91,12 @@ export interface Env {
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
+  // Web-rescore bindings. WEB_RESCORE_WORKFLOW is the Workflow that fans
+  // out the weekly board rescore; WEB_RESCORE_SECRET (wrangler secret)
+  // auths the POST /api/web-rescore deploy hook. Optional so tests that
+  // don't exercise the rescore path can stub a minimal env.
+  WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
+  WEB_RESCORE_SECRET?: string;
 }
 
 /**
@@ -308,6 +320,12 @@ export default {
     // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
     if (isWebAuditPath(pathname)) {
       return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
+    }
+
+    // Post-deploy rescore hook (secret-authed). Shares the single-flight
+    // helper with the weekly cron in scheduled() below.
+    if (pathname === '/api/web-rescore') {
+      return handleWebRescore(request, env as WebRescoreTriggerEnv);
     }
 
     // MCP server card (SEP-1649): the canonical path serves the JSON
@@ -638,5 +656,12 @@ export default {
     }
 
     return applyHeaders(upstream, { request, servedMarkdown, pathname });
+  },
+
+  // Weekly board rescore. The cron and the deploy hook coalesce through
+  // the same single-flight helper, so a cron tick during an in-flight
+  // batch no-ops instead of double-spending the audit budget.
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await startWebRescore(env as WebRescoreTriggerEnv);
   },
 } satisfies ExportedHandler<Env>;
