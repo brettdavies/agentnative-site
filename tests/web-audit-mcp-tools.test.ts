@@ -43,17 +43,6 @@ async function projections() {
   return assetsJson;
 }
 
-const CURATED_INDEX = [
-  { domain: 'anc.dev', url: 'https://anc.dev/', name: 'anc.dev', description: 'x', score_pct: 67 },
-];
-const CURATED_ANC = {
-  schema_version: '0.1',
-  target_url: 'https://anc.dev/',
-  tool: { name: 'anc.dev', url: 'https://anc.dev/' },
-  badge: { score_pct: 67, eligible: false },
-  results: [],
-};
-
 interface WebEnvOpts {
   webEnabled?: boolean;
   mcpEnabled?: boolean;
@@ -76,8 +65,6 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
         if (path === '/_internal/mcp-catalog.json') return ok(JSON.stringify(FIXTURE_CATALOG));
         if (path === '/_internal/web-audit-registry.json') return ok(registry);
         if (path === '/_internal/web-remediation.json') return ok(remediation);
-        if (path === '/_internal/web-scorecards/index.json') return ok(JSON.stringify(CURATED_INDEX));
-        if (path === '/_internal/web-scorecards/anc.dev.json') return ok(JSON.stringify(CURATED_ANC));
         if (path === '/_internal/web-seed.json') {
           return ok(
             JSON.stringify([{ domain: 'anc.dev', url: 'https://anc.dev/', name: 'anc.dev', description: 'x' }]),
@@ -188,11 +175,11 @@ describe('get_website_audit', () => {
     expect((body.scorecard as { badge: { score_pct: number } }).badge.score_pct).toBe(88);
   });
 
-  test('curated projection resolves when R2 misses', async () => {
+  test('a board domain with no R2 entry is a miss (no committed fallback)', async () => {
     const env = await makeEnv();
     const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'anc.dev' }));
-    expect(body.found).toBe(true);
-    expect(body.share_url).toBe('https://anc.dev/web/anc.dev');
+    expect(body.found).toBe(false);
+    expect(body.next_tool).toBe('audit_website');
   });
 
   test('miss returns found:false + next_tool audit_website', async () => {
@@ -322,13 +309,38 @@ describe('audit_website gates', () => {
 });
 
 describe('list_website_audits', () => {
-  test('returns curated board summaries with share_urls', async () => {
-    const env = await makeEnv();
+  test('returns board summaries from the leaderboard aggregate with share_urls', async () => {
+    const env = await makeEnv({
+      cachePrefill: {
+        [`audits/web/leaderboard/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          generated_at: new Date().toISOString(),
+          entries: [
+            {
+              domain: 'anc.dev',
+              url: 'https://anc.dev/',
+              name: 'anc.dev',
+              description: 'x',
+              score_pct: 67,
+              score: { relative: 67, global: 62 },
+            },
+          ],
+        },
+      },
+    });
     const body = jsonContent(await callTool(env, 'list_website_audits', {}));
     expect(body.count).toBe(1);
     const entries = body.entries as Array<{ domain: string; share_url: string; score_pct: number }>;
     expect(entries[0].domain).toBe('anc.dev');
+    expect(entries[0].score_pct).toBe(67);
     expect(entries[0].share_url).toBe('https://anc.dev/web/anc.dev');
+  });
+
+  test('an absent aggregate returns an empty list, not an error', async () => {
+    const env = await makeEnv();
+    const body = jsonContent(await callTool(env, 'list_website_audits', {}));
+    expect(body.count).toBe(0);
+    expect(body.entries).toEqual([]);
   });
 });
 

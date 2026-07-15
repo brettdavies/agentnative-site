@@ -448,11 +448,10 @@ function esc(s: string): string {
 }
 
 /**
- * Resolve a domain's audit for the result page. R2 (on-demand audits)
- * wins; on a miss, fall back to the committed curated projection at
- * /_internal/web-scorecards/<domain>.json (leaderboard seeds, static +
- * committed, independent of R2 per KTD-8). Tries https then http for the
- * R2 key since the cache is scheme-specific.
+ * Resolve a domain's audit for the result page from per-domain R2 only
+ * (a miss renders the not-yet-scored state; there is no committed
+ * fallback). Tries https then http for the R2 key since the cache is
+ * scheme-specific.
  */
 async function lookupByDomain(
   env: WebAuditRouteEnv,
@@ -463,19 +462,7 @@ async function lookupByDomain(
     const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
     if (cached) return { scorecard: cached.scorecard, targetUrl };
   }
-  const curated = await loadCuratedScorecard(env, domain);
-  if (curated) return { scorecard: curated, targetUrl: normalizeTargetUrl(`https://${domain}/`) };
   return null;
-}
-
-async function loadCuratedScorecard(env: WebAuditRouteEnv, domain: string): Promise<unknown | null> {
-  try {
-    const res = await env.ASSETS.fetch(new Request(`https://assets.internal/_internal/web-scorecards/${domain}.json`));
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 export async function handleWebResultPage(request: Request, env: WebAuditRouteEnv): Promise<Response> {
