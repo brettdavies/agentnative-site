@@ -18,9 +18,9 @@
   "audit_profile": null,
   "site_type": null,
   "summary": {
-    "pass": 23,
-    "broken": 2,
-    "absent": 4,
+    "pass": 27,
+    "broken": 0,
+    "absent": 2,
     "n_a": 7,
     "skip": 0,
     "error": 0
@@ -32,29 +32,29 @@
     },
     "should": {
       "total": 15,
-      "verified": 9
+      "verified": 13
     },
     "may": {
       "total": 12,
       "verified": 12
     }
   },
-  "score_pct": 73,
+  "score_pct": 95,
   "score": {
-    "relative": 73,
-    "global": 57
+    "relative": 95,
+    "global": 78
   },
   "categories": [
     {
       "id": "discoverability",
       "name": "Discoverability",
-      "passed": 4,
+      "passed": 5,
       "counted": 5
     },
     {
       "id": "content-for-agents",
       "name": "Content for agents",
-      "passed": 6,
+      "passed": 7,
       "counted": 7
     },
     {
@@ -66,7 +66,7 @@
     {
       "id": "mcp-api",
       "name": "MCP & API",
-      "passed": 6,
+      "passed": 8,
       "counted": 10
     },
     {
@@ -201,16 +201,16 @@
       "evidence": "405 allow-origin absent"
     },
     {
-      "id": "mcp-get-fast-fail",
-      "label": "GET on the MCP endpoint fast-fails (not a held-open hang)",
+      "id": "mcp-tools-list",
+      "label": "tools/list returns a tools array with input schemas",
       "category": "mcp-api",
-      "group": "P4",
+      "group": "P2",
       "layer": "web",
-      "keyword": "should",
-      "tier": "recommended",
-      "principle": "P4",
-      "status": "broken",
-      "evidence": "https://anc.dev/mcp -> 200 (status 200 not in [405, 400, 404, 406])"
+      "keyword": "must",
+      "tier": "required",
+      "principle": "P2",
+      "status": "pass",
+      "evidence": "13 tools, 13 with input schema"
     },
     {
       "id": "mcp-capabilities",
@@ -237,8 +237,8 @@
       "evidence": "https://anc.dev/ -> 200"
     },
     {
-      "id": "mcp-unknown-method",
-      "label": "unknown JSON-RPC method returns -32601",
+      "id": "mcp-get-fast-fail",
+      "label": "GET on the MCP endpoint answers fast (not a held-open hang)",
       "category": "mcp-api",
       "group": "P4",
       "layer": "web",
@@ -246,7 +246,7 @@
       "tier": "recommended",
       "principle": "P4",
       "status": "pass",
-      "evidence": "error code -32601"
+      "evidence": "https://anc.dev/mcp -> 200"
     },
     {
       "id": "mcp-usage-doc",
@@ -261,16 +261,16 @@
       "evidence": "https://anc.dev/mcp-skill.md -> 200"
     },
     {
-      "id": "mcp-tools-list",
-      "label": "tools/list returns a tools array with input schemas",
+      "id": "mcp-cors-actual",
+      "label": "POST response carries Access-Control-Allow-Origin",
       "category": "mcp-api",
-      "group": "P2",
+      "group": "P6",
       "layer": "web",
-      "keyword": "must",
-      "tier": "required",
-      "principle": "P2",
-      "status": "pass",
-      "evidence": "9 tools, 9 with input schema"
+      "keyword": "should",
+      "tier": "recommended",
+      "principle": "P6",
+      "status": "absent",
+      "evidence": "allow-origin absent"
     },
     {
       "id": "root-meta-description",
@@ -317,8 +317,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P1",
-      "status": "absent",
-      "evidence": "https://anc.dev/ -> 200 (body no match /<noscript/)"
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
     },
     {
       "id": "link-headers",
@@ -329,8 +329,8 @@
       "keyword": "should",
       "tier": "recommended",
       "principle": "P3",
-      "status": "absent",
-      "evidence": "https://anc.dev/ -> 200 (header link no match /rel=\"?(service-desc|describedby|api-catalog|service-doc)\"?/)"
+      "status": "pass",
+      "evidence": "https://anc.dev/ -> 200"
     },
     {
       "id": "root-link-rel",
@@ -343,18 +343,6 @@
       "principle": "P3",
       "status": "pass",
       "evidence": "https://anc.dev/ -> 200"
-    },
-    {
-      "id": "mcp-cors-actual",
-      "label": "POST response carries Access-Control-Allow-Origin",
-      "category": "mcp-api",
-      "group": "P6",
-      "layer": "web",
-      "keyword": "should",
-      "tier": "recommended",
-      "principle": "P6",
-      "status": "absent",
-      "evidence": "allow-origin absent"
     },
     {
       "id": "accept-markdown",
@@ -382,19 +370,6 @@
       "evidence": "https://anc.dev/.well-known/llms.txt -> 404"
     },
     {
-      "id": "llms-full-txt-scoped",
-      "label": "Per-section llms-full.txt files resolve under content subdirectories",
-      "category": "content-for-agents",
-      "group": "P2",
-      "layer": "web",
-      "keyword": "may",
-      "tier": "optional",
-      "principle": "P2",
-      "status": "n_a",
-      "na_reason": "optional-absent",
-      "evidence": "https://anc.dev/.well-known/llms-full.txt -> 404"
-    },
-    {
       "id": "content-signals",
       "label": "robots.txt declares Content-Signal AI-usage preferences",
       "category": "bot-crawl-policy",
@@ -417,6 +392,18 @@
       "principle": "P7",
       "status": "pass",
       "evidence": "https://anc.dev/robots.txt -> 200"
+    },
+    {
+      "id": "well-known-mcp-card",
+      "label": "A .well-known MCP server card is published (SEP-1649)",
+      "category": "mcp-api",
+      "group": "P8",
+      "layer": "web",
+      "keyword": "should",
+      "tier": "recommended",
+      "principle": "P8",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/mcp/server-card.json -> 200"
     },
     {
       "id": "web-bot-auth",
@@ -456,6 +443,18 @@
       "evidence": "https://anc.dev/.well-known/security.txt -> 200"
     },
     {
+      "id": "oauth-protected-resource",
+      "label": "OAuth Protected Resource Metadata published (RFC 9728)",
+      "category": "agent-discovery-auth",
+      "group": "P1",
+      "layer": "web",
+      "keyword": "may",
+      "tier": "optional",
+      "principle": "P1",
+      "status": "pass",
+      "evidence": "https://anc.dev/.well-known/oauth-protected-resource -> 200"
+    },
+    {
       "id": "agent-skills",
       "label": "Agent-skills discovery index published",
       "category": "agent-discovery-auth",
@@ -481,28 +480,17 @@
       "evidence": "https://anc.dev/.well-known/agent-card.json -> 404 (status 404 not in [200])"
     },
     {
-      "id": "oauth-protected-resource",
-      "label": "OAuth Protected Resource Metadata published (RFC 9728)",
-      "category": "agent-discovery-auth",
-      "group": "P1",
+      "id": "llms-full-txt-scoped",
+      "label": "Per-section llms-full.txt files resolve under content subdirectories",
+      "category": "content-for-agents",
+      "group": "P2",
       "layer": "web",
       "keyword": "may",
       "tier": "optional",
-      "principle": "P1",
-      "status": "pass",
-      "evidence": "https://anc.dev/.well-known/oauth-protected-resource -> 200"
-    },
-    {
-      "id": "well-known-mcp-card",
-      "label": "A .well-known MCP server card is published (SEP-1649)",
-      "category": "mcp-api",
-      "group": "P8",
-      "layer": "web",
-      "keyword": "should",
-      "tier": "recommended",
-      "principle": "P8",
-      "status": "broken",
-      "evidence": "https://anc.dev/.well-known/mcp/server-card.json -> 200 (body matches /mcp_endpoint|serverInfo|transport|\"name\"/)"
+      "principle": "P2",
+      "status": "n_a",
+      "na_reason": "optional-absent",
+      "evidence": "https://anc.dev/.well-known/llms-full.txt -> 404"
     },
     {
       "id": "auth-md",
@@ -515,6 +503,18 @@
       "principle": "P1",
       "status": "pass",
       "evidence": "https://anc.dev/auth.md -> 200"
+    },
+    {
+      "id": "mcp-unknown-method",
+      "label": "unknown JSON-RPC method returns -32601",
+      "category": "mcp-api",
+      "group": "P4",
+      "layer": "web",
+      "keyword": "should",
+      "tier": "recommended",
+      "principle": "P4",
+      "status": "pass",
+      "evidence": "error code -32601"
     }
   ]
 }
