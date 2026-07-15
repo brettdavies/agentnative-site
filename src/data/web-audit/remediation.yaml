@@ -55,13 +55,17 @@ remediation:
     resources:
       - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
   mcp-get-fast-fail:
-    title: GET on the MCP endpoint fast-fails
-    goal: Answer GET on the MCP endpoint fast (405 or a documented surface), never a held-open hang
+    title: GET on the MCP endpoint answers fast
+    goal: Answer GET on the MCP endpoint fast (a fast-fail status or a documented surface), never a held-open hang
     fix: |
-      A stateless streamable-HTTP MCP endpoint must fast-fail a `GET` (return `405`, `400`, `404`,
-      or `406`) rather than hold the connection open waiting for an SSE session that a probe never
-      establishes. Guard non-`POST` verbs at the router and return `405 Method Not Allowed` with an
-      `Allow: POST` header.
+      Answer a `GET` on the MCP endpoint promptly; this check fails only when the connection is
+      held open. A streamable-HTTP `GET` routed into the transport opens the server-to-client SSE
+      notification stream, and a stateless server (nothing to push) parks that connection until the
+      caller times out. Answer one of two ways instead: fast-fail non-`POST` at the router with
+      `405 Method Not Allowed` and an `Allow: POST` header; or serve a documented surface on `GET`
+      (a human- and agent-readable docs page, or a redirect to your `.well-known` MCP server card)
+      so the `GET` returns content rather than a rejection. Any prompt, completed response passes
+      (a fast-fail status, or a documented `2xx`/redirect); only a held-open hang or a `5xx` fails.
     resources:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-cors-preflight:
