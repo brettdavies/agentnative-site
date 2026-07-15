@@ -32,12 +32,20 @@ async function registryJson(): Promise<string> {
   return registryJsonPromise;
 }
 
+const SEED_FIXTURE = [{ domain: 'seeded.dev', url: 'https://seeded.dev/', name: 'seeded.dev', description: 'seeded' }];
+
 function makeAssets(): Fetcher {
   return {
     async fetch(input: RequestInfo | URL) {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes('/_internal/web-audit-registry.json')) {
         return new Response(await registryJson(), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('/_internal/web-seed.json')) {
+        return new Response(JSON.stringify(SEED_FIXTURE), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
       }
       if (url.includes('/_internal/score-live-shell.html')) {
         return new Response(
@@ -386,6 +394,7 @@ describe('handleWebAudit streaming', () => {
       spec_version: SPEC_VERSION,
       target_url: url,
       scorecard: { schema_version: '0.2', target_url: url, score_pct: 77, results: [] },
+      scored_at: new Date().toISOString(),
     };
     const { bucket } = makeR2({ [key]: cached });
     const env = makeEnv({ SCORE_CACHE: bucket });
@@ -403,6 +412,97 @@ describe('handleWebAudit streaming', () => {
     expect(body.cached).toBe(true);
     expect(body.scorecard.score_pct).toBe(77);
     expect(body.share_url).toBe('/web/example.com');
+  });
+});
+
+describe('staleness gate + aggregate invalidation', () => {
+  const aggregateKey = `audits/web/leaderboard/${SPEC_VERSION}.json`;
+  const frontpageKey = `audits/web/leaderboard-frontpage/${SPEC_VERSION}.json`;
+
+  async function stalePrefill(url: string, pct = 55) {
+    const key = await keyFor(url, SPEC_VERSION);
+    return {
+      [key]: {
+        spec_version: SPEC_VERSION,
+        target_url: url,
+        scorecard: { schema_version: '0.2', target_url: url, score_pct: pct, results: [] },
+        scored_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+      },
+    };
+  }
+
+  test('a fresh audit of a seeded domain rebuilds both aggregates', async () => {
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await runAudit(auditRequest('https://seeded.dev/'), env, ctx, { probeFetch: stubProbeFetch() });
+    expect(resp.status).toBe(200);
+    await readNdjson(resp);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    expect(store.has(aggregateKey)).toBe(true);
+    expect(store.has(frontpageKey)).toBe(true);
+    const board = JSON.parse(store.get(aggregateKey) as string) as { entries: Array<{ domain: string }> };
+    expect(board.entries.map((e) => e.domain)).toEqual(['seeded.dev']);
+  });
+
+  test('a fresh audit of a non-seeded domain writes per-domain R2 only', async () => {
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    await readNdjson(await runAudit(auditRequest('https://example.com/'), env, ctx, { probeFetch: stubProbeFetch() }));
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    expect(store.has(await keyFor('https://example.com/', SPEC_VERSION))).toBe(true);
+    expect(store.has(aggregateKey)).toBe(false);
+    expect(store.has(frontpageKey)).toBe(false);
+  });
+
+  test('a hit younger than the threshold serves cached without the engine', async () => {
+    const url = 'https://example.com/';
+    const key = await keyFor(url, SPEC_VERSION);
+    const prefill = await stalePrefill(url);
+    (prefill[key] as { scored_at: string }).scored_at = new Date().toISOString();
+    const env = makeEnv({ SCORE_CACHE: makeR2(prefill).bucket });
+    const resp = await handleWebAudit(auditRequest(url), env, makeCtx(), {
+      probeFetch: (() => {
+        throw new Error('engine must not run on a fresh hit');
+      }) as unknown as typeof fetch,
+    });
+    expect(resp.status).toBe(200);
+    expect(((await resp.json()) as { cached: boolean }).cached).toBe(true);
+  });
+
+  test('a hit older than the threshold re-runs the engine through the gates', async () => {
+    const url = 'https://example.com/';
+    const { bucket, store } = makeR2(await stalePrefill(url));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await runAudit(auditRequest(url), env, ctx, { probeFetch: stubProbeFetch() });
+    expect(resp.status).toBe(200);
+    const events = await readNdjson(resp);
+    expect(events.at(-1)?.type).toBe('complete');
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const updated = JSON.parse(store.get(await keyFor(url, SPEC_VERSION)) as string) as { scored_at: string };
+    expect(Date.now() - Date.parse(updated.scored_at)).toBeLessThan(60_000);
+  });
+
+  test('kill switch off + stale hit still serves the cached entry as data', async () => {
+    const url = 'https://example.com/';
+    const env = makeEnv({ WEB_AUDIT_ENABLED: undefined, SCORE_CACHE: makeR2(await stalePrefill(url)).bucket });
+    const resp = await runAudit(auditRequest(url, {}), env, makeCtx());
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { cached: boolean; scorecard: { score_pct: number } };
+    expect(body.cached).toBe(true);
+    expect(body.scorecard.score_pct).toBe(55);
+  });
+
+  test('a stale hit behind a breached limiter returns 429, not cached (gates still apply)', async () => {
+    const url = 'https://example.com/';
+    const env = makeEnv({
+      SCORE_CACHE: makeR2(await stalePrefill(url)).bucket,
+      WEB_AUDIT_LIMITER: { limit: async () => ({ success: false }) },
+    });
+    const resp = await runAudit(auditRequest(url), env, makeCtx());
+    expect(resp.status).toBe(429);
   });
 });
 
@@ -655,6 +755,7 @@ describe('cache-first gate ordering', () => {
       spec_version: SPEC_VERSION,
       target_url: url,
       scorecard: { schema_version: '0.2', target_url: url, score_pct: 70, results: [] },
+      scored_at: new Date().toISOString(),
     };
     const { bucket } = makeR2({ [key]: cached });
     let budgetReads = 0;
