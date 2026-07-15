@@ -271,7 +271,7 @@ Two deploy targets, one workflow (`.github/workflows/deploy.yml`):
 **A `dev` merge deploys to staging only; `anc.dev` (production) lags until a release lands on `main`.** So the CI deploy
 that fires after a `dev` merge is the staging deploy, and production still serves the previous code and content until
 the next `main` release. For running the website audit against a target (production, staging behind Access, or the local
-engine against a public URL) and for regenerating a `scorecards/web/<domain>.json` seed, see the
+engine against a public URL) and for operating the web-board rescore (weekly cron, post-deploy hook, on-demand), see the
 [web-audit operations runbook](./docs/runbooks/web-audit-operations.md).
 
 ## Cross-repo context

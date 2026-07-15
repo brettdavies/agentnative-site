@@ -6,11 +6,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { WebAggregateEntry } from '../src/worker/audit-web/cache';
 import {
   buildWebLeaderboardBody,
   buildWebLeaderboardMarkdown,
   rankWebEntries,
-} from '../src/build/web-leaderboard-render.mjs';
+} from '../src/worker/audit-web/leaderboard-render';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import {
   buildWebScorecard,
@@ -266,13 +267,14 @@ describe('web leaderboard (U15)', () => {
   // A small perfect site (relative 100, low global) vs a bigger,
   // higher-GLOBAL platform: GLOBAL ranks the platform first by default;
   // RELATIVE puts the perfect site on top.
-  function entry(domain: string, relative: number, globalScore: number) {
+  function entry(domain: string, relative: number, globalScore: number): WebAggregateEntry {
     return {
       domain,
       url: `https://${domain}/`,
       name: domain,
       description: 'x',
-      scorecard: { ...webScorecard(relative), score: { relative, global: globalScore } },
+      score_pct: relative,
+      score: { relative, global: globalScore },
     };
   }
   const entries = [entry('small-perfect.dev', 100, 45), entry('big-platform.dev', 88, 79)];
@@ -300,16 +302,16 @@ describe('web leaderboard (U15)', () => {
     expect(html).not.toContain('ANC 100');
   });
 
-  test('empty seed renders an empty-state, not a broken table', () => {
+  test('an empty board renders the scoring-in-progress state, not a broken table', () => {
     const html = buildWebLeaderboardBody([]);
     expect(html).not.toContain('<tbody>');
-    expect(html).toContain('No websites are on the board yet');
+    expect(html).toContain('Scoring in progress');
   });
 
-  test('markdown twin lists GLOBAL-ordered rows with both columns', () => {
-    const md = buildWebLeaderboardMarkdown(entries);
-    expect(md).toContain('| 1 | [big-platform.dev](/web/big-platform.dev) | 79% | 88% |');
-    expect(md).toContain('| 2 | [small-perfect.dev](/web/small-perfect.dev) | 45% | 100% |');
+  test('markdown twin lists GLOBAL-ordered rows with both columns, origin-absolute', () => {
+    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev');
+    expect(md).toContain('| 1 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% |');
+    expect(md).toContain('| 2 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% |');
   });
 
   test('the CLI leaderboard hero is not present on the web board', () => {

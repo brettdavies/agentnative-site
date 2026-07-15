@@ -23,7 +23,7 @@ Usage:
     score_model.py                      # run the built-in scenarios
     score_model.py --weights 10,4,1     # try steeper difficulty
     score_model.py --broken 0.75        # broken penalty factor
-    score_model.py --scorecard scorecards/web/anc.dev.json   # score real data
+    score_model.py --scorecard /path/to/web-scorecard.json   # score real data (fetch one via get_website_audit)
 """
 
 from __future__ import annotations

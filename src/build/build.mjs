@@ -47,7 +47,7 @@ import { emitMcpCatalog } from './11-mcp-catalog.mjs';
 import { emitAgentReadiness, emitDiscovery } from './11a-discovery-emit.mjs';
 import { minifyDist } from './12-minify-dist.mjs';
 import { emitWebAuditRegistry, emitWebRemediation } from './13-web-audit-registry.mjs';
-import { emitWebScorecardSurface, loadWebSeed } from './14-web-scorecards-emit.mjs';
+import { emitWebSeedProjection, loadWebSeed } from './14-web-scorecards-emit.mjs';
 import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -244,13 +244,10 @@ export async function build() {
       themeInit,
     });
 
-  // 6a. Web seed — loaded for the 11d runtime projection. The homepage web
-  // board pane no longer consumes it: the Worker fills that pane from the
-  // R2 leaderboard-frontpage aggregate at request time.
-  const webSeed = await loadWebSeed(
-    join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'),
-    join(REPO_ROOT, 'scorecards', 'web'),
-  );
+  // 6a. Web seed — the domain list feeding the 11d runtime projection.
+  // Every web board surface renders from R2 at request time; the build
+  // only projects the seed for the Worker to read.
+  const webSeed = await loadWebSeed(join(REPO_ROOT, 'src', 'data', 'web-audit', 'seed.yaml'));
   for (const w of webSeed.warnings) console.warn(`warning: ${w}`);
 
   // 6b. Homepage — instrument hero + toggle-driven boards + spec index.
@@ -369,13 +366,12 @@ export async function build() {
     distDir: DIST_DIR,
   });
 
-  // 11d. Web leaderboard + per-seed scorecard projections. Consumes the
-  // seed loaded at stage 6a; emits /web + the Worker-served /web/<domain>
-  // fallback JSON under _internal.
-  const webScorecardStats = await emitWebScorecardSurface({
+  // 11d. Web-seed projection. Consumes the seed loaded at stage 6a and
+  // emits the runtime domain list the Worker's rescore Workflow and
+  // seed-membership check read.
+  const webSeedStats = await emitWebSeedProjection({
     distDir: DIST_DIR,
     seed: webSeed,
-    themeInit,
   });
 
   // 12. Invariant check — fails fast if any critical contract slips.
@@ -411,7 +407,7 @@ export async function build() {
     agentReadiness: agentReadinessStats,
     webAuditRegistry: webAuditRegistryStats,
     webRemediation: webRemediationStats,
-    webScorecards: webScorecardStats,
+    webSeed: webSeedStats,
     minified: minifyStats,
   };
 }

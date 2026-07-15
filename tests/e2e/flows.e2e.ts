@@ -97,7 +97,11 @@ test.describe('keyboard + a11y', () => {
   });
 
   // One representative page per remaining archetype, light and dark.
-  for (const path of ['/score/ripgrep', '/web/anc.dev', '/scorecards', '/web-audit']) {
+  // /web renders Worker-side from the R2 aggregate; against the local
+  // wrangler-dev server (empty R2) it exercises the scoring-in-progress
+  // empty state. The populated result-page archetype is covered by the
+  // staging-targeting web-audit project.
+  for (const path of ['/score/ripgrep', '/web', '/scorecards', '/web-audit']) {
     for (const scheme of ['light', 'dark'] as const) {
       test(`axe: 0 serious/critical violations on ${path} in ${scheme} mode`, async ({ page }) => {
         await page.emulateMedia({ colorScheme: scheme });
@@ -109,7 +113,7 @@ test.describe('keyboard + a11y', () => {
   }
 
   test('no horizontal overflow at 390/768/1440 on each archetype', async ({ page }) => {
-    for (const path of ['/p1', '/score/ripgrep', '/web/anc.dev', '/scorecards', '/web', '/web-audit', '/install']) {
+    for (const path of ['/p1', '/score/ripgrep', '/scorecards', '/web', '/web-audit', '/install']) {
       for (const width of [390, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto(path);

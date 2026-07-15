@@ -1,8 +1,9 @@
 # Web-audit operations runbook
 
-How to run the website agent-readiness audit against a real target, in each environment, and how to regenerate a
-committed web-leaderboard seed scorecard. Pairs with the [MCP operator runbook](./mcp-operator.md) (kill switches,
-`wrangler tail`) and the [live-scoring monitoring runbook](./live-scoring-monitoring.md).
+How to run the website agent-readiness audit against a real target, in each environment, and how to operate the
+web-board rescore (weekly cron, post-deploy hook, on-demand triggers). Pairs with the
+[MCP operator runbook](./mcp-operator.md) (kill switches, `wrangler tail`) and the
+[live-scoring monitoring runbook](./live-scoring-monitoring.md).
 
 ## Environments
 
@@ -15,8 +16,9 @@ Source of truth: `.github/workflows/deploy.yml` and the `env.staging` / top-leve
 
 **A `dev` merge reaches staging only, never production.** Production `anc.dev` lags `dev` until a release lands on
 `main` (see `RELEASES.md`). So immediately after a `dev` merge, `anc.dev` still serves the previous code and content.
-This matters for any audit that reads the target's own content (see
-[Seed regeneration](#regenerating-a-web-seed-scorecard)).
+This matters for any audit that reads the target's own content: an audit of `anc.dev` before the production release
+scores the old content, and the deploy hook re-scores it once the release lands (see
+[Operating the board rescore](#operating-the-board-rescore)).
 
 ## The audit endpoint
 
@@ -67,27 +69,49 @@ scripted `POST /api/audit-web` needs a real Turnstile token, which you cannot mi
 working-tree engine against live production content, point the helper at it: `scripts/web-audit/run.sh --target
 https://anc.dev/` (a public host, so no Access token is fetched).
 
-## Regenerating a web seed scorecard
+## Operating the board rescore
 
-The web leaderboard is curated, not crawled. Each board entry has a committed snapshot at `scorecards/web/<domain>.json`
-(web scorecard schema `0.2`), listed in `src/data/web-audit/seed.yaml`. The build renders the static board pages from
-these files; on-demand user audits live only in R2 and never appear here.
+The web leaderboard is curated, not crawled: `src/data/web-audit/seed.yaml` holds the domain list (projected at build
+time to `dist/_internal/web-seed.json`), and every score lives in R2. The rescore Workflow audits each seeded domain
+(one Workflow step per domain) and then rebuilds the two board aggregates (`leaderboard`, `leaderboard-frontpage`) in a
+final step. All board surfaces (`/web`, the homepage web pane, `list_website_audits`) read the aggregate;
+`/web/<domain>` and `get_website_audit` read per-domain R2. Nothing is committed.
 
-To regenerate an entry, run the helper against the live site and write its `--json` output:
+Three triggers start a rescore, all coalescing through a single-flight helper (a start while a batch is in flight no-ops
+onto the running instance):
+
+- **Weekly cron.** `triggers.crons` in `wrangler.jsonc` (both envs) fires `scheduled()` every Monday 06:00 UTC.
+- **Post-deploy hook.** `deploy.yml` POSTs `/api/web-rescore` after each `wrangler deploy`, so a deploy (or a
+  `SPEC_VERSION` bump, which rotates every R2 key) repopulates R2 under the current version. The step fails loudly on
+  any non-2xx.
+- **Manual.** The same endpoint, authed by the `x-web-rescore-secret` header:
+
+  ```bash
+  curl -sSf -X POST -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" https://anc.dev/api/web-rescore
+  # staging additionally needs the CF Access service-token headers
+  ```
+
+  A 202 carries `{ started, coalesced, instance_id }`. 401 means a wrong/missing header; 500 means the Worker-side
+  secret is unset.
+
+**Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
+lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
+both places; there is no fallback window.
+
+**On-demand freshness.** An on-demand audit (`audit_website` or `POST /api/audit-web`) of a seeded domain rebuilds the
+aggregates immediately, so a board entry refreshes without waiting for the batch. A cached entry younger than 5 minutes
+serves as-is; older entries re-run on demand.
+
+**Cold start / empty board.** After a fresh deploy or a `SPEC_VERSION` bump, the board and homepage pane render a
+"scoring in progress" empty state until the deploy hook's batch lands. If the empty state persists, check the Workflow:
 
 ```bash
-scripts/web-audit/run.sh --target https://<domain>/ --json > scorecards/web/<domain>.json
+wrangler workflows instances list web-rescore            # production (web-rescore-staging on staging)
+wrangler workflows instances describe web-rescore <id>
 ```
 
-**Regenerate against live production, after the content is on `main`.** The seed represents `anc.dev` as the public sees
-it, so it must be captured from production once the relevant code **and** content are live there. Capturing it earlier
-bakes in a transient state:
+A per-domain step failure is logged (`scope: web-rescore`) and skipped; that domain drops off the board until the next
+successful rescore of it.
 
-- The helper against `anc.dev` shows a **logic** fix (say an antecedent now resolving `n_a`) but reads the old
-  production **content**, so content-dependent checks (`noscript-fallback`, `link-headers`, ...) read as `absent` until
-  their PRs reach `main`.
-- Staging is a faithful preview but its scorecard's `target_url` is the staging host, not `anc.dev`.
-
-So the correct order is: land the code and content on `main`, let the production deploy finish, run the helper against
-`https://anc.dev/`, then commit the resulting `scorecards/web/anc.dev.json`. Auditing before the production release
-produces a scorecard that is wrong the moment the release lands.
+**Adding a board entry.** Add the row to `seed.yaml`, merge, and either wait for the deploy hook (fires on the same
+merge's deploy) or trigger the endpoint manually.
