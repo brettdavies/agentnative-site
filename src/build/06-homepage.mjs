@@ -5,8 +5,11 @@
 //
 // The CLI ⇆ Web toggle is CSS-first: hidden radios + `:has()` swap the
 // board, the spec index, and the try-form together with zero JS (CLI is
-// the no-JS default). Board rows are threaded in from the already-computed
-// leaderboard + web entries — build.mjs computes both before this stage.
+// the no-JS default). CLI board rows are threaded in from the
+// already-computed leaderboard; the web board pane emits a
+// {{WEB_BOARD_ROWS}} placeholder the Worker fills server-side from the
+// R2 leaderboard-frontpage aggregate, keeping the page zero-JS while the
+// web scores stay live.
 //
 // The live-scoring form is server-rendered as an inert shell; /js/live-score.js
 // wires submit + Turnstile + redirect on the client side. The Turnstile
@@ -20,7 +23,6 @@ import { extractDescription, extractFirstParagraph, extractIntroSummary, extract
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
-import { rankWebEntries } from './web-leaderboard-render.mjs';
 
 const BOARD_ROWS = 5;
 
@@ -118,18 +120,6 @@ function buildCliBoardRows(leaderboard) {
     .join('\n');
 }
 
-function buildWebBoardRows(webEntries) {
-  return rankWebEntries(webEntries)
-    .slice(0, BOARD_ROWS)
-    .map((entry) => {
-      const pct = entry.scores.global;
-      const domain = escHtml(entry.domain);
-      const desc = escHtml(entry.description || entry.name);
-      return `        <a class="lrow ${bandOf(pct)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
-    })
-    .join('\n');
-}
-
 function buildSpecRows(principles) {
   return principles
     .map((p) => {
@@ -157,10 +147,9 @@ function buildWebCheckRows() {
  * @param {string} useItHtml — pre-rendered <p class="use-note">…</p>
  * @param {Array<{n: number, title: string, shortDesc: string}>} principles
  * @param {Array} leaderboard — from computeLeaderboard()
- * @param {Array} webEntries — from loadWebSeed()
  * @returns {string}
  */
-function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webEntries) {
+function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard) {
   return `<section class="hero">
   <div class="container hero__grid">
     <div>
@@ -212,7 +201,7 @@ ${buildHeroCard(leaderboard[0], principles)}
 ${buildCliBoardRows(leaderboard)}
       </div>
       <div class="board" data-s="web" aria-label="Top websites">
-${buildWebBoardRows(webEntries)}
+{{WEB_BOARD_ROWS}}
       </div>
       <p class="board-rubric" data-s="cli">Scored against the <strong>8 principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>
       <p class="board-rubric" data-s="web">Scored against the emerging agent-web standards: <code>MCP</code>, <code>llms.txt</code>, <code>OpenAPI</code>, JSON Schema, discovery. anc audits; it doesn't own them. <a href="/web">Full board&nbsp;▸</a></p>
@@ -276,15 +265,11 @@ ${buildWebCheckRows()}
  * @param {string} args.themeInit
  * @param {Array<{n: number, title: string, shortDesc: string}>} args.principles
  * @param {Array} args.leaderboard — ranked entries from computeLeaderboard()
- * @param {Array} args.webEntries — loaded seed entries from loadWebSeed()
  * @returns {Promise<{introTitle: string, introSummary: string, introSource: string, specContextSource: string, useSource: string, introLede: string}>}
  */
-export async function emitHomepage({ distDir, contentDir, themeInit, principles, leaderboard, webEntries }) {
+export async function emitHomepage({ distDir, contentDir, themeInit, principles, leaderboard }) {
   if (!Array.isArray(leaderboard) || leaderboard.length === 0) {
     throw new Error('emitHomepage: leaderboard is empty — board data must be computed before the homepage emits');
-  }
-  if (!Array.isArray(webEntries) || webEntries.length === 0) {
-    throw new Error('emitHomepage: webEntries is empty — web seed must be loaded before the homepage emits');
   }
   const [introSource, specContextSource, useSource] = await Promise.all([
     readFile(join(contentDir, '_intro.md'), 'utf8'),
@@ -304,7 +289,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
   }
   const useItHtml = useRendered.replace(/^<p>/, '<p class="use-note">');
 
-  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webEntries);
+  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard);
   await writeFile(
     join(distDir, 'index.html'),
     emitShell({

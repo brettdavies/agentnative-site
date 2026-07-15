@@ -1,11 +1,12 @@
-# Curated web leaderboard seed (plan U10, KTD-8). The web board is
-# curated, not auto-populated from arbitrary audited URLs: each entry here
-# has a committed web scorecard at scorecards/web/<domain>.json (a real
-# audit snapshot), rendered as a build-time static page independent of R2.
-# On-demand user audits live in R2 only and never appear here.
+# Curated web leaderboard seed: the domain list only. The web board is
+# curated, not auto-populated from arbitrary audited URLs. Scores live in
+# R2 and refresh via the weekly rescore Workflow, the post-deploy hook,
+# and on-demand audits of seeded domains; nothing is committed here
+# beyond the list itself.
 #
-# To add an entry: run the web audit against the site, commit its
-# scorecard as scorecards/web/<domain>.json, and add a row below.
+# To add an entry: add a row below and merge. The next rescore (deploy
+# hook or weekly cron) scores it onto the board; to see it immediately,
+# trigger POST /api/web-rescore per docs/runbooks/web-audit-operations.md.
 
 entries:
   - domain: anc.dev
