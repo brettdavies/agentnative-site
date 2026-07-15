@@ -78,6 +78,11 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
         if (path === '/_internal/web-remediation.json') return ok(remediation);
         if (path === '/_internal/web-scorecards/index.json') return ok(JSON.stringify(CURATED_INDEX));
         if (path === '/_internal/web-scorecards/anc.dev.json') return ok(JSON.stringify(CURATED_ANC));
+        if (path === '/_internal/web-seed.json') {
+          return ok(
+            JSON.stringify([{ domain: 'anc.dev', url: 'https://anc.dev/', name: 'anc.dev', description: 'x' }]),
+          );
+        }
         return new Response('not found', { status: 404 });
       },
     } as unknown as Fetcher,
@@ -220,6 +225,7 @@ describe('audit_website gates', () => {
           spec_version: SPEC_VERSION,
           target_url: 'https://example.com/',
           scorecard: { badge: { score_pct: 91 } },
+          scored_at: new Date().toISOString(),
         },
       },
     });
@@ -237,6 +243,7 @@ describe('audit_website gates', () => {
           spec_version: SPEC_VERSION,
           target_url: 'https://example.com/',
           scorecard: { badge: { score_pct: 88 } },
+          scored_at: new Date().toISOString(),
         },
       },
     });
@@ -244,6 +251,59 @@ describe('audit_website gates', () => {
     expect(body.audited).toBe(false);
     expect(body.source).toBe('cache');
     expect(String(body.message ?? '')).not.toContain('disabled');
+  });
+
+  test('kill switch off + stale hit still serves the cached entry as data', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const env = await makeEnv({
+      webEnabled: false,
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scorecard: { badge: { score_pct: 88 } },
+          scored_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+        },
+      },
+    });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.4'));
+    expect(body.audited).toBe(false);
+    expect(body.source).toBe('cache');
+  });
+
+  test('a stale hit falls through to the gate chain (limiter breach surfaces, cache does not mask it)', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const env = await makeEnv({
+      limiterOk: false,
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scorecard: { badge: { score_pct: 88 } },
+          scored_at: new Date(Date.now() - 10 * 60_000).toISOString(),
+        },
+      },
+    });
+    const res = await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.4');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
+  });
+
+  test('a legacy cached entry without scored_at reads as stale and falls through', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const env = await makeEnv({
+      limiterOk: false,
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scorecard: { badge: { score_pct: 88 } },
+        },
+      },
+    });
+    const res = await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.4');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
   });
 
   test('missing cf-connecting-ip returns the -32099 envelope (no anon fallback)', async () => {
@@ -355,7 +415,14 @@ describe('audit_website inline remediation (U13)', () => {
       ],
     };
     return makeEnv({
-      cachePrefill: { [key]: { spec_version: SPEC_VERSION, target_url: 'https://example.com/', scorecard } },
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scorecard,
+          scored_at: new Date().toISOString(),
+        },
+      },
     });
   }
 

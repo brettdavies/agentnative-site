@@ -49,6 +49,11 @@ export type CachedWebAggregate = {
 
 const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
 
+// Staleness threshold for the on-demand paths: a hit younger than this
+// serves cached; an older hit falls through to a fresh audit (still
+// behind the kill-switch/limiter/Turnstile gates).
+export const WEB_AUDIT_STALE_AFTER_MS = 5 * 60_000;
+
 /**
  * Normalize a URL for keying and display: lowercase host, canonical
  * scheme, no fragment, and a normalized trailing slash on a bare-host URL.

@@ -14,7 +14,7 @@ import {
   type WebAggregateEntry,
   type WebCacheEnv,
 } from './cache';
-import { loadWebSeed, type WebSeedEnv } from './seed';
+import { isSeededDomain, loadWebSeed, type WebSeedEnv } from './seed';
 
 export type WebAggregateEnv = WebCacheEnv & WebSeedEnv;
 
@@ -56,6 +56,26 @@ export async function rebuildWebAggregates(
   await putAggregate(env, 'leaderboard', entries, specVersion);
   await putAggregate(env, 'leaderboard-frontpage', entries.slice(0, FRONTPAGE_TOP_N), specVersion);
   return { seeded: seed.length, scored: entries.length };
+}
+
+/**
+ * Best-effort aggregate invalidation for the on-demand paths: rebuild
+ * only when the just-audited domain is on the seeded board, and never
+ * fail the audit response over a rebuild problem (the next batch
+ * self-heals a missed rebuild).
+ */
+export async function rebuildAggregatesIfSeeded(
+  env: WebAggregateEnv,
+  domain: string,
+  specVersion: string,
+): Promise<void> {
+  try {
+    if (!(await isSeededDomain(env, domain))) return;
+    await rebuildWebAggregates(env, specVersion);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(JSON.stringify({ scope: 'web-aggregate', domain, error: message }));
+  }
 }
 
 // GLOBAL is the default board order; ties break by relative then domain

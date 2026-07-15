@@ -18,13 +18,16 @@ import { detectPreference } from '../accept';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
+import { rebuildAggregatesIfSeeded } from './aggregate';
 import {
   type CachedWebAudit,
   get as cacheGet,
   put as cachePut,
   canonicalTargetOf,
+  isStale,
   keyFor,
   normalizeTargetUrl,
+  WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 
 export { canonicalTargetOf };
@@ -159,15 +162,20 @@ export async function handleWebAudit(
   // 4. Cache hit — cache state is data, served ahead of every metered gate
   // including the kill switch, so a cached read needs no source IP, no
   // Turnstile, and consumes no budget (the audit_website MCP tool orders
-  // its gates the same way).
+  // its gates the same way). A hit older than the staleness threshold
+  // falls through to the fresh path so a re-run refreshes the board.
   const shareUrl = `/web/${shareDomain}`;
   const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
-  if (cached) {
+  if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
     return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
   }
 
-  // 5. Kill switch — fires on a cache miss only.
+  // 5. Kill switch — a stale hit is still data when fresh audits are off,
+  // so only a true miss surfaces the 503.
   if (env.WEB_AUDIT_ENABLED !== 'true') {
+    if (cached) {
+      return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+    }
     return new Response('web audit is currently disabled by the operator\n', {
       status: 503,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '3600', 'cache-control': 'no-store' },
@@ -271,6 +279,7 @@ export async function handleWebAudit(
       }
       if (scorecard && complete) {
         await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+        await rebuildAggregatesIfSeeded(env, shareDomain, SPEC_VERSION);
       }
       const terminal = complete
         ? { type: 'complete', scorecard, share_url: shareUrl }
