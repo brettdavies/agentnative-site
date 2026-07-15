@@ -67,6 +67,11 @@ export function normalizeTargetUrl(raw: string): string {
   return u.toString();
 }
 
+/** Canonical audited target: scheme + host + `/` (drops path/query/fragment beyond the origin). */
+export function canonicalTargetOf(url: URL): string {
+  return `${url.protocol}//${url.host}/`;
+}
+
 async function sha256Hex(input: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return Array.from(new Uint8Array(buf))

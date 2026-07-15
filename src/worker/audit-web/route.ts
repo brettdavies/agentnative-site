@@ -18,7 +18,17 @@ import { detectPreference } from '../accept';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
-import { type CachedWebAudit, get as cacheGet, put as cachePut, keyFor, normalizeTargetUrl } from './cache';
+import {
+  type CachedWebAudit,
+  get as cacheGet,
+  put as cachePut,
+  canonicalTargetOf,
+  keyFor,
+  normalizeTargetUrl,
+} from './cache';
+
+export { canonicalTargetOf };
+
 import { runWebAudit } from './engine';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
@@ -91,11 +101,6 @@ export function coerceUrl(raw: unknown): URL | null {
   } catch {
     return null;
   }
-}
-
-/** Canonical audited target: scheme + host + `/` (drops port-less path/query/fragment beyond the origin). */
-export function canonicalTargetOf(url: URL): string {
-  return `${url.protocol}//${url.host}/`;
 }
 
 function checkEvent(result: EngineResult): string {
