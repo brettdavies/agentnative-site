@@ -135,6 +135,21 @@ The per-check remediation page for a web-audit check, served at a content URL wi
 pointer entry in the agent-skills discovery index. Scorecard remediation prompts point agents at it as the durable
 how-to-fix reference.
 
+### Leaderboard aggregate
+
+The precomputed board object every web-leaderboard surface reads: a ranked full board plus a top-N frontpage slice,
+rebuilt from the per-domain web scorecards. It is the single source that keeps the leaderboard page, the homepage web
+pane, and the MCP board listing in agreement, so a fresh audit cannot leave one surface showing a different score than
+another. When it is absent (a fresh deploy, or a spec-version change that rotates every cached key) the surfaces render
+a scoring-in-progress state until the next rescore rebuilds it.
+
+### Web rescore
+
+The batch process that re-audits every curated board domain and rebuilds the leaderboard aggregate. It runs on a weekly
+schedule, after each deploy, and on demand whenever a board domain is audited; only one batch runs at a time, so
+overlapping triggers coalesce rather than double-spending the audit budget. It is what keeps the board's live scores
+fresh without committing any scorecard snapshots.
+
 ## Agent discovery
 
 ### MCP endpoint
