@@ -1,13 +1,16 @@
 ---
 title: "feat: Web-audit R2 single-funnel (dynamic leaderboard + weekly rescore)"
 date: 2026-07-15
-status: implementation-ready
+status: completed
+completed: 2026-07-16
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
 product_contract_source: ce-plan-bootstrap
 plan_type: feat
 depth: deep
+related:
+  - docs/solutions/architecture-patterns/cached-theater-live-fallback-2026-04-17.md
 ---
 
 # feat: Web-audit R2 single-funnel (dynamic leaderboard + weekly rescore)
@@ -183,9 +186,9 @@ fallback, homepage server-side inject, and cutover/tests/verification.
 
 ## Prerequisites
 
-- **Cloudflare Workflows must be enabled on the account** before U2. Confirm via `wrangler` (a `workflows` binding
-  deploys cleanly) and the Cloudflare dashboard. If Workflows is unavailable on the plan, that is a blocker — resolve it
-  or fall back to the Queues alternative in KTD1 before the fan-out work starts.
+- **Cloudflare Workflows is enabled on the account.** The `web-rescore` (production) and `web-rescore-staging` bindings
+  deploy cleanly and the staging instance runs to completion (`load-seed` → `audit:<domain>` → `rebuild-aggregate`), so
+  the Queues fallback in KTD1 is not needed.
 
 ---
 
@@ -468,9 +471,14 @@ seeds, so the board is never sourced from a deleted file mid-migration.
 - **Aggregate vs batch races.** Full-board batches are single-flighted (R11), so two never run at once. During a running
   batch the aggregate serves the prior snapshot (acceptable per R5); a single-domain on-demand rebuild (U4) concurrent
   with the batch's final rebuild resolves last-writer-wins (minor, self-heals next batch).
-- **Deploy-hook secret management.** `WEB_RESCORE_SECRET` must exist in prod + staging (wrangler secret) and in the
-  deploy workflow's secret store; a missing secret makes the post-deploy pass a silent 401. The U3 tests assert the 401
-  path; the deploy step should fail loudly on non-2xx.
+- **Deploy-hook secret management.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers and the
+  repo-level GitHub secret `ANC_WEB_RESCORE_SECRET` (repo-level, matching the existing `ANC_STAGING_ACCESS_*` / `CF_*`
+  secrets; the GitHub environments hold none). The deploy step `curl -sSf`s the endpoint, so a wrong or missing secret
+  fails the job loudly rather than passing a silent 401.
+- **Deploy-hook propagation lag.** The trigger fires seconds after `wrangler deploy` returns and can reach an edge
+  isolate still serving the previous version, which `404`s the not-yet-live route; `curl` does not retry `4xx` without
+  `--retry-all-errors`. Both rescore steps use `curl -sSf --retry 5 --retry-delay 10 --retry-all-errors`, so the
+  transient window self-heals while a stable `401`/`500` still fails the job after retries exhaust.
 - **Dependency ordering.** U8 (delete committed seeds) must land after U5-U7 (dynamic reads) or the board briefly has no
   source.
 
@@ -489,14 +497,26 @@ seeds, so the board is never sourced from a deleted file mid-migration.
 
 ---
 
-## Open Questions (execution-time)
+## Execution decisions
 
-- Exact weekly cron expression and `leaderboard_frontpage` top-N count (pick sensible defaults at implementation; both
-  are trivially tunable).
-- Whether the on-demand aggregate rebuild (U4) reuses the Workflow's final-step helper directly or runs a one-shot
-  rebuild inline — decide when the U2 helper's shape is concrete.
-- The precise marker/injection mechanism for the homepage web-board region (U7) — resolve against the actual
-  `06-homepage.mjs` output and the existing inject helpers.
+- **Cron + top-N.** The weekly schedule is `0 6 * * 1` (Mondays 06:00 UTC) on both envs; the frontpage aggregate is the
+  top 5 (`FRONTPAGE_TOP_N` in `aggregate.ts`). Both are one-line tunables.
+- **On-demand rebuild.** The U2 batch rebuild is extracted into a shared `rebuildWebAggregates(env, spec)`; the
+  on-demand paths call a thin `rebuildAggregatesIfSeeded(env, domain, spec)` wrapper inline (seed-membership check +
+  best-effort rebuild that never fails the audit response), not the Workflow's final step directly.
+- **Homepage injection.** `06-homepage.mjs` emits a `{{WEB_BOARD_ROWS}}` placeholder in the web-board pane; the Worker's
+  `/` branch in `index.ts` fills it from the `leaderboard-frontpage` aggregate alongside the existing
+  `{{TURNSTILE_SITEKEY}}` substitution (empty-state copy when the aggregate is absent).
+
+## Delivery notes
+
+- Shipped as one branch (`feat/web-audit-r2-single-funnel`, U1-U8 as SRP commits) in PR #222 to `dev`; the deploy-hook
+  propagation retry landed as follow-up PR #223. Staging runs the full funnel end-to-end (board == `.md` twin ==
+  homepage pane == `list_website_audits` == `get_website_audit`); production serves it at the next release to `main`.
+- `canonicalTargetOf` moved from `route.ts` to `cache.ts` (re-exported from `route.ts`) so the new `aggregate.ts` /
+  `rescore-workflow.ts` modules key R2 without importing the route layer.
+- U8's "update preflight/postflight web assertions" is a no-op: `scripts/release/{preflight,postflight}.sh` carry no
+  web-surface gates to change.
 
 ---
 
