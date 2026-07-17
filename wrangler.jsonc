@@ -81,7 +81,7 @@
   // lands during an in-flight batch coalesces instead of running a second
   // one. Freshness between ticks comes from the post-deploy hook
   // (POST /api/web-rescore) and on-demand audits.
-  "triggers": { "crons": ["0 9 * * 0"] },
+  "triggers": { "crons": ["0 9 * * SUN"] },
   // Web-rescore Workflow: selects the stalest seeded domains in bounded
   // batches (one audit per step), rebuilds the board after each batch, and
   // cycles until none remain, so the seed list is dynamic and unbounded per
@@ -249,7 +249,7 @@
       // top-level one. Staging runs the same weekly rescore so its board
       // exercises the exact production path during soak. See
       // RELEASES-RATIONALE.md § Wrangler env inheritance traps.
-      "triggers": { "crons": ["0 9 * * 0"] },
+      "triggers": { "crons": ["0 9 * * SUN"] },
       // Workflow name is account-scoped, so staging gets its own; the
       // binding + class stay identical to production.
       "workflows": [

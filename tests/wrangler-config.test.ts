@@ -61,8 +61,8 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
     const stagingCrons = (staging.triggers as Record<string, unknown>).crons;
     const topCrons = (config.triggers as Record<string, unknown>).crons;
     expect(Array.isArray(stagingCrons)).toBe(true);
-    expect(stagingCrons).toEqual(['0 9 * * 0']);
-    expect(topCrons).toEqual(['0 9 * * 0']);
+    expect(stagingCrons).toEqual(['0 9 * * SUN']);
+    expect(topCrons).toEqual(['0 9 * * SUN']);
   });
 
   test('both envs declare the WEB_RESCORE_WORKFLOW binding with distinct account-scoped names', () => {
