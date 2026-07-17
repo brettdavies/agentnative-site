@@ -39,6 +39,7 @@ import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
+import { loadWebSeed } from './seed';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
 
@@ -489,9 +490,18 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     tool?: { name?: string; url?: string };
     score_pct?: number;
   };
+  // Friendly display label from the seed (absent for an unseeded on-demand
+  // audit); summary-render falls back to the domain.
+  let seedName: string | undefined;
+  try {
+    seedName = (await loadWebSeed(env)).find((e) => e.domain === match.domain)?.name;
+  } catch {
+    seedName = undefined;
+  }
   const input = {
     scorecard: scorecard as never,
     domain: match.domain,
+    name: seedName,
     targetUrl: scorecard.tool?.url ?? hit.targetUrl,
     remediation,
     origin: new URL(request.url).origin,
