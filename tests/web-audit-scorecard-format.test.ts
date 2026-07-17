@@ -240,6 +240,19 @@ describe('buildWebSummaryBody (U14)', () => {
   test('shows the web CTA note instead of the CLI install note', () => {
     expect(html).toContain('audit_website');
   });
+
+  test('each check row carries its own RFC-2119 tier chip, beside the status', () => {
+    // The fixture mixes tiers: mcp-initialize + openapi are MUST, robots is
+    // SHOULD, the optional rows are MAY. The chip is per-check, in the summary.
+    expect(html).toContain('<span class="tier tier-must">MUST</span>');
+    expect(html).toContain('<span class="tier tier-should">SHOULD</span>');
+    expect(html).toContain('<span class="tier tier-may">MAY</span>');
+    expect(html).toMatch(
+      /web-check__label">[^<]*<\/span> <span class="tier tier-must">MUST<\/span> <span class="audit__status"/,
+    );
+    // The category header still carries no tier (that was the misnomer).
+    expect(html).not.toContain('catcard__hd tier-');
+  });
 });
 
 describe('buildWebSummaryMarkdown (U14)', () => {
@@ -269,9 +282,15 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('```text');
     expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
   });
+
+  test('each check row carries its per-check tier', () => {
+    expect(md).toContain('- Tier: MUST'); // mcp-initialize / openapi
+    expect(md).toContain('- Tier: SHOULD'); // robots
+    expect(md).toContain('- Tier: MAY'); // the optional rows
+  });
 });
 
-describe('web scorecard category tiers (U2: API/MCP split)', () => {
+describe('web scorecard category cards (six categories, no group tier)', () => {
   function cat(id: string, name: string, passed: number, counted: number) {
     return { id, name, passed, counted };
   }
@@ -306,20 +325,20 @@ describe('web scorecard category tiers (U2: API/MCP split)', () => {
     expect(html).not.toContain('<span class="spec__id">C7</span>');
   });
 
-  test('the API card (C4) precedes the MCP card (C5), both at tier MUST', () => {
+  test('the API card precedes the MCP card; headers show id + title + rollup, never a tier', () => {
     const c4 = html.indexOf('<span class="spec__id">C4</span>');
     const c5 = html.indexOf('<span class="spec__id">C5</span>');
     const c6 = html.indexOf('<span class="spec__id">C6</span>');
     expect(c4).toBeGreaterThan(-1);
     expect(c5).toBeGreaterThan(c4);
     expect(c6).toBeGreaterThan(c5);
-    // The tier class sits on the card header just above the C-id; pin each
-    // card's id, title, and tier together so the API/MCP split is exact.
+    // C4 is API, C5 is MCP; the header goes id -> title -> rollup with no
+    // tier badge (MUST/SHOULD/MAY is a per-check obligation, not a group's).
     expect(html).toMatch(
-      /catcard__hd tier-must">\s*<span class="spec__id">C4<\/span>\s*<h3 class="audit-group__title">API<\/h3>\s*<span class="tier">MUST<\/span>/,
+      /<span class="spec__id">C4<\/span>\s*<h3 class="audit-group__title">API<\/h3>\s*<span class="audit-group__rollup/,
     );
     expect(html).toMatch(
-      /catcard__hd tier-must">\s*<span class="spec__id">C5<\/span>\s*<h3 class="audit-group__title">MCP<\/h3>\s*<span class="tier">MUST<\/span>/,
+      /<span class="spec__id">C5<\/span>\s*<h3 class="audit-group__title">MCP<\/h3>\s*<span class="audit-group__rollup/,
     );
   });
 
@@ -345,17 +364,13 @@ describe('web scorecard category tiers (U2: API/MCP split)', () => {
     }
   });
 
-  test('an unknown category id still falls back to tier MUST', () => {
-    const scorecard = sixCategoryScorecard();
-    scorecard.categories = [cat('mystery', 'Mystery', 0, 1)];
-    const mysteryHtml = buildWebSummaryBody({
-      scorecard,
-      domain: 'example.com',
-      targetUrl: 'https://example.com/',
-    });
-    expect(mysteryHtml).toContain('audit-group__title">Mystery<');
-    expect(mysteryHtml).toContain('catcard__hd tier-must');
-    expect(mysteryHtml).toContain('<span class="tier">MUST</span>');
+  test('no category header carries a tier badge or a tier-* class', () => {
+    const headers = [...html.matchAll(/<div class="catcard__hd[^"]*">[\s\S]*?<\/div>/g)].map((m) => m[0]);
+    expect(headers).toHaveLength(6);
+    for (const header of headers) {
+      expect(header).not.toContain('class="tier"');
+      expect(header).not.toMatch(/tier-(must|should|may)/);
+    }
   });
 });
 
