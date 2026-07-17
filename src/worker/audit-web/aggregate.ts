@@ -21,6 +21,26 @@ export type WebAggregateEnv = WebCacheEnv & WebSeedEnv;
 // Row count of the homepage web-board pane.
 export const FRONTPAGE_TOP_N = 5;
 
+// The site's own domain always appears on its homepage board, in score
+// order, even if its score falls outside the top-N.
+export const PINNED_FRONTPAGE_DOMAIN = 'anc.dev';
+
+/**
+ * The homepage pane slice: the top-N by the given (already-applied) sort,
+ * with the pinned domain guaranteed present. When the pinned domain is
+ * outside the top-N, it takes the last slot and the slice is re-sorted so
+ * it lands in score order rather than pinned to the bottom.
+ */
+function pinnedFrontpageSlice(sorted: WebAggregateEntry[]): WebAggregateEntry[] {
+  const top = sorted.slice(0, FRONTPAGE_TOP_N);
+  if (top.some((e) => e.domain === PINNED_FRONTPAGE_DOMAIN)) return top;
+  const pinned = sorted.find((e) => e.domain === PINNED_FRONTPAGE_DOMAIN);
+  if (!pinned) return top;
+  const slice = [...sorted.slice(0, FRONTPAGE_TOP_N - 1), pinned];
+  sortByRelative(slice);
+  return slice;
+}
+
 type ScoreShape = { score_pct?: number; score?: { relative?: number; global?: number } };
 
 /**
@@ -52,9 +72,13 @@ export async function rebuildWebAggregates(
       },
     });
   }
+  // /web ranks by GLOBAL; the homepage pane headlines the site score, so
+  // its top-N slice ranks by RELATIVE.
   sortByGlobal(entries);
   await putAggregate(env, 'leaderboard', entries, specVersion);
-  await putAggregate(env, 'leaderboard-frontpage', entries.slice(0, FRONTPAGE_TOP_N), specVersion);
+  const byRelative = entries.slice();
+  sortByRelative(byRelative);
+  await putAggregate(env, 'leaderboard-frontpage', pinnedFrontpageSlice(byRelative), specVersion);
   return { seeded: seed.length, scored: entries.length };
 }
 
@@ -86,6 +110,17 @@ function sortByGlobal(entries: WebAggregateEntry[]): void {
     if (byGlobal !== 0) return byGlobal;
     const byRelative = b.score.relative - a.score.relative;
     if (byRelative !== 0) return byRelative;
+    return a.domain.localeCompare(b.domain);
+  });
+}
+
+// RELATIVE order for the homepage pane; ties break by global then domain.
+function sortByRelative(entries: WebAggregateEntry[]): void {
+  entries.sort((a, b) => {
+    const byRelative = b.score.relative - a.score.relative;
+    if (byRelative !== 0) return byRelative;
+    const byGlobal = b.score.global - a.score.global;
+    if (byGlobal !== 0) return byGlobal;
     return a.domain.localeCompare(b.domain);
   });
 }

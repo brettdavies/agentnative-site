@@ -16,7 +16,7 @@ import yaml from 'js-yaml';
 
 const DOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62}))*(:[0-9]{1,5})?$/;
 
-/** Load and validate the seed list (domain, url, name, description). */
+/** Load and validate the seed list (domain, url, description; name defaults to domain). */
 export async function loadWebSeed(seedPath) {
   const doc = yaml.load(await readFile(seedPath, 'utf8'));
   const entries = doc?.entries;
@@ -30,14 +30,16 @@ export async function loadWebSeed(seedPath) {
       warnings.push(`web seed entry has an invalid domain: ${JSON.stringify(entry?.domain)} — skipped`);
       continue;
     }
-    if (!entry.url || !entry.name) {
-      warnings.push(`web seed "${entry.domain}" missing url or name — skipped`);
+    if (!entry.url) {
+      warnings.push(`web seed "${entry.domain}" missing url — skipped`);
       continue;
     }
     loaded.push({
       domain: entry.domain,
       url: entry.url,
-      name: entry.name,
+      // name is the board's display label; it defaults to the host, which
+      // is the single source of truth, and is set only to override it.
+      name: entry.name ?? entry.domain,
       description: entry.description ?? '',
     });
   }

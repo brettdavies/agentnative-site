@@ -95,6 +95,20 @@ function stubAudit(scores: Record<string, number>, failFor: Set<string> = new Se
   };
 }
 
+const HOUR_MS = 60 * 60_000;
+
+/** Pre-populate a domain's cache entry with a chosen audit age, bypassing put's now-stamp. */
+async function primeCache(store: Map<string, string>, domain: string, agoMs: number, globalScore = 50): Promise<void> {
+  const url = `https://${domain}/`;
+  const payload = {
+    spec_version: SPEC_VERSION,
+    target_url: url,
+    scorecard: scorecardFor(domain, globalScore),
+    scored_at: new Date(Date.now() - agoMs).toISOString(),
+  };
+  store.set(await keyFor(url, SPEC_VERSION), JSON.stringify(payload));
+}
+
 beforeEach(() => {
   resetWebSeedCacheForTests();
 });
@@ -162,7 +176,7 @@ describe('runWebRescore', () => {
     expect(frontpage?.entries.map((e) => e.domain)).toEqual(['b.dev', 'a.dev']);
   });
 
-  test('leaderboard-frontpage is the top-N slice of the global-sorted board', async () => {
+  test('leaderboard-frontpage is the top-N slice by site score (relative)', async () => {
     const domains = ['a.dev', 'b.dev', 'c.dev', 'd.dev', 'e.dev', 'f.dev'];
     const scores = Object.fromEntries(domains.map((d, i) => [d, 10 * (i + 1)]));
     const { env } = makeEnv(domains.map(seedEntry));
@@ -187,11 +201,59 @@ describe('runWebRescore', () => {
     expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev', 'c.dev']);
   });
 
-  test('the aggregate rebuild runs after every audit step', async () => {
+  test('a cycle selects, audits its batch, rebuilds, then a final empty select ends the run', async () => {
     const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
     const { step, names } = makeStep();
     await runWebRescore(env, step, { audit: stubAudit({ 'a.dev': 70, 'b.dev': 80 }) });
-    expect(names).toEqual(['load-seed', 'audit:a.dev', 'audit:b.dev', 'rebuild-aggregate']);
+    expect(names).toEqual(['load-seed', 'select:0', 'audit:a.dev', 'audit:b.dev', 'rebuild:0', 'select:1']);
+  });
+
+  test('skips a domain audited within the eligibility window; audits the stale one', async () => {
+    const { env, store } = makeEnv([seedEntry('fresh.dev'), seedEntry('stale.dev')]);
+    await primeCache(store, 'fresh.dev', 60_000, 40); // audited 1 minute ago
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, { audit: stubAudit({ 'stale.dev': 80 }) });
+    expect(result.audited).toEqual(['stale.dev']);
+    expect(result.skipped).toEqual([]);
+    const cached = (await cacheGet(env, await keyFor('https://fresh.dev/', SPEC_VERSION))) as CachedWebAudit;
+    expect((cached.scorecard as { score: { global: number } }).score.global).toBe(40); // untouched
+  });
+
+  test('drains a queue larger than the batch, oldest-first, in bounded cycles', async () => {
+    const domains = ['d1.dev', 'd2.dev', 'd3.dev', 'd4.dev', 'd5.dev'];
+    const { env } = makeEnv(domains.map(seedEntry));
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, {
+      audit: stubAudit(Object.fromEntries(domains.map((d) => [d, 50]))),
+      batchSize: 2,
+    });
+    expect(result.audited).toEqual(domains);
+    expect(result.cycles).toBe(3); // 2 + 2 + 1
+  });
+
+  test('audits the stalest domains first', async () => {
+    const { env, store } = makeEnv([seedEntry('new.dev'), seedEntry('old.dev'), seedEntry('mid.dev')]);
+    await primeCache(store, 'new.dev', 3 * HOUR_MS);
+    await primeCache(store, 'old.dev', 5 * HOUR_MS);
+    await primeCache(store, 'mid.dev', 4 * HOUR_MS);
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, {
+      audit: stubAudit({ 'new.dev': 10, 'old.dev': 20, 'mid.dev': 30 }),
+      batchSize: 1,
+    });
+    expect(result.audited).toEqual(['old.dev', 'mid.dev', 'new.dev']);
+  });
+
+  test('a permanently failing domain is attempted once and cannot spin the loop', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('bad.dev'), seedEntry('c.dev')]);
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, {
+      audit: stubAudit({ 'a.dev': 70, 'c.dev': 60 }, new Set(['bad.dev'])),
+      batchSize: 1,
+    });
+    expect(result.audited).toEqual(['a.dev', 'c.dev']);
+    expect(result.skipped).toEqual(['bad.dev']);
+    expect(result.cycles).toBe(3); // a, bad, c — then empty; bad never re-fills
   });
 
   test('an injected rebuild receives the env and spec version', async () => {
@@ -224,6 +286,33 @@ describe('rebuildWebAggregates', () => {
     const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
     expect(board?.entries).toEqual([]);
   });
+
+  test('/web ranks by global; the homepage pane ranks by site score (relative)', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
+    // b leads on global, a leads on relative — the two boards disagree on order.
+    await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 60, 90), SPEC_VERSION);
+    await cachePut(env, 'https://b.dev/', scorecardFor('b.dev', 80, 70), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    const frontpage = await getAggregate(env, 'leaderboard-frontpage', SPEC_VERSION);
+    expect(board?.entries.map((e) => e.domain)).toEqual(['b.dev', 'a.dev']);
+    expect(frontpage?.entries.map((e) => e.domain)).toEqual(['a.dev', 'b.dev']);
+  });
+
+  test('anc.dev always appears in the homepage pane, in score order, even when low-scoring', async () => {
+    const highs = ['x1.dev', 'x2.dev', 'x3.dev', 'x4.dev', 'x5.dev'];
+    const { env } = makeEnv([...highs.map(seedEntry), seedEntry('anc.dev')]);
+    for (const [i, d] of highs.entries()) {
+      await cachePut(env, `https://${d}/`, scorecardFor(d, 90 - i, 90 - i), SPEC_VERSION);
+    }
+    await cachePut(env, 'https://anc.dev/', scorecardFor('anc.dev', 10, 10), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const frontpage = await getAggregate(env, 'leaderboard-frontpage', SPEC_VERSION);
+    const domains = frontpage?.entries.map((e) => e.domain) ?? [];
+    expect(domains).toHaveLength(5);
+    expect(domains).toContain('anc.dev');
+    expect(domains[domains.length - 1]).toBe('anc.dev'); // lowest score sorts last
+  });
 });
 
 describe('WebRescoreWorkflow entrypoint', () => {
@@ -239,6 +328,6 @@ describe('WebRescoreWorkflow entrypoint', () => {
       skipped: string[];
     };
     expect(result.skipped).toEqual(['a.dev']);
-    expect(names).toEqual(['load-seed', 'audit:a.dev', 'rebuild-aggregate']);
+    expect(names).toEqual(['load-seed', 'select:0', 'audit:a.dev', 'rebuild:0', 'select:1']);
   });
 });

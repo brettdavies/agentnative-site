@@ -1527,7 +1527,9 @@ body:has(.leaderboard-hero) main {
 }
 
 .leaderboard-table tbody tr {
+  position: relative;
   transition: background-color 80ms ease;
+  cursor: pointer;
 }
 .leaderboard-table tbody tr:hover {
   background: var(--bg-raised, #f4f5f7);
@@ -1555,6 +1557,18 @@ body:has(.leaderboard-hero) main {
 }
 .lb-tool a:hover {
   text-decoration: underline;
+}
+/* Whole-row stretched link: the domain anchor's ::after covers the row, so a
+   click anywhere opens the detail page; :focus-within lifts the keyboard
+   outline to the row. */
+.lb-rowlink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.lb-row:focus-within {
+  outline: 2px solid var(--accent, #0058aa);
+  outline-offset: -2px;
 }
 
 /* Description — hide on narrow screens */
