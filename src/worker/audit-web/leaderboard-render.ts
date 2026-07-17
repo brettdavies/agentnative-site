@@ -54,9 +54,12 @@ export function buildWebLeaderboardBody(entries: WebAggregateEntry[]): string {
       const { relative, global: globalScore } = entry.score;
       const friendly =
         entry.name && entry.name !== entry.domain ? ` <span class="lb-tool__name">(${escHtml(entry.name)})</span>` : '';
-      return `      <tr data-global="${globalScore}" data-relative="${relative}" data-domain="${escHtml(entry.domain)}">
+      // Whole-row link: the domain anchor stretches over the row via
+      // .lb-rowlink::after so a click anywhere in the row opens the detail
+      // page, never the external site.
+      return `      <tr class="lb-row" data-global="${globalScore}" data-relative="${relative}" data-domain="${escHtml(entry.domain)}">
         <td class="lb-rank">${entry.rank}</td>
-        <td class="lb-tool"><a href="/web/${escHtml(entry.domain)}">${escHtml(entry.domain)}</a>${friendly}</td>
+        <td class="lb-tool"><a class="lb-rowlink" href="/web/${escHtml(entry.domain)}">${escHtml(entry.domain)}</a>${friendly}</td>
         <td class="lb-desc">${escHtml(entry.description)}</td>
         <td class="lb-score lb-score--global" data-sort="${globalScore}">${renderMeter(globalScore)}</td>
         <td class="lb-score lb-score--relative" data-sort="${relative}">${renderMeter(relative)}</td>

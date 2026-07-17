@@ -462,7 +462,9 @@ describe('leaderboard friendly-name display', () => {
 
   test('/web renders "<domain> (<name>)" linking to the detail page, not the external site', () => {
     const html = buildWebLeaderboardBody([entry()]);
-    expect(html).toContain('<a href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
+    // whole-row stretched link: one anchor on the domain, row is position-anchored
+    expect(html).toContain('<tr class="lb-row"');
+    expect(html).toContain('<a class="lb-rowlink" href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
     expect(html).toContain('<span class="lb-tool__name">(Cloudflare Developers)</span>');
     // never links to the external site
     expect(html).not.toContain('href="https://developers.cloudflare.com');
