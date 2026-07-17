@@ -45,11 +45,18 @@ export interface RescoreDeps {
   now?: () => number;
 }
 
-// One audit is ~30s of fan-out probes; two retries cover transient target
-// flakiness without letting one dead domain stall the batch.
+// Background rescore of arbitrary external sites is patient: the interactive
+// 25s engine default trips the deadline on slower Worker-runtime egress
+// (leaving the domain unscored), so give each audit a longer budget that
+// still fits inside one step.
+const RESCORE_AUDIT_DEADLINE_MS = 90_000;
+
+// One audit runs up to RESCORE_AUDIT_DEADLINE_MS of fan-out probes; two
+// retries cover transient target flakiness without letting one dead domain
+// stall the batch, and the step timeout leaves headroom over the deadline.
 const AUDIT_STEP_CONFIG = {
   retries: { limit: 2, delay: '30 seconds', backoff: 'exponential' },
-  timeout: '2 minutes',
+  timeout: '3 minutes',
 } as const;
 
 // Audits per cycle before the board is rebuilt. Bounds one Workflow
@@ -71,7 +78,13 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   const registry = await loadWebAuditRegistry(env);
   let scorecard: unknown = null;
   let complete = false;
-  for await (const event of runWebAudit({ url: targetUrl, registry, siteType: null, specVersion: SPEC_VERSION })) {
+  for await (const event of runWebAudit({
+    url: targetUrl,
+    registry,
+    siteType: null,
+    specVersion: SPEC_VERSION,
+    perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
+  })) {
     if (event.type === 'complete') {
       scorecard = event.scorecard;
       complete = event.complete;
