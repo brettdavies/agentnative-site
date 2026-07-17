@@ -131,8 +131,9 @@ describe('built homepage carries the placeholder', () => {
 });
 
 // U3: the homepage web-check spec index shows six rows matching the six
-// registry categories, with API (C4) and MCP (C5) as distinct MUST rows.
-describe('homepage web-check rows (U3: API/MCP split)', () => {
+// registry categories, with API (C4) and MCP (C5) distinct. These rows are
+// categories, not single-tier checks, so they carry no tier chip.
+describe('homepage web-check rows (six categories, no group tier)', () => {
   test('renders six rows with unique, sequential ids C1-C6', async () => {
     const { buildWebCheckRows } = await import('../src/build/06-homepage.mjs');
     const rows = buildWebCheckRows();
@@ -140,16 +141,19 @@ describe('homepage web-check rows (U3: API/MCP split)', () => {
     expect(ids).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6']);
   });
 
-  test('the API row and MCP row are distinct and both tier MUST', async () => {
+  test('the API row and MCP row are distinct, with no tier chip on any category row', async () => {
     const { buildWebCheckRows } = await import('../src/build/06-homepage.mjs');
     const rows = buildWebCheckRows();
-    // C4 = API MUST, C5 = MCP MUST; the tier drives the spec__row class.
+    // C4 = API, C5 = MCP, as untiered category rows (id -> title -> desc).
     expect(rows).toMatch(
-      /spec__row tier-must"><span class="spec__id">C4<\/span>[\s\S]*?spec__title[^>]*>API<[\s\S]*?<span class="tier">MUST<\/span>/,
+      /spec__row spec__row--untiered"><span class="spec__id">C4<\/span>[\s\S]*?spec__title[^>]*>API</,
     );
     expect(rows).toMatch(
-      /spec__row tier-must"><span class="spec__id">C5<\/span>[\s\S]*?spec__title[^>]*>MCP<[\s\S]*?<span class="tier">MUST<\/span>/,
+      /spec__row spec__row--untiered"><span class="spec__id">C5<\/span>[\s\S]*?spec__title[^>]*>MCP</,
     );
+    // No RFC-2119 tier vocabulary at the category level.
+    expect(rows).not.toContain('class="tier"');
+    expect(rows).not.toMatch(/spec__row tier-(must|should|may)/);
     expect(rows).not.toContain('MCP &amp; API');
   });
 });

@@ -84,16 +84,16 @@ function statusMark(status: ScorecardStatus): string {
   return STATUS_MARKS[status] ?? '–';
 }
 
-// Display tier per registry category id — mirrors the homepage's six
-// web-check rows (src/build/06-homepage.mjs WEB_CHECKS).
-const CATEGORY_TIERS: Record<string, string> = {
-  discoverability: 'MUST',
-  'content-for-agents': 'MUST',
-  'bot-crawl-policy': 'SHOULD',
-  api: 'MUST',
-  mcp: 'MUST',
-  'agent-discovery-auth': 'MAY',
-};
+// The RFC-2119 tier (MUST/SHOULD/MAY) is a per-check obligation, so it
+// renders on each check row, never on the category header: a category holds
+// a mix of tiers, and the scorer weighs each check by its own tier
+// (score.ts), never by its group. Row keyword -> chip class below.
+const TIER_LABELS: Record<string, string> = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
+
+function tierChip(keyword: string | undefined): string {
+  if (!keyword || !(keyword in TIER_LABELS)) return '';
+  return `<span class="tier tier-${keyword}">${TIER_LABELS[keyword]}</span> `;
+}
 
 function isFixable(status: ScorecardStatus): boolean {
   return status === 'broken' || status === 'absent';
@@ -161,13 +161,11 @@ ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''} 
     catIndex += 1;
     const rows = byCategory.get(category.id) ?? [];
     const empty = category.counted === 0;
-    const tier = CATEGORY_TIERS[category.id] ?? 'MUST';
     const rollupBand = empty ? '' : ` ${bandOf((category.passed / category.counted) * 100)}`;
     html += `  <div class="catcard${empty ? ' catcard--empty' : ''}">
-    <div class="catcard__hd tier-${tier.toLowerCase()}">
+    <div class="catcard__hd">
       <span class="spec__id">C${catIndex}</span>
       <h3 class="audit-group__title">${escHtml(category.name)}</h3>
-      <span class="tier">${tier}</span>
       <span class="audit-group__rollup${rollupBand}">${category.passed} / ${category.counted}</span>
     </div>
 `;
@@ -215,7 +213,7 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
   }
 
   return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>
-      <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> <span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
+      <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;
 }
@@ -252,6 +250,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
       const fixable = isFixable(row.status);
       const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
       lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
+      if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
       lines.push(`- Goal: ${entry?.goal ?? assembled.goal}.`);
       lines.push(`- Result: ${result}`);
       if (fixable) lines.push(`- Fix: ${assembled.fix.replace(/\s*\n\s*/g, ' ')}`);
