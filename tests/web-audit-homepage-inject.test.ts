@@ -129,3 +129,27 @@ describe('built homepage carries the placeholder', () => {
     expect(source).not.toContain('buildWebBoardRows');
   });
 });
+
+// U3: the homepage web-check spec index shows six rows matching the six
+// registry categories, with API (C4) and MCP (C5) as distinct MUST rows.
+describe('homepage web-check rows (U3: API/MCP split)', () => {
+  test('renders six rows with unique, sequential ids C1-C6', async () => {
+    const { buildWebCheckRows } = await import('../src/build/06-homepage.mjs');
+    const rows = buildWebCheckRows();
+    const ids = [...rows.matchAll(/<span class="spec__id">(C\d+)<\/span>/g)].map((m) => m[1]);
+    expect(ids).toEqual(['C1', 'C2', 'C3', 'C4', 'C5', 'C6']);
+  });
+
+  test('the API row and MCP row are distinct and both tier MUST', async () => {
+    const { buildWebCheckRows } = await import('../src/build/06-homepage.mjs');
+    const rows = buildWebCheckRows();
+    // C4 = API MUST, C5 = MCP MUST; the tier drives the spec__row class.
+    expect(rows).toMatch(
+      /spec__row tier-must"><span class="spec__id">C4<\/span>[\s\S]*?spec__title[^>]*>API<[\s\S]*?<span class="tier">MUST<\/span>/,
+    );
+    expect(rows).toMatch(
+      /spec__row tier-must"><span class="spec__id">C5<\/span>[\s\S]*?spec__title[^>]*>MCP<[\s\S]*?<span class="tier">MUST<\/span>/,
+    );
+    expect(rows).not.toContain('MCP &amp; API');
+  });
+});

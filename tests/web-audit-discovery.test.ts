@@ -87,16 +87,16 @@ function tinyRegistry(): WebAuditRegistry {
   return {
     version: 1,
     mcp_discovery: DISCOVERY,
-    category_order: ['mcp-api', 'content-for-agents', 'discoverability'],
+    category_order: ['mcp', 'content-for-agents', 'discoverability'],
     categories: {
-      'mcp-api': 'MCP & API',
+      mcp: 'MCP',
       'content-for-agents': 'Content for agents',
       discoverability: 'Discoverability',
     },
     checks: [
       {
         id: 'mcp-initialize',
-        category: 'mcp-api',
+        category: 'mcp',
         tier: 'required',
         keyword: 'must',
         principle: 'P2',
