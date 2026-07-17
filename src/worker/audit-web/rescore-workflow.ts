@@ -15,6 +15,10 @@
 // failing (its scored_at never advances) cannot re-fill every batch and
 // spin forever. Single-flighting happens at the trigger (startWebRescore),
 // not here — the run is idempotent and re-triggerable.
+//
+// A registry-shape change (a check retiered, a category split, a new check)
+// is detected via a KV fingerprint and forces one full reflow so every
+// cached scorecard re-renders under the new shape; see REGISTRY_FINGERPRINT_KEY.
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -24,7 +28,10 @@ import { runWebAudit } from './engine';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebSeed, type WebSeedEntry } from './seed';
 
-export type WebRescoreEnv = WebAggregateEnv;
+// The Workflow shares the Worker's bindings; SCORE_KV is optional so the
+// registry-change gate degrades to plain staleness batching when it is
+// absent (e.g. a minimal test env).
+export type WebRescoreEnv = WebAggregateEnv & { SCORE_KV?: KVNamespace };
 
 // Narrow structural view of the Workflow binding (mirrors the RateLimit
 // pattern): enough surface for the trigger helper and its tests.
@@ -43,6 +50,14 @@ export interface RescoreDeps {
   batchSize?: number;
   /** Injectable clock for deterministic eligibility tests. */
   now?: () => number;
+  /** Override the staleness eligibility window (ms). Defaults to the 2h
+   * rotation window; the registry-change gate drops it to 0 for a full
+   * reflow. Setting it also bypasses the gate (tests drive the window
+   * directly). */
+  eligibleAfterMs?: number;
+  /** Injectable registry fingerprint for the change gate; defaults to a
+   * SHA-256 of the normalized registry JSON. */
+  fingerprint?: (env: WebRescoreEnv) => Promise<string>;
 }
 
 // Background rescore of arbitrary external sites is patient: the interactive
@@ -72,6 +87,23 @@ const RESCORE_ELIGIBLE_AFTER_MS = 2 * 60 * 60_000;
 // progress (one attempt per domain per run); this only bounds a seed larger
 // than MAX_CYCLES * batchSize, whose tail waits for the next run.
 const RESCORE_MAX_CYCLES = 200;
+
+// KV marker for the registry shape the last rescore ran against. A check
+// retiered, a category split, or a new check changes the fingerprint; the
+// next rescore then reflows every cached scorecard (eligibility window 0)
+// so each re-renders under the new shape, and records the new fingerprint
+// to return to incremental staleness batching. This closes the gap where a
+// display-only registry change (which does not rotate the SPEC_VERSION cache
+// key) leaves cached scorecards grouped under the old shape until they
+// age out.
+const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
+
+/** SHA-256 hex of the normalized registry JSON: any shape change moves it. */
+async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
+  const registry = await loadWebAuditRegistry(env);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(registry)));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 /** Run one seeded domain's audit to completion and cache the scorecard. */
 export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<void> {
@@ -110,13 +142,14 @@ async function selectStaleBatch(
   attempted: ReadonlySet<string>,
   batchSize: number,
   now: number,
+  eligibleAfterMs: number,
 ): Promise<BatchItem[]> {
   const rows: Array<{ domain: string; target: string; scoredAtMs: number }> = [];
   for (const entry of seed) {
     if (attempted.has(entry.domain)) continue;
     const target = canonicalTargetOf(new URL(entry.url));
     const cached = await cacheGet(env, await keyFor(target, SPEC_VERSION));
-    if (!isStale(cached?.scored_at, RESCORE_ELIGIBLE_AFTER_MS, now)) continue;
+    if (!isStale(cached?.scored_at, eligibleAfterMs, now)) continue;
     const parsed = cached?.scored_at ? Date.parse(cached.scored_at) : 0;
     rows.push({ domain: entry.domain, target, scoredAtMs: Number.isNaN(parsed) ? 0 : parsed });
   }
@@ -141,6 +174,27 @@ export async function runWebRescore(
   const clock = deps.now ?? Date.now;
 
   const seed = await step.do('load-seed', async () => loadWebSeed(env));
+
+  // Registry-change gate: when the current registry fingerprint differs
+  // from the one KV recorded on the last run, reflow every cached scorecard
+  // (eligibility 0) so the board re-renders under the new shape, then record
+  // the new fingerprint below. An explicit deps.eligibleAfterMs (tests)
+  // bypasses the gate; a missing SCORE_KV degrades to plain staleness batching.
+  let eligibleAfterMs = deps.eligibleAfterMs ?? RESCORE_ELIGIBLE_AFTER_MS;
+  let fingerprintToRecord: string | null = null;
+  if (deps.eligibleAfterMs === undefined && env.SCORE_KV) {
+    const kv = env.SCORE_KV;
+    const compute = deps.fingerprint ?? registryFingerprint;
+    const currentFp = await step.do('registry-fingerprint', async () => compute(env));
+    const priorFp = await step.do('registry-fingerprint:prior', async () =>
+      kv.get(REGISTRY_FINGERPRINT_KEY).catch(() => null),
+    );
+    if (priorFp !== currentFp) {
+      eligibleAfterMs = 0;
+      fingerprintToRecord = currentFp;
+    }
+  }
+
   const audited: string[] = [];
   const skipped: string[] = [];
   const attempted = new Set<string>();
@@ -148,7 +202,7 @@ export async function runWebRescore(
 
   for (; cycle < RESCORE_MAX_CYCLES; cycle++) {
     const batch = await step.do(`select:${cycle}`, async () =>
-      selectStaleBatch(env, seed, attempted, batchSize, clock()),
+      selectStaleBatch(env, seed, attempted, batchSize, clock(), eligibleAfterMs),
     );
     if (batch.length === 0) break;
     for (const { domain, target } of batch) {
@@ -174,6 +228,17 @@ export async function runWebRescore(
   if (cycle === 0) {
     await step.do('rebuild:idle', async () => {
       await rebuild(env, SPEC_VERSION);
+    });
+  }
+
+  // Record the new fingerprint only after the reflow drains, so a run that
+  // dies partway re-forces on the next trigger instead of stranding the
+  // remaining domains under the old shape.
+  if (fingerprintToRecord !== null && env.SCORE_KV) {
+    const kv = env.SCORE_KV;
+    const fp = fingerprintToRecord;
+    await step.do('registry-fingerprint:record', async () => {
+      await kv.put(REGISTRY_FINGERPRINT_KEY, fp);
     });
   }
   return { audited, skipped, cycles: cycle };

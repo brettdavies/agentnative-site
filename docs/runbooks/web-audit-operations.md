@@ -94,6 +94,16 @@ onto the running instance):
   The 202 response carries `{ started, coalesced, instance_id }`. 401 means a wrong or missing header; 500 means the
   Worker-side secret is unset.
 
+**Staleness batching and registry-change reflow.** Each rescore selects the seeded domains whose cached audit is older
+than a 2-hour eligibility window (or never audited), oldest-first, in bounded batches, and cycles until none remain, so
+one run drains the whole list regardless of size. Recently-audited domains are skipped, so a rescore right after a fresh
+board is a cheap aggregate rebuild rather than a full re-audit. The exception is a **registry-shape change**: when the
+normalized registry's fingerprint differs from the one recorded in KV (`web_rescore:registry_fp`), the next rescore
+forces a full reflow (every domain re-audited regardless of freshness) so cached scorecards re-render under the new
+checks and categories, then records the new fingerprint and returns to incremental batching. This covers a display-only
+change (for example splitting a category) that does not rotate the `SPEC_VERSION` cache key, and it runs through the
+Workflow's own audit path, so it is not subject to the on-demand endpoint's per-source rate limit.
+
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
 both places; there is no fallback window.
