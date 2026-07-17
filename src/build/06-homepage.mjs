@@ -27,44 +27,40 @@ import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
 const BOARD_ROWS = 5;
 
 // The six web-audit display categories (ids + names mirror
-// src/data/web-audit/registry.yaml `categories`; tier + description are
-// homepage display copy). The web surface is an audit against external
-// specs — anc does not own these standards (R10).
+// src/data/web-audit/registry.yaml `categories`; description is homepage
+// display copy). No tier: MUST/SHOULD/MAY is a per-check obligation, and a
+// category groups a mix of tiers, so a group-level tier would misuse the
+// keyword. The web surface is an audit against external specs — anc does
+// not own these standards (R10).
 const WEB_CHECKS = [
   {
     id: 'C1',
     title: 'Discoverability',
-    tier: 'MUST',
     desc: '<code>robots.txt</code>, <code>sitemap.xml</code>, Link headers, DNS-AID under <code>_agents</code>.',
   },
   {
     id: 'C2',
     title: 'Content for agents',
-    tier: 'MUST',
     desc: '<code>llms.txt</code>, <code>Accept: text/markdown</code>, JSON-LD, semantic landmarks.',
   },
   {
     id: 'C3',
     title: 'Bot &amp; crawl policy',
-    tier: 'SHOULD',
     desc: 'AI-crawler rules, Content-Signal, <code>security.txt</code>, Web Bot Auth.',
   },
   {
     id: 'C4',
     title: 'API',
-    tier: 'MUST',
     desc: 'OpenAPI description, JSON Schemas, <code>.well-known/api-catalog</code>.',
   },
   {
     id: 'C5',
     title: 'MCP',
-    tier: 'MUST',
     desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, <code>.well-known</code> server card.',
   },
   {
     id: 'C6',
     title: 'Agent discovery &amp; auth',
-    tier: 'MAY',
     desc: 'A2A agent card, agent-skills index, OAuth discovery, <code>auth.md</code>.',
   },
 ];
@@ -138,9 +134,12 @@ function buildSpecRows(principles) {
 }
 
 export function buildWebCheckRows() {
+  // No tier chip: MUST/SHOULD/MAY is a per-check obligation, and these rows
+  // are categories (each a mix of tiers). The tiers live on the individual
+  // check rows of the /web-audit scorecard, not on the category summary.
   return WEB_CHECKS.map(
     (c) =>
-      `      <li class="spec__row tier-${c.tier.toLowerCase()}"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="/web-audit">${c.title}</a><span class="tier">${c.tier}</span></div><p class="spec__desc">${c.desc}</p></div></li>`,
+      `      <li class="spec__row spec__row--untiered"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="/web-audit">${c.title}</a></div><p class="spec__desc">${c.desc}</p></div></li>`,
   ).join('\n');
 }
 

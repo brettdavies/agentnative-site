@@ -922,6 +922,22 @@ a.spec__title:hover {
 .tier-may .tier {
   color: var(--may);
 }
+/* Per-check tier chip on the web scorecard rows: the tier-<kw> class sits on
+   the chip itself (not an ancestor spec__row), so color it directly. */
+.tier.tier-must {
+  color: var(--must);
+}
+.tier.tier-should {
+  color: var(--should);
+}
+.tier.tier-may {
+  color: var(--may);
+}
+/* Homepage web-check rows are categories, not single-tier checks, so their
+   C-index carries no tier color: a deliberate neutral, not an oversight. */
+.spec__row--untiered .spec__id {
+  color: var(--fg-heading);
+}
 .spec__desc {
   color: var(--fg-secondary);
   font-size: 0.9rem;
