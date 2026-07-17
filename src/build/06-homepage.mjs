@@ -26,7 +26,7 @@ import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
 
 const BOARD_ROWS = 5;
 
-// The five web-audit display categories (ids + names mirror
+// The six web-audit display categories (ids + names mirror
 // src/data/web-audit/registry.yaml `categories`; tier + description are
 // homepage display copy). The web surface is an audit against external
 // specs — anc does not own these standards (R10).
@@ -51,12 +51,18 @@ const WEB_CHECKS = [
   },
   {
     id: 'C4',
-    title: 'MCP &amp; API',
+    title: 'API',
     tier: 'MUST',
-    desc: 'Initialize handshake, <code>tools/list</code>, error codes, <code>.well-known</code> card, OpenAPI.',
+    desc: 'OpenAPI description, JSON Schemas, <code>.well-known/api-catalog</code>.',
   },
   {
     id: 'C5',
+    title: 'MCP',
+    tier: 'MUST',
+    desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, <code>.well-known</code> server card.',
+  },
+  {
+    id: 'C6',
     title: 'Agent discovery &amp; auth',
     tier: 'MAY',
     desc: 'A2A agent card, agent-skills index, OAuth discovery, <code>auth.md</code>.',
@@ -131,7 +137,7 @@ function buildSpecRows(principles) {
     .join('\n');
 }
 
-function buildWebCheckRows() {
+export function buildWebCheckRows() {
   return WEB_CHECKS.map(
     (c) =>
       `      <li class="spec__row tier-${c.tier.toLowerCase()}"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="/web-audit">${c.title}</a><span class="tier">${c.tier}</span></div><p class="spec__desc">${c.desc}</p></div></li>`,
@@ -225,13 +231,13 @@ ${buildCliBoardRows(leaderboard)}
         <p class="sub">The standard anc.dev authors. Each is a testable contract with a MUST / SHOULD / MAY obligation and a named failure mode.</p>
       </div>
       <div data-s="web">
-        <h2>Five checks for a website</h2>
+        <h2>Six checks for a website</h2>
         <p class="sub">Not a standard anc owns; an audit of your agent-facing surface against what the ecosystem is converging on.</p>
       </div>
       <ol class="spec" data-s="cli" aria-label="The eight principles">
 ${buildSpecRows(principles)}
       </ol>
-      <ol class="spec" data-s="web" aria-label="The five web checks">
+      <ol class="spec" data-s="web" aria-label="The six web checks">
 ${buildWebCheckRows()}
       </ol>
     </div>
