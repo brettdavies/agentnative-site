@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { WebAggregateEntry } from '../src/worker/audit-web/cache';
 import {
+  buildFrontpageBoardRows,
   buildWebLeaderboardBody,
   buildWebLeaderboardMarkdown,
   rankWebEntries,
@@ -443,5 +444,42 @@ describe('web scorecard schema doc drift guard (U16)', () => {
     const example = doc.slice(doc.indexOf('## Top-level fields'), doc.indexOf('| Field'));
     const documented = [...example.matchAll(/^\s*"([a-z_]+)":/gm)].map((m) => m[1]);
     expect(documented.sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
+  });
+});
+
+describe('leaderboard friendly-name display', () => {
+  function entry(over: Partial<WebAggregateEntry> = {}): WebAggregateEntry {
+    return {
+      domain: 'developers.cloudflare.com',
+      url: 'https://developers.cloudflare.com/',
+      name: 'Cloudflare Developers',
+      description: 'Cloudflare developer docs.',
+      score_pct: 96,
+      score: { relative: 96, global: 90 },
+      ...over,
+    };
+  }
+
+  test('/web renders "<domain> (<name>)" linking to the detail page, not the external site', () => {
+    const html = buildWebLeaderboardBody([entry()]);
+    expect(html).toContain('<a href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
+    expect(html).toContain('<span class="lb-tool__name">(Cloudflare Developers)</span>');
+    // never links to the external site
+    expect(html).not.toContain('href="https://developers.cloudflare.com');
+  });
+
+  test('a row whose name equals its domain shows no parenthetical', () => {
+    const html = buildWebLeaderboardBody([
+      entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' }),
+    ]);
+    expect(html).not.toContain('lb-tool__name');
+  });
+
+  test('the homepage pane shows the friendly name and the site score (relative), not global', () => {
+    const rows = buildFrontpageBoardRows([entry()]);
+    expect(rows).toContain('developers.cloudflare.com (Cloudflare Developers)');
+    expect(rows).toContain('href="/web/developers.cloudflare.com"');
+    expect(rows).toContain('width:96%'); // relative meter
+    expect(rows).not.toContain('width:90%'); // not the global score
   });
 });

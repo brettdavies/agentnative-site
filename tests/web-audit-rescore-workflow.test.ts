@@ -176,7 +176,7 @@ describe('runWebRescore', () => {
     expect(frontpage?.entries.map((e) => e.domain)).toEqual(['b.dev', 'a.dev']);
   });
 
-  test('leaderboard-frontpage is the top-N slice of the global-sorted board', async () => {
+  test('leaderboard-frontpage is the top-N slice by site score (relative)', async () => {
     const domains = ['a.dev', 'b.dev', 'c.dev', 'd.dev', 'e.dev', 'f.dev'];
     const scores = Object.fromEntries(domains.map((d, i) => [d, 10 * (i + 1)]));
     const { env } = makeEnv(domains.map(seedEntry));
@@ -285,6 +285,33 @@ describe('rebuildWebAggregates', () => {
     await rebuildWebAggregates(env, SPEC_VERSION);
     const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
     expect(board?.entries).toEqual([]);
+  });
+
+  test('/web ranks by global; the homepage pane ranks by site score (relative)', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
+    // b leads on global, a leads on relative — the two boards disagree on order.
+    await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 60, 90), SPEC_VERSION);
+    await cachePut(env, 'https://b.dev/', scorecardFor('b.dev', 80, 70), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    const frontpage = await getAggregate(env, 'leaderboard-frontpage', SPEC_VERSION);
+    expect(board?.entries.map((e) => e.domain)).toEqual(['b.dev', 'a.dev']);
+    expect(frontpage?.entries.map((e) => e.domain)).toEqual(['a.dev', 'b.dev']);
+  });
+
+  test('anc.dev always appears in the homepage pane, in score order, even when low-scoring', async () => {
+    const highs = ['x1.dev', 'x2.dev', 'x3.dev', 'x4.dev', 'x5.dev'];
+    const { env } = makeEnv([...highs.map(seedEntry), seedEntry('anc.dev')]);
+    for (const [i, d] of highs.entries()) {
+      await cachePut(env, `https://${d}/`, scorecardFor(d, 90 - i, 90 - i), SPEC_VERSION);
+    }
+    await cachePut(env, 'https://anc.dev/', scorecardFor('anc.dev', 10, 10), SPEC_VERSION);
+    await rebuildWebAggregates(env, SPEC_VERSION);
+    const frontpage = await getAggregate(env, 'leaderboard-frontpage', SPEC_VERSION);
+    const domains = frontpage?.entries.map((e) => e.domain) ?? [];
+    expect(domains).toHaveLength(5);
+    expect(domains).toContain('anc.dev');
+    expect(domains[domains.length - 1]).toBe('anc.dev'); // lowest score sorts last
   });
 });
 

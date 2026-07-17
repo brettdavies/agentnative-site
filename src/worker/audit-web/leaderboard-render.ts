@@ -52,9 +52,11 @@ export function buildWebLeaderboardBody(entries: WebAggregateEntry[]): string {
   const rows = ranked
     .map((entry) => {
       const { relative, global: globalScore } = entry.score;
+      const friendly =
+        entry.name && entry.name !== entry.domain ? ` <span class="lb-tool__name">(${escHtml(entry.name)})</span>` : '';
       return `      <tr data-global="${globalScore}" data-relative="${relative}" data-domain="${escHtml(entry.domain)}">
         <td class="lb-rank">${entry.rank}</td>
-        <td class="lb-tool"><a href="/web/${escHtml(entry.domain)}">${escHtml(entry.name)}</a></td>
+        <td class="lb-tool"><a href="/web/${escHtml(entry.domain)}">${escHtml(entry.domain)}</a>${friendly}</td>
         <td class="lb-desc">${escHtml(entry.description)}</td>
         <td class="lb-score lb-score--global" data-sort="${globalScore}">${renderMeter(globalScore)}</td>
         <td class="lb-score lb-score--relative" data-sort="${relative}">${renderMeter(relative)}</td>
@@ -129,8 +131,9 @@ export function buildWebLeaderboardMarkdown(entries: WebAggregateEntry[], origin
   }
   lines.push('| # | Site | Global | Relative |', '|---|------|--------|----------|');
   for (const entry of ranked) {
+    const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
     lines.push(
-      `| ${entry.rank} | [${entry.name}](${origin}/web/${entry.domain}) | ${entry.score.global}% | ${entry.score.relative}% |`,
+      `| ${entry.rank} | [${label}](${origin}/web/${entry.domain}) | ${entry.score.global}% | ${entry.score.relative}% |`,
     );
   }
   lines.push('');
@@ -142,12 +145,15 @@ export function buildWebLeaderboardMarkdown(entries: WebAggregateEntry[], origin
  * CLI board markup the homepage builds statically.
  */
 export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
-  return rankWebEntries(entries)
+  // The homepage pane headlines the site score (RELATIVE) and ranks by it,
+  // unlike /web which sorts by GLOBAL.
+  return rankWebEntries(entries, 'relative')
     .map((entry) => {
-      const pct = entry.score.global;
+      const pct = entry.score.relative;
       const domain = escHtml(entry.domain);
-      const desc = escHtml(entry.description || entry.name);
-      return `        <a class="lrow ${bandOf(pct)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
+      const friendly = entry.name && entry.name !== entry.domain ? ` (${escHtml(entry.name)})` : '';
+      const desc = escHtml(entry.description);
+      return `        <a class="lrow ${bandOf(pct)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 }

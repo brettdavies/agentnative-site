@@ -40,6 +40,8 @@ export interface WebSummaryInput {
   scorecard: WebScorecardShape;
   domain: string;
   targetUrl: string;
+  /** Friendly display label from the seed; falls back to the domain. */
+  name?: string;
   /** Static remediation catalog; absent entries degrade to generic prompts. */
   remediation?: WebRemediationCatalog;
   /** Origin for skill links in prompts; defaults to the canonical site. */
@@ -120,7 +122,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   const origin = input.origin ?? 'https://anc.dev';
   const catalog = input.remediation ?? {};
   const { relative, global: globalScore } = scoresOf(sc);
-  const name = sc.tool?.name ?? input.domain;
+  const name = input.name ?? sc.tool?.name ?? input.domain;
   const targetUrl = sc.tool?.url ?? input.targetUrl;
   const byCategory = rowsByCategory(sc);
 
@@ -223,7 +225,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   const origin = input.origin ?? 'https://anc.dev';
   const catalog = input.remediation ?? {};
   const { relative, global: globalScore } = scoresOf(sc);
-  const name = sc.tool?.name ?? input.domain;
+  const name = input.name ?? sc.tool?.name ?? input.domain;
   const targetUrl = sc.tool?.url ?? input.targetUrl;
   const byCategory = rowsByCategory(sc);
 
