@@ -49,7 +49,8 @@ function webScorecard(pct = 82) {
     categories: [
       { id: 'discoverability', name: 'Discoverability', passed: 0, counted: 1 },
       { id: 'content-for-agents', name: 'Content for agents', passed: 0, counted: 0 },
-      { id: 'mcp-api', name: 'MCP & API', passed: 1, counted: 2 },
+      { id: 'api', name: 'API', passed: 0, counted: 1 },
+      { id: 'mcp', name: 'MCP', passed: 1, counted: 1 },
       { id: 'agent-discovery-auth', name: 'Agent discovery & auth', passed: 1, counted: 1 },
     ],
     coverage_summary: {
@@ -62,7 +63,7 @@ function webScorecard(pct = 82) {
       {
         id: 'mcp-initialize',
         label: 'initialize handshake',
-        category: 'mcp-api',
+        category: 'mcp',
         group: 'P2',
         principle: 'P2',
         keyword: 'must',
@@ -73,7 +74,7 @@ function webScorecard(pct = 82) {
       {
         id: 'openapi',
         label: 'An OpenAPI description is published',
-        category: 'mcp-api',
+        category: 'api',
         group: 'P2',
         principle: 'P2',
         keyword: 'must',
@@ -163,16 +164,20 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(html).toContain('maximally agent-ready site');
   });
 
-  test('groups rows under the visible categories in category_order, with rollups', () => {
+  test('groups rows under the visible categories in category_order, with API before MCP and rollups', () => {
     const discoverability = html.indexOf('Discoverability');
     const content = html.indexOf('Content for agents');
-    const mcpApi = html.indexOf('MCP &amp; API');
+    const api = html.indexOf('audit-group__title">API<');
+    const mcp = html.indexOf('audit-group__title">MCP<');
     const auth = html.indexOf('Agent discovery &amp; auth');
     expect(discoverability).toBeGreaterThan(-1);
     expect(content).toBeGreaterThan(discoverability);
-    expect(mcpApi).toBeGreaterThan(content);
-    expect(auth).toBeGreaterThan(mcpApi);
-    expect(html).toMatch(/audit-group__rollup[^"]*">1 \/ 2</);
+    expect(api).toBeGreaterThan(content);
+    expect(mcp).toBeGreaterThan(api);
+    expect(auth).toBeGreaterThan(mcp);
+    // API card: openapi absent -> 0 / 1; MCP card: mcp-initialize pass -> 1 / 1.
+    expect(html).toMatch(/audit-group__rollup[^"]*">0 \/ 1</);
+    expect(html).toMatch(/audit-group__rollup[^"]*">1 \/ 1</);
   });
 
   test('a category with only n_a rows shows 0/0 and is de-emphasized', () => {
@@ -210,7 +215,8 @@ describe('buildWebSummaryBody (U14)', () => {
   });
 
   test('a passing row carries Goal + Result + Resources but no Fix or prompt carrier', () => {
-    const passBlock = html.slice(html.indexOf('initialize handshake'), html.indexOf('An OpenAPI description'));
+    const passStart = html.indexOf('initialize handshake');
+    const passBlock = html.slice(passStart, html.indexOf('</details>', passStart));
     expect(passBlock).toContain('Verified (serverInfo anc)');
     expect(passBlock).not.toContain('data-copy-text');
     expect(passBlock).not.toContain('<strong>Fix:</strong>');
@@ -249,7 +255,8 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('# example.com');
     expect(md).toContain('**Score:** 82%');
     expect(md).toContain('**Global:** 72%');
-    expect(md).toContain('## MCP & API (1/2)');
+    expect(md).toContain('## API (0/1)');
+    expect(md).toContain('## MCP (1/1)');
     expect(md).toContain('## Content for agents (0/0)');
     expect(md).not.toContain('/p2');
     expect(md).not.toContain('## Embed the badge');
@@ -261,6 +268,94 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('- Fix: Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(md).toContain('```text');
     expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+  });
+});
+
+describe('web scorecard category tiers (U2: API/MCP split)', () => {
+  function cat(id: string, name: string, passed: number, counted: number) {
+    return { id, name, passed, counted };
+  }
+  function sixCategoryScorecard() {
+    return {
+      schema_version: '0.2',
+      spec_version: SPEC_VERSION,
+      target_url: 'https://example.com/',
+      tool: { name: 'example.com', url: 'https://example.com/' },
+      score_pct: 70,
+      score: { relative: 70, global: 60 },
+      categories: [
+        cat('discoverability', 'Discoverability', 1, 1),
+        cat('content-for-agents', 'Content for agents', 1, 1),
+        cat('bot-crawl-policy', 'Bot & crawl policy', 1, 1),
+        cat('api', 'API', 1, 1),
+        cat('mcp', 'MCP', 1, 1),
+        cat('agent-discovery-auth', 'Agent discovery & auth', 1, 1),
+      ],
+      results: [],
+    };
+  }
+
+  const html = buildWebSummaryBody({
+    scorecard: sixCategoryScorecard(),
+    domain: 'example.com',
+    targetUrl: 'https://example.com/',
+  });
+
+  test('renders six category cards numbered C1-C6 in category_order, no C7', () => {
+    for (let i = 1; i <= 6; i++) expect(html).toContain(`<span class="spec__id">C${i}</span>`);
+    expect(html).not.toContain('<span class="spec__id">C7</span>');
+  });
+
+  test('the API card (C4) precedes the MCP card (C5), both at tier MUST', () => {
+    const c4 = html.indexOf('<span class="spec__id">C4</span>');
+    const c5 = html.indexOf('<span class="spec__id">C5</span>');
+    const c6 = html.indexOf('<span class="spec__id">C6</span>');
+    expect(c4).toBeGreaterThan(-1);
+    expect(c5).toBeGreaterThan(c4);
+    expect(c6).toBeGreaterThan(c5);
+    // The tier class sits on the card header just above the C-id; pin each
+    // card's id, title, and tier together so the API/MCP split is exact.
+    expect(html).toMatch(
+      /catcard__hd tier-must">\s*<span class="spec__id">C4<\/span>\s*<h3 class="audit-group__title">API<\/h3>\s*<span class="tier">MUST<\/span>/,
+    );
+    expect(html).toMatch(
+      /catcard__hd tier-must">\s*<span class="spec__id">C5<\/span>\s*<h3 class="audit-group__title">MCP<\/h3>\s*<span class="tier">MUST<\/span>/,
+    );
+  });
+
+  test('the markdown twin lists the six categories in category_order', () => {
+    const md = buildWebSummaryMarkdown({
+      scorecard: sixCategoryScorecard(),
+      domain: 'example.com',
+      targetUrl: 'https://example.com/',
+    });
+    const order = [
+      '## Discoverability',
+      '## Content for agents',
+      '## Bot & crawl policy',
+      '## API',
+      '## MCP',
+      '## Agent discovery & auth',
+    ];
+    let last = -1;
+    for (const heading of order) {
+      const at = md.indexOf(heading);
+      expect(at).toBeGreaterThan(last);
+      last = at;
+    }
+  });
+
+  test('an unknown category id still falls back to tier MUST', () => {
+    const scorecard = sixCategoryScorecard();
+    scorecard.categories = [cat('mystery', 'Mystery', 0, 1)];
+    const mysteryHtml = buildWebSummaryBody({
+      scorecard,
+      domain: 'example.com',
+      targetUrl: 'https://example.com/',
+    });
+    expect(mysteryHtml).toContain('audit-group__title">Mystery<');
+    expect(mysteryHtml).toContain('catcard__hd tier-must');
+    expect(mysteryHtml).toContain('<span class="tier">MUST</span>');
   });
 });
 

@@ -129,7 +129,8 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
     expect(body).toMatch(/\*\*Score:\*\* \d+%/);
     expect(body).toMatch(/\*\*Global:\*\* \d+%/);
     expect(body).toMatch(/## Discoverability \(\d+\/\d+\)/);
-    expect(body).toMatch(/## MCP & API \(\d+\/\d+\)/);
+    expect(body).toMatch(/## API \(\d+\/\d+\)/);
+    expect(body).toMatch(/## MCP \(\d+\/\d+\)/);
   });
 
   test('the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {

@@ -38,7 +38,7 @@ describe('buildSkillMarkdown', () => {
   const check = {
     id: 'openapi',
     title: 'An OpenAPI description is published',
-    category: 'mcp-api',
+    category: 'api',
     keyword: 'must',
     hint: 'Publish an OpenAPI 3.1 description.',
   };
@@ -50,7 +50,7 @@ describe('buildSkillMarkdown', () => {
       fix: 'Publish an OpenAPI 3.1 description\nat /openapi.json.',
       resources: [{ label: 'OpenAPI 3.1', url: 'https://spec.openapis.org/oas/latest.html' }],
     },
-    { 'mcp-api': 'MCP & API' },
+    { api: 'API' },
     'https://anc.dev',
   );
 
@@ -63,7 +63,7 @@ describe('buildSkillMarkdown', () => {
     expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
     expect(md).toContain('Docs: https://spec.openapis.org/oas/latest.html');
     expect(md).toContain('## Verify');
-    expect(md).toContain('MCP & API, MUST');
+    expect(md).toContain('API, MUST');
   });
 
   test('the prompt Fix line is the fix collapsed to one line', () => {

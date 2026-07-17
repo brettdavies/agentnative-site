@@ -84,13 +84,14 @@ function statusMark(status: ScorecardStatus): string {
   return STATUS_MARKS[status] ?? '–';
 }
 
-// Display tier per registry category id — mirrors the homepage's five
+// Display tier per registry category id — mirrors the homepage's six
 // web-check rows (src/build/06-homepage.mjs WEB_CHECKS).
 const CATEGORY_TIERS: Record<string, string> = {
   discoverability: 'MUST',
   'content-for-agents': 'MUST',
   'bot-crawl-policy': 'SHOULD',
-  'mcp-api': 'MUST',
+  api: 'MUST',
+  mcp: 'MUST',
   'agent-discovery-auth': 'MAY',
 };
 

@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -72,13 +73,14 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('the five visible categories are ordered by category_order and each check names one', async () => {
+  test('the six visible categories are ordered by category_order and each check names one', async () => {
     const registry = await loadNormalized();
     expect(registry.category_order).toEqual([
       'discoverability',
       'content-for-agents',
       'bot-crawl-policy',
-      'mcp-api',
+      'api',
+      'mcp',
       'agent-discovery-auth',
     ]);
     expect(Object.keys(registry.categories).sort()).toEqual([...registry.category_order].sort());
@@ -99,7 +101,7 @@ describe('web-audit registry shape', () => {
     });
     const webmcp = registry.checks.find((c) => c.id === 'webmcp');
     expect(webmcp).toMatchObject({
-      category: 'mcp-api',
+      category: 'mcp',
       keyword: 'may',
       antecedent: 'html-root',
       site_types: ['all'],
@@ -314,5 +316,85 @@ describe('buildWebScorecard', () => {
     expect(sc.summary.pass).toBe(2);
     expect(sc.summary.absent).toBe(1);
     expect(sc.summary.broken).toBe(1);
+  });
+});
+
+// The load-bearing proof of KTD1: reassigning a check's display category
+// (mcp-api -> api/mcp) must not move any score. score.ts reads keyword +
+// status only, so a future edit that entangles a tier/weight change with a
+// re-categorization is caught here.
+describe('scoring invariance under the API/MCP category split (U4, KTD1)', () => {
+  test('the real registry keeps its 3/15/18 tier distribution, so universeMax is unchanged', async () => {
+    const registry = await loadNormalized();
+    // 3 MUST x5 + 15 SHOULD x3 + 18 MAY x1 = 78. Retiering a check (e.g. the
+    // deferred openapi MUST -> SHOULD) would move this; the display split
+    // alone must not.
+    const universeMax = universeMaxOf(
+      registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
+    );
+    expect(universeMax).toBe(78);
+  });
+
+  test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {
+    // One representative result set. The ONLY difference between the two
+    // scorecards is each row's display category (and the registry's
+    // category map/order); the universe, keywords, and statuses are shared.
+    const outcomes = [
+      { id: 'openapi', keyword: 'must', status: 'pass', legacyCat: 'mcp-api', splitCat: 'api' },
+      { id: 'api-catalog', keyword: 'may', status: 'broken', legacyCat: 'mcp-api', splitCat: 'api' },
+      { id: 'mcp-initialize', keyword: 'must', status: 'pass', legacyCat: 'mcp-api', splitCat: 'mcp' },
+      { id: 'mcp-cors-preflight', keyword: 'should', status: 'absent', legacyCat: 'mcp-api', splitCat: 'mcp' },
+      { id: 'webmcp', keyword: 'may', status: 'n_a', legacyCat: 'mcp-api', splitCat: 'mcp' },
+      { id: 'robots', keyword: 'should', status: 'pass', legacyCat: 'discoverability', splitCat: 'discoverability' },
+    ] as const;
+
+    // A registry-shaped universe (3 MUST / 15 SHOULD / 18 MAY), shared by both.
+    const universeChecks = [
+      ...Array.from({ length: 3 }, () => ({ keyword: 'must' })),
+      ...Array.from({ length: 15 }, () => ({ keyword: 'should' })),
+      ...Array.from({ length: 18 }, () => ({ keyword: 'may' })),
+    ] as never;
+
+    const context = {
+      targetUrl: 'https://example.com/',
+      domain: 'example.com',
+      mcpEndpoint: 'https://example.com/mcp',
+      discoveryEvidence: [],
+      specVersion: '0.5.0',
+    };
+
+    const legacy = buildWebScorecard(
+      outcomes.map((o) => row({ id: o.id, keyword: o.keyword, status: o.status, category: o.legacyCat })),
+      {
+        ...context,
+        registry: {
+          category_order: ['discoverability', 'mcp-api'],
+          categories: { discoverability: 'Discoverability', 'mcp-api': 'MCP & API' },
+          checks: universeChecks,
+        },
+      },
+    );
+
+    const split = buildWebScorecard(
+      outcomes.map((o) => row({ id: o.id, keyword: o.keyword, status: o.status, category: o.splitCat })),
+      {
+        ...context,
+        registry: {
+          category_order: ['discoverability', 'api', 'mcp'],
+          categories: { discoverability: 'Discoverability', api: 'API', mcp: 'MCP' },
+          checks: universeChecks,
+        },
+      },
+    );
+
+    // Scores are byte-for-byte identical across the two labelings.
+    expect(split.score_pct).toBe(legacy.score_pct);
+    expect(split.score.relative).toBe(legacy.score.relative);
+    expect(split.score.global).toBe(legacy.score.global);
+
+    // ...while the grouping is precisely what moved: mcp-api became api + mcp.
+    expect(legacy.categories.map((c) => c.id)).toContain('mcp-api');
+    expect(split.categories.map((c) => c.id)).toEqual(['discoverability', 'api', 'mcp']);
+    expect(split.categories.map((c) => c.id)).not.toContain('mcp-api');
   });
 });
