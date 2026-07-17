@@ -62,6 +62,20 @@ function makeEnv(seed: unknown): { env: WebRescoreEnv; store: Map<string, string
   return { env, store };
 }
 
+/** Map-backed KV double for the registry-change gate. */
+function makeKv(initial: Record<string, string> = {}): { kv: KVNamespace; map: Map<string, string> } {
+  const map = new Map(Object.entries(initial));
+  const kv = {
+    async get(key: string) {
+      return map.get(key) ?? null;
+    },
+    async put(key: string, value: string) {
+      map.set(key, value);
+    },
+  } as unknown as KVNamespace;
+  return { kv, map };
+}
+
 /** Fake WorkflowStep: records step names in execution order, runs closures inline. */
 function makeStep(): { step: RescoreStep; names: string[] } {
   const names: string[] = [];
@@ -267,6 +281,51 @@ describe('runWebRescore', () => {
       },
     });
     expect(calls).toEqual([SPEC_VERSION]);
+  });
+
+  test('a changed registry fingerprint reflows every domain even when all are fresh', async () => {
+    const { env, store } = makeEnv([seedEntry('fresh1.dev'), seedEntry('fresh2.dev')]);
+    const { kv } = makeKv({ 'web_rescore:registry_fp': 'OLD' });
+    env.SCORE_KV = kv;
+    await primeCache(store, 'fresh1.dev', 60_000, 40); // 1 minute ago — well inside the window
+    await primeCache(store, 'fresh2.dev', 60_000, 40);
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, {
+      audit: stubAudit({ 'fresh1.dev': 70, 'fresh2.dev': 80 }),
+      fingerprint: async () => 'NEW',
+    });
+    expect(result.audited.sort()).toEqual(['fresh1.dev', 'fresh2.dev']);
+    expect(await kv.get('web_rescore:registry_fp')).toBe('NEW'); // recorded after the reflow
+  });
+
+  test('an unchanged fingerprint keeps incremental batching: fresh skipped, stale audited', async () => {
+    const { env, store } = makeEnv([seedEntry('fresh.dev'), seedEntry('stale.dev')]);
+    const { kv } = makeKv({ 'web_rescore:registry_fp': 'SAME' });
+    env.SCORE_KV = kv;
+    await primeCache(store, 'fresh.dev', 60_000, 40); // fresh — skipped incrementally
+    await primeCache(store, 'stale.dev', 3 * HOUR_MS, 40); // > 2h — audited
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, {
+      audit: stubAudit({ 'stale.dev': 80 }),
+      fingerprint: async () => 'SAME',
+    });
+    expect(result.audited).toEqual(['stale.dev']);
+    expect(result.skipped).toEqual([]);
+    expect(await kv.get('web_rescore:registry_fp')).toBe('SAME'); // unchanged, not rewritten
+  });
+
+  test('a first run with no recorded fingerprint reflows all and records it', async () => {
+    const { env, store } = makeEnv([seedEntry('fresh.dev')]);
+    const { kv } = makeKv(); // no prior fingerprint
+    env.SCORE_KV = kv;
+    await primeCache(store, 'fresh.dev', 60_000, 40); // fresh — would be skipped incrementally
+    const { step } = makeStep();
+    const result = await runWebRescore(env, step, {
+      audit: stubAudit({ 'fresh.dev': 70 }),
+      fingerprint: async () => 'FP1',
+    });
+    expect(result.audited).toEqual(['fresh.dev']);
+    expect(await kv.get('web_rescore:registry_fp')).toBe('FP1');
   });
 });
 
