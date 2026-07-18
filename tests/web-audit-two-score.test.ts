@@ -147,16 +147,16 @@ describe('categoryRollups', () => {
     const results = [
       { category: 'discoverability', status: 'pass' },
       { category: 'discoverability', status: 'absent' },
-      { category: 'mcp-api', status: 'n_a' },
-      { category: 'mcp-api', status: 'n_a' },
+      { category: 'mcp', status: 'n_a' },
+      { category: 'mcp', status: 'n_a' },
     ] as Array<Pick<EngineResult, 'category' | 'status'>>;
-    const rollups = categoryRollups(results, ['discoverability', 'mcp-api'], {
+    const rollups = categoryRollups(results, ['discoverability', 'mcp'], {
       discoverability: 'Discoverability',
-      'mcp-api': 'MCP & API',
+      mcp: 'MCP',
     });
     expect(rollups).toEqual([
       { id: 'discoverability', name: 'Discoverability', passed: 1, counted: 2 },
-      { id: 'mcp-api', name: 'MCP & API', passed: 0, counted: 0 },
+      { id: 'mcp', name: 'MCP', passed: 0, counted: 0 },
     ]);
   });
 });

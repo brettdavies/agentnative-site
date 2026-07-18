@@ -3,11 +3,16 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+  aggregateKeyFor,
   type CachedWebAudit,
   get,
+  getAggregate,
+  isStale,
   keyFor,
   normalizeTargetUrl,
   put,
+  putAggregate,
+  type WebAggregateEntry,
   type WebCacheEnv,
 } from '../src/worker/audit-web/cache';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -159,5 +164,99 @@ describe('cache.put / get', () => {
     const got = (await get(env, await keyFor(url, SPEC_VERSION))) as CachedWebAudit;
     expect(got.spec_version).toBe(SPEC_VERSION);
     expect(got.target_url).toBe(url);
+  });
+
+  test('put stamps scored_at with ISO-8601 now; get round-trips it', async () => {
+    const { env } = makeR2Stub();
+    const url = 'https://example.com/';
+    const before = Date.now();
+    await put(env, url, sampleScorecard(url), SPEC_VERSION);
+    const got = (await get(env, await keyFor(url, SPEC_VERSION))) as CachedWebAudit;
+    expect(typeof got.scored_at).toBe('string');
+    const stamped = Date.parse(got.scored_at as string);
+    expect(stamped).toBeGreaterThanOrEqual(before - 1000);
+    expect(stamped).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  test('a legacy payload without scored_at reads back intact (stale, not corrupt)', async () => {
+    const url = 'https://example.com/';
+    const key = await keyFor(url, SPEC_VERSION);
+    const legacy = { spec_version: SPEC_VERSION, target_url: url, scorecard: sampleScorecard(url) };
+    const { env, deletedKeys } = makeR2Stub({ prefill: { [key]: legacy } });
+    const got = await get(env, key);
+    expect(got).not.toBeNull();
+    expect(got?.scored_at).toBeUndefined();
+    expect(deletedKeys).toHaveLength(0);
+    expect(isStale(got?.scored_at, 5 * 60_000)).toBe(true);
+  });
+});
+
+describe('isStale', () => {
+  const FIVE_MIN = 5 * 60_000;
+
+  test('false within the threshold, true past it', () => {
+    const now = Date.now();
+    expect(isStale(new Date(now - FIVE_MIN + 10_000).toISOString(), FIVE_MIN, now)).toBe(false);
+    expect(isStale(new Date(now - FIVE_MIN - 10_000).toISOString(), FIVE_MIN, now)).toBe(true);
+  });
+
+  test('true when scored_at is absent or unparseable', () => {
+    expect(isStale(undefined, FIVE_MIN)).toBe(true);
+    expect(isStale('not-a-date', FIVE_MIN)).toBe(true);
+  });
+});
+
+describe('aggregate cache', () => {
+  const ENTRIES: WebAggregateEntry[] = [
+    {
+      domain: 'anc.dev',
+      url: 'https://anc.dev/',
+      name: 'anc.dev',
+      description: 'the auditor itself',
+      score_pct: 76,
+      score: { relative: 76, global: 71 },
+    },
+  ];
+
+  test('aggregateKeyFor slots the kind where per-domain keys carry the hash', () => {
+    expect(aggregateKeyFor('leaderboard', '9.9.9')).toBe('audits/web/leaderboard/9.9.9.json');
+    expect(aggregateKeyFor('leaderboard-frontpage', '9.9.9')).toBe('audits/web/leaderboard-frontpage/9.9.9.json');
+  });
+
+  test('getAggregate returns null on a miss', async () => {
+    const { env } = makeR2Stub();
+    expect(await getAggregate(env, 'leaderboard', SPEC_VERSION)).toBeNull();
+  });
+
+  test('putAggregate then getAggregate round-trips the board entries', async () => {
+    const { env } = makeR2Stub();
+    await putAggregate(env, 'leaderboard', ENTRIES, SPEC_VERSION);
+    const got = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+    expect(got?.spec_version).toBe(SPEC_VERSION);
+    expect(typeof got?.generated_at).toBe('string');
+    expect(got?.entries).toEqual(ENTRIES);
+  });
+
+  test('the two kinds key distinct objects', async () => {
+    const { env } = makeR2Stub();
+    await putAggregate(env, 'leaderboard', ENTRIES, SPEC_VERSION);
+    expect(await getAggregate(env, 'leaderboard-frontpage', SPEC_VERSION)).toBeNull();
+  });
+
+  test('a malformed aggregate object is deleted and returns null', async () => {
+    const key = aggregateKeyFor('leaderboard', SPEC_VERSION);
+    const { env, deletedKeys } = makeR2Stub({ prefill: { [key]: { spec_version: SPEC_VERSION, entries: 'nope' } } });
+    expect(await getAggregate(env, 'leaderboard', SPEC_VERSION)).toBeNull();
+    expect(deletedKeys).toContain(key);
+  });
+
+  test('putAggregate refuses an empty spec version', async () => {
+    const { env } = makeR2Stub();
+    await expect(putAggregate(env, 'leaderboard', ENTRIES, '')).rejects.toThrow(/specVersion required/);
+  });
+
+  test('an aggregate write failure never throws to the caller', async () => {
+    const { env } = makeR2Stub({ throwOnPut: true });
+    await expect(putAggregate(env, 'leaderboard', ENTRIES, SPEC_VERSION)).resolves.toBeUndefined();
   });
 });

@@ -51,12 +51,36 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
     expect((staging.routes as unknown[]).length).toBe(0);
   });
 
-  test('env.staging.triggers.crons is explicitly set to an empty array (prophylactic against future cron addition)', () => {
+  test('env.staging.triggers.crons is an explicit override that matches the top-level weekly rescore', () => {
+    // `triggers` is inheritable, so staging must state its crons
+    // deliberately. Both envs run the same weekly web-rescore schedule;
+    // a staging block that silently drops the override would re-inherit
+    // whatever top level says, and a divergent schedule would mean soak
+    // no longer exercises the production path.
     expect(staging.triggers).toBeDefined();
-    const triggers = staging.triggers as Record<string, unknown>;
-    expect(triggers.crons).toBeDefined();
-    expect(Array.isArray(triggers.crons)).toBe(true);
-    expect((triggers.crons as unknown[]).length).toBe(0);
+    const stagingCrons = (staging.triggers as Record<string, unknown>).crons;
+    const topCrons = (config.triggers as Record<string, unknown>).crons;
+    expect(Array.isArray(stagingCrons)).toBe(true);
+    expect(stagingCrons).toEqual(['0 9 * * SUN']);
+    expect(topCrons).toEqual(['0 9 * * SUN']);
+  });
+
+  test('both envs declare the WEB_RESCORE_WORKFLOW binding with distinct account-scoped names', () => {
+    // `workflows` is non-inheritable per env; a missing staging block
+    // makes the staging scheduled() handler throw on its first tick.
+    // Workflow names are account-scoped, so the two Workers cannot share
+    // one name.
+    const topWorkflows = config.workflows as Array<Record<string, unknown>>;
+    const stagingWorkflows = staging.workflows as Array<Record<string, unknown>>;
+    expect(topWorkflows).toBeDefined();
+    expect(stagingWorkflows).toBeDefined();
+    const top = topWorkflows.find((w) => w.binding === 'WEB_RESCORE_WORKFLOW');
+    const stg = stagingWorkflows.find((w) => w.binding === 'WEB_RESCORE_WORKFLOW');
+    expect(top?.class_name).toBe('WebRescoreWorkflow');
+    expect(stg?.class_name).toBe('WebRescoreWorkflow');
+    expect(top?.name).toBeDefined();
+    expect(stg?.name).toBeDefined();
+    expect(top?.name).not.toBe(stg?.name);
   });
 
   test('top-level routes binds anc.dev + www.anc.dev as custom domains (the canary value)', () => {

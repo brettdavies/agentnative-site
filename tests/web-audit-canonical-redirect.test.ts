@@ -57,7 +57,7 @@ const CARD_BODY = '{"mcp_endpoint":"https://example.com/mcp","serverInfo":{"name
 function cardCheck(): WebCheck {
   return {
     id: 'well-known-mcp-card',
-    category: 'mcp-api',
+    category: 'mcp',
     tier: 'recommended',
     keyword: 'should',
     principle: 'P8',

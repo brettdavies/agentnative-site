@@ -5,8 +5,11 @@
 //
 // The CLI ⇆ Web toggle is CSS-first: hidden radios + `:has()` swap the
 // board, the spec index, and the try-form together with zero JS (CLI is
-// the no-JS default). Board rows are threaded in from the already-computed
-// leaderboard + web entries — build.mjs computes both before this stage.
+// the no-JS default). CLI board rows are threaded in from the
+// already-computed leaderboard; the web board pane emits a
+// {{WEB_BOARD_ROWS}} placeholder the Worker fills server-side from the
+// R2 leaderboard-frontpage aggregate, keeping the page zero-JS while the
+// web scores stay live.
 //
 // The live-scoring form is server-rendered as an inert shell; /js/live-score.js
 // wires submit + Turnstile + redirect on the client side. The Turnstile
@@ -20,43 +23,44 @@ import { extractDescription, extractFirstParagraph, extractIntroSummary, extract
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
-import { rankWebEntries } from './web-leaderboard-render.mjs';
 
 const BOARD_ROWS = 5;
 
-// The five web-audit display categories (ids + names mirror
-// src/data/web-audit/registry.yaml `categories`; tier + description are
-// homepage display copy). The web surface is an audit against external
-// specs — anc does not own these standards (R10).
+// The six web-audit display categories (ids + names mirror
+// src/data/web-audit/registry.yaml `categories`; description is homepage
+// display copy). No tier: MUST/SHOULD/MAY is a per-check obligation, and a
+// category groups a mix of tiers, so a group-level tier would misuse the
+// keyword. The web surface is an audit against external specs — anc does
+// not own these standards (R10).
 const WEB_CHECKS = [
   {
     id: 'C1',
     title: 'Discoverability',
-    tier: 'MUST',
     desc: '<code>robots.txt</code>, <code>sitemap.xml</code>, Link headers, DNS-AID under <code>_agents</code>.',
   },
   {
     id: 'C2',
     title: 'Content for agents',
-    tier: 'MUST',
     desc: '<code>llms.txt</code>, <code>Accept: text/markdown</code>, JSON-LD, semantic landmarks.',
   },
   {
     id: 'C3',
     title: 'Bot &amp; crawl policy',
-    tier: 'SHOULD',
     desc: 'AI-crawler rules, Content-Signal, <code>security.txt</code>, Web Bot Auth.',
   },
   {
     id: 'C4',
-    title: 'MCP &amp; API',
-    tier: 'MUST',
-    desc: 'Initialize handshake, <code>tools/list</code>, error codes, <code>.well-known</code> card, OpenAPI.',
+    title: 'API',
+    desc: 'OpenAPI description, JSON Schemas, <code>.well-known/api-catalog</code>.',
   },
   {
     id: 'C5',
+    title: 'MCP',
+    desc: 'Initialize handshake, <code>tools/list</code>, error codes, CORS, <code>.well-known</code> server card.',
+  },
+  {
+    id: 'C6',
     title: 'Agent discovery &amp; auth',
-    tier: 'MAY',
     desc: 'A2A agent card, agent-skills index, OAuth discovery, <code>auth.md</code>.',
   },
 ];
@@ -118,18 +122,6 @@ function buildCliBoardRows(leaderboard) {
     .join('\n');
 }
 
-function buildWebBoardRows(webEntries) {
-  return rankWebEntries(webEntries)
-    .slice(0, BOARD_ROWS)
-    .map((entry) => {
-      const pct = entry.scores.global;
-      const domain = escHtml(entry.domain);
-      const desc = escHtml(entry.description || entry.name);
-      return `        <a class="lrow ${bandOf(pct)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
-    })
-    .join('\n');
-}
-
 function buildSpecRows(principles) {
   return principles
     .map((p) => {
@@ -141,10 +133,13 @@ function buildSpecRows(principles) {
     .join('\n');
 }
 
-function buildWebCheckRows() {
+export function buildWebCheckRows() {
+  // No tier chip: MUST/SHOULD/MAY is a per-check obligation, and these rows
+  // are categories (each a mix of tiers). The tiers live on the individual
+  // check rows of the /web-audit scorecard, not on the category summary.
   return WEB_CHECKS.map(
     (c) =>
-      `      <li class="spec__row tier-${c.tier.toLowerCase()}"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="/web-audit">${c.title}</a><span class="tier">${c.tier}</span></div><p class="spec__desc">${c.desc}</p></div></li>`,
+      `      <li class="spec__row spec__row--untiered"><span class="spec__id">${c.id}</span><div class="spec__body"><div class="spec__head"><a class="spec__title" href="/web-audit">${c.title}</a></div><p class="spec__desc">${c.desc}</p></div></li>`,
   ).join('\n');
 }
 
@@ -157,10 +152,9 @@ function buildWebCheckRows() {
  * @param {string} useItHtml — pre-rendered <p class="use-note">…</p>
  * @param {Array<{n: number, title: string, shortDesc: string}>} principles
  * @param {Array} leaderboard — from computeLeaderboard()
- * @param {Array} webEntries — from loadWebSeed()
  * @returns {string}
  */
-function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webEntries) {
+function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard) {
   return `<section class="hero">
   <div class="container hero__grid">
     <div>
@@ -212,7 +206,7 @@ ${buildHeroCard(leaderboard[0], principles)}
 ${buildCliBoardRows(leaderboard)}
       </div>
       <div class="board" data-s="web" aria-label="Top websites">
-${buildWebBoardRows(webEntries)}
+{{WEB_BOARD_ROWS}}
       </div>
       <p class="board-rubric" data-s="cli">Scored against the <strong>8 principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>
       <p class="board-rubric" data-s="web">Scored against the emerging agent-web standards: <code>MCP</code>, <code>llms.txt</code>, <code>OpenAPI</code>, JSON Schema, discovery. anc audits; it doesn't own them. <a href="/web">Full board&nbsp;▸</a></p>
@@ -236,13 +230,13 @@ ${buildWebBoardRows(webEntries)}
         <p class="sub">The standard anc.dev authors. Each is a testable contract with a MUST / SHOULD / MAY obligation and a named failure mode.</p>
       </div>
       <div data-s="web">
-        <h2>Five checks for a website</h2>
+        <h2>Six checks for a website</h2>
         <p class="sub">Not a standard anc owns; an audit of your agent-facing surface against what the ecosystem is converging on.</p>
       </div>
       <ol class="spec" data-s="cli" aria-label="The eight principles">
 ${buildSpecRows(principles)}
       </ol>
-      <ol class="spec" data-s="web" aria-label="The five web checks">
+      <ol class="spec" data-s="web" aria-label="The six web checks">
 ${buildWebCheckRows()}
       </ol>
     </div>
@@ -276,15 +270,11 @@ ${buildWebCheckRows()}
  * @param {string} args.themeInit
  * @param {Array<{n: number, title: string, shortDesc: string}>} args.principles
  * @param {Array} args.leaderboard — ranked entries from computeLeaderboard()
- * @param {Array} args.webEntries — loaded seed entries from loadWebSeed()
  * @returns {Promise<{introTitle: string, introSummary: string, introSource: string, specContextSource: string, useSource: string, introLede: string}>}
  */
-export async function emitHomepage({ distDir, contentDir, themeInit, principles, leaderboard, webEntries }) {
+export async function emitHomepage({ distDir, contentDir, themeInit, principles, leaderboard }) {
   if (!Array.isArray(leaderboard) || leaderboard.length === 0) {
     throw new Error('emitHomepage: leaderboard is empty — board data must be computed before the homepage emits');
-  }
-  if (!Array.isArray(webEntries) || webEntries.length === 0) {
-    throw new Error('emitHomepage: webEntries is empty — web seed must be loaded before the homepage emits');
   }
   const [introSource, specContextSource, useSource] = await Promise.all([
     readFile(join(contentDir, '_intro.md'), 'utf8'),
@@ -304,7 +294,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
   }
   const useItHtml = useRendered.replace(/^<p>/, '<p class="use-note">');
 
-  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webEntries);
+  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard);
   await writeFile(
     join(distDir, 'index.html'),
     emitShell({

@@ -1,10 +1,11 @@
 // Web-audit MCP tools (plan U12).
 //
-//   get_website_audit(url)   cheap read: R2 cache or curated projection.
+//   get_website_audit(url)   cheap read: per-domain R2 cache.
 //   audit_website(url)       metered fresh audit; single terminal
 //                            scorecard (no progress notifications — the
 //                            server runs stateless per-request, KTD-6).
-//   list_website_audits()    the curated web leaderboard summaries.
+//   list_website_audits()    the board summaries from the R2 leaderboard
+//                            aggregate (the same object /web renders).
 //
 // audit_website mirrors score_cli's audit-tier gate chain: URL validation
 // + SSRF, then cache state served as data ahead of the kill switch, then
@@ -16,12 +17,16 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
 import {
   type CachedWebAudit,
   get as cacheGet,
   put as cachePut,
+  getAggregate,
+  isStale,
   keyFor,
   normalizeTargetUrl,
+  WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
@@ -63,16 +68,6 @@ function jsonRpcError32099(message: string) {
 
 function isError(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
-}
-
-async function loadCuratedProjection(env: WebAuditToolsEnv, path: string): Promise<unknown | null> {
-  try {
-    const res = await env.ASSETS.fetch(new Request(`https://assets.internal/_internal/web-scorecards/${path}`));
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 type ScorecardRow = {
@@ -120,14 +115,14 @@ async function catalogOrEmpty(env: WebAuditToolsEnv): Promise<WebRemediationCata
   }
 }
 
-/** Resolve a domain's scorecard: R2 (https then http) then the curated projection. */
+/** Resolve a domain's scorecard from per-domain R2 (https then http); null on a miss. */
 async function resolveScorecard(env: WebAuditToolsEnv, domain: string): Promise<unknown | null> {
   for (const scheme of ['https', 'http']) {
     const target = normalizeTargetUrl(`${scheme}://${domain}/`);
     const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(target, SPEC_VERSION));
     if (cached) return cached.scorecard;
   }
-  return loadCuratedProjection(env, `${domain}.json`);
+  return null;
 }
 
 export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv): void {
@@ -163,10 +158,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
   server.tool(
     'audit_website',
     'Run a fresh website agent-readiness audit and return the complete scorecard. Returns a single terminal scorecard ' +
-      '(no progress notifications — the server is stateless per-request). An existing cached result is returned ' +
-      'without re-running, even when the audit is disabled. A fresh audit is gated like score_cli: disabled when ' +
-      'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
-      'fallback); a per-IP burst limiter plus a 30-fresh-audits-per-hour-per-IP window apply.',
+      '(no progress notifications — the server is stateless per-request). A cached result younger than 5 minutes is ' +
+      'returned without re-running; an older one re-runs (and is still served as-is when the audit is disabled). A ' +
+      'fresh audit is gated like score_cli: disabled when WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request ' +
+      'without cf-connecting-ip returns -32099 (no anon fallback); a per-IP burst limiter plus a ' +
+      '30-fresh-audits-per-hour-per-IP window apply.',
     {
       url: z.string().describe('The website URL or bare domain to audit.'),
       site_type: z
@@ -190,8 +186,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
       // data, so a cached scorecard is served even when the audit is off.
+      // A hit older than the staleness threshold falls through to the
+      // fresh path (still behind every gate below) so a re-run refreshes
+      // the board.
       const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
-      if (cached) {
+      if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
         return textContent({
           audited: false,
           source: 'cache',
@@ -200,8 +199,17 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         });
       }
 
-      // Kill switches (fresh audit only — a cache miss reached this point).
+      // Kill switches: a stale hit is still data when fresh audits are
+      // off, so only a true miss surfaces the disabled message.
       if (env.MCP_ENABLED !== 'true' || env.WEB_AUDIT_ENABLED !== 'true') {
+        if (cached) {
+          return textContent({
+            audited: false,
+            source: 'cache',
+            scorecard: withInlineRemediation(cached.scorecard, await catalogOrEmpty(env)),
+            share_url: shareUrl,
+          });
+        }
         return textContent({
           audited: false,
           message:
@@ -248,6 +256,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         return isError('the audit did not finish within the deadline; nothing was cached. Retry.');
       }
       await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+      await rebuildAggregatesIfSeeded(env, domain, SPEC_VERSION);
       return textContent({
         audited: true,
         source: 'fresh-audit',
@@ -261,17 +270,12 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
   server.tool(
     'list_website_audits',
     'Return the curated web leaderboard: summaries of the websites on anc.dev/web. Each entry carries domain, url, ' +
-      'name, score_pct, and share_url. This board is curated (not every audited URL appears).',
+      'name, score_pct, and share_url. This board is curated (not every audited URL appears). An empty list means ' +
+      'the board is mid-rescore; get_website_audit still serves per-domain results.',
     {},
     async () => {
-      const index = (await loadCuratedProjection(env, 'index.json')) as Array<{
-        domain: string;
-        url: string;
-        name: string;
-        description?: string;
-        score_pct: number;
-      }> | null;
-      const entries = (index ?? []).map((e) => ({
+      const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+      const entries = (aggregate?.entries ?? []).map((e) => ({
         domain: e.domain,
         url: e.url,
         name: e.name,

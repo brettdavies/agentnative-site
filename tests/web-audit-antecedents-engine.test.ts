@@ -28,12 +28,13 @@ function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
     version: 1,
     mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
-    category_order: ['discoverability', 'content-for-agents', 'bot-crawl-policy', 'mcp-api', 'agent-discovery-auth'],
+    category_order: ['discoverability', 'content-for-agents', 'bot-crawl-policy', 'api', 'mcp', 'agent-discovery-auth'],
     categories: {
       discoverability: 'Discoverability',
       'content-for-agents': 'Content for agents',
       'bot-crawl-policy': 'Bot & crawl policy',
-      'mcp-api': 'MCP & API',
+      api: 'API',
+      mcp: 'MCP',
       'agent-discovery-auth': 'Agent discovery & auth',
     },
     checks,
@@ -214,7 +215,7 @@ describe('runWebAudit two-wave evaluation', () => {
       ...CHECKS,
       makeCheck({
         id: 'openapi',
-        category: 'mcp-api',
+        category: 'api',
         tier: 'required',
         keyword: 'must',
         site_types: ['api'],

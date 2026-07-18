@@ -12,11 +12,17 @@
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { getAggregate, type WebCacheEnv } from './audit-web/cache';
+import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
+import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from './audit-web/rescore-trigger';
+import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
   handleWebAudit,
+  handleWebLeaderboard,
   handleWebResultPage,
   handleWebScoringPage,
   isWebAuditPath,
+  isWebLeaderboardPath,
   isWebScoringPath,
   parseWebResultPath,
   type WebAuditRouteEnv,
@@ -28,6 +34,7 @@ import { logVisitor } from './mcp/visitor-log';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
+import { SPEC_VERSION } from './spec-version.gen';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
 // outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
@@ -38,6 +45,10 @@ import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render'
 // (Sandbox `fetch()` missing) — documented in
 // docs/solutions/integration-issues/cloudflare-workers-do-mock-must-mirror-binding-shape-2026-05-15.md.
 export { ContainerProxy } from '@cloudflare/sandbox';
+// Web-rescore Workflow class. Re-exported so wrangler's binding resolver
+// can find `class_name: "WebRescoreWorkflow"` from wrangler.jsonc's
+// workflows section.
+export { WebRescoreWorkflow } from './audit-web/rescore-workflow';
 // Live-scoring DO class. Re-exported so wrangler's binding resolver can
 // find `class_name: "Sandbox"` from wrangler.jsonc's containers +
 // durable_objects sections.
@@ -52,6 +63,7 @@ export interface Env {
   ASSETS: Fetcher;
   SCORE?: DurableObjectNamespace;
   SCORE_KV?: KVNamespace;
+  SCORE_CACHE?: R2Bucket;
   SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
@@ -85,6 +97,12 @@ export interface Env {
   WEB_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   WEB_AUDIT_ENABLED?: string;
+  // Web-rescore bindings. WEB_RESCORE_WORKFLOW is the Workflow that fans
+  // out the weekly board rescore; WEB_RESCORE_SECRET (wrangler secret)
+  // auths the POST /api/web-rescore deploy hook. Optional so tests that
+  // don't exercise the rescore path can stub a minimal env.
+  WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
+  WEB_RESCORE_SECRET?: string;
 }
 
 /**
@@ -308,6 +326,12 @@ export default {
     // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
     if (isWebAuditPath(pathname)) {
       return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
+    }
+
+    // Post-deploy rescore hook (secret-authed). Shares the single-flight
+    // helper with the weekly cron in scheduled() below.
+    if (pathname === '/api/web-rescore') {
+      return handleWebRescore(request, env as WebRescoreTriggerEnv);
     }
 
     // MCP server card (SEP-1649): the canonical path serves the JSON
@@ -562,6 +586,23 @@ export default {
       return handleLiveScorePage(request, env as ScoreEnv);
     }
 
+    // /web board + .md twin — Worker-rendered from the R2 leaderboard
+    // aggregate, dispatched ahead of the asset fetch so no static
+    // dist/web.html ever serves the board. Legacy extension/slash forms
+    // canonicalize like the rest of the site.
+    if (pathname === '/web.html' || pathname === '/web/') {
+      return new Response(null, {
+        status: 301,
+        headers: { Location: '/web', 'Cache-Control': 'public, max-age=300' },
+      });
+    }
+    if (isWebLeaderboardPath(pathname)) {
+      const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+      const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
+      if (response.status !== 200) return response;
+      return applyHeaders(response, { request, servedMarkdown, pathname: '/web' });
+    }
+
     // /web/scoring[/<domain>] — the transient in-progress streaming page.
     // Reserved above the result-page dispatch so `scoring` is never treated
     // as a cached-result domain (mirrors the reserved `live` segment under
@@ -616,18 +657,29 @@ export default {
 
     const upstream = await env.ASSETS.fetch(assetRequest);
 
-    // Homepage HTML: substitute {{TURNSTILE_SITEKEY}} placeholder. Runs
-    // AFTER the markdown-CN rewrite above so /index.md content (no
-    // placeholder) flows through untouched. Production with no
-    // TURNSTILE_SITEKEY set substitutes with the empty string, which the
-    // homepage JS treats as "form disabled, install anc locally" per
-    // the deliberate fail-loud-pre-promotion posture.
+    // Homepage HTML: substitute the {{TURNSTILE_SITEKEY}} and
+    // {{WEB_BOARD_ROWS}} placeholders. Runs AFTER the markdown-CN rewrite
+    // above so /index.md content (no placeholders) flows through
+    // untouched. Production with no TURNSTILE_SITEKEY set substitutes
+    // with the empty string, which the homepage JS treats as "form
+    // disabled, install anc locally" per the deliberate
+    // fail-loud-pre-promotion posture. The web-board region is filled
+    // server-side from the R2 leaderboard-frontpage aggregate so the
+    // homepage stays zero-JS while its web scores stay live; an absent
+    // aggregate (cold start / spec bump) renders the scoring-in-progress
+    // state.
     if ((pathname === '/' || pathname === '/index.html') && !servedMarkdown && upstream.ok) {
       const contentType = upstream.headers.get('content-type') ?? '';
       if (contentType.toLowerCase().includes('text/html')) {
         const html = await upstream.text();
         const sitekey = env.TURNSTILE_SITEKEY ?? '';
-        const substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
+        let substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
+        if (substituted.includes('{{WEB_BOARD_ROWS}}')) {
+          const aggregate = await getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION);
+          const entries = aggregate?.entries ?? [];
+          const board = entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
+          substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', board);
+        }
         const rewritten = new Response(substituted, {
           status: upstream.status,
           statusText: upstream.statusText,
@@ -638,5 +690,12 @@ export default {
     }
 
     return applyHeaders(upstream, { request, servedMarkdown, pathname });
+  },
+
+  // Weekly board rescore. The cron and the deploy hook coalesce through
+  // the same single-flight helper, so a cron tick during an in-flight
+  // batch no-ops instead of double-spending the audit budget.
+  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    await startWebRescore(env as WebRescoreTriggerEnv);
   },
 } satisfies ExportedHandler<Env>;

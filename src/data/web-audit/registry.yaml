@@ -54,20 +54,65 @@ category_order:
   - discoverability
   - content-for-agents
   - bot-crawl-policy
-  - mcp-api
+  - api
+  - mcp
   - agent-discovery-auth
 
 categories:
   discoverability: Discoverability
   content-for-agents: Content for agents
   bot-crawl-policy: Bot & crawl policy
-  mcp-api: MCP & API
+  api: API
+  mcp: MCP
   agent-discovery-auth: Agent discovery & auth
 
 checks:
-  # ---- MCP & API -----------------------------------------------------------
+  # ---- API -----------------------------------------------------------------
+  - id: openapi
+    category: api
+    tier: required
+    principle: P2
+    site_types: [api]
+    antecedent: api-surface
+    weight: 2
+    title: An OpenAPI description is published
+    handler: http
+    with:
+      path_any: [/openapi.json, /openapi.yaml, /.well-known/openapi.json]
+      expect: { status: [200], body_regex: "openapi|swagger" }
+    hint: Publish an OpenAPI 3.1 description for the REST surface so non-MCP agents can call it.
+
+  - id: json-schemas
+    category: api
+    tier: optional
+    principle: P2
+    site_types: [api]
+    antecedent: schemas-ref
+    weight: 1
+    title: Referenced JSON Schemas resolve as application/schema+json
+    handler: http
+    with:
+      path_any: [/api/schema/input.json, /api/schema/output.json, /schema.json]
+      expect: { status: [200], content_type: "json" }
+    hint: Serve input/output JSON Schemas so agents can validate payloads before calling.
+
+  - id: api-catalog
+    category: api
+    tier: optional
+    principle: P8
+    site_types: [api]
+    antecedent: api-surface
+    weight: 2
+    title: /.well-known/api-catalog published (RFC 9727)
+    handler: http
+    with:
+      path: /.well-known/api-catalog
+      expect: { status: [200], body_regex: "linkset" }
+    hint: Serve /.well-known/api-catalog as application/linkset+json with a linkset[] of anchor + service-desc entries.
+
+  # ---- MCP -----------------------------------------------------------------
   - id: mcp-initialize
-    category: mcp-api
+    category: mcp
     tier: required
     principle: P2
     site_types: [mcp]
@@ -79,7 +124,7 @@ checks:
     hint: Answer JSON-RPC `initialize` with serverInfo{name,version} and protocolVersion.
 
   - id: mcp-capabilities
-    category: mcp-api
+    category: mcp
     tier: recommended
     principle: P2
     site_types: [mcp]
@@ -91,7 +136,7 @@ checks:
     hint: Populate `capabilities` in the initialize result so clients gate feature use.
 
   - id: mcp-tools-list
-    category: mcp-api
+    category: mcp
     tier: required
     principle: P2
     site_types: [mcp]
@@ -103,7 +148,7 @@ checks:
     hint: Return `result.tools[]`, each with `name`, `description`, and a JSON `inputSchema`.
 
   - id: mcp-unknown-method
-    category: mcp-api
+    category: mcp
     tier: recommended
     principle: P4
     site_types: [mcp]
@@ -115,7 +160,7 @@ checks:
     hint: Reject unknown methods with JSON-RPC error -32601 (Method not found), not a hang or 500.
 
   - id: mcp-get-fast-fail
-    category: mcp-api
+    category: mcp
     tier: recommended
     principle: P4
     site_types: [mcp]
@@ -131,7 +176,7 @@ checks:
     hint: "Answer GET promptly: fast-fail non-POST with 405, or serve a documented surface (a docs page, or a redirect to your server card). A stateless streamable-HTTP GET routed into the transport otherwise holds the SSE stream open until the caller times out."
 
   - id: mcp-cors-preflight
-    category: mcp-api
+    category: mcp
     tier: recommended
     principle: P6
     site_types: [mcp]
@@ -147,7 +192,7 @@ checks:
     hint: Answer OPTIONS with 204 + Access-Control-Allow-Origin/Methods/Headers so browser-origin agents work.
 
   - id: mcp-cors-actual
-    category: mcp-api
+    category: mcp
     tier: recommended
     principle: P6
     site_types: [mcp]
@@ -159,7 +204,7 @@ checks:
     hint: Echo Access-Control-Allow-Origin on the actual POST, not only the preflight.
 
   - id: well-known-mcp-card
-    category: mcp-api
+    category: mcp
     tier: recommended
     principle: P8
     site_types: [mcp]
@@ -179,7 +224,7 @@ checks:
     hint: Publish /.well-known/mcp/server-card.json (SEP-1649); 301 the legacy aliases to it.
 
   - id: mcp-usage-doc
-    category: mcp-api
+    category: mcp
     tier: optional
     principle: P8
     site_types: [mcp]
@@ -192,50 +237,8 @@ checks:
       expect: { status: [200] }
     hint: Link a short markdown usage doc (curl examples, tool list, auth, rate limits) from the card and llms.txt.
 
-  - id: openapi
-    category: mcp-api
-    tier: required
-    principle: P2
-    site_types: [api]
-    antecedent: api-surface
-    weight: 2
-    title: An OpenAPI description is published
-    handler: http
-    with:
-      path_any: [/openapi.json, /openapi.yaml, /.well-known/openapi.json]
-      expect: { status: [200], body_regex: "openapi|swagger" }
-    hint: Publish an OpenAPI 3.1 description for the REST surface so non-MCP agents can call it.
-
-  - id: json-schemas
-    category: mcp-api
-    tier: optional
-    principle: P2
-    site_types: [api]
-    antecedent: schemas-ref
-    weight: 1
-    title: Referenced JSON Schemas resolve as application/schema+json
-    handler: http
-    with:
-      path_any: [/api/schema/input.json, /api/schema/output.json, /schema.json]
-      expect: { status: [200], content_type: "json" }
-    hint: Serve input/output JSON Schemas so agents can validate payloads before calling.
-
-  - id: api-catalog
-    category: mcp-api
-    tier: optional
-    principle: P8
-    site_types: [api]
-    antecedent: api-surface
-    weight: 2
-    title: /.well-known/api-catalog published (RFC 9727)
-    handler: http
-    with:
-      path: /.well-known/api-catalog
-      expect: { status: [200], body_regex: "linkset" }
-    hint: Serve /.well-known/api-catalog as application/linkset+json with a linkset[] of anchor + service-desc entries.
-
   - id: webmcp
-    category: mcp-api
+    category: mcp
     tier: optional
     principle: P2
     site_types: [all]

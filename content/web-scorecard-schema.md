@@ -1,7 +1,7 @@
 # Web scorecard schema
 
 A web scorecard is the structured output of the [website agent-readiness audit](/web-audit). It scores a website and its
-MCP server across five visible categories with a fairness-driven two-score model: a check that does not apply to a site
+MCP server across six visible categories with a fairness-driven two-score model: a check that does not apply to a site
 is excluded rather than counted against it, and a present-but-broken surface costs more than an absent one. This page
 documents every field a web scorecard carries.
 
@@ -91,7 +91,8 @@ nothing applicable reads `0/0`.
   { "id": "discoverability", "name": "Discoverability", "passed": 4, "counted": 5 },
   { "id": "content-for-agents", "name": "Content for agents", "passed": 7, "counted": 8 },
   { "id": "bot-crawl-policy", "name": "Bot & crawl policy", "passed": 3, "counted": 3 },
-  { "id": "mcp-api", "name": "MCP & API", "passed": 6, "counted": 9 },
+  { "id": "api", "name": "API", "passed": 2, "counted": 3 },
+  { "id": "mcp", "name": "MCP", "passed": 4, "counted": 6 },
   { "id": "agent-discovery-auth", "name": "Agent discovery & auth", "passed": 3, "counted": 3 }
 ]
 ```
