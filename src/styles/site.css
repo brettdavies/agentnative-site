@@ -922,6 +922,22 @@ a.spec__title:hover {
 .tier-may .tier {
   color: var(--may);
 }
+/* Per-check tier chip on the web scorecard rows: the tier-<kw> class sits on
+   the chip itself (not an ancestor spec__row), so color it directly. */
+.tier.tier-must {
+  color: var(--must);
+}
+.tier.tier-should {
+  color: var(--should);
+}
+.tier.tier-may {
+  color: var(--may);
+}
+/* Homepage web-check rows are categories, not single-tier checks, so their
+   C-index carries no tier color: a deliberate neutral, not an oversight. */
+.spec__row--untiered .spec__id {
+  color: var(--fg-heading);
+}
 .spec__desc {
   color: var(--fg-secondary);
   font-size: 0.9rem;
@@ -1527,7 +1543,9 @@ body:has(.leaderboard-hero) main {
 }
 
 .leaderboard-table tbody tr {
+  position: relative;
   transition: background-color 80ms ease;
+  cursor: pointer;
 }
 .leaderboard-table tbody tr:hover {
   background: var(--bg-raised, #f4f5f7);
@@ -1555,6 +1573,18 @@ body:has(.leaderboard-hero) main {
 }
 .lb-tool a:hover {
   text-decoration: underline;
+}
+/* Whole-row stretched link: the domain anchor's ::after covers the row, so a
+   click anywhere opens the detail page; :focus-within lifts the keyboard
+   outline to the row. */
+.lb-rowlink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.lb-row:focus-within {
+  outline: 2px solid var(--accent, #0058aa);
+  outline-offset: -2px;
 }
 
 /* Description — hide on narrow screens */

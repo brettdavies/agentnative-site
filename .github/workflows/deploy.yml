@@ -104,6 +104,25 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: scripts/smoke-api-score.sh https://agentnative-site-staging.brettdavies.workers.dev
 
+      # Repopulate R2 under the current SPEC_VERSION: a deploy (or a spec
+      # bump that rotates every cache key) starts a full board rescore.
+      # `curl -sSf` fails the job on any non-2xx, so a missing or wrong
+      # secret is a loud deploy failure, not a silent 401. The retry set
+      # covers edge-propagation lag right after `wrangler deploy`: a stale
+      # isolate 404s the new route, and curl does not retry 4xx without
+      # --retry-all-errors.
+      - name: Trigger web rescore
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+          WEB_RESCORE_SECRET: ${{ secrets.ANC_WEB_RESCORE_SECRET }}
+        run: |
+          curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -X POST \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
+            https://agentnative-site-staging.brettdavies.workers.dev/api/web-rescore
+
   production:
     name: build + deploy production
     if: >-
@@ -145,3 +164,14 @@ jobs:
           # Without it, wrangler 4.x warns about ambiguity even though
           # bare `deploy` does the right thing.
           command: deploy --env=""
+
+      # Same post-deploy rescore as staging; anc.dev is public, so no
+      # Access headers. Fails the job loudly on any non-2xx, with the same
+      # propagation-lag retry set.
+      - name: Trigger web rescore
+        env:
+          WEB_RESCORE_SECRET: ${{ secrets.ANC_WEB_RESCORE_SECRET }}
+        run: |
+          curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -X POST \
+            -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
+            https://anc.dev/api/web-rescore

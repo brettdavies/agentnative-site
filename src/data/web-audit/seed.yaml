@@ -1,14 +1,225 @@
-# Curated web leaderboard seed (plan U10, KTD-8). The web board is
-# curated, not auto-populated from arbitrary audited URLs: each entry here
-# has a committed web scorecard at scorecards/web/<domain>.json (a real
-# audit snapshot), rendered as a build-time static page independent of R2.
-# On-demand user audits live in R2 only and never appear here.
+# Curated web leaderboard seed: the domain list only. The web board is
+# curated, not auto-populated from arbitrary audited URLs. Scores live in
+# R2 and refresh via the weekly rescore Workflow, the post-deploy hook,
+# and on-demand audits of seeded domains; nothing is committed here
+# beyond the list itself.
 #
-# To add an entry: run the web audit against the site, commit its
-# scorecard as scorecards/web/<domain>.json, and add a row below.
+# The list is dynamic: the rescore Workflow selects the stalest domains in
+# bounded batches and cycles until the whole list is refreshed, so adding
+# rows never has to respect a per-run size budget. Each row is audited at
+# its canonical host (redirecting aliases are resolved to the host an agent
+# actually reaches; a callout notes where the browser homepage redirects).
+#
+# `name` is the board's friendly display label, shown as "<domain> (<name>)";
+# omit it and the label is just the domain. To add an entry: add a row below
+# and merge. The next rescore (deploy hook or weekly cron) scores it onto the
+# board; to see it immediately, trigger POST /api/web-rescore per
+# docs/runbooks/web-audit-operations.md.
 
 entries:
   - domain: anc.dev
     url: https://anc.dev/
-    name: anc.dev
+    name: anc
     description: The agent-native CLI standard and the agent-readiness auditor itself.
+  - domain: developers.cloudflare.com
+    url: https://developers.cloudflare.com/
+    name: Cloudflare Developers
+    description: Cloudflare's developer documentation and API reference.
+  - domain: telnyx.com
+    url: https://telnyx.com/
+    name: Telnyx
+    description: Telnyx's communications and connectivity API platform.
+  - domain: supabase.com
+    url: https://supabase.com/
+    name: Supabase
+    description: Supabase's Postgres application-development platform.
+  - domain: docs.gitbook.com
+    url: https://docs.gitbook.com/
+    name: GitBook Docs
+    description: GitBook's product documentation. Browser homepage redirects to gitbook.com/docs; agent surfaces resolve at this host.
+  - domain: developers.apideck.com
+    url: https://developers.apideck.com/
+    name: Apideck Developers
+    description: Apideck's unified-API developer documentation and MCP server.
+  - domain: firecrawl.dev
+    url: https://firecrawl.dev/
+    name: Firecrawl
+    description: Firecrawl's web-crawling and scraping API.
+  - domain: zuplo.com
+    url: https://zuplo.com/
+    name: Zuplo
+    description: Zuplo's API-gateway platform.
+  - domain: docs.n8n.io
+    url: https://docs.n8n.io/
+    name: n8n Docs
+    description: n8n's workflow-automation documentation.
+  - domain: modelcontextprotocol.io
+    url: https://modelcontextprotocol.io/
+    name: Model Context Protocol
+    description: The Model Context Protocol specification and server registry.
+  - domain: docs.zapier.com
+    url: https://docs.zapier.com/
+    name: Zapier Docs
+    description: Zapier's developer and API documentation and MCP server.
+  - domain: asana.com
+    url: https://asana.com/
+    name: Asana
+    description: Asana's work-management platform.
+  - domain: twilio.com
+    url: https://twilio.com/
+    name: Twilio
+    description: Twilio's communications API platform.
+  - domain: intercom.com
+    url: https://intercom.com/
+    name: Intercom
+    description: Intercom's customer-communications platform.
+  - domain: docs.upstash.com
+    url: https://docs.upstash.com/
+    name: Upstash Docs
+    description: Upstash's serverless data-platform documentation and MCP server.
+  - domain: docs.firecrawl.dev
+    url: https://docs.firecrawl.dev/
+    name: Firecrawl Docs
+    description: Firecrawl's developer documentation and hosted MCP server.
+  - domain: vercel.com
+    url: https://vercel.com/
+    name: Vercel
+    description: Vercel's frontend deployment platform.
+  - domain: docs.stripe.com
+    url: https://docs.stripe.com/
+    name: Stripe Docs
+    description: Stripe's API and product documentation.
+  - domain: anthropic.com
+    url: https://anthropic.com/
+    name: Anthropic
+    description: Anthropic's company and product site.
+  - domain: docs.box.com
+    url: https://docs.box.com/
+    name: Box Docs
+    description: Box's developer documentation and MCP server.
+  - domain: hubspot.com
+    url: https://hubspot.com/
+    name: HubSpot
+    description: HubSpot's CRM and marketing platform.
+  - domain: redocly.com
+    url: https://redocly.com/
+    name: Redocly
+    description: Redocly's OpenAPI documentation tooling and MCP server.
+  - domain: notion.so
+    url: https://notion.so/
+    name: Notion
+    description: Notion's connected-workspace platform.
+  - domain: claude.com
+    url: https://claude.com/
+    name: Claude
+    description: Anthropic's Claude product site.
+  - domain: mcpservers.org
+    url: https://mcpservers.org/
+    name: MCP Servers
+    description: A community directory of MCP servers.
+  - domain: docs.sentry.io
+    url: https://docs.sentry.io/
+    name: Sentry Docs
+    description: Sentry's application-monitoring documentation.
+  - domain: react.dev
+    url: https://react.dev/
+    name: React
+    description: The React JavaScript library documentation.
+  - domain: docs.anthropic.com
+    url: https://docs.anthropic.com/
+    name: Claude Docs
+    description: Anthropic's Claude developer documentation and MCP server. Browser homepage redirects to platform.claude.com/docs; agent surfaces resolve at this host.
+  - domain: cursor.com
+    url: https://cursor.com/
+    name: Cursor
+    description: Cursor's AI code-editor site.
+  - domain: docs.github.com
+    url: https://docs.github.com/
+    name: GitHub Docs
+    description: GitHub's product and API documentation.
+  - domain: paypal.com
+    url: https://paypal.com/
+    name: PayPal
+    description: PayPal's payments platform.
+  - domain: square.com
+    url: https://square.com/
+    name: Square
+    description: Square's commerce and payments platform.
+  - domain: pypi.org
+    url: https://pypi.org/
+    name: PyPI
+    description: The Python Package Index.
+  - domain: openapis.org
+    url: https://openapis.org/
+    name: OpenAPI Initiative
+    description: The OpenAPI Initiative.
+  - domain: shopify.com
+    url: https://shopify.com/
+    name: Shopify
+    description: Shopify's commerce platform.
+  - domain: grafana.com
+    url: https://grafana.com/
+    name: Grafana
+    description: Grafana's observability platform.
+  - domain: prisma.io
+    url: https://prisma.io/
+    name: Prisma
+    description: Prisma's database-toolkit platform.
+  - domain: postman.com
+    url: https://postman.com/
+    name: Postman
+    description: Postman's API development platform.
+  - domain: docs.plaid.com
+    url: https://docs.plaid.com/
+    name: Plaid Docs
+    description: Plaid's financial-data API documentation.
+  - domain: microsoft.com
+    url: https://microsoft.com/
+    name: Microsoft
+    description: Microsoft's company and product site.
+  - domain: openai.com
+    url: https://openai.com/
+    name: OpenAI
+    description: OpenAI's company and product site.
+  - domain: en.wikipedia.org
+    url: https://en.wikipedia.org/
+    name: Wikipedia
+    description: The English Wikipedia.
+  - domain: developer.mozilla.org
+    url: https://developer.mozilla.org/
+    name: MDN Web Docs
+    description: MDN Web Docs, Mozilla's web-platform reference.
+  - domain: context7.com
+    url: https://context7.com/
+    name: Context7
+    description: Context7's up-to-date library-documentation service for coding agents.
+  - domain: mcp.linear.app
+    url: https://mcp.linear.app/
+    name: Linear MCP
+    description: Linear's hosted MCP server for its issue-tracking platform.
+  - domain: document360.com
+    url: https://document360.com/
+    name: Document360
+    description: Document360's knowledge-base platform and MCP server.
+  - domain: mintlify.com
+    url: https://mintlify.com/
+    name: Mintlify
+    description: Mintlify's documentation-hosting platform.
+  - domain: huggingface.co
+    url: https://huggingface.co/
+    name: Hugging Face
+    description: Hugging Face's model and dataset hub and MCP server.
+  - domain: github.com
+    url: https://github.com/
+    name: GitHub
+    description: GitHub's code-hosting platform.
+  - domain: crates.io
+    url: https://crates.io/
+    description: The Rust community's crate registry.
+  - domain: docs.rs
+    url: https://docs.rs/
+    description: Automatic documentation hosting for Rust crates.
+  - domain: lobste.rs
+    url: https://lobste.rs/
+    name: Lobsters
+    description: The Lobsters computing-focused link-aggregation community.

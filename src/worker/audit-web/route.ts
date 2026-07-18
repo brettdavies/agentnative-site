@@ -18,12 +18,28 @@ import { detectPreference } from '../accept';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
-import { type CachedWebAudit, get as cacheGet, put as cachePut, keyFor, normalizeTargetUrl } from './cache';
+import { rebuildAggregatesIfSeeded } from './aggregate';
+import {
+  type CachedWebAudit,
+  get as cacheGet,
+  put as cachePut,
+  canonicalTargetOf,
+  getAggregate,
+  isStale,
+  keyFor,
+  normalizeTargetUrl,
+  WEB_AUDIT_STALE_AFTER_MS,
+} from './cache';
+
+export { canonicalTargetOf };
+
 import { runWebAudit } from './engine';
+import { buildWebLeaderboardBody, buildWebLeaderboardMarkdown } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
+import { loadWebSeed } from './seed';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
 
@@ -93,11 +109,6 @@ export function coerceUrl(raw: unknown): URL | null {
   }
 }
 
-/** Canonical audited target: scheme + host + `/` (drops port-less path/query/fragment beyond the origin). */
-export function canonicalTargetOf(url: URL): string {
-  return `${url.protocol}//${url.host}/`;
-}
-
 function checkEvent(result: EngineResult): string {
   return `${JSON.stringify({
     type: 'check',
@@ -154,15 +165,20 @@ export async function handleWebAudit(
   // 4. Cache hit — cache state is data, served ahead of every metered gate
   // including the kill switch, so a cached read needs no source IP, no
   // Turnstile, and consumes no budget (the audit_website MCP tool orders
-  // its gates the same way).
+  // its gates the same way). A hit older than the staleness threshold
+  // falls through to the fresh path so a re-run refreshes the board.
   const shareUrl = `/web/${shareDomain}`;
   const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
-  if (cached) {
+  if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
     return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
   }
 
-  // 5. Kill switch — fires on a cache miss only.
+  // 5. Kill switch — a stale hit is still data when fresh audits are off,
+  // so only a true miss surfaces the 503.
   if (env.WEB_AUDIT_ENABLED !== 'true') {
+    if (cached) {
+      return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+    }
     return new Response('web audit is currently disabled by the operator\n', {
       status: 503,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '3600', 'cache-control': 'no-store' },
@@ -266,6 +282,7 @@ export async function handleWebAudit(
       }
       if (scorecard && complete) {
         await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+        await rebuildAggregatesIfSeeded(env, shareDomain, SPEC_VERSION);
       }
       const terminal = complete
         ? { type: 'complete', scorecard, share_url: shareUrl }
@@ -289,6 +306,54 @@ export async function handleWebAudit(
       ...cookieHeader(setCookie),
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// GET /web board + .md twin — rendered at request time from the R2
+// leaderboard aggregate (the same source the homepage pane and the
+// list_website_audits tool read, so the surfaces cannot disagree).
+// ---------------------------------------------------------------------------
+
+export function isWebLeaderboardPath(pathname: string): boolean {
+  return pathname === '/web' || pathname === '/web.md';
+}
+
+export async function handleWebLeaderboard(request: Request, env: WebAuditRouteEnv): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('method not allowed', {
+      status: 405,
+      headers: { Allow: 'GET, HEAD', 'content-type': 'text/plain', 'cache-control': 'no-store' },
+    });
+  }
+  const url = new URL(request.url);
+  const wantMarkdown = url.pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+  const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+  const entries = aggregate?.entries ?? [];
+
+  if (wantMarkdown) {
+    return new Response(buildWebLeaderboardMarkdown(entries, url.origin), {
+      status: 200,
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    });
+  }
+
+  let template: string;
+  try {
+    template = await loadShellTemplate(env);
+  } catch (err) {
+    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
+      status: 500,
+      headers: { 'content-type': 'text/plain' },
+    });
+  }
+  const html = substituteShell(template, {
+    title: 'Web Agent-Readiness Leaderboard — anc.dev',
+    description:
+      'Agent-readiness scores for websites and their MCP servers, scored against the eight agent-native principles.',
+    canonicalPath: '/web',
+    body: buildWebLeaderboardBody(entries),
+  });
+  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 // ---------------------------------------------------------------------------
@@ -384,11 +449,10 @@ function esc(s: string): string {
 }
 
 /**
- * Resolve a domain's audit for the result page. R2 (on-demand audits)
- * wins; on a miss, fall back to the committed curated projection at
- * /_internal/web-scorecards/<domain>.json (leaderboard seeds, static +
- * committed, independent of R2 per KTD-8). Tries https then http for the
- * R2 key since the cache is scheme-specific.
+ * Resolve a domain's audit for the result page from per-domain R2 only
+ * (a miss renders the not-yet-scored state; there is no committed
+ * fallback). Tries https then http for the R2 key since the cache is
+ * scheme-specific.
  */
 async function lookupByDomain(
   env: WebAuditRouteEnv,
@@ -399,19 +463,7 @@ async function lookupByDomain(
     const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
     if (cached) return { scorecard: cached.scorecard, targetUrl };
   }
-  const curated = await loadCuratedScorecard(env, domain);
-  if (curated) return { scorecard: curated, targetUrl: normalizeTargetUrl(`https://${domain}/`) };
   return null;
-}
-
-async function loadCuratedScorecard(env: WebAuditRouteEnv, domain: string): Promise<unknown | null> {
-  try {
-    const res = await env.ASSETS.fetch(new Request(`https://assets.internal/_internal/web-scorecards/${domain}.json`));
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
 }
 
 export async function handleWebResultPage(request: Request, env: WebAuditRouteEnv): Promise<Response> {
@@ -438,9 +490,18 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     tool?: { name?: string; url?: string };
     score_pct?: number;
   };
+  // Friendly display label from the seed (absent for an unseeded on-demand
+  // audit); summary-render falls back to the domain.
+  let seedName: string | undefined;
+  try {
+    seedName = (await loadWebSeed(env)).find((e) => e.domain === match.domain)?.name;
+  } catch {
+    seedName = undefined;
+  }
   const input = {
     scorecard: scorecard as never,
     domain: match.domain,
+    name: seedName,
     targetUrl: scorecard.tool?.url ?? hit.targetUrl,
     remediation,
     origin: new URL(request.url).origin,
