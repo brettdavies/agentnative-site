@@ -1,0 +1,41 @@
+# Dependabot for the Bun / TypeScript toolchain (npm ecosystem).
+#
+# `target-branch: dev` is required: without it Dependabot opens PRs against the
+# default branch (main), which breaks the dev -> main flow. Dependabot reads
+# this config from the default branch, so it must live on main to take effect.
+#
+# `ignore` rules hold deps we pin deliberately: typescript majors (a TS major is
+# a reviewed step, never an automatic one), and the Playwright family
+# (@playwright/*, playwright, playwright-core), exact-pinned to the version
+# dotfiles provisions into $PLAYWRIGHT_BROWSERS_PATH, so bumping is a dotfiles
+# job, not a per-repo one.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Chicago
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    reviewers:
+      - brettdavies
+    labels:
+      - dependencies
+      - javascript
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@playwright/*"
+      - dependency-name: "playwright"
+      - dependency-name: "playwright-core"
