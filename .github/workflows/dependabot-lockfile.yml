@@ -1,0 +1,41 @@
+name: Dependabot lockfile sync
+
+# Dependabot bumps package.json but does not reconcile bun.lock, so the next
+# frozen install (CI, pre-push) fails on every Dependabot PR. This regenerates
+# bun.lock on the PR branch and commits it back via the shared reconcile-lockfile
+# action.
+#
+# The push uses a fine-grained PAT stored as a Dependabot secret
+# (DEPENDABOT_RECONCILE_TOKEN, Contents: write) so it re-triggers the required
+# CI checks on the new head; a GITHUB_TOKEN push would not, leaving the PR
+# unmergeable. Dependabot-triggered runs cannot read Actions secrets, which is
+# why the token lives in the Dependabot secret store. bun install --ignore-scripts
+# skips lifecycle scripts while still resolving bun.lock against the bumped
+# manifest.
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.DEPENDABOT_RECONCILE_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.11
+
+      - uses: brettdavies/.github/actions/reconcile-lockfile@main
+        with:
+          command: bun install --ignore-scripts
+          files: bun.lock
