@@ -1235,17 +1235,8 @@ body:has(.doc) main {
   flex: 1;
   min-width: 0;
 }
-.audit-hero .audit-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-  table-layout: fixed;
-}
 .audit-table td {
   overflow-wrap: anywhere;
-}
-.audit-hero .live-score__help {
-  margin: var(--space-3) 0 0;
 }
 
 /* Prev / next pager. */
@@ -1959,11 +1950,6 @@ main .remediation__body {
   background: var(--band-surface-bg);
   border-bottom: 1px solid var(--border-subtle);
 }
-.catcard__hd .audit-group__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
-}
 .audit-group__rollup {
   margin-left: auto;
   font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
@@ -2011,9 +1997,12 @@ main .remediation__body {
   flex: 1;
   min-width: 0;
 }
-.web-check summary .audit__status {
-  margin-left: auto;
-  width: auto;
+.audit__status {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  width: 3.5rem;
   white-space: nowrap;
 }
 .web-check--pass .web-check__mark,
@@ -2165,6 +2154,11 @@ main .remediation__body {
   font-weight: 600;
   margin: 0 0 0.5rem;
 }
+.catcard__hd .audit-group__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
 
 .audit-group__title a {
   color: var(--accent, #0058aa);
@@ -2186,6 +2180,12 @@ main .remediation__body {
   font-size: 0.88rem;
   table-layout: fixed;
 }
+.audit-hero .audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  table-layout: fixed;
+}
 .audit-table td {
   overflow-wrap: anywhere;
 }
@@ -2194,15 +2194,6 @@ main .remediation__body {
   padding: 0.35rem 0.6rem;
   border-bottom: 1px solid var(--border-subtle, #e5e8eb);
   vertical-align: top;
-}
-
-.audit__status {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  width: 3.5rem;
-  white-space: nowrap;
 }
 
 .audit--pass .audit__status {
@@ -2244,6 +2235,11 @@ main .remediation__body {
   white-space: nowrap;
   width: auto;
   padding-right: 0.75rem;
+}
+.web-check summary .audit__status {
+  margin-left: auto;
+  width: auto;
+  white-space: nowrap;
 }
 .audit__label {
   color: var(--fg-body, #1a2026);
@@ -2534,6 +2530,9 @@ main .remediation__body {
   font-size: 0.88rem;
   color: var(--fg-secondary);
   line-height: 1.6;
+}
+.audit-hero .live-score__help {
+  margin: var(--space-3) 0 0;
 }
 
 .live-score__chip {
