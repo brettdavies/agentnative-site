@@ -2115,6 +2115,14 @@ describe('renderBadgeSvg — SVG output', () => {
     expect(svg).toContain('#bf5200');
     expect(svg).not.toContain('#005da1');
   });
+
+  test('text shadow is softened, not badge-maker default heavy halo', () => {
+    const svg = renderBadgeSvg(0.91, '0.3.0');
+    expect(svg).toContain('stdDeviation="4"');
+    expect(svg).toContain('fill-opacity=".4"');
+    expect(svg).not.toContain('stdDeviation="16"');
+    expect(svg).not.toContain('fill-opacity=".8"');
+  });
 });
 
 // -------------------------------------------------------------------
