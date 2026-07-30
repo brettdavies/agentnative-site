@@ -13,7 +13,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
