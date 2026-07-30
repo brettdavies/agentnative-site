@@ -382,7 +382,10 @@ describe('WebRescoreWorkflow entrypoint', () => {
     const { step, names } = makeStep();
     // Real audit would hit the network; the entrypoint path is exercised
     // with the seed load + rebuild only by letting the audit step fail.
-    const result = (await wf.run({ payload: {}, timestamp: new Date(), instanceId: 'test' }, step as never)) as {
+    const result = (await wf.run(
+      { payload: {}, timestamp: new Date(), instanceId: 'test' } as never,
+      step as never,
+    )) as {
       audited: string[];
       skipped: string[];
     };
