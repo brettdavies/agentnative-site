@@ -67,7 +67,7 @@ const MARKDOWN_CHECKS: WebCheck[] = [
     tier: 'optional',
     keyword: 'may',
     antecedent: 'markdown-twin',
-    with: { path: '/', expect: { header_regex: { name: 'vary', pattern: '(?=.*accept)(?=.*user-agent)' } } },
+    with: { path: '/', expect: { header_regex: { name: 'vary', pattern: '(?=.*accept(?!-))(?=.*user-agent)' } } },
   }),
 ];
 
@@ -232,5 +232,20 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
       expect(row?.status).toBe('n_a');
       expect(row?.na_reason).toBe('optional-absent');
     }
+  });
+
+  test('markdown-vary rejects Vary: Accept-Encoding, User-Agent (Accept-Encoding is not Accept)', async () => {
+    // "accept" is a substring of "accept-encoding", so a naive lookahead
+    // credits a Vary that never lists Accept itself.
+    function variesOnEncodingOnly(): Response {
+      return htmlResponse({ link: MD_ALTERNATE_LINK, vary: 'Accept-Encoding, User-Agent' });
+    }
+    const { fetchImpl } = siteFetch(variesOnEncodingOnly);
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+    );
+    const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
+    expect(row?.status).toBe('n_a');
+    expect(row?.na_reason).toBe('optional-absent');
   });
 });

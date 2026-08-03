@@ -377,7 +377,7 @@ checks:
     with:
       path: /
       expect:
-        header_regex: { name: vary, pattern: "(?=.*accept)(?=.*user-agent)" }
+        header_regex: { name: vary, pattern: "(?=.*accept(?!-))(?=.*user-agent)" }
     hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
 
   - id: root-meta-description
