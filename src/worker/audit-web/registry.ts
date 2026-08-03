@@ -25,6 +25,7 @@ export type AntecedentToken =
   | 'docs-site'
   | 'root-llms-txt'
   | 'root-llms-full-txt'
+  | 'markdown-twin'
   | 'robots-present'
   | 'auth-present';
 

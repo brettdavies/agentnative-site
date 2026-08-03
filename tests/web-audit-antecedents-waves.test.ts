@@ -11,6 +11,7 @@ describe('WAVE1_CHECK_IDS', () => {
       'oauth-discovery',
       'mcp-initialize',
       'sitemap',
+      'accept-markdown',
     ]) {
       expect(WAVE1_CHECK_IDS.has(id)).toBe(true);
     }

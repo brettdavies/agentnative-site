@@ -320,6 +320,66 @@ checks:
       expect: { content_type: "markdown|text/plain" }
     hint: 'Honor `Accept: text/markdown` on content URLs; return raw markdown, not HTML chrome.'
 
+  - id: markdown-cli-ua
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [all]
+    antecedent: markdown-twin
+    weight: 1
+    title: Bare CLI User-Agent receives the markdown twin
+    handler: http
+    with:
+      path: /
+      headers: { User-Agent: "curl/8.7.1", Accept: "*/*" }
+      expect: { content_type: "markdown|text/plain" }
+    hint: 'Serve the markdown twin to shell HTTP clients (curl/wget/library UAs) that state no content-type preference, so scripted fetches get source, not HTML chrome.'
+
+  - id: markdown-agent-ua
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [all]
+    antecedent: markdown-twin
+    weight: 1
+    title: AI user-fetch User-Agent receives the markdown twin
+    handler: http
+    with:
+      path: /
+      headers: { User-Agent: "ChatGPT-User/1.0 (+https://openai.com/bot)", Accept: "*/*" }
+      expect: { content_type: "markdown|text/plain" }
+    hint: 'Serve the markdown twin to AI on-demand user-fetchers (ChatGPT-User, Claude-User, Perplexity-User) that state no content-type preference.'
+
+  - id: markdown-accept-plain
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [all]
+    antecedent: markdown-twin
+    weight: 1
+    title: Accept text/plain returns the markdown twin
+    handler: http
+    with:
+      path: /
+      headers: { Accept: "text/plain" }
+      expect: { content_type: "markdown|text/plain" }
+    hint: 'Treat Accept text/plain as a markdown request: return the raw markdown source, not HTML chrome.'
+
+  - id: markdown-vary
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [all]
+    antecedent: markdown-twin
+    weight: 1
+    title: Negotiated responses carry Vary Accept, User-Agent
+    handler: http
+    with:
+      path: /
+      expect:
+        header_regex: { name: vary, pattern: "(?=.*accept(?!-))(?=.*user-agent)" }
+    hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
+
   - id: root-meta-description
     category: content-for-agents
     tier: recommended
