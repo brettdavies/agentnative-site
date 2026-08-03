@@ -30,13 +30,15 @@ scoring-policy value, not fixed in this glossary.
 
 ### Markdown twin
 
-The verbatim markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
-text/markdown`, and concatenated into `llms-full.txt`. It is the agent-facing half of the site's dual-surface contract:
-one markdown source emits both an HTML page for browsers and this twin for agents.
+The markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
+text/markdown`. It opens with a short frontmatter block (title, description, canonical URL) followed by the source body
+verbatim, with site-internal links resolved to absolute URLs. The frontmatter-free body is what gets concatenated into
+`llms-full.txt`. It is the agent-facing half of the site's dual-surface contract: one markdown source emits both an HTML
+page for browsers and this twin for agents.
 
-Because the twin is served from the source verbatim, only prose belongs in the content source. Interactive HTML that
-renders correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build
-template and substituted per surface rather than authored inline.
+Because the twin's body is the source verbatim, only prose belongs in the content source. Interactive HTML that renders
+correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build template and
+substituted per surface rather than authored inline.
 
 ## Live scoring
 
@@ -137,11 +139,18 @@ how-to-fix reference.
 
 ### Leaderboard aggregate
 
-The precomputed board object every web-leaderboard surface reads: a ranked full board plus a top-N frontpage slice,
-rebuilt from the per-domain web scorecards. It is the single source that keeps the leaderboard page, the homepage web
-pane, and the MCP board listing in agreement, so a fresh audit cannot leave one surface showing a different score than
-another. When it is absent (a fresh deploy, or a spec-version change that rotates every cached key) the surfaces render
-a scoring-in-progress state until the next rescore rebuilds it.
+The precomputed board object the homepage web pane, the MCP board listing, and the curated view of `/web` all read: a
+ranked full board plus a top-N frontpage slice, rebuilt from the per-domain web scorecards. It keeps those surfaces in
+agreement, so a fresh audit cannot leave one showing a different score than another. When it is absent (a fresh deploy,
+or a spec-version change that rotates every cached key) the surfaces that depend on it render a scoring-in-progress
+state until the next rescore rebuilds it.
+
+### Board view
+
+The two ways `/web` (and its markdown twin) render the ranked list: the curated view shows only the leaderboard
+aggregate's registry-seeded rows; the all view, the default, adds every other non-expired cached audit — sites a user
+submitted on demand rather than the registry — read live rather than from the aggregate. The homepage pane and the MCP
+board listing always render curated only; there is no all-view equivalent for either.
 
 ### Web rescore
 
