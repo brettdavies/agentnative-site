@@ -2,7 +2,7 @@
 // its root llms.txt / llms-full.txt indexes are present.
 
 import type { AntecedentToken } from '../registry';
-import { type AntecedentResolver, rootContentType, sourcePassed } from './context';
+import { type AntecedentResolver, htmlRootGate, sourcePassed } from './context';
 
 const docsSite: AntecedentResolver = (ctx) =>
   ctx.siteType === 'content' || sourcePassed(ctx, 'llms-txt') ? 'apply' : 'n_a';
@@ -14,9 +14,9 @@ const rootLlmsFullTxt: AntecedentResolver = (ctx) => (sourcePassed(ctx, 'llms-fu
 // A markdown twin is an affordance of an HTML page: a non-HTML root has no
 // twin to serve, and a root that never answered gates dependents to error.
 const markdownTwin: AntecedentResolver = (ctx) => {
-  if (ctx.root === null || ctx.root.status === null) return 'error';
-  if (!rootContentType(ctx).includes('text/html')) return 'n_a';
-  const link = ctx.root.headers.link ?? '';
+  const gate = htmlRootGate(ctx);
+  if (gate) return gate;
+  const link = ctx.root?.headers.link ?? '';
   const advertisesMdAlternate = /rel=["']?alternate["']?/i.test(link) && /text\/markdown/i.test(link);
   return sourcePassed(ctx, 'accept-markdown') || sourcePassed(ctx, 'llms-txt') || advertisesMdAlternate
     ? 'apply'
