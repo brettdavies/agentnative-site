@@ -4,13 +4,21 @@
 //
 //   HTML responses         Link: </p<n>.md>; rel="alternate"; type="text/markdown"
 //                          X-Llms-Txt: /llms.txt
+//                          Vary: Accept, User-Agent
 //                          Cache-Control: public, max-age=300, s-maxage=86400,
 //                                         stale-while-revalidate=60
 //
 //   Markdown responses     Content-Type: text/markdown; charset=utf-8
 //                          X-Robots-Tag: noindex
+//                          Vary: Accept, User-Agent
 //                          Cache-Control: public, max-age=300, s-maxage=86400,
 //                                         stale-while-revalidate=60
+//
+//   HTML + Markdown carry Vary because the twin is negotiated on the SAME URL
+//   by both Accept and User-Agent (see accept.ts): a shared cache MUST key on
+//   both or it serves one client's variant to another. Cloudflare's own edge
+//   ignores Vary except Accept-Encoding, but these dynamic responses are not
+//   edge-cached, and browsers and third-party proxies honor it.
 //
 //   JSON responses (.json) Content-Type: application/json; charset=utf-8
 //                          Access-Control-Allow-Origin: *
@@ -144,6 +152,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   if (opts.servedMarkdown) {
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
     headers.set('X-Robots-Tag', 'noindex');
+    headers.set('Vary', 'Accept, User-Agent');
     headers.set('Cache-Control', SHORT_CACHE);
   } else if (isJson(opts.pathname)) {
     headers.set('Content-Type', 'application/json; charset=utf-8');
@@ -160,6 +169,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     const twinLink = `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`;
     headers.set('Link', opts.pathname === '/' ? `${twinLink}, ${ROOT_DISCOVERY_LINKS}` : twinLink);
     headers.set('X-Llms-Txt', '/llms.txt');
+    headers.set('Vary', 'Accept, User-Agent');
     headers.set('Cache-Control', SHORT_CACHE);
     // CSP applies to HTML responses only — the markdown / JSON / SVG
     // branches above MUST stay free of HTML-only directives like
