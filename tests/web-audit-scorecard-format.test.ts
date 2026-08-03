@@ -6,12 +6,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { WebAggregateEntry } from '../src/worker/audit-web/cache';
 import {
   buildFrontpageBoardRows,
   buildWebLeaderboardBody,
   buildWebLeaderboardMarkdown,
   rankWebEntries,
+  type WebBoardEntry,
 } from '../src/worker/audit-web/leaderboard-render';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import {
@@ -378,7 +378,7 @@ describe('web leaderboard (U15)', () => {
   // A small perfect site (relative 100, low global) vs a bigger,
   // higher-GLOBAL platform: GLOBAL ranks the platform first by default;
   // RELATIVE puts the perfect site on top.
-  function entry(domain: string, relative: number, globalScore: number): WebAggregateEntry {
+  function entry(domain: string, relative: number, globalScore: number): WebBoardEntry {
     return {
       domain,
       url: `https://${domain}/`,
@@ -386,9 +386,11 @@ describe('web leaderboard (U15)', () => {
       description: 'x',
       score_pct: relative,
       score: { relative, global: globalScore },
+      curated: true,
     };
   }
   const entries = [entry('small-perfect.dev', 100, 45), entry('big-platform.dev', 88, 79)];
+  const boardOpts = { view: 'all', curatedCount: 2, userCount: 0 } as const;
 
   test('default order is GLOBAL descending: the bigger routine outranks the small perfect site', () => {
     const ranked = rankWebEntries(entries);
@@ -402,7 +404,7 @@ describe('web leaderboard (U15)', () => {
   });
 
   test('renders both score columns, row sort data, the toggle control, and /web links', () => {
-    const html = buildWebLeaderboardBody(entries);
+    const html = buildWebLeaderboardBody(entries, boardOpts);
     expect(html).toContain('href="/web/small-perfect.dev"');
     expect(html).toContain('data-web-sort="global"');
     expect(html).toContain('data-web-sort="relative"');
@@ -414,19 +416,19 @@ describe('web leaderboard (U15)', () => {
   });
 
   test('an empty board renders the scoring-in-progress state, not a broken table', () => {
-    const html = buildWebLeaderboardBody([]);
+    const html = buildWebLeaderboardBody([], { view: 'all', curatedCount: 0, userCount: 0 });
     expect(html).not.toContain('<tbody>');
     expect(html).toContain('Scoring in progress');
   });
 
   test('markdown twin lists GLOBAL-ordered rows with both columns, origin-absolute', () => {
-    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev');
-    expect(md).toContain('| 1 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% |');
-    expect(md).toContain('| 2 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% |');
+    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev', boardOpts);
+    expect(md).toContain('| 1 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% | curated |');
+    expect(md).toContain('| 2 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% | curated |');
   });
 
   test('the CLI leaderboard hero is not present on the web board', () => {
-    expect(buildWebLeaderboardBody(entries)).toContain('Web Agent-Readiness Leaderboard');
+    expect(buildWebLeaderboardBody(entries, boardOpts)).toContain('Web Agent-Readiness Leaderboard');
   });
 });
 
@@ -558,7 +560,7 @@ describe('web scorecard schema doc drift guard (U16)', () => {
 });
 
 describe('leaderboard friendly-name display', () => {
-  function entry(over: Partial<WebAggregateEntry> = {}): WebAggregateEntry {
+  function entry(over: Partial<WebBoardEntry> = {}): WebBoardEntry {
     return {
       domain: 'developers.cloudflare.com',
       url: 'https://developers.cloudflare.com/',
@@ -566,12 +568,14 @@ describe('leaderboard friendly-name display', () => {
       description: 'Cloudflare developer docs.',
       score_pct: 96,
       score: { relative: 96, global: 90 },
+      curated: true,
       ...over,
     };
   }
+  const singleOpts = { view: 'all', curatedCount: 1, userCount: 0 } as const;
 
   test('/web renders "<domain> (<name>)" linking to the detail page, not the external site', () => {
-    const html = buildWebLeaderboardBody([entry()]);
+    const html = buildWebLeaderboardBody([entry()], singleOpts);
     // whole-row stretched link: one anchor on the domain, row is position-anchored
     expect(html).toContain('<tr class="lb-row"');
     expect(html).toContain('<a class="lb-rowlink" href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
@@ -581,9 +585,10 @@ describe('leaderboard friendly-name display', () => {
   });
 
   test('a row whose name equals its domain shows no parenthetical', () => {
-    const html = buildWebLeaderboardBody([
-      entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' }),
-    ]);
+    const html = buildWebLeaderboardBody(
+      [entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' })],
+      singleOpts,
+    );
     expect(html).not.toContain('lb-tool__name');
   });
 
