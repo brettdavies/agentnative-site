@@ -24,8 +24,12 @@ import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
 import {
   ANC_VERSION,
+  absolutifyMarkdownLinks,
+  composeTwin,
   escHtml,
   parseFilename,
+  renderFrontmatter,
+  resolveBaseUrl,
   SITE_SPEC_VERSION,
   SPEC_VERSION,
   sortedGlob,
@@ -2667,5 +2671,95 @@ describe('buildLeaderboardBody — badge callout', () => {
   test('callout links to /badge', () => {
     const html = buildLeaderboardBody([entry('eza', 1.0)], '<p>m</p>');
     expect(html).toContain('href="/badge"');
+  });
+});
+
+// -------------------------------------------------------------------
+// Twin frontmatter — renderFrontmatter + composeTwin (shared by the
+// homepage, subpage, and principle twin emitters and by invariant #4).
+// -------------------------------------------------------------------
+
+describe('renderFrontmatter — YAML frontmatter block for markdown twins', () => {
+  const meta = {
+    title: 'The agent-native standard',
+    description: 'One bar for agent-readiness.',
+    url: 'https://anc.dev/',
+  };
+
+  test('emits a fenced block with title, description, and url keys', () => {
+    const block = renderFrontmatter(meta);
+    expect(block.startsWith('---\n')).toBe(true);
+    expect(block.endsWith('---\n\n')).toBe(true);
+    expect(block).toContain('title:');
+    expect(block).toContain('description:');
+    expect(block).toContain('url:');
+  });
+
+  test('round-trips through yaml.load', async () => {
+    const yaml = await import('js-yaml');
+    const block = renderFrontmatter(meta);
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(meta);
+  });
+
+  test('a colon-space title serializes to valid YAML and round-trips', async () => {
+    const yaml = await import('js-yaml');
+    const colonMeta = { ...meta, title: 'P3: Progressive Help Discovery' };
+    const block = renderFrontmatter(colonMeta);
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(colonMeta);
+  });
+
+  test('a description with double quotes and a trailing ellipsis round-trips', async () => {
+    const yaml = await import('js-yaml');
+    const trickyMeta = { ...meta, description: 'Scored "MUST / SHOULD / MAY", not asserted…' };
+    const block = renderFrontmatter(trickyMeta);
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(trickyMeta);
+  });
+
+  test('an absolute url serializes as a plain scalar and round-trips', async () => {
+    const yaml = await import('js-yaml');
+    const urlMeta = { ...meta, url: 'https://anc.dev/p3' };
+    const block = renderFrontmatter(urlMeta);
+    expect(block).toContain('url: https://anc.dev/p3\n');
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(urlMeta);
+  });
+
+  test('a 180-char description stays on one physical line (no folded block scalar)', () => {
+    const longMeta = { ...meta, description: `${'a'.repeat(90)} ${'b'.repeat(89)}` };
+    expect(longMeta.description.length).toBe(180);
+    const block = renderFrontmatter(longMeta);
+    const descriptionLines = block.split('\n').filter((l) => l.startsWith('description:'));
+    expect(descriptionLines.length).toBe(1);
+    expect(descriptionLines[0]).toContain('b'.repeat(89));
+    expect(block).not.toContain('>-');
+  });
+});
+
+describe('composeTwin — frontmatter + absolutified body', () => {
+  const meta = {
+    title: 'P3: Progressive Help Discovery',
+    description: 'Help output is layered.',
+    url: 'https://anc.dev/p3',
+  };
+  const body = '# P3: Progressive Help Discovery\n\nSee [the standard](/p1) for context.\n';
+
+  test('output is the frontmatter block followed by the absolutified body', () => {
+    const twin = composeTwin(meta, body);
+    const fm = renderFrontmatter(meta);
+    expect(twin.startsWith(fm)).toBe(true);
+    expect(twin.slice(fm.length)).toBe(absolutifyMarkdownLinks(body));
+    expect(twin).toContain('](https://anc.dev/p1)');
+  });
+
+  test('honors an explicit baseUrl override for body absolutification', () => {
+    const staging = 'https://staging.example';
+    const stagingMeta = { ...meta, url: `${resolveBaseUrl(staging)}/p3` };
+    const twin = composeTwin(stagingMeta, body, staging);
+    expect(twin).toContain('url: https://staging.example/p3\n');
+    expect(twin).toContain('](https://staging.example/p1)');
+    expect(twin).not.toContain('](https://anc.dev/p1)');
   });
 });
