@@ -71,13 +71,20 @@ function viewToggleNav(opts: WebBoardRenderOpts): string {
   </nav>`;
 }
 
-function heroMeta(opts: WebBoardRenderOpts): string {
-  const total = opts.curatedCount + opts.userCount;
-  const cta = '<a href="/web-audit">Audit your own</a>.';
+function siteNoun(n: number): string {
+  return n === 1 ? 'site' : 'sites';
+}
+
+function boardCountLine(opts: Omit<WebBoardRenderOpts, 'sort'>): string {
   if (opts.view === 'curated') {
-    return `${opts.curatedCount} curated ${opts.curatedCount === 1 ? 'site' : 'sites'} on the board. ${cta}`;
+    return `${opts.curatedCount} curated ${siteNoun(opts.curatedCount)} on the board.`;
   }
-  return `${total} ${total === 1 ? 'site' : 'sites'} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted). ${cta}`;
+  const total = opts.curatedCount + opts.userCount;
+  return `${total} ${siteNoun(total)} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted).`;
+}
+
+function heroMeta(opts: WebBoardRenderOpts): string {
+  return `${boardCountLine(opts)} <a href="/web-audit">Audit your own</a>.`;
 }
 
 const BOARD_HERO = `<section class="leaderboard-hero">
@@ -173,15 +180,11 @@ export function buildWebLeaderboardMarkdown(
   opts: Omit<WebBoardRenderOpts, 'sort'>,
 ): string {
   const ranked = rankWebEntries(entries);
-  const total = opts.curatedCount + opts.userCount;
   const viewSwitch =
     opts.view === 'curated'
       ? `View: [All](${origin}/web.md) | Curated`
       : `View: All | [Curated](${origin}/web.md?view=curated)`;
-  const countLine =
-    opts.view === 'curated'
-      ? `${opts.curatedCount} curated ${opts.curatedCount === 1 ? 'site' : 'sites'} on the board.`
-      : `${total} ${total === 1 ? 'site' : 'sites'} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted).`;
+  const countLine = boardCountLine(opts);
   const lines = [
     '# Web Agent-Readiness Leaderboard',
     '',
