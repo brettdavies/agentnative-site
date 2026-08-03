@@ -2,8 +2,15 @@
 // `accepts` npm package (NOT substring matching, per the
 // `accept-header-q-value` learning).
 //
-// detectPreference — site-default ('html' | 'markdown'). Used by index.ts
-//                    for the asset-first path; markdown is opt-in.
+// detectPreference — site-default ('html' | 'markdown') for the asset-first
+//                    path. HTML is the default. Markdown is served when the
+//                    client negotiates for it (Accept: text/markdown or
+//                    text/plain, q-value parsed) OR, when the client states
+//                    no content-type preference (Accept absent or `*/*`),
+//                    presents a User-Agent on the MARKDOWN_UA_TOKENS
+//                    allowlist. An explicit Accept always wins over the UA
+//                    heuristic, so browsers, Googlebot, and AI
+//                    training/search crawlers stay on HTML.
 //
 // detectScorePreference — /api/score endpoint ('json' | 'markdown'). JSON is
 //                         default; markdown is opt-in. The handler combines
@@ -41,7 +48,47 @@ export type ScorePreference = 'json' | 'markdown';
 export type McpFormat = 'json' | 'sse' | false;
 export type McpGetFormat = 'html' | 'json' | 'markdown';
 
-const SITE_PREFERENCE_ORDER = ['text/html', 'text/markdown'];
+const SITE_PREFERENCE_ORDER = ['text/html', 'text/markdown', 'text/plain'];
+
+// User-Agent tokens that receive the markdown twin when the client states no
+// content-type preference (Accept absent or exactly `*/*`). Matched as
+// case-insensitive substrings; the trailing `/` anchors tokens that would
+// otherwise be ambiguous (e.g. `java/` not `java`). Two groups:
+//   - CLI / library HTTP clients: a human or script poking the site from a
+//     shell gets clean markdown instead of HTML chrome.
+//   - AI on-demand user-fetchers (ChatGPT-User, Claude-User, Perplexity-User):
+//     a live agent retrieving the page to answer a human, the canonical
+//     agent-native read path.
+// Strict allowlist — any unrecognized UA defaults to HTML. That deliberately
+// keeps browsers, classic search crawlers (Googlebot, bingbot — SEO), and AI
+// training/search-index crawlers (GPTBot, ClaudeBot, OAI-SearchBot,
+// Claude-SearchBot, PerplexityBot) on HTML.
+const MARKDOWN_UA_TOKENS = [
+  'curl/',
+  'wget/',
+  'httpie/',
+  'python-requests/',
+  'python-httpx/',
+  'go-http-client/',
+  'node-fetch',
+  'undici',
+  'okhttp/',
+  'java/',
+  'libwww-perl',
+  'postmanruntime/',
+  'axios/',
+  'chatgpt-user',
+  'claude-user',
+  'perplexity-user',
+];
+
+function isMarkdownEligibleAgent(request: Request): boolean {
+  const ua = request.headers.get('user-agent');
+  if (!ua) return false;
+  const lower = ua.toLowerCase();
+  return MARKDOWN_UA_TOKENS.some((token) => lower.includes(token));
+}
+
 const SCORE_PREFERENCE_ORDER = ['application/json', 'text/markdown', 'text/html'];
 const MCP_FORMAT_ORDER = ['application/json', 'text/event-stream'];
 const MCP_GET_ORDER = ['text/html', 'application/json', 'text/markdown'];
@@ -59,10 +106,22 @@ function shim(request: Request) {
 }
 
 export function detectPreference(request: Request): Preference {
-  // @ts-expect-error — the accepts package types an IncomingMessage but only
-  // reads `headers.accept`; the shim is sufficient.
-  const match = accepts(shim(request)).type(SITE_PREFERENCE_ORDER);
-  return match === 'text/markdown' ? 'markdown' : 'html';
+  const accept = request.headers.get('accept');
+  const statesNoPreference = !accept || accept.trim() === '' || accept.trim() === '*/*';
+
+  if (!statesNoPreference) {
+    // The client named a type: honor its q-value-ranked choice. text/plain
+    // is treated as a markdown request — markdown is valid text/plain, and a
+    // client asking for plain text wants the source, not HTML chrome.
+    // @ts-expect-error — the accepts package types an IncomingMessage but only
+    // reads `headers.accept`; the shim is sufficient.
+    const match = accepts(shim(request)).type(SITE_PREFERENCE_ORDER);
+    return match === 'text/markdown' || match === 'text/plain' ? 'markdown' : 'html';
+  }
+
+  // No stated preference (Accept absent or exactly `*/*`): default to HTML,
+  // but hand the markdown twin to recognized CLI tools and AI user-fetchers.
+  return isMarkdownEligibleAgent(request) ? 'markdown' : 'html';
 }
 
 export function detectScorePreference(request: Request): ScorePreference {

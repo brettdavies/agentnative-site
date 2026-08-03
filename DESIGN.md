@@ -212,12 +212,17 @@ convert to HTML with `remark-rehype` + `rehype-stringify`, template into a singl
 content index, emit `dist/sitemap.xml` and `dist/og-image.png` (copied from `public/og-image.png`; see §3.4.1 and
 `scripts/og/generate.ts`). Dependencies are all build-time and pinned.
 
-The Worker is ~80 lines: static assets from `env.ASSETS`, content-negotiation branch on `url.pathname.endsWith(".md")
-|| Accepts(req).type(['text/html', 'text/markdown']) === 'text/markdown'` (proper RFC 7231 q-value parsing via the
+The Worker serves static assets from `env.ASSETS` with a markdown-twin content-negotiation branch. A request receives
+the `.md` twin when the path ends in `.md`, when `Accepts(req).type(['text/html', 'text/markdown', 'text/plain'])`
+resolves to markdown or plain text (proper RFC 7231 q-value parsing via the
 [`accepts`](https://www.npmjs.com/package/accepts) npm package, because bare `includes("text/markdown")` mishandles
-`q=0` rejections, comma-separated media ranges, and the standard browser `*/*` fallback), `Link` and `X-Llms-Txt`
-response headers on every HTML response (copying the Mintlify pattern), `X-Robots-Tag: noindex` on the markdown variant
-so search engines do not double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
+`q=0` rejections and comma-separated media ranges), or, when the client states no content-type preference (`Accept`
+absent or `*/*`), when its `User-Agent` is on a strict allowlist of CLI tools and AI on-demand user-fetchers (`curl`,
+`wget`, `ChatGPT-User`, `Claude-User`, `Perplexity-User`, and peers). An explicit `Accept` wins over the User-Agent
+path, so browsers, Googlebot, and AI training/search-index crawlers stay on HTML. HTML and markdown responses carry
+`Vary: Accept, User-Agent` because the twin is negotiated on the same URL; every HTML response carries `Link` and
+`X-Llms-Txt` (the Mintlify pattern); the markdown variant carries `X-Robots-Tag: noindex` so search engines do not
+double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
 
 **Static-asset binding (A12).** `env.ASSETS` is the
 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/) binding, configured in
