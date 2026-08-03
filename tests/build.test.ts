@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +34,6 @@ import {
   escHtml,
   parseFilename,
   renderFrontmatter,
-  resolveBaseUrl,
   SITE_SPEC_VERSION,
   SPEC_VERSION,
   sortedGlob,
@@ -2747,25 +2746,28 @@ describe('composeTwin — frontmatter + absolutified body', () => {
   const meta = {
     title: 'P3: Progressive Help Discovery',
     description: 'Help output is layered.',
-    url: 'https://anc.dev/p3',
+    canonicalPath: '/p3',
   };
   const body = '# P3: Progressive Help Discovery\n\nSee [the standard](/p1) for context.\n';
 
   test('output is the frontmatter block followed by the absolutified body', () => {
     const twin = composeTwin(meta, body);
-    const fm = renderFrontmatter(meta);
+    const fm = renderFrontmatter({
+      title: meta.title,
+      description: meta.description,
+      url: 'https://anc.dev/p3',
+    });
     expect(twin.startsWith(fm)).toBe(true);
     expect(twin.slice(fm.length)).toBe(absolutifyMarkdownLinks(body));
     expect(twin).toContain('](https://anc.dev/p1)');
   });
 
-  test('honors an explicit baseUrl override for body absolutification', () => {
+  test('an explicit baseUrl override moves the frontmatter url and body links together', () => {
     const staging = 'https://staging.example';
-    const stagingMeta = { ...meta, url: `${resolveBaseUrl(staging)}/p3` };
-    const twin = composeTwin(stagingMeta, body, staging);
+    const twin = composeTwin(meta, body, staging);
     expect(twin).toContain('url: https://staging.example/p3\n');
     expect(twin).toContain('](https://staging.example/p1)');
-    expect(twin).not.toContain('](https://anc.dev/p1)');
+    expect(twin).not.toContain('anc.dev');
   });
 
   test('absolutifies site-relative links inside the description so the twin self-resolves', () => {
@@ -2812,8 +2814,12 @@ const HOMEPAGE_PRINCIPLES_FIXTURE = [
 ];
 
 describe('emitHomepage — index.md twin frontmatter', () => {
-  async function emitToTempDist() {
-    const distDir = join(tmpdir(), `homepage-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  // One emission serves all three tests: renderMarkdown rebuilds the full
+  // remark/rehype/Shiki pipeline per call, so per-test re-emission is the
+  // expensive part, and the tests only read the emitted files.
+  const distDir = join(tmpdir(), `homepage-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  beforeAll(async () => {
     await mkdir(distDir, { recursive: true });
     await emitHomepage({
       distDir,
@@ -2822,104 +2828,84 @@ describe('emitHomepage — index.md twin frontmatter', () => {
       principles: HOMEPAGE_PRINCIPLES_FIXTURE,
       leaderboard: homepageLeaderboardFixture(),
     });
-    return distDir;
-  }
+  });
+
+  afterAll(async () => {
+    await rm(distDir, { recursive: true, force: true });
+  });
 
   test('index.md opens with title/description/url frontmatter derived from _intro.md', async () => {
-    const distDir = await emitToTempDist();
-    try {
-      const introSource = await readFile(join(CONTENT_DIR, '_intro.md'), 'utf8');
-      const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
-      const expectedFm = renderFrontmatter({
-        title: extractTitle(introSource),
-        description: extractDescription(introSource),
-        url: 'https://anc.dev/',
-      });
-      expect(indexMd.startsWith(expectedFm)).toBe(true);
-    } finally {
-      await rm(distDir, { recursive: true, force: true });
-    }
+    const introSource = await readFile(join(CONTENT_DIR, '_intro.md'), 'utf8');
+    const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
+    const expectedFm = renderFrontmatter({
+      title: extractTitle(introSource),
+      description: extractDescription(introSource),
+      url: 'https://anc.dev/',
+    });
+    expect(indexMd.startsWith(expectedFm)).toBe(true);
   });
 
   test('twin body keeps the Principles section, the use-note, and homepage silence', async () => {
-    const distDir = await emitToTempDist();
-    try {
-      const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
-      expect(indexMd).toContain('## Principles');
-      const useSource = await readFile(join(CONTENT_DIR, '_use.md'), 'utf8');
-      expect(indexMd).toContain(absolutifyMarkdownLinks(useSource.trim()));
-      for (const needle of ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score']) {
-        expect(indexMd.toLowerCase()).not.toContain(needle.toLowerCase());
-      }
-    } finally {
-      await rm(distDir, { recursive: true, force: true });
+    const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
+    expect(indexMd).toContain('## Principles');
+    const useSource = await readFile(join(CONTENT_DIR, '_use.md'), 'utf8');
+    expect(indexMd).toContain(absolutifyMarkdownLinks(useSource.trim()));
+    for (const needle of ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score']) {
+      expect(indexMd.toLowerCase()).not.toContain(needle.toLowerCase());
     }
   });
 
   test('index.html carries no frontmatter fence or url line', async () => {
-    const distDir = await emitToTempDist();
-    try {
-      const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
-      expect(indexHtml).not.toContain('---\ntitle:');
-      expect(indexHtml).not.toMatch(/^url: /m);
-    } finally {
-      await rm(distDir, { recursive: true, force: true });
-    }
+    const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
+    expect(indexHtml).not.toContain('---\ntitle:');
+    expect(indexHtml).not.toMatch(/^url: /m);
   });
 });
 
 describe('emitSubPages — twin frontmatter', () => {
-  async function emitToTempDist() {
-    const distDir = join(tmpdir(), `subpages-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  // One emission serves all three tests: the subpage pipeline renders
+  // twelve markdown pages through Shiki per run.
+  const distDir = join(tmpdir(), `subpages-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  let subPageData: Array<{ name: string; source: string; title: string }> = [];
+
+  beforeAll(async () => {
     await mkdir(distDir, { recursive: true });
-    const subPageData = await emitSubPages({ distDir, contentDir: CONTENT_DIR, themeInit: '/* theme */' });
-    return { distDir, subPageData };
-  }
+    subPageData = await emitSubPages({ distDir, contentDir: CONTENT_DIR, themeInit: '/* theme */' });
+  });
+
+  afterAll(async () => {
+    await rm(distDir, { recursive: true, force: true });
+  });
 
   test('audit twin opens with frontmatter derived from its source; HTML stays clean', async () => {
-    const { distDir } = await emitToTempDist();
-    try {
-      const source = await readFile(join(CONTENT_DIR, 'audit.md'), 'utf8');
-      const auditMd = await readFile(join(distDir, 'audit.md'), 'utf8');
-      const expectedFm = renderFrontmatter({
-        title: extractTitle(source),
-        description: extractDescription(source),
-        url: 'https://anc.dev/audit',
-      });
-      expect(auditMd.startsWith(expectedFm)).toBe(true);
-      const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
-      expect(auditHtml).not.toContain('---\ntitle:');
-      expect(auditHtml).not.toMatch(/^url: /m);
-    } finally {
-      await rm(distDir, { recursive: true, force: true });
-    }
+    const source = await readFile(join(CONTENT_DIR, 'audit.md'), 'utf8');
+    const auditMd = await readFile(join(distDir, 'audit.md'), 'utf8');
+    const expectedFm = renderFrontmatter({
+      title: extractTitle(source),
+      description: extractDescription(source),
+      url: 'https://anc.dev/audit',
+    });
+    expect(auditMd.startsWith(expectedFm)).toBe(true);
+    const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
+    expect(auditHtml).not.toContain('---\ntitle:');
+    expect(auditHtml).not.toMatch(/^url: /m);
   });
 
   test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
-    const { distDir } = await emitToTempDist();
-    try {
-      const webAuditMd = await readFile(join(distDir, 'web-audit.md'), 'utf8');
-      expect(webAuditMd.startsWith('---\n')).toBe(true);
-      expect(webAuditMd).toContain('url: https://anc.dev/web-audit\n');
-      expect(webAuditMd).toContain('Enter a public URL at');
-      expect(webAuditMd).not.toContain('data-web-audit-form');
-    } finally {
-      await rm(distDir, { recursive: true, force: true });
-    }
+    const webAuditMd = await readFile(join(distDir, 'web-audit.md'), 'utf8');
+    expect(webAuditMd.startsWith('---\n')).toBe(true);
+    expect(webAuditMd).toContain('url: https://anc.dev/web-audit\n');
+    expect(webAuditMd).toContain('Enter a public URL at');
+    expect(webAuditMd).not.toContain('data-web-audit-form');
   });
 
-  test('subPageData still carries the frontmatter-free twin source for llms-full.txt', async () => {
-    const { distDir, subPageData } = await emitToTempDist();
-    try {
-      expect(subPageData.length).toBeGreaterThan(0);
-      for (const page of subPageData) {
-        expect({ name: page.name, hasFrontmatter: page.source.startsWith('---\n') }).toEqual({
-          name: page.name,
-          hasFrontmatter: false,
-        });
-      }
-    } finally {
-      await rm(distDir, { recursive: true, force: true });
+  test('subPageData still carries the frontmatter-free twin source for llms-full.txt', () => {
+    expect(subPageData.length).toBeGreaterThan(0);
+    for (const page of subPageData) {
+      expect({ name: page.name, hasFrontmatter: page.source.startsWith('---\n') }).toEqual({
+        name: page.name,
+        hasFrontmatter: false,
+      });
     }
   });
 });
@@ -2946,7 +2932,7 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
       {
         title: extractTitle(SOURCE),
         description: extractDescription(SOURCE),
-        url: 'https://anc.dev/p1',
+        canonicalPath: '/p1',
       },
       SOURCE,
     );

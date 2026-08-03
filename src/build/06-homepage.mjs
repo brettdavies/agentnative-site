@@ -22,7 +22,7 @@ import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.m
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
-import { composeTwin, escHtml, resolveBaseUrl } from './util.mjs';
+import { composeTwin, escHtml } from './util.mjs';
 
 const BOARD_ROWS = 5;
 
@@ -337,10 +337,7 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
   ];
   await writeFile(
     join(distDir, 'index.md'),
-    composeTwin(
-      { title: introTitle, description: introDescription, url: `${resolveBaseUrl()}/` },
-      indexMdLines.join('\n'),
-    ),
+    composeTwin({ title: introTitle, description: introDescription, canonicalPath: '/' }, indexMdLines.join('\n')),
   );
 
   return { introTitle, introSummary, introSource, specContextSource, useSource, introLede };

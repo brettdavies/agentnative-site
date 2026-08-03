@@ -121,7 +121,7 @@ describe('regression #3 — markdown twin is frontmatter + source with site-rela
       {
         title: extractTitle(sourceContent),
         description: extractDescription(sourceContent),
-        url: `https://anc.dev/p${n}`,
+        canonicalPath: `/p${n}`,
       },
       sourceContent,
     );

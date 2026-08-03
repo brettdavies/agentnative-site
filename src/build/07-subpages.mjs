@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
-import { composeTwin, resolveBaseUrl } from './util.mjs';
+import { composeTwin } from './util.mjs';
 
 // The CLI "score a binary" hero. A plain GET form (works without JS) that
 // prefills the homepage demo via ?score=.
@@ -131,7 +131,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     );
     await writeFile(
       join(distDir, `${name}.md`),
-      composeTwin({ title, description, url: `${resolveBaseUrl()}/${name}` }, twinSource),
+      composeTwin({ title, description, canonicalPath: `/${name}` }, twinSource),
     );
     // llms-full.txt consumes `source` and must stay frontmatter-free (the
     // A5 section header already carries the metadata), so push the raw

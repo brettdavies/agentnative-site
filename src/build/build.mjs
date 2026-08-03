@@ -54,7 +54,7 @@ import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
-import { composeTwin, escHtml, parseFilename, resolveBaseUrl, sortedGlob } from './util.mjs';
+import { composeTwin, escHtml, parseFilename, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -130,7 +130,7 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
       {
         title: extractTitle(sourceContent),
         description: extractDescription(sourceContent),
-        url: `${resolveBaseUrl()}/p${n}`,
+        canonicalPath: `/p${n}`,
       },
       sourceContent,
     );
@@ -241,10 +241,7 @@ export async function build() {
     // bytes with site-relative links absolutified, so `Accept: text/markdown`
     // agents fetching /p<n>.md get a self-describing, self-contained document.
     // Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
-    await writeFile(
-      join(DIST_DIR, `p${n}.md`),
-      composeTwin({ title, description, url: `${resolveBaseUrl()}/p${n}` }, source),
-    );
+    await writeFile(join(DIST_DIR, `p${n}.md`), composeTwin({ title, description, canonicalPath: `/p${n}` }, source));
   }
 
   // 6. Scorecard surface — leaderboard, per-tool pages, badges, coverage,

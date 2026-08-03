@@ -196,19 +196,25 @@ export function renderFrontmatter({ title, description, url }) {
  * Compose a complete markdown-twin string: frontmatter block followed by
  * the link-absolutified body. Emitters and the principle byte-equivalence
  * invariant both call this, so there is exactly one definition of a
- * twin's bytes.
+ * twin's bytes. Taking the site-relative `canonicalPath` (the same value
+ * callers pass to emitShell) and deriving the absolute `url` here keeps
+ * the frontmatter url and the absolutified links on the same base by
+ * construction.
  *
- * @param {{ title: string, description: string, url: string }} meta
+ * @param {{ title: string, description: string, canonicalPath: string }} meta
  * @param {string} bodyMarkdown
  * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
  * @returns {string}
  */
-export function composeTwin({ title, description, url }, bodyMarkdown, baseUrl) {
+export function composeTwin({ title, description, canonicalPath }, bodyMarkdown, baseUrl) {
   // The description is body prose (extractDescription) and can carry
   // authored site-relative links; the twin surface promises every link
   // self-resolves, so absolutify it like the body.
   return (
-    renderFrontmatter({ title, description: absolutifyMarkdownLinks(description, baseUrl), url }) +
-    absolutifyMarkdownLinks(bodyMarkdown, baseUrl)
+    renderFrontmatter({
+      title,
+      description: absolutifyMarkdownLinks(description, baseUrl),
+      url: `${resolveBaseUrl(baseUrl)}${canonicalPath}`,
+    }) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl)
   );
 }
