@@ -29,6 +29,7 @@ export const WEB_AUDIT_HANDLERS = new Set([
   'auth-md',
   'webmcp',
   'scoped-llms',
+  'markdown-frontmatter',
 ]);
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([
@@ -42,6 +43,7 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'docs-site',
   'root-llms-txt',
   'root-llms-full-txt',
+  'markdown-twin',
   'robots-present',
   'auth-present',
 ]);

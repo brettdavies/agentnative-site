@@ -26,6 +26,7 @@ import { runAuthMd } from './handlers/auth-md';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
+import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import { runMcp } from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
@@ -65,6 +66,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     'auth-md': runAuthMd,
     webmcp: runWebMcp,
     'scoped-llms': runScopedLlms,
+    'markdown-frontmatter': runMarkdownFrontmatter,
   };
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {

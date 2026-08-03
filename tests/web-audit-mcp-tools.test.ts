@@ -48,6 +48,7 @@ interface WebEnvOpts {
   mcpEnabled?: boolean;
   cachePrefill?: Record<string, unknown>;
   limiterOk?: boolean;
+  failRegistry?: boolean;
 }
 
 async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
@@ -63,7 +64,9 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
         const ok = (body: string) =>
           new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
         if (path === '/_internal/mcp-catalog.json') return ok(JSON.stringify(FIXTURE_CATALOG));
-        if (path === '/_internal/web-audit-registry.json') return ok(registry);
+        if (path === '/_internal/web-audit-registry.json') {
+          return opts.failRegistry ? new Response('boom', { status: 500 }) : ok(registry);
+        }
         if (path === '/_internal/web-remediation.json') return ok(remediation);
         if (path === '/_internal/web-seed.json') {
           return ok(
@@ -193,6 +196,98 @@ describe('get_website_audit', () => {
     const env = await makeEnv();
     const res = await callTool(env, 'get_website_audit', { url: 'http://169.254.169.254/' });
     expect(res.result?.isError).toBe(true);
+  });
+});
+
+describe('get_website_audit read-time enrichment', () => {
+  const OLD_SHAPE = {
+    schema_version: '0.2',
+    target_url: 'https://example.com/',
+    score_pct: 60,
+    score: { relative: 60, global: 48 },
+    summary: { pass: 2, broken: 1, absent: 1, n_a: 0, skip: 0, error: 0 },
+    categories: [{ id: 'mcp-api', name: 'MCP & API', passed: 2, counted: 4 }],
+    results: [
+      { id: 'openapi', category: 'mcp-api', keyword: 'must', status: 'absent', evidence: 'openapi.json -> 404' },
+      { id: 'mcp-initialize', category: 'mcp-api', keyword: 'must', status: 'pass', evidence: 'ok' },
+      { id: 'mcp-tools-list', category: 'mcp-api', keyword: 'should', status: 'broken', evidence: 'no tools array' },
+      { id: 'llms-txt', category: 'mcp-api', keyword: 'should', status: 'pass', evidence: 'llms.txt -> 200' },
+    ],
+  };
+
+  async function oldShapeEnv(extra: WebEnvOpts = {}) {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    return makeEnv({
+      cachePrefill: {
+        [key]: { spec_version: SPEC_VERSION, target_url: 'https://example.com/', scorecard: OLD_SHAPE },
+      },
+      ...extra,
+    });
+  }
+
+  type EnrichedRow = { id: string; category: string; result?: string; remediation?: { skill_url: string } };
+
+  test('a cache hit on an old-shape scorecard returns the current category split with rows re-tagged', async () => {
+    const env = await oldShapeEnv();
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    expect(body.found).toBe(true);
+    const scorecard = body.scorecard as {
+      categories: Array<{ id: string }>;
+      results: EnrichedRow[];
+    };
+    const catIds = scorecard.categories.map((c) => c.id);
+    expect(catIds).not.toContain('mcp-api');
+    expect(catIds).toEqual(expect.arrayContaining(['api', 'mcp', 'content-for-agents']));
+    const byId = new Map(scorecard.results.map((r) => [r.id, r]));
+    expect(byId.get('openapi')?.category).toBe('api');
+    expect(byId.get('mcp-initialize')?.category).toBe('mcp');
+    expect(byId.get('llms-txt')?.category).toBe('content-for-agents');
+  });
+
+  test('a cache hit carries a result line on every row and remediation on non-passing rows only', async () => {
+    const env = await oldShapeEnv();
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    const scorecard = body.scorecard as { results: EnrichedRow[] };
+    const byId = new Map(scorecard.results.map((r) => [r.id, r]));
+
+    expect(byId.get('openapi')?.result).toContain('Not found');
+    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+
+    expect(byId.get('mcp-tools-list')?.result).toContain('Present but broken');
+    expect(byId.get('mcp-tools-list')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/mcp-tools-list');
+
+    const pass = byId.get('llms-txt');
+    expect(pass?.result).toContain('Verified');
+    expect(pass?.remediation).toBeUndefined();
+  });
+
+  test('a registry-load failure still returns the scorecard (remediation-only, not an error)', async () => {
+    const env = await oldShapeEnv({ failRegistry: true });
+    const res = await callTool(env, 'get_website_audit', { url: 'example.com' });
+    expect(res.result?.isError).toBeFalsy();
+    const body = jsonContent(res);
+    expect(body.found).toBe(true);
+    const scorecard = body.scorecard as { categories: Array<{ id: string }>; results: EnrichedRow[] };
+    // No registry -> stored category shape is preserved.
+    expect(scorecard.categories.map((c) => c.id)).toEqual(['mcp-api']);
+    // Remediation still attaches from the catalog.
+    const byId = new Map(scorecard.results.map((r) => [r.id, r]));
+    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+  });
+
+  test('the minimal-payload guard passes a badge-only scorecard through unchanged', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const env = await makeEnv({
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scorecard: { badge: { score_pct: 88 } },
+        },
+      },
+    });
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    expect((body.scorecard as { badge: { score_pct: number } }).badge.score_pct).toBe(88);
   });
 });
 
@@ -342,6 +437,58 @@ describe('list_website_audits', () => {
     expect(body.count).toBe(0);
     expect(body.entries).toEqual([]);
   });
+
+  // Boundary guard: the tool stays curated-aggregate-only. A cached
+  // non-seeded audit in R2 (surfaced by the /web all view) must never
+  // appear here; the mock bucket has no list(), so an enumeration attempt
+  // fails loudly.
+  test('a non-seeded cached audit in R2 never appears in the tool output', async () => {
+    const env = await makeEnv({
+      cachePrefill: {
+        [`audits/web/leaderboard/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          generated_at: new Date().toISOString(),
+          entries: [
+            {
+              domain: 'anc.dev',
+              url: 'https://anc.dev/',
+              name: 'anc.dev',
+              description: 'x',
+              score_pct: 67,
+              score: { relative: 67, global: 62 },
+            },
+          ],
+        },
+        [`audits/web/${'a'.repeat(64)}/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://user-submitted.dev/',
+          scorecard: { target_url: 'https://user-submitted.dev/', score_pct: 99 },
+          scored_at: new Date().toISOString(),
+        },
+      },
+    });
+    const body = jsonContent(await callTool(env, 'list_website_audits', {}));
+    expect(body.count).toBe(1);
+    const entries = body.entries as Array<{ domain: string }>;
+    expect(entries.map((e) => e.domain)).toEqual(['anc.dev']);
+  });
+
+  test('the tool description still presents the board as curated', async () => {
+    const env = await makeEnv();
+    const handler = await buildMcpHandler(env, { jsonResponse: true });
+    const res = await handler(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    const body = JSON.parse(await res.text()) as { result: { tools: Array<{ name: string; description: string }> } };
+    const tool = body.result.tools.find((t) => t.name === 'list_website_audits');
+    expect(tool?.description).toContain('curated');
+  });
 });
 
 describe('tool registration', () => {
@@ -462,5 +609,78 @@ describe('audit_website inline remediation (U13)', () => {
     const na = byId.get('dns-aid');
     expect(na?.result).toContain('Not implemented, optional');
     expect(na?.remediation).toBeUndefined();
+  });
+
+  test('a warm cache hit carries the current category split (parity with the fresh path)', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const env = await makeEnv({
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scored_at: new Date().toISOString(),
+          scorecard: {
+            schema_version: '0.2',
+            target_url: 'https://example.com/',
+            score_pct: 50,
+            categories: [{ id: 'mcp-api', name: 'MCP & API', passed: 1, counted: 2 }],
+            results: [
+              {
+                id: 'openapi',
+                category: 'mcp-api',
+                keyword: 'must',
+                status: 'absent',
+                evidence: 'openapi.json -> 404',
+              },
+              { id: 'mcp-initialize', category: 'mcp-api', keyword: 'must', status: 'pass', evidence: 'ok' },
+            ],
+          },
+        },
+      },
+    });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9'));
+    const scorecard = body.scorecard as {
+      categories: Array<{ id: string }>;
+      results: Array<{ id: string; category: string }>;
+    };
+    expect(scorecard.categories.map((c) => c.id)).not.toContain('mcp-api');
+    expect(scorecard.results.find((r) => r.id === 'openapi')?.category).toBe('api');
+    expect(scorecard.results.find((r) => r.id === 'mcp-initialize')?.category).toBe('mcp');
+  });
+});
+
+describe('cross-tool result parity', () => {
+  test('get_website_audit and audit_website return a byte-identical scorecard object for the same stored entry', async () => {
+    const key = await keyFor('https://example.com/', SPEC_VERSION);
+    const stored = {
+      schema_version: '0.2',
+      target_url: 'https://example.com/',
+      score_pct: 55,
+      score: { relative: 55, global: 44 },
+      summary: { pass: 1, broken: 1, absent: 1, n_a: 0, skip: 0, error: 0 },
+      categories: [{ id: 'mcp-api', name: 'MCP & API', passed: 1, counted: 3 }],
+      results: [
+        { id: 'openapi', category: 'mcp-api', keyword: 'must', status: 'absent', evidence: 'openapi.json -> 404' },
+        { id: 'mcp-tools-list', category: 'mcp-api', keyword: 'should', status: 'broken', evidence: 'no tools' },
+        { id: 'llms-txt', category: 'mcp-api', keyword: 'should', status: 'pass', evidence: 'llms.txt -> 200' },
+      ],
+    };
+    const env = await makeEnv({
+      cachePrefill: {
+        [key]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://example.com/',
+          scored_at: new Date().toISOString(),
+          scorecard: stored,
+        },
+      },
+    });
+    const getBody = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9'));
+    // The scorecard payload is identical across the two tools; the
+    // enclosing envelopes (found/share_url vs audited/source) differ.
+    expect(getBody.scorecard).toEqual(auditBody.scorecard);
+    expect(getBody.found).toBe(true);
+    expect(auditBody.source).toBe('cache');
   });
 });

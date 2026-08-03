@@ -172,6 +172,64 @@ remediation:
       same URL via content negotiation, invisibly to crawlers.
     resources:
       - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+  markdown-cli-ua:
+    title: Bare CLI User-Agent receives the markdown twin
+    goal: Serve the markdown twin to shell HTTP clients that state no content-type preference
+    fix: |
+      Sniff the request User-Agent and serve the markdown twin to bare shell clients (`curl`, `wget`,
+      and language HTTP libraries) that send `Accept: */*` or no `Accept` at all. A scripted `curl
+      https://your.site/` should get the raw markdown source, not the HTML shell, so pipelines parse
+      content instead of scraping chrome. Return the same twin you already expose to
+      `Accept: text/markdown`, keyed on the User-Agent this time.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+      - { label: RFC 9110 (User-Agent), url: "https://www.rfc-editor.org/rfc/rfc9110#name-user-agent" }
+  markdown-agent-ua:
+    title: AI user-fetch User-Agent receives the markdown twin
+    goal: Serve the markdown twin to AI on-demand user-fetchers that state no content-type preference
+    fix: |
+      Recognize the AI on-demand user-fetch User-Agents (`ChatGPT-User`, `Claude-User`,
+      `Perplexity-User`) and serve them the markdown twin when they send `Accept: */*` or no `Accept`.
+      These fetchers retrieve a page on a person's behalf and parse markdown far more reliably than a
+      JS-rendered page, so handing them source improves what the assistant reads back. Match the token
+      case-insensitively and fall through to HTML for everything you do not recognize.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+      - { label: OpenAI bots and User-Agents, url: "https://platform.openai.com/docs/bots" }
+  markdown-accept-plain:
+    title: Accept text/plain returns the markdown twin
+    goal: Treat Accept text/plain as a request for the raw markdown source
+    fix: |
+      Treat `Accept: text/plain` as a markdown request and return the raw markdown source rather than
+      the HTML shell. Many clients and libraries default to `text/plain` when they want the bytes, not
+      a rendered document, so honoring it hands them the same twin you serve for `Accept:
+      text/markdown`. Set the response `Content-Type` to `text/markdown` (or `text/plain`) so the
+      negotiated content type is unambiguous.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+  markdown-vary:
+    title: Negotiated responses carry Vary Accept, User-Agent
+    goal: Emit Vary Accept, User-Agent so shared caches never serve one client the wrong variant
+    fix: |
+      When the same URL serves HTML or markdown depending on the request, emit
+      `Vary: Accept, User-Agent` on every response. Without it a shared cache (a CDN or a corporate
+      proxy) can store the markdown twin under the bare URL and then hand it to a browser, or vice
+      versa. Listing both request headers you negotiate on tells every cache to key its stored copies
+      by them, so each client class gets the variant it asked for.
+    resources:
+      - { label: RFC 9110 (Vary), url: "https://www.rfc-editor.org/rfc/rfc9110#name-vary" }
+  markdown-frontmatter:
+    title: Markdown twin carries YAML frontmatter
+    goal: Prefix the markdown twin with a YAML frontmatter block so agents read page metadata without parsing the body
+    fix: |
+      Open each markdown twin with a YAML frontmatter block: a `---` fence line, `title`, `description`, and a
+      canonical `url` key, then a closing `---` fence, before the first heading. An agent then lifts the page's
+      title, summary, and canonical URL from structured keys instead of inferring them from prose, which is both
+      cheaper and less error-prone. Keep the block well-formed: an opened fence with no terminator, or a fence pair
+      with no keys, is worse than no frontmatter because it misleads a parser.
+    resources:
+      - { label: YAML front matter (Jekyll), url: "https://jekyllrb.com/docs/front-matter/" }
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
   root-meta-description:
     title: Root HTML has a descriptive meta description
     goal: Add a meta description naming what the service does and its agent entry points

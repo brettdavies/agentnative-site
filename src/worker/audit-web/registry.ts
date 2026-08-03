@@ -7,7 +7,15 @@
 
 export type WebCheckKeyword = 'must' | 'should' | 'may';
 export type WebCheckTier = 'required' | 'recommended' | 'optional';
-export type WebCheckHandler = 'http' | 'cors-preflight' | 'mcp' | 'dns-doh' | 'auth-md' | 'webmcp' | 'scoped-llms';
+export type WebCheckHandler =
+  | 'http'
+  | 'cors-preflight'
+  | 'mcp'
+  | 'dns-doh'
+  | 'auth-md'
+  | 'webmcp'
+  | 'scoped-llms'
+  | 'markdown-frontmatter';
 
 /** Declared audit site type (the entry-point argument). */
 export type WebSiteType = 'content' | 'api';
@@ -25,6 +33,7 @@ export type AntecedentToken =
   | 'docs-site'
   | 'root-llms-txt'
   | 'root-llms-full-txt'
+  | 'markdown-twin'
   | 'robots-present'
   | 'auth-present';
 

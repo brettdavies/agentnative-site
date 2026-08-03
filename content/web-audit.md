@@ -18,8 +18,10 @@ keyword and belongs to one of six categories:
 
 - **Discoverability** — `robots.txt`, `sitemap.xml`, `Link` headers, `<link rel>` pointers, and DNS-AID records under
   `_agents`.
-- **Content for agents** — `llms.txt` (root and per-section), `llms-full.txt`, `Accept: text/markdown` content
-  negotiation, and the root-HTML affordances (meta description, `<noscript>`, JSON-LD, semantic landmarks).
+- **Content for agents** — `llms.txt` (root and per-section), `llms-full.txt`, and markdown content negotiation:
+  `Accept: text/markdown`, the markdown twin served to bare CLI/library User-Agents and AI user-fetchers that state no
+  content-type preference, `Accept: text/plain` treated as a markdown request, and `Vary: Accept, User-Agent` on the
+  negotiated response. Plus the root-HTML affordances (meta description, `<noscript>`, JSON-LD, semantic landmarks).
 - **Bot & crawl policy** — AI-crawler rules, Content-Signal directives, `security.txt`, and Web Bot Auth.
 - **API** — an OpenAPI description, referenced JSON Schemas, and a `.well-known/api-catalog` (RFC 9727).
 - **MCP** — the `initialize` handshake, `tools/list` with input schemas, JSON-RPC error codes, a prompt GET answer (no

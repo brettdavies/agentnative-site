@@ -27,14 +27,21 @@ import {
   getAggregate,
   isStale,
   keyFor,
+  listAllWebAudits,
   normalizeTargetUrl,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 
 export { canonicalTargetOf };
 
+import { normalizeScorecardCategories } from './display';
 import { runWebAudit } from './engine';
-import { buildWebLeaderboardBody, buildWebLeaderboardMarkdown } from './leaderboard-render';
+import {
+  buildWebLeaderboardBody,
+  buildWebLeaderboardMarkdown,
+  type WebBoardEntry,
+  type WebBoardView,
+} from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
@@ -327,11 +334,46 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
   }
   const url = new URL(request.url);
   const wantMarkdown = url.pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+  // Unrecognized view values fall back to the all-cache default so a
+  // mistyped parameter never 404s a shareable board URL.
+  const view: WebBoardView = url.searchParams.get('view') === 'curated' ? 'curated' : 'all';
+  const sortRaw = url.searchParams.get('sort');
+  const sort: 'global' | 'relative' | null = sortRaw === 'relative' || sortRaw === 'global' ? sortRaw : null;
+
   const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
-  const entries = aggregate?.entries ?? [];
+  const curatedEntries: WebBoardEntry[] = (aggregate?.entries ?? []).map((e) => ({ ...e, curated: true }));
+
+  let entries = curatedEntries;
+  let userCount = 0;
+  if (view === 'all') {
+    // Dedup against the rendered curated rows AND the seed: the aggregate
+    // can lag the seed in either direction (freshly seeded domain not yet
+    // rebuilt, or a domain dropped from the seed still in the aggregate),
+    // and a duplicate row is worse than a missing one.
+    const excludeDomains = new Set(curatedEntries.map((e) => e.domain));
+    try {
+      for (const s of await loadWebSeed(env)) excludeDomains.add(s.domain);
+    } catch {
+      // Seed unavailable: the curated-row exclusion above still dedups
+      // every domain the board actually renders.
+    }
+    const userSubmitted = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains });
+    const userEntries: WebBoardEntry[] = userSubmitted.map((l) => ({
+      domain: l.domain,
+      url: `https://${l.domain}/`,
+      name: l.name,
+      description: '',
+      score_pct: l.score_pct,
+      score: l.score,
+      curated: false,
+    }));
+    entries = curatedEntries.concat(userEntries);
+    userCount = userEntries.length;
+  }
+  const renderOpts = { view, curatedCount: curatedEntries.length, userCount, sort };
 
   if (wantMarkdown) {
-    return new Response(buildWebLeaderboardMarkdown(entries, url.origin), {
+    return new Response(buildWebLeaderboardMarkdown(entries, url.origin, renderOpts), {
       status: 200,
       headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
     });
@@ -350,8 +392,8 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
     title: 'Web Agent-Readiness Leaderboard — anc.dev',
     description:
       'Agent-readiness scores for websites and their MCP servers, scored against the eight agent-native principles.',
-    canonicalPath: '/web',
-    body: buildWebLeaderboardBody(entries),
+    canonicalPath: view === 'curated' ? '/web?view=curated' : '/web',
+    body: buildWebLeaderboardBody(entries, renderOpts),
   });
   return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
@@ -478,7 +520,7 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   const hit = await lookupByDomain(env, match.domain);
   if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
 
-  // A missing remediation catalog degrades to generic prompts (R10).
+  // A missing remediation catalog degrades to generic prompts.
   let remediation: WebRemediationCatalog = {};
   try {
     remediation = await loadWebRemediationCatalog(env);
@@ -486,7 +528,17 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     remediation = {};
   }
 
-  const scorecard = hit.scorecard as {
+  // Re-derive the current category split at read time so a cached
+  // scorecard renders the current shape; a failed registry load falls
+  // back to the stored shape rather than failing the page.
+  let normalized: unknown = hit.scorecard;
+  try {
+    normalized = normalizeScorecardCategories(hit.scorecard, await loadWebAuditRegistry(env));
+  } catch {
+    normalized = hit.scorecard;
+  }
+
+  const scorecard = normalized as {
     tool?: { name?: string; url?: string };
     score_pct?: number;
   };
