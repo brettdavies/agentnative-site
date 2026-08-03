@@ -3,7 +3,8 @@
 // For each entry in `subPages`, reads content/<name>.md, renders the HTML
 // via the shared markdown pipeline, wraps in emitShell, and emits both the
 // HTML and markdown twin. The twin is the authored source with site-
-// relative links absolutified.
+// relative links absolutified, prefixed with title/description/url
+// frontmatter derived from the same extractors the HTML <head> uses.
 //
 // Interactive widgets (forms/inputs/buttons) do NOT belong in content/*.md:
 // the markdown twin and llms-full.txt are served verbatim from the source,
@@ -22,7 +23,7 @@ import { join } from 'node:path';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
-import { absolutifyMarkdownLinks } from './util.mjs';
+import { composeTwin, resolveBaseUrl } from './util.mjs';
 
 // The CLI "score a binary" hero. A plain GET form (works without JS) that
 // prefills the homepage demo via ?score=.
@@ -128,7 +129,13 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         extraScripts: extraScripts ?? (name === 'mcp' ? [WEBMCP_SCRIPT] : []),
       }),
     );
-    await writeFile(join(distDir, `${name}.md`), absolutifyMarkdownLinks(twinSource));
+    await writeFile(
+      join(distDir, `${name}.md`),
+      composeTwin({ title, description, url: `${resolveBaseUrl()}/${name}` }, twinSource),
+    );
+    // llms-full.txt consumes `source` and must stay frontmatter-free (the
+    // A5 section header already carries the metadata), so push the raw
+    // twin source, not the composed twin.
     subPageData.push({ name, source: twinSource, title });
   }
   return subPageData;

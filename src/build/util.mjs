@@ -203,6 +203,12 @@ export function renderFrontmatter({ title, description, url }) {
  * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
  * @returns {string}
  */
-export function composeTwin(meta, bodyMarkdown, baseUrl) {
-  return renderFrontmatter(meta) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl);
+export function composeTwin({ title, description, url }, bodyMarkdown, baseUrl) {
+  // The description is body prose (extractDescription) and can carry
+  // authored site-relative links; the twin surface promises every link
+  // self-resolves, so absolutify it like the body.
+  return (
+    renderFrontmatter({ title, description: absolutifyMarkdownLinks(description, baseUrl), url }) +
+    absolutifyMarkdownLinks(bodyMarkdown, baseUrl)
+  );
 }

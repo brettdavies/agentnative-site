@@ -7,7 +7,8 @@
 //   2. sortedGlob principle files in numeric order.
 //   3. Render each principle; pin H1 id to the locked filename slug.
 //   4. Emit per-principle HTML pages wrapped in the production shell.
-//   5. Copy each principle's markdown source byte-for-byte.
+//   5. Emit each principle's markdown twin: title/description/url
+//      frontmatter plus the authored source with links absolutified.
 //   6. Build homepage — hero (title + lede) + principle listing (links to
 //      /p{N} pages). No inline principle content on the index page.
 //   7. Render audit.md + about.md + the rest of content/*.md into sub-pages
@@ -21,7 +22,8 @@
 //      registry-index + principles + vendored spec for the Worker's MCP
 //      module. Public path 404s; Worker reads via env.ASSETS.fetch.
 //  12. Invariant check — no MUST/SHOULD/MAY leaked into <code> / <pre> /
-//      <a>, locked anchors present on principle pages, md sha256 matches.
+//      <a>, locked anchors present on principle pages, principle twins
+//      byte-match composeTwin(frontmatter, source).
 //  13. Minify dist/ HTML, JSON, and CSS as a unified post step.
 //
 // Fail-fast: the invariant check throws on violation so CI/`bun run build`
@@ -52,7 +54,7 @@ import { emitWebAuditSkillPages } from './15-web-audit-skills.mjs';
 import { extractDefinitionParagraph, extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, emitShellTemplate, WEBMCP_SCRIPT } from './shell.mjs';
-import { absolutifyMarkdownLinks, escHtml, parseFilename, sortedGlob } from './util.mjs';
+import { composeTwin, escHtml, parseFilename, resolveBaseUrl, sortedGlob } from './util.mjs';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const CONTENT_DIR = join(REPO_ROOT, 'content');
@@ -79,7 +81,7 @@ async function ensureDir(dir) {
   await mkdir(dir, { recursive: true });
 }
 
-async function runInvariantChecks(distDir, principleSlugs, principleSources) {
+export async function runInvariantChecks(distDir, principleSlugs, principleSources) {
   // 1. No MUST / SHOULD / MAY bare words inside <code> / <pre> / <a>.
   //    Check every principle page (the index page no longer has inline
   //    principle content). The `\b` after the tag name keeps the regex
@@ -116,14 +118,24 @@ async function runInvariantChecks(distDir, principleSlugs, principleSources) {
     }
   }
 
-  // 4. dist/p<n>.md == absolutifyMarkdownLinks(content/principles/p<n>-*.md).
-  // Twin-source equivalence post-link-rewrite: site-relative links in source
-  // become absolute https://anc.dev/... in the twin, but no other bytes drift.
+  // 4. dist/p<n>.md == composeTwin(frontmatter, content/principles/p<n>-*.md).
+  // Twin-source equivalence: the twin is exactly the title/description/url
+  // frontmatter block plus the source with site-relative links absolutified.
+  // Re-deriving through the same composeTwin the emitter uses means emit and
+  // check cannot drift, and any copy-edit that drifts the body still fails.
   for (const { n, sourcePath } of principleSources) {
     const distContent = await readFile(join(distDir, `p${n}.md`), 'utf8');
     const sourceContent = await readFile(sourcePath, 'utf8');
-    if (distContent !== absolutifyMarkdownLinks(sourceContent)) {
-      throw new Error(`invariant: dist/p${n}.md does not match absolutified ${sourcePath}`);
+    const expected = composeTwin(
+      {
+        title: extractTitle(sourceContent),
+        description: extractDescription(sourceContent),
+        url: `${resolveBaseUrl()}/p${n}`,
+      },
+      sourceContent,
+    );
+    if (distContent !== expected) {
+      throw new Error(`invariant: dist/p${n}.md does not match frontmatter + absolutified ${sourcePath}`);
     }
   }
 
@@ -185,7 +197,8 @@ export async function build() {
 
   // 4. Per-principle pages — the rendered markdown wrapped in the reading
   // treatment: breadcrumb, tier-colored P# head, audit-note callout, and a
-  // prev/next pager. The markdown twin stays byte-identical to source.
+  // prev/next pager. The markdown twin keeps the authored source bytes
+  // behind its frontmatter block.
   for (const [i, p] of principles.entries()) {
     const { n, title, description, source } = p;
     const tier = principleTier(n);
@@ -224,10 +237,14 @@ export async function build() {
     });
     await writeFile(join(DIST_DIR, `p${n}.html`), page);
 
-    // 5. Markdown twin — authored bytes with site-relative links absolutified
-    // so `Accept: text/markdown` agents fetching /p<n>.md get a self-contained
-    // document. Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
-    await writeFile(join(DIST_DIR, `p${n}.md`), absolutifyMarkdownLinks(source));
+    // 5. Markdown twin — title/description/url frontmatter plus the authored
+    // bytes with site-relative links absolutified, so `Accept: text/markdown`
+    // agents fetching /p<n>.md get a self-describing, self-contained document.
+    // Source authors `[text](/p3)`; the twin emits `[text](https://anc.dev/p3)`.
+    await writeFile(
+      join(DIST_DIR, `p${n}.md`),
+      composeTwin({ title, description, url: `${resolveBaseUrl()}/p${n}` }, source),
+    );
   }
 
   // 6. Scorecard surface — leaderboard, per-tool pages, badges, coverage,
