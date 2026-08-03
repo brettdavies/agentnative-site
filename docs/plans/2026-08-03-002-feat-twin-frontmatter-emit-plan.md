@@ -87,8 +87,13 @@ introduce a single pure helper in `src/build/util.mjs`:
 - `renderFrontmatter({ title, description, url })` -> the `---\n<yaml>---\n\n` block, serialized with `js-yaml`'s `dump`
   (already a build dependency; used by `13-web-audit-registry.mjs`). `dump` handles all escaping (colons, quotes, the
   `…` ellipsis) so R3 is satisfied without hand-rolled quoting.
-- `composeTwin({ title, description, url }, bodyMarkdown, baseUrl?)` -> `renderFrontmatter(...) +
-  absolutifyMarkdownLinks(bodyMarkdown, baseUrl)`.
+- `composeTwin({ title, description, canonicalPath }, bodyMarkdown, baseUrl?)` -> `renderFrontmatter({ title,
+  description, url })` + `absolutifyMarkdownLinks(bodyMarkdown, baseUrl)`, where `url` is derived internally as
+  `resolveBaseUrl(baseUrl) + canonicalPath`. Taking the site-relative `canonicalPath` (the same value callers pass to
+  `emitShell`) and deriving the absolute `url` inside the helper keeps the frontmatter `url` and the absolutified body
+  links on the same base by construction, so no caller can pair a production `url` with staging links. The `description`
+  is body prose (`extractDescription`) and can carry authored site-relative links, so `composeTwin` absolutifies it too:
+  the twin surface promises every link self-resolves.
 
 The homepage, subpages, and principle emitters all call `composeTwin`; the principle byte-equivalence invariant (R8)
 re-derives the expected twin with the **same** `composeTwin`, so emit and check can never drift. DRY + single point of
@@ -127,12 +132,12 @@ Twin emission today vs. after this change (authored content twins only):
                        │
                        │  (twin path only)
                        ▼
-   composeTwin({title, description, url}, body):
+   composeTwin({title, description, canonicalPath}, body):
         ┌───────────────────────────────┐
         │ ---                            │   renderFrontmatter(): js-yaml.dump
         │ title: <extractTitle>          │
-        │ description: <extractDescription>
-        │ url: <resolveBaseUrl()+path>   │
+        │ description: <extractDescription, links absolutified>
+        │ url: <resolveBaseUrl()+canonicalPath>
         │ ---                            │
         │                               │
         │ <absolutifyMarkdownLinks(body)>│   existing twin body
@@ -149,7 +154,7 @@ Twin emission today vs. after this change (authored content twins only):
 
 ### U1. Add `renderFrontmatter` + `composeTwin` helpers to `src/build/util.mjs`
 
-**Goal:** One tested, pure place that turns `(title, description, url, body)` into a frontmatter-prefixed,
+**Goal:** One tested, pure place that turns `(title, description, canonicalPath, body)` into a frontmatter-prefixed,
 link-absolutified twin string.
 
 **Requirements:** R2, R3, R9.
@@ -166,9 +171,11 @@ link-absolutified twin string.
    `lineWidth: -1` disables folding, so a long `description` (the extractor caps at 180 chars) stays on one physical
    line instead of folding into a `>-` block scalar. `dump` appends its own trailing newline, so the closing fence is
    `---\n` followed by one blank line before the body.
-2. `composeTwin({ title, description, url }, bodyMarkdown, baseUrl)`: return `renderFrontmatter({ title, description,
-   url }) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl)`. `baseUrl` is optional and defaults through
-   `absolutifyMarkdownLinks`/`resolveBaseUrl`.
+2. `composeTwin({ title, description, canonicalPath }, bodyMarkdown, baseUrl)`: return `renderFrontmatter({ title,
+   description: absolutifyMarkdownLinks(description, baseUrl), url: resolveBaseUrl(baseUrl) + canonicalPath }) +
+   absolutifyMarkdownLinks(bodyMarkdown, baseUrl)`. `baseUrl` is optional and defaults through `resolveBaseUrl`;
+   deriving the `url` inside the helper keeps the frontmatter and the body links on one base, and absolutifying the
+   `description` keeps the twin's promise that every link self-resolves.
 3. Keep both functions pure (no fs, no rendering). `util.mjs` is build-only (the Worker imports
    `src/shared/scorecard-format.mjs`), so the `js-yaml` import adds no Worker bundle weight.
 
@@ -186,10 +193,12 @@ link-absolutified twin string.
 - A `url` like `https://anc.dev/p3` serializes as a plain scalar and round-trips.
 - A 180-char `description` emits a single physical `description:` line (no folded `>-` block scalar), proving
   `lineWidth: -1` is applied.
-- `composeTwin` output starts with the frontmatter block and, after it, equals `absolutifyMarkdownLinks(body)` for a
-  body containing a `[text](/p3)` link (link becomes absolute; frontmatter `url` is already absolute and untouched).
-- `composeTwin` honors an explicit `baseUrl` override for both the frontmatter `url` derivation site (via the caller)
-  and the body absolutification.
+- `composeTwin` output starts with the frontmatter block (its `url` derived from `canonicalPath`) and, after it, equals
+  `absolutifyMarkdownLinks(body)` for a body containing a `[text](/p3)` link (link becomes absolute).
+- An explicit `baseUrl` override moves the frontmatter `url` and the body links together (e.g. a staging base yields
+  `url: https://staging.example/p3` and `](https://staging.example/p1)`, with no `anc.dev` anywhere).
+- A `description` containing a site-relative link (`[website audit](/web-audit)`) emits with that link absolutified, so
+  the twin self-resolves.
 
 **Verification:** New `util` tests pass; no other suite regresses.
 
@@ -208,13 +217,13 @@ link-absolutified twin string.
 - `tests/build.test.ts`
 
 **Approach:**
-1. `emitHomepage` already computes `introTitle`, `introDescription` (local var), and `introLede`. Compute `url =
-   resolveBaseUrl() + '/'`.
+1. `emitHomepage` already computes `introTitle`, `introDescription` (local var), and `introLede`; the homepage's
+   canonical path is `/`.
 2. Replace the `writeFile(join(distDir, 'index.md'), absolutifyMarkdownLinks(indexMdLines.join('\n')))` call with
-   `composeTwin({ title: introTitle, description: introDescription, url }, indexMdLines.join('\n'))`.
+   `composeTwin({ title: introTitle, description: introDescription, canonicalPath: '/' }, indexMdLines.join('\n'))`.
 3. Update imports: this was the file's only use of `absolutifyMarkdownLinks`, so drop it (`composeTwin` calls it
-   internally) and add `composeTwin` and `resolveBaseUrl`. `biome check` (the `lint` gate) reds on an unused import, so
-   leaving `absolutifyMarkdownLinks` fails CI.
+   internally) and add `composeTwin`; no `resolveBaseUrl` import is needed because `composeTwin` derives the `url`
+   itself. `biome check` (the `lint` gate) reds on an unused import, so leaving `absolutifyMarkdownLinks` fails CI.
 4. Do not touch `emitShell` / `index.html` emission or the returned sidecar sources consumed by `09-llms-emit.mjs`.
 
 **Patterns to follow:** existing `index.md` write in the same function.
@@ -242,15 +251,15 @@ unchanged; the widget prose-pointer behavior is preserved.
 **Files:**
 - `src/build/07-subpages.mjs` (twin write)
 - `tests/build.test.ts`
+- `tests/regression.test.ts` (the `/install` twin H1 anchor)
 
 **Approach:**
-1. Inside the `for` loop, `title` and `description` are already extracted; compute `url = resolveBaseUrl() + '/' +
-   name`.
+1. Inside the `for` loop, `title` and `description` are already extracted; each subpage's canonical path is `/${name}`.
 2. Replace `writeFile(join(distDir, '${name}.md'), absolutifyMarkdownLinks(twinSource))` with `composeTwin({ title,
-   description, url }, twinSource)`. The widget substitution that produces `twinSource` (prose pointer, not HTML markup)
-   is unchanged and still upstream of `composeTwin`.
+   description, canonicalPath: `/${name}` }, twinSource)`. The widget substitution that produces `twinSource` (prose
+   pointer, not HTML markup) is unchanged and still upstream of `composeTwin`.
 3. Update imports: this was the file's only use of `absolutifyMarkdownLinks`, so drop it (`composeTwin` calls it
-   internally) and add `composeTwin` and `resolveBaseUrl`, or `bun run lint` reds on the unused import.
+   internally) and add `composeTwin` (no `resolveBaseUrl` needed), or `bun run lint` reds on the unused import.
 4. Leave `subPageData.push({ name, source: twinSource, title })` unchanged: `subPageData` feeds `llms-full.txt`, which
    must stay frontmatter-free (KTD3). Pushing `twinSource` (no frontmatter) keeps that guarantee.
 
@@ -264,6 +273,8 @@ unchanged; the widget prose-pointer behavior is preserved.
 - `dist/audit.html` contains no frontmatter fence / `url:` line (R4).
 - `subPageData` entries still carry the frontmatter-free `twinSource` (guards KTD3 / R6 at the source of
   `llms-full.txt`).
+- Regression #6's `/install` twin assertion (`tests/regression.test.ts`) matches its H1 with a multiline anchor
+  (`/^#\s+Install anc/m`): the twin opens with the frontmatter block, and the H1 follows it.
 
 **Verification:** `bun run build` produces every subpage twin with frontmatter; HTML pages unchanged.
 
@@ -279,34 +290,38 @@ source)` exactly.
 **Dependencies:** U1.
 
 **Files:**
-- `src/build/build.mjs` (principle twin write in the section-4/5 loop; `runInvariantChecks` #4)
+- `src/build/build.mjs` (principle twin write in the section-4/5 loop; `runInvariantChecks` #4, exported)
 - `tests/build.test.ts`
+- `tests/regression.test.ts` (regression #3 twin contract + per-page HTML locks)
 
 **Approach:**
-1. In the principle page loop, `title` and `description` are already destructured from `p`. Compute `url =
-   resolveBaseUrl() + '/p' + n`.
+1. In the principle page loop, `title` and `description` are already destructured from `p`; each principle's canonical
+   path is `/p${n}`.
 2. Replace `writeFile(join(DIST_DIR, 'p${n}.md'), absolutifyMarkdownLinks(source))` with `composeTwin({ title,
-   description, url }, source)`.
+   description, canonicalPath: `/p${n}` }, source)`.
 3. Update invariant #4 in `runInvariantChecks`: for each principle, re-derive `title = extractTitle(source)`,
-   `description = extractDescription(source)`, `url = resolveBaseUrl() + '/p' + n`, and assert `distContent ===
-   composeTwin({ title, description, url }, source)`. `runInvariantChecks` currently receives `principleSources` as `[{
-   n, sourcePath }]`; it already re-reads source, so it can re-run the same extractors. Update `build.mjs`'s imports:
-   add `resolveBaseUrl` and `composeTwin`, and drop `absolutifyMarkdownLinks`. Both of its uses (the section-4/5 twin
-   write in step 2 and invariant #4) now route through `composeTwin`, so the import is left unused and `biome check`
-   reds CI.
+   `description = extractDescription(source)`, and assert `distContent === composeTwin({ title, description,
+   canonicalPath: `/p${n}` }, source)`. `runInvariantChecks` receives `principleSources` as `[{ n, sourcePath }]`; it
+   already re-reads source, so it re-runs the same extractors. Export `runInvariantChecks` from `build.mjs` so the
+   invariant unit tests can drive it directly against a seeded temp dist. Update `build.mjs`'s imports: add
+   `composeTwin` and drop `absolutifyMarkdownLinks`. Both of its uses (the section-4/5 twin write in step 2 and
+   invariant #4) now route through `composeTwin`, so the import is left unused and `biome check` reds CI.
 4. The invariant re-derivation and the emit share `composeTwin` (KTD2), so there is exactly one definition of a
    principle twin's bytes.
+5. Update `tests/regression.test.ts` to the frontmatter twin contract: regression #3 asserts `dist/p<n>.md ===
+   composeTwin(frontmatter, source)` for every principle, driven by `LOCKED_SLUGS.length` (all eight pages, not a
+   hardcoded seven), and the file-header comment states the llms.txt shape's eight `.md` bullets.
 
 **Patterns to follow:** existing principle twin write (section 5 comment) and existing invariant #4.
 
 **Test scenarios:**
-- After the principle loop (or via a `runInvariantChecks` unit test over a temp dist seeded with a wrong twin), a
-  `dist/p<n>.md` that lacks the expected frontmatter fails invariant #4.
-- A `dist/p<n>.md` whose body drifts from `absolutifyMarkdownLinks(source)` still fails invariant #4 (regression: the
-  strengthened check keeps body-equivalence).
-- A correctly composed `dist/p3.md` (frontmatter with `url: https://anc.dev/p3` + absolutified body) passes invariant
-  #4.
-- `dist/p3.html` contains no frontmatter fence / `url:` line (R4).
+- Via a `runInvariantChecks` unit test over a seeded temp dist (`tests/build.test.ts`): a `dist/p1.md` that lacks the
+  expected frontmatter fails invariant #4.
+- A `dist/p1.md` whose body drifts from the absolutified source still fails invariant #4 (regression: the strengthened
+  check keeps body-equivalence).
+- A correctly composed twin (frontmatter + absolutified body from `composeTwin`) passes invariant #4.
+- Every `dist/p<n>.html` (all eight, via `LOCKED_SLUGS`) carries no frontmatter fence (`---\ntitle:`) and no `url:` line
+  (R4; `tests/regression.test.ts`).
 
 **Verification:** `bun run build` completes; invariant #4 passes for a real build and fails on an injected drift.
 

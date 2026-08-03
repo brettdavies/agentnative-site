@@ -72,10 +72,11 @@ every per-site **markdown/JSON result** must be the full result — current cate
   rescore workflow's fingerprint reflow.)
 - **R5.** Enrichment degrades gracefully. In the module: a scorecard without a `results[]` array (a minimal or malformed
   payload) passes through unchanged, and a row whose id is absent from the current registry keeps its stored category.
-  At the read paths (U2/U3): a failed registry load falls back to serving the stored category shape and a failed catalog
-  load degrades to generic remediation prompts (the existing R10 behavior). `normalizeScorecardCategories` receives an
-  already-loaded registry, so the load-failure fallback lives at its call sites, not in the module. A read never crashes
-  because enrichment could not fully run.
+  At the MCP read paths (U2): a failed registry load resolves to a `null` registry, and `enrichWebScorecardForDisplay`
+  owns that degrade — it skips the category split (the stored shape stands) while still attaching remediation. At the
+  result page (U3): a failed registry load falls back to rendering the raw stored scorecard. A failed catalog load
+  degrades to generic remediation prompts (the existing R10 behavior). A read never crashes because enrichment could not
+  fully run.
 - **R6.** No stored-shape change and no `schema_version` bump. R2 keeps the raw scorecard (no stored remediation).
   `content/web-scorecard-schema.md` is updated to describe the read-time behavior for both MCP read tools and the
   category-normalization guarantee.
@@ -222,7 +223,10 @@ graceful degradation.
 - `tests/web-audit-display-enrich.test.ts` (new)
 
 **Approach:**
-- Export `normalizeScorecardCategories(stored, registry)`:
+- Export a structural `DisplayRegistry` interface — the registry fields the enrichment reads (`category_order`,
+  `categories`, and `checks` with `id` + `category`) — so a full `WebAuditRegistry` satisfies it without coupling the
+  module to the whole registry type.
+- Export `normalizeScorecardCategories(stored, registry)` (registry: `DisplayRegistry`):
   1. Guard: if `stored` is not an object or has no array `results`, return `stored` unchanged (R5).
   2. Build an `id -> category` map from `registry.checks`.
   3. Map each row to a new row whose `category` is taken from the registry map by `row.id`, falling back to the row's
@@ -239,8 +243,11 @@ graceful degradation.
   `web-audit.ts` — `result = resultLine(...)` on every row, plus an inline `remediation = assembleRemediation(...)` on
   `broken` / `absent` rows. Same guard as `normalizeScorecardCategories`. `origin` becomes a parameter (today the MCP
   helper hardcodes `SITE_URL`) so the caller controls the skill-link origin.
-- Export a convenience `enrichWebScorecardForDisplay(stored, { registry, catalog, origin })` = `attachInlineRemediation`
-  applied to the output of `normalizeScorecardCategories`, for the MCP JSON paths.
+- Export `enrichWebScorecardForDisplay(stored, { registry, catalog, origin })` for the MCP JSON paths:
+  `attachInlineRemediation` applied to the output of `normalizeScorecardCategories`. `registry` is typed
+  `DisplayRegistry | null` and the enricher owns the missing-registry degrade: a `null` registry skips the category
+  split (the stored shape stands) but remediation is still attached, so a failed registry load degrades the read rather
+  than failing it.
 
 **Patterns to follow:** the existing `withInlineRemediation` guard shape in `src/worker/mcp/tools/web-audit.ts`;
 `categoryRollups` and its `Pick<EngineResult, 'category' | 'status'>` row contract in `src/worker/audit-web/score.ts`;
@@ -263,9 +270,10 @@ graceful degradation.
   normalization. Covers R4 / KTD3.
 - Missing-registry fallback (caller passes a registry that lacks a row's id everywhere): rows keep stored categories, no
   throw.
+- An `absent` row missing a catalog entry degrades to a generic prompt rather than dropping remediation.
 
-**Verification:** the new test file passes; `display.ts` exports the three functions with no `any` and no
-plan/registry-identifier comments in the code.
+**Verification:** the new test file passes; `display.ts` exports the three functions plus the `DisplayRegistry` type,
+with no `any` and no plan/registry-identifier comments in the code.
 
 ### U2. Enrich the MCP read tools
 
@@ -281,18 +289,18 @@ per-row remediation).
 - `tests/web-audit-mcp-tools.test.ts`
 
 **Approach:**
-1. Remove the private `withInlineRemediation` (and its `ScorecardRow` type if now unused) from `web-audit.ts`; import
-   `enrichWebScorecardForDisplay` from `display.ts`.
-2. `get_website_audit`: after `resolveScorecard` returns a hit, load the registry (`loadWebAuditRegistry`) and the
-   catalog (`catalogOrEmpty`), then return `enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin:
-   SITE_URL })` in the `found: true` envelope. Wrap the registry load so a failure falls back to serving the stored
-   scorecard (R5): on registry-load failure, still return the scorecard (optionally remediation-only) rather than
-   erroring.
-3. `audit_website`: replace the three `withInlineRemediation(cached.scorecard, ...)` / `withInlineRemediation(scorecard,
-   ...)` call sites (cache-hit short-circuit, kill-switch cached branch, fresh terminal) with
-   `enrichWebScorecardForDisplay(..., { registry, catalog, origin: SITE_URL })`. The fresh path already holds
-   `registry`; hoist the registry load (or load lazily) so the cache-hit and kill-switch branches also have it.
-4. Registry and catalog loads are per-isolate cached (`registry.ts`, `remediation.ts`), so the added loads on the read
+1. Remove the private `withInlineRemediation` helper from `web-audit.ts`; import `enrichWebScorecardForDisplay` from
+   `display.ts`.
+2. Add `registryOrNull` (a failed registry load resolves to `null` rather than failing the read) beside the existing
+   `catalogOrEmpty`, and a shared `enrichForRead(env, scorecard)` helper that loads both and returns
+   `enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: SITE_URL })`. Both MCP read tools funnel
+   through this one helper, so they cannot disagree (R3); the `null`-registry degrade itself is enricher-owned (R5).
+3. `get_website_audit`: after `resolveScorecard` returns a hit, return `await enrichForRead(env, scorecard)` in the
+   `found: true` envelope.
+4. `audit_website`: route all three scorecard-returning call sites (cache-hit short-circuit, kill-switch cached branch,
+   fresh terminal) through `await enrichForRead(env, ...)`. The fresh path's own engine-run registry load is separate;
+   `enrichForRead`'s re-load hits the per-isolate cache.
+5. Registry and catalog loads are per-isolate cached (`registry.ts`, `remediation.ts`), so the added loads on the read
    paths are cheap.
 
 **Patterns to follow:** the existing gate ordering and `textContent` envelopes in `web-audit.ts`; `catalogOrEmpty`
@@ -308,10 +316,12 @@ describe blocks):
   `next_tool:"audit_website"`) is unchanged.
 - `audit_website` cache-hit output now carries split categories (parity with fresh) in addition to the remediation it
   already returned.
-- Registry-load failure on `get_website_audit`: the tool still returns the scorecard (does not throw / does not become
-  `isError:true`). Covers R5.
+- Registry-load failure on `get_website_audit`: the tool still returns the scorecard, remediation-only (does not throw /
+  does not become `isError:true`). Covers R5.
 - The existing minimal-fixture test (`scorecard: { badge: { score_pct: 88 } }`) still passes — the guard returns it
   unchanged.
+- Cross-tool parity: `get_website_audit` and `audit_website` return a byte-identical scorecard object for the same
+  stored entry (the tool envelopes differ).
 
 **Verification:** the MCP tool suite passes; `get_website_audit` and `audit_website` JSON outputs are shape-identical
 for the same stored scorecard.
@@ -371,9 +381,11 @@ category shape is normalized at read time; no `schema_version` change.
 - In "Remediation on the MCP surface", change the sentence that names only `audit_website` to name both `audit_website`
   **and** `get_website_audit` as returning each row with a derived `result` line and non-passing rows with an inline
   `remediation` object.
-- Add a short "Display normalization" note (near `categories`): `categories[]` and `results[].category` are re-derived
-  from the current registry at read time, so every render of a cached scorecard reflects the current category shape
-  regardless of when it was cached; the score reflects the registry at audit time. Keep `schema_version` at 0.2.
+- Add a short read-time normalization note in the `categories` section: `categories[]` and `results[].category` are
+  re-derived from the current registry at read time, so every render of a cached scorecard (both MCP tools, the
+  `/web/<domain>` page, and its `.md` twin) reflects the current category shape regardless of when it was cached;
+  `score` and `score_pct` reflect the registry at audit time, and re-grouping earns no points. Keep `schema_version` at
+  0.2.
 - Present-tense only; no change-history narration (git holds that).
 
 **Patterns to follow:** the existing prose style and table conventions in `content/web-scorecard-schema.md`.
@@ -463,8 +475,8 @@ markdown; ship on the same feature branch and PR as the code units per the branc
 
 ## Definition of Done
 
-- `src/worker/audit-web/display.ts` exists with `normalizeScorecardCategories`, `attachInlineRemediation`, and
-  `enrichWebScorecardForDisplay`, fully unit-tested.
+- `src/worker/audit-web/display.ts` exists with `normalizeScorecardCategories`, `attachInlineRemediation`,
+  `enrichWebScorecardForDisplay`, and the `DisplayRegistry` structural type, fully unit-tested.
 - `get_website_audit` and `audit_website` return the enriched full result; `withInlineRemediation` no longer lives in
   `web-audit.ts`.
 - `handleWebResultPage` normalizes categories before rendering; HTML and `.md` show the current split for old-shape

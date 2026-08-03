@@ -96,8 +96,9 @@ Alternative (one "serves markdown to agents" check) is rejected under Alternativ
 The registry schema allows one antecedent token per check (`antecedent: <token>`), but the new checks need two
 conditions: the root is an HTML page (a markdown twin is an affordance of an HTML page) AND the site ships markdown.
 `markdown-twin` folds both in: it returns `error` on root network failure, `n_a` on a non-HTML root, then `apply` when
-any markdown signal holds. This keeps the single-token schema intact and mirrors how `html-root` already special-cases
-the root.
+any markdown signal holds. This keeps the single-token schema intact. The HTML-root precondition is the shared
+`htmlRootGate` helper in `src/worker/audit-web/antecedents/context.ts`, which the `htmlRoot` resolver uses for the same
+special-casing.
 
 ### KTD3. The antecedent's markdown signal is a three-way disjunction, with `accept-markdown` moved to wave 1
 
@@ -182,7 +183,7 @@ markdown-twin`, `handler: http`):
 | `markdown-vary`         | `GET /` (no headers)                                       | `header_regex` on `vary` requiring both `accept` and `user-agent` | yes                 |
 
 Scoring deltas: registry check count 36 -> 40 (tier distribution 3 MUST / 15 SHOULD / 18 MAY -> 3 / 15 / 22);
-`universeMaxOf` 78 -> 82.
+`universeMaxOf` 78 -> 82; principle distribution P2 12 -> 16 (all four checks are P2).
 
 ---
 
@@ -232,14 +233,15 @@ Scoring deltas: registry check count 36 -> 40 (tier distribution 3 MUST / 15 SHO
   unmet-evidence string to `contentEvidence`)
 - `tests/web-audit-antecedents-content.test.ts` (modify: add `markdown-twin` resolver cases)
 
-**Approach (directional resolver sketch; the comment states the constraint, no identifiers):**
+**Approach (the resolver; the comment states the constraint, no identifiers):**
 
 ```ts
-// A markdown twin is an affordance of an HTML page: a non-HTML root has no twin to serve.
+// A markdown twin is an affordance of an HTML page: a non-HTML root has no
+// twin to serve, and a root that never answered gates dependents to error.
 const markdownTwin: AntecedentResolver = (ctx) => {
-  if (ctx.root === null || ctx.root.status === null) return 'error';
-  if (!rootContentType(ctx).includes('text/html')) return 'n_a';
-  const link = ctx.root.headers.link ?? '';
+  const gate = htmlRootGate(ctx);
+  if (gate) return gate;
+  const link = ctx.root?.headers.link ?? '';
   const advertisesMdAlternate = /rel=["']?alternate["']?/i.test(link) && /text\/markdown/i.test(link);
   return sourcePassed(ctx, 'accept-markdown') || sourcePassed(ctx, 'llms-txt') || advertisesMdAlternate
     ? 'apply'
@@ -247,7 +249,9 @@ const markdownTwin: AntecedentResolver = (ctx) => {
 };
 ```
 
-- Import `rootContentType` alongside the existing `sourcePassed` from `./context` in `content.ts`.
+- Import `htmlRootGate` alongside the existing `sourcePassed` from `./context` in `content.ts`. `htmlRootGate`
+  (`src/worker/audit-web/antecedents/context.ts`) owns the `error`-on-network-failure / `n_a`-on-non-HTML gate and is
+  shared with the `htmlRoot` resolver.
 - Evidence string (shown on a gated-out row): `site exposes no markdown twin (no text/markdown negotiation, no markdown
   alternate link, no llms.txt)`.
 - Adding the token to the `AntecedentToken` union without a resolver is a compile error: `index.ts` composes `RESOLVERS`
@@ -257,8 +261,9 @@ const markdownTwin: AntecedentResolver = (ctx) => {
   moment U3's registry references it, so both edits ship together.
 
 **Patterns to follow:** `docsSite` / `rootLlmsTxt` in `src/worker/audit-web/antecedents/content.ts` (resolver + evidence
-+ `satisfies Partial<Record<...>>`), and `htmlRoot` in `src/worker/audit-web/antecedents/root.ts` (the `error` on
-network failure, `n_a` on non-HTML pattern).
++ `satisfies Partial<Record<...>>`), and the shared `htmlRootGate` in `src/worker/audit-web/antecedents/context.ts` (the
+`error` on network failure, `n_a` on non-HTML pattern, also used by `htmlRoot` in
+`src/worker/audit-web/antecedents/root.ts`).
 
 **Test scenarios (use the `ctx` / `htmlRoot` / `outcome` helpers in `tests/web-audit-antecedents-helpers.ts`):**
 - `apply` when `accept-markdown` passed: `ctx({ sources: new Map([['accept-markdown', outcome('pass')]]) })`.
@@ -287,7 +292,7 @@ typecheck) is clean, proving the union/resolver/evidence are complete.
 - `src/data/web-audit/registry.yaml` (modify: append the four checks to the `content-for-agents` section, after
   `accept-markdown`)
 
-**Approach (directional YAML; final wording refined at implementation):**
+**Approach (the four registry entries):**
 
 ```yaml
   - id: markdown-cli-ua
@@ -347,7 +352,7 @@ typecheck) is clean, proving the union/resolver/evidence are complete.
     with:
       path: /
       expect:
-        header_regex: { name: vary, pattern: "(?=.*accept)(?=.*user-agent)" }
+        header_regex: { name: vary, pattern: "(?=.*accept(?!-))(?=.*user-agent)" }
     hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
 ```
 
@@ -357,7 +362,9 @@ typecheck) is clean, proving the union/resolver/evidence are complete.
   reference contract treats `*/*` and absent identically (recorded as an Open Question).
 - `markdown-vary` intentionally has no `headers` key so the `http` handler reuses the canonical root fetch.
 - The `header_regex` pattern uses two lookaheads so it matches `Vary` regardless of token order and is case-insensitive
-  (the handler compiles it with the `i` flag).
+  (the handler compiles it with the `i` flag). The `accept` lookahead carries a negative lookahead on `-`
+  (`accept(?!-)`) because `accept` is a substring of `accept-encoding`: without it, a `Vary: Accept-Encoding,
+  User-Agent` that never lists `Accept` itself would be credited. U6 pins this with a regression case.
 
 **Patterns to follow:** the existing `accept-markdown` and `root-meta-description` entries in the same section.
 
@@ -396,7 +403,7 @@ stay 1:1).
 **Verification:** the build emits `dist/_internal/web-remediation.json` with no "no remediation entry" / "orphan
 remediation" abort; four new `/web-audit/skill/<id>` pages generate.
 
-### U5. Update hardcoded registry-size, universe-max, and tier-distribution assertions
+### U5. Update hardcoded registry-size, universe-max, and distribution assertions
 
 **Goal:** Bring existing tests to the new totals.
 
@@ -406,9 +413,10 @@ remediation" abort; four new `/web-audit/skill/<id>` pages generate.
 
 **Files:**
 - `tests/web-audit-scoring.test.ts` (modify: `checks.length` 36 -> 40 at both assertion sites; `universeMax` 78 -> 82;
-  and the tier-distribution assertions at all three sites, `optional`/`may` 18 -> 22: the `{ required: 3, recommended:
-  15, optional: 18 }` object, the `{ must: 3, should: 15, may: 18 }` object, and the "3/15/18 tier distribution, so
-  universeMax is unchanged" test's numbers and message -> 3/15/22 and 82)
+  the tier-distribution assertions at all three sites, `optional`/`may` 18 -> 22: the `{ required: 3, recommended: 15,
+  optional: 18 }` object, the `{ must: 3, should: 15, may: 18 }` object, and the "3/15/18 tier distribution, so
+  universeMax is unchanged" test's numbers and message -> 3/15/22 and 82; and the principle-distribution assertion, `P2:
+  12` -> `P2: 16`)
 - `tests/web-audit-routes.test.ts` (modify: `checks.length` 36 -> 40)
 - `tests/web-remediation.test.ts` (modify: `checkIds.length` 36 -> 40, and the "no misses across all 36" title string ->
   40; this file is named in U4's prose but was omitted here, and its assertion reds CI if left at 36)
@@ -435,8 +443,8 @@ tests/web-audit-two-score.test.ts` passes.
 **Dependencies:** U1, U2, U3.
 
 **Files:**
-- `tests/web-audit-markdown-rewards.test.ts` (create) OR extend `tests/web-audit-antecedents-engine.test.ts` following
-  its existing `runWebAudit` + injected `fetchImpl` pattern.
+- `tests/web-audit-markdown-rewards.test.ts` (create) following the `runWebAudit` + injected `fetchImpl` pattern in
+  `tests/web-audit-antecedents-engine.test.ts`.
 
 **Approach:**
 - Drive `runWebAudit` with a `fetchOptions.fetchImpl` that emulates a site mirroring this repo's negotiation: returns
@@ -449,14 +457,18 @@ tests/web-audit-two-score.test.ts` passes.
   omits `Vary` (root advertises the markdown alternate Link so the antecedent still holds, but the client probes come
   back HTML / no Vary). Assert the four checks land `n_a` with `na_reason: optional-absent` (applicable, unimplemented,
   no penalty).
-- Assert a scoring consequence on the all-pass case: `coverage_summary.may.verified` includes the four, and the four
-  contribute to `earned`; on the antecedent-unmet case they are excluded from `score.relative`.
+- Assert a scoring consequence on the all-pass case: `coverage_summary.may.verified` counts the four; on the
+  antecedent-unmet case they are excluded from the coverage totals (`coverage_summary.may.total` is 0) and therefore
+  from the relative denominator.
+- Pin the `markdown-vary` negative lookahead with a regression case: a root whose `Vary` is `Accept-Encoding,
+  User-Agent` (never `Accept` itself) lands `n_a` with `na_reason: optional-absent`, not `pass`.
 
 **Patterns to follow:** `tests/web-audit-antecedents-engine.test.ts` (engine wiring with an injected `fetchImpl`) and
 `tests/web-audit-handlers.test.ts` (per-handler request/response shaping).
 
-**Test scenarios:** the three site shapes above (all-pass, antecedent-unmet, optional-absent), plus a spot check that
-`markdown-vary` reuses the root fetch (the injected `fetchImpl` records one `GET /` with no custom headers, not two).
+**Test scenarios:** the three site shapes above (all-pass, antecedent-unmet, optional-absent), the `Vary:
+Accept-Encoding, User-Agent` rejection, plus a spot check that `markdown-vary` reuses the root fetch (the injected
+`fetchImpl` records one `GET /` with no custom headers, not two).
 
 **Verification:** `bun test tests/web-audit-markdown-rewards.test.ts` passes; the full web-audit test group is green.
 
@@ -509,32 +521,28 @@ entries, the doc update, and the test updates above.
 
 ## Cross-Feature Contention (Feature 2: markdown frontmatter)
 
-A sibling worker is planning Feature 2 (a MAY check for markdown frontmatter) that also adds to
-`src/data/web-audit/registry.yaml` and `src/data/web-audit/remediation.yaml`. Compose cleanly as follows:
+A sibling feature (Feature 2, plan `2026-08-03-003`: a MAY check for markdown frontmatter) also adds to
+`src/data/web-audit/registry.yaml` and `src/data/web-audit/remediation.yaml`. The two compose as follows:
 
 - **Shared `markdown-*` id prefix.** This plan uses `markdown-cli-ua`, `markdown-agent-ua`, `markdown-accept-plain`,
-  `markdown-vary`. Feature 2 should use `markdown-frontmatter` (or similar under the same prefix). No id collision; the
-  shared prefix groups them in the `content-for-agents` category.
+  `markdown-vary`. Feature 2 uses `markdown-frontmatter`. No id collision; the shared prefix groups them in the
+  `content-for-agents` category.
 - **Reuse the `markdown-twin` antecedent.** Feature 2's frontmatter check is also contingent on the site shipping
-  markdown, so it should reuse the `markdown-twin` antecedent this plan introduces rather than defining a second
+  markdown, so it reuses the `markdown-twin` antecedent this plan introduces rather than defining a second
   near-identical token. This plan's three-way disjunction resolver (`accept-markdown` passed OR a `text/markdown` Link
-  alternate OR `/llms.txt`) is the AUTHORITATIVE `markdown-twin` definition and must win any merge: Feature 2's narrower
-  fallback (a bare `accept-markdown` check) is a stopgap only for the case this plan does not land, and must be REPLACED
-  by this disjunction, never merely referenced (a narrow definition would silently drop the two disjuncts R5 requires).
-  Whichever feature lands first adds `markdown-twin` (union in `src/worker/audit-web/registry.ts`, set in
-  `src/build/13-web-audit-registry.mjs`, resolver in `src/worker/audit-web/antecedents/content.ts`); the other rebases
-  and references the token. If both add it independently, expect a merge conflict in those three files, resolved by
-  keeping this plan's disjunction definition.
-- **Cumulative test counts.** Both features bump the hardcoded `checks.length` (currently 36) and `universeMax`
-  (currently 78, tier distribution 3/15/18). This plan targets 40 checks / universeMax 82 / 3-15-22. With Feature 2's
-  one MAY check, the cumulative total is 41 checks / universeMax 83 / 3-15-23. The feature that merges SECOND must
-  reconcile every count-bearing assertion to the running total rather than its own standalone number:
-  `tests/web-audit-scoring.test.ts` (`checks.length`, `universeMax`, and both tier-distribution objects),
+  alternate OR `/llms.txt`) is the AUTHORITATIVE `markdown-twin` definition. This plan lands the token (union in
+  `src/worker/audit-web/registry.ts`, set in `src/build/13-web-audit-registry.mjs`, resolver in
+  `src/worker/audit-web/antecedents/content.ts`); Feature 2 references it.
+- **Cumulative test counts.** Both features bump the hardcoded `checks.length` and `universeMax` from the 36 / 78 /
+  3-15-18 base. This plan's scope is 40 checks / universeMax 82 / 3-15-22. With Feature 2's one MAY check, the
+  cumulative total is 41 checks / universeMax 83 / 3-15-23. Feature 2 merges second and reconciles every count-bearing
+  assertion to the running total rather than its own standalone number: `tests/web-audit-scoring.test.ts`
+  (`checks.length`, `universeMax`, both tier-distribution objects, and the principle distribution),
   `tests/web-audit-routes.test.ts` (`checks.length`), and `tests/web-remediation.test.ts` (`checkIds.length` and its
   title string).
 - **Append order in the YAML files.** Both append to the `content-for-agents` section of `registry.yaml` and to
-  `remediation.yaml`. Appending at distinct points (this plan after `accept-markdown`) reduces line-adjacent conflict
-  risk, but a merge conflict in these two data files is still likely and is a trivial keep-both resolution.
+  `remediation.yaml`, at distinct points: this plan's four entries directly after `accept-markdown`, Feature 2's
+  `markdown-frontmatter` after `markdown-vary`.
 
 ---
 
@@ -583,8 +591,8 @@ A sibling worker is planning Feature 2 (a MAY check for markdown frontmatter) th
 - **Open Question (product):** Should `/llms.txt` count as a markdown-twin signal in the antecedent, or should the gate
   require a real per-page twin (accept-markdown pass or the Link alternate)? This plan includes llms.txt per the
   request; the stricter variant is a one-line resolver change.
-- **Open Question (id naming):** Confirm `markdown-cli-ua` / `markdown-agent-ua` / `markdown-accept-plain` /
-  `markdown-vary` compose with Feature 2's `markdown-frontmatter` id; adjust if Feature 2 chose a conflicting prefix.
+- **Resolved (id naming):** `markdown-cli-ua` / `markdown-agent-ua` / `markdown-accept-plain` / `markdown-vary` compose
+  with Feature 2's `markdown-frontmatter` id under the shared `markdown-*` prefix; no collision.
 
 ---
 
@@ -600,8 +608,8 @@ A sibling worker is planning Feature 2 (a MAY check for markdown frontmatter) th
   `src/build/13-web-audit-registry.mjs` (registry + remediation validation), `src/build/15-web-audit-skills.mjs`
   (skill-page generation), `src/data/web-audit/seed.yaml` (domain list only).
 - Contracts + tests: `content/web-scorecard-schema.md`, `content/web-audit.md`, `tests/web-audit-scoring.test.ts` (count
-  36 / universeMax 78 / 3-15-18), `tests/web-audit-routes.test.ts`, `tests/web-audit-antecedents-waves.test.ts`,
-  `tests/web-audit-antecedents-content.test.ts`, `tests/web-audit-antecedents-engine.test.ts`,
-  `tests/web-audit-two-score.test.ts` (synthetic universe, decoupled).
+  / universeMax / distribution assertions), `tests/web-audit-routes.test.ts`,
+  `tests/web-audit-antecedents-waves.test.ts`, `tests/web-audit-antecedents-content.test.ts`,
+  `tests/web-audit-antecedents-engine.test.ts`, `tests/web-audit-two-score.test.ts` (synthetic universe, decoupled).
 - Prior art: `docs/solutions/architecture-patterns/agent-readiness-audit-surface-2026-07-01.md` (standards landscape,
   Accept-negotiated surfaces as an agent-readiness axis).

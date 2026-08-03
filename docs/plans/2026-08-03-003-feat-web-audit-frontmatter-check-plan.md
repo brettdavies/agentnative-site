@@ -97,27 +97,20 @@ terminator" branches.
 ### KTD3. Gate on a shared `markdown-twin` antecedent; do not duplicate it (Feature 1 owns its definition)
 
 The antecedent for "this site serves a markdown twin" reads only wave-1 outcomes (`ctx.sources`), never a fresh fetch,
-so its markdown signal (`accept-markdown`) must be a wave-1 source. The concurrent Feature 1 plan
-(`docs/plans/2026-08-03-001-feat-web-audit-md-agent-rewards-plan.md`) **already** introduces exactly this: an antecedent
-token named `markdown-twin` (resolving `apply` on a three-way disjunction: `accept-markdown` passed, a `text/markdown`
+so its markdown signal (`accept-markdown`) must be a wave-1 source. The Feature 1 plan
+(`docs/plans/2026-08-03-001-feat-web-audit-md-agent-rewards-plan.md`) introduces exactly this: an antecedent token named
+`markdown-twin` (resolving `apply` on a three-way disjunction: `accept-markdown` passed, a `text/markdown`
 `rel="alternate"` root Link header, or `/llms.txt` present) **and** the promotion of `accept-markdown` into
 `WAVE1_CHECK_IDS`. Both plans need the identical token and the identical promotion, so this plan **consumes Feature 1's
 `markdown-twin` rather than defining its own** (two tokens for one concept is drift; two promotions of the same id into
-a `Set` is duplicative). Feature 1's disjunction is a strict superset of what this check needs, and it is the correct,
-broader definition of "serves a twin".
+a `Set` is duplicative). Feature 1's disjunction is a strict superset of what this check needs, it is the correct,
+broader definition of "serves a twin", and it is the authoritative `markdown-twin`; this plan consumes it unchanged and
+never redefines it.
 
 One consequence to accept: `markdown-twin` can hold via the `llms.txt`-only disjunct on a site whose root does **not**
 negotiate markdown. In that case this check's own fetch of `/` (KTD4) returns HTML, the content-type guard yields
 `absent`, and the MAY-absent rule finalizes it to `n_a` (`optional-absent`). That is a correct, non-penalizing outcome,
 so consuming the broader antecedent is safe.
-
-**Fallback (only if Feature 1 does not land):** define `markdown-twin` here as `sourcePassed(ctx, 'accept-markdown') ?
-'apply' : 'n_a'` in `src/worker/audit-web/antecedents/content.ts` and add `accept-markdown` to `WAVE1_CHECK_IDS` (U2
-carries this fallback). The root plain-GET fetch (`text/html`) cannot detect a twin, so the wave-1 promotion is required
-either way. This fallback resolver drops Feature 1's `error`-on-root-network-failure and `n_a`-on-non-HTML-root
-branches, which is acceptable because the check is non-penalizing: both dropped branches resolve to `n_a` here anyway.
-When Feature 1 is present, its three-way disjunction is the authoritative `markdown-twin`; this plan consumes it and
-never redefines it.
 
 ### KTD4. The handler does its own `Accept: text/markdown` fetch of `/`
 
@@ -134,18 +127,20 @@ Adding a check does not change the scorecard JSON shape: `na_reason` is already 
 'optional-absent'`, and the `results[]` row shape is unchanged. `WEB_SCHEMA_VERSION` stays `0.2`;
 `content/web-scorecard-schema.md` needs no version change (it documents the shape + taxonomy generically and points at
 the registry for the check list). What **does** change: this MAY check adds `+1` to the registry size, the live
-`universeMax`, and the MAY tier count, so several count-bearing assertions move. Standalone deltas (from today's
-36-check baseline): `checks.length` 36 -> 37 at four sites (`tests/web-remediation.test.ts:35`,
-`tests/web-audit-routes.test.ts:381`, `tests/web-audit-scoring.test.ts:54` and `:232`), plus the
-`tests/web-remediation.test.ts:33` describe-title string ("no misses across all 36" -> "37"); the two tier-distribution
-object assertions in `tests/web-audit-scoring.test.ts` (`{ required: 3, recommended: 15, optional: 18 }` at `:130` and
-`{ must: 3, should: 15, may: 18 }` at `:137`, each MAY `+1` to `optional`/`may` 19); and the `universeMax` block (`:335`
-78 -> 79, its inline arithmetic comment at `:329` `3 MUST x5 + 15 SHOULD x3 + 18 MAY x1 = 78` -> `19 MAY x1 = 79`, and
-the `:327` tier-distribution test title 3/15/18 -> 3/15/19). **If Feature 1 (which adds four MAY checks) merges first**,
-the baselines shift: `checks.length` 40 -> 41, `universeMax` 82 -> 83, distribution 3/15/22 -> 3/15/23. The
-second-merged plan reconciles to the cumulative literal; do not write `37`/`79` blindly. The two-score parity fixture
-(`tests/fixtures/web-audit-score-parity.json`) uses a synthetic universe, not the live registry count, so it is
-unaffected.
+`universeMax`, and the MAY tier count, and the registry gains a new handler and one more P2 check, so several
+registry-shape assertions move. Feature 1 (four MAY checks) merges first, so this plan reconciles every one of them to
+the cumulative literal, not a standalone number:
+
+- `tests/web-audit-scoring.test.ts`: `checks.length` 40 -> 41 at both assertion sites; the tier-distribution objects `{
+  required: 3, recommended: 15, optional: 22 }` -> `optional: 23` and `{ must: 3, should: 15, may: 22 }` -> `may: 23`;
+  `universeMax` 82 -> 83 with its inline arithmetic comment (`3 MUST x5 + 15 SHOULD x3 + 23 MAY x1 = 83`) and the
+  tier-distribution test title (3/15/23); the principle-distribution assertion `P2: 16` -> `P2: 17`; and the
+  handler-allowlist assertion, which gains `'markdown-frontmatter'`.
+- `tests/web-audit-routes.test.ts`: `checks.length` 40 -> 41.
+- `tests/web-remediation.test.ts`: `checkIds.length` 40 -> 41 and the describe-title string ("no misses across all 41").
+
+The two-score parity fixture (`tests/fixtures/web-audit-score-parity.json`) uses a synthetic universe, not the live
+registry count, so it is unaffected.
 
 ---
 
@@ -161,10 +156,10 @@ Evaluation flow for the new check, keyed on the two fairness constraints:
    └───────────────────────────────┘
                      │
                      ▼
-        antecedent 'markdown-twin':
-        sourcePassed('accept-markdown') ?
-             ┌── no ──► n_a (antecedent-unmet)         [R3: site serves no twin]
-             └── yes ─► run markdown-frontmatter handler
+        antecedent 'markdown-twin' (Feature 1's three-way disjunction:
+        accept-markdown passed OR text/markdown alternate Link OR /llms.txt):
+             ┌── unmet ─► n_a (antecedent-unmet)       [R3: site serves no twin]
+             └── apply ─► run markdown-frontmatter handler
                               │
                               ▼  GET / with Accept: text/markdown
                     ┌─────────────────────────────────────────┐
@@ -213,12 +208,13 @@ structure.
 2. `guardedFetch(resolveUrl(ctx.base, path), { headers }, { ...ctx.fetchOptions, timeoutMs })` via the SSRF guard (never
    a bare `fetch`); reuse `timeoutMsFor` / `resolveUrl` from `handlers/shared`.
 3. On request error or null status: return `{ status: 'error', ... }` (operational, excluded from scoring).
-4. Detection on `resp.body`: strip a leading BOM; if it does not start with a `---` fence line -> `absent`. Else scan
-   subsequent lines for a `---` or `...` terminator; if none -> `broken` (unterminated). Between the fences, require at
-   least one line matching `^\S[^:]*:(\s|$)` (a `key:` mapping line); if none -> `broken` (empty/degenerate block).
-   Otherwise -> `pass`.
-5. Evidence rows mirror the http handler shape (`url`, `status`, `ok`, `why`), e.g. `why: ['frontmatter present (N key
-   lines)']` / `['no leading frontmatter fence']` / `['unterminated frontmatter fence']`.
+4. Detection on `resp.body`: strip a leading BOM; split into lines on `/\r?\n/` (CRLF tolerated); if the first line is
+   not exactly `---` -> `absent`. Else scan subsequent lines for a `---` or `...` terminator line; if none -> `broken`
+   (unterminated). Between the fences, require at least one line matching `^\S[^:]*:(\s|$)` (a `key:` mapping line); if
+   none -> `broken` (empty/degenerate block). Otherwise -> `pass`.
+5. Evidence rows mirror the http handler shape (`url`, `status`, `ok`, `why`): `why: ['frontmatter present (N key
+   lines)']` / `['no leading frontmatter fence']` / `['unterminated frontmatter fence']` / `['frontmatter fence encloses
+   no key line']` / `['root served HTML, not a markdown twin']`.
 6. Defensive content-type check: if the response is `text/html` (antecedent should preclude this), treat as `absent`
    rather than scanning HTML for a stray `---`.
 7. Never use `any`; type `check.with` with a local `MarkdownFrontmatterWith` shape as the other handlers do.
@@ -245,49 +241,28 @@ structure.
 
 ---
 
-### U2. Ensure the shared `markdown-twin` antecedent exists (consume Feature 1's, or add the fallback)
+### U2. Consume the shared `markdown-twin` antecedent (Feature 1 owns it)
 
-**Goal:** The `markdown-twin` antecedent token resolves from `accept-markdown`'s wave-1 result, so U3's check can gate
-on it. Ownership is coordinated with Feature 1 (plan 001), which introduces the identical token and the same wave-1
-promotion.
+**Goal:** The `markdown-twin` antecedent token resolves from wave-1 results, so U3's check can gate on it. Feature 1
+(plan 001) owns the token, its resolver, and the `accept-markdown` wave-1 promotion; this plan consumes them.
 
 **Requirements:** R3, R8.
 
-**Dependencies:** none (independent of U1). **Coordination:** Feature 1 (plan 001) also introduces `markdown-twin` + the
-`accept-markdown` wave-1 promotion.
+**Dependencies:** Feature 1's `markdown-twin` + `accept-markdown` wave-1 promotion (merged first).
 
-**Files (fallback path only — skip when Feature 1 already landed these):**
-- `src/worker/audit-web/antecedents/content.ts` (add `markdown-twin` resolver + unmet-evidence)
-- `src/worker/audit-web/registry.ts` (`AntecedentToken` union: add `'markdown-twin'`)
-- `src/build/13-web-audit-registry.mjs` (`WEB_AUDIT_ANTECEDENTS` set: add `'markdown-twin'`)
-- `src/worker/audit-web/antecedents/waves.ts` (`WAVE1_CHECK_IDS`: add `'accept-markdown'`)
-- `tests/web-audit-antecedents-content.test.ts`, `tests/web-audit-antecedents-waves.test.ts`
+**Files:** none — Feature 1's plan lands the resolver (`src/worker/audit-web/antecedents/content.ts`), the
+`AntecedentToken` union member (`src/worker/audit-web/registry.ts`), the `WEB_AUDIT_ANTECEDENTS` entry
+(`src/build/13-web-audit-registry.mjs`), and the `WAVE1_CHECK_IDS` promotion
+(`src/worker/audit-web/antecedents/waves.ts`), with their tests.
 
-**Approach:**
-1. **If Feature 1's `markdown-twin` + `accept-markdown` wave-1 promotion are already present** (merged or in the same
-   integration branch): this unit is a no-op beyond confirming the token exists and resolves. Do **not** re-add the
-   token (a duplicate `AntecedentToken` member / `contentResolvers` key is a type/build error) and do **not** re-add
-   `accept-markdown` to `WAVE1_CHECK_IDS` (harmless but duplicative). Skip to U3.
-2. **Fallback (Feature 1 not present):** in `content.ts`, add `const markdownTwin: AntecedentResolver = (ctx) =>
-   (sourcePassed(ctx, 'accept-markdown') ? 'apply' : 'n_a');`, register `'markdown-twin': markdownTwin` in
-   `contentResolvers` and `'markdown-twin': 'no markdown twin served (Accept: text/markdown did not return markdown)'`
-   in `contentEvidence` (`index.ts` composes both automatically). Add `'markdown-twin'` to the `AntecedentToken` union
-   (`registry.ts`) and `WEB_AUDIT_ANTECEDENTS` (`13-web-audit-registry.mjs`). Add `'accept-markdown'` to
-   `WAVE1_CHECK_IDS` (`waves.ts`); its `html-root` gate still applies in the wave-1 finalize loop, so behavior/score are
-   unchanged, only probe timing.
+**Approach:** Confirm the token exists and resolves; do **not** re-add it (a duplicate `AntecedentToken` member /
+`contentResolvers` key is a type/build error) and do **not** re-add `accept-markdown` to `WAVE1_CHECK_IDS` (harmless but
+duplicative). `markdown-twin`'s resolver and unmet-evidence are covered by Feature 1's
+`tests/web-audit-antecedents-content.test.ts` / `tests/web-audit-antecedents-waves.test.ts`; this plan adds no
+antecedent code or tests.
 
-**Patterns to follow:** the existing `docs-site` / `root-llms-txt` resolvers in `content.ts` (`sourcePassed`-based); the
-union + set + validation triple used for every antecedent token; Feature 1's own `markdown-twin` definition if present.
-
-**Test scenarios (fallback path; when consuming Feature 1's token, its own tests cover these):**
-- `resolveAntecedent('markdown-twin', ctx({ sources: Map[['accept-markdown', outcome('pass')]] }))` -> `apply`.
-- `resolveAntecedent('markdown-twin', ctx({ sources: Map[['accept-markdown', outcome('absent')]] }))` -> `n_a`.
-- `resolveAntecedent('markdown-twin', ctx({}))` (no source) -> `n_a`.
-- `WAVE1_CHECK_IDS.has('accept-markdown')` is `true` (extend the waves test's id list).
-- The existing wave-1 members still resolve/pass (no regression from the promotion).
-
-**Verification:** `markdown-twin` resolves and `accept-markdown` is a wave-1 source (from whichever plan owns it); `bun
-run build` normalizes the registry (validation set admits the token).
+**Verification:** `markdown-twin` resolves and `accept-markdown` is a wave-1 source (Feature 1's tests); `bun run build`
+normalizes the registry (the validation set admits the token).
 
 ---
 
@@ -300,17 +275,16 @@ standalone-vs-after-Feature-1 baselines).
 **Requirements:** R1, R4, R7, R9.
 
 **Dependencies:** U1 (handler name must be in `WEB_AUDIT_HANDLERS`), U2 (antecedent token `markdown-twin` must be in
-`WEB_AUDIT_ANTECEDENTS`, whether from Feature 1 or the U2 fallback). The build's registry validation rejects an unknown
-handler/antecedent, so U1 and U2 land first.
+`WEB_AUDIT_ANTECEDENTS`, from Feature 1). The build's registry validation rejects an unknown handler/antecedent, so U1
+and U2 land first.
 
 **Files:**
-- `src/data/web-audit/registry.yaml` (new check in the `content-for-agents` block)
+- `src/data/web-audit/registry.yaml` (new check in the `content-for-agents` block, after `markdown-vary`)
 - `src/data/web-audit/remediation.yaml` (new `markdown-frontmatter` entry)
-- `tests/web-remediation.test.ts` (`checkIds.length` `:35`, `+1`; describe-title string "no misses across all 36" `:33`)
-- `tests/web-audit-routes.test.ts` (`checks.length` `:381`, `+1`)
-- `tests/web-audit-scoring.test.ts` (`checks.length` `:54` and `:232`, `+1`; tier-distribution objects `{ required: 3,
-  recommended: 15, optional: 18 }` `:130` and `{ must: 3, should: 15, may: 18 }` `:137`, MAY `+1`; `universeMax` `:335`,
-  `+1`, and its inline arithmetic comment `:329`; `:327` tier-distribution test title, MAY `+1`)
+- `tests/web-remediation.test.ts` (`checkIds.length` 40 -> 41; describe-title string "no misses across all 41")
+- `tests/web-audit-routes.test.ts` (`checks.length` 40 -> 41)
+- `tests/web-audit-scoring.test.ts` (`checks.length` 40 -> 41 at both sites; tier-distribution objects, universeMax +
+  arithmetic comment + test title, principle distribution, and the handler allowlist — the KTD5 list)
 - `tests/web-audit-antecedents-engine.test.ts` (end-to-end scenarios for the new check)
 
 **Approach:**
@@ -331,10 +305,11 @@ handler/antecedent, so U1 and U2 land first.
      hint: Prefix each markdown twin with YAML frontmatter (title, description, canonical url) so agents ingest page metadata without parsing the body.
    ```
    Do not hand-author a `keyword` (it derives from `tier`); the build aborts if present.
-2. Remediation entry (title/goal/fix/resources), mirroring the `accept-markdown` entry's voice; resources point at a
-   stable frontmatter reference and the anc.dev example twin.
-3. Reconcile every live-registry count-bearing assertion by `+1 MAY` (see the Files list and KTD5 for exact sites and
-   baselines).
+2. Remediation entry (title/goal/fix/resources), mirroring the `accept-markdown` entry's voice; resources point at
+   stable frontmatter references (the Jekyll front-matter convention doc and RFC 7763, `text/markdown`).
+3. Reconcile every live-registry assertion to the cumulative totals — 41 checks / universeMax 83 / tier distribution
+   3-15-23 — including the two beyond-count assertions: the principle distribution (`P2: 17`) and the handler allowlist
+   (`markdown-frontmatter`). KTD5 enumerates the exact sites.
 
 **Patterns to follow:** the `accept-markdown` registry entry (~line 308) and its remediation entry (~line 166); the
 append-a-check convention (the build derives `keyword`, generates the `/web-audit/skill/markdown-frontmatter` page, and
@@ -350,7 +325,8 @@ the discovery index entry automatically, so no display wiring is needed).
   the same site with the twin frontmatter-absent.
 - `normalizeWebAuditRegistry` accepts the new check (handler + antecedent validate) and `normalizeWebRemediation` passes
   1:1 (no orphan, full coverage).
-- The reconciled count / `universeMax` / tier-distribution assertions read the `+1 MAY` totals.
+- The reconciled count / `universeMax` / tier- and principle-distribution / handler-allowlist assertions read the
+  cumulative totals (41 / 83 / 3-15-23 / `P2: 17`).
 
 **Verification:** `bun test` green (assertions reconciled, engine scenarios pass); `bun run build` emits
 `dist/_internal/web-audit-registry.json` with the new check present and `dist/web-audit/skill/markdown-frontmatter.md`.
@@ -360,8 +336,7 @@ the discovery index entry automatically, so no display wiring is needed).
 ## Scope Boundaries
 
 **In scope:** one MAY check (`markdown-frontmatter`), its dedicated handler, the remediation entry, gating on the shared
-`markdown-twin` antecedent (consumed from Feature 1, or added via U2's fallback), and the live-registry test
-reconciliation.
+`markdown-twin` antecedent (consumed from Feature 1), and the live-registry test reconciliation.
 
 **Out of scope / Deferred to Follow-Up Work:**
 - Reusing `accept-markdown`'s retained response body instead of a second fetch (would require threading
@@ -386,15 +361,14 @@ concrete facts, not hypotheticals:
 - **Shared `markdown-twin` antecedent + `accept-markdown` wave-1 promotion (direct collision, resolved).** Feature 1's
   U1/U2 introduce an antecedent token named exactly `markdown-twin` (a three-way disjunction: `accept-markdown` passed
   OR root `rel="alternate"` `text/markdown` Link OR `/llms.txt` present) **and** promote `accept-markdown` into
-  `WAVE1_CHECK_IDS`. This plan's U2 is written to **consume** that shared token rather than redefine it (KTD3); only the
-  U2 fallback adds it, and only if Feature 1 does not land. Do not let both plans add the `markdown-twin` union member /
-  resolver (a type/build error) or both edit `WAVE1_CHECK_IDS` (duplicative). Whichever merges first owns the
-  definitions.
-- **Guaranteed conflict on the live-registry assertions.** Feature 1 bumps `checks.length` 36 -> 40, `universeMax` 78 ->
-  82, and the tier distribution 3/15/18 -> 3/15/22 (`tests/web-remediation.test.ts`, `tests/web-audit-routes.test.ts`,
-  `tests/web-audit-scoring.test.ts`). This plan adds one MAY on top. The second-merged plan reconciles to the cumulative
-  literals (checks 41, universeMax 83, distribution 3/15/23); do not write the standalone `37`/`79` values blindly. See
-  KTD5.
+  `WAVE1_CHECK_IDS`. Feature 1 merges first and owns those definitions; this plan's U2 **consumes** the shared token and
+  never redefines it (KTD3) — both plans adding the `markdown-twin` union member / resolver would be a type/build error,
+  and both editing `WAVE1_CHECK_IDS` would be duplicative.
+- **Shared live-registry assertions.** Feature 1 bumps `checks.length` 36 -> 40, `universeMax` 78 -> 82, and the tier
+  distribution 3/15/18 -> 3/15/22 (`tests/web-remediation.test.ts`, `tests/web-audit-routes.test.ts`,
+  `tests/web-audit-scoring.test.ts`). This plan adds one MAY on top and, merging second, reconciles to the cumulative
+  literals (checks 41, universeMax 83, distribution 3/15/23, principle distribution `P2: 17`, handler allowlist +
+  `markdown-frontmatter`), never the standalone `37`/`79` values. See KTD5.
 - **Registry / remediation append points.** Both add YAML entries to the same two files, both in the
   `content-for-agents` category. Keep diffs disjoint by appending distinct blocks with distinct ids. This plan uses id
   `markdown-frontmatter`; Feature 1's ids include `markdown-cli-ua` (and three siblings) — no id collision.
@@ -439,9 +413,9 @@ it only affects whether anc.dev self-audits `pass` here.
 - **OQ1** Should a fence pair with zero key lines (`---\n---`) be `broken` (this plan) or `absent`? Chosen default:
   `broken`, because an empty frontmatter block is present-but-useless and signals a templating bug worth flagging.
   Revisit if it proves noisy on real sites.
-- **OQ2** Remediation `resources` links: cite a canonical frontmatter reference (e.g. a YAML front-matter convention
-  doc) plus the anc.dev example twin, or only the anc.dev example? Default: both, once part (a) makes the anc.dev
-  example real.
+- **OQ2 (resolved)** Remediation `resources` cite two canonical frontmatter references — the Jekyll front-matter
+  convention doc and RFC 7763 (`text/markdown`) — rather than the anc.dev example twin, keeping the catalog free of
+  self-referencing links.
 
 ---
 
@@ -460,7 +434,7 @@ it only affects whether anc.dev self-audits `pass` here.
 - Scoring: `src/worker/audit-web/score.ts` (`universeMaxOf`, MAY-absent excluded), `src/worker/audit-web/scorecard.ts`
   (`NaReason = 'antecedent-unmet' | 'optional-absent'`, `WEB_SCHEMA_VERSION = '0.2'`).
 - Auto-generated skill pages: `src/build/15-web-audit-skills.mjs`.
-- Test coupling: `tests/web-remediation.test.ts:35`, `tests/web-audit-routes.test.ts:381`,
-  `tests/web-audit-scoring.test.ts:54,232` (count `36`); `tests/web-audit-two-score.test.ts` (synthetic universe,
-  unaffected); `tests/web-audit-handlers.test.ts`, `tests/web-audit-antecedents-engine.test.ts` (patterns for new
-  cases).
+- Test coupling: `tests/web-remediation.test.ts`, `tests/web-audit-routes.test.ts`, `tests/web-audit-scoring.test.ts`
+  (registry count / distribution / handler-allowlist assertions); `tests/web-audit-two-score.test.ts` (synthetic
+  universe, unaffected); `tests/web-audit-handlers.test.ts`, `tests/web-audit-antecedents-engine.test.ts` (patterns for
+  new cases).

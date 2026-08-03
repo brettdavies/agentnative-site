@@ -68,8 +68,9 @@ toggle must be a server-rendered control, not client JS), and working for both t
   never expiry-filtered.
 - **R6** — View-aware counts and copy replace the hardcoded "curated" strings: the all view states the total plus the
   curated/user-submitted breakdown; the curated view states the curated count.
-- **R7** — The board list stays **narrow** (rank, site, description, Global, Relative) in both HTML and markdown. Full
-  category-split / per-check remediation output is explicitly out of scope (Feature 5 owns per-site result markdown).
+- **R7** — The board list stays **narrow**: rank, site, description, Global, Relative in HTML; rank, site, Global,
+  Relative, Source in markdown. Full category-split / per-check remediation output is explicitly out of scope (Feature 5
+  owns per-site result markdown).
 - **R8** — The homepage teaser board (`src/worker/index.ts`) and the `list_website_audits` MCP tool stay **curated and
   unchanged**.
 - **R9** — Enumerating all cached sites must honor R2 `list()` pagination and must not require a per-object body fetch
@@ -146,8 +147,7 @@ progressive enhancement, not required for the feature.
 The feature's framing ("display ALL sites ... plus a toggle to filter to only the curated set") makes all the default
 and curated the subset. Chosen accordingly. The trade-off (all-default puts the R2 `list()` on the hotter path, and a
 noisy user-submitted set could dilute the default board's signal) is real; curated-default is the documented alternative
-and is flagged in Open Questions for Brett to confirm. Choosing all-default keeps the plan faithful to the request while
-the alternative remains a one-line switch.
+and remains a one-line switch if the all-default proves noisy.
 
 ### KTD5 — Logical display-expiry window, physical R2 cleanup deferred
 
@@ -223,9 +223,8 @@ helper for the all view. Advances R1, R5, R9, KTD1, KTD2, KTD5.
    - Keep only per-domain keys at the current spec — shape `audits/web/<sha256>/<specVersion>.json` (this excludes the
      `leaderboard` / `leaderboard-frontpage` aggregate keys and other spec versions). Do **not** interpolate
      `specVersion` raw into a `RegExp`: it contains dots that a raw pattern treats as any-char (matching e.g. `0x3x0`).
-     Either split the key on `/` and compare the trailing segment as the literal string `` `${specVersion}.json` ``, or
-     escape the version before interpolating (`specVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')`). The `[0-9a-f]{64}`
-     sha segment can still be a regex; the version must be matched literally.
+     Split the key on `/`, require exactly four segments, match the sha segment against `[0-9a-f]{64}`, and compare the
+     trailing segment as the literal string `` `${specVersion}.json` `` — the version is never a regex.
    - Read `customMetadata`; skip entries missing any required field or with unparseable numbers.
    - Skip when `excludeDomains.has(domain)` (seeded domains come from the aggregate).
    - Skip when `isStale(scored_at, maxAgeMs ?? WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS, now ?? Date.now())` (expired).
@@ -265,24 +264,28 @@ and a user-submitted marker on non-curated rows. Advances R2, R3, R4, R6, R7.
 **Files:**
 - `src/worker/audit-web/leaderboard-render.ts` (modify `buildWebLeaderboardBody`, `buildWebLeaderboardMarkdown`; leave
   `buildFrontpageBoardRows` / `buildFrontpageBoardEmptyState` untouched)
-- `src/styles/site.css` (add the `.lb-tag` rule backing the user-submitted badge)
-- `tests/web-audit-leaderboard-route.test.ts` (extend — render assertions exercised through the route in U3) and/or a
-  focused block in the same file
+- `src/styles/site.css` (add the `.lb-tag` rule backing the user-submitted badge and an `a.tier-filter` companion rule)
+- `tests/web-audit-leaderboard-route.test.ts` (extend — render assertions exercised through the route in U3)
+- `tests/web-audit-scorecard-format.test.ts` (existing renderer tests move to the `WebBoardEntry` + opts signatures; the
+  markdown row assertions gain the Source column)
 
 **Approach:**
-1. Introduce a board-entry type carrying the curated flag, e.g. `type WebBoardEntry = WebAggregateEntry & { curated:
-   boolean }`, and have `rankWebEntries` operate over it (it already spreads `...e`, so the flag survives). Keep the
-   existing `WebAggregateEntry` overload working for the frontpage rows.
-2. Give both builders a signature that accepts the view and counts, e.g. `buildWebLeaderboardBody(entries, { view,
-   curatedCount, userCount, sort })` and `buildWebLeaderboardMarkdown(entries, origin, { view, curatedCount, userCount
-   })`. Keep argument order backward-compatible where practical, or update all call sites (only U3 calls these).
+1. Introduce a board-entry type carrying the curated flag — `export type WebBoardEntry = WebAggregateEntry & { curated:
+   boolean }` — and make `rankWebEntries` generic (`<T>(entries: T[], sortKey) => (T & { rank: number })[]`) so the flag
+   survives ranking and the frontpage `WebAggregateEntry[]` call still type-checks. The `RankedWebEntry` alias is
+   removed: with rank expressed inline nothing consumes it.
+2. Give both builders a signature that accepts the view and counts via a shared `WebBoardRenderOpts` (`{ view,
+   curatedCount, userCount, sort }`): `buildWebLeaderboardBody(entries, opts)` and `buildWebLeaderboardMarkdown(entries,
+   origin, opts)` with the markdown builder taking `Omit<WebBoardRenderOpts, 'sort'>` (markdown has no sort control).
+   Update all call sites (U3's route plus the existing renderer tests).
 3. **Toggle control (HTML, zero-JS):** two `<a>` links styled with the existing `.tier-filter` classes (reuse the visual
    language of the sort control but as navigation): "All" -> `/web` and "Curated (`{curatedCount}`)" ->
    `/web?view=curated`, the active one marked (`tier-filter--active`, `aria-current="page"`). Each link carries the
    current `?sort=` value when set. Place it near the existing sort `.tier-filters` group.
    - **Markdown twin discoverability:** `buildWebLeaderboardMarkdown` gets the same switch as a one-line pointer near
-     the top of the body, e.g. `View: [All](/web.md) | [Curated](/web.md?view=curated)` with the active view rendered as
-     plain text rather than a link. Without it the markdown board has no in-body way to reach the other view; a bare
+     the top of the body — `View: All | [Curated](<origin>/web.md?view=curated)` (and the mirror on the curated view) —
+     with the active view rendered as plain text rather than a link, and the link origin-absolutized like every other
+     link the markdown builder emits. Without it the markdown board has no in-body way to reach the other view; a bare
      `?view=curated` param is undiscoverable to a reader of `/web.md`.
 4. **View-aware copy (replaces the hardcoded strings at the current lines ~71 and ~107):**
    - All view hero meta: `"{total} sites on the board ({curatedCount} curated, {userCount} user-submitted). Audit your
@@ -290,12 +293,13 @@ and a user-submitted marker on non-curated rows. Advances R2, R3, R4, R6, R7.
    - Curated view hero meta: `"{curatedCount} curated site(s) on the board. Audit your own."`.
    - Methodology footer: describe both views — the curated set is hand-picked; the all view also lists sites audited on
      demand, which appear until their cached result ages out. Drop the absolute "The board is curated." sentence.
-5. **Row markers:** on a `curated: false` row, add a small badge in the site cell, e.g. `<span
+5. **Row markers:** on a `curated: false` row, add a small badge in the site cell — `<span
    class="lb-tag">user-submitted</span>` (HTML) after the domain/name. Curated rows render as today. In markdown, add a
-   "Source" column with `curated` / `on-demand` (keeps the table narrow, one extra column). The `.lb-tag` class has no
-   existing rule, so the badge would render as unstyled text; add a `.lb-tag` rule to `src/styles/site.css`. Do not
-   hand-author the visual styling from taste — route the badge's exact appearance (size, weight, color/contrast,
-   padding, radius) through the `/typeset` or `/design-review` skill per this repo's visual-fix convention.
+   "Source" column with `curated` / `on-demand` (keeps the table narrow, one extra column). Style the badge with a
+   `.lb-tag` rule in `src/styles/site.css` built from the existing foundation tokens: `.tier-badge` metrics with neutral
+   colors (`--bg-raised`, `--border-subtle`), because the tag marks the row's source, not an achievement tier.
+   `a.tier-filter` gets a companion rule (no underline, inline-block): the class now styles server-rendered anchor
+   links, and anchors keep the UA underline that buttons never had.
 6. Empty states: keep the existing scoring-in-progress empty state; it applies per view (curated view with no curated
    rows; all view with no rows at all).
 
@@ -310,8 +314,10 @@ table builder already present.
 - All-view meta shows total and the curated/user-submitted breakdown; curated-view meta shows only the curated count.
 - Markdown all view includes the Source column with `on-demand` for a user-submitted row and `curated` for a seeded row;
   markdown curated view lists only curated rows.
-- Markdown all view carries the `View:` switch line with a live `[Curated](/web.md?view=curated)` link; markdown curated
-  view links back to `[All](/web.md)` and renders the active view as plain text, not a link.
+- Markdown all view carries the `View:` switch line with a live, origin-absolute
+  `[Curated](<origin>/web.md?view=curated)` link; markdown curated view links back to `[All](<origin>/web.md)` and
+  renders the active view as plain text, not a link. The renderer tests lock the origin-absolute convention for rows and
+  switch links alike.
 - Toggle links preserve a present `?sort=relative`.
 - Methodology footer no longer asserts "The board is curated." and mentions the on-demand/aging-out behavior.
 
@@ -330,8 +336,9 @@ KTD3, KTD4.
 - `tests/web-audit-leaderboard-route.test.ts` (extend)
 
 **Approach:**
-1. Parse `const view = url.searchParams.get('view') === 'curated' ? 'curated' : 'all';` (anything else -> all) and
-   `const sort = url.searchParams.get('sort');` (passed to the renderer for toggle-link preservation only).
+1. Parse `const view = url.searchParams.get('view') === 'curated' ? 'curated' : 'all';` (anything else -> all, so a
+   mistyped parameter never 404s a shareable URL) and validate `?sort=` to `'global' | 'relative' | null` (passed to the
+   renderer for toggle-link preservation only).
 2. Read the curated aggregate (`getAggregate('leaderboard')`) -> `curatedEntries` mapped to `WebBoardEntry` with
    `curated: true`. `curatedCount = curatedEntries.length`.
 3. If `view === 'curated'`: entries = `curatedEntries`; `userCount = 0`.
@@ -339,10 +346,11 @@ KTD3, KTD4.
    Set(curatedEntries.map((e) => e.domain))` — unioned with the seed set (`loadWebSeed` -> `seededSet`, which also
    catches a freshly-seeded domain not yet in the aggregate). Dedup on the curated rows, not the seed alone: a domain
    dropped from `seed.yaml` but still lingering in the possibly-stale `leaderboard` aggregate and holding a live R2
-   entry is in `curatedEntries`, so keying dedup off the seed alone would render it twice. Call `listAllWebAudits(env, {
-   specVersion: SPEC_VERSION, excludeDomains: <union of curatedDomainSet and seededSet> })` -> user-submitted
-   `WebBoardEntry[]` with `curated: false`, `url: https://<domain>/`, `description: ''` (unseeded audits carry no seed
-   description). entries = `curatedEntries.concat(userSubmitted)`; `userCount = userSubmitted.length`.
+   entry is in `curatedEntries`, so keying dedup off the seed alone would render it twice. A `loadWebSeed` failure is
+   tolerated (try/catch): the curated-row exclusion still dedups every domain the board actually renders. Call
+   `listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: <union of curatedDomainSet and seededSet> })` ->
+   user-submitted `WebBoardEntry[]` with `curated: false`, `url: https://<domain>/`, `description: ''` (unseeded audits
+   carry no seed description). entries = `curatedEntries.concat(userSubmitted)`; `userCount = userSubmitted.length`.
 5. Branch markdown vs HTML exactly as today (`wantMarkdown` unchanged), passing `{ view, curatedCount, userCount, sort
    }` to the renderer. Set the HTML canonical to `/web` for the all view and `/web?view=curated` for the curated view.
 6. Leave the response headers otherwise as today (see Open Questions on edge-caching + `Vary: Accept`; not added here).
@@ -465,8 +473,8 @@ two files; the edits are additive and touch disjoint symbols:
   `handleWebResultPage` and its markdown branch (the per-site result). Different functions in one file; both add
   imports. Land as separate commits to keep the diff regions disjoint.
 - `src/worker/audit-web/cache.ts` — this plan modifies `put` (adds custom metadata) and adds `listAllWebAudits` +
-  `WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS`; Feature 5 is expected to touch the per-domain read/summary path, not `put`. Same
-  file, disjoint symbols.
+  `WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS`; Feature 5 touches the per-domain read path (read-time display enrichment), not
+  `put`. Same file, disjoint symbols.
 - `src/worker/audit-web/leaderboard-render.ts` — owned entirely by this plan (the LIST). Feature 5 owns
   `src/worker/audit-web/summary-render.ts` (the per-site RESULT). This plan does not touch `summary-render.ts`.
 
@@ -487,13 +495,14 @@ interchangeable; resolve import-block conflicts in `route.ts`/`cache.ts` mechani
 
 ## Open Questions
 
-- **Default view — all vs curated?** Plan chooses all (per the feature framing). Confirm, or flip to curated-default
-  (one-line change in U3, plus swapping which toggle link is active by default).
-- **Display window value.** 30 days assumed. Confirm the intended "shown until expires" duration; align any future R2
-  lifecycle TTL to be `>=` it.
-- **R2 `list()` + `customMetadata` behavior** at the current Workers runtime: confirm custom metadata is returned for
-  listed objects and the effective page size, to size the pagination loop and confirm KTD1 over the
-  materialized-aggregate fallback. (Execution-time verification; drive a real `list()` in staging.)
+- **Resolved — default view is all** (per the feature framing); curated is the opt-in filter. Flipping to
+  curated-default stays a one-line change in U3 (plus swapping which toggle link is active by default) if the default
+  proves noisy.
+- **Resolved — display window is 30 days** (`WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS`); any future R2 lifecycle TTL must be
+  `>=` it.
+- **R2 `list()` + `customMetadata` behavior.** A miniflare/workerd run confirms `put` persists `customMetadata` and
+  `list({ include: ['customMetadata'] })` returns it per object. Still open: a drive against real R2 in staging (page
+  size, metadata delivery at production scale) to close out KTD1 over the materialized-aggregate fallback.
 - **Edge-caching the board.** Left off to avoid the `Vary: Accept` cross-serve hazard; revisit if render cost matters.
 
 ---
