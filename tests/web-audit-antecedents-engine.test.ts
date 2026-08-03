@@ -237,3 +237,70 @@ describe('runWebAudit two-wave evaluation', () => {
     expect(row?.na_reason).toBe('antecedent-unmet');
   });
 });
+
+describe('runWebAudit markdown-frontmatter gating', () => {
+  const REGISTRY = registryOf([
+    makeCheck({
+      id: 'accept-markdown',
+      antecedent: 'html-root',
+      with: { path: '/', headers: { Accept: 'text/markdown' }, expect: { content_type: 'markdown|text/plain' } },
+    }),
+    makeCheck({
+      id: 'markdown-frontmatter',
+      tier: 'optional',
+      keyword: 'may',
+      antecedent: 'markdown-twin',
+      handler: 'markdown-frontmatter',
+      with: { path: '/', headers: { Accept: 'text/markdown' } },
+    }),
+  ]);
+
+  // twin === null models a site that never serves markdown: the root
+  // markdown request falls through to HTML, so no markdown-twin signal.
+  function twinSite(twin: string | null) {
+    return stubFetch((url, init) => {
+      const path = new URL(url).pathname;
+      const accept = (init?.headers as Record<string, string> | undefined)?.Accept ?? '';
+      if (path === '/') {
+        if (twin !== null && accept.includes('text/markdown')) {
+          return new Response(twin, { status: 200, headers: { 'content-type': 'text/markdown' } });
+        }
+        return new Response('<html><head></head><body>hi</body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+  }
+
+  async function frontmatterRow(twin: string | null) {
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: REGISTRY, fetchOptions: { fetchImpl: twinSite(twin) } }),
+    );
+    return resultsOf(events).find((r) => r.id === 'markdown-frontmatter');
+  }
+
+  test('a twin with frontmatter passes and contributes its MAY weight', async () => {
+    const row = await frontmatterRow('---\ntitle: X\ndescription: Y\nurl: https://z/\n---\n\n# H\n');
+    expect(row?.status).toBe('pass');
+    expect(row?.weight).toBe(1);
+  });
+
+  test('a twin without frontmatter is n_a optional-absent, not a miss', async () => {
+    const row = await frontmatterRow('# Heading\n\nJust prose, no frontmatter.\n');
+    expect(row?.status).toBe('n_a');
+    expect(row?.na_reason).toBe('optional-absent');
+  });
+
+  test('no markdown twin at all gates the check to n_a antecedent-unmet', async () => {
+    const row = await frontmatterRow(null);
+    expect(row?.status).toBe('n_a');
+    expect(row?.na_reason).toBe('antecedent-unmet');
+  });
+
+  test('a malformed (unterminated) frontmatter twin is broken', async () => {
+    const row = await frontmatterRow('---\ntitle: X\ndescription: Y\n\n# H\n');
+    expect(row?.status).toBe('broken');
+  });
+});

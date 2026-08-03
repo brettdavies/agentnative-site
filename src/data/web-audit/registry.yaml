@@ -380,6 +380,20 @@ checks:
         header_regex: { name: vary, pattern: "(?=.*accept(?!-))(?=.*user-agent)" }
     hint: 'Emit Vary: Accept, User-Agent when the markdown twin is negotiated on the same URL, so shared caches never serve one client the wrong variant.'
 
+  - id: markdown-frontmatter
+    category: content-for-agents
+    tier: optional
+    principle: P2
+    site_types: [all]
+    antecedent: markdown-twin
+    weight: 1
+    title: Markdown twin carries YAML frontmatter
+    handler: markdown-frontmatter
+    with:
+      path: /
+      headers: { Accept: text/markdown }
+    hint: Prefix each markdown twin with YAML frontmatter (title, description, canonical url) so agents ingest page metadata without parsing the body.
+
   - id: root-meta-description
     category: content-for-agents
     tier: recommended

@@ -218,6 +218,18 @@ remediation:
       by them, so each client class gets the variant it asked for.
     resources:
       - { label: RFC 9110 (Vary), url: "https://www.rfc-editor.org/rfc/rfc9110#name-vary" }
+  markdown-frontmatter:
+    title: Markdown twin carries YAML frontmatter
+    goal: Prefix the markdown twin with a YAML frontmatter block so agents read page metadata without parsing the body
+    fix: |
+      Open each markdown twin with a YAML frontmatter block: a `---` fence line, `title`, `description`, and a
+      canonical `url` key, then a closing `---` fence, before the first heading. An agent then lifts the page's
+      title, summary, and canonical URL from structured keys instead of inferring them from prose, which is both
+      cheaper and less error-prone. Keep the block well-formed: an opened fence with no terminator, or a fence pair
+      with no keys, is worse than no frontmatter because it misleads a parser.
+    resources:
+      - { label: YAML front matter (Jekyll), url: "https://jekyllrb.com/docs/front-matter/" }
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
   root-meta-description:
     title: Root HTML has a descriptive meta description
     goal: Add a meta description naming what the service does and its agent entry points
