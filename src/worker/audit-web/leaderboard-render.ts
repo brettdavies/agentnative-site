@@ -10,8 +10,6 @@
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import type { WebAggregateEntry } from './cache';
 
-export type RankedWebEntry = WebAggregateEntry & { rank: number };
-
 /** Board row: an aggregate entry plus whether it came from the curated seed. */
 export type WebBoardEntry = WebAggregateEntry & { curated: boolean };
 
