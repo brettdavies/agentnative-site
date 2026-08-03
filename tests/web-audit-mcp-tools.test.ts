@@ -437,6 +437,58 @@ describe('list_website_audits', () => {
     expect(body.count).toBe(0);
     expect(body.entries).toEqual([]);
   });
+
+  // Boundary guard: the tool stays curated-aggregate-only. A cached
+  // non-seeded audit in R2 (surfaced by the /web all view) must never
+  // appear here; the mock bucket has no list(), so an enumeration attempt
+  // fails loudly.
+  test('a non-seeded cached audit in R2 never appears in the tool output', async () => {
+    const env = await makeEnv({
+      cachePrefill: {
+        [`audits/web/leaderboard/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          generated_at: new Date().toISOString(),
+          entries: [
+            {
+              domain: 'anc.dev',
+              url: 'https://anc.dev/',
+              name: 'anc.dev',
+              description: 'x',
+              score_pct: 67,
+              score: { relative: 67, global: 62 },
+            },
+          ],
+        },
+        [`audits/web/${'a'.repeat(64)}/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://user-submitted.dev/',
+          scorecard: { target_url: 'https://user-submitted.dev/', score_pct: 99 },
+          scored_at: new Date().toISOString(),
+        },
+      },
+    });
+    const body = jsonContent(await callTool(env, 'list_website_audits', {}));
+    expect(body.count).toBe(1);
+    const entries = body.entries as Array<{ domain: string }>;
+    expect(entries.map((e) => e.domain)).toEqual(['anc.dev']);
+  });
+
+  test('the tool description still presents the board as curated', async () => {
+    const env = await makeEnv();
+    const handler = await buildMcpHandler(env, { jsonResponse: true });
+    const res = await handler(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    const body = JSON.parse(await res.text()) as { result: { tools: Array<{ name: string; description: string }> } };
+    const tool = body.result.tools.find((t) => t.name === 'list_website_audits');
+    expect(tool?.description).toContain('curated');
+  });
 });
 
 describe('tool registration', () => {

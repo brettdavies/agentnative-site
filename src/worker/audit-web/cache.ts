@@ -54,6 +54,22 @@ const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
 // behind the kill-switch/limiter/Turnstile gates).
 export const WEB_AUDIT_STALE_AFTER_MS = 5 * 60_000;
 
+// Logical display expiry for user-submitted rows on the /web all view:
+// an unseeded entry older than this drops off the board even though the
+// R2 object persists (no lifecycle rule covers audits/web/). Tunable;
+// any future physical R2 lifecycle TTL must be >= this window so a row
+// never vanishes from storage before it ages off the board.
+export const WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+
+/** Board-relevant subset of a listed per-domain entry, parsed from R2 custom metadata. */
+export type WebListedAudit = {
+  domain: string;
+  name: string;
+  score_pct: number;
+  score: { relative: number; global: number };
+  scored_at: string;
+};
+
 /**
  * Normalize a URL for keying and display: lowercase host, canonical
  * scheme, no fragment, and a normalized trailing slash on a bare-host URL.
@@ -149,20 +165,112 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
     throw new Error('web-cache.put: scorecard.target_url required (refusal-to-cache-half-state)');
   }
 
+  const scoredAt = new Date().toISOString();
   const payload: CachedWebAudit = {
     spec_version: specVersion,
     target_url: normalizeTargetUrl(url),
     scorecard,
-    scored_at: new Date().toISOString(),
+    scored_at: scoredAt,
   };
   const key = await keyFor(url, specVersion);
   try {
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
       httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
+      customMetadata: boardMetadataOf(payload.target_url, scorecard, scoredAt),
     });
   } catch (err) {
     console.log(JSON.stringify({ scope: 'web-cache.put', key, error: errMsg(err) }));
   }
+}
+
+// Board fields duplicated into R2 custom metadata so the /web all view
+// can enumerate cached sites with a bare list() — no per-object body
+// fetch on the render path. R2 metadata is string-valued; readers parse.
+function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string): Record<string, string> {
+  const sc = scorecard as {
+    tool?: { name?: unknown };
+    score_pct?: unknown;
+    score?: { relative?: unknown; global?: unknown };
+  } | null;
+  const domain = new URL(targetUrl).host;
+  const toolName = sc?.tool?.name;
+  const meta: Record<string, string> = {
+    domain,
+    name: typeof toolName === 'string' && toolName.length > 0 ? toolName : domain,
+    scored_at: scoredAt,
+  };
+  if (typeof sc?.score_pct === 'number') meta.score_pct = String(sc.score_pct);
+  if (typeof sc?.score?.relative === 'number') meta.relative = String(sc.score.relative);
+  if (typeof sc?.score?.global === 'number') meta.global = String(sc.score.global);
+  return meta;
+}
+
+const PER_DOMAIN_HASH_RE = /^[0-9a-f]{64}$/;
+
+export type ListAllWebAuditsOpts = {
+  specVersion: string;
+  excludeDomains: ReadonlySet<string>;
+  now?: number;
+  maxAgeMs?: number;
+};
+
+/**
+ * Enumerate every cached per-domain audit at `specVersion` from R2 custom
+ * metadata alone. Skips aggregate keys, other spec versions, excluded
+ * (seeded/curated) domains, entries past the display window, and entries
+ * whose metadata is missing or unparseable (pre-metadata writes self-heal
+ * on their next audit). Best-effort like the rest of this module: a list
+ * failure logs and returns what was collected, never throws.
+ */
+export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsOpts): Promise<WebListedAudit[]> {
+  const out: WebListedAudit[] = [];
+  const maxAgeMs = opts.maxAgeMs ?? WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS;
+  const now = opts.now ?? Date.now();
+  // The trailing key segment is compared as a literal string so version
+  // dots can never act as regex wildcards (0.5.0 must not match 0x5x0).
+  const versionSegment = `${opts.specVersion}.json`;
+  let cursor: string | undefined;
+  try {
+    do {
+      const page = await env.SCORE_CACHE.list({ prefix: 'audits/web/', include: ['customMetadata'], cursor });
+      for (const obj of page.objects) {
+        const parts = obj.key.split('/');
+        if (parts.length !== 4 || !PER_DOMAIN_HASH_RE.test(parts[2]) || parts[3] !== versionSegment) continue;
+        const entry = parseListedMetadata(obj.customMetadata);
+        if (!entry) continue;
+        if (opts.excludeDomains.has(entry.domain)) continue;
+        if (isStale(entry.scored_at, maxAgeMs, now)) continue;
+        out.push(entry);
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  } catch (err) {
+    console.log(JSON.stringify({ scope: 'web-cache.listAllWebAudits', error: errMsg(err) }));
+  }
+  return out;
+}
+
+function parseListedMetadata(meta: Record<string, string> | undefined): WebListedAudit | null {
+  if (!meta) return null;
+  const { domain, name, scored_at } = meta;
+  if (!domain || !scored_at) return null;
+  const scorePct = numberField(meta.score_pct);
+  const relative = numberField(meta.relative);
+  const globalScore = numberField(meta.global);
+  if (scorePct === null || relative === null || globalScore === null) return null;
+  return {
+    domain,
+    name: name && name.length > 0 ? name : domain,
+    score_pct: scorePct,
+    score: { relative, global: globalScore },
+    scored_at,
+  };
+}
+
+function numberField(raw: string | undefined): number | null {
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function getAggregate(

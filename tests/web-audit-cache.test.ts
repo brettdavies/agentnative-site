@@ -9,19 +9,39 @@ import {
   getAggregate,
   isStale,
   keyFor,
+  listAllWebAudits,
   normalizeTargetUrl,
   put,
   putAggregate,
+  WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS,
   type WebAggregateEntry,
   type WebCacheEnv,
 } from '../src/worker/audit-web/cache';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
-type StubOpts = { throwOnGet?: boolean; throwOnPut?: boolean; prefill?: Record<string, unknown> };
+type ListedObject = { key: string; customMetadata?: Record<string, string> };
 
-function makeR2Stub(opts: StubOpts = {}): { env: WebCacheEnv; store: Map<string, string>; deletedKeys: string[] } {
+type StubOpts = {
+  throwOnGet?: boolean;
+  throwOnPut?: boolean;
+  throwOnList?: boolean;
+  prefill?: Record<string, unknown>;
+  listPages?: ListedObject[][];
+};
+
+type PutOptions = { customMetadata?: Record<string, string> };
+
+function makeR2Stub(opts: StubOpts = {}): {
+  env: WebCacheEnv;
+  store: Map<string, string>;
+  deletedKeys: string[];
+  putOptions: Map<string, PutOptions | undefined>;
+  listCalls: Array<{ cursor?: string }>;
+} {
   const store = new Map<string, string>();
   const deletedKeys: string[] = [];
+  const putOptions = new Map<string, PutOptions | undefined>();
+  const listCalls: Array<{ cursor?: string }> = [];
   if (opts.prefill) {
     for (const [k, v] of Object.entries(opts.prefill)) {
       store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
@@ -42,17 +62,27 @@ function makeR2Stub(opts: StubOpts = {}): { env: WebCacheEnv; store: Map<string,
           },
         };
       },
-      async put(key: string, value: unknown) {
+      async put(key: string, value: unknown, options?: PutOptions) {
         if (opts.throwOnPut) throw new Error('r2_put_failed');
         store.set(key, typeof value === 'string' ? value : String(value));
+        putOptions.set(key, options);
       },
       async delete(key: string) {
         deletedKeys.push(key);
         store.delete(key);
       },
+      async list(options?: { cursor?: string }) {
+        if (opts.throwOnList) throw new Error('r2_list_failed');
+        listCalls.push({ cursor: options?.cursor });
+        const pages = opts.listPages ?? [];
+        const index = options?.cursor ? Number(options.cursor) : 0;
+        const objects = pages[index] ?? [];
+        const truncated = index + 1 < pages.length;
+        return truncated ? { objects, truncated, cursor: String(index + 1) } : { objects, truncated: false };
+      },
     } as unknown as R2Bucket,
   };
-  return { env, store, deletedKeys };
+  return { env, store, deletedKeys, putOptions, listCalls };
 }
 
 function sampleScorecard(url: string) {
@@ -258,5 +288,166 @@ describe('aggregate cache', () => {
   test('an aggregate write failure never throws to the caller', async () => {
     const { env } = makeR2Stub({ throwOnPut: true });
     await expect(putAggregate(env, 'leaderboard', ENTRIES, SPEC_VERSION)).resolves.toBeUndefined();
+  });
+});
+
+describe('put custom metadata (board fields)', () => {
+  test('put writes domain, name, scores, and scored_at into custom metadata', async () => {
+    const { env, putOptions } = makeR2Stub();
+    const url = 'https://example.com/';
+    const scorecard = {
+      ...sampleScorecard(url),
+      tool: { name: 'Example', url },
+      score_pct: 82,
+      score: { relative: 82, global: 71 },
+    };
+    await put(env, url, scorecard, SPEC_VERSION);
+    const key = await keyFor(url, SPEC_VERSION);
+    const meta = putOptions.get(key)?.customMetadata;
+    expect(meta?.domain).toBe('example.com');
+    expect(meta?.name).toBe('Example');
+    expect(meta?.score_pct).toBe('82');
+    expect(meta?.relative).toBe('82');
+    expect(meta?.global).toBe('71');
+    expect(typeof meta?.scored_at).toBe('string');
+    expect(Number.isNaN(Date.parse(meta?.scored_at as string))).toBe(false);
+  });
+
+  test('a scorecard without a usable tool.name stores the domain as name', async () => {
+    const { env, putOptions } = makeR2Stub();
+    const url = 'https://example.com/';
+    const scorecard = { ...sampleScorecard(url), tool: { name: '', url }, score: { relative: 1, global: 1 } };
+    await put(env, url, scorecard, SPEC_VERSION);
+    const meta = putOptions.get(await keyFor(url, SPEC_VERSION))?.customMetadata;
+    expect(meta?.name).toBe('example.com');
+  });
+
+  test('put still refuses a half-state with metadata in play', async () => {
+    const { env } = makeR2Stub();
+    await expect(put(env, 'https://example.com/', sampleScorecard('https://example.com/'), '')).rejects.toThrow(
+      /specVersion required/,
+    );
+    const bad = { ...sampleScorecard('https://example.com/'), target_url: undefined };
+    await expect(put(env, 'https://example.com/', bad, SPEC_VERSION)).rejects.toThrow(/target_url/);
+  });
+});
+
+describe('listAllWebAudits', () => {
+  const HASH_A = 'a'.repeat(64);
+  const HASH_B = 'b'.repeat(64);
+  const HASH_C = 'c'.repeat(64);
+
+  function listedEntry(hash: string, domain: string, ageMs: number, overrides: Record<string, string> = {}) {
+    return {
+      key: `audits/web/${hash}/${SPEC_VERSION}.json`,
+      customMetadata: {
+        domain,
+        name: domain,
+        score_pct: '80',
+        relative: '80',
+        global: '70',
+        scored_at: new Date(NOW - ageMs).toISOString(),
+        ...overrides,
+      },
+    };
+  }
+
+  const NOW = Date.parse('2026-08-03T00:00:00Z');
+
+  test('returns only per-domain keys at the current spec (aggregates and other specs excluded)', async () => {
+    const { env } = makeR2Stub({
+      listPages: [
+        [
+          listedEntry(HASH_A, 'fresh.dev', 60_000),
+          { key: `audits/web/leaderboard/${SPEC_VERSION}.json` },
+          { key: `audits/web/leaderboard-frontpage/${SPEC_VERSION}.json` },
+          { ...listedEntry(HASH_B, 'old-spec.dev', 60_000), key: `audits/web/${HASH_B}/0.0.1.json` },
+        ],
+      ],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    expect(got.map((e) => e.domain)).toEqual(['fresh.dev']);
+    expect(got[0]).toEqual({
+      domain: 'fresh.dev',
+      name: 'fresh.dev',
+      score_pct: 80,
+      score: { relative: 80, global: 70 },
+      scored_at: new Date(NOW - 60_000).toISOString(),
+    });
+  });
+
+  test('a spec version with regex metacharacters never wildcard-matches another version', async () => {
+    const { env } = makeR2Stub({
+      listPages: [[{ ...listedEntry(HASH_A, 'sneaky.dev', 60_000), key: `audits/web/${HASH_A}/0x5x0.json` }]],
+    });
+    const got = await listAllWebAudits(env, { specVersion: '0.5.0', excludeDomains: new Set(), now: NOW });
+    expect(got).toEqual([]);
+  });
+
+  test('excludes domains in excludeDomains', async () => {
+    const { env } = makeR2Stub({
+      listPages: [[listedEntry(HASH_A, 'seeded.dev', 60_000), listedEntry(HASH_B, 'user.dev', 60_000)]],
+    });
+    const got = await listAllWebAudits(env, {
+      specVersion: SPEC_VERSION,
+      excludeDomains: new Set(['seeded.dev']),
+      now: NOW,
+    });
+    expect(got.map((e) => e.domain)).toEqual(['user.dev']);
+  });
+
+  test('drops entries past the display window and keeps ones within it', async () => {
+    const { env } = makeR2Stub({
+      listPages: [
+        [
+          listedEntry(HASH_A, 'recent.dev', WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS - 60_000),
+          listedEntry(HASH_B, 'expired.dev', WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS + 60_000),
+        ],
+      ],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    expect(got.map((e) => e.domain)).toEqual(['recent.dev']);
+  });
+
+  test('a custom maxAgeMs overrides the default window', async () => {
+    const { env } = makeR2Stub({ listPages: [[listedEntry(HASH_A, 'recent.dev', 120_000)]] });
+    const got = await listAllWebAudits(env, {
+      specVersion: SPEC_VERSION,
+      excludeDomains: new Set(),
+      now: NOW,
+      maxAgeMs: 60_000,
+    });
+    expect(got).toEqual([]);
+  });
+
+  test('skips entries with missing or unparseable metadata instead of throwing', async () => {
+    const { env } = makeR2Stub({
+      listPages: [
+        [
+          { key: `audits/web/${HASH_A}/${SPEC_VERSION}.json` },
+          listedEntry(HASH_B, 'no-score.dev', 60_000, { score_pct: '', relative: 'NaN' }),
+          listedEntry(HASH_C, 'good.dev', 60_000),
+        ],
+      ],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    expect(got.map((e) => e.domain)).toEqual(['good.dev']);
+  });
+
+  test('paginates through truncated pages and unions the results', async () => {
+    const { env, listCalls } = makeR2Stub({
+      listPages: [[listedEntry(HASH_A, 'page-one.dev', 60_000)], [listedEntry(HASH_B, 'page-two.dev', 60_000)]],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    expect(got.map((e) => e.domain).sort()).toEqual(['page-one.dev', 'page-two.dev']);
+    expect(listCalls).toHaveLength(2);
+    expect(listCalls[1].cursor).toBe('1');
+  });
+
+  test('returns [] instead of throwing when list rejects', async () => {
+    const { env } = makeR2Stub({ throwOnList: true });
+    await expect(
+      listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW }),
+    ).resolves.toEqual([]);
   });
 });

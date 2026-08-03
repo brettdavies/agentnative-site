@@ -1496,6 +1496,13 @@ body:has(.leaderboard-hero) main {
   font-weight: 600;
 }
 
+/* The class also styles server-rendered view-toggle links; anchors keep
+   the UA underline unless overridden, buttons never had one. */
+a.tier-filter {
+  text-decoration: none;
+  display: inline-block;
+}
+
 /* Leaderboard table */
 .leaderboard-table {
   width: 100%;
@@ -1640,6 +1647,22 @@ body:has(.leaderboard-hero) main {
   color: oklch(45.00% 0.1 70);
 }
 
+/* Provenance tag on user-submitted board rows — .tier-badge metrics with
+   neutral tokens: it marks the row's source, not an achievement tier. */
+.lb-tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+  background: var(--bg-raised, #f4f5f7);
+  border: 1px solid var(--border-subtle, #e5e8eb);
+  color: var(--fg-secondary, #6a7278);
+}
+
 .leaderboard-badge-callout h2 {
   margin: 0 0 0.5rem 0;
   font-size: 1.05rem;
@@ -1689,6 +1712,10 @@ body:has(.leaderboard-hero) main {
   .tier-badge {
     font-size: 0.65rem;
     padding: 0.1rem 0.35rem;
+  }
+  .lb-tag {
+    font-size: 0.62rem;
+    padding: 0.08rem 0.3rem;
   }
 }
 @media (max-width: 560px) {
