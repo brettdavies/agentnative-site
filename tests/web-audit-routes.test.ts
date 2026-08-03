@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
-import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { keyFor } from '../src/worker/audit-web/cache';
 import {
   handleWebAudit,
@@ -32,14 +32,37 @@ async function registryJson(): Promise<string> {
   return registryJsonPromise;
 }
 
+let remediationJsonPromise: Promise<string> | null = null;
+async function remediationJson(): Promise<string> {
+  if (!remediationJsonPromise) {
+    remediationJsonPromise = (async () => {
+      const dataDir = join(REPO_ROOT, 'src', 'data', 'web-audit');
+      const registry = normalizeWebAuditRegistry(
+        yaml.load(await readFile(join(dataDir, 'registry.yaml'), 'utf8')) as object,
+      );
+      const checks = registry.checks as Array<{ id: string }>;
+      const remediation = normalizeWebRemediation(
+        yaml.load(await readFile(join(dataDir, 'remediation.yaml'), 'utf8')) as object,
+        checks.map((c) => c.id),
+      );
+      return JSON.stringify(remediation);
+    })();
+  }
+  return remediationJsonPromise;
+}
+
 const SEED_FIXTURE = [{ domain: 'seeded.dev', url: 'https://seeded.dev/', name: 'seeded.dev', description: 'seeded' }];
 
-function makeAssets(): Fetcher {
+function makeAssets(opts: { failRegistry?: boolean } = {}): Fetcher {
   return {
     async fetch(input: RequestInfo | URL) {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes('/_internal/web-audit-registry.json')) {
+        if (opts.failRegistry) return new Response('boom', { status: 500 });
         return new Response(await registryJson(), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('/_internal/web-remediation.json')) {
+        return new Response(await remediationJson(), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.includes('/_internal/web-seed.json')) {
         return new Response(JSON.stringify(SEED_FIXTURE), {
@@ -672,6 +695,104 @@ describe('handleWebResultPage', () => {
     const env = resultEnv();
     const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com', { method: 'POST' }), env);
     expect(resp.status).toBe(405);
+  });
+
+  // An old-shape stored scorecard: one combined `mcp-api` category with
+  // rows tagged `mcp-api`, the exact reduced shape the bug produces.
+  async function oldShapeCachedFor(url: string) {
+    const key = await keyFor(url, SPEC_VERSION);
+    return {
+      [key]: {
+        spec_version: SPEC_VERSION,
+        target_url: url,
+        scorecard: {
+          schema_version: '0.2',
+          spec_version: SPEC_VERSION,
+          target_url: url,
+          tool: { name: new URL(url).host, url },
+          score_pct: 60,
+          score: { relative: 60, global: 48 },
+          summary: { pass: 2, broken: 0, absent: 2, n_a: 0, skip: 0, error: 0 },
+          categories: [{ id: 'mcp-api', name: 'MCP & API', passed: 2, counted: 4 }],
+          results: [
+            {
+              id: 'openapi',
+              label: 'OpenAPI',
+              category: 'mcp-api',
+              keyword: 'must',
+              status: 'absent',
+              evidence: 'openapi.json -> 404',
+            },
+            {
+              id: 'mcp-initialize',
+              label: 'MCP initialize',
+              category: 'mcp-api',
+              keyword: 'must',
+              status: 'pass',
+              evidence: 'ok',
+            },
+            {
+              id: 'mcp-tools-list',
+              label: 'tools/list',
+              category: 'mcp-api',
+              keyword: 'should',
+              status: 'pass',
+              evidence: 'ok',
+            },
+            {
+              id: 'llms-txt',
+              label: 'llms.txt',
+              category: 'mcp-api',
+              keyword: 'should',
+              status: 'absent',
+              evidence: 'llms.txt -> 404',
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  test('an old-shape stored scorecard renders separate API and MCP category cards, not the combined bucket', async () => {
+    const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
+    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env);
+    expect(resp.status).toBe(200);
+    const html = await resp.text();
+    expect(html).toContain('<h3 class="audit-group__title">API</h3>');
+    expect(html).toContain('<h3 class="audit-group__title">MCP</h3>');
+    expect(html).not.toContain('MCP &amp; API');
+  });
+
+  test('the .md twin emits separate ## API and ## MCP headings', async () => {
+    const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
+    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env);
+    expect(resp.status).toBe(200);
+    const md = await resp.text();
+    expect(md).toContain('## API (0/1)');
+    expect(md).toContain('## MCP (2/2)');
+    expect(md).toContain('## Content for agents (0/1)');
+    expect(md).not.toContain('## MCP & API');
+  });
+
+  test('remediation still renders per non-passing check after normalization (HTML + .md)', async () => {
+    const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
+    const html = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env)).text();
+    expect(html).toContain('class="web-check__fix"');
+    expect(html).toContain('https://anc.dev/web-audit/skill/openapi');
+    const md = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env)).text();
+    expect(md).toContain('- Fix:');
+    expect(md).toContain('https://anc.dev/web-audit/skill/openapi');
+  });
+
+  test('a registry-load failure falls back to the stored category shape and still renders 200', async () => {
+    const env = makeEnv({
+      SCORE_CACHE: makeR2(await oldShapeCachedFor('https://example.com/')).bucket,
+      ASSETS: makeAssets({ failRegistry: true }),
+    });
+    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env);
+    expect(resp.status).toBe(200);
+    const html = await resp.text();
+    expect(html).toContain('MCP &amp; API');
   });
 });
 

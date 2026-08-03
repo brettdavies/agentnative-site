@@ -86,6 +86,11 @@ Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 
 Per-category rollups in the fixed display order. `counted` excludes `n_a` / `skip` / `error` rows, so a category with
 nothing applicable reads `0/0`.
 
+`categories[]` and `results[].category` are re-derived from the current registry at read time, so every render of a
+cached scorecard (the `audit_website` and `get_website_audit` MCP tools, the `/web/<domain>` page, and its `.md` twin)
+reflects the current category shape regardless of when it was cached. The `score` and `score_pct` reflect the registry
+at audit time; re-grouping the categories earns no points and never changes the stored score.
+
 ```json
 "categories": [
   { "id": "discoverability", "name": "Discoverability", "passed": 4, "counted": 5 },
@@ -163,9 +168,9 @@ One object per check.
 
 ## Remediation on the MCP surface
 
-Scorecard rows carry no remediation; the fix guidance is assembled at read time. The `audit_website` MCP tool returns
-each row with a derived `result` line, and non-passing (`broken` / `absent`) rows additionally carry an inline
-`remediation` object:
+Scorecard rows carry no remediation; the fix guidance is assembled at read time. Both the `audit_website` and
+`get_website_audit` MCP tools return each row with a derived `result` line, and non-passing (`broken` / `absent`) rows
+additionally carry an inline `remediation` object:
 
 ```json
 "remediation": {

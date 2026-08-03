@@ -33,6 +33,7 @@ import {
 
 export { canonicalTargetOf };
 
+import { normalizeScorecardCategories } from './display';
 import { runWebAudit } from './engine';
 import { buildWebLeaderboardBody, buildWebLeaderboardMarkdown } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
@@ -478,7 +479,7 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   const hit = await lookupByDomain(env, match.domain);
   if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
 
-  // A missing remediation catalog degrades to generic prompts (R10).
+  // A missing remediation catalog degrades to generic prompts.
   let remediation: WebRemediationCatalog = {};
   try {
     remediation = await loadWebRemediationCatalog(env);
@@ -486,7 +487,17 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     remediation = {};
   }
 
-  const scorecard = hit.scorecard as {
+  // Re-derive the current category split at read time so a cached
+  // scorecard renders the current shape; a failed registry load falls
+  // back to the stored shape rather than failing the page.
+  let normalized: unknown = hit.scorecard;
+  try {
+    normalized = normalizeScorecardCategories(hit.scorecard, await loadWebAuditRegistry(env));
+  } catch {
+    normalized = hit.scorecard;
+  }
+
+  const scorecard = normalized as {
     tool?: { name?: string; url?: string };
     score_pct?: number;
   };

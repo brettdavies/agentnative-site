@@ -28,17 +28,12 @@ import {
   normalizeTargetUrl,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
+import { attachInlineRemediation, enrichWebScorecardForDisplay } from '../../audit-web/display';
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
-import { loadWebAuditRegistry } from '../../audit-web/registry';
-import {
-  assembleRemediation,
-  loadWebRemediationCatalog,
-  resultLine,
-  type WebRemediationCatalog,
-} from '../../audit-web/remediation';
+import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
+import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
-import type { NaReason, ScorecardStatus } from '../../audit-web/scorecard';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
 
@@ -70,49 +65,36 @@ function isError(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
 }
 
-type ScorecardRow = {
-  id: string;
-  status: ScorecardStatus;
-  na_reason?: NaReason;
-  evidence: string | null;
-};
-
-/**
- * Enrich audit_website scorecard rows in place-shape (R14): every row
- * gains a derived `result` line, and a non-passing row (broken / absent)
- * carries the inline remediation object. Passing and n_a rows carry no
- * remediation (nothing to fix / not applicable).
- */
-function withInlineRemediation(scorecard: unknown, catalog: WebRemediationCatalog): unknown {
-  if (!scorecard || typeof scorecard !== 'object' || !Array.isArray((scorecard as { results?: unknown }).results)) {
-    return scorecard;
-  }
-  const rows = (scorecard as { results: ScorecardRow[] }).results;
-  return {
-    ...scorecard,
-    results: rows.map((row) => {
-      const result = resultLine(row.status, row.evidence, row.na_reason);
-      if (row.status === 'broken' || row.status === 'absent') {
-        const remediation = assembleRemediation(catalog[row.id], {
-          checkId: row.id,
-          origin: SITE_URL,
-          evidence: row.evidence,
-        });
-        return { ...row, result, remediation };
-      }
-      return { ...row, result };
-    }),
-  };
-}
-
 async function catalogOrEmpty(env: WebAuditToolsEnv): Promise<WebRemediationCatalog> {
   // A missing catalog degrades to generic prompts rather than failing the
-  // audit result (R10).
+  // audit result.
   try {
     return await loadWebRemediationCatalog(env);
   } catch {
     return {};
   }
+}
+
+async function registryOrNull(env: WebAuditToolsEnv): Promise<WebAuditRegistry | null> {
+  // A failed registry load falls back to the stored category shape rather
+  // than failing the read.
+  try {
+    return await loadWebAuditRegistry(env);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read-time enrichment shared by both MCP read tools: current category
+ * split plus per-row remediation. Without a registry the category shape
+ * falls back to the stored one, but remediation is still attached.
+ */
+async function enrichForRead(env: WebAuditToolsEnv, scorecard: unknown): Promise<unknown> {
+  const catalog = await catalogOrEmpty(env);
+  const registry = await registryOrNull(env);
+  if (!registry) return attachInlineRemediation(scorecard, catalog, SITE_URL);
+  return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: SITE_URL });
 }
 
 /** Resolve a domain's scorecard from per-domain R2 (https then http); null on a miss. */
@@ -142,7 +124,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (scorecard) {
         return textContent({
           found: true,
-          scorecard,
+          scorecard: await enrichForRead(env, scorecard),
           share_url: `${SITE_URL}/web/${domain}`,
           spec_version: SPEC_VERSION,
         });
@@ -194,7 +176,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         return textContent({
           audited: false,
           source: 'cache',
-          scorecard: withInlineRemediation(cached.scorecard, await catalogOrEmpty(env)),
+          scorecard: await enrichForRead(env, cached.scorecard),
           share_url: shareUrl,
         });
       }
@@ -206,7 +188,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           return textContent({
             audited: false,
             source: 'cache',
-            scorecard: withInlineRemediation(cached.scorecard, await catalogOrEmpty(env)),
+            scorecard: await enrichForRead(env, cached.scorecard),
             share_url: shareUrl,
           });
         }
@@ -260,7 +242,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       return textContent({
         audited: true,
         source: 'fresh-audit',
-        scorecard: withInlineRemediation(scorecard, await catalogOrEmpty(env)),
+        scorecard: await enrichForRead(env, scorecard),
         share_url: shareUrl,
         spec_version: SPEC_VERSION,
       });
