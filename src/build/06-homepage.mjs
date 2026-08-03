@@ -22,7 +22,7 @@ import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.m
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
-import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
+import { composeTwin, escHtml } from './util.mjs';
 
 const BOARD_ROWS = 5;
 
@@ -311,10 +311,12 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     }),
   );
 
-  // index.md — content-only markdown twin. The live-score form is
-  // interactive (button-based chip examples); content extractors and
-  // agents fetching the twin need the same examples surfaced as inline
-  // code so the homepage contract holds without JavaScript.
+  // index.md — content-only markdown twin, prefixed with title/description/
+  // url frontmatter so agents fetching it get the same metadata the HTML
+  // carries in <head>. The live-score form is interactive (button-based
+  // chip examples); content extractors and agents fetching the twin need
+  // the same examples surfaced as inline code so the homepage contract
+  // holds without JavaScript.
   const indexMdLines = [
     `# ${introTitle}`,
     '',
@@ -333,7 +335,10 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     ...principles.map((p) => `- [${p.title}](/p${p.n}) — ${p.shortDesc}`),
     '',
   ];
-  await writeFile(join(distDir, 'index.md'), absolutifyMarkdownLinks(indexMdLines.join('\n')));
+  await writeFile(
+    join(distDir, 'index.md'),
+    composeTwin({ title: introTitle, description: introDescription, canonicalPath: '/' }, indexMdLines.join('\n')),
+  );
 
   return { introTitle, introSummary, introSource, specContextSource, useSource, introLede };
 }
