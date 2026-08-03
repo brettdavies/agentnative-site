@@ -102,10 +102,16 @@ export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediat
   };
 }
 
-/** Full read-time enrichment for the MCP JSON surfaces: split categories then per-row remediation. */
+/**
+ * Full read-time enrichment for the MCP JSON surfaces: split categories
+ * then per-row remediation. A null registry skips the category split (the
+ * stored shape stands) but remediation is still attached, so a failed
+ * registry load degrades the read rather than failing it.
+ */
 export function enrichWebScorecardForDisplay(
   stored: unknown,
-  opts: { registry: DisplayRegistry; catalog: WebRemediationCatalog; origin: string },
+  opts: { registry: DisplayRegistry | null; catalog: WebRemediationCatalog; origin: string },
 ): unknown {
-  return attachInlineRemediation(normalizeScorecardCategories(stored, opts.registry), opts.catalog, opts.origin);
+  const normalized = opts.registry ? normalizeScorecardCategories(stored, opts.registry) : stored;
+  return attachInlineRemediation(normalized, opts.catalog, opts.origin);
 }
