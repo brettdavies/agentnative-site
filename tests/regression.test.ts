@@ -5,7 +5,7 @@
 //      Renaming ANY of these breaks every inbound link, HN comment, blog
 //      quote, or agent citation in perpetuity.
 //
-//   2. llms.txt shape — H1 + `>` summary + H2 "Principles" + 7 `.md`
+//   2. llms.txt shape — H1 + `>` summary + H2 "Principles" + 8 `.md`
 //      bullets + H2 "Scorecards". Shape is the llmstxt.org contract for
 //      agent discovery.
 //
@@ -132,6 +132,14 @@ describe('regression #3 — markdown twin is frontmatter + source with site-rela
     const { absolutifyMarkdownLinks } = await import('../src/build/util.mjs');
     const distContent = await readFile(join(DIST, 'p1.md'), 'utf8');
     expect(absolutifyMarkdownLinks(distContent)).toBe(distContent);
+  });
+
+  test.each(
+    Array.from({ length: LOCKED_SLUGS.length }, (_, i) => i + 1),
+  )('dist/p%s.html carries no frontmatter fence or url line', async (n) => {
+    const html = await readFile(join(DIST, `p${n}.html`), 'utf8');
+    expect(html).not.toContain('---\ntitle:');
+    expect(html).not.toMatch(/^url: /m);
   });
 
   test('every dist/*.md page emits absolute https://anc.dev/ URLs for site-internal links', async () => {
