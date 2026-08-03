@@ -316,9 +316,10 @@ export async function handleWebAudit(
 }
 
 // ---------------------------------------------------------------------------
-// GET /web board + .md twin — rendered at request time from the R2
-// leaderboard aggregate (the same source the homepage pane and the
-// list_website_audits tool read, so the surfaces cannot disagree).
+// GET /web board + .md twin — rendered at request time. The curated
+// view reads the R2 leaderboard aggregate (the same source the homepage
+// pane and the list_website_audits tool read); the all view additionally
+// enumerates the audit cache for non-expired user-submitted rows.
 // ---------------------------------------------------------------------------
 
 export function isWebLeaderboardPath(pathname: string): boolean {

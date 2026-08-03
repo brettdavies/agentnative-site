@@ -364,7 +364,7 @@ export async function build() {
   });
 
   // 11c. Web-audit registry — normalized JSON projection of the vendored
-  // 32-check registry, consumed by the Worker's web-audit engine via
+  // registry, consumed by the Worker's web-audit engine via
   // env.ASSETS.fetch. Same /_internal/ privacy posture as the MCP catalog.
   const webAuditRegistryStats = await emitWebAuditRegistry({
     registryPath: join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml'),
