@@ -28,7 +28,7 @@ import {
   normalizeTargetUrl,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
-import { attachInlineRemediation, enrichWebScorecardForDisplay } from '../../audit-web/display';
+import { enrichWebScorecardForDisplay } from '../../audit-web/display';
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
 import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
@@ -93,7 +93,6 @@ async function registryOrNull(env: WebAuditToolsEnv): Promise<WebAuditRegistry |
 async function enrichForRead(env: WebAuditToolsEnv, scorecard: unknown): Promise<unknown> {
   const catalog = await catalogOrEmpty(env);
   const registry = await registryOrNull(env);
-  if (!registry) return attachInlineRemediation(scorecard, catalog, SITE_URL);
   return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: SITE_URL });
 }
 

@@ -2,17 +2,14 @@
 // whether it is an HTML document.
 
 import type { AntecedentToken } from '../registry';
-import { type AntecedentResolver, rootContentType } from './context';
+import { type AntecedentResolver, htmlRootGate } from './context';
 
 const none: AntecedentResolver = () => 'apply';
 
 // A network error on the root makes dependents error/skip, not n_a.
 const httpRoot: AntecedentResolver = (ctx) => (ctx.root !== null && ctx.root.status !== null ? 'apply' : 'error');
 
-const htmlRoot: AntecedentResolver = (ctx) => {
-  if (ctx.root === null || ctx.root.status === null) return 'error';
-  return rootContentType(ctx).includes('text/html') ? 'apply' : 'n_a';
-};
+const htmlRoot: AntecedentResolver = (ctx) => htmlRootGate(ctx) ?? 'apply';
 
 export const rootResolvers = {
   none,
