@@ -328,12 +328,13 @@ describe('buildWebScorecard', () => {
   });
 });
 
-// The load-bearing proof of KTD1: reassigning a check's display category
+// The load-bearing proof that display categories are score-neutral:
+// reassigning a check's display category
 // (mcp-api -> api/mcp) must not move any score. score.ts reads keyword +
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
-describe('scoring invariance under the API/MCP category split (U4, KTD1)', () => {
-  test('the real registry keeps its 3/15/23 tier distribution, so universeMax is unchanged', async () => {
+describe('scoring invariance under the API/MCP category split', () => {
+  test('the real registry keeps its 3/15/23 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
     // 3 MUST x5 + 15 SHOULD x3 + 23 MAY x1 = 83. Retiering a check (e.g. the
     // deferred openapi MUST -> SHOULD) would move this; the display split
