@@ -8,6 +8,7 @@ import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
+import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
 import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
@@ -593,5 +594,86 @@ describe('runWebMcp', () => {
     const fetchImpl = stubFetch(() => new Response(''));
     const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: undefined }));
     expect(outcome.status).toBe('error');
+  });
+});
+
+describe('runMarkdownFrontmatter', () => {
+  const fmCheck = check({
+    id: 'markdown-frontmatter',
+    handler: 'markdown-frontmatter',
+    tier: 'optional',
+    keyword: 'may',
+    antecedent: 'markdown-twin',
+    with: { path: '/', headers: { Accept: 'text/markdown' } },
+  });
+  const md = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'text/markdown' } });
+
+  test('a twin opening with a terminated frontmatter block passes', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      expect(url).toBe('https://example.com/');
+      expect((init?.headers as Record<string, string>).Accept).toBe('text/markdown');
+      return md('---\ntitle: X\ndescription: Y\nurl: https://z/\n---\n\n# H\n');
+    });
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+    expect((outcome.evidence[0].why as string[])[0]).toContain('3 key lines');
+  });
+
+  test('a leading fence with a key line but no terminator is broken', async () => {
+    const fetchImpl = stubFetch(() => md('---\ntitle: X\ndescription: Y\n\n# H\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a fence pair with no key line is broken', async () => {
+    const fetchImpl = stubFetch(() => md('---\n---\n\n# H\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a fence pair whose only inter-fence line is a comment is broken', async () => {
+    const fetchImpl = stubFetch(() => md('---\n# just a comment\n---\n\n# H\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a twin opening with prose is absent', async () => {
+    const fetchImpl = stubFetch(() => md('# Heading\n\nSome prose.\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a mid-document thematic break is not a false frontmatter pass', async () => {
+    const fetchImpl = stubFetch(() => md('# Heading\n\nIntro paragraph.\n\n---\n\nMore prose.\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a leading UTF-8 BOM before the fence is tolerated', async () => {
+    const fetchImpl = stubFetch(() => md('\uFEFF---\ntitle: X\n---\n\n# H\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('an HTML response containing --- is guarded to absent', async () => {
+    const fetchImpl = stubFetch(
+      () => new Response('<html>---<body>hi</body></html>', { status: 200, headers: { 'content-type': 'text/html' } }),
+    );
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('a failed fetch is an operational error', async () => {
+    const fetchImpl = stubFetch(() => {
+      throw new Error('boom');
+    });
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('error');
+  });
+
+  test('CRLF line endings pass', async () => {
+    const fetchImpl = stubFetch(() => md('---\r\ntitle: X\r\n---\r\n\r\n# H\r\n'));
+    const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
   });
 });
