@@ -181,14 +181,15 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
  * write (R2 has no partial-metadata update, so it is a full rewrite). Unlike
  * `put`, `scored_at` is sourced from the stored entry and carried forward so a
  * flag flip never resets the freshness or display-age windows; only an entry
- * that never carried a stamp gets one now. Best-effort: a write failure logs
- * but never throws.
+ * that never carried a stamp gets one now. Never throws: a write failure logs
+ * and resolves false so callers can refuse to report a patch that did not
+ * land.
  */
 export async function patchStoredPublicListing(
   env: WebCacheEnv,
   cached: CachedWebAudit,
   value: boolean,
-): Promise<void> {
+): Promise<boolean> {
   const scorecard = { ...(cached.scorecard as Record<string, unknown>), public_listing: value };
   const payload = {
     spec_version: cached.spec_version,
@@ -197,27 +198,29 @@ export async function patchStoredPublicListing(
     scored_at: cached.scored_at ?? new Date().toISOString(),
   };
   const key = await keyFor(cached.target_url, cached.spec_version);
-  await writeAuditObject(env, key, payload, 'web-cache.patchStoredPublicListing');
+  return writeAuditObject(env, key, payload, 'web-cache.patchStoredPublicListing');
 }
 
 /**
  * Write a fully-stamped audit envelope to R2, deriving board custom metadata
- * from the same payload so body and metadata can never disagree. Best-effort:
- * a write failure logs under `scope` but never throws to the caller.
+ * from the same payload so body and metadata can never disagree. Never
+ * throws: a write failure logs under `scope` and resolves false.
  */
 async function writeAuditObject(
   env: WebCacheEnv,
   key: string,
   payload: CachedWebAudit & { scored_at: string },
   scope: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
       httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
       customMetadata: boardMetadataOf(payload.target_url, payload.scorecard, payload.scored_at),
     });
+    return true;
   } catch (err) {
     console.log(JSON.stringify({ scope, key, error: errMsg(err) }));
+    return false;
   }
 }
 

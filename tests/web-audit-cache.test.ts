@@ -504,7 +504,7 @@ describe('patchStoredPublicListing (scored_at-preserving dual-writer)', () => {
   test('flips the flag in both the envelope and the metadata, preserving scored_at', async () => {
     const { env, store, putOptions } = makeR2Stub();
     const url = 'https://example.com/';
-    await patchStoredPublicListing(env, cachedFixture(url, false), true);
+    expect(await patchStoredPublicListing(env, cachedFixture(url, false), true)).toBe(true);
 
     const key = await keyFor(url, SPEC_VERSION);
     const stored = JSON.parse(store.get(key) as string) as CachedWebAudit;
@@ -552,10 +552,24 @@ describe('patchStoredPublicListing (scored_at-preserving dual-writer)', () => {
     expect(got?.scored_at).toBe(PRIOR_SCORED_AT);
   });
 
-  test('a write failure never throws to the caller', async () => {
+  test('a write failure resolves false instead of throwing', async () => {
     const { env } = makeR2Stub({ throwOnPut: true });
-    await expect(
-      patchStoredPublicListing(env, cachedFixture('https://example.com/', false), true),
-    ).resolves.toBeUndefined();
+    await expect(patchStoredPublicListing(env, cachedFixture('https://example.com/', false), true)).resolves.toBe(
+      false,
+    );
+  });
+
+  test('an entry that never carried scored_at gets stamped now, body and metadata agreeing', async () => {
+    const { env, store, putOptions } = makeR2Stub();
+    const url = 'https://example.com/';
+    const unstamped: CachedWebAudit = { ...cachedFixture(url, false) };
+    delete unstamped.scored_at;
+    expect(await patchStoredPublicListing(env, unstamped, true)).toBe(true);
+
+    const key = await keyFor(url, SPEC_VERSION);
+    const stored = JSON.parse(store.get(key) as string) as CachedWebAudit;
+    expect(typeof stored.scored_at).toBe('string');
+    expect(putOptions.get(key)?.customMetadata?.scored_at).toBe(stored.scored_at);
+    expect((stored.scorecard as { public_listing: boolean }).public_listing).toBe(true);
   });
 });
