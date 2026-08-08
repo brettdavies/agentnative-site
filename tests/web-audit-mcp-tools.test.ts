@@ -684,3 +684,180 @@ describe('cross-tool result parity', () => {
     expect(auditBody.source).toBe('cache');
   });
 });
+
+// The audit_website tool mirrors the POST /api/audit-web inbound semantics —
+// a store-owning bucket lets these assert no-write and read the patched
+// envelope directly. The re-audit engine path stays e2e-smoke-only (this
+// file's header), so the stale rows are asserted at the routing level (they
+// fall through to the same gate chain a fresh MCP audit passes).
+describe('audit_website public_listing (U4)', () => {
+  const TARGET = 'https://example.com/';
+  const IP = '203.0.113.7';
+  const freshStamp = () => new Date().toISOString();
+  const staleStamp = () => new Date(Date.now() - 10 * 60_000).toISOString();
+
+  function makeBucket(store: Map<string, string>): R2Bucket {
+    return {
+      async get(key: string) {
+        const value = store.get(key);
+        if (!value) return null;
+        return {
+          async json() {
+            return JSON.parse(value);
+          },
+        };
+      },
+      async put(key: string, value: string) {
+        store.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+      },
+      async delete(key: string) {
+        store.delete(key);
+      },
+    } as unknown as R2Bucket;
+  }
+
+  async function seed(store: Map<string, string>, opts: { scoredAt: string; stored?: boolean }): Promise<string> {
+    const key = await keyFor(TARGET, SPEC_VERSION);
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: TARGET,
+      score_pct: 64,
+      results: [],
+    };
+    if (opts.stored !== undefined) scorecard.public_listing = opts.stored;
+    store.set(
+      key,
+      JSON.stringify({ spec_version: SPEC_VERSION, target_url: TARGET, scorecard, scored_at: opts.scoredAt }),
+    );
+    return key;
+  }
+
+  async function envWithStore(store: Map<string, string>, opts: WebEnvOpts = {}): Promise<McpEnv> {
+    const env = await makeEnv(opts);
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    return env;
+  }
+
+  test('omitted param serves cached, does not erase a stored true, and writes nothing', async () => {
+    const store = new Map<string, string>();
+    const key = await seed(store, { scoredAt: freshStamp(), stored: true });
+    const before = store.get(key);
+    const env = await envWithStore(store);
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
+    expect(body.audited).toBe(false);
+    expect(body.source).toBe('cache');
+    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('fresh hit + stored false + explicit true patches to true, preserves scored_at, behind gates', async () => {
+    const store = new Map<string, string>();
+    const scoredAt = freshStamp();
+    const key = await seed(store, { scoredAt, stored: false });
+    const env = await envWithStore(store);
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
+    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(body.share_url).toBe('https://anc.dev/web/example.com');
+    const stored = JSON.parse(store.get(key) as string) as {
+      scorecard: { public_listing: boolean };
+      scored_at: string;
+    };
+    expect(stored.scorecard.public_listing).toBe(true);
+    expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  test('fresh hit + stored true + explicit true serves cached (redundant, no write)', async () => {
+    const store = new Map<string, string>();
+    const key = await seed(store, { scoredAt: freshStamp(), stored: true });
+    const before = store.get(key);
+    const env = await envWithStore(store);
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
+    expect(body.source).toBe('cache');
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('kill switch off blocks an explicit-differing fresh patch: no write, unpatched served', async () => {
+    const store = new Map<string, string>();
+    const key = await seed(store, { scoredAt: freshStamp(), stored: false });
+    const before = store.get(key);
+    const env = await envWithStore(store, { webEnabled: false });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
+    expect(body.source).toBe('cache');
+    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(false);
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('a breached limiter blocks the patch (rate-limit error, no write)', async () => {
+    const store = new Map<string, string>();
+    const key = await seed(store, { scoredAt: freshStamp(), stored: false });
+    const before = store.get(key);
+    const env = await envWithStore(store, { limiterOk: false });
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP);
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('a failed patch write surfaces a tool error, not fabricated success', async () => {
+    const store = new Map<string, string>();
+    await seed(store, { scoredAt: freshStamp(), stored: false });
+    const env = await makeEnv();
+    const bucket = makeBucket(store);
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = {
+      get: bucket.get.bind(bucket),
+      async put() {
+        throw new Error('r2 unavailable');
+      },
+      delete: bucket.delete.bind(bucket),
+    } as unknown as R2Bucket;
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP);
+    expect(res.result?.isError).toBe(true);
+    expect((res.result?.content?.[0]?.text ?? '').toLowerCase()).toContain('public_listing');
+  });
+
+  test('stale hit + explicit differing falls through to the gate chain (re-audit routing, not serve-cached)', async () => {
+    const store = new Map<string, string>();
+    const key = await seed(store, { scoredAt: staleStamp(), stored: true });
+    const before = store.get(key);
+    const env = await envWithStore(store, { limiterOk: false });
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: false }, IP);
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
+    // No patch on the stale path: the object is untouched (a re-audit would
+    // rewrite it only after the gate chain, which the breached limiter blocks).
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('stale hit + omit falls through to the gate chain (re-audit carries prior, not serve-cached)', async () => {
+    const store = new Map<string, string>();
+    await seed(store, { scoredAt: staleStamp(), stored: true });
+    const env = await envWithStore(store, { limiterOk: false });
+    const res = await callTool(env, 'audit_website', { url: 'example.com' }, IP);
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('rate limit');
+  });
+
+  test('a non-boolean public_listing is rejected by input validation', async () => {
+    const store = new Map<string, string>();
+    const key = await seed(store, { scoredAt: freshStamp(), stored: false });
+    const before = store.get(key);
+    const env = await envWithStore(store);
+    for (const bad of ['false', 1, null] as const) {
+      const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: bad }, IP);
+      expect(res.result?.isError).toBe(true);
+      expect(res.result?.content?.[0]?.text ?? '').toContain('public_listing');
+    }
+    // A rejected request never writes.
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('audit_website and get_website_audit both surface the stored public_listing', async () => {
+    const store = new Map<string, string>();
+    await seed(store, { scoredAt: freshStamp(), stored: true });
+    const env = await envWithStore(store);
+    const readBody = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
+    expect((readBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect((auditBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+  });
+});

@@ -26,11 +26,13 @@ import {
   isStale,
   keyFor,
   normalizeTargetUrl,
+  patchStoredPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
 import { enrichWebScorecardForDisplay } from '../../audit-web/display';
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
+import { decidePublicListingWrite, storedPublicListing } from '../../audit-web/public-listing';
 import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
@@ -153,8 +155,16 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           'Declared site type scoping applicability: "content" (blog/docs/marketing) or "api" (REST API and/or ' +
             'interactive app). Omit to run everything. MCP surfaces are auto-detected regardless.',
         ),
+      public_listing: z
+        .boolean()
+        .optional()
+        .describe(
+          'Opt this domain in to (true) or out of (false) the public web leaderboard at anc.dev/web. Omit to keep ' +
+            "the current stored choice — a blank never erases a prior opt-in. Defaults to off only on a domain's " +
+            'first-ever audit.',
+        ),
     },
-    async ({ url, site_type }, extra) => {
+    async ({ url, site_type, public_listing }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
       // the cache read and the kill switch).
       const parsed = coerceUrl(url);
@@ -171,7 +181,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // fresh path (still behind every gate below) so a re-run refreshes
       // the board.
       const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
-      if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
+      // Resolve the opt-in flag against the stored entry once. A fresh hit
+      // only short-circuits when the request asks for no flag change; an
+      // explicit, differing public_listing falls through the full gate stack
+      // (kill switch, cf-connecting-ip, limiters) like a fresh audit and then
+      // takes the scored_at-preserving patch below, so a flag flip never
+      // bypasses a gate the kill switch also enforces.
+      const listingWrite = decidePublicListingWrite({ explicit: public_listing, cached });
+      if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS) && listingWrite.path === 'serve-cached') {
         return textContent({
           audited: false,
           source: 'cache',
@@ -218,6 +235,33 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         if (!ok) return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
       }
 
+      // Fresh-window flag patch — the request only changes public_listing, so
+      // no re-audit runs; the preserving writer rewrites both stores without
+      // resetting scored_at. A write failure surfaces a tool error rather than
+      // a fabricated success the caller would follow as a saved result. The
+      // response mirrors a normal read: patched scorecard + share_url.
+      if (listingWrite.path === 'patch') {
+        const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
+        if (!wrote) return isError('failed to persist the public_listing change; please retry.');
+        const patched = {
+          ...(listingWrite.cached.scorecard as Record<string, unknown>),
+          public_listing: listingWrite.value,
+        };
+        return textContent({
+          audited: false,
+          source: 'cache',
+          scorecard: await enrichForRead(env, patched),
+          share_url: shareUrl,
+        });
+      }
+
+      // Miss or stale hit — a (re-)audit. The fallback re-applies the same
+      // explicit-wins resolution: the decision's staleness snapshot can lag
+      // the check above across the boundary, and an omitted flag must still
+      // carry the prior stored choice, never reset it.
+      const auditListing =
+        listingWrite.path === 'audit' ? listingWrite.value : (public_listing ?? storedPublicListing(cached) ?? false);
+
       // Run the engine to completion (terminal-only; no streaming on MCP).
       const registry = await loadWebAuditRegistry(env);
       let scorecard: unknown = null;
@@ -226,6 +270,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         url: canonicalTarget,
         registry,
         siteType: site_type ?? null,
+        publicListing: auditListing,
         specVersion: SPEC_VERSION,
       })) {
         if (event.type === 'complete') {
