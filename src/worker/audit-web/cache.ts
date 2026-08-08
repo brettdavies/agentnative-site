@@ -68,6 +68,7 @@ export type WebListedAudit = {
   score_pct: number;
   score: { relative: number; global: number };
   scored_at: string;
+  public_listing: boolean;
 };
 
 /**
@@ -183,6 +184,39 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
   }
 }
 
+/**
+ * Re-put a stored audit with `public_listing` flipped, writing the flag into
+ * both the envelope body and the board custom metadata in a single object
+ * write (R2 has no partial-metadata update, so it is a full rewrite). Unlike
+ * `put`, `scored_at` is sourced from the stored entry and carried forward so a
+ * flag flip never resets the freshness or display-age windows; only an entry
+ * that never carried a stamp gets one now. Best-effort: a write failure logs
+ * but never throws.
+ */
+export async function patchStoredPublicListing(
+  env: WebCacheEnv,
+  cached: CachedWebAudit,
+  value: boolean,
+): Promise<void> {
+  const scorecard = { ...(cached.scorecard as Record<string, unknown>), public_listing: value };
+  const scoredAt = cached.scored_at ?? new Date().toISOString();
+  const payload: CachedWebAudit = {
+    spec_version: cached.spec_version,
+    target_url: cached.target_url,
+    scorecard,
+    scored_at: scoredAt,
+  };
+  const key = await keyFor(cached.target_url, cached.spec_version);
+  try {
+    await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
+      httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
+      customMetadata: boardMetadataOf(payload.target_url, scorecard, scoredAt),
+    });
+  } catch (err) {
+    console.log(JSON.stringify({ scope: 'web-cache.patchStoredPublicListing', key, error: errMsg(err) }));
+  }
+}
+
 // Board fields duplicated into R2 custom metadata so the /web all view
 // can enumerate cached sites with a bare list() — no per-object body
 // fetch on the render path. R2 metadata is string-valued; readers parse.
@@ -191,6 +225,7 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
     tool?: { name?: unknown };
     score_pct?: unknown;
     score?: { relative?: unknown; global?: unknown };
+    public_listing?: unknown;
   } | null;
   const domain = new URL(targetUrl).host;
   const toolName = sc?.tool?.name;
@@ -198,6 +233,10 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
     domain,
     name: typeof toolName === 'string' && toolName.length > 0 ? toolName : domain,
     scored_at: scoredAt,
+    // Board gating reads custom metadata only (never the body), so the opt-in
+    // flag must be dual-stored here; string-valued because R2 metadata is
+    // string-only, and always emitted so a missing key can't read as opted-in.
+    public_listing: String(sc?.public_listing ?? false),
   };
   if (typeof sc?.score_pct === 'number') meta.score_pct = String(sc.score_pct);
   if (typeof sc?.score?.relative === 'number') meta.relative = String(sc.score.relative);
@@ -264,6 +303,8 @@ function parseListedMetadata(meta: Record<string, string> | undefined): WebListe
     score_pct: scorePct,
     score: { relative, global: globalScore },
     scored_at,
+    // A missing key coerces to false: an unmigrated object reads as not-listed.
+    public_listing: meta.public_listing === 'true',
   };
 }
 

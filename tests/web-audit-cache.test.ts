@@ -11,6 +11,7 @@ import {
   keyFor,
   listAllWebAudits,
   normalizeTargetUrl,
+  patchStoredPublicListing,
   put,
   putAggregate,
   WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS,
@@ -322,6 +323,22 @@ describe('put custom metadata (board fields)', () => {
     expect(meta?.name).toBe('example.com');
   });
 
+  test('public_listing serializes to the string "true" / "false", defaulting to false when absent', async () => {
+    const { env, putOptions } = makeR2Stub();
+
+    const optedIn = 'https://opted-in.dev/';
+    await put(env, optedIn, { ...sampleScorecard(optedIn), public_listing: true }, SPEC_VERSION);
+    expect(putOptions.get(await keyFor(optedIn, SPEC_VERSION))?.customMetadata?.public_listing).toBe('true');
+
+    const optedOut = 'https://opted-out.dev/';
+    await put(env, optedOut, { ...sampleScorecard(optedOut), public_listing: false }, SPEC_VERSION);
+    expect(putOptions.get(await keyFor(optedOut, SPEC_VERSION))?.customMetadata?.public_listing).toBe('false');
+
+    const absent = 'https://absent.dev/';
+    await put(env, absent, sampleScorecard(absent), SPEC_VERSION);
+    expect(putOptions.get(await keyFor(absent, SPEC_VERSION))?.customMetadata?.public_listing).toBe('false');
+  });
+
   test('put still refuses a half-state with metadata in play', async () => {
     const { env } = makeR2Stub();
     await expect(put(env, 'https://example.com/', sampleScorecard('https://example.com/'), '')).rejects.toThrow(
@@ -373,6 +390,7 @@ describe('listAllWebAudits', () => {
       score_pct: 80,
       score: { relative: 80, global: 70 },
       scored_at: new Date(NOW - 60_000).toISOString(),
+      public_listing: false,
     });
   });
 
@@ -434,6 +452,23 @@ describe('listAllWebAudits', () => {
     expect(got.map((e) => e.domain)).toEqual(['good.dev']);
   });
 
+  test('parses public_listing: "true" -> true, "false" -> false, missing -> false', async () => {
+    const { env } = makeR2Stub({
+      listPages: [
+        [
+          listedEntry(HASH_A, 'opted-in.dev', 60_000, { public_listing: 'true' }),
+          listedEntry(HASH_B, 'opted-out.dev', 60_000, { public_listing: 'false' }),
+          listedEntry(HASH_C, 'legacy.dev', 60_000),
+        ],
+      ],
+    });
+    const got = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW });
+    const byDomain = Object.fromEntries(got.map((e) => [e.domain, e.public_listing]));
+    expect(byDomain['opted-in.dev']).toBe(true);
+    expect(byDomain['opted-out.dev']).toBe(false);
+    expect(byDomain['legacy.dev']).toBe(false);
+  });
+
   test('paginates through truncated pages and unions the results', async () => {
     const { env, listCalls } = makeR2Stub({
       listPages: [[listedEntry(HASH_A, 'page-one.dev', 60_000)], [listedEntry(HASH_B, 'page-two.dev', 60_000)]],
@@ -449,5 +484,78 @@ describe('listAllWebAudits', () => {
     await expect(
       listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains: new Set(), now: NOW }),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('patchStoredPublicListing (scored_at-preserving dual-writer)', () => {
+  const PRIOR_SCORED_AT = '2026-08-01T00:00:00.000Z';
+
+  function cachedFixture(url: string, publicListing: boolean | undefined): CachedWebAudit {
+    const base = {
+      ...sampleScorecard(url),
+      tool: { name: 'Example', url },
+      score_pct: 82,
+      score: { relative: 82, global: 71 },
+    };
+    const scorecard = publicListing === undefined ? base : { ...base, public_listing: publicListing };
+    return { spec_version: SPEC_VERSION, target_url: url, scorecard, scored_at: PRIOR_SCORED_AT };
+  }
+
+  test('flips the flag in both the envelope and the metadata, preserving scored_at', async () => {
+    const { env, store, putOptions } = makeR2Stub();
+    const url = 'https://example.com/';
+    await patchStoredPublicListing(env, cachedFixture(url, false), true);
+
+    const key = await keyFor(url, SPEC_VERSION);
+    const stored = JSON.parse(store.get(key) as string) as CachedWebAudit;
+    expect((stored.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(stored.scored_at).toBe(PRIOR_SCORED_AT);
+
+    const meta = putOptions.get(key)?.customMetadata;
+    expect(meta?.public_listing).toBe('true');
+    expect(meta?.scored_at).toBe(PRIOR_SCORED_AT);
+  });
+
+  test('flips an opted-in entry back to false without restamping scored_at', async () => {
+    const { env, store, putOptions } = makeR2Stub();
+    const url = 'https://example.com/';
+    await patchStoredPublicListing(env, cachedFixture(url, true), false);
+
+    const key = await keyFor(url, SPEC_VERSION);
+    const stored = JSON.parse(store.get(key) as string) as CachedWebAudit;
+    expect((stored.scorecard as { public_listing: boolean }).public_listing).toBe(false);
+    expect(stored.scored_at).toBe(PRIOR_SCORED_AT);
+    expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('false');
+    expect(putOptions.get(key)?.customMetadata?.scored_at).toBe(PRIOR_SCORED_AT);
+  });
+
+  test('leaves every other envelope and scorecard field intact', async () => {
+    const { env, store } = makeR2Stub();
+    const url = 'https://example.com/';
+    const cached = cachedFixture(url, false);
+    await patchStoredPublicListing(env, cached, true);
+
+    const stored = JSON.parse(store.get(await keyFor(url, SPEC_VERSION)) as string) as CachedWebAudit;
+    expect(stored.spec_version).toBe(SPEC_VERSION);
+    expect(stored.target_url).toBe(url);
+    // Only public_listing changes; every other scorecard field is carried through verbatim.
+    expect(stored.scorecard).toEqual({ ...(cached.scorecard as Record<string, unknown>), public_listing: true });
+  });
+
+  test('a round-trip through get sees the patched flag and the preserved scored_at', async () => {
+    const { env } = makeR2Stub();
+    const url = 'https://example.com/';
+    await patchStoredPublicListing(env, cachedFixture(url, false), true);
+
+    const got = await get(env, await keyFor(url, SPEC_VERSION));
+    expect((got?.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(got?.scored_at).toBe(PRIOR_SCORED_AT);
+  });
+
+  test('a write failure never throws to the caller', async () => {
+    const { env } = makeR2Stub({ throwOnPut: true });
+    await expect(
+      patchStoredPublicListing(env, cachedFixture('https://example.com/', false), true),
+    ).resolves.toBeUndefined();
   });
 });
