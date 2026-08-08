@@ -5,6 +5,7 @@
 // in KV; the authoritative liveness check is the Workflow instance status
 // (a stale pointer to a finished batch never blocks a new start).
 
+import { runWebPublicListingBackfill, type WebBackfillEnv } from './public-listing-backfill';
 import type { WebRescoreWorkflowBinding } from './rescore-workflow';
 
 export interface WebRescoreTriggerEnv {
@@ -12,6 +13,8 @@ export interface WebRescoreTriggerEnv {
   WEB_RESCORE_WORKFLOW: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
 }
+
+export type WebBackfillTriggerEnv = WebBackfillEnv & { WEB_RESCORE_SECRET?: string };
 
 const CURRENT_INSTANCE_KEY = 'web_rescore:current';
 
@@ -83,4 +86,60 @@ export async function handleWebRescore(request: Request, env: WebRescoreTriggerE
   }
   const { instanceId, coalesced } = await startWebRescore(env);
   return jsonResponse({ started: !coalesced, coalesced, instance_id: instanceId }, 202);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function optionalPositiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * POST /api/web-audit-backfill — the one-time `public_listing` backfill,
+ * behind the same `WEB_RESCORE_SECRET` constant-time gate as the rescore
+ * hook. Body (all optional): `dry_run` (report only), `cursor` (resume a
+ * prior run), `max_writes` (per-run object cap). Returns the run's
+ * written/skipped/failed tally plus the resume cursor; the caller re-runs
+ * until a run reports zero writes. A seed-load failure aborts the batch and
+ * surfaces as a 500 rather than a partial success that could stamp curated
+ * domains false.
+ */
+export async function handleWebBackfill(request: Request, env: WebBackfillTriggerEnv): Promise<Response> {
+  if (request.method !== 'POST') {
+    return new Response('method not allowed\n', {
+      status: 405,
+      headers: { Allow: 'POST', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+    });
+  }
+  if (!env.WEB_RESCORE_SECRET) {
+    return jsonResponse({ error: 'service_misconfigured', message: 'WEB_RESCORE_SECRET missing' }, 500);
+  }
+  const presented = request.headers.get('x-web-rescore-secret');
+  if (!presented || !(await secretsMatch(presented, env.WEB_RESCORE_SECRET))) {
+    return jsonResponse({ error: 'unauthorized' }, 401);
+  }
+
+  const body: Record<string, unknown> = await request
+    .json()
+    .then((v) => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {}))
+    .catch(() => ({}));
+
+  try {
+    const result = await runWebPublicListingBackfill(env, {
+      dryRun: body.dry_run === true,
+      cursor: optionalString(body.cursor),
+      maxWrites: optionalPositiveInt(body.max_writes),
+    });
+    return jsonResponse(result, 200);
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        scope: 'web-backfill.trigger',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return jsonResponse({ error: 'backfill_aborted', message: 'seed load failed; no objects written' }, 500);
+  }
 }

@@ -253,6 +253,21 @@ function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string
 
 const PER_DOMAIN_HASH_RE = /^[0-9a-f]{64}$/;
 
+/**
+ * `true` when `key` is a per-domain audit object at `specVersion` — the
+ * `audits/web/<64-hex-hash>/<version>.json` shape. Aggregate keys (their
+ * third segment is a `WebAggregateKind`, not a 64-char hex hash) and
+ * off-version objects return false. The version segment is compared as a
+ * literal string so version dots can never act as regex wildcards (0.5.0
+ * must not match 0x5x0). Shared by the board enumeration and the one-time
+ * `public_listing` backfill so the two can never disagree on which objects
+ * are per-domain audits.
+ */
+export function isPerDomainAuditKey(key: string, specVersion: string): boolean {
+  const parts = key.split('/');
+  return parts.length === 4 && PER_DOMAIN_HASH_RE.test(parts[2]) && parts[3] === `${specVersion}.json`;
+}
+
 export type ListAllWebAuditsOpts = {
   specVersion: string;
   excludeDomains: ReadonlySet<string>;
@@ -272,16 +287,12 @@ export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsO
   const out: WebListedAudit[] = [];
   const maxAgeMs = opts.maxAgeMs ?? WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS;
   const now = opts.now ?? Date.now();
-  // The trailing key segment is compared as a literal string so version
-  // dots can never act as regex wildcards (0.5.0 must not match 0x5x0).
-  const versionSegment = `${opts.specVersion}.json`;
   let cursor: string | undefined;
   try {
     do {
       const page = await env.SCORE_CACHE.list({ prefix: 'audits/web/', include: ['customMetadata'], cursor });
       for (const obj of page.objects) {
-        const parts = obj.key.split('/');
-        if (parts.length !== 4 || !PER_DOMAIN_HASH_RE.test(parts[2]) || parts[3] !== versionSegment) continue;
+        if (!isPerDomainAuditKey(obj.key, opts.specVersion)) continue;
         const entry = parseListedMetadata(obj.customMetadata);
         if (!entry) continue;
         if (opts.excludeDomains.has(entry.domain)) continue;

@@ -18,6 +18,8 @@ import {
   type WebAggregateEntry,
   type WebCacheEnv,
 } from '../src/worker/audit-web/cache';
+import { runWebPublicListingBackfill, type WebBackfillEnv } from '../src/worker/audit-web/public-listing-backfill';
+import { resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 type ListedObject = { key: string; customMetadata?: Record<string, string> };
@@ -571,5 +573,293 @@ describe('patchStoredPublicListing (scored_at-preserving dual-writer)', () => {
     expect(typeof stored.scored_at).toBe('string');
     expect(putOptions.get(key)?.customMetadata?.scored_at).toBe(stored.scored_at);
     expect((stored.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+  });
+});
+
+describe('runWebPublicListingBackfill', () => {
+  const CURATED = { domain: 'curated.example', url: 'https://curated.example/', name: 'Curated' };
+  const SEED = [CURATED];
+
+  type StoreRec = { body: string; meta?: Record<string, string> };
+
+  function bodyFor(url: string, opts: { flag?: boolean; scoredAt?: string } = {}) {
+    const base = sampleScorecard(url);
+    const scorecard = opts.flag === undefined ? base : { ...base, public_listing: opts.flag };
+    return {
+      spec_version: SPEC_VERSION,
+      target_url: url,
+      scorecard,
+      scored_at: opts.scoredAt ?? '2020-01-01T00:00:00.000Z',
+    };
+  }
+
+  function readStored(store: Map<string, StoreRec>, key: string): CachedWebAudit {
+    return JSON.parse((store.get(key) as StoreRec).body) as CachedWebAudit;
+  }
+
+  function readMeta(store: Map<string, StoreRec>, key: string): Record<string, string> | undefined {
+    return (store.get(key) as StoreRec).meta;
+  }
+
+  function flagOf(store: Map<string, StoreRec>, key: string): unknown {
+    return (readStored(store, key).scorecard as Record<string, unknown>).public_listing;
+  }
+
+  // Realistic R2 stub whose list() reflects prior writes, so the same body
+  // is never re-filled once its metadata carries the flag — the property the
+  // fill-if-absent + re-run-until-zero protocol relies on. `pageSize` forces
+  // multi-page pagination for the drain test.
+  function makeEnv(setup: {
+    entries: Array<{ key: string; body?: unknown; meta?: Record<string, string> }>;
+    seed?: Array<{ domain: string; url: string; name: string }> | null;
+    pageSize?: number;
+    throwOnPut?: boolean;
+    throwOnList?: boolean;
+  }): { env: WebBackfillEnv; store: Map<string, StoreRec>; putKeys: string[] } {
+    resetWebSeedCacheForTests();
+    const store = new Map<string, StoreRec>();
+    for (const e of setup.entries) {
+      store.set(e.key, { body: e.body === undefined ? '' : JSON.stringify(e.body), meta: e.meta });
+    }
+    const putKeys: string[] = [];
+    const pageSize = setup.pageSize ?? 1000;
+    const seed = setup.seed === undefined ? SEED : setup.seed;
+    const env: WebBackfillEnv = {
+      SCORE_CACHE: {
+        async get(key: string) {
+          const rec = store.get(key);
+          if (!rec || rec.body === '') return null;
+          return {
+            async json() {
+              return JSON.parse(rec.body);
+            },
+            async text() {
+              return rec.body;
+            },
+          };
+        },
+        async put(key: string, value: unknown, options?: { customMetadata?: Record<string, string> }) {
+          if (setup.throwOnPut) throw new Error('r2_put_failed');
+          putKeys.push(key);
+          store.set(key, { body: typeof value === 'string' ? value : String(value), meta: options?.customMetadata });
+        },
+        async delete(key: string) {
+          store.delete(key);
+        },
+        async list(options?: { prefix?: string; cursor?: string; limit?: number }) {
+          if (setup.throwOnList) throw new Error('r2_list_failed');
+          const keys = [...store.keys()].filter((k) => !options?.prefix || k.startsWith(options.prefix)).sort();
+          const start = options?.cursor ? Number(options.cursor) : 0;
+          const size = Math.min(options?.limit ?? pageSize, pageSize);
+          const slice = keys.slice(start, start + size);
+          const objects = slice.map((k) => ({ key: k, customMetadata: store.get(k)?.meta }));
+          const next = start + size;
+          return next < keys.length
+            ? { objects, truncated: true, cursor: String(next) }
+            : { objects, truncated: false };
+        },
+      } as unknown as R2Bucket,
+      ASSETS: {
+        async fetch() {
+          if (seed === null) return new Response('seed unavailable', { status: 500 });
+          return new Response(JSON.stringify(seed), { status: 200 });
+        },
+      } as unknown as Fetcher,
+    };
+    return { env, store, putKeys };
+  }
+
+  test('a user object with no stored flag gets false; a curated seed gets true', async () => {
+    const userKey = await keyFor('https://user-a.com/', SPEC_VERSION);
+    const curatedKey = await keyFor('https://curated.example/', SPEC_VERSION);
+    const { env, store } = makeEnv({
+      entries: [
+        { key: userKey, body: bodyFor('https://user-a.com/') },
+        { key: curatedKey, body: bodyFor('https://curated.example/') },
+      ],
+    });
+
+    const r = await runWebPublicListingBackfill(env);
+
+    expect(r.written).toBe(2);
+    expect(r.skipped).toBe(0);
+    expect(r.failed).toBe(0);
+    expect(r.done).toBe(true);
+    expect(r.cursor).toBeNull();
+    expect(flagOf(store, userKey)).toBe(false);
+    expect(flagOf(store, curatedKey)).toBe(true);
+    expect(readMeta(store, userKey)?.public_listing).toBe('false');
+    expect(readMeta(store, curatedKey)?.public_listing).toBe('true');
+  });
+
+  test('an object already carrying an explicit flag is left untouched', async () => {
+    const key = await keyFor('https://opted-in.com/', SPEC_VERSION);
+    const { env, store, putKeys } = makeEnv({
+      entries: [
+        {
+          key,
+          body: bodyFor('https://opted-in.com/', { flag: true, scoredAt: '2019-05-05T00:00:00.000Z' }),
+          meta: { public_listing: 'true' },
+        },
+      ],
+    });
+
+    const r = await runWebPublicListingBackfill(env);
+
+    expect(r.written).toBe(0);
+    expect(r.skipped).toBe(1);
+    expect(putKeys).toEqual([]);
+    expect(flagOf(store, key)).toBe(true);
+    expect(readStored(store, key).scored_at).toBe('2019-05-05T00:00:00.000Z');
+  });
+
+  test('a second full run over freshly filled objects writes nothing (idempotent)', async () => {
+    const key = await keyFor('https://user-b.com/', SPEC_VERSION);
+    const { env } = makeEnv({ entries: [{ key, body: bodyFor('https://user-b.com/') }] });
+
+    const first = await runWebPublicListingBackfill(env);
+    expect(first.written).toBe(1);
+
+    const second = await runWebPublicListingBackfill(env);
+    expect(second.written).toBe(0);
+    expect(second.skipped).toBe(1);
+    expect(second.done).toBe(true);
+  });
+
+  test('aggregate and off-version keys are skipped', async () => {
+    const userKey = await keyFor('https://user-c.com/', SPEC_VERSION);
+    const offVersionKey = await keyFor('https://user-c.com/', '9.9.9');
+    const aggKey = aggregateKeyFor('leaderboard', SPEC_VERSION);
+    const { env, store, putKeys } = makeEnv({
+      entries: [
+        { key: userKey, body: bodyFor('https://user-c.com/') },
+        { key: offVersionKey, body: bodyFor('https://user-c.com/') },
+        { key: aggKey, body: { spec_version: SPEC_VERSION, generated_at: 'x', entries: [] } },
+      ],
+    });
+
+    const r = await runWebPublicListingBackfill(env);
+
+    expect(r.scanned).toBe(1);
+    expect(r.written).toBe(1);
+    expect(putKeys).toEqual([userKey]);
+    expect(readMeta(store, offVersionKey)?.public_listing).toBeUndefined();
+    expect(readMeta(store, aggKey)?.public_listing).toBeUndefined();
+  });
+
+  test('scored_at is preserved on every re-put', async () => {
+    const key = await keyFor('https://user-d.com/', SPEC_VERSION);
+    const { env, store } = makeEnv({
+      entries: [{ key, body: bodyFor('https://user-d.com/', { scoredAt: '2018-03-03T12:00:00.000Z' }) }],
+    });
+
+    await runWebPublicListingBackfill(env);
+
+    expect(readStored(store, key).scored_at).toBe('2018-03-03T12:00:00.000Z');
+    expect(readMeta(store, key)?.scored_at).toBe('2018-03-03T12:00:00.000Z');
+  });
+
+  test('a batch larger than one page drains across calls until a run reports zero writes', async () => {
+    const urls = ['https://p1.com/', 'https://p2.com/', 'https://p3.com/'];
+    const entries: Array<{ key: string; body: unknown }> = [];
+    for (const u of urls) entries.push({ key: await keyFor(u, SPEC_VERSION), body: bodyFor(u) });
+    const { env, putKeys } = makeEnv({ entries, pageSize: 1 });
+
+    let cursor: string | undefined;
+    let totalWritten = 0;
+    let calls = 0;
+    for (;;) {
+      const r = await runWebPublicListingBackfill(env, { cursor, maxWrites: 1 });
+      totalWritten += r.written;
+      calls++;
+      if (r.done && r.written === 0) break;
+      cursor = r.cursor ?? undefined;
+      if (calls > 20) throw new Error('backfill did not converge');
+    }
+
+    expect(totalWritten).toBe(3);
+    expect(putKeys).toHaveLength(3);
+    expect(new Set(putKeys).size).toBe(3);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  test('a seed-load failure aborts the batch with nothing written', async () => {
+    const key = await keyFor('https://user-e.com/', SPEC_VERSION);
+    const { env, store, putKeys } = makeEnv({
+      entries: [{ key, body: bodyFor('https://user-e.com/') }],
+      seed: null,
+    });
+
+    await expect(runWebPublicListingBackfill(env)).rejects.toThrow();
+    expect(putKeys).toEqual([]);
+    expect(readMeta(store, key)?.public_listing).toBeUndefined();
+  });
+
+  // The seed load is guarded up front, before the enumeration, so a broken
+  // seed aborts even when no object needs a fill (nothing would call
+  // isSeededDomain). A late per-object check would report a false clean run.
+  test('a seed-load failure aborts even when every object is already flagged', async () => {
+    const key = await keyFor('https://all-flagged.com/', SPEC_VERSION);
+    const { env } = makeEnv({
+      entries: [{ key, body: bodyFor('https://all-flagged.com/', { flag: false }), meta: { public_listing: 'false' } }],
+      seed: null,
+    });
+
+    await expect(runWebPublicListingBackfill(env)).rejects.toThrow();
+  });
+
+  test('a dry run writes nothing and reports the intended diff and tally', async () => {
+    const userKey = await keyFor('https://user-f.com/', SPEC_VERSION);
+    const curatedKey = await keyFor('https://curated.example/', SPEC_VERSION);
+    const { env, store, putKeys } = makeEnv({
+      entries: [
+        { key: userKey, body: bodyFor('https://user-f.com/') },
+        { key: curatedKey, body: bodyFor('https://curated.example/') },
+      ],
+    });
+
+    const r = await runWebPublicListingBackfill(env, { dryRun: true });
+
+    expect(r.dry_run).toBe(true);
+    expect(r.written).toBe(0);
+    expect(r.would_write).toBe(2);
+    expect(putKeys).toEqual([]);
+    expect(r.diffs).toEqual(
+      expect.arrayContaining([
+        { key: userKey, domain: 'user-f.com', public_listing: false },
+        { key: curatedKey, domain: 'curated.example', public_listing: true },
+      ]),
+    );
+    expect(flagOf(store, userKey)).toBeUndefined();
+  });
+
+  test('a failed re-put counts as failed, not written or skipped', async () => {
+    const key = await keyFor('https://user-g.com/', SPEC_VERSION);
+    const { env } = makeEnv({ entries: [{ key, body: bodyFor('https://user-g.com/') }], throwOnPut: true });
+
+    const r = await runWebPublicListingBackfill(env);
+
+    expect(r.written).toBe(0);
+    expect(r.skipped).toBe(0);
+    expect(r.failed).toBe(1);
+    expect(r.would_write).toBe(1);
+  });
+
+  test('a legacy object with metadata but no public_listing key is still filled', async () => {
+    const key = await keyFor('https://user-h.com/', SPEC_VERSION);
+    const { env, store } = makeEnv({
+      entries: [
+        {
+          key,
+          body: bodyFor('https://user-h.com/'),
+          meta: { domain: 'user-h.com', name: 'user-h.com', scored_at: '2020-01-01T00:00:00.000Z' },
+        },
+      ],
+    });
+
+    const r = await runWebPublicListingBackfill(env);
+
+    expect(r.written).toBe(1);
+    expect(readMeta(store, key)?.public_listing).toBe('false');
   });
 });

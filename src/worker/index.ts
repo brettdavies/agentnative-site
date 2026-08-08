@@ -14,7 +14,13 @@
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { getAggregate, type WebCacheEnv } from './audit-web/cache';
 import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
-import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from './audit-web/rescore-trigger';
+import {
+  handleWebBackfill,
+  handleWebRescore,
+  startWebRescore,
+  type WebBackfillTriggerEnv,
+  type WebRescoreTriggerEnv,
+} from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
   handleWebAudit,
@@ -332,6 +338,12 @@ export default {
     // helper with the weekly cron in scheduled() below.
     if (pathname === '/api/web-rescore') {
       return handleWebRescore(request, env as WebRescoreTriggerEnv);
+    }
+
+    // One-time public_listing backfill (same secret gate as the rescore
+    // hook). Bounded per call; the operator re-runs until it writes zero.
+    if (pathname === '/api/web-audit-backfill') {
+      return handleWebBackfill(request, env as WebBackfillTriggerEnv);
     }
 
     // MCP server card (SEP-1649): the canonical path serves the JSON
