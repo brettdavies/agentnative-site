@@ -166,22 +166,13 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
     throw new Error('web-cache.put: scorecard.target_url required (refusal-to-cache-half-state)');
   }
 
-  const scoredAt = new Date().toISOString();
-  const payload: CachedWebAudit = {
+  const payload = {
     spec_version: specVersion,
     target_url: normalizeTargetUrl(url),
     scorecard,
-    scored_at: scoredAt,
+    scored_at: new Date().toISOString(),
   };
-  const key = await keyFor(url, specVersion);
-  try {
-    await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
-      httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
-      customMetadata: boardMetadataOf(payload.target_url, scorecard, scoredAt),
-    });
-  } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.put', key, error: errMsg(err) }));
-  }
+  await writeAuditObject(env, await keyFor(url, specVersion), payload, 'web-cache.put');
 }
 
 /**
@@ -199,21 +190,34 @@ export async function patchStoredPublicListing(
   value: boolean,
 ): Promise<void> {
   const scorecard = { ...(cached.scorecard as Record<string, unknown>), public_listing: value };
-  const scoredAt = cached.scored_at ?? new Date().toISOString();
-  const payload: CachedWebAudit = {
+  const payload = {
     spec_version: cached.spec_version,
     target_url: cached.target_url,
     scorecard,
-    scored_at: scoredAt,
+    scored_at: cached.scored_at ?? new Date().toISOString(),
   };
   const key = await keyFor(cached.target_url, cached.spec_version);
+  await writeAuditObject(env, key, payload, 'web-cache.patchStoredPublicListing');
+}
+
+/**
+ * Write a fully-stamped audit envelope to R2, deriving board custom metadata
+ * from the same payload so body and metadata can never disagree. Best-effort:
+ * a write failure logs under `scope` but never throws to the caller.
+ */
+async function writeAuditObject(
+  env: WebCacheEnv,
+  key: string,
+  payload: CachedWebAudit & { scored_at: string },
+  scope: string,
+): Promise<void> {
   try {
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
       httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
-      customMetadata: boardMetadataOf(payload.target_url, scorecard, scoredAt),
+      customMetadata: boardMetadataOf(payload.target_url, payload.scorecard, payload.scored_at),
     });
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.patchStoredPublicListing', key, error: errMsg(err) }));
+    console.log(JSON.stringify({ scope, key, error: errMsg(err) }));
   }
 }
 
