@@ -152,6 +152,25 @@ aggregate's registry-seeded rows; the all view, the default, adds every other no
 submitted on demand rather than the registry — read live rather than from the aggregate. The homepage pane and the MCP
 board listing always render curated only; there is no all-view equivalent for either.
 
+### Public listing
+
+A per-domain, submitter-set boolean stored on a web-audit envelope and mirrored into the R2 board metadata, recording
+whether the submitter consents to that domain appearing on public board-listing surfaces. Curated (seeded) domains are
+exempt and always exposed regardless of the flag. Explicit values always take effect; an omitted value never erases a
+previously stored choice, and only a domain's first-ever audit defaults it to unlisted. Because the flag is out-of-band
+state relative to an audit's own inputs, every write path capable of rewriting a domain's stored audit, a fresh
+submission, a flag-only patch, a scheduled rescore, or a registry-fingerprint reflow, must explicitly resolve and carry
+it forward, or it silently reverts to the default.
+
+### Staleness window
+
+More than one independent threshold gates behavior from the same web-audit freshness stamp, and they must not be
+conflated. One controls whether an on-demand request serves the cached result or falls through to a fresh audit; a
+separate one controls how long an unseeded entry stays visible before it ages off the board's display, even though the
+underlying cached record persists. The two are tuned independently for different jobs, and a write path that restamps
+freshness for an unrelated reason resets both at once, whether or not that is intended. Distinct from the cadence a Web
+rescore batch uses to decide which curated domains are due for re-audit, a third, separately-tuned window.
+
 ### Web rescore
 
 The batch process that re-audits every curated board domain and rebuilds the leaderboard aggregate. It runs on a weekly
