@@ -29,6 +29,7 @@ import {
   keyFor,
   listAllWebAudits,
   normalizeTargetUrl,
+  patchStoredPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 
@@ -43,6 +44,7 @@ import {
   type WebBoardView,
 } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
+import { decidePublicListingWrite, storedPublicListing } from './public-listing';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
@@ -141,9 +143,14 @@ export async function handleWebAudit(
     });
   }
   // 2. Body + URL parse.
-  let body: { url?: unknown; site_type?: unknown; turnstile_token?: unknown };
+  let body: { url?: unknown; site_type?: unknown; turnstile_token?: unknown; public_listing?: unknown };
   try {
-    body = (await request.json()) as { url?: unknown; site_type?: unknown; turnstile_token?: unknown };
+    body = (await request.json()) as {
+      url?: unknown;
+      site_type?: unknown;
+      turnstile_token?: unknown;
+      public_listing?: unknown;
+    };
   } catch {
     return jsonResponse(
       { error: 'invalid_body', message: 'POST body must be JSON { url, site_type?, turnstile_token }' },
@@ -159,6 +166,13 @@ export async function handleWebAudit(
     return jsonResponse({ error: 'invalid_site_type', message: 'site_type must be "content" or "api"' }, 400);
   }
   const siteType = (body.site_type as 'content' | 'api' | undefined) ?? null;
+  // Opt-in board listing: strict boolean, kept distinct from omitted so a
+  // blank never erases a stored choice. Reject any non-boolean, including a
+  // "false" string or a number, before any metered gate.
+  if (body.public_listing !== undefined && typeof body.public_listing !== 'boolean') {
+    return jsonResponse({ error: 'invalid_public_listing', message: 'public_listing must be a boolean' }, 400);
+  }
+  const publicListing = body.public_listing as boolean | undefined;
   const canonicalTarget = canonicalTargetOf(url);
   const shareDomain = url.host;
 
@@ -176,8 +190,14 @@ export async function handleWebAudit(
   // falls through to the fresh path so a re-run refreshes the board.
   const shareUrl = `/web/${shareDomain}`;
   const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
+  const listingWrite = decidePublicListingWrite({ explicit: publicListing, cached });
   if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
-    return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+    // A fresh hit is served as data unless an explicit, differing
+    // public_listing asks for a flag-only patch — that falls through the
+    // full gate stack (kill switch, Turnstile, limiters) like a fresh audit.
+    if (listingWrite.path === 'serve-cached') {
+      return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+    }
   }
 
   // 5. Kill switch — a stale hit is still data when fresh audits are off,
@@ -259,7 +279,38 @@ export async function handleWebAudit(
     }
   }
 
-  // 11. Miss — stream the engine, cache the completed result via waitUntil.
+  // 11. Fresh-window flag patch — the request only changes public_listing,
+  // so no re-audit runs; the preserving writer rewrites both stores without
+  // resetting scored_at. A write failure surfaces an error rather than a
+  // fabricated success the client would follow as a saved result.
+  if (listingWrite.path === 'patch') {
+    const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
+    if (!wrote) {
+      return jsonResponse(
+        { error: 'patch_failed', message: 'failed to persist the public_listing change; please retry' },
+        500,
+        cookieHeader(setCookie),
+      );
+    }
+    const patchedScorecard = {
+      ...(listingWrite.cached.scorecard as Record<string, unknown>),
+      public_listing: listingWrite.value,
+    };
+    return jsonResponse(
+      { cached: true, scorecard: patchedScorecard, share_url: shareUrl },
+      200,
+      cookieHeader(setCookie),
+    );
+  }
+
+  // 12. Miss or stale hit — stream the engine, cache the completed result
+  // via waitUntil. Serve-cached and patch both returned above, so only the
+  // (re-)audit path reaches here. The fallback re-applies the same
+  // explicit-wins resolution: the decision's staleness snapshot can lag the
+  // route's own check across the boundary, and an omitted flag must still
+  // carry the prior stored choice, never reset it.
+  const auditListing =
+    listingWrite.path === 'audit' ? listingWrite.value : (publicListing ?? storedPublicListing(cached) ?? false);
   const registry = await loadWebAuditRegistry(env);
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -273,6 +324,7 @@ export async function handleWebAudit(
         url: canonicalTarget,
         registry,
         siteType,
+        publicListing: auditListing,
         specVersion: SPEC_VERSION,
         fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
       })) {
