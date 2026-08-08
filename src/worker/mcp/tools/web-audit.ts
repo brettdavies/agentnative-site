@@ -27,12 +27,13 @@ import {
   keyFor,
   normalizeTargetUrl,
   patchStoredPublicListing,
+  scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from '../../audit-web/cache';
 import { enrichWebScorecardForDisplay } from '../../audit-web/display';
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
-import { decidePublicListingWrite, storedPublicListing } from '../../audit-web/public-listing';
+import { decidePublicListingWrite, resolveAuditListing } from '../../audit-web/public-listing';
 import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
@@ -243,10 +244,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (listingWrite.path === 'patch') {
         const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
         if (!wrote) return isError('failed to persist the public_listing change; please retry.');
-        const patched = {
-          ...(listingWrite.cached.scorecard as Record<string, unknown>),
-          public_listing: listingWrite.value,
-        };
+        const patched = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
         return textContent({
           audited: false,
           source: 'cache',
@@ -255,12 +253,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         });
       }
 
-      // Miss or stale hit — a (re-)audit. The fallback re-applies the same
-      // explicit-wins resolution: the decision's staleness snapshot can lag
-      // the check above across the boundary, and an omitted flag must still
-      // carry the prior stored choice, never reset it.
-      const auditListing =
-        listingWrite.path === 'audit' ? listingWrite.value : (public_listing ?? storedPublicListing(cached) ?? false);
+      // Miss or stale hit — a (re-)audit.
+      const auditListing = resolveAuditListing(listingWrite, public_listing, cached);
 
       // Run the engine to completion (terminal-only; no streaming on MCP).
       const registry = await loadWebAuditRegistry(env);

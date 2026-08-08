@@ -66,24 +66,33 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 /**
- * POST /api/web-rescore — the deploy hook. Authed by a shared secret
- * header; a missing Worker-side secret is a fail-fast 500 (a silent 401
- * would hide the misconfiguration from the deploy pass).
+ * Shared gate for the secret-authed rescore endpoints: POST-only, a
+ * fail-fast 500 when the Worker-side secret is unset (a silent 401 would
+ * hide the misconfiguration from the deploy pass), and a constant-time
+ * secret compare. Resolves the rejection response, or null when the
+ * request is authorized.
  */
-export async function handleWebRescore(request: Request, env: WebRescoreTriggerEnv): Promise<Response> {
+async function requireRescoreAuth(request: Request, secret: string | undefined): Promise<Response | null> {
   if (request.method !== 'POST') {
     return new Response('method not allowed\n', {
       status: 405,
       headers: { Allow: 'POST', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     });
   }
-  if (!env.WEB_RESCORE_SECRET) {
+  if (!secret) {
     return jsonResponse({ error: 'service_misconfigured', message: 'WEB_RESCORE_SECRET missing' }, 500);
   }
   const presented = request.headers.get('x-web-rescore-secret');
-  if (!presented || !(await secretsMatch(presented, env.WEB_RESCORE_SECRET))) {
+  if (!presented || !(await secretsMatch(presented, secret))) {
     return jsonResponse({ error: 'unauthorized' }, 401);
   }
+  return null;
+}
+
+/** POST /api/web-rescore — the deploy hook, behind the shared-secret gate. */
+export async function handleWebRescore(request: Request, env: WebRescoreTriggerEnv): Promise<Response> {
+  const denied = await requireRescoreAuth(request, env.WEB_RESCORE_SECRET);
+  if (denied) return denied;
   const { instanceId, coalesced } = await startWebRescore(env);
   return jsonResponse({ started: !coalesced, coalesced, instance_id: instanceId }, 202);
 }
@@ -107,19 +116,8 @@ function optionalPositiveInt(value: unknown): number | undefined {
  * domains false.
  */
 export async function handleWebBackfill(request: Request, env: WebBackfillTriggerEnv): Promise<Response> {
-  if (request.method !== 'POST') {
-    return new Response('method not allowed\n', {
-      status: 405,
-      headers: { Allow: 'POST', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
-    });
-  }
-  if (!env.WEB_RESCORE_SECRET) {
-    return jsonResponse({ error: 'service_misconfigured', message: 'WEB_RESCORE_SECRET missing' }, 500);
-  }
-  const presented = request.headers.get('x-web-rescore-secret');
-  if (!presented || !(await secretsMatch(presented, env.WEB_RESCORE_SECRET))) {
-    return jsonResponse({ error: 'unauthorized' }, 401);
-  }
+  const denied = await requireRescoreAuth(request, env.WEB_RESCORE_SECRET);
+  if (denied) return denied;
 
   const body: Record<string, unknown> = await request
     .json()

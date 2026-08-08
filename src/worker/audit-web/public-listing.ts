@@ -63,3 +63,22 @@ export function decidePublicListingWrite(input: {
   const value = explicit ?? prior ?? false;
   return { path: 'audit', value, flagChanges: value !== (prior ?? false) };
 }
+
+/**
+ * The `public_listing` value a (re-)audit should carry, shared by both
+ * inbound surfaces so they resolve it identically.
+ *
+ * When the decision already chose the audit path its resolved value is
+ * authoritative. A surface reaches its own audit branch with any other
+ * decision only when its staleness snapshot lagged the decision's across
+ * the request boundary; there an omitted flag must still carry the prior
+ * stored choice rather than reset it, so the value is re-resolved as
+ * `explicit ?? prior ?? false`.
+ */
+export function resolveAuditListing(
+  write: PublicListingWrite,
+  explicit: boolean | undefined,
+  cached: CachedWebAudit | null,
+): boolean {
+  return write.path === 'audit' ? write.value : (explicit ?? storedPublicListing(cached) ?? false);
+}

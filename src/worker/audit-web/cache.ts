@@ -176,6 +176,16 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
 }
 
 /**
+ * A shallow copy of a stored scorecard with `public_listing` set to `value`.
+ * Shared by the preserving writer and both inbound surfaces so the object
+ * persisted to R2 and the one echoed back in a patch response can never take
+ * a different shape.
+ */
+export function scorecardWithPublicListing(scorecard: unknown, value: boolean): Record<string, unknown> {
+  return { ...(scorecard as Record<string, unknown>), public_listing: value };
+}
+
+/**
  * Re-put a stored audit with `public_listing` flipped, writing the flag into
  * both the envelope body and the board custom metadata in a single object
  * write (R2 has no partial-metadata update, so it is a full rewrite). Unlike
@@ -190,7 +200,7 @@ export async function patchStoredPublicListing(
   cached: CachedWebAudit,
   value: boolean,
 ): Promise<boolean> {
-  const scorecard = { ...(cached.scorecard as Record<string, unknown>), public_listing: value };
+  const scorecard = scorecardWithPublicListing(cached.scorecard, value);
   const payload = {
     spec_version: cached.spec_version,
     target_url: cached.target_url,

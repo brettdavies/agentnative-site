@@ -31,6 +31,7 @@ import {
   listAllWebAudits,
   normalizeTargetUrl,
   patchStoredPublicListing,
+  scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 
@@ -45,7 +46,7 @@ import {
   type WebBoardView,
 } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
-import { decidePublicListingWrite, storedPublicListing } from './public-listing';
+import { decidePublicListingWrite, resolveAuditListing } from './public-listing';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
@@ -293,10 +294,7 @@ export async function handleWebAudit(
         cookieHeader(setCookie),
       );
     }
-    const patchedScorecard = {
-      ...(listingWrite.cached.scorecard as Record<string, unknown>),
-      public_listing: listingWrite.value,
-    };
+    const patchedScorecard = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
     return jsonResponse(
       { cached: true, scorecard: patchedScorecard, share_url: shareUrl },
       200,
@@ -306,12 +304,8 @@ export async function handleWebAudit(
 
   // 12. Miss or stale hit — stream the engine, cache the completed result
   // via waitUntil. Serve-cached and patch both returned above, so only the
-  // (re-)audit path reaches here. The fallback re-applies the same
-  // explicit-wins resolution: the decision's staleness snapshot can lag the
-  // route's own check across the boundary, and an omitted flag must still
-  // carry the prior stored choice, never reset it.
-  const auditListing =
-    listingWrite.path === 'audit' ? listingWrite.value : (publicListing ?? storedPublicListing(cached) ?? false);
+  // (re-)audit path reaches here.
+  const auditListing = resolveAuditListing(listingWrite, publicListing, cached);
   const registry = await loadWebAuditRegistry(env);
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
