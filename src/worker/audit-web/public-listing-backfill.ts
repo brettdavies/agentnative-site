@@ -25,7 +25,7 @@ export type WebBackfillOptions = {
   cursor?: string;
   /** When true, compute and report intended changes but write nothing. */
   dryRun?: boolean;
-  /** Cap on objects re-put in one run so the subrequest budget stays bounded. */
+  /** Cap on objects processed per run (re-put, or identified in a dry run) so the subrequest budget stays bounded. */
   maxWrites?: number;
   /** Spec version whose per-domain keys are in scope. Defaults to the current build. */
   specVersion?: string;
@@ -151,7 +151,17 @@ export async function runWebPublicListingBackfill(
         continue;
       }
 
-      const domain = new URL(cached.target_url).host;
+      let domain: string;
+      try {
+        domain = new URL(cached.target_url).host;
+      } catch {
+        // A malformed target_url cannot be classified; count it failed so
+        // the run never converges to a false zero over an unmigrated object,
+        // and so the seed-load guard stays the only throw that escapes.
+        result.failed++;
+        console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'bad_target_url', key: obj.key }));
+        continue;
+      }
       const value = await isSeededDomain(env, domain);
       result.would_write++;
       result.diffs.push({ key: obj.key, domain, public_listing: value });
@@ -174,9 +184,12 @@ export async function runWebPublicListingBackfill(
 
     cursor = page.truncated ? page.cursor : undefined;
 
-    // Bound the run: once the write budget is spent and objects remain,
-    // return the resume cursor. Dry runs are read-only, so they drain fully.
-    if (!dryRun && result.written + result.failed >= maxWrites && cursor) {
+    // Bound the run in both modes: a dry run still pays a body read per
+    // unflagged object, so an unbounded pass would exhaust the invocation's
+    // subrequest budget on a large bucket. Once the budget is spent and
+    // objects remain, return the resume cursor.
+    const progressed = dryRun ? result.would_write : result.written + result.failed;
+    if (progressed >= maxWrites && cursor) {
       result.cursor = cursor;
       result.done = false;
       return result;

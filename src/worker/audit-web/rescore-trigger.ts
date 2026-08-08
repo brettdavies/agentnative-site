@@ -109,9 +109,11 @@ function optionalPositiveInt(value: unknown): number | undefined {
  * POST /api/web-audit-backfill — the one-time `public_listing` backfill,
  * behind the same `WEB_RESCORE_SECRET` constant-time gate as the rescore
  * hook. Body (all optional): `dry_run` (report only), `cursor` (resume a
- * prior run), `max_writes` (per-run object cap). Returns the run's
- * written/skipped/failed tally plus the resume cursor; the caller re-runs
- * until a run reports zero writes. A seed-load failure aborts the batch and
+ * prior run), `max_writes` (per-run object cap, both modes). Returns the
+ * run's written/skipped/failed tally plus the resume cursor. Completion
+ * differs by mode: a real run re-runs from the start until it reports zero
+ * writes; a dry run writes nothing, so it is cursored forward until `done`.
+ * A seed-load failure aborts the batch and
  * surfaces as a 500 rather than a partial success that could stamp curated
  * domains false.
  */

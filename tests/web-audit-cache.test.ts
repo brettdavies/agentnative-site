@@ -783,6 +783,31 @@ describe('runWebPublicListingBackfill', () => {
     expect(calls).toBeGreaterThan(1);
   });
 
+  test('a dry run is bounded by the same budget and cursors forward to done', async () => {
+    const urls = ['https://q1.com/', 'https://q2.com/', 'https://q3.com/'];
+    const entries: Array<{ key: string; body: unknown }> = [];
+    for (const u of urls) entries.push({ key: await keyFor(u, SPEC_VERSION), body: bodyFor(u) });
+    const { env, putKeys } = makeEnv({ entries, pageSize: 1 });
+
+    let cursor: string | undefined;
+    let totalWouldWrite = 0;
+    let calls = 0;
+    for (;;) {
+      const r = await runWebPublicListingBackfill(env, { cursor, dryRun: true, maxWrites: 1 });
+      expect(r.written).toBe(0);
+      expect(r.diffs.length).toBeLessThanOrEqual(1);
+      totalWouldWrite += r.would_write;
+      calls++;
+      if (r.done) break;
+      cursor = r.cursor ?? undefined;
+      if (calls > 20) throw new Error('dry run did not converge');
+    }
+
+    expect(totalWouldWrite).toBe(3);
+    expect(putKeys).toEqual([]);
+    expect(calls).toBeGreaterThan(1);
+  });
+
   test('a seed-load failure aborts the batch with nothing written', async () => {
     const key = await keyFor('https://user-e.com/', SPEC_VERSION);
     const { env, store, putKeys } = makeEnv({
