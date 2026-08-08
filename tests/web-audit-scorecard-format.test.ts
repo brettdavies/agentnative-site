@@ -20,6 +20,7 @@ import {
   type NaReason,
   type ScorecardStatus,
   WEB_SCHEMA_VERSION,
+  type WebScorecardMeta,
 } from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -442,6 +443,7 @@ const DOCUMENTED_TOP_LEVEL = [
   'audience',
   'audit_profile',
   'site_type',
+  'public_listing',
   'summary',
   'coverage_summary',
   'score_pct',
@@ -470,25 +472,26 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     };
   }
 
-  const produced = buildWebScorecard(
-    [
-      engineRow({ keyword: 'must', tier: 'required', status: 'pass' }),
-      engineRow({ status: 'absent' }),
-      engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
-    ],
-    {
-      targetUrl: 'https://example.com/',
-      domain: 'example.com',
-      mcpEndpoint: 'https://example.com/mcp',
-      discoveryEvidence: [{ source: '/mcp', probed: 'initialize' }],
-      specVersion: SPEC_VERSION,
-      registry: {
-        category_order: ['content-surface'],
-        categories: { 'content-surface': 'Content for agents' },
-        checks: [{ keyword: 'must' }, { keyword: 'should' }, { keyword: 'may' }] as never,
-      },
+  const ENGINE_ROWS = [
+    engineRow({ keyword: 'must', tier: 'required', status: 'pass' }),
+    engineRow({ status: 'absent' }),
+    engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
+  ];
+
+  const BASE_META: WebScorecardMeta = {
+    targetUrl: 'https://example.com/',
+    domain: 'example.com',
+    mcpEndpoint: 'https://example.com/mcp',
+    discoveryEvidence: [{ source: '/mcp', probed: 'initialize' }],
+    specVersion: SPEC_VERSION,
+    registry: {
+      category_order: ['content-surface'],
+      categories: { 'content-surface': 'Content for agents' },
+      checks: [{ keyword: 'must' }, { keyword: 'should' }, { keyword: 'may' }] as never,
     },
-  );
+  };
+
+  const produced = buildWebScorecard(ENGINE_ROWS, BASE_META);
 
   test('carries exactly the documented top-level fields (no badge)', () => {
     expect(Object.keys(produced).sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
@@ -503,6 +506,17 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(Object.keys(produced.tool).sort()).toEqual(['name', 'url']);
     expect((produced.tool as Record<string, unknown>).binary).toBeUndefined();
     expect((produced.tool as Record<string, unknown>).install).toBeUndefined();
+  });
+
+  test('public_listing defaults to false when the meta omits it', () => {
+    expect(produced.public_listing).toBe(false);
+  });
+
+  test('public_listing round-trips an explicit meta value; schema_version stays 0.2', () => {
+    const listed = buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: true });
+    expect(listed.public_listing).toBe(true);
+    expect(listed.schema_version).toBe('0.2');
+    expect(buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: false }).public_listing).toBe(false);
   });
 
   test('score_pct is the RELATIVE score beside the { relative, global } pair', () => {
