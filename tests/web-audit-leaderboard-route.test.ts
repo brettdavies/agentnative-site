@@ -37,20 +37,30 @@ function listedAudit(
   domain: string,
   globalScore: number,
   relative: number,
-  overrides: Partial<Record<'scored_at' | 'key', string>> = {},
+  overrides: {
+    scored_at?: string;
+    key?: string;
+    // 'true'/'false' set the metadata flag; 'absent' omits the key so the row
+    // exercises the missing-key-reads-as-false path. Defaults to opted-in so a
+    // helper named "listed" produces a board-visible row.
+    public_listing?: 'true' | 'false' | 'absent';
+  } = {},
 ): ListedObject {
   hashCounter += 1;
   const hash = String(hashCounter).padStart(64, '0');
+  const customMetadata: Record<string, string> = {
+    domain,
+    name: domain,
+    score_pct: String(relative),
+    relative: String(relative),
+    global: String(globalScore),
+    scored_at: overrides.scored_at ?? new Date().toISOString(),
+  };
+  const listing = overrides.public_listing ?? 'true';
+  if (listing !== 'absent') customMetadata.public_listing = listing;
   return {
     key: overrides.key ?? `audits/web/${hash}/${SPEC_VERSION}.json`,
-    customMetadata: {
-      domain,
-      name: domain,
-      score_pct: String(relative),
-      relative: String(relative),
-      global: String(globalScore),
-      scored_at: overrides.scored_at ?? new Date().toISOString(),
-    },
+    customMetadata,
   };
 }
 
@@ -301,6 +311,70 @@ describe('all vs curated views', () => {
     } as unknown as ExecutionContext);
     expect(resp.status).toBe(200);
     expect(await resp.text()).toContain('href="/web/user.dev"');
+  });
+});
+
+describe('public_listing board gate', () => {
+  // Reused across HTML/markdown parity so both surfaces read one fixture.
+  function mixedListing(): ListedObject[] {
+    return [
+      listedAudit('optin.dev', 40, 55, { public_listing: 'true' }),
+      listedAudit('optout.dev', 41, 56, { public_listing: 'false' }),
+      listedAudit('legacy.dev', 42, 57, { public_listing: 'absent' }),
+    ];
+  }
+
+  test('the all view lists only opted-in user rows; false and absent are hidden', async () => {
+    const env = makeEnv(BOARD, { listed: mixedListing() });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?view=all'), env)).text();
+    expect(html).toContain('data-domain="optin.dev"');
+    expect(html).not.toContain('optout.dev');
+    expect(html).not.toContain('legacy.dev');
+  });
+
+  test('the .md all view gates the identical user-row set as the HTML all view', async () => {
+    const htmlEnv = makeEnv(BOARD, { listed: mixedListing() });
+    const mdEnv = makeEnv(BOARD, { listed: mixedListing() });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?view=all'), htmlEnv)).text();
+    const md = await (await handleWebLeaderboard(new Request('https://anc.dev/web.md?view=all'), mdEnv)).text();
+    // Same visibility decision on both surfaces, so the board cannot diverge.
+    for (const shown of ['optin.dev']) {
+      expect(html).toContain(shown);
+      expect(md).toContain(shown);
+    }
+    for (const hidden of ['optout.dev', 'legacy.dev']) {
+      expect(html).not.toContain(hidden);
+      expect(md).not.toContain(hidden);
+    }
+  });
+
+  test('curated rows always show, even when their own R2 object opts out', async () => {
+    // top.dev is curated (in the aggregate + seed) and additionally carries a
+    // user object flagged false: it must still render, never gated.
+    const env = makeEnv(BOARD, { listed: [listedAudit('top.dev', 90, 95, { public_listing: 'false' })] });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?view=all'), env)).text();
+    expect(html).toContain('data-domain="top.dev"');
+    expect(html).toContain('data-domain="mid.dev"');
+  });
+
+  test('the meta breakdown counts only opted-in user rows', async () => {
+    const env = makeEnv(BOARD, { listed: mixedListing() });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?view=all'), env)).text();
+    expect(html).toContain('3 sites on the board (2 curated, 1 user-submitted)');
+  });
+
+  test('the curated view is unaffected by the flag gate', async () => {
+    const env = makeEnv(BOARD, {
+      listed: [
+        listedAudit('optin.dev', 40, 55, { public_listing: 'true' }),
+        listedAudit('optout.dev', 41, 56, { public_listing: 'false' }),
+      ],
+    });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?view=curated'), env)).text();
+    expect(html).toContain('data-domain="top.dev"');
+    expect(html).toContain('data-domain="mid.dev"');
+    expect(html).not.toContain('optin.dev');
+    expect(html).not.toContain('optout.dev');
   });
 });
 

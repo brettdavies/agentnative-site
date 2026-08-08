@@ -25,6 +25,7 @@ import {
   put as cachePut,
   canonicalTargetOf,
   getAggregate,
+  isBoardListable,
   isStale,
   keyFor,
   listAllWebAudits,
@@ -410,7 +411,12 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
       // Seed unavailable: the curated-row exclusion above still dedups
       // every domain the board actually renders.
     }
-    const userSubmitted = await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains });
+    // Opt-in gate on the shared enumeration, upstream of both renderers, so
+    // the HTML board and its .md twin can never disagree on which non-curated
+    // rows list. Curated rows come from the aggregate above and never pass here.
+    const userSubmitted = (await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains })).filter(
+      isBoardListable,
+    );
     const userEntries: WebBoardEntry[] = userSubmitted.map((l) => ({
       domain: l.domain,
       url: `https://${l.domain}/`,

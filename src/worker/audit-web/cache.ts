@@ -296,6 +296,16 @@ export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsO
   return out;
 }
 
+/**
+ * Board-listing gate for a non-curated row: a user-submitted audit lists only
+ * on an explicit opt-in. The single exported predicate both board surfaces
+ * (the /web all view and the MCP list tool) share, so they can never drift on
+ * what counts as listable. Curated rows bypass this entirely and always show.
+ */
+export function isBoardListable(row: WebListedAudit): boolean {
+  return row.public_listing === true;
+}
+
 function parseListedMetadata(meta: Record<string, string> | undefined): WebListedAudit | null {
   if (!meta) return null;
   const { domain, name, scored_at } = meta;
