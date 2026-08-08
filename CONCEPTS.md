@@ -174,9 +174,9 @@ rescore batch uses to decide which curated domains are due for re-audit, a third
 ### Web rescore
 
 The batch process that re-audits every curated board domain and rebuilds the leaderboard aggregate. It runs on a weekly
-schedule, after each deploy, and on demand whenever a board domain is audited; only one batch runs at a time, so
-overlapping triggers coalesce rather than double-spending the audit budget. It is what keeps the board's live scores
-fresh without committing any scorecard snapshots.
+schedule and after each deploy; only one batch runs at a time, so overlapping triggers coalesce rather than
+double-spending the audit budget. It is what keeps the board's live scores fresh without committing any scorecard
+snapshots. Distinct from an on-demand audit of a single domain, which caches its own result without starting a batch.
 
 ## Agent discovery
 
