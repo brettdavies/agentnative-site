@@ -32,6 +32,7 @@ import {
   normalizeTargetUrl,
   patchStoredPublicListing,
   scorecardWithPublicListing,
+  sha256Hex,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 
@@ -50,7 +51,7 @@ import { decidePublicListingWrite, enforcePublicListingFlipLimit, resolveAuditLi
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
-import { loadWebSeed } from './seed';
+import { boardExcludeDomains, loadWebSeed } from './seed';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
 
@@ -76,11 +77,6 @@ export interface WebAuditRouteDeps {
   probeFetch?: typeof fetch;
   /** Injected Turnstile siteverify fetch for tests; production uses global fetch. */
   turnstileFetch?: typeof fetch;
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function isWebAuditPath(pathname: string): boolean {
@@ -421,17 +417,10 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
   let entries = curatedEntries;
   let userCount = 0;
   if (view === 'all') {
-    // Dedup against the rendered curated rows AND the seed: the aggregate
-    // can lag the seed in either direction (freshly seeded domain not yet
-    // rebuilt, or a domain dropped from the seed still in the aggregate),
-    // and a duplicate row is worse than a missing one.
-    const excludeDomains = new Set(curatedEntries.map((e) => e.domain));
-    try {
-      for (const s of await loadWebSeed(env)) excludeDomains.add(s.domain);
-    } catch {
-      // Seed unavailable: the curated-row exclusion above still dedups
-      // every domain the board actually renders.
-    }
+    const excludeDomains = await boardExcludeDomains(
+      env,
+      curatedEntries.map((e) => e.domain),
+    );
     // Opt-in gate on the shared enumeration, upstream of both renderers, so
     // the HTML board and its .md twin can never disagree on which non-curated
     // rows list. Curated rows come from the aggregate above and never pass here.

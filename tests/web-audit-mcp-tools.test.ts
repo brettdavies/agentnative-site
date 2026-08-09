@@ -48,6 +48,28 @@ async function projections() {
 // fields duplicated into custom metadata (the render path never reads bodies).
 type ListedObject = { key: string; customMetadata?: Record<string, string> };
 
+// Map-backed R2 stub: a store-owning bucket lets a test assert no-write and
+// read a patched envelope directly.
+function makeBucket(store: Map<string, string>): R2Bucket {
+  return {
+    async get(key: string) {
+      const value = store.get(key);
+      if (!value) return null;
+      return {
+        async json() {
+          return JSON.parse(value);
+        },
+      };
+    },
+    async put(key: string, value: string) {
+      store.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+    },
+    async delete(key: string) {
+      store.delete(key);
+    },
+  } as unknown as R2Bucket;
+}
+
 interface WebEnvOpts {
   webEnabled?: boolean;
   mcpEnabled?: boolean;
@@ -800,31 +822,11 @@ describe('cross-tool result parity', () => {
 // envelope directly. The re-audit engine path stays e2e-smoke-only (this
 // file's header), so the stale rows are asserted at the routing level (they
 // fall through to the same gate chain a fresh MCP audit passes).
-describe('audit_website public_listing (U4)', () => {
+describe('audit_website public_listing', () => {
   const TARGET = 'https://example.com/';
   const IP = '203.0.113.7';
   const freshStamp = () => new Date().toISOString();
   const staleStamp = () => new Date(Date.now() - 10 * 60_000).toISOString();
-
-  function makeBucket(store: Map<string, string>): R2Bucket {
-    return {
-      async get(key: string) {
-        const value = store.get(key);
-        if (!value) return null;
-        return {
-          async json() {
-            return JSON.parse(value);
-          },
-        };
-      },
-      async put(key: string, value: string) {
-        store.set(key, typeof value === 'string' ? value : JSON.stringify(value));
-      },
-      async delete(key: string) {
-        store.delete(key);
-      },
-    } as unknown as R2Bucket;
-  }
 
   async function seed(store: Map<string, string>, opts: { scoredAt: string; stored?: boolean }): Promise<string> {
     const key = await keyFor(TARGET, SPEC_VERSION);
@@ -980,26 +982,6 @@ describe('audit_website public_listing flip budget', () => {
   const TARGET = 'https://example.com/';
   const IP = '203.0.113.12';
   const freshStamp = () => new Date().toISOString();
-
-  function makeBucket(store: Map<string, string>): R2Bucket {
-    return {
-      async get(key: string) {
-        const value = store.get(key);
-        if (!value) return null;
-        return {
-          async json() {
-            return JSON.parse(value);
-          },
-        };
-      },
-      async put(key: string, value: string) {
-        store.set(key, typeof value === 'string' ? value : JSON.stringify(value));
-      },
-      async delete(key: string) {
-        store.delete(key);
-      },
-    } as unknown as R2Bucket;
-  }
 
   function makeKvStore(store: Map<string, string>): KVNamespace {
     return {

@@ -17,15 +17,26 @@ const HOURLY_KV_TTL_SECONDS = 7200;
 // needs. The window is the same fixed hour the audit ceiling uses.
 const FLIP_CEILING = 5;
 
-/** Consume one unit of the hourly budget for `ip`. Returns false when exhausted. */
-export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): Promise<boolean> {
+// Fixed-hour KV counter shared by both budgets: read the current bucket
+// count, refuse at the ceiling, otherwise increment under the shared TTL.
+async function consumeHourlyBucketBudget(
+  kv: KVNamespace,
+  prefix: string,
+  id: string,
+  ceiling: number,
+): Promise<boolean> {
   const bucket = Math.floor(Date.now() / HOUR_MS);
-  const key = `web_audit:${ip}:${bucket}`;
+  const key = `${prefix}:${id}:${bucket}`;
   const currentRaw = await kv.get(key);
   const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
-  if (Number.isNaN(current) || current >= HOURLY_AUDIT_CEILING) return false;
+  if (Number.isNaN(current) || current >= ceiling) return false;
   await kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
   return true;
+}
+
+/** Consume one unit of the hourly budget for `ip`. Returns false when exhausted. */
+export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): Promise<boolean> {
+  return consumeHourlyBucketBudget(kv, 'web_audit', ip, HOURLY_AUDIT_CEILING);
 }
 
 /**
@@ -35,11 +46,5 @@ export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): 
  * and flips across different domains stay independent.
  */
 export async function consumeWebAuditFlipBudget(kv: KVNamespace, domainHash: string): Promise<boolean> {
-  const bucket = Math.floor(Date.now() / HOUR_MS);
-  const key = `web_audit_flip:${domainHash}:${bucket}`;
-  const currentRaw = await kv.get(key);
-  const current = currentRaw ? Number.parseInt(currentRaw, 10) : 0;
-  if (Number.isNaN(current) || current >= FLIP_CEILING) return false;
-  await kv.put(key, String(current + 1), { expirationTtl: HOURLY_KV_TTL_SECONDS });
-  return true;
+  return consumeHourlyBucketBudget(kv, 'web_audit_flip', domainHash, FLIP_CEILING);
 }

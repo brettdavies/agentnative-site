@@ -43,7 +43,7 @@ import {
 import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
-import { loadWebSeed } from '../../audit-web/seed';
+import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
 
@@ -339,18 +339,13 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         return textContent({ count: curated.length, entries: curated });
       }
 
-      // view=all mirrors handleWebLeaderboard: dedup user rows against both the
-      // rendered curated rows AND the seed (the aggregate can lag the seed
-      // either way), then gate on the shared opt-in predicate. Without this
-      // exclude set a curated domain would surface twice and the tool would
-      // diverge from /web?view=all.
-      const excludeDomains = new Set(curated.map((e) => e.domain));
-      try {
-        for (const s of await loadWebSeed(env)) excludeDomains.add(s.domain);
-      } catch {
-        // Seed unavailable: the curated-row exclusion above still dedups every
-        // domain the board actually renders.
-      }
+      // Mirror handleWebLeaderboard's view=all: exclude curated + seed domains
+      // through the shared helper, then gate on the shared opt-in predicate, so
+      // the tool and /web?view=all can't diverge on which user rows list.
+      const excludeDomains = await boardExcludeDomains(
+        env,
+        curated.map((e) => e.domain),
+      );
       const userRows = (await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains }))
         .filter(isBoardListable)
         .slice(0, LIST_ALL_MAX_USER_ROWS)
