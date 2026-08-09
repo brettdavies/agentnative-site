@@ -1265,3 +1265,98 @@ describe('handleWebAudit public_listing', () => {
     expect(body.share_url).toBeUndefined();
   });
 });
+
+// The per-domain flip budget caps flag-changing writes so the ownership-free
+// public_listing flag can't be flapped to grief the board. A shared env keeps
+// one KV across requests so the budget accumulates the way it does in
+// production.
+describe('handleWebAudit public_listing flip budget', () => {
+  const URL_A = 'https://example.com/';
+  const URL_B = 'https://other.example/';
+  const freshStamp = () => new Date().toISOString();
+  const throwingProbe = (() => {
+    throw new Error('engine must not run on a flag-only patch');
+  }) as unknown as typeof fetch;
+
+  async function prefillEntry(url: string, stored: boolean, scoredAt: string) {
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: url,
+      tool: { name: new URL(url).host, url },
+      score_pct: 64,
+      results: [],
+      public_listing: stored,
+    };
+    return {
+      [await keyFor(url, SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
+        target_url: url,
+        scorecard,
+        scored_at: scoredAt,
+      },
+    };
+  }
+
+  const flip = (url: string, value: boolean) => auditRequest(url, undefined, { public_listing: value });
+
+  test('flips within budget succeed; the sixth flip on a domain returns 429 flip_rate_limited and writes nothing', async () => {
+    const { bucket, store } = makeR2(await prefillEntry(URL_A, false, freshStamp()));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const key = await keyFor(URL_A, SPEC_VERSION);
+    // Five alternating flips (T, F, T, F, T) each change the stored flag.
+    for (let i = 0; i < 5; i++) {
+      const want = i % 2 === 0;
+      const resp = await runAudit(flip(URL_A, want), env, makeCtx(), { probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+      expect(((await resp.json()) as { scorecard: { public_listing: boolean } }).scorecard.public_listing).toBe(want);
+    }
+    const afterFive = store.get(key);
+    // The sixth flip (explicit false against the now-stored true) is rejected.
+    const resp = await runAudit(flip(URL_A, false), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(429);
+    expect(((await resp.json()) as { error: string }).error).toBe('flip_rate_limited');
+    // Rejected before the write: the stored object is untouched.
+    expect(store.get(key)).toBe(afterFive);
+  });
+
+  test('the budget is keyed by domain, not IP: a different domain still flips after another is exhausted', async () => {
+    const prefill = {
+      ...(await prefillEntry(URL_A, false, freshStamp())),
+      ...(await prefillEntry(URL_B, false, freshStamp())),
+    };
+    const { bucket } = makeR2(prefill);
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    // Exhaust domain A on one IP (five flips, then a blocked sixth).
+    for (let i = 0; i < 5; i++) {
+      const resp = await runAudit(flip(URL_A, i % 2 === 0), env, makeCtx(), { probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+    }
+    expect((await runAudit(flip(URL_A, false), env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(429);
+    // Same IP, same window, different domain: the flip still lands.
+    const other = await runAudit(flip(URL_B, true), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(other.status).toBe(200);
+    expect(((await other.json()) as { scorecard: { public_listing: boolean } }).scorecard.public_listing).toBe(true);
+  });
+
+  test('a no-op (omit or redundant explicit) spends no flip budget', async () => {
+    const { bucket, store } = makeR2(await prefillEntry(URL_A, true, freshStamp()));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const key = await keyFor(URL_A, SPEC_VERSION);
+    const before = store.get(key);
+    // A run of no-ops: omit and redundant explicit-true both serve cached and
+    // return before the flip gate, so none should consume budget.
+    for (let i = 0; i < 8; i++) {
+      const req = i % 2 === 0 ? auditRequest(URL_A, {}) : flip(URL_A, true);
+      expect((await runAudit(req, env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(200);
+    }
+    expect(store.get(key)).toBe(before);
+    // The full budget survives: five real flips (T -> F, T, F, T, F) still pass.
+    for (let i = 0; i < 5; i++) {
+      expect((await runAudit(flip(URL_A, i % 2 === 1), env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(
+        200,
+      );
+    }
+    // The sixth is finally blocked, proving exactly five were available.
+    expect((await runAudit(flip(URL_A, true), env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(429);
+  });
+});

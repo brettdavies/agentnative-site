@@ -11,7 +11,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { keyFor } from '../src/worker/audit-web/cache';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
-import { handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
+import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import { buildMcpHandler, type McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
@@ -969,5 +969,124 @@ describe('audit_website public_listing (U4)', () => {
     const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
     expect((readBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
     expect((auditBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+  });
+});
+
+// The per-domain flip budget is enforced inside the shared flag-resolution
+// helper both surfaces call, so the MCP tool and the web route draw from one
+// budget per domain. These tests use Map-backed R2 + KV so the stored flag and
+// the budget accumulate across calls.
+describe('audit_website public_listing flip budget', () => {
+  const TARGET = 'https://example.com/';
+  const IP = '203.0.113.12';
+  const freshStamp = () => new Date().toISOString();
+
+  function makeBucket(store: Map<string, string>): R2Bucket {
+    return {
+      async get(key: string) {
+        const value = store.get(key);
+        if (!value) return null;
+        return {
+          async json() {
+            return JSON.parse(value);
+          },
+        };
+      },
+      async put(key: string, value: string) {
+        store.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+      },
+      async delete(key: string) {
+        store.delete(key);
+      },
+    } as unknown as R2Bucket;
+  }
+
+  function makeKvStore(store: Map<string, string>): KVNamespace {
+    return {
+      async get(key: string) {
+        return store.get(key) ?? null;
+      },
+      async put(key: string, value: string) {
+        store.set(key, value);
+      },
+    } as unknown as KVNamespace;
+  }
+
+  async function seed(store: Map<string, string>, stored: boolean, scoredAt: string): Promise<string> {
+    const key = await keyFor(TARGET, SPEC_VERSION);
+    const scorecard = { schema_version: '0.2', target_url: TARGET, score_pct: 64, results: [], public_listing: stored };
+    store.set(key, JSON.stringify({ spec_version: SPEC_VERSION, target_url: TARGET, scorecard, scored_at: scoredAt }));
+    return key;
+  }
+
+  test('flips within budget patch; the sixth returns a flip_rate_limited tool error and writes nothing', async () => {
+    const r2 = new Map<string, string>();
+    const kv = new Map<string, string>();
+    const key = await seed(r2, false, freshStamp());
+    const env = await makeEnv();
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(r2);
+    (env as { SCORE_KV: KVNamespace }).SCORE_KV = makeKvStore(kv);
+    for (let i = 0; i < 5; i++) {
+      const want = i % 2 === 0;
+      const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: want }, IP));
+      expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(want);
+    }
+    const afterFive = r2.get(key);
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: false }, IP);
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
+    // Rejected before the write: the stored object is untouched.
+    expect(r2.get(key)).toBe(afterFive);
+  });
+
+  test('a budget exhausted through the web route blocks the MCP tool for the same domain', async () => {
+    const r2 = new Map<string, string>();
+    const kv = new Map<string, string>();
+    const key = await seed(r2, false, freshStamp());
+    const alwaysPass = { limit: async () => ({ success: true }) };
+    const turnstileFetch = (async () =>
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+    const throwingProbe = (() => {
+      throw new Error('engine must not run on a flag-only patch');
+    }) as unknown as typeof fetch;
+    const makeCtx = () => ({ waitUntil() {}, passThroughOnException() {}, props: {} }) as unknown as ExecutionContext;
+    // The web-route patch path needs no ASSETS or registry, only shared R2 + KV.
+    const webEnv = {
+      ASSETS: {
+        async fetch() {
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+      SCORE_CACHE: makeBucket(r2),
+      SCORE_KV: makeKvStore(kv),
+      WEB_AUDIT_ENABLED: 'true',
+      TURNSTILE_SECRET: 'test-turnstile-secret',
+      SESSION_HMAC_SECRET: 'test-session-secret',
+      WEB_AUDIT_LIMITER: alwaysPass,
+      WEB_AUDIT_LIMITER_IP: alwaysPass,
+    } as unknown as WebAuditRouteEnv;
+    // Exhaust the budget through the web route (five flips, F -> T, F, T, F, T).
+    for (let i = 0; i < 5; i++) {
+      const req = new Request('https://anc.dev/api/audit-web', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.13' },
+        body: JSON.stringify({ url: 'example.com', turnstile_token: 'x', public_listing: i % 2 === 0 }),
+      });
+      const resp = await handleWebAudit(req, webEnv, makeCtx(), { turnstileFetch, probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+    }
+    // The MCP tool (fresh IP, same domain) draws from the same exhausted
+    // per-domain budget: its sixth flip is rejected and writes nothing.
+    const mcpEnv = await makeEnv();
+    (mcpEnv as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(r2);
+    (mcpEnv as { SCORE_KV: KVNamespace }).SCORE_KV = makeKvStore(kv);
+    const before = r2.get(key);
+    const res = await callTool(mcpEnv, 'audit_website', { url: 'example.com', public_listing: false }, '203.0.113.14');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
+    expect(r2.get(key)).toBe(before);
   });
 });

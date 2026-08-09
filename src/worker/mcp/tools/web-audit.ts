@@ -35,7 +35,11 @@ import {
 import { enrichWebScorecardForDisplay } from '../../audit-web/display';
 import { runWebAudit } from '../../audit-web/engine';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
-import { decidePublicListingWrite, resolveAuditListing } from '../../audit-web/public-listing';
+import {
+  decidePublicListingWrite,
+  enforcePublicListingFlipLimit,
+  resolveAuditListing,
+} from '../../audit-web/public-listing';
 import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
@@ -243,6 +247,17 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (env.SCORE_KV) {
         const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
         if (!ok) return jsonRpcError32099('audit rate limit exceeded — 30 fresh audits per hour per source.');
+      }
+
+      // Per-domain flip budget (the same shared helper the webapp route calls,
+      // so both surfaces draw from one budget per domain). A write that changes
+      // the stored public_listing is capped per domain because the flag is
+      // submitter-set with no ownership check; a no-op serve or same-value
+      // re-audit spends nothing. Rejected before the write.
+      if ((await enforcePublicListingFlipLimit({ write: listingWrite, kv: env.SCORE_KV, domain })) === 'rate-limited') {
+        return jsonRpcError32099(
+          'flip_rate_limited: too many public_listing changes for this domain; try again later.',
+        );
       }
 
       // Fresh-window flag patch — the request only changes public_listing, so

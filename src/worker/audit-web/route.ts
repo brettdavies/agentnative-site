@@ -46,7 +46,7 @@ import {
   type WebBoardView,
 } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
-import { decidePublicListingWrite, resolveAuditListing } from './public-listing';
+import { decidePublicListingWrite, enforcePublicListingFlipLimit, resolveAuditListing } from './public-listing';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
@@ -97,6 +97,19 @@ function jsonResponse(body: unknown, status: number, extraHeaders: Record<string
 /** 429 with the session cookie threaded so a rate-limit bounce keeps the session. */
 function rateLimited(message: string, setCookie: string | null): Response {
   return jsonResponse({ error: 'rate_limit', message, retry_after: 60 }, 429, cookieHeader(setCookie));
+}
+
+/** 429 for an exhausted per-domain listing-flip budget, distinct from the audit rate limit. */
+function flipRateLimited(setCookie: string | null): Response {
+  return jsonResponse(
+    {
+      error: 'flip_rate_limited',
+      message: 'too many public_listing changes for this domain; try again later',
+      retry_after: 3600,
+    },
+    429,
+    cookieHeader(setCookie),
+  );
 }
 
 /** Fail-fast 500 for a missing bot-defense secret on the fresh path. */
@@ -281,7 +294,21 @@ export async function handleWebAudit(
     }
   }
 
-  // 11. Fresh-window flag patch — the request only changes public_listing,
+  // 11. Per-domain flip budget — a write that changes the stored
+  // public_listing (a flag-only patch, or a re-audit that resolves to a
+  // different value) is additionally capped per domain, since the flag is
+  // submitter-set with no ownership check and a flip is far cheaper than a
+  // full audit. Enforced through the shared helper the MCP tool also calls, so
+  // both surfaces draw from one budget per domain. A no-op serve or same-value
+  // re-audit spends nothing. Rejected before the write.
+  if (
+    (await enforcePublicListingFlipLimit({ write: listingWrite, kv: env.SCORE_KV, domain: shareDomain })) ===
+    'rate-limited'
+  ) {
+    return flipRateLimited(setCookie);
+  }
+
+  // 12. Fresh-window flag patch — the request only changes public_listing,
   // so no re-audit runs; the preserving writer rewrites both stores without
   // resetting scored_at. A write failure surfaces an error rather than a
   // fabricated success the client would follow as a saved result.
@@ -302,7 +329,7 @@ export async function handleWebAudit(
     );
   }
 
-  // 12. Miss or stale hit — stream the engine, cache the completed result
+  // 13. Miss or stale hit — stream the engine, cache the completed result
   // via waitUntil. Serve-cached and patch both returned above, so only the
   // (re-)audit path reaches here.
   const auditListing = resolveAuditListing(listingWrite, publicListing, cached);

@@ -94,7 +94,12 @@ export function canonicalTargetOf(url: URL): string {
   return `${url.protocol}//${url.host}/`;
 }
 
-async function sha256Hex(input: string): Promise<string> {
+/**
+ * Hex SHA-256 of a string: the keying convention shared by the per-domain
+ * cache key and the per-domain flip budget, so both hash an identifier the
+ * same way rather than storing it in the clear.
+ */
+export async function sha256Hex(input: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, '0'))

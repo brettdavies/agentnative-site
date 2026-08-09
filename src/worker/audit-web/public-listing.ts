@@ -8,7 +8,8 @@
 // stays distinct from an explicit `false` so a blank never erases a stored
 // choice, collapsing to `false` only on a first-ever audit.
 
-import { type CachedWebAudit, isStale, WEB_AUDIT_STALE_AFTER_MS } from './cache';
+import { type CachedWebAudit, isStale, sha256Hex, WEB_AUDIT_STALE_AFTER_MS } from './cache';
+import { consumeWebAuditFlipBudget } from './limiter';
 
 /**
  * The stored flag read from a cached envelope, or `undefined` when the
@@ -81,4 +82,36 @@ export function resolveAuditListing(
   cached: CachedWebAudit | null,
 ): boolean {
   return write.path === 'audit' ? write.value : (explicit ?? storedPublicListing(cached) ?? false);
+}
+
+/**
+ * Outcome of metering a resolved write against the per-domain flip budget.
+ * `allowed` covers a write that spent a token, a no-op that spent nothing, and
+ * (fail-open) a request when no KV binding is configured; `rate-limited` means
+ * the domain's flip budget is exhausted and the caller must reject the flip
+ * before writing.
+ */
+export type FlipLimitOutcome = 'allowed' | 'rate-limited';
+
+/**
+ * Meter a flag-changing write against the shared per-domain flip budget so the
+ * `POST /api/audit-web` route and the `audit_website` MCP tool draw from one
+ * budget per domain. Only a write that actually changes the stored flag
+ * (`flagChanges` — the patch path always, a re-audit only when its resolved
+ * value differs) spends a token; a serve-cached no-op or a same-value re-audit
+ * is free. Keyed by a hash of the domain, following the cache-key hashing
+ * convention. Fails open when no KV binding is present, mirroring the hourly
+ * limiter (both surfaces skip that gate when `SCORE_KV` is unset), so a dev or
+ * unprovisioned env still serves flips while the primary bot defenses
+ * (Turnstile, burst + hourly limiters, the staleness gate) stand.
+ */
+export async function enforcePublicListingFlipLimit(input: {
+  write: PublicListingWrite;
+  kv: KVNamespace | undefined;
+  domain: string;
+}): Promise<FlipLimitOutcome> {
+  if (!input.write.flagChanges) return 'allowed';
+  if (!input.kv) return 'allowed';
+  const ok = await consumeWebAuditFlipBudget(input.kv, await sha256Hex(input.domain));
+  return ok ? 'allowed' : 'rate-limited';
 }
