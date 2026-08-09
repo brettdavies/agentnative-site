@@ -11,6 +11,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { keyFor } from '../src/worker/audit-web/cache';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
+import { handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import { buildMcpHandler, type McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
@@ -43,10 +44,18 @@ async function projections() {
   return assetsJson;
 }
 
+// One listed R2 object as the board enumeration sees it: key plus the board
+// fields duplicated into custom metadata (the render path never reads bodies).
+type ListedObject = { key: string; customMetadata?: Record<string, string> };
+
 interface WebEnvOpts {
   webEnabled?: boolean;
   mcpEnabled?: boolean;
   cachePrefill?: Record<string, unknown>;
+  // Pages the bucket's list() returns, cursor-paginated like production R2 so
+  // listAllWebAudits (and thus list_website_audits view=all) can enumerate
+  // user-submitted rows from custom metadata alone.
+  listPages?: ListedObject[][];
   limiterOk?: boolean;
   failRegistry?: boolean;
 }
@@ -90,6 +99,13 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
         cacheStore.set(key, value);
       },
       async delete() {},
+      async list(options?: { cursor?: string }) {
+        const pages = opts.listPages ?? [];
+        const index = options?.cursor ? Number(options.cursor) : 0;
+        const objects = pages[index] ?? [];
+        const truncated = index + 1 < pages.length;
+        return truncated ? { objects, truncated, cursor: String(index + 1) } : { objects, truncated: false };
+      },
     } as unknown as R2Bucket,
     SCORE_KV: {
       async get() {
@@ -403,6 +419,54 @@ describe('audit_website gates', () => {
   });
 });
 
+const CURATED_AGGREGATE_KEY = `audits/web/leaderboard/${SPEC_VERSION}.json`;
+
+function curatedAggregate(domains: string[]) {
+  return {
+    spec_version: SPEC_VERSION,
+    generated_at: new Date().toISOString(),
+    entries: domains.map((domain) => ({
+      domain,
+      url: `https://${domain}/`,
+      name: domain,
+      description: 'x',
+      score_pct: 67,
+      score: { relative: 67, global: 62 },
+    })),
+  };
+}
+
+// A per-domain audit as the board enumeration sees it: a valid hex key plus the
+// board fields in custom metadata. An omitted publicListing models an
+// unmigrated object, which parses back as not-opted-in.
+let listedRowSeq = 0;
+function listedRow(domain: string, publicListing?: boolean): ListedObject {
+  const key = `audits/web/${String(listedRowSeq++).padStart(64, '0')}/${SPEC_VERSION}.json`;
+  const customMetadata: Record<string, string> = {
+    domain,
+    name: domain,
+    scored_at: new Date().toISOString(),
+    score_pct: '80',
+    relative: '80',
+    global: '70',
+  };
+  if (publicListing !== undefined) customMetadata.public_listing = String(publicListing);
+  return { key, customMetadata };
+}
+
+// The domains rendered as user (on-demand) rows on the /web markdown board,
+// pulled from the /web/<domain> link in each on-demand table row.
+function onDemandDomainsFromMarkdown(md: string): string[] {
+  return md
+    .split('\n')
+    .filter((line) => line.includes('| on-demand |'))
+    .map((line) => {
+      const m = line.match(/\/web\/([^)]+)\)/);
+      if (!m) throw new Error(`no domain link in on-demand row: ${line}`);
+      return m[1];
+    });
+}
+
 describe('list_website_audits', () => {
   test('returns board summaries from the leaderboard aggregate with share_urls', async () => {
     const env = await makeEnv({
@@ -438,42 +502,88 @@ describe('list_website_audits', () => {
     expect(body.entries).toEqual([]);
   });
 
-  // Boundary guard: the tool stays curated-aggregate-only. A cached
-  // non-seeded audit in R2 (surfaced by the /web all view) must never
-  // appear here; the mock bucket has no list(), so an enumeration attempt
-  // fails loudly.
-  test('a non-seeded cached audit in R2 never appears in the tool output', async () => {
+  // The default view stays curated-only: user-submitted rows in R2 are never
+  // enumerated, so an opted-in cached audit is absent unless view=all asks.
+  test('view=curated (default) omits user rows even when opted-in ones exist in R2', async () => {
     const env = await makeEnv({
-      cachePrefill: {
-        [`audits/web/leaderboard/${SPEC_VERSION}.json`]: {
-          spec_version: SPEC_VERSION,
-          generated_at: new Date().toISOString(),
-          entries: [
-            {
-              domain: 'anc.dev',
-              url: 'https://anc.dev/',
-              name: 'anc.dev',
-              description: 'x',
-              score_pct: 67,
-              score: { relative: 67, global: 62 },
-            },
-          ],
-        },
-        [`audits/web/${'a'.repeat(64)}/${SPEC_VERSION}.json`]: {
-          spec_version: SPEC_VERSION,
-          target_url: 'https://user-submitted.dev/',
-          scorecard: { target_url: 'https://user-submitted.dev/', score_pct: 99 },
-          scored_at: new Date().toISOString(),
-        },
-      },
+      cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['first.dev']) },
+      listPages: [[listedRow('opted-in.dev', true)]],
     });
     const body = jsonContent(await callTool(env, 'list_website_audits', {}));
     expect(body.count).toBe(1);
-    const entries = body.entries as Array<{ domain: string }>;
-    expect(entries.map((e) => e.domain)).toEqual(['anc.dev']);
+    expect((body.entries as Array<{ domain: string }>).map((e) => e.domain)).toEqual(['first.dev']);
   });
 
-  test('the tool description still presents the board as curated', async () => {
+  // An opted-in user row surfaces under view=all — the point of the opt-in
+  // listing — alongside the curated rows.
+  test('an opted-in cached audit appears under view=all', async () => {
+    const env = await makeEnv({
+      cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['first.dev']) },
+      listPages: [[listedRow('opted-in.dev', true)]],
+    });
+    const body = jsonContent(await callTool(env, 'list_website_audits', { view: 'all' }));
+    const domains = (body.entries as Array<{ domain: string }>).map((e) => e.domain);
+    expect(domains).toContain('first.dev');
+    expect(domains).toContain('opted-in.dev');
+    expect(body.count).toBe(2);
+  });
+
+  // The shared opt-in predicate: a row that did not opt in (flag false or
+  // absent) stays off view=all exactly as it does on /web.
+  test('opted-out and flag-absent cached audits stay off view=all', async () => {
+    const env = await makeEnv({
+      cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['first.dev']) },
+      listPages: [[listedRow('opted-out.dev', false), listedRow('no-flag.dev')]],
+    });
+    const body = jsonContent(await callTool(env, 'list_website_audits', { view: 'all' }));
+    expect((body.entries as Array<{ domain: string }>).map((e) => e.domain)).toEqual(['first.dev']);
+  });
+
+  // excludeDomains dedup: a domain that is both curated and present as a user
+  // row in R2 appears exactly once (as curated), never twice.
+  test('a curated domain does not appear twice under view=all', async () => {
+    const env = await makeEnv({
+      cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['dup.dev']) },
+      listPages: [[listedRow('dup.dev', true)]],
+    });
+    const body = jsonContent(await callTool(env, 'list_website_audits', { view: 'all' }));
+    const domains = (body.entries as Array<{ domain: string }>).map((e) => e.domain);
+    expect(domains.filter((d) => d === 'dup.dev')).toEqual(['dup.dev']);
+    expect(body.count).toBe(1);
+  });
+
+  // Cross-surface parity: for one shared fixture, view=all's user-row set is
+  // identical to /web?view=all's, because both build excludeDomains the same
+  // way (aggregate domains unioned with the seed) and filter through the same
+  // isBoardListable predicate. This is the divergence the unit exists to close.
+  test('view=all returns the same user-row set as /web?view=all', async () => {
+    const listPages: ListedObject[][] = [
+      [listedRow('opted-in.dev', true), listedRow('opted-out.dev', false)],
+      [listedRow('another-in.dev', true), listedRow('no-flag.dev')],
+    ];
+    const env = await makeEnv({
+      cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['anc.dev', 'curated-two.dev']) },
+      listPages,
+    });
+    const curated = ['anc.dev', 'curated-two.dev'];
+
+    const mcpBody = jsonContent(await callTool(env, 'list_website_audits', { view: 'all' }));
+    const mcpUserRows = (mcpBody.entries as Array<{ domain: string }>)
+      .map((e) => e.domain)
+      .filter((d) => !curated.includes(d))
+      .sort();
+
+    const res = await handleWebLeaderboard(
+      new Request('https://anc.dev/web.md?view=all'),
+      env as unknown as WebAuditRouteEnv,
+    );
+    const webUserRows = onDemandDomainsFromMarkdown(await res.text()).sort();
+
+    expect(mcpUserRows).toEqual(webUserRows);
+    expect(mcpUserRows).toEqual(['another-in.dev', 'opted-in.dev']);
+  });
+
+  test('the tool description presents the board as curated + opted-in', async () => {
     const env = await makeEnv();
     const handler = await buildMcpHandler(env, { jsonResponse: true });
     const res = await handler(
@@ -487,7 +597,7 @@ describe('list_website_audits', () => {
     );
     const body = JSON.parse(await res.text()) as { result: { tools: Array<{ name: string; description: string }> } };
     const tool = body.result.tools.find((t) => t.name === 'list_website_audits');
-    expect(tool?.description).toContain('curated');
+    expect(tool?.description).toContain('curated + opted-in');
   });
 });
 

@@ -23,8 +23,10 @@ import {
   get as cacheGet,
   put as cachePut,
   getAggregate,
+  isBoardListable,
   isStale,
   keyFor,
+  listAllWebAudits,
   normalizeTargetUrl,
   patchStoredPublicListing,
   scorecardWithPublicListing,
@@ -37,6 +39,7 @@ import { decidePublicListingWrite, resolveAuditListing } from '../../audit-web/p
 import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
+import { loadWebSeed } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
 
@@ -50,6 +53,12 @@ export interface WebAuditToolsEnv {
 }
 
 const SITE_URL = 'https://anc.dev';
+
+// Upper bound on opted-in user rows returned under view=all. The /web board
+// renders every opted-in row, but an MCP response is a single unpaginated JSON
+// payload, so the user-cache enumeration is capped rather than dumped whole.
+// Parity with /web?view=all holds for any user set within this cap.
+const LIST_ALL_MAX_USER_ROWS = 100;
 
 function textContent(value: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
@@ -289,19 +298,55 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
 
   server.tool(
     'list_website_audits',
-    'Return the curated web leaderboard: summaries of the websites on anc.dev/web. Each entry carries domain, url, ' +
-      'name, score_pct, and share_url. This board is curated (not every audited URL appears). An empty list means ' +
-      'the board is mid-rescore; get_website_audit still serves per-domain results.',
-    {},
-    async () => {
+    'Return the web leaderboard (curated + opted-in): summaries of the websites on anc.dev/web. Each entry carries ' +
+      'domain, url, name, score_pct, and share_url. view "curated" (the default) returns only the curated board; ' +
+      `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
+      'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
+    {
+      view: z
+        .enum(['curated', 'all'])
+        .optional()
+        .describe(
+          'Which board to return: "curated" (default) for the curated leaderboard only, or "all" to also include ' +
+            'user-submitted domains that opted in to public listing. Mirrors anc.dev/web?view=all.',
+        ),
+    },
+    async ({ view }) => {
       const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
-      const entries = (aggregate?.entries ?? []).map((e) => ({
+      const curated = (aggregate?.entries ?? []).map((e) => ({
         domain: e.domain,
         url: e.url,
         name: e.name,
         score_pct: e.score_pct,
         share_url: `${SITE_URL}/web/${e.domain}`,
       }));
+      if ((view ?? 'curated') !== 'all') {
+        return textContent({ count: curated.length, entries: curated });
+      }
+
+      // view=all mirrors handleWebLeaderboard: dedup user rows against both the
+      // rendered curated rows AND the seed (the aggregate can lag the seed
+      // either way), then gate on the shared opt-in predicate. Without this
+      // exclude set a curated domain would surface twice and the tool would
+      // diverge from /web?view=all.
+      const excludeDomains = new Set(curated.map((e) => e.domain));
+      try {
+        for (const s of await loadWebSeed(env)) excludeDomains.add(s.domain);
+      } catch {
+        // Seed unavailable: the curated-row exclusion above still dedups every
+        // domain the board actually renders.
+      }
+      const userRows = (await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains }))
+        .filter(isBoardListable)
+        .slice(0, LIST_ALL_MAX_USER_ROWS)
+        .map((l) => ({
+          domain: l.domain,
+          url: `https://${l.domain}/`,
+          name: l.name,
+          score_pct: l.score_pct,
+          share_url: `${SITE_URL}/web/${l.domain}`,
+        }));
+      const entries = curated.concat(userRows);
       return textContent({ count: entries.length, entries });
     },
   );
