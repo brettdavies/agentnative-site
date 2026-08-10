@@ -1,8 +1,10 @@
 // Web-rescore Workflow tests: seed fan-out (one step per domain), the
 // final rebuild-aggregate step as the completion barrier, per-domain
-// failure isolation, and the runtime seed loader. The Workflow body is
-// exercised through runWebRescore with a fake step and an injected audit
-// so no live network is touched.
+// failure isolation, the runtime seed loader, and the curated
+// public-listing flag on re-audit writes. The Workflow body is exercised
+// through runWebRescore with a fake step and an injected audit so no live
+// network is touched; the flag tests run the real audit against an empty
+// check registry with global fetch stubbed.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { rebuildWebAggregates } from '../src/worker/audit-web/aggregate';
@@ -14,6 +16,7 @@ import {
   keyFor,
 } from '../src/worker/audit-web/cache';
 import {
+  auditDomainToCache,
   type RescoreStep,
   runWebRescore,
   type WebRescoreEnv,
@@ -26,14 +29,28 @@ function seedEntry(domain: string) {
   return { domain, url: `https://${domain}/`, name: domain, description: `about ${domain}` };
 }
 
-function makeEnv(seed: unknown): { env: WebRescoreEnv; store: Map<string, string> } {
+type PutOptions = { customMetadata?: Record<string, string> };
+
+function makeEnv(
+  seed: unknown,
+  opts: { registry?: unknown } = {},
+): { env: WebRescoreEnv; store: Map<string, string>; putOptions: Map<string, PutOptions | undefined> } {
   const store = new Map<string, string>();
+  const putOptions = new Map<string, PutOptions | undefined>();
   const env = {
     ASSETS: {
       async fetch(req: Request): Promise<Response> {
         const path = new URL(req.url).pathname;
         if (path === '/_internal/web-seed.json') {
           return new Response(JSON.stringify(seed), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        // Served only on request: the entrypoint test relies on the
+        // registry 404 to fail the real audit before it reaches the network.
+        if (path === '/_internal/web-audit-registry.json' && opts.registry !== undefined) {
+          return new Response(JSON.stringify(opts.registry), {
             status: 200,
             headers: { 'content-type': 'application/json' },
           });
@@ -51,15 +68,16 @@ function makeEnv(seed: unknown): { env: WebRescoreEnv; store: Map<string, string
           },
         };
       },
-      async put(key: string, value: unknown) {
+      async put(key: string, value: unknown, options?: PutOptions) {
         store.set(key, typeof value === 'string' ? value : String(value));
+        putOptions.set(key, options);
       },
       async delete(key: string) {
         store.delete(key);
       },
     } as unknown as R2Bucket,
   } as WebRescoreEnv;
-  return { env, store };
+  return { env, store, putOptions };
 }
 
 /** Map-backed KV double for the registry-change gate. */
@@ -121,6 +139,27 @@ async function primeCache(store: Map<string, string>, domain: string, agoMs: num
     scored_at: new Date(Date.now() - agoMs).toISOString(),
   };
   store.set(await keyFor(url, SPEC_VERSION), JSON.stringify(payload));
+}
+
+// Zero checks and no discovery paths: the real engine completes after the
+// single (stubbed) root fetch, so the audit-to-cache path runs offline.
+const MINIMAL_REGISTRY = {
+  version: 1,
+  mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+  category_order: [],
+  categories: {},
+  checks: [],
+};
+
+/** Run `fn` with global fetch answering 404 so no probe leaves the process. */
+async function withStubbedFetch<T>(fn: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
 }
 
 beforeEach(() => {
@@ -326,6 +365,48 @@ describe('runWebRescore', () => {
     });
     expect(result.audited).toEqual(['fresh.dev']);
     expect(await kv.get('web_rescore:registry_fp')).toBe('FP1');
+  });
+});
+
+describe('public listing on re-audit writes', () => {
+  test('a seeded-domain rescore writes public_listing true in envelope and metadata', async () => {
+    const { env, putOptions } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    const { step } = makeStep();
+    const result = await withStubbedFetch(() => runWebRescore(env, step));
+    expect(result.audited).toEqual(['a.dev']);
+    const key = await keyFor('https://a.dev/', SPEC_VERSION);
+    const cached = (await cacheGet(env, key)) as CachedWebAudit;
+    expect((cached.scorecard as { public_listing?: boolean }).public_listing).toBe(true);
+    expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('true');
+  });
+
+  test('a registry reflow re-audits every seeded domain and leaves each listed', async () => {
+    const { env, store, putOptions } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')], {
+      registry: MINIMAL_REGISTRY,
+    });
+    const { kv } = makeKv({ 'web_rescore:registry_fp': 'OLD' });
+    env.SCORE_KV = kv;
+    // Fresh entries: only the fingerprint-change reflow makes them eligible.
+    await primeCache(store, 'a.dev', 60_000, 40);
+    await primeCache(store, 'b.dev', 60_000, 40);
+    const { step } = makeStep();
+    const result = await withStubbedFetch(() => runWebRescore(env, step, { fingerprint: async () => 'NEW' }));
+    expect([...result.audited].sort()).toEqual(['a.dev', 'b.dev']);
+    for (const domain of ['a.dev', 'b.dev']) {
+      const key = await keyFor(`https://${domain}/`, SPEC_VERSION);
+      const cached = (await cacheGet(env, key)) as CachedWebAudit;
+      expect((cached.scorecard as { public_listing?: boolean }).public_listing).toBe(true);
+      expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('true');
+    }
+  });
+
+  test('auditDomainToCache derives the flag from the seed: a non-seeded target stays unlisted', async () => {
+    const { env, putOptions } = makeEnv([seedEntry('a.dev')], { registry: MINIMAL_REGISTRY });
+    await withStubbedFetch(() => auditDomainToCache(env, 'https://other.dev/'));
+    const key = await keyFor('https://other.dev/', SPEC_VERSION);
+    const cached = (await cacheGet(env, key)) as CachedWebAudit;
+    expect((cached.scorecard as { public_listing?: boolean }).public_listing).toBe(false);
+    expect(putOptions.get(key)?.customMetadata?.public_listing).toBe('false');
   });
 });
 

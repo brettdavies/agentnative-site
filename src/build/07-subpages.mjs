@@ -50,6 +50,10 @@ const WEB_AUDIT_WIDGET = {
   <form class="board-try audit-hero__form" method="get" action="/web/scoring" novalidate data-web-audit-form>
     <input id="web-audit-input" name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" required aria-label="Website URL" aria-describedby="web-audit-help" data-web-audit-input />
     <button type="submit" class="btn btn--primary" data-web-audit-submit>Audit</button>
+    <label class="audit-hero__optin">
+      <input type="checkbox" name="public_listing" value="true" data-web-audit-listing />
+      List this site on the public web leaderboard
+    </label>
   </form>
   <p id="web-audit-help" class="live-score__help">
     or try

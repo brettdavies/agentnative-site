@@ -43,6 +43,7 @@ export interface RunWebAuditInput {
   url: string;
   registry: WebAuditRegistry;
   siteType?: WebSiteType | null;
+  publicListing?: boolean;
   specVersion?: string;
   concurrency?: number;
   perCheckTimeoutMs?: number;
@@ -341,6 +342,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     discoveryEvidence: discovery.evidence,
     specVersion: input.specVersion ?? '',
     siteType: input.siteType ?? null,
+    publicListing: input.publicListing,
     registry: input.registry,
   });
   yield { type: 'complete', scorecard, complete: !incomplete };

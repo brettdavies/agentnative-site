@@ -6,7 +6,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
-import { keyFor } from '../src/worker/audit-web/cache';
+import { type CachedWebAudit, keyFor } from '../src/worker/audit-web/cache';
+import { decidePublicListingWrite } from '../src/worker/audit-web/public-listing';
 import {
   handleWebAudit,
   handleWebResultPage,
@@ -903,5 +904,459 @@ describe('cache-first gate ordering', () => {
     expect(body.cached).toBe(true);
     expect(body.scorecard.score_pct).toBe(70);
     expect(budgetReads).toBe(0);
+  });
+});
+
+// The tri-state resolution + serve-cached/patch/re-audit choice shared by
+// the web POST route and the audit_website MCP tool. Rows mirror the
+// plan's authoritative write-semantics truth table.
+describe('decidePublicListingWrite', () => {
+  const TARGET = 'https://example.com/';
+  const FRESH = new Date().toISOString();
+  const STALE = new Date(Date.now() - 10 * 60_000).toISOString();
+
+  function entry(scoredAt: string, stored?: boolean): CachedWebAudit {
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: TARGET,
+      score_pct: 50,
+      results: [],
+    };
+    if (stored !== undefined) scorecard.public_listing = stored;
+    return { spec_version: SPEC_VERSION, target_url: TARGET, scorecard, scored_at: scoredAt };
+  }
+
+  test('first-ever miss: omit and false audit to false; true audits to true', () => {
+    expect(decidePublicListingWrite({ explicit: undefined, cached: null })).toEqual({
+      path: 'audit',
+      value: false,
+      flagChanges: false,
+    });
+    expect(decidePublicListingWrite({ explicit: false, cached: null })).toEqual({
+      path: 'audit',
+      value: false,
+      flagChanges: false,
+    });
+    expect(decidePublicListingWrite({ explicit: true, cached: null })).toEqual({
+      path: 'audit',
+      value: true,
+      flagChanges: true,
+    });
+  });
+
+  test('fresh hit: omit serves cached for stored true, false, and absent', () => {
+    for (const stored of [true, false, undefined] as const) {
+      const cached = entry(FRESH, stored);
+      expect(decidePublicListingWrite({ explicit: undefined, cached })).toEqual({
+        path: 'serve-cached',
+        flagChanges: false,
+      });
+    }
+  });
+
+  test('fresh hit: an explicit value matching a concrete stored value serves cached', () => {
+    expect(decidePublicListingWrite({ explicit: true, cached: entry(FRESH, true) })).toEqual({
+      path: 'serve-cached',
+      flagChanges: false,
+    });
+    expect(decidePublicListingWrite({ explicit: false, cached: entry(FRESH, false) })).toEqual({
+      path: 'serve-cached',
+      flagChanges: false,
+    });
+  });
+
+  test('fresh hit: a differing explicit value patches (stored F/absent -> T)', () => {
+    for (const stored of [false, undefined] as const) {
+      const cached = entry(FRESH, stored);
+      const d = decidePublicListingWrite({ explicit: true, cached });
+      expect(d.path).toBe('patch');
+      if (d.path === 'patch') {
+        expect(d.value).toBe(true);
+        expect(d.flagChanges).toBe(true);
+        expect(d.cached).toBe(cached);
+      }
+    }
+  });
+
+  test('fresh hit: a differing explicit value patches (stored T/absent -> F)', () => {
+    for (const stored of [true, undefined] as const) {
+      const cached = entry(FRESH, stored);
+      const d = decidePublicListingWrite({ explicit: false, cached });
+      expect(d.path).toBe('patch');
+      if (d.path === 'patch') {
+        expect(d.value).toBe(false);
+        expect(d.cached).toBe(cached);
+      }
+    }
+  });
+
+  test('stale hit: omit carries the prior stored value (never erases)', () => {
+    expect(decidePublicListingWrite({ explicit: undefined, cached: entry(STALE, true) })).toEqual({
+      path: 'audit',
+      value: true,
+      flagChanges: false,
+    });
+    expect(decidePublicListingWrite({ explicit: undefined, cached: entry(STALE, false) })).toEqual({
+      path: 'audit',
+      value: false,
+      flagChanges: false,
+    });
+  });
+
+  test('stale hit with no stored flag: omit assumes false', () => {
+    expect(decidePublicListingWrite({ explicit: undefined, cached: entry(STALE, undefined) })).toEqual({
+      path: 'audit',
+      value: false,
+      flagChanges: false,
+    });
+  });
+
+  test('stale hit: an explicit value wins and marks a flip when it differs', () => {
+    expect(decidePublicListingWrite({ explicit: false, cached: entry(STALE, true) })).toEqual({
+      path: 'audit',
+      value: false,
+      flagChanges: true,
+    });
+    expect(decidePublicListingWrite({ explicit: true, cached: entry(STALE, false) })).toEqual({
+      path: 'audit',
+      value: true,
+      flagChanges: true,
+    });
+    expect(decidePublicListingWrite({ explicit: true, cached: entry(STALE, true) })).toEqual({
+      path: 'audit',
+      value: true,
+      flagChanges: false,
+    });
+  });
+});
+
+describe('handleWebAudit public_listing', () => {
+  const URL_UNDER_TEST = 'https://example.com/';
+
+  async function prefill(opts: { scoredAt: string; stored?: boolean; pct?: number }) {
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: URL_UNDER_TEST,
+      tool: { name: 'example.com', url: URL_UNDER_TEST },
+      score_pct: opts.pct ?? 64,
+      results: [],
+    };
+    if (opts.stored !== undefined) scorecard.public_listing = opts.stored;
+    return {
+      [key]: {
+        spec_version: SPEC_VERSION,
+        target_url: URL_UNDER_TEST,
+        scorecard,
+        scored_at: opts.scoredAt,
+      },
+    };
+  }
+
+  const freshStamp = () => new Date().toISOString();
+  const staleStamp = () => new Date(Date.now() - 10 * 60_000).toISOString();
+  const throwingProbe = (() => {
+    throw new Error('engine must not run on a serve-cached / patch request');
+  }) as unknown as typeof fetch;
+
+  test('a non-boolean public_listing is rejected with 400 before any probe', async () => {
+    for (const bad of ['false', 1, null] as const) {
+      const env = makeEnv();
+      const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: bad }), env, makeCtx(), {
+        probeFetch: throwingProbe,
+      });
+      expect(resp.status).toBe(400);
+      expect(((await resp.json()) as { error: string }).error).toBe('invalid_public_listing');
+    }
+  });
+
+  test('fresh hit + stored true + omit serves cached with no write and no engine', async () => {
+    const prefilled = await prefill({ scoredAt: freshStamp(), stored: true });
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const before = JSON.stringify(prefilled[key]);
+    const { bucket, store } = makeR2(prefilled);
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { cached: boolean; scorecard: { public_listing: boolean }; share_url: string };
+    expect(body.cached).toBe(true);
+    expect(body.scorecard.public_listing).toBe(true);
+    expect(body.share_url).toBe('/web/example.com');
+    // No write: the stored object is byte-identical.
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('fresh hit + stored false + explicit true patches to true, preserving scored_at and running gates', async () => {
+    const scoredAt = freshStamp();
+    const { bucket, store } = makeR2(await prefill({ scoredAt, stored: false }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get('content-type')).toContain('application/json');
+    const body = (await resp.json()) as { scorecard: { public_listing: boolean }; share_url: string };
+    // Patch response shape matches a cache serve: patched scorecard + share_url.
+    expect(body.scorecard.public_listing).toBe(true);
+    expect(body.share_url).toBe('/web/example.com');
+    // The gate stack ran: a session cookie is minted like a fresh audit.
+    expect(resp.headers.get('set-cookie')).toContain('__Host-anc-session=');
+    // Stored envelope flips to true; scored_at is carried forward, not reset.
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const stored = JSON.parse(store.get(key) as string) as {
+      scorecard: { public_listing: boolean };
+      scored_at: string;
+    };
+    expect(stored.scorecard.public_listing).toBe(true);
+    expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  test('fresh hit + stored true + explicit true serves cached (redundant, no write)', async () => {
+    const prefilled = await prefill({ scoredAt: freshStamp(), stored: true });
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const before = JSON.stringify(prefilled[key]);
+    const { bucket, store } = makeR2(prefilled);
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    expect(((await resp.json()) as { cached: boolean }).cached).toBe(true);
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('stale hit + stored true + omit re-audits and preserves true in both stores', async () => {
+    const { bucket, store } = makeR2(await prefill({ scoredAt: staleStamp(), stored: true }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, ctx, { probeFetch: stubProbeFetch() });
+    expect(resp.status).toBe(200);
+    const events = await readNdjson(resp);
+    const terminal = events.at(-1) as { type: string; scorecard: { public_listing: boolean } };
+    expect(terminal.type).toBe('complete');
+    expect(terminal.scorecard.public_listing).toBe(true);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as {
+      scorecard: { public_listing: boolean };
+    };
+    expect(stored.scorecard.public_listing).toBe(true);
+  });
+
+  test('stale hit + stored true + explicit false re-audits to false', async () => {
+    const { bucket, store } = makeR2(await prefill({ scoredAt: staleStamp(), stored: true }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: false }), env, ctx, {
+      probeFetch: stubProbeFetch(),
+    });
+    const events = await readNdjson(resp);
+    const terminal = events.at(-1) as { scorecard: { public_listing: boolean } };
+    expect(terminal.scorecard.public_listing).toBe(false);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as {
+      scorecard: { public_listing: boolean };
+    };
+    expect(stored.scorecard.public_listing).toBe(false);
+  });
+
+  test('first-ever miss defaults to false on omit and honors an explicit true', async () => {
+    // Omit -> false.
+    {
+      const { bucket, store } = makeR2();
+      const env = makeEnv({ SCORE_CACHE: bucket });
+      const ctx = makeCtx();
+      const resp = await runAudit(auditRequest(URL_UNDER_TEST), env, ctx, { probeFetch: stubProbeFetch() });
+      const events = await readNdjson(resp);
+      expect((events.at(-1) as { scorecard: { public_listing: boolean } }).scorecard.public_listing).toBe(false);
+      await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+      const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as {
+        scorecard: { public_listing: boolean };
+      };
+      expect(stored.scorecard.public_listing).toBe(false);
+    }
+    // Explicit true -> true.
+    {
+      const { bucket, store } = makeR2();
+      const env = makeEnv({ SCORE_CACHE: bucket });
+      const ctx = makeCtx();
+      const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, ctx, {
+        probeFetch: stubProbeFetch(),
+      });
+      const events = await readNdjson(resp);
+      expect((events.at(-1) as { scorecard: { public_listing: boolean } }).scorecard.public_listing).toBe(true);
+      await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+      const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as {
+        scorecard: { public_listing: boolean };
+      };
+      expect(stored.scorecard.public_listing).toBe(true);
+    }
+  });
+
+  test('kill switch off blocks an explicit-differing fresh-window request: no patch', async () => {
+    const prefilled = await prefill({ scoredAt: freshStamp(), stored: false });
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const before = JSON.stringify(prefilled[key]);
+    const { bucket, store } = makeR2(prefilled);
+    const env = makeEnv({ WEB_AUDIT_ENABLED: undefined, SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { cached: boolean; scorecard: { public_listing: boolean } };
+    expect(body.cached).toBe(true);
+    // The stored (unpatched) flag is returned and the object is untouched.
+    expect(body.scorecard.public_listing).toBe(false);
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('a breached limiter blocks the patch with 429 and writes nothing', async () => {
+    const prefilled = await prefill({ scoredAt: freshStamp(), stored: false });
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const before = JSON.stringify(prefilled[key]);
+    const { bucket, store } = makeR2(prefilled);
+    const env = makeEnv({ SCORE_CACHE: bucket, WEB_AUDIT_LIMITER: { limit: async () => ({ success: false }) } });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(429);
+    expect(store.get(key)).toBe(before);
+  });
+
+  test('a failed patch write surfaces an error, not fabricated success', async () => {
+    const scoredAt = freshStamp();
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const stored = {
+      spec_version: SPEC_VERSION,
+      target_url: URL_UNDER_TEST,
+      scorecard: {
+        schema_version: '0.2',
+        target_url: URL_UNDER_TEST,
+        score_pct: 64,
+        results: [],
+        public_listing: false,
+      },
+      scored_at: scoredAt,
+    };
+    const bucket = {
+      async get(k: string) {
+        if (k !== key) return null;
+        return {
+          async json() {
+            return stored;
+          },
+          async text() {
+            return JSON.stringify(stored);
+          },
+        };
+      },
+      async put() {
+        throw new Error('r2 unavailable');
+      },
+      async delete() {},
+    } as unknown as R2Bucket;
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(500);
+    const body = (await resp.json()) as { error: string; share_url?: string };
+    expect(body.error).toBe('patch_failed');
+    // No fabricated share_url that a client would follow as a success.
+    expect(body.share_url).toBeUndefined();
+  });
+});
+
+// The per-domain flip budget caps flag-changing writes so the ownership-free
+// public_listing flag can't be flapped to grief the board. A shared env keeps
+// one KV across requests so the budget accumulates the way it does in
+// production.
+describe('handleWebAudit public_listing flip budget', () => {
+  const URL_A = 'https://example.com/';
+  const URL_B = 'https://other.example/';
+  const freshStamp = () => new Date().toISOString();
+  const throwingProbe = (() => {
+    throw new Error('engine must not run on a flag-only patch');
+  }) as unknown as typeof fetch;
+
+  async function prefillEntry(url: string, stored: boolean, scoredAt: string) {
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: url,
+      tool: { name: new URL(url).host, url },
+      score_pct: 64,
+      results: [],
+      public_listing: stored,
+    };
+    return {
+      [await keyFor(url, SPEC_VERSION)]: {
+        spec_version: SPEC_VERSION,
+        target_url: url,
+        scorecard,
+        scored_at: scoredAt,
+      },
+    };
+  }
+
+  const flip = (url: string, value: boolean) => auditRequest(url, undefined, { public_listing: value });
+
+  test('flips within budget succeed; the sixth flip on a domain returns 429 flip_rate_limited and writes nothing', async () => {
+    const { bucket, store } = makeR2(await prefillEntry(URL_A, false, freshStamp()));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const key = await keyFor(URL_A, SPEC_VERSION);
+    // Five alternating flips (T, F, T, F, T) each change the stored flag.
+    for (let i = 0; i < 5; i++) {
+      const want = i % 2 === 0;
+      const resp = await runAudit(flip(URL_A, want), env, makeCtx(), { probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+      expect(((await resp.json()) as { scorecard: { public_listing: boolean } }).scorecard.public_listing).toBe(want);
+    }
+    const afterFive = store.get(key);
+    // The sixth flip (explicit false against the now-stored true) is rejected.
+    const resp = await runAudit(flip(URL_A, false), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(429);
+    expect(((await resp.json()) as { error: string }).error).toBe('flip_rate_limited');
+    // Rejected before the write: the stored object is untouched.
+    expect(store.get(key)).toBe(afterFive);
+  });
+
+  test('the budget is keyed by domain, not IP: a different domain still flips after another is exhausted', async () => {
+    const prefill = {
+      ...(await prefillEntry(URL_A, false, freshStamp())),
+      ...(await prefillEntry(URL_B, false, freshStamp())),
+    };
+    const { bucket } = makeR2(prefill);
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    // Exhaust domain A on one IP (five flips, then a blocked sixth).
+    for (let i = 0; i < 5; i++) {
+      const resp = await runAudit(flip(URL_A, i % 2 === 0), env, makeCtx(), { probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+    }
+    expect((await runAudit(flip(URL_A, false), env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(429);
+    // Same IP, same window, different domain: the flip still lands.
+    const other = await runAudit(flip(URL_B, true), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(other.status).toBe(200);
+    expect(((await other.json()) as { scorecard: { public_listing: boolean } }).scorecard.public_listing).toBe(true);
+  });
+
+  test('a no-op (omit or redundant explicit) spends no flip budget', async () => {
+    const { bucket, store } = makeR2(await prefillEntry(URL_A, true, freshStamp()));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const key = await keyFor(URL_A, SPEC_VERSION);
+    const before = store.get(key);
+    // A run of no-ops: omit and redundant explicit-true both serve cached and
+    // return before the flip gate, so none should consume budget.
+    for (let i = 0; i < 8; i++) {
+      const req = i % 2 === 0 ? auditRequest(URL_A, {}) : flip(URL_A, true);
+      expect((await runAudit(req, env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(200);
+    }
+    expect(store.get(key)).toBe(before);
+    // The full budget survives: five real flips (T -> F, T, F, T, F) still pass.
+    for (let i = 0; i < 5; i++) {
+      expect((await runAudit(flip(URL_A, i % 2 === 1), env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(
+        200,
+      );
+    }
+    // The sixth is finally blocked, proving exactly five were available.
+    expect((await runAudit(flip(URL_A, true), env, makeCtx(), { probeFetch: throwingProbe })).status).toBe(429);
   });
 });

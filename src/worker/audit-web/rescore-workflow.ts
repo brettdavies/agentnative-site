@@ -26,7 +26,7 @@ import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
 import { runWebAudit } from './engine';
 import { loadWebAuditRegistry } from './registry';
-import { loadWebSeed, type WebSeedEntry } from './seed';
+import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
 // registry-change gate degrades to plain staleness batching when it is
@@ -108,12 +108,17 @@ async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
 /** Run one seeded domain's audit to completion and cache the scorecard. */
 export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string): Promise<void> {
   const registry = await loadWebAuditRegistry(env);
+  // Curated seeds are always listed; deriving the flag here keeps a rescore
+  // or reflow re-audit from resetting the stored opt-in to the default in
+  // the envelope and the R2 board metadata.
+  const publicListing = await isSeededDomain(env, new URL(targetUrl).host);
   let scorecard: unknown = null;
   let complete = false;
   for await (const event of runWebAudit({
     url: targetUrl,
     registry,
     siteType: null,
+    publicListing,
     specVersion: SPEC_VERSION,
     perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
   })) {
