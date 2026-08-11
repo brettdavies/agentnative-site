@@ -114,10 +114,18 @@ jobs:
       #                        top-level pin to match env.staging before
       #                        merging.
       #
-      # Skipped on forks (secrets are unavailable to PRs from forks by
-      # default). Same-repo branches always hit it.
+      # Runs only where the CF credentials resolve. Two contexts cannot
+      # satisfy that, and both would fail the probe on missing auth rather
+      # than on a real pin problem:
+      #   forks:      Actions secrets are withheld from fork PRs.
+      #   Dependabot: Dependabot-triggered runs read the Dependabot secret
+      #               store, not the Actions one, so secrets.CF_* resolve
+      #               empty. Its PRs cannot touch wrangler.jsonc or
+      #               docker/sandbox/, so the pin invariant is unaffected.
       - name: Verify pinned sandbox image exists in CF registry
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        if: >-
+          github.event.pull_request.head.repo.full_name == github.repository
+          && github.actor != 'dependabot[bot]'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -140,7 +148,16 @@ jobs:
 
           # Always: independent registry-existence check on each pinned
           # tag. Allows staging to lead prod during development.
-          images=$(bun x wrangler containers images list 2>/dev/null || true)
+          #
+          # A failed listing must not fall through to the grep below: empty
+          # output is indistinguishable from a missing image there, so an
+          # auth or API failure would be reported as an unpushed pin and
+          # send the reader to `containers build` for a credential problem.
+          if ! images=$(bun x wrangler containers images list); then
+            echo "::error::could not list container images; the registry probe did not run"
+            echo "check CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID and the wrangler output above"
+            exit 1
+          fi
           fail=0
 
           if echo "$images" | grep -qE "anc-sandbox[[:space:]]+${prod_tag}\b"; then
