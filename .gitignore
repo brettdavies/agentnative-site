@@ -8,6 +8,12 @@ node_modules/
 .dev.vars
 .dev.vars.*
 .context/
+# Claude Code state, including agent worktrees under .claude/worktrees/. Each
+# worktree is a full checkout carrying its own biome.json, which `biome check .`
+# rejects as a nested root configuration. Brett's global ~/.config/git/ignore
+# also lists this, but biome's `vcs.useIgnoreFile` reads the repo's .gitignore,
+# so the entry has to live here to take effect.
+.claude/
 # docs/solutions/ is a symlink to ~/dev/solutions-docs (see AGENT.md).
 # Ignore that specific subpath; docs/design/ and any other future docs/
 # subdirectories remain tracked normally.
