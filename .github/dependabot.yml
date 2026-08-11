@@ -1,4 +1,7 @@
-# Dependabot for the Bun / TypeScript toolchain (npm ecosystem).
+# Dependabot for the Bun / TypeScript toolchain (npm) and the workflow actions
+# (github-actions). Workflow actions are SHA-pinned to immutable commits, so
+# Dependabot is what surfaces a newer SHA; without the github-actions block the
+# pins never move.
 #
 # `target-branch: dev` is required: without it Dependabot opens PRs against the
 # default branch (main), which breaks the dev -> main flow. Dependabot reads
@@ -39,3 +42,19 @@ updates:
       - dependency-name: "@playwright/*"
       - dependency-name: "playwright"
       - dependency-name: "playwright-core"
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Chicago
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    reviewers:
+      - brettdavies
+    labels:
+      - dependencies
+      - github-actions
