@@ -6,12 +6,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { WebAggregateEntry } from '../src/worker/audit-web/cache';
 import {
   buildFrontpageBoardRows,
   buildWebLeaderboardBody,
   buildWebLeaderboardMarkdown,
   rankWebEntries,
+  type WebBoardEntry,
 } from '../src/worker/audit-web/leaderboard-render';
 import { assembleRemediation } from '../src/worker/audit-web/remediation';
 import {
@@ -20,6 +20,7 @@ import {
   type NaReason,
   type ScorecardStatus,
   WEB_SCHEMA_VERSION,
+  type WebScorecardMeta,
 } from '../src/worker/audit-web/scorecard';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
@@ -222,6 +223,17 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(passBlock).not.toContain('<strong>Fix:</strong>');
   });
 
+  test('fixable rows carry keyword and status on the prompt carrier; pass and n_a do not', () => {
+    expect(html).toContain('data-keyword="must" data-status="absent"');
+    expect(html).toContain('data-keyword="should" data-status="absent"');
+    expect(html).not.toContain('data-status="pass"');
+    expect(html).not.toContain('data-status="n_a"');
+    expect(html).not.toContain('data-assemble-prompt');
+    expect(html).not.toContain('<input');
+    expect(html).not.toContain('<button');
+    expect(html).toContain('data-web-audit-result');
+  });
+
   test('no badge-embed markup and no P-principle grouping', () => {
     expect(html).not.toContain('Embed the badge');
     expect(html).not.toContain('badge floor');
@@ -281,6 +293,8 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('- Fix: Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(md).toContain('```text');
     expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(md).not.toContain('Assemble fix prompts');
+    expect(md).not.toContain('Include SHOULD');
   });
 
   test('each check row carries its per-check tier', () => {
@@ -378,7 +392,7 @@ describe('web leaderboard (U15)', () => {
   // A small perfect site (relative 100, low global) vs a bigger,
   // higher-GLOBAL platform: GLOBAL ranks the platform first by default;
   // RELATIVE puts the perfect site on top.
-  function entry(domain: string, relative: number, globalScore: number): WebAggregateEntry {
+  function entry(domain: string, relative: number, globalScore: number): WebBoardEntry {
     return {
       domain,
       url: `https://${domain}/`,
@@ -386,9 +400,11 @@ describe('web leaderboard (U15)', () => {
       description: 'x',
       score_pct: relative,
       score: { relative, global: globalScore },
+      curated: true,
     };
   }
   const entries = [entry('small-perfect.dev', 100, 45), entry('big-platform.dev', 88, 79)];
+  const boardOpts = { view: 'all', curatedCount: 2, userCount: 0 } as const;
 
   test('default order is GLOBAL descending: the bigger routine outranks the small perfect site', () => {
     const ranked = rankWebEntries(entries);
@@ -402,7 +418,7 @@ describe('web leaderboard (U15)', () => {
   });
 
   test('renders both score columns, row sort data, the toggle control, and /web links', () => {
-    const html = buildWebLeaderboardBody(entries);
+    const html = buildWebLeaderboardBody(entries, boardOpts);
     expect(html).toContain('href="/web/small-perfect.dev"');
     expect(html).toContain('data-web-sort="global"');
     expect(html).toContain('data-web-sort="relative"');
@@ -414,19 +430,19 @@ describe('web leaderboard (U15)', () => {
   });
 
   test('an empty board renders the scoring-in-progress state, not a broken table', () => {
-    const html = buildWebLeaderboardBody([]);
+    const html = buildWebLeaderboardBody([], { view: 'all', curatedCount: 0, userCount: 0 });
     expect(html).not.toContain('<tbody>');
     expect(html).toContain('Scoring in progress');
   });
 
   test('markdown twin lists GLOBAL-ordered rows with both columns, origin-absolute', () => {
-    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev');
-    expect(md).toContain('| 1 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% |');
-    expect(md).toContain('| 2 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% |');
+    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev', boardOpts);
+    expect(md).toContain('| 1 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% | curated |');
+    expect(md).toContain('| 2 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% | curated |');
   });
 
   test('the CLI leaderboard hero is not present on the web board', () => {
-    expect(buildWebLeaderboardBody(entries)).toContain('Web Agent-Readiness Leaderboard');
+    expect(buildWebLeaderboardBody(entries, boardOpts)).toContain('Web Agent-Readiness Leaderboard');
   });
 });
 
@@ -440,6 +456,7 @@ const DOCUMENTED_TOP_LEVEL = [
   'audience',
   'audit_profile',
   'site_type',
+  'public_listing',
   'summary',
   'coverage_summary',
   'score_pct',
@@ -468,25 +485,26 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     };
   }
 
-  const produced = buildWebScorecard(
-    [
-      engineRow({ keyword: 'must', tier: 'required', status: 'pass' }),
-      engineRow({ status: 'absent' }),
-      engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
-    ],
-    {
-      targetUrl: 'https://example.com/',
-      domain: 'example.com',
-      mcpEndpoint: 'https://example.com/mcp',
-      discoveryEvidence: [{ source: '/mcp', probed: 'initialize' }],
-      specVersion: SPEC_VERSION,
-      registry: {
-        category_order: ['content-surface'],
-        categories: { 'content-surface': 'Content for agents' },
-        checks: [{ keyword: 'must' }, { keyword: 'should' }, { keyword: 'may' }] as never,
-      },
+  const ENGINE_ROWS = [
+    engineRow({ keyword: 'must', tier: 'required', status: 'pass' }),
+    engineRow({ status: 'absent' }),
+    engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
+  ];
+
+  const BASE_META: WebScorecardMeta = {
+    targetUrl: 'https://example.com/',
+    domain: 'example.com',
+    mcpEndpoint: 'https://example.com/mcp',
+    discoveryEvidence: [{ source: '/mcp', probed: 'initialize' }],
+    specVersion: SPEC_VERSION,
+    registry: {
+      category_order: ['content-surface'],
+      categories: { 'content-surface': 'Content for agents' },
+      checks: [{ keyword: 'must' }, { keyword: 'should' }, { keyword: 'may' }] as never,
     },
-  );
+  };
+
+  const produced = buildWebScorecard(ENGINE_ROWS, BASE_META);
 
   test('carries exactly the documented top-level fields (no badge)', () => {
     expect(Object.keys(produced).sort()).toEqual([...DOCUMENTED_TOP_LEVEL].sort());
@@ -501,6 +519,17 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(Object.keys(produced.tool).sort()).toEqual(['name', 'url']);
     expect((produced.tool as Record<string, unknown>).binary).toBeUndefined();
     expect((produced.tool as Record<string, unknown>).install).toBeUndefined();
+  });
+
+  test('public_listing defaults to false when the meta omits it', () => {
+    expect(produced.public_listing).toBe(false);
+  });
+
+  test('public_listing round-trips an explicit meta value; schema_version stays 0.2', () => {
+    const listed = buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: true });
+    expect(listed.public_listing).toBe(true);
+    expect(listed.schema_version).toBe('0.2');
+    expect(buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: false }).public_listing).toBe(false);
   });
 
   test('score_pct is the RELATIVE score beside the { relative, global } pair', () => {
@@ -558,7 +587,7 @@ describe('web scorecard schema doc drift guard (U16)', () => {
 });
 
 describe('leaderboard friendly-name display', () => {
-  function entry(over: Partial<WebAggregateEntry> = {}): WebAggregateEntry {
+  function entry(over: Partial<WebBoardEntry> = {}): WebBoardEntry {
     return {
       domain: 'developers.cloudflare.com',
       url: 'https://developers.cloudflare.com/',
@@ -566,12 +595,14 @@ describe('leaderboard friendly-name display', () => {
       description: 'Cloudflare developer docs.',
       score_pct: 96,
       score: { relative: 96, global: 90 },
+      curated: true,
       ...over,
     };
   }
+  const singleOpts = { view: 'all', curatedCount: 1, userCount: 0 } as const;
 
   test('/web renders "<domain> (<name>)" linking to the detail page, not the external site', () => {
-    const html = buildWebLeaderboardBody([entry()]);
+    const html = buildWebLeaderboardBody([entry()], singleOpts);
     // whole-row stretched link: one anchor on the domain, row is position-anchored
     expect(html).toContain('<tr class="lb-row"');
     expect(html).toContain('<a class="lb-rowlink" href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
@@ -581,9 +612,10 @@ describe('leaderboard friendly-name display', () => {
   });
 
   test('a row whose name equals its domain shows no parenthetical', () => {
-    const html = buildWebLeaderboardBody([
-      entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' }),
-    ]);
+    const html = buildWebLeaderboardBody(
+      [entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' })],
+      singleOpts,
+    );
     expect(html).not.toContain('lb-tool__name');
   });
 

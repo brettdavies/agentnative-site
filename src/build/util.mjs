@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as yaml from 'js-yaml';
 
 const PRINCIPLE_FILENAME_RE = /^p(\d+)-([a-z0-9-]+)\.md$/;
 
@@ -172,4 +173,48 @@ export function absolutifyMarkdownLinks(markdown, baseUrl) {
     if (path.startsWith('//')) return match;
     return `${bracket}(${base}${path}${title ?? ''})`;
   });
+}
+
+/**
+ * Render the YAML frontmatter block prepended to every authored markdown
+ * twin. `title`/`description` come from the page's content extractors and
+ * `url` is the canonical HTML URL, so an agent fetching the twin gets the
+ * same metadata the HTML page carries in <head>.
+ *
+ * @param {{ title: string, description: string, url: string }} meta
+ * @returns {string} `---\n<yaml>---\n\n` — closing fence plus one blank
+ *          line before the body.
+ */
+export function renderFrontmatter({ title, description, url }) {
+  // lineWidth: -1 disables yaml's line folding so a long description stays
+  // one physical `description:` line instead of a `>-` block scalar.
+  const dumped = yaml.dump({ title, description, url }, { lineWidth: -1 });
+  return `---\n${dumped}---\n\n`;
+}
+
+/**
+ * Compose a complete markdown-twin string: frontmatter block followed by
+ * the link-absolutified body. Emitters and the principle byte-equivalence
+ * invariant both call this, so there is exactly one definition of a
+ * twin's bytes. Taking the site-relative `canonicalPath` (the same value
+ * callers pass to emitShell) and deriving the absolute `url` here keeps
+ * the frontmatter url and the absolutified links on the same base by
+ * construction.
+ *
+ * @param {{ title: string, description: string, canonicalPath: string }} meta
+ * @param {string} bodyMarkdown
+ * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
+ * @returns {string}
+ */
+export function composeTwin({ title, description, canonicalPath }, bodyMarkdown, baseUrl) {
+  // The description is body prose (extractDescription) and can carry
+  // authored site-relative links; the twin surface promises every link
+  // self-resolves, so absolutify it like the body.
+  return (
+    renderFrontmatter({
+      title,
+      description: absolutifyMarkdownLinks(description, baseUrl),
+      url: `${resolveBaseUrl(baseUrl)}${canonicalPath}`,
+    }) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl)
+  );
 }

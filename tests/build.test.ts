@@ -1,8 +1,13 @@
-import { describe, expect, test } from 'bun:test';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { emitHomepage } from '../src/build/06-homepage.mjs';
+import { emitSubPages } from '../src/build/07-subpages.mjs';
 import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
+import { runInvariantChecks } from '../src/build/build.mjs';
+import { extractDescription, extractTitle } from '../src/build/content.mjs';
+import { buildLlmsFull, buildLlmsIndex } from '../src/build/llms.mjs';
 import { renderMarkdown } from '../src/build/render.mjs';
 import {
   compareVersions,
@@ -24,8 +29,11 @@ import { emitShell } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
 import {
   ANC_VERSION,
+  absolutifyMarkdownLinks,
+  composeTwin,
   escHtml,
   parseFilename,
+  renderFrontmatter,
   SITE_SPEC_VERSION,
   SPEC_VERSION,
   sortedGlob,
@@ -2115,6 +2123,14 @@ describe('renderBadgeSvg — SVG output', () => {
     expect(svg).toContain('#bf5200');
     expect(svg).not.toContain('#005da1');
   });
+
+  test('text shadow is softened, not badge-maker default heavy halo', () => {
+    const svg = renderBadgeSvg(0.91, '0.3.0');
+    expect(svg).toContain('stdDeviation="4"');
+    expect(svg).toContain('fill-opacity=".4"');
+    expect(svg).not.toContain('stdDeviation="16"');
+    expect(svg).not.toContain('fill-opacity=".8"');
+  });
 });
 
 // -------------------------------------------------------------------
@@ -2659,5 +2675,361 @@ describe('buildLeaderboardBody — badge callout', () => {
   test('callout links to /badge', () => {
     const html = buildLeaderboardBody([entry('eza', 1.0)], '<p>m</p>');
     expect(html).toContain('href="/badge"');
+  });
+});
+
+// -------------------------------------------------------------------
+// Twin frontmatter — renderFrontmatter + composeTwin (shared by the
+// homepage, subpage, and principle twin emitters and by invariant #4).
+// -------------------------------------------------------------------
+
+describe('renderFrontmatter — YAML frontmatter block for markdown twins', () => {
+  const meta = {
+    title: 'The agent-native standard',
+    description: 'One bar for agent-readiness.',
+    url: 'https://anc.dev/',
+  };
+
+  test('emits a fenced block with title, description, and url keys', () => {
+    const block = renderFrontmatter(meta);
+    expect(block.startsWith('---\n')).toBe(true);
+    expect(block.endsWith('---\n\n')).toBe(true);
+    expect(block).toContain('title:');
+    expect(block).toContain('description:');
+    expect(block).toContain('url:');
+  });
+
+  test('round-trips through yaml.load', async () => {
+    const yaml = await import('js-yaml');
+    const block = renderFrontmatter(meta);
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(meta);
+  });
+
+  test('a colon-space title serializes to valid YAML and round-trips', async () => {
+    const yaml = await import('js-yaml');
+    const colonMeta = { ...meta, title: 'P3: Progressive Help Discovery' };
+    const block = renderFrontmatter(colonMeta);
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(colonMeta);
+  });
+
+  test('a description with double quotes and a trailing ellipsis round-trips', async () => {
+    const yaml = await import('js-yaml');
+    const trickyMeta = { ...meta, description: 'Scored "MUST / SHOULD / MAY", not asserted…' };
+    const block = renderFrontmatter(trickyMeta);
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(trickyMeta);
+  });
+
+  test('an absolute url serializes as a plain scalar and round-trips', async () => {
+    const yaml = await import('js-yaml');
+    const urlMeta = { ...meta, url: 'https://anc.dev/p3' };
+    const block = renderFrontmatter(urlMeta);
+    expect(block).toContain('url: https://anc.dev/p3\n');
+    const inner = block.slice('---\n'.length, block.lastIndexOf('---\n'));
+    expect(yaml.load(inner)).toEqual(urlMeta);
+  });
+
+  test('a 180-char description stays on one physical line (no folded block scalar)', () => {
+    const longMeta = { ...meta, description: `${'a'.repeat(90)} ${'b'.repeat(89)}` };
+    expect(longMeta.description.length).toBe(180);
+    const block = renderFrontmatter(longMeta);
+    const descriptionLines = block.split('\n').filter((l) => l.startsWith('description:'));
+    expect(descriptionLines.length).toBe(1);
+    expect(descriptionLines[0]).toContain('b'.repeat(89));
+    expect(block).not.toContain('>-');
+  });
+});
+
+describe('composeTwin — frontmatter + absolutified body', () => {
+  const meta = {
+    title: 'P3: Progressive Help Discovery',
+    description: 'Help output is layered.',
+    canonicalPath: '/p3',
+  };
+  const body = '# P3: Progressive Help Discovery\n\nSee [the standard](/p1) for context.\n';
+
+  test('output is the frontmatter block followed by the absolutified body', () => {
+    const twin = composeTwin(meta, body);
+    const fm = renderFrontmatter({
+      title: meta.title,
+      description: meta.description,
+      url: 'https://anc.dev/p3',
+    });
+    expect(twin.startsWith(fm)).toBe(true);
+    expect(twin.slice(fm.length)).toBe(absolutifyMarkdownLinks(body));
+    expect(twin).toContain('](https://anc.dev/p1)');
+  });
+
+  test('an explicit baseUrl override moves the frontmatter url and body links together', () => {
+    const staging = 'https://staging.example';
+    const twin = composeTwin(meta, body, staging);
+    expect(twin).toContain('url: https://staging.example/p3\n');
+    expect(twin).toContain('](https://staging.example/p1)');
+    expect(twin).not.toContain('anc.dev');
+  });
+
+  test('absolutifies site-relative links inside the description so the twin self-resolves', () => {
+    const linkMeta = {
+      ...meta,
+      description: 'The structured output of the [website audit](/web-audit).',
+    };
+    const twin = composeTwin(linkMeta, body);
+    expect(twin).toContain('[website audit](https://anc.dev/web-audit)');
+    expect(twin).not.toContain('](/web-audit)');
+  });
+});
+
+// -------------------------------------------------------------------
+// Twin frontmatter — homepage + subpage emitters.
+// -------------------------------------------------------------------
+
+const CONTENT_DIR = join(import.meta.dir, '..', 'content');
+
+/** Minimal leaderboard entry satisfying the homepage hero + board rows. */
+function homepageLeaderboardFixture() {
+  return [
+    {
+      tool: { name: 'rg', tier: 'workhorse', language: 'rust', description: 'grep' },
+      scorecard: { badge: { score_pct: 90 } },
+      principleScore: {
+        met: 7,
+        total: 8,
+        details: [
+          { status: 'pass', group: 'P1' },
+          { status: 'pass', group: 'P2' },
+          { status: 'fail', group: 'P3' },
+        ],
+      },
+      rank: 1,
+    },
+  ];
+}
+
+const HOMEPAGE_PRINCIPLES_FIXTURE = [
+  { n: 1, title: 'P1: Non-Interactive by Default', shortDesc: 'No prompts.' },
+  { n: 2, title: 'P2: Structured, Parseable Output', shortDesc: 'JSON out.' },
+  { n: 3, title: 'P3: Progressive Help Discovery', shortDesc: 'Layered help.' },
+];
+
+describe('emitHomepage — index.md twin frontmatter', () => {
+  // One emission serves all three tests: renderMarkdown rebuilds the full
+  // remark/rehype/Shiki pipeline per call, so per-test re-emission is the
+  // expensive part, and the tests only read the emitted files.
+  const distDir = join(tmpdir(), `homepage-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  beforeAll(async () => {
+    await mkdir(distDir, { recursive: true });
+    await emitHomepage({
+      distDir,
+      contentDir: CONTENT_DIR,
+      themeInit: '/* theme */',
+      principles: HOMEPAGE_PRINCIPLES_FIXTURE,
+      leaderboard: homepageLeaderboardFixture(),
+    });
+  });
+
+  afterAll(async () => {
+    await rm(distDir, { recursive: true, force: true });
+  });
+
+  test('index.md opens with title/description/url frontmatter derived from _intro.md', async () => {
+    const introSource = await readFile(join(CONTENT_DIR, '_intro.md'), 'utf8');
+    const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
+    const expectedFm = renderFrontmatter({
+      title: extractTitle(introSource),
+      description: extractDescription(introSource),
+      url: 'https://anc.dev/',
+    });
+    expect(indexMd.startsWith(expectedFm)).toBe(true);
+  });
+
+  test('twin body keeps the Principles section, the use-note, and homepage silence', async () => {
+    const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
+    expect(indexMd).toContain('## Principles');
+    const useSource = await readFile(join(CONTENT_DIR, '_use.md'), 'utf8');
+    expect(indexMd).toContain(absolutifyMarkdownLinks(useSource.trim()));
+    for (const needle of ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score']) {
+      expect(indexMd.toLowerCase()).not.toContain(needle.toLowerCase());
+    }
+  });
+
+  test('index.html carries no frontmatter fence or url line', async () => {
+    const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
+    expect(indexHtml).not.toContain('---\ntitle:');
+    expect(indexHtml).not.toMatch(/^url: /m);
+  });
+});
+
+describe('emitSubPages — twin frontmatter', () => {
+  // One emission serves all three tests: the subpage pipeline renders
+  // twelve markdown pages through Shiki per run.
+  const distDir = join(tmpdir(), `subpages-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  let subPageData: Array<{ name: string; source: string; title: string }> = [];
+
+  beforeAll(async () => {
+    await mkdir(distDir, { recursive: true });
+    subPageData = await emitSubPages({ distDir, contentDir: CONTENT_DIR, themeInit: '/* theme */' });
+  });
+
+  afterAll(async () => {
+    await rm(distDir, { recursive: true, force: true });
+  });
+
+  test('audit twin opens with frontmatter derived from its source; HTML stays clean', async () => {
+    const source = await readFile(join(CONTENT_DIR, 'audit.md'), 'utf8');
+    const auditMd = await readFile(join(distDir, 'audit.md'), 'utf8');
+    const expectedFm = renderFrontmatter({
+      title: extractTitle(source),
+      description: extractDescription(source),
+      url: 'https://anc.dev/audit',
+    });
+    expect(auditMd.startsWith(expectedFm)).toBe(true);
+    const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
+    expect(auditHtml).not.toContain('---\ntitle:');
+    expect(auditHtml).not.toMatch(/^url: /m);
+  });
+
+  test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
+    const webAuditMd = await readFile(join(distDir, 'web-audit.md'), 'utf8');
+    expect(webAuditMd.startsWith('---\n')).toBe(true);
+    expect(webAuditMd).toContain('url: https://anc.dev/web-audit\n');
+    expect(webAuditMd).toContain('Enter a public URL at');
+    expect(webAuditMd).not.toContain('data-web-audit-form');
+  });
+
+  test('subPageData still carries the frontmatter-free twin source for llms-full.txt', () => {
+    expect(subPageData.length).toBeGreaterThan(0);
+    for (const page of subPageData) {
+      expect({ name: page.name, hasFrontmatter: page.source.startsWith('---\n') }).toEqual({
+        name: page.name,
+        hasFrontmatter: false,
+      });
+    }
+  });
+});
+
+describe('runInvariantChecks — principle twin equivalence (invariant #4)', () => {
+  const SOURCE = '# P1: Test Principle\n\nA test paragraph for the invariant fixture.\n\nSee [the next one](/p2).\n';
+  const SLUG = 'p1-test-principle';
+
+  /** Seed a dist dir satisfying every invariant except the p1.md under test. */
+  async function seedDist(p1Md: string) {
+    const distDir = join(tmpdir(), `invariant-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await mkdir(distDir, { recursive: true });
+    const sourcePath = join(distDir, 'p1-test-principle.source.md');
+    await writeFile(sourcePath, SOURCE);
+    await writeFile(join(distDir, 'p1.html'), `<html><body><h1 id="${SLUG}">Test</h1></body></html>`);
+    await writeFile(join(distDir, 'index.html'), '<html><body><a href="/p1">P1</a></body></html>');
+    await writeFile(join(distDir, 'index.md'), '# Home\n\nQuiet twin.\n');
+    await writeFile(join(distDir, 'p1.md'), p1Md);
+    return { distDir, sourcePath };
+  }
+
+  function expectedTwin() {
+    return composeTwin(
+      {
+        title: extractTitle(SOURCE),
+        description: extractDescription(SOURCE),
+        canonicalPath: '/p1',
+      },
+      SOURCE,
+    );
+  }
+
+  test('a correctly composed twin (frontmatter + absolutified body) passes', async () => {
+    const { distDir, sourcePath } = await seedDist(expectedTwin());
+    try {
+      await runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }]);
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a twin missing the frontmatter fails', async () => {
+    const { distDir, sourcePath } = await seedDist(absolutifyMarkdownLinks(SOURCE));
+    try {
+      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(
+        /invariant: dist\/p1\.md/,
+      );
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a twin whose body drifts from the absolutified source fails', async () => {
+    const { distDir, sourcePath } = await seedDist(`${expectedTwin()}\ndrifted copy-edit\n`);
+    try {
+      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(
+        /invariant: dist\/p1\.md/,
+      );
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('llms surface — twin frontmatter stays out (regression lock)', () => {
+  // llms-full.txt is assembled from SOURCE bodies, never dist twins. The A5
+  // section header already carries title + source + canonical-markdown, and
+  // YAML fences would collide with the inter-section `---` delimiters. These
+  // locks catch a future refactor that starts feeding composed twins in.
+  test('buildLlmsFull embeds no YAML frontmatter; the only --- lines are A5 delimiters', () => {
+    const out = buildLlmsFull({
+      sections: [
+        { path: '/', body: '# Home\n\nIntro prose.', htmlPath: '/', mdPath: '/index.md', title: 'Home' },
+        { path: '/p1', body: '# P1\n\nPrinciple prose.', htmlPath: '/p1', mdPath: '/p1.md', title: 'P1' },
+      ],
+    });
+    expect(out).not.toMatch(/^url: https:\/\//m);
+    expect(out).not.toMatch(/^description: /m);
+    const fenceLines = out.split('\n').filter((l) => l === '---');
+    expect(fenceLines.length).toBe(2);
+  });
+
+  test('buildLlmsIndex output for fixed inputs is byte-stable (inline snapshot)', () => {
+    const out = buildLlmsIndex({
+      introTitle: 'The agent-native standard',
+      summary: 'One bar for agent-readiness.',
+      principles: [{ n: 1, slug: 'p1-non-interactive-by-default', title: 'P1 — Non-Interactive by Default' }],
+      subPages: [{ name: 'audit', title: 'Audit your CLI' }],
+      scorecardLinks: [{ name: 'Leaderboard', path: '/scorecards.md' }],
+    });
+    expect(out).toBe(
+      [
+        '# The agent-native standard',
+        '',
+        '> One bar for agent-readiness.',
+        '',
+        '## Principles',
+        '',
+        '- [P1 — Non-Interactive by Default](https://anc.dev/p1.md)',
+        '',
+        '## Pages',
+        '',
+        '- [Audit your CLI](https://anc.dev/audit.md)',
+        '',
+        '## Scorecards',
+        '',
+        '- [Leaderboard](https://anc.dev/scorecards.md)',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  test('Programmatic access includes a no-auth initialize crumb and still links mcp-skill.md', () => {
+    const out = buildLlmsIndex({
+      introTitle: 'The agent-native standard',
+      summary: 'One bar for agent-readiness.',
+      principles: [{ n: 1, slug: 'p1-non-interactive-by-default', title: 'P1 — Non-Interactive by Default' }],
+      programmaticAccess: [{ label: 'MCP server (streamable HTTP)', path: '/mcp' }],
+    });
+    expect(out).toContain('## Programmatic access');
+    expect(out).toContain('https://anc.dev/mcp');
+    expect(out).toContain('No authentication');
+    expect(out).toContain('initialize');
+    expect(out).toContain('https://anc.dev/mcp-skill.md');
+    expect(out).toContain('Full recipes');
   });
 });

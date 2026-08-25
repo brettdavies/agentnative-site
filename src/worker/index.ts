@@ -14,7 +14,13 @@
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { getAggregate, type WebCacheEnv } from './audit-web/cache';
 import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
-import { handleWebRescore, startWebRescore, type WebRescoreTriggerEnv } from './audit-web/rescore-trigger';
+import {
+  handleWebBackfill,
+  handleWebRescore,
+  startWebRescore,
+  type WebBackfillTriggerEnv,
+  type WebRescoreTriggerEnv,
+} from './audit-web/rescore-trigger';
 import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
   handleWebAudit,
@@ -27,10 +33,11 @@ import {
   parseWebResultPath,
   type WebAuditRouteEnv,
 } from './audit-web/route';
-import { applyHeaders } from './headers';
+import { applyHeaders, isSingleRepresentation } from './headers';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
+import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
@@ -332,6 +339,12 @@ export default {
     // helper with the weekly cron in scheduled() below.
     if (pathname === '/api/web-rescore') {
       return handleWebRescore(request, env as WebRescoreTriggerEnv);
+    }
+
+    // One-time public_listing backfill (same secret gate as the rescore
+    // hook). Bounded per call; the operator re-runs until it writes zero.
+    if (pathname === '/api/web-audit-backfill') {
+      return handleWebBackfill(request, env as WebBackfillTriggerEnv);
     }
 
     // MCP server card (SEP-1649): the canonical path serves the JSON
@@ -641,10 +654,12 @@ export default {
 
     const pathIsMarkdown = pathname.endsWith('.md');
     const pathIsJson = pathname.endsWith('.json');
-    // CN rewrite is markdown-only. Skip for `.json` paths so `Accept:
-    // text/markdown` against `/skill.json` returns the JSON unchanged
-    // instead of rewriting to a non-existent `/skill.json.md` twin.
-    const preferMarkdown = !pathIsMarkdown && !pathIsJson && detectPreference(request) === 'markdown';
+    // CN rewrite is for HTML pages that have a markdown twin. Skip
+    // single-representation files so `curl /llms.txt` (UA heuristic) and
+    // `Accept: text/markdown` against `/skill.json` do not look up a
+    // non-existent `*.md` twin. Same skip as DESIGN.md §3.4 for JSON.
+    const preferMarkdown =
+      !pathIsMarkdown && !isSingleRepresentation(pathname) && detectPreference(request) === 'markdown';
     const servedMarkdown = pathIsMarkdown || preferMarkdown;
 
     let assetRequest = request;
@@ -687,6 +702,24 @@ export default {
         });
         return applyHeaders(rewritten, { request, servedMarkdown, pathname });
       }
+    }
+
+    if (
+      upstream.status === 404 &&
+      !pathIsJson &&
+      !pathname.endsWith('.svg') &&
+      !pathname.startsWith('/fonts/') &&
+      pathname !== '/og-image.png'
+    ) {
+      const origin = url.origin;
+      const body = servedMarkdown ? notFoundMarkdown(origin) : notFoundHtml(origin);
+      const headers = new Headers(upstream.headers);
+      headers.set('Content-Type', servedMarkdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8');
+      return applyHeaders(new Response(body, { status: 404, statusText: upstream.statusText, headers }), {
+        request,
+        servedMarkdown,
+        pathname,
+      });
     }
 
     return applyHeaders(upstream, { request, servedMarkdown, pathname });

@@ -102,7 +102,10 @@ normalized registry's fingerprint differs from the one recorded in KV (`web_resc
 forces a full reflow (every domain re-audited regardless of freshness) so cached scorecards re-render under the new
 checks and categories, then records the new fingerprint and returns to incremental batching. This covers a display-only
 change (for example splitting a category) that does not rotate the `SPEC_VERSION` cache key, and it runs through the
-Workflow's own audit path, so it is not subject to the on-demand endpoint's per-source rate limit.
+Workflow's own audit path, so it is not subject to the on-demand endpoint's per-source rate limit. Adding or retiering
+checks in `registry.yaml` is a registry-shape change; the post-deploy rescore after this kind of PR reflows every
+curated seed. Stale `/web/<domain>` URLs keep serving the previous row set until that reflow: missing check ids are
+omitted, not shown as ghost rows.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in

@@ -7,6 +7,7 @@
 // returns here.
 
 import { getTurnstileToken, readSitekey, stashTurnstileToken } from './turnstile';
+import { stashPublicListing } from './web-audit-listing';
 
 function q<T extends Element>(root: ParentNode, sel: string): T | null {
   return root.querySelector<T>(sel);
@@ -30,6 +31,7 @@ function init(): void {
   const scope = (form.closest('[data-web-audit-section]') as HTMLElement | null) ?? document.body;
   const input = q<HTMLInputElement>(form, '[data-web-audit-input]');
   const submit = q<HTMLButtonElement>(form, '[data-web-audit-submit]');
+  const listing = q<HTMLInputElement>(form, '[data-web-audit-listing]');
   const status = q<HTMLElement>(scope, '[data-web-audit-status]');
   if (!input || !submit) return;
 
@@ -75,6 +77,10 @@ function init(): void {
         return;
       }
     }
+    // A real submit always carries an explicit choice (unchecked opts out);
+    // only a direct scoring-page visit leaves the stash empty so the POST
+    // omits the field and the stored choice survives.
+    if (listing) stashPublicListing(host, listing.checked);
     setStatus('Starting audit…');
     window.location.href = `/web/scoring/${host}`;
   };

@@ -71,6 +71,11 @@ export interface WebScorecard {
   tool: { name: string; url: string };
   audience: null;
   audit_profile: null;
+  /**
+   * Submitter's opt-in to the public board listing. A fresh build always
+   * emits it; optional only because stored envelopes may lack it.
+   */
+  public_listing?: boolean;
   /** The declared site type this audit ran under; null = ran everything. */
   site_type: WebSiteType | null;
   summary: Record<ScorecardStatus, number>;
@@ -110,6 +115,11 @@ export interface WebScorecardMeta {
   discoveryEvidence: EvidenceItem[];
   specVersion: string;
   siteType?: WebSiteType | null;
+  /**
+   * Callers resolve the stored tri-state before building, so undefined
+   * here means a first-ever audit and safely collapses to false.
+   */
+  publicListing?: boolean;
   registry: Pick<WebAuditRegistry, 'category_order' | 'categories' | 'checks'>;
   scoreConfig?: ScoreConfig;
 }
@@ -147,6 +157,7 @@ export function buildWebScorecard(results: EngineResult[], meta: WebScorecardMet
     audience: null,
     audit_profile: null,
     site_type: meta.siteType ?? null,
+    public_listing: meta.publicListing ?? false,
     summary,
     coverage_summary: {
       must: coverageLevel(results, 'must'),

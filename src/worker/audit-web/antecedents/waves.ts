@@ -2,7 +2,8 @@
  * Checks probed in wave 1 because their results feed antecedent tokens or
  * retained bodies consumed by wave-2 checks. Probed unconditionally; their
  * own antecedents are applied afterwards from wave-1 data (the openapi probe
- * result is itself one input to its api-surface gate).
+ * result is itself one input to its api-surface gate; the accept-markdown
+ * probe result is one of the markdown-twin gate's markdown signals).
  */
 export const WAVE1_CHECK_IDS: ReadonlySet<string> = new Set([
   'robots',
@@ -12,4 +13,5 @@ export const WAVE1_CHECK_IDS: ReadonlySet<string> = new Set([
   'oauth-discovery',
   'mcp-initialize',
   'sitemap',
+  'accept-markdown',
 ]);

@@ -1235,17 +1235,28 @@ body:has(.doc) main {
   flex: 1;
   min-width: 0;
 }
-.audit-hero .audit-table {
-  width: 100%;
-  border-collapse: collapse;
+/* The opt-in checkbox gets its own wrapped line; on the form's single
+ * nowrap flex row it would squeeze the URL input on narrow screens. */
+.audit-hero__form {
+  flex-wrap: wrap;
+}
+.audit-hero__optin {
+  flex-basis: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: 0.88rem;
-  table-layout: fixed;
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+.audit-hero__optin input {
+  flex: none;
+  min-width: auto;
+  margin: 0;
+  accent-color: var(--accent);
 }
 .audit-table td {
   overflow-wrap: anywhere;
-}
-.audit-hero .live-score__help {
-  margin: var(--space-3) 0 0;
 }
 
 /* Prev / next pager. */
@@ -1505,6 +1516,13 @@ body:has(.leaderboard-hero) main {
   font-weight: 600;
 }
 
+/* The class also styles server-rendered view-toggle links; anchors keep
+   the UA underline unless overridden, buttons never had one. */
+a.tier-filter {
+  text-decoration: none;
+  display: inline-block;
+}
+
 /* Leaderboard table */
 .leaderboard-table {
   width: 100%;
@@ -1649,6 +1667,22 @@ body:has(.leaderboard-hero) main {
   color: oklch(45.00% 0.1 70);
 }
 
+/* Provenance tag on user-submitted board rows — .tier-badge metrics with
+   neutral tokens: it marks the row's source, not an achievement tier. */
+.lb-tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+  background: var(--bg-raised, #f4f5f7);
+  border: 1px solid var(--border-subtle, #e5e8eb);
+  color: var(--fg-secondary, #6a7278);
+}
+
 .leaderboard-badge-callout h2 {
   margin: 0 0 0.5rem 0;
   font-size: 1.05rem;
@@ -1698,6 +1732,10 @@ body:has(.leaderboard-hero) main {
   .tier-badge {
     font-size: 0.65rem;
     padding: 0.1rem 0.35rem;
+  }
+  .lb-tag {
+    font-size: 0.62rem;
+    padding: 0.08rem 0.3rem;
   }
 }
 @media (max-width: 560px) {
@@ -1943,6 +1981,53 @@ main .remediation__body {
   color: var(--fg-muted);
   max-width: 48ch;
 }
+.assemble-prompt {
+  margin: var(--space-5) 0 var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+}
+.assemble-prompt__title {
+  margin: 0 0 var(--space-2);
+  font-size: 1.1rem;
+  letter-spacing: -0.015em;
+}
+.assemble-prompt__lede {
+  margin: 0 0 var(--space-4);
+  color: var(--fg-secondary);
+  font-size: 0.9rem;
+}
+.assemble-prompt__opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+.assemble-prompt__opt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.88rem;
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+.assemble-prompt__opt input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.assemble-prompt__status {
+  margin: 0 0 var(--space-3);
+  color: var(--fg-secondary);
+  font-size: 0.88rem;
+}
+.assemble-prompt__status:empty {
+  display: none;
+}
+.assemble-prompt [data-assemble-copy]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .catcard {
   border: 1px solid var(--card-border);
   border-radius: var(--radius-lg);
@@ -1958,11 +2043,6 @@ main .remediation__body {
   padding: var(--space-4) var(--space-5);
   background: var(--band-surface-bg);
   border-bottom: 1px solid var(--border-subtle);
-}
-.catcard__hd .audit-group__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
 }
 .audit-group__rollup {
   margin-left: auto;
@@ -2011,9 +2091,12 @@ main .remediation__body {
   flex: 1;
   min-width: 0;
 }
-.web-check summary .audit__status {
-  margin-left: auto;
-  width: auto;
+.audit__status {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  width: 3.5rem;
   white-space: nowrap;
 }
 .web-check--pass .web-check__mark,
@@ -2165,6 +2248,11 @@ main .remediation__body {
   font-weight: 600;
   margin: 0 0 0.5rem;
 }
+.catcard__hd .audit-group__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
 
 .audit-group__title a {
   color: var(--accent, #0058aa);
@@ -2186,6 +2274,12 @@ main .remediation__body {
   font-size: 0.88rem;
   table-layout: fixed;
 }
+.audit-hero .audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  table-layout: fixed;
+}
 .audit-table td {
   overflow-wrap: anywhere;
 }
@@ -2194,15 +2288,6 @@ main .remediation__body {
   padding: 0.35rem 0.6rem;
   border-bottom: 1px solid var(--border-subtle, #e5e8eb);
   vertical-align: top;
-}
-
-.audit__status {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  width: 3.5rem;
-  white-space: nowrap;
 }
 
 .audit--pass .audit__status {
@@ -2244,6 +2329,11 @@ main .remediation__body {
   white-space: nowrap;
   width: auto;
   padding-right: 0.75rem;
+}
+.web-check summary .audit__status {
+  margin-left: auto;
+  width: auto;
+  white-space: nowrap;
 }
 .audit__label {
   color: var(--fg-body, #1a2026);
@@ -2534,6 +2624,9 @@ main .remediation__body {
   font-size: 0.88rem;
   color: var(--fg-secondary);
   line-height: 1.6;
+}
+.audit-hero .live-score__help {
+  margin: var(--space-3) 0 0;
 }
 
 .live-score__chip {

@@ -209,6 +209,96 @@ test.describe('web audit — per-check fix skills', () => {
   });
 });
 
+test.describe('web audit — public_listing opt-in transport', () => {
+  // Serial: these tests write and then read the one shared staging flag
+  // for TARGET_DOMAIN, so each page-driven write must settle (forward or
+  // terminal error state) before the next test touches the flag. The
+  // "form navigates" test above also patches an explicit false (its box
+  // is unchecked) and can overlap this block in wall clock; its write
+  // settles inside that test, so the overlap window is the moments
+  // between this block's two round-trip POSTs.
+  test.describe.configure({ mode: 'serial' });
+
+  function isAuditPost(r: import('@playwright/test').Request): boolean {
+    return r.method() === 'POST' && r.url().includes('/api/audit-web');
+  }
+
+  /** The page's audit flow has settled: forwarded to the saved result, or ended on the retry state. */
+  async function settled(page: import('@playwright/test').Page): Promise<void> {
+    await Promise.race([
+      page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 }),
+      page.locator('[data-web-audit-retry]').waitFor({ state: 'visible', timeout: 75_000 }),
+    ]);
+  }
+
+  test('a checked box sends public_listing: true in the POST body', async ({ page }) => {
+    await page.goto('/web-audit');
+    await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
+    await page.check('[data-web-audit-listing]');
+    const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
+    await page.click('[data-web-audit-submit]');
+    const body = (await posted).postDataJSON() as Record<string, unknown>;
+    expect(body.public_listing).toBe(true);
+    await settled(page);
+  });
+
+  test('an unchecked box (the default) sends an explicit public_listing: false', async ({ page }) => {
+    await page.goto('/web-audit');
+    await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
+    await expect(page.locator('[data-web-audit-listing]')).not.toBeChecked();
+    const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
+    await page.click('[data-web-audit-submit]');
+    const body = (await posted).postDataJSON() as Record<string, unknown>;
+    expect(body.public_listing).toBe(false);
+    await settled(page);
+  });
+
+  test('a direct scoring-page visit omits public_listing entirely', async ({ page }) => {
+    // No preceding form submit means no stashed choice: the POST must omit
+    // the field (never send false) so a shared-link re-audit preserves the
+    // stored choice.
+    const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
+    await page.goto(`/web/scoring/${TARGET_DOMAIN}`);
+    const body = (await posted).postDataJSON() as Record<string, unknown>;
+    expect('public_listing' in body).toBe(false);
+  });
+
+  test('an explicit true round-trips to the stored flag and a blank preserves it', async ({ request }) => {
+    // Serve-cached, patch, and fresh-stream responses all carry the
+    // envelope this helper extracts.
+    async function envelopeOf(res: import('@playwright/test').APIResponse): Promise<Record<string, unknown>> {
+      const contentType = res.headers()['content-type'] ?? '';
+      if (contentType.includes('application/json')) {
+        const body = (await res.json()) as { scorecard?: Record<string, unknown> };
+        return body.scorecard ?? {};
+      }
+      const lines = (await res.text())
+        .split('\n')
+        .filter((l) => l.trim().length > 0)
+        .map((l) => JSON.parse(l) as { type?: string; scorecard?: Record<string, unknown> });
+      const terminal = lines.at(-1);
+      expect(terminal?.type).toBe('complete');
+      return terminal?.scorecard ?? {};
+    }
+
+    const wrote = await request.post('/api/audit-web', {
+      headers: { 'content-type': 'application/json' },
+      data: { url: TARGET_DOMAIN, turnstile_token: 'x', public_listing: true },
+      timeout: 75_000,
+    });
+    expect(wrote.status()).toBe(200);
+    expect((await envelopeOf(wrote)).public_listing).toBe(true);
+
+    const blank = await request.post('/api/audit-web', {
+      headers: { 'content-type': 'application/json' },
+      data: { url: TARGET_DOMAIN, turnstile_token: 'x' },
+      timeout: 75_000,
+    });
+    expect(blank.status()).toBe(200);
+    expect((await envelopeOf(blank)).public_listing).toBe(true);
+  });
+});
+
 test.describe('web audit — MCP fresh path', () => {
   const MCP_HEADERS = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
 

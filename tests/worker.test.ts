@@ -13,27 +13,50 @@ import { applyHeaders, isStagingHost } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/handler';
 
-function req(url: string, accept?: string): Request {
+function req(url: string, accept?: string, ua?: string): Request {
   const headers: Record<string, string> = {};
   if (accept !== undefined) headers.accept = accept;
+  if (ua !== undefined) headers['user-agent'] = ua;
   return new Request(url, { headers });
 }
+
+// Real production User-Agent shapes (token matched, version boilerplate as
+// vendors ship it) so the allowlist regressions catch a real UA drift.
+const UA = {
+  curl: 'curl/8.7.1',
+  browser:
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+  googlebot: 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+  gptbot: 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; GPTBot/1.2; +https://openai.com/gptbot',
+  claudebot: 'Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)',
+  perplexitybot: 'Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://www.perplexity.ai/perplexitybot)',
+  chatgptUser:
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot',
+  claudeUser: 'Mozilla/5.0 (compatible; Claude-User/1.0; +Claude-User@anthropic.com)',
+  perplexityUser: 'Mozilla/5.0 (compatible; Perplexity-User/1.0; +https://www.perplexity.ai/perplexity-user)',
+} as const;
 
 /**
  * Return a stub env.ASSETS whose fetch echoes the requested URL back in
  * both body text and a custom header. The handler under test sees this as
  * an opaque upstream response and layers its own headers on top.
  */
-function makeEnv(bodyByPath: Record<string, string> = {}) {
+function makeEnv(bodyByPath: Record<string, string> = {}, opts: { notFoundUnlessListed?: boolean } = {}) {
   return {
     ASSETS: {
       async fetch(request: Request | string): Promise<Response> {
         const url = typeof request === 'string' ? request : request.url;
         const path = new URL(url).pathname;
-        const body = bodyByPath[path] ?? `asset:${path}`;
+        const listed = Object.hasOwn(bodyByPath, path);
+        const status = opts.notFoundUnlessListed && !listed ? 404 : 200;
+        const body = bodyByPath[path] ?? (status === 404 ? '' : `asset:${path}`);
+        const headers: Record<string, string> = { 'X-Echo-Path': path };
+        // Mirror Static Assets: .txt files are text/plain, not HTML. Needed so
+        // curl-/llms.txt tests can assert the Worker does not overwrite to markdown.
+        if (path.endsWith('.txt')) headers['Content-Type'] = 'text/plain';
         return new Response(body, {
-          status: 200,
-          headers: { 'X-Echo-Path': path },
+          status,
+          headers,
         });
       },
     } as unknown as Fetcher,
@@ -49,7 +72,7 @@ describe('detectPreference — content-negotiation decision table', () => {
     expect(detectPreference(req('https://x/p3'))).toBe('html');
   });
 
-  test('Accept: */* → html (first in our preference list)', () => {
+  test('Accept: */* + no UA → html (no markdown-eligible User-Agent)', () => {
     expect(detectPreference(req('https://x/p3', '*/*'))).toBe('html');
   });
 
@@ -79,6 +102,61 @@ describe('detectPreference — content-negotiation decision table', () => {
 
   test('malformed Accept → html (graceful fallback)', () => {
     expect(detectPreference(req('https://x/p3', 'garbage,,,;;;'))).toBe('html');
+  });
+
+  test('Accept: text/plain → markdown (plain-text clients want the source)', () => {
+    expect(detectPreference(req('https://x/p3', 'text/plain'))).toBe('markdown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectPreference — User-Agent allowlist (fires only on no-preference
+// Accept: absent or `*/*`). Explicit Accept always wins over the UA path.
+// ---------------------------------------------------------------------------
+
+describe('detectPreference — User-Agent allowlist', () => {
+  test('*/* + curl UA → markdown (CLI allowlist)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.curl))).toBe('markdown');
+  });
+
+  test('no Accept + curl UA → markdown', () => {
+    expect(detectPreference(req('https://x/p3', undefined, UA.curl))).toBe('markdown');
+  });
+
+  test('explicit text/html + curl UA → html (explicit Accept wins over UA)', () => {
+    expect(detectPreference(req('https://x/p3', 'text/html', UA.curl))).toBe('html');
+  });
+
+  test('*/* + browser UA → html', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.browser))).toBe('html');
+  });
+
+  test('*/* + Googlebot UA → html (SEO firewall: Googlebot sends */*)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.googlebot))).toBe('html');
+  });
+
+  test('*/* + GPTBot UA → html (training crawler excluded)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.gptbot))).toBe('html');
+  });
+
+  test('*/* + ClaudeBot UA → html (training crawler excluded)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.claudebot))).toBe('html');
+  });
+
+  test('*/* + PerplexityBot UA → html (search-index crawler excluded)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.perplexitybot))).toBe('html');
+  });
+
+  test('*/* + ChatGPT-User UA → markdown (on-demand user-fetcher allowlisted)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.chatgptUser))).toBe('markdown');
+  });
+
+  test('*/* + Claude-User UA → markdown (on-demand user-fetcher allowlisted)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.claudeUser))).toBe('markdown');
+  });
+
+  test('*/* + Perplexity-User UA → markdown (on-demand user-fetcher allowlisted)', () => {
+    expect(detectPreference(req('https://x/p3', '*/*', UA.perplexityUser))).toBe('markdown');
   });
 });
 
@@ -111,8 +189,26 @@ describe('applyHeaders — HTML branch', () => {
     });
     expect(res.headers.get('Link')).toBe('</p3.md>; rel="alternate"; type="text/markdown"');
     expect(res.headers.get('X-Llms-Txt')).toBe('/llms.txt');
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
     expect(res.headers.get('Cache-Control')).toContain('stale-while-revalidate=60');
     expect(res.headers.get('X-Robots-Tag')).toBeNull();
+  });
+
+  // Characterization (2026-08-25 production curl): `https://anc.dev/` HTML HIT
+  // carried applyHeaders Link + `s-maxage=86400` but omitted Vary. Cloudflare's
+  // zone cache stores the Worker response and does not preserve Vary except
+  // Accept-Encoding unless a Cache Rule enables it. Negotiated HTML/markdown
+  // therefore MUST NOT invite shared-cache reuse; JSON/SVG still may.
+  test('HTML negotiated responses skip shared-cache TTL so Vary reaches clients', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/'),
+      servedMarkdown: false,
+      pathname: '/',
+    });
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
   });
 
   test('/ HTML: Link carries the twin alternate plus the machine-surface discovery rels', () => {
@@ -140,7 +236,37 @@ describe('applyHeaders — markdown branch', () => {
     });
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
     expect(res.headers.get('Link')).toBeNull();
+  });
+
+  test('markdown negotiated responses skip shared-cache TTL so Vary reaches clients', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/'),
+      servedMarkdown: true,
+      pathname: '/',
+    });
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('applyHeaders — untwinned source (.txt / .xml)', () => {
+  test('/llms.txt keeps upstream text/plain, edge TTL, and no HTML/markdown chrome', () => {
+    const res = applyHeaders(new Response('# index\n', { headers: { 'Content-Type': 'text/plain' } }), {
+      request: req('https://anc.dev/llms.txt', '*/*', UA.curl),
+      servedMarkdown: false,
+      pathname: '/llms.txt',
+    });
+    expect(res.headers.get('Content-Type')).toBe('text/plain');
+    expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
+    expect(res.headers.get('Vary')).toBeNull();
+    expect(res.headers.get('Link')).toBeNull();
+    expect(res.headers.get('X-Llms-Txt')).toBeNull();
+    expect(res.headers.get('Content-Security-Policy')).toBeNull();
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
   });
 });
 
@@ -155,6 +281,9 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(res.headers.get('Cache-Control')).toContain('stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
+    expect(res.headers.get('Vary')).toBeNull();
     // No markdown-twin advertisement on JSON paths.
     expect(res.headers.get('Link')).toBeNull();
     expect(res.headers.get('X-Llms-Txt')).toBeNull();
@@ -304,6 +433,49 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     const env = makeEnv();
     const res = await worker.fetch(req('https://anc.dev/', 'text/markdown'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/index.md');
+  });
+
+  test('/ with */* + curl UA → fetches /index.md (bare `curl anc.dev`)', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://anc.dev/', '*/*', UA.curl), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Echo-Path')).toBe('/index.md');
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+  });
+
+  // Regression: markdown-UA rewrite used to look up /llms.txt.md and 404.
+  // Bare `curl /llms.txt` must return the file as text/plain; `curl /` still
+  // negotiates the homepage twin (test above).
+  test('/llms.txt with */* + curl UA is 200 text/plain, not a rewritten 404', async () => {
+    const env = makeEnv({ '/llms.txt': '# The agent-native standard\n' }, { notFoundUnlessListed: true });
+    const res = await worker.fetch(req('https://anc.dev/llms.txt', '*/*', UA.curl), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Echo-Path')).toBe('/llms.txt');
+    expect(res.headers.get('Content-Type')).toBe('text/plain');
+    expect(res.headers.get('Content-Type')).not.toContain('markdown');
+    expect(await res.text()).toContain('# The agent-native standard');
+    expect(res.headers.get('Content-Security-Policy')).toBeNull();
+    expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
+  });
+
+  test('/robots.txt and /sitemap.xml skip the markdown twin rewrite', async () => {
+    const env = makeEnv(
+      { '/robots.txt': 'User-agent: *\n', '/sitemap.xml': '<urlset/>' },
+      { notFoundUnlessListed: true },
+    );
+    const robots = await worker.fetch(req('https://anc.dev/robots.txt', '*/*', UA.curl), env, {} as ExecutionContext);
+    const sitemap = await worker.fetch(req('https://anc.dev/sitemap.xml', '*/*', UA.curl), env, {} as ExecutionContext);
+    expect(robots.status).toBe(200);
+    expect(robots.headers.get('X-Echo-Path')).toBe('/robots.txt');
+    expect(sitemap.status).toBe(200);
+    expect(sitemap.headers.get('X-Echo-Path')).toBe('/sitemap.xml');
+  });
+
+  test('/ with */* + browser UA → HTML branch (fetches /)', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(req('https://anc.dev/', '*/*', UA.browser), env, {} as ExecutionContext);
+    expect(res.headers.get('X-Echo-Path')).toBe('/');
   });
 
   test('/p3 with Accept: text/html,text/markdown;q=0.9 → HTML branch', async () => {
@@ -540,5 +712,46 @@ describe('worker.fetch — /api/score routing', () => {
       {} as ExecutionContext,
     );
     expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+});
+
+describe('worker.fetch — agent-friendly 404', () => {
+  test('unknown HTML path returns 404 with origin-absolute recovery links and Vary', async () => {
+    const env = makeEnv({}, { notFoundUnlessListed: true });
+    const res = await worker.fetch(req('https://anc.dev/anc-web-audit-no-such-page'), env, {} as ExecutionContext);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    const html = await res.text();
+    expect(html).toContain('<h1>Not found</h1>');
+    expect(html).toContain('https://anc.dev/sitemap.xml');
+    expect(html).toContain('https://anc.dev/llms.txt');
+    expect(html).not.toContain('href="/sitemap.xml"');
+  });
+
+  test('unknown path with Accept markdown returns 404 markdown linking both recovery URLs', async () => {
+    const env = makeEnv({}, { notFoundUnlessListed: true });
+    const res = await worker.fetch(
+      req('https://anc.dev/anc-web-audit-no-such-page', 'text/markdown'),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    const md = await res.text();
+    expect(md).toContain('[Sitemap](https://anc.dev/sitemap.xml)');
+    expect(md).toContain('[llms.txt](https://anc.dev/llms.txt)');
+  });
+
+  test('staging origin does not emit the production host in 404 markdown', async () => {
+    const env = makeEnv({}, { notFoundUnlessListed: true });
+    const res = await worker.fetch(
+      req('https://agentnative-site-staging.workers.dev/missing', 'text/markdown'),
+      env,
+      {} as ExecutionContext,
+    );
+    const md = await res.text();
+    expect(md).toContain('[Sitemap](https://agentnative-site-staging.workers.dev/sitemap.xml)');
+    expect(md).not.toContain('https://anc.dev');
   });
 });

@@ -7,7 +7,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { computePrincipleScore as sharedComputePrincipleScore } from '../shared/scorecard-format.mjs';
 
 // Re-exported from shared so the Worker live-score renderer reads from

@@ -10,6 +10,10 @@ import { expect, test } from '@playwright/test';
 
 const BASE = 'http://localhost:8787';
 
+// Default curl: Accept */* and a curl/ User-Agent. Playwright's API context
+// otherwise sends a Chrome UA, which would miss the markdown-UA rewrite path.
+const CURL = { 'user-agent': 'curl/8.7.1', accept: '*/*' } as const;
+
 async function sha256(path: string): Promise<string> {
   return createHash('sha256')
     .update(await readFile(path))
@@ -66,6 +70,13 @@ test.describe('CN decision table — live Worker', () => {
     expect(res.headers()['content-type']).toContain('text/markdown');
   });
 
+  test('bare curl GET / is markdown with Vary Accept, User-Agent', async ({ request }) => {
+    const res = await request.get(`${BASE}/`, { headers: CURL });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
+    expect(res.headers()['vary']).toBe('Accept, User-Agent');
+  });
+
   test('HEAD /p3 includes Link header', async ({ request }) => {
     const res = await request.fetch(`${BASE}/p3`, { method: 'HEAD' });
     expect(res.headers()['link']).toContain('rel="alternate"');
@@ -73,6 +84,16 @@ test.describe('CN decision table — live Worker', () => {
 });
 
 test.describe('llms.txt + llms-full.txt — live', () => {
+  test('bare curl GET /llms.txt is 200 text/plain, not a rewritten 404', async ({ request }) => {
+    const res = await request.get(`${BASE}/llms.txt`, { headers: CURL });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toMatch(/text\/plain/);
+    expect(res.headers()['content-type']).not.toContain('markdown');
+    const body = await res.text();
+    expect(body).toMatch(/^#\s+/m);
+    expect(body).not.toMatch(/^# Not found/m);
+  });
+
   test('/llms.txt is the llmstxt.org shape with principles and pages', async ({ request }) => {
     const res = await request.get(`${BASE}/llms.txt`);
     expect(res.status()).toBe(200);

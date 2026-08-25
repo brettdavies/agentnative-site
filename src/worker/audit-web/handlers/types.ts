@@ -23,6 +23,11 @@ export type EvidenceItem = Record<string, unknown>;
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
+  /**
+   * When true, the handler exhausted the remaining per-audit budget mid-probe.
+   * The engine treats the run as incomplete and the route must not cache it.
+   */
+  incomplete?: boolean;
 }
 
 export interface HandlerContext {
@@ -49,4 +54,15 @@ export interface HandlerContext {
   scopedDirs?: string[];
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  /**
+   * Wave-1 retained response bodies keyed by check id (e.g. `llms-txt`).
+   * Handlers that soften on a discoverable twin read this instead of
+   * issuing a second fetch of the antecedent source.
+   */
+  retainedBodies?: ReadonlyMap<string, string>;
+  /**
+   * Session id from wave-1 MCP initialize (`Mcp-Session-Id`), or null when
+   * the server is stateless. Wave-2 MCP probes send it when present.
+   */
+  mcpSessionId?: string | null;
 }

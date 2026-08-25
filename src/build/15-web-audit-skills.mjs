@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from './13-web-audit-registry.mjs';
 import { renderMarkdown } from './render.mjs';

@@ -15,6 +15,7 @@
 // persisted.
 
 import { detectPreference } from '../accept';
+import { applyHeaders } from '../headers';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -25,21 +26,33 @@ import {
   put as cachePut,
   canonicalTargetOf,
   getAggregate,
+  isBoardListable,
   isStale,
   keyFor,
+  listAllWebAudits,
   normalizeTargetUrl,
+  patchStoredPublicListing,
+  scorecardWithPublicListing,
+  sha256Hex,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
 
 export { canonicalTargetOf };
 
+import { normalizeScorecardCategories } from './display';
 import { runWebAudit } from './engine';
-import { buildWebLeaderboardBody, buildWebLeaderboardMarkdown } from './leaderboard-render';
+import {
+  buildWebLeaderboardBody,
+  buildWebLeaderboardMarkdown,
+  type WebBoardEntry,
+  type WebBoardView,
+} from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
+import { decidePublicListingWrite, enforcePublicListingFlipLimit, resolveAuditListing } from './public-listing';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
-import { loadWebSeed } from './seed';
+import { boardExcludeDomains, loadWebSeed } from './seed';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
 
@@ -67,11 +80,6 @@ export interface WebAuditRouteDeps {
   turnstileFetch?: typeof fetch;
 }
 
-async function sha256Hex(input: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 export function isWebAuditPath(pathname: string): boolean {
   return pathname === '/api/audit-web';
 }
@@ -86,6 +94,19 @@ function jsonResponse(body: unknown, status: number, extraHeaders: Record<string
 /** 429 with the session cookie threaded so a rate-limit bounce keeps the session. */
 function rateLimited(message: string, setCookie: string | null): Response {
   return jsonResponse({ error: 'rate_limit', message, retry_after: 60 }, 429, cookieHeader(setCookie));
+}
+
+/** 429 for an exhausted per-domain listing-flip budget, distinct from the audit rate limit. */
+function flipRateLimited(setCookie: string | null): Response {
+  return jsonResponse(
+    {
+      error: 'flip_rate_limited',
+      message: 'too many public_listing changes for this domain; try again later',
+      retry_after: 3600,
+    },
+    429,
+    cookieHeader(setCookie),
+  );
 }
 
 /** Fail-fast 500 for a missing bot-defense secret on the fresh path. */
@@ -134,9 +155,14 @@ export async function handleWebAudit(
     });
   }
   // 2. Body + URL parse.
-  let body: { url?: unknown; site_type?: unknown; turnstile_token?: unknown };
+  let body: { url?: unknown; site_type?: unknown; turnstile_token?: unknown; public_listing?: unknown };
   try {
-    body = (await request.json()) as { url?: unknown; site_type?: unknown; turnstile_token?: unknown };
+    body = (await request.json()) as {
+      url?: unknown;
+      site_type?: unknown;
+      turnstile_token?: unknown;
+      public_listing?: unknown;
+    };
   } catch {
     return jsonResponse(
       { error: 'invalid_body', message: 'POST body must be JSON { url, site_type?, turnstile_token }' },
@@ -152,6 +178,13 @@ export async function handleWebAudit(
     return jsonResponse({ error: 'invalid_site_type', message: 'site_type must be "content" or "api"' }, 400);
   }
   const siteType = (body.site_type as 'content' | 'api' | undefined) ?? null;
+  // Opt-in board listing: strict boolean, kept distinct from omitted so a
+  // blank never erases a stored choice. Reject any non-boolean, including a
+  // "false" string or a number, before any metered gate.
+  if (body.public_listing !== undefined && typeof body.public_listing !== 'boolean') {
+    return jsonResponse({ error: 'invalid_public_listing', message: 'public_listing must be a boolean' }, 400);
+  }
+  const publicListing = body.public_listing as boolean | undefined;
   const canonicalTarget = canonicalTargetOf(url);
   const shareDomain = url.host;
 
@@ -169,8 +202,14 @@ export async function handleWebAudit(
   // falls through to the fresh path so a re-run refreshes the board.
   const shareUrl = `/web/${shareDomain}`;
   const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
+  const listingWrite = decidePublicListingWrite({ explicit: publicListing, cached });
   if (cached && !isStale(cached.scored_at, WEB_AUDIT_STALE_AFTER_MS)) {
-    return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+    // A fresh hit is served as data unless an explicit, differing
+    // public_listing asks for a flag-only patch — that falls through the
+    // full gate stack (kill switch, Turnstile, limiters) like a fresh audit.
+    if (listingWrite.path === 'serve-cached') {
+      return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+    }
   }
 
   // 5. Kill switch — a stale hit is still data when fresh audits are off,
@@ -252,7 +291,45 @@ export async function handleWebAudit(
     }
   }
 
-  // 11. Miss — stream the engine, cache the completed result via waitUntil.
+  // 11. Per-domain flip budget — a write that changes the stored
+  // public_listing (a flag-only patch, or a re-audit that resolves to a
+  // different value) is additionally capped per domain, since the flag is
+  // submitter-set with no ownership check and a flip is far cheaper than a
+  // full audit. Enforced through the shared helper the MCP tool also calls, so
+  // both surfaces draw from one budget per domain. A no-op serve or same-value
+  // re-audit spends nothing. Rejected before the write.
+  if (
+    (await enforcePublicListingFlipLimit({ write: listingWrite, kv: env.SCORE_KV, domain: shareDomain })) ===
+    'rate-limited'
+  ) {
+    return flipRateLimited(setCookie);
+  }
+
+  // 12. Fresh-window flag patch — the request only changes public_listing,
+  // so no re-audit runs; the preserving writer rewrites both stores without
+  // resetting scored_at. A write failure surfaces an error rather than a
+  // fabricated success the client would follow as a saved result.
+  if (listingWrite.path === 'patch') {
+    const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
+    if (!wrote) {
+      return jsonResponse(
+        { error: 'patch_failed', message: 'failed to persist the public_listing change; please retry' },
+        500,
+        cookieHeader(setCookie),
+      );
+    }
+    const patchedScorecard = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
+    return jsonResponse(
+      { cached: true, scorecard: patchedScorecard, share_url: shareUrl },
+      200,
+      cookieHeader(setCookie),
+    );
+  }
+
+  // 13. Miss or stale hit — stream the engine, cache the completed result
+  // via waitUntil. Serve-cached and patch both returned above, so only the
+  // (re-)audit path reaches here.
+  const auditListing = resolveAuditListing(listingWrite, publicListing, cached);
   const registry = await loadWebAuditRegistry(env);
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -266,6 +343,7 @@ export async function handleWebAudit(
         url: canonicalTarget,
         registry,
         siteType,
+        publicListing: auditListing,
         specVersion: SPEC_VERSION,
         fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
       })) {
@@ -309,9 +387,10 @@ export async function handleWebAudit(
 }
 
 // ---------------------------------------------------------------------------
-// GET /web board + .md twin — rendered at request time from the R2
-// leaderboard aggregate (the same source the homepage pane and the
-// list_website_audits tool read, so the surfaces cannot disagree).
+// GET /web board + .md twin — rendered at request time. The curated
+// view reads the R2 leaderboard aggregate (the same source the homepage
+// pane and the list_website_audits tool read); the all view additionally
+// enumerates the audit cache for non-expired user-submitted rows.
 // ---------------------------------------------------------------------------
 
 export function isWebLeaderboardPath(pathname: string): boolean {
@@ -327,11 +406,44 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
   }
   const url = new URL(request.url);
   const wantMarkdown = url.pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+  // Unrecognized view values fall back to the all-cache default so a
+  // mistyped parameter never 404s a shareable board URL.
+  const view: WebBoardView = url.searchParams.get('view') === 'curated' ? 'curated' : 'all';
+  const sortRaw = url.searchParams.get('sort');
+  const sort: 'global' | 'relative' | null = sortRaw === 'relative' || sortRaw === 'global' ? sortRaw : null;
+
   const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
-  const entries = aggregate?.entries ?? [];
+  const curatedEntries: WebBoardEntry[] = (aggregate?.entries ?? []).map((e) => ({ ...e, curated: true }));
+
+  let entries = curatedEntries;
+  let userCount = 0;
+  if (view === 'all') {
+    const excludeDomains = await boardExcludeDomains(
+      env,
+      curatedEntries.map((e) => e.domain),
+    );
+    // Opt-in gate on the shared enumeration, upstream of both renderers, so
+    // the HTML board and its .md twin can never disagree on which non-curated
+    // rows list. Curated rows come from the aggregate above and never pass here.
+    const userSubmitted = (await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains })).filter(
+      isBoardListable,
+    );
+    const userEntries: WebBoardEntry[] = userSubmitted.map((l) => ({
+      domain: l.domain,
+      url: `https://${l.domain}/`,
+      name: l.name,
+      description: '',
+      score_pct: l.score_pct,
+      score: l.score,
+      curated: false,
+    }));
+    entries = curatedEntries.concat(userEntries);
+    userCount = userEntries.length;
+  }
+  const renderOpts = { view, curatedCount: curatedEntries.length, userCount, sort };
 
   if (wantMarkdown) {
-    return new Response(buildWebLeaderboardMarkdown(entries, url.origin), {
+    return new Response(buildWebLeaderboardMarkdown(entries, url.origin, renderOpts), {
       status: 200,
       headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
     });
@@ -350,8 +462,8 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
     title: 'Web Agent-Readiness Leaderboard — anc.dev',
     description:
       'Agent-readiness scores for websites and their MCP servers, scored against the eight agent-native principles.',
-    canonicalPath: '/web',
-    body: buildWebLeaderboardBody(entries),
+    canonicalPath: view === 'curated' ? '/web?view=curated' : '/web',
+    body: buildWebLeaderboardBody(entries, renderOpts),
   });
   return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
@@ -399,17 +511,33 @@ export function parseWebScoringPath(pathname: string): WebScoringPathMatch | nul
   return DOMAIN_SLUG_RE.test(m[1]) ? { domain: m[1], isMarkdown: m[2] === '.md' } : null;
 }
 
+// Content-Type + noindex only. Vary / Link / CSP / negotiated cache come
+// from applyHeaders so result pages share the asset-path policy. X-Robots-Tag
+// survives the HTML branch (applyHeaders does not clear it).
 const HTML_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',
-  'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=60',
   'X-Robots-Tag': 'noindex',
 } as const;
 
 const MARKDOWN_HEADERS = {
   'Content-Type': 'text/markdown; charset=utf-8',
-  'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=60',
   'X-Robots-Tag': 'noindex',
 } as const;
+
+function withNegotiatedHeaders(
+  request: Request,
+  response: Response,
+  servedMarkdown: boolean,
+  pathname: string,
+  opts: { noStore?: boolean } = {},
+): Response {
+  const headed = applyHeaders(response, { request, servedMarkdown, pathname });
+  if (opts.noStore) {
+    headed.headers.set('Cache-Control', 'no-store');
+    headed.headers.delete('Cloudflare-CDN-Cache-Control');
+  }
+  return headed;
+}
 
 let shellTemplatePromise: Promise<string> | null = null;
 async function loadShellTemplate(env: { ASSETS: Fetcher }): Promise<string> {
@@ -472,13 +600,13 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   }
   const url = new URL(request.url);
   const match = parseWebResultPath(url.pathname);
-  if (!match) return renderNotFound(env, '(invalid)', false);
+  if (!match) return renderNotFound(request, env, '(invalid)', false);
 
   const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
   const hit = await lookupByDomain(env, match.domain);
-  if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
+  if (!hit) return renderNotFound(request, env, match.domain, wantMarkdown);
 
-  // A missing remediation catalog degrades to generic prompts (R10).
+  // A missing remediation catalog degrades to generic prompts.
   let remediation: WebRemediationCatalog = {};
   try {
     remediation = await loadWebRemediationCatalog(env);
@@ -486,7 +614,17 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     remediation = {};
   }
 
-  const scorecard = hit.scorecard as {
+  // Re-derive the current category split at read time so a cached
+  // scorecard renders the current shape; a failed registry load falls
+  // back to the stored shape rather than failing the page.
+  let normalized: unknown = hit.scorecard;
+  try {
+    normalized = normalizeScorecardCategories(hit.scorecard, await loadWebAuditRegistry(env));
+  } catch {
+    normalized = hit.scorecard;
+  }
+
+  const scorecard = normalized as {
     tool?: { name?: string; url?: string };
     score_pct?: number;
   };
@@ -508,7 +646,12 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   };
 
   if (wantMarkdown) {
-    return new Response(buildWebSummaryMarkdown(input), { status: 200, headers: MARKDOWN_HEADERS });
+    return withNegotiatedHeaders(
+      request,
+      new Response(buildWebSummaryMarkdown(input), { status: 200, headers: MARKDOWN_HEADERS }),
+      true,
+      url.pathname,
+    );
   }
 
   const pct = scorecard.score_pct ?? 0;
@@ -529,10 +672,21 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     canonicalPath: `/web/${match.domain}`,
     body: buildWebSummaryBody(input),
   });
-  return new Response(html, { status: 200, headers: HTML_HEADERS });
+  return withNegotiatedHeaders(
+    request,
+    new Response(html, { status: 200, headers: HTML_HEADERS }),
+    false,
+    url.pathname,
+  );
 }
 
-async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdown: boolean): Promise<Response> {
+async function renderNotFound(
+  request: Request,
+  env: WebAuditRouteEnv,
+  domain: string,
+  wantMarkdown: boolean,
+): Promise<Response> {
+  const pathname = new URL(request.url).pathname;
   if (wantMarkdown) {
     const lines = [
       `# ${domain} is not audited yet`,
@@ -540,7 +694,12 @@ async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdow
       'No cached agent-readiness audit exists for this domain. Run one at [anc.dev/web-audit](https://anc.dev/web-audit) or call the `audit_website` MCP tool.',
       '',
     ];
-    return new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS });
+    return withNegotiatedHeaders(
+      request,
+      new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS }),
+      true,
+      pathname,
+    );
   }
   const body = `<header class="scorecard-header">
   <h1><code>${esc(domain)}</code> is not audited yet</h1>
@@ -564,7 +723,7 @@ async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdow
     canonicalPath: `/web/${domain}`,
     body,
   });
-  return new Response(html, { status: 404, headers: HTML_HEADERS });
+  return withNegotiatedHeaders(request, new Response(html, { status: 404, headers: HTML_HEADERS }), false, pathname);
 }
 
 // ---------------------------------------------------------------------------
@@ -594,11 +753,17 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
   }
   const url = new URL(request.url);
   const match = parseWebScoringPath(url.pathname);
-  if (!match) return renderNotFound(env, '(invalid)', detectPreference(request) === 'markdown');
+  if (!match) return renderNotFound(request, env, '(invalid)', detectPreference(request) === 'markdown');
 
   const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
   if (wantMarkdown) {
-    return new Response(scoringMarkdown(match.domain), { status: 200, headers: SCORING_MARKDOWN_HEADERS });
+    return withNegotiatedHeaders(
+      request,
+      new Response(scoringMarkdown(match.domain), { status: 200, headers: SCORING_MARKDOWN_HEADERS }),
+      true,
+      url.pathname,
+      { noStore: true },
+    );
   }
 
   const title = match.domain ? `Auditing ${match.domain} — anc.dev` : 'Audit a website — anc.dev';
@@ -618,7 +783,13 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
   }
   const body = match.domain ? scoringBody(match.domain, env.TURNSTILE_SITEKEY ?? '') : scoringPointerBody();
   const html = substituteShell(template, { title, description, canonicalPath, body });
-  return new Response(html, { status: 200, headers: SCORING_HTML_HEADERS });
+  return withNegotiatedHeaders(
+    request,
+    new Response(html, { status: 200, headers: SCORING_HTML_HEADERS }),
+    false,
+    url.pathname,
+    { noStore: true },
+  );
 }
 
 // The sitekey meta and the page script are injected in the body substitution

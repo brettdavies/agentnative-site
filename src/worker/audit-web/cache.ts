@@ -54,6 +54,23 @@ const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
 // behind the kill-switch/limiter/Turnstile gates).
 export const WEB_AUDIT_STALE_AFTER_MS = 5 * 60_000;
 
+// Logical display expiry for user-submitted rows on the /web all view:
+// an unseeded entry older than this drops off the board even though the
+// R2 object persists (no lifecycle rule covers audits/web/). Tunable;
+// any future physical R2 lifecycle TTL must be >= this window so a row
+// never vanishes from storage before it ages off the board.
+export const WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+
+/** Board-relevant subset of a listed per-domain entry, parsed from R2 custom metadata. */
+export type WebListedAudit = {
+  domain: string;
+  name: string;
+  score_pct: number;
+  score: { relative: number; global: number };
+  scored_at: string;
+  public_listing: boolean;
+};
+
 /**
  * Normalize a URL for keying and display: lowercase host, canonical
  * scheme, no fragment, and a normalized trailing slash on a bare-host URL.
@@ -77,7 +94,12 @@ export function canonicalTargetOf(url: URL): string {
   return `${url.protocol}//${url.host}/`;
 }
 
-async function sha256Hex(input: string): Promise<string> {
+/**
+ * Hex SHA-256 of a string: the keying convention shared by the per-domain
+ * cache key and the per-domain flip budget, so both hash an identifier the
+ * same way rather than storing it in the clear.
+ */
+export async function sha256Hex(input: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -149,20 +171,190 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
     throw new Error('web-cache.put: scorecard.target_url required (refusal-to-cache-half-state)');
   }
 
-  const payload: CachedWebAudit = {
+  const payload = {
     spec_version: specVersion,
     target_url: normalizeTargetUrl(url),
     scorecard,
     scored_at: new Date().toISOString(),
   };
-  const key = await keyFor(url, specVersion);
+  await writeAuditObject(env, await keyFor(url, specVersion), payload, 'web-cache.put');
+}
+
+/**
+ * A shallow copy of a stored scorecard with `public_listing` set to `value`.
+ * Shared by the preserving writer and both inbound surfaces so the object
+ * persisted to R2 and the one echoed back in a patch response can never take
+ * a different shape.
+ */
+export function scorecardWithPublicListing(scorecard: unknown, value: boolean): Record<string, unknown> {
+  return { ...(scorecard as Record<string, unknown>), public_listing: value };
+}
+
+/**
+ * Re-put a stored audit with `public_listing` flipped, writing the flag into
+ * both the envelope body and the board custom metadata in a single object
+ * write (R2 has no partial-metadata update, so it is a full rewrite). Unlike
+ * `put`, `scored_at` is sourced from the stored entry and carried forward so a
+ * flag flip never resets the freshness or display-age windows; only an entry
+ * that never carried a stamp gets one now. Never throws: a write failure logs
+ * and resolves false so callers can refuse to report a patch that did not
+ * land.
+ */
+export async function patchStoredPublicListing(
+  env: WebCacheEnv,
+  cached: CachedWebAudit,
+  value: boolean,
+): Promise<boolean> {
+  const scorecard = scorecardWithPublicListing(cached.scorecard, value);
+  const payload = {
+    spec_version: cached.spec_version,
+    target_url: cached.target_url,
+    scorecard,
+    scored_at: cached.scored_at ?? new Date().toISOString(),
+  };
+  const key = await keyFor(cached.target_url, cached.spec_version);
+  return writeAuditObject(env, key, payload, 'web-cache.patchStoredPublicListing');
+}
+
+/**
+ * Write a fully-stamped audit envelope to R2, deriving board custom metadata
+ * from the same payload so body and metadata can never disagree. Never
+ * throws: a write failure logs under `scope` and resolves false.
+ */
+async function writeAuditObject(
+  env: WebCacheEnv,
+  key: string,
+  payload: CachedWebAudit & { scored_at: string },
+  scope: string,
+): Promise<boolean> {
   try {
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
       httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
+      customMetadata: boardMetadataOf(payload.target_url, payload.scorecard, payload.scored_at),
     });
+    return true;
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.put', key, error: errMsg(err) }));
+    console.log(JSON.stringify({ scope, key, error: errMsg(err) }));
+    return false;
   }
+}
+
+// Board fields duplicated into R2 custom metadata so the /web all view
+// can enumerate cached sites with a bare list() — no per-object body
+// fetch on the render path. R2 metadata is string-valued; readers parse.
+function boardMetadataOf(targetUrl: string, scorecard: unknown, scoredAt: string): Record<string, string> {
+  const sc = scorecard as {
+    tool?: { name?: unknown };
+    score_pct?: unknown;
+    score?: { relative?: unknown; global?: unknown };
+    public_listing?: unknown;
+  } | null;
+  const domain = new URL(targetUrl).host;
+  const toolName = sc?.tool?.name;
+  const meta: Record<string, string> = {
+    domain,
+    name: typeof toolName === 'string' && toolName.length > 0 ? toolName : domain,
+    scored_at: scoredAt,
+    // Board gating reads custom metadata only (never the body), so the opt-in
+    // flag must be dual-stored here; string-valued because R2 metadata is
+    // string-only, and always emitted so a missing key can't read as opted-in.
+    public_listing: String(sc?.public_listing ?? false),
+  };
+  if (typeof sc?.score_pct === 'number') meta.score_pct = String(sc.score_pct);
+  if (typeof sc?.score?.relative === 'number') meta.relative = String(sc.score.relative);
+  if (typeof sc?.score?.global === 'number') meta.global = String(sc.score.global);
+  return meta;
+}
+
+const PER_DOMAIN_HASH_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * `true` when `key` is a per-domain audit object at `specVersion` — the
+ * `audits/web/<64-hex-hash>/<version>.json` shape. Aggregate keys (their
+ * third segment is a `WebAggregateKind`, not a 64-char hex hash) and
+ * off-version objects return false. The version segment is compared as a
+ * literal string so version dots can never act as regex wildcards (0.5.0
+ * must not match 0x5x0). Shared by the board enumeration and the one-time
+ * `public_listing` backfill so the two can never disagree on which objects
+ * are per-domain audits.
+ */
+export function isPerDomainAuditKey(key: string, specVersion: string): boolean {
+  const parts = key.split('/');
+  return parts.length === 4 && PER_DOMAIN_HASH_RE.test(parts[2]) && parts[3] === `${specVersion}.json`;
+}
+
+export type ListAllWebAuditsOpts = {
+  specVersion: string;
+  excludeDomains: ReadonlySet<string>;
+  now?: number;
+  maxAgeMs?: number;
+};
+
+/**
+ * Enumerate every cached per-domain audit at `specVersion` from R2 custom
+ * metadata alone. Skips aggregate keys, other spec versions, excluded
+ * (seeded/curated) domains, entries past the display window, and entries
+ * whose metadata is missing or unparseable (pre-metadata writes self-heal
+ * on their next audit). Best-effort like the rest of this module: a list
+ * failure logs and returns what was collected, never throws.
+ */
+export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsOpts): Promise<WebListedAudit[]> {
+  const out: WebListedAudit[] = [];
+  const maxAgeMs = opts.maxAgeMs ?? WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS;
+  const now = opts.now ?? Date.now();
+  let cursor: string | undefined;
+  try {
+    do {
+      const page = await env.SCORE_CACHE.list({ prefix: 'audits/web/', include: ['customMetadata'], cursor });
+      for (const obj of page.objects) {
+        if (!isPerDomainAuditKey(obj.key, opts.specVersion)) continue;
+        const entry = parseListedMetadata(obj.customMetadata);
+        if (!entry) continue;
+        if (opts.excludeDomains.has(entry.domain)) continue;
+        if (isStale(entry.scored_at, maxAgeMs, now)) continue;
+        out.push(entry);
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+  } catch (err) {
+    console.log(JSON.stringify({ scope: 'web-cache.listAllWebAudits', error: errMsg(err) }));
+  }
+  return out;
+}
+
+/**
+ * Board-listing gate for a non-curated row: a user-submitted audit lists only
+ * on an explicit opt-in. The single exported predicate both board surfaces
+ * (the /web all view and the MCP list tool) share, so they can never drift on
+ * what counts as listable. Curated rows bypass this entirely and always show.
+ */
+export function isBoardListable(row: WebListedAudit): boolean {
+  return row.public_listing === true;
+}
+
+function parseListedMetadata(meta: Record<string, string> | undefined): WebListedAudit | null {
+  if (!meta) return null;
+  const { domain, name, scored_at } = meta;
+  if (!domain || !scored_at) return null;
+  const scorePct = numberField(meta.score_pct);
+  const relative = numberField(meta.relative);
+  const globalScore = numberField(meta.global);
+  if (scorePct === null || relative === null || globalScore === null) return null;
+  return {
+    domain,
+    name: name && name.length > 0 ? name : domain,
+    score_pct: scorePct,
+    score: { relative, global: globalScore },
+    scored_at,
+    // A missing key coerces to false: an unmigrated object reads as not-listed.
+    public_listing: meta.public_listing === 'true',
+  };
+}
+
+function numberField(raw: string | undefined): number | null {
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function getAggregate(
