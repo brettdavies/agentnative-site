@@ -3,8 +3,8 @@
 // Link probes are SSRF-guarded and budgeted like scoped-llms.
 
 import type { WebCheck } from '../registry';
-import { guardedFetch, validatePublicUrl } from '../ssrf';
-import { timeoutMsFor } from './shared';
+import { guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
+import { remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 const MARKDOWN_LINK_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -72,6 +72,7 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
   }
 
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
+  const deadlineAt = Date.now() + timeoutMs;
   const cap = w.max_candidates ?? DEFAULT_MAX_LINKS;
   const hrefs = hrefsFrom(body, ctx.base).slice(0, cap);
   if (hrefs.length === 0) {
@@ -81,13 +82,23 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
   const evidence: ProbeOutcome['evidence'] = [];
   const misses: Array<Exclude<ProbeStatus, 'pass' | 'na'>> = [];
   for (const href of hrefs) {
+    const slice = remainingDeadlineMs(deadlineAt);
+    if (slice <= 0) {
+      evidence.push({ why: ['nested-probe budget exhausted'] });
+      misses.push('error');
+      break;
+    }
     const validation = validatePublicUrl(href);
     if (!validation.ok) {
       evidence.push({ url: href, blocked: validation.reason, ok: false });
       misses.push('absent');
       continue;
     }
-    const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs });
+    const resp = await guardedFetch(
+      href,
+      {},
+      { ...ctx.fetchOptions, timeoutMs: slice, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
+    );
     if (resp.error !== null || resp.status === null) {
       evidence.push({ url: href, status: resp.status, error: resp.error, ok: false });
       misses.push('error');

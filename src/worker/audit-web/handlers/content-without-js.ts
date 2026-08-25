@@ -6,8 +6,8 @@
 // not fetch; the retained llms.txt body is the only twin signal.
 
 import type { WebCheck } from '../registry';
-import { guardedFetch, validatePublicUrl } from '../ssrf';
-import { timeoutMsFor } from './shared';
+import { AUDIT_PROBE_MAX_BODY_BYTES, guardedFetch, validatePublicUrl } from '../ssrf';
+import { remainingDeadlineMs, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
 const MIN_VISIBLE_CHARS = 200;
@@ -61,6 +61,7 @@ function contentHrefs(llmsBody: string, base: string): string[] {
 export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const w = check.with as { timeout?: number };
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
+  const deadlineAt = Date.now() + timeoutMs;
   const root = ctx.root;
   if (!root || root.status === null) {
     return { status: 'error', evidence: [{ why: ['root fetch unavailable'] }] };
@@ -83,12 +84,21 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
   const hrefs = contentHrefs(llmsBody, ctx.base).slice(0, MAX_TWIN_PROBES);
   const evidence: ProbeOutcome['evidence'] = [{ url: ctx.base, status: root.status, ok: false, why: floor.why }];
   for (const href of hrefs) {
+    const slice = remainingDeadlineMs(deadlineAt);
+    if (slice <= 0) {
+      evidence.push({ why: ['nested-probe budget exhausted'] });
+      break;
+    }
     const validation = validatePublicUrl(href);
     if (!validation.ok) {
       evidence.push({ url: href, blocked: validation.reason });
       continue;
     }
-    const resp = await guardedFetch(href, {}, { ...ctx.fetchOptions, timeoutMs });
+    const resp = await guardedFetch(
+      href,
+      {},
+      { ...ctx.fetchOptions, timeoutMs: slice, maxBodyBytes: AUDIT_PROBE_MAX_BODY_BYTES },
+    );
     if (resp.error !== null || resp.status === null) {
       evidence.push({ url: href, status: resp.status, error: resp.error });
       continue;

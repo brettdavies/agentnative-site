@@ -42,7 +42,7 @@ const RECOVERY_CHECKS: WebCheck[] = [
       expect: {
         status: [404, 410],
         content_type: 'markdown|text/plain',
-        body_regex: '\\]\\([^)]*(sitemap\\.xml|llms\\.txt|/docs)',
+        same_origin_recovery_link: true,
       },
     },
   }),
@@ -166,6 +166,24 @@ describe('agent-friendly 404 family', () => {
       if (url.includes('/anc-web-audit-no-such-page')) {
         const md = accept?.includes('markdown');
         return new Response(md ? '# Not found\n' : '<h1>gone</h1>', {
+          status: 404,
+          headers: { 'content-type': md ? 'text/markdown' : 'text/html' },
+        });
+      }
+      if (url.endsWith('/llms.txt')) return new Response('nope', { status: 404 });
+      return new Response(RICH_HTML, { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: registryOf(RECOVERY_CHECKS), fetchOptions: { fetchImpl } }),
+    );
+    expect(resultsOf(events).find((r) => r.id === 'agent-friendly-404-md')?.status).toBe('absent');
+  });
+
+  test('off-origin lookalike recovery href does not pass the sibling', async () => {
+    const fetchImpl = siteFetch((url, accept) => {
+      if (url.includes('/anc-web-audit-no-such-page')) {
+        const md = accept?.includes('markdown');
+        return new Response(md ? '# Not found\n\n- [llms.txt](https://evil.example/llms.txt)\n' : '<h1>gone</h1>', {
           status: 404,
           headers: { 'content-type': md ? 'text/markdown' : 'text/html' },
         });

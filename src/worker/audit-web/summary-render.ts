@@ -139,7 +139,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   const naCount = (counts.n_a ?? 0) + (counts.skip ?? 0);
   if (naCount) chips.push(`<span class="chip chip--muted">${naCount} n/a</span>`);
 
-  let html = `<article class="container scorecard-page"><nav class="crumb" aria-label="Breadcrumb">
+  let html = `<article class="container scorecard-page" data-web-audit-result><nav class="crumb" aria-label="Breadcrumb">
   <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(name)}</span>
 </nav>
 <header class="scorecard-hero">

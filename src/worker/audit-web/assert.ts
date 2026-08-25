@@ -33,6 +33,12 @@ export type ExpectBlock = {
   body_regex?: string;
   /** Fail when the body matches (cheap challenge/interstitial heuristic). */
   body_not_regex?: string;
+  /**
+   * Markdown 404 recovery: at least one markdown href must resolve to a
+   * same-origin sitemap.xml, llms.txt, or /docs path. Evaluated by the
+   * http handler (needs the audited origin), not assertHttp.
+   */
+  same_origin_recovery_link?: boolean;
 };
 
 export type AssertOutcome = { ok: boolean; reasons: string[] };

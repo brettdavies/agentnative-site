@@ -5,7 +5,7 @@
 
 import type { ProbeResponse } from '../assert';
 import type { WebCheck } from '../registry';
-import { guardedFetch, validatePublicUrl } from '../ssrf';
+import { AUDIT_PROBE_MAX_BODY_BYTES, guardedFetch, STATUS_ONLY_BODY_BYTES, validatePublicUrl } from '../ssrf';
 import { timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome } from './types';
 
@@ -126,7 +126,15 @@ export async function runApiHygiene(check: WebCheck, ctx: HandlerContext): Promi
     return { status: 'error', evidence: [{ url: derived.url, blocked: validation.reason, source: derived.source }] };
   }
 
-  const resp = await guardedFetch(derived.url, { method: 'GET' }, { ...ctx.fetchOptions, timeoutMs });
+  const resp = await guardedFetch(
+    derived.url,
+    { method: 'GET' },
+    {
+      ...ctx.fetchOptions,
+      timeoutMs,
+      maxBodyBytes: op === 'rate-limit' ? STATUS_ONLY_BODY_BYTES : AUDIT_PROBE_MAX_BODY_BYTES,
+    },
+  );
   if (resp.error !== null || resp.status === null) {
     return {
       status: 'error',

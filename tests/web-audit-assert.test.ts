@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { assertHttp, type ProbeResponse, parseJsonRpc } from '../src/worker/audit-web/assert';
+import { remainingDeadlineMs, sameOriginRecoveryLink } from '../src/worker/audit-web/handlers/shared';
 
 function resp(partial: Partial<ProbeResponse>): ProbeResponse {
   return { status: 200, headers: {}, body: '', error: null, ...partial };
@@ -230,5 +231,24 @@ describe('parseJsonRpc', () => {
 
   test('non-object JSON body returns null', () => {
     expect(parseJsonRpc(resp({ body: '[1,2,3]' }))).toBeNull();
+  });
+});
+
+describe('sameOriginRecoveryLink', () => {
+  test('accepts origin-absolute, relative, and /docs paths; rejects off-origin lookalikes', () => {
+    const base = 'https://example.com/';
+    expect(sameOriginRecoveryLink('- [llms.txt](https://example.com/llms.txt)\n', base).ok).toBe(true);
+    expect(sameOriginRecoveryLink('- [sitemap](/sitemap.xml)\n', base).ok).toBe(true);
+    expect(sameOriginRecoveryLink('- [docs](/docs)\n', base).ok).toBe(true);
+    expect(sameOriginRecoveryLink('- [llms.txt](https://evil.example/llms.txt)\n', base).ok).toBe(false);
+    expect(sameOriginRecoveryLink('- [docs](/documentation)\n', base).ok).toBe(false);
+  });
+});
+
+describe('remainingDeadlineMs', () => {
+  test('clamps exhausted budgets to zero', () => {
+    expect(remainingDeadlineMs(1000, 1000)).toBe(0);
+    expect(remainingDeadlineMs(1000, 1500)).toBe(0);
+    expect(remainingDeadlineMs(1000, 400)).toBe(600);
   });
 });

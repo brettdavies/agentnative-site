@@ -616,7 +616,7 @@ checks:
       expect:
         status: [404, 410]
         content_type: "markdown|text/plain"
-        body_regex: "\\]\\([^)]*(sitemap\\.xml|llms\\.txt|/docs)"
+        same_origin_recovery_link: true
     hint: 'On Accept text/markdown, serve a short 404 markdown body that links at least one recovery surface (sitemap, llms.txt, or a docs index). Verify with curl -sS -o /dev/null -w "%{http_code}".'
 
   - id: link-headers

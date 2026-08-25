@@ -2,6 +2,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
+import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
+import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 
 function makeCheck(partial: Partial<WebCheck> & { id: string }): WebCheck {
@@ -149,5 +151,31 @@ describe('llms.txt quality trio', () => {
       expect(row?.status).toBe('n_a');
       expect(row?.na_reason).toBe('antecedent-unmet');
     }
+  });
+
+  test('link probes stop when the nested budget is exhausted', async () => {
+    const links = Array.from({ length: 8 }, (_, i) => `- [p${i}](https://example.com/p${i})`).join('\n');
+    const body = `# Site\n\n> Summary\n\n${links}\n`;
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+    const ctx: HandlerContext = {
+      base: 'https://example.com/',
+      host: 'example.com',
+      mcpEndpoint: null,
+      protocolVersion: '2025-06-18',
+      defaultTimeoutMs: 50,
+      retainedBodies: new Map([['llms-txt', body]]),
+      fetchOptions: { fetchImpl },
+    };
+    const check = CHECKS.find((c) => c.id === 'llms-txt-links');
+    if (!check) throw new Error('missing llms-txt-links fixture');
+    const outcome = await runLlmsTxtQuality(check, ctx);
+    expect(calls).toBeLessThan(8);
+    expect(outcome.status).toBe('error');
+    expect(JSON.stringify(outcome.evidence)).toContain('nested-probe budget exhausted');
   });
 });

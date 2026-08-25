@@ -5,7 +5,12 @@
 // public happy path must still succeed.
 
 import { describe, expect, test } from 'bun:test';
-import { guardedFetch, validatePublicUrl } from '../src/worker/audit-web/ssrf';
+import {
+  AUDIT_PROBE_MAX_BODY_BYTES,
+  guardedFetch,
+  STATUS_ONLY_BODY_BYTES,
+  validatePublicUrl,
+} from '../src/worker/audit-web/ssrf';
 
 function stubFetch(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -160,5 +165,23 @@ describe('guardedFetch', () => {
     const fetchImpl = stubFetch(() => new Response('odd', { status: 302 }));
     const resp = await guardedFetch('https://example.com/', {}, { fetchImpl });
     expect(resp.status).toBe(302);
+  });
+
+  test('maxBodyBytes 0 skips the body; a cap truncates oversized responses', async () => {
+    const huge = 'x'.repeat(AUDIT_PROBE_MAX_BODY_BYTES + 2048);
+    const skip = await guardedFetch(
+      'https://example.com/',
+      {},
+      { fetchImpl: stubFetch(() => new Response(huge)), maxBodyBytes: STATUS_ONLY_BODY_BYTES },
+    );
+    expect(skip.status).toBe(200);
+    expect(skip.body).toBe('');
+    const capped = await guardedFetch(
+      'https://example.com/',
+      {},
+      { fetchImpl: stubFetch(() => new Response(huge)), maxBodyBytes: AUDIT_PROBE_MAX_BODY_BYTES },
+    );
+    expect(capped.status).toBe(200);
+    expect(capped.body.length).toBe(AUDIT_PROBE_MAX_BODY_BYTES);
   });
 });

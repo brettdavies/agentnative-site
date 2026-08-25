@@ -231,6 +231,7 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(html).not.toContain('data-assemble-prompt');
     expect(html).not.toContain('<input');
     expect(html).not.toContain('<button');
+    expect(html).toContain('data-web-audit-result');
   });
 
   test('no badge-embed markup and no P-principle grouping', () => {

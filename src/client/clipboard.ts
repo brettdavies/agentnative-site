@@ -142,11 +142,12 @@ function attachDataButtons() {
 }
 
 function attachAssemblePrompt() {
-  const page = document.querySelector('.scorecard-page');
+  const page = document.querySelector('.scorecard-page[data-web-audit-result]');
   const hero = page?.querySelector('.scorecard-hero');
   if (!page || !hero || page.querySelector('[data-assemble-prompt]')) return;
 
   const carriers = carriersFromElements(page.querySelectorAll('[data-copy-text][data-keyword]'));
+  if (carriers.length === 0) return;
   const section = document.createElement('section');
   section.className = 'assemble-prompt';
   section.setAttribute('data-assemble-prompt', '');
