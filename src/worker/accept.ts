@@ -160,3 +160,74 @@ export function detectMcpGetFormat(request: Request): McpGetFormat {
   if (match === 'text/markdown') return 'markdown';
   return 'html';
 }
+
+/** Canonical Accept the inner Worker sees after gateway classification. */
+const SITE_CLASS_ACCEPT: Record<Preference, string> = {
+  html: 'text/html',
+  markdown: 'text/markdown',
+};
+
+const MCP_GET_CLASS_ACCEPT: Record<McpGetFormat, string> = {
+  html: 'text/html',
+  json: 'application/json',
+  markdown: 'text/markdown',
+};
+
+// UA class uses tokens detectPreference already understands: `curl/` is on
+// MARKDOWN_UA_TOKENS; empty UA is the HTML default. Do not invent a label
+// that is not already in that allowlist (KTD8).
+const MARKDOWN_CLASS_UA = 'curl/';
+
+function isGetOrHead(method: string): boolean {
+  const upper = method.toUpperCase();
+  return upper === 'GET' || upper === 'HEAD';
+}
+
+function mcpGetPathname(pathname: string): boolean {
+  return pathname === '/mcp' || pathname === '/mcp/';
+}
+
+function applyUaClass(headers: Headers, siteClass: Preference): void {
+  if (siteClass === 'markdown') {
+    headers.set('user-agent', MARKDOWN_CLASS_UA);
+    return;
+  }
+  headers.delete('user-agent');
+}
+
+/**
+ * Uncached-gateway rewrite (KTD1 / KTD8): classify HTML vs markdown the way
+ * detectPreference already does, then canonicalize Accept and UA so Workers
+ * Caching keys on the class rather than raw header strings. GET /mcp uses
+ * detectMcpGetFormat so the JSON 301 cannot share a cache object with the
+ * HTML/markdown page. www.anc.dev coalesces to anc.dev on production only.
+ */
+export function classifyGatewayRequest(request: Request): Request {
+  const url = new URL(request.url);
+  if (url.hostname === 'www.anc.dev') {
+    url.hostname = 'anc.dev';
+  }
+
+  if (!isGetOrHead(request.method)) {
+    if (url.href === request.url) return request;
+    return new Request(url, request);
+  }
+
+  const headers = new Headers(request.headers);
+  const siteClass = detectPreference(request);
+  applyUaClass(headers, siteClass);
+
+  if (mcpGetPathname(url.pathname)) {
+    headers.set('accept', MCP_GET_CLASS_ACCEPT[detectMcpGetFormat(request)]);
+  } else if (!url.pathname.startsWith('/api/')) {
+    // Negotiated HTML/markdown site surface only. /api/score and friends
+    // keep the inbound Accept so q-value JSON vs markdown still works (KTD8).
+    headers.set('accept', SITE_CLASS_ACCEPT[siteClass]);
+  }
+
+  return new Request(url, {
+    method: request.method,
+    headers,
+    redirect: request.redirect,
+  });
+}

@@ -8,7 +8,7 @@
 // no wrangler dev needed.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { detectPreference } from '../src/worker/accept';
+import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isStagingHost } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/handler';
@@ -157,6 +157,126 @@ describe('detectPreference — User-Agent allowlist', () => {
 
   test('*/* + Perplexity-User UA → markdown (on-demand user-fetcher allowlisted)', () => {
     expect(detectPreference(req('https://x/p3', '*/*', UA.perplexityUser))).toBe('markdown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyGatewayRequest — format-class cache key (edge HIT restore U2 / AE4)
+// ---------------------------------------------------------------------------
+
+describe('classifyGatewayRequest — format-class table', () => {
+  test('Chrome text/html and Chrome */* share one HTML class after normalize', () => {
+    const html = classifyGatewayRequest(req('https://anc.dev/about', 'text/html', UA.browser));
+    const star = classifyGatewayRequest(req('https://anc.dev/about', '*/*', UA.browser));
+    expect(html.headers.get('accept')).toBe('text/html');
+    expect(star.headers.get('accept')).toBe('text/html');
+    expect(html.headers.get('user-agent')).toBeNull();
+    expect(star.headers.get('user-agent')).toBeNull();
+  });
+
+  test('Safari vs Chrome HTML shards collapse to the same UA class', () => {
+    const chrome = classifyGatewayRequest(req('https://anc.dev/about', 'text/html', UA.browser));
+    const safari = classifyGatewayRequest(
+      req(
+        'https://anc.dev/about',
+        'text/html',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+      ),
+    );
+    expect(chrome.headers.get('accept')).toBe(safari.headers.get('accept'));
+    expect(chrome.headers.get('user-agent')).toBe(safari.headers.get('user-agent'));
+  });
+
+  test('curl */* is the markdown class; Chrome text/html is not', () => {
+    const curl = classifyGatewayRequest(req('https://anc.dev/', '*/*', UA.curl));
+    const chrome = classifyGatewayRequest(req('https://anc.dev/', 'text/html', UA.browser));
+    expect(curl.headers.get('accept')).toBe('text/markdown');
+    expect(curl.headers.get('user-agent')).toBe('curl/');
+    expect(chrome.headers.get('accept')).toBe('text/html');
+    expect(chrome.headers.get('user-agent')).toBeNull();
+  });
+
+  test('Accept: text/markdown with a browser UA is markdown (explicit Accept wins)', () => {
+    const classified = classifyGatewayRequest(req('https://anc.dev/', 'text/markdown', UA.browser));
+    expect(classified.headers.get('accept')).toBe('text/markdown');
+    expect(classified.headers.get('user-agent')).toBe('curl/');
+  });
+
+  test('header-less GET / is the HTML class (no-UA → HTML)', () => {
+    const classified = classifyGatewayRequest(req('https://anc.dev/'));
+    expect(classified.headers.get('accept')).toBe('text/html');
+    expect(classified.headers.get('user-agent')).toBeNull();
+  });
+
+  test('GET /mcp with Accept: application/json keeps JSON Accept (not the site HTML/markdown pair)', () => {
+    const json = classifyGatewayRequest(req('https://anc.dev/mcp', 'application/json'));
+    const html = classifyGatewayRequest(req('https://anc.dev/mcp', 'text/html', UA.browser));
+    expect(json.headers.get('accept')).toBe('application/json');
+    expect(html.headers.get('accept')).toBe('text/html');
+  });
+
+  test('www.anc.dev coalesces to anc.dev; staging hosts are left alone', () => {
+    const www = classifyGatewayRequest(req('https://www.anc.dev/about', 'text/html', UA.browser));
+    expect(new URL(www.url).hostname).toBe('anc.dev');
+    const staging = classifyGatewayRequest(
+      req('https://agentnative-site-staging.example.workers.dev/about', 'text/html', UA.browser),
+    );
+    expect(new URL(staging.url).hostname).toBe('agentnative-site-staging.example.workers.dev');
+  });
+
+  test('POST /mcp does not smash Accept into the site-surface pair', () => {
+    const post = classifyGatewayRequest(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { accept: 'application/json, text/event-stream' },
+      }),
+    );
+    expect(post.headers.get('accept')).toBe('application/json, text/event-stream');
+  });
+
+  test('/api/score keeps inbound Accept q-values (not smashed to the HTML/markdown pair)', () => {
+    const classified = classifyGatewayRequest(
+      req('https://anc.dev/api/score', 'text/markdown;q=0.1, application/json;q=0.9'),
+    );
+    expect(classified.headers.get('accept')).toBe('text/markdown;q=0.1, application/json;q=0.9');
+  });
+});
+
+describe('gateway dispatch — inner Cached is the fetch target', () => {
+  test('ctx.exports.Cached.fetch receives the classified request', async () => {
+    const seen: Request[] = [];
+    const ctx = {
+      exports: {
+        Cached: {
+          fetch(request: Request) {
+            seen.push(request);
+            return new Response('inner', { headers: { 'content-type': 'text/html' } });
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    const res = await worker.fetch(req('https://anc.dev/about', '*/*', UA.browser), makeEnv(), ctx);
+    expect(await res.text()).toBe('inner');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.headers.get('accept')).toBe('text/html');
+    expect(seen[0]?.headers.get('user-agent')).toBeNull();
+  });
+
+  test('GET /mcp JSON 301 is classified separately from an HTML GET /mcp', async () => {
+    const seen: string[] = [];
+    const ctx = {
+      exports: {
+        Cached: {
+          fetch(request: Request) {
+            seen.push(request.headers.get('accept') ?? '');
+            return new Response('inner');
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    await worker.fetch(req('https://anc.dev/mcp', 'application/json'), makeEnv(), ctx);
+    await worker.fetch(req('https://anc.dev/mcp', 'text/html', UA.browser), makeEnv(), ctx);
+    expect(seen).toEqual(['application/json', 'text/html']);
   });
 });
 
