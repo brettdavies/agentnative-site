@@ -237,6 +237,8 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
   });
 
   test('markdown-vary with missing Vary is absent, not n_a / optional-absent', async () => {
+    // markdown-vary stays a SHOULD on GET / (KD7). A Vary-less HIT must fail
+    // this check; do not move it off the homepage.
     const { fetchImpl } = siteFetch(shipsMdButUnimplemented);
     const events = await collect(
       runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),

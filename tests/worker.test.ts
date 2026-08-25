@@ -327,6 +327,7 @@ describe('applyHeaders — HTML branch', () => {
       pathname: '/about',
     });
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Vary')?.toLowerCase()).not.toContain('accept-encoding');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
     expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');

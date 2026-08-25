@@ -21,8 +21,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 8787;
-// A remote-targeting opt-in project (web-audit, staging-mcp, homepage-score-live)
-// sets ANC_STAGING_BASE_URL to a deployed Worker. When it does, baseURL honors
+// A remote-targeting opt-in project (web-audit, staging-mcp, homepage-score-live,
+// edge-hit) sets ANC_STAGING_BASE_URL to a deployed Worker. When it does, baseURL honors
 // it and the local wrangler-dev webServer is skipped — booting a Docker-backed
 // local Worker is pure overhead (and a hard dependency) for tests that never
 // touch it. Local-targeting projects leave it unset and get the local server.
@@ -59,16 +59,17 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
-      // Live opt-in projects (skill, homepage-score-live, staging-mcp)
-      // are excluded from the default suite — they hit real network
-      // endpoints (github.com clone hosts, the staging Worker) that the
-      // deep-check daily schedule shouldn't depend on.
+      // Live opt-in projects (skill, homepage-score-live, staging-mcp,
+      // edge-hit) are excluded from the default suite — they hit real
+      // network endpoints (github.com clone hosts, the staging Worker)
+      // that the deep-check daily schedule shouldn't depend on.
       testIgnore: [
         /skill\.e2e\.ts/,
         /homepage-score-live\.e2e\.ts/,
         /mcp\.e2e\.ts/,
         /discoverability\.e2e\.ts/,
         /web-audit\.e2e\.ts/,
+        /edge-hit\.e2e\.ts/,
       ],
     },
     { name: 'mobile-android', use: { ...devices['Pixel 7'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) }, testMatch: /flows\.e2e\.ts/ },
@@ -105,6 +106,16 @@ export default defineConfig({
       // workerd.
       use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
       testMatch: /(?:mcp|discoverability)\.e2e\.ts/,
+    },
+    {
+      name: 'edge-hit',
+      // Live staging Worker — skip-Worker HIT on negotiated HTML/markdown.
+      // wrangler dev cannot prove this. Set ANC_STAGING_BASE_URL before
+      // invoking (and ANC_STAGING_ACCESS_CLIENT_ID/SECRET for headless
+      // Access auth). Excluded from the default suite. Run with:
+      //   bun x playwright test --project=edge-hit
+      use: { ...devices['Desktop Chrome'], ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) },
+      testMatch: /edge-hit\.e2e\.ts/,
     },
     {
       name: 'web-audit',
