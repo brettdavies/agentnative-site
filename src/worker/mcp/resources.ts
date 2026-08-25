@@ -20,8 +20,8 @@
 // error from the resource handler into that shape; throwing the
 // ResourceNotFound-shaped error here is the spec-correct signal.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 import type { Catalog } from './catalog';
 
 function jsonText(uri: URL, value: unknown) {
@@ -48,7 +48,7 @@ function notFound(uri: URL, kind: string, key: string): never {
 }
 
 export function registerResources(server: McpServer, catalog: Catalog): void {
-  server.resource(
+  server.registerResource(
     'registry',
     'anc://registry',
     {
@@ -59,7 +59,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     async (uri) => jsonText(uri, catalog.registry),
   );
 
-  server.resource(
+  server.registerResource(
     'tool',
     new ResourceTemplate('anc://tool/{slug}', { list: undefined }),
     {
@@ -75,7 +75,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'principle',
     new ResourceTemplate('anc://principle/{n}', { list: undefined }),
     {
@@ -92,7 +92,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'spec',
     new ResourceTemplate('anc://spec/{section}', { list: undefined }),
     {
@@ -108,7 +108,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'scorecard',
     new ResourceTemplate('anc://scorecard/{binary}', { list: undefined }),
     {

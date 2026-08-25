@@ -5,7 +5,7 @@
 // network calls. The catalog ships with the same fields the registry
 // surface advertises; nothing else is fetched at tool-call time.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Catalog, CatalogRegistryEntry } from '../catalog';
 
@@ -29,22 +29,27 @@ function summary(entry: CatalogRegistryEntry) {
 }
 
 export function registerRegistryTools(server: McpServer, catalog: Catalog): void {
-  server.tool(
+  server.registerTool(
     'list_tools',
-    'Return summaries of every scored CLI in the anc.dev registry. Each entry carries slug, name, binary, install ' +
-      'command, version (when a scorecard has been committed), score_pct (percentage pass rate of the latest audit), ' +
-      'scorecard_url (path under anc.dev), and audit_profile (when the tool opts out of the default profile).',
-    {},
+    {
+      description:
+        'Return summaries of every scored CLI in the anc.dev registry. Each entry carries slug, name, binary, install ' +
+        'command, version (when a scorecard has been committed), score_pct (percentage pass rate of the latest audit), ' +
+        'scorecard_url (path under anc.dev), and audit_profile (when the tool opts out of the default profile).',
+    },
     async () => textContent(catalog.registry.map(summary)),
   );
 
-  server.tool(
+  server.registerTool(
     'get_tool',
-    'Return the full registry record for a single CLI by slug. Fields: slug, name, binary, install, audit_profile ' +
-      '(when set), repo (when a GitHub owner/repo is parseable), version, anc_version, scorecard_url, score_pct. ' +
-      'Look-not-found returns isError: false with a typed { found: false, message } body because absence is data, ' +
-      'not failure.',
-    { slug: z.string().describe('The CLI slug, e.g. "ripgrep" or "curl".') },
+    {
+      description:
+        'Return the full registry record for a single CLI by slug. Fields: slug, name, binary, install, audit_profile ' +
+        '(when set), repo (when a GitHub owner/repo is parseable), version, anc_version, scorecard_url, score_pct. ' +
+        'Look-not-found returns isError: false with a typed { found: false, message } body because absence is data, ' +
+        'not failure.',
+      inputSchema: { slug: z.string().describe('The CLI slug, e.g. "ripgrep" or "curl".') },
+    },
     async ({ slug }) => {
       const entry = catalog.registry.find((e) => e.slug === slug);
       if (!entry) {
@@ -61,22 +66,25 @@ export function registerRegistryTools(server: McpServer, catalog: Catalog): void
     },
   );
 
-  server.tool(
+  server.registerTool(
     'search_tools',
-    'Filter the registry by one or more criteria. All filters AND together. score_min / score_max are inclusive ' +
-      'bounds on score_pct (rows without a committed scorecard are excluded when either bound is set). ' +
-      'audit_profile is an exact match. principle_min_score is reserved for a future per-principle score filter and ' +
-      'is currently a no-op (the catalog projection does not yet carry per-principle scores).',
     {
-      score_min: z.number().min(0).max(100).optional().describe('Inclusive lower bound on score_pct.'),
-      score_max: z.number().min(0).max(100).optional().describe('Inclusive upper bound on score_pct.'),
-      audit_profile: z.string().optional().describe('Exact audit_profile match.'),
-      principle_min_score: z
-        .number()
-        .min(0)
-        .max(100)
-        .optional()
-        .describe('Reserved for a future per-principle filter; no-op today.'),
+      description:
+        'Filter the registry by one or more criteria. All filters AND together. score_min / score_max are inclusive ' +
+        'bounds on score_pct (rows without a committed scorecard are excluded when either bound is set). ' +
+        'audit_profile is an exact match. principle_min_score is reserved for a future per-principle score filter and ' +
+        'is currently a no-op (the catalog projection does not yet carry per-principle scores).',
+      inputSchema: {
+        score_min: z.number().min(0).max(100).optional().describe('Inclusive lower bound on score_pct.'),
+        score_max: z.number().min(0).max(100).optional().describe('Inclusive upper bound on score_pct.'),
+        audit_profile: z.string().optional().describe('Exact audit_profile match.'),
+        principle_min_score: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe('Reserved for a future per-principle filter; no-op today.'),
+      },
     },
     async ({ score_min, score_max, audit_profile }) => {
       const matches = catalog.registry.filter((entry) => {
