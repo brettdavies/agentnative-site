@@ -534,7 +534,8 @@ function withNegotiatedHeaders(
   const headed = applyHeaders(response, { request, servedMarkdown, pathname });
   if (opts.noStore) {
     headed.headers.set('Cache-Control', 'no-store');
-    headed.headers.delete('Cloudflare-CDN-Cache-Control');
+    headed.headers.set('Cloudflare-CDN-Cache-Control', 'no-store');
+    headed.headers.delete('Cache-Tag');
   }
   return headed;
 }

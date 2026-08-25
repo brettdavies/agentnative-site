@@ -20,6 +20,7 @@ import {
   escHtml as sharedEscHtml,
 } from '../../shared/scorecard-format.mjs';
 import { detectPreference } from '../accept';
+import { applyHeaders } from '../headers';
 import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { get as cacheGet, keyFor as cacheKeyFor } from './cache';
@@ -269,7 +270,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   const url = new URL(request.url);
   const match = parseLiveScorePathMatch(url.pathname);
   if (!match) {
-    return renderNotFound(env, '(invalid)', false);
+    return renderNotFound(request, env, '(invalid)', false);
   }
 
   const { binary } = match;
@@ -306,7 +307,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
 
   const cached = await cacheGet(env, cacheKeyFor(binary, SPEC_VERSION));
   if (!cached) {
-    return renderNotFound(env, binary, wantMarkdown);
+    return renderNotFound(request, env, binary, wantMarkdown);
   }
 
   const renderInput: SummaryRenderInput = {
@@ -344,7 +345,13 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   return new Response(html, { status: 200, headers: HTML_HEADERS });
 }
 
-async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: boolean): Promise<Response> {
+async function renderNotFound(
+  request: Request,
+  env: LiveScoreEnv,
+  binary: string,
+  wantMarkdown: boolean,
+): Promise<Response> {
+  const pathname = new URL(request.url).pathname;
   if (wantMarkdown) {
     const lines = [
       `# No live score for \`${binary}\` yet`,
@@ -358,7 +365,11 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
       `Or [install \`anc\`](https://anc.dev/install) and run \`anc audit ${binary}\` locally.`,
       '',
     ];
-    return new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS });
+    return applyHeaders(new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS }), {
+      request,
+      servedMarkdown: true,
+      pathname,
+    });
   }
 
   const body = `<header class="live-score-summary__header">
@@ -386,7 +397,11 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
   }
 
   const html = substituteShell(template, { title, description, canonicalPath, body });
-  return new Response(html, { status: 404, headers: HTML_HEADERS });
+  return applyHeaders(new Response(html, { status: 404, headers: HTML_HEADERS }), {
+    request,
+    servedMarkdown: false,
+    pathname,
+  });
 }
 
 // Statically referenced so unused-export linters keep these alive.
