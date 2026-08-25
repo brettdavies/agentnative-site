@@ -132,8 +132,68 @@ not orders of magnitude.
 ### Tuning
 
 Both ceilings are pre-data placeholders sized from parity with the sister `streamsgrp.com/mcp` deployment. They will be
-tuned after 14 days of visitor-log data lands. Before changing either, pull the `[mcp-call]` log volume by IP and the
-audit-window distribution from KV; tune to keep p95 traffic under the ceiling rather than guessing.
+tuned after 14 days of `mcp.request` log volume by IP and the audit-window distribution from KV; tune to keep p95
+traffic under the ceiling rather than guessing.
+
+## Staging proof (dual-stack migration)
+
+Run after a `dev` merge deploys to the staging Worker. Requires CF Access service-token headers (same pair as
+`scripts/release/preflight.sh` / `scripts/release/postflight.sh`).
+
+### Scripted checks (6/6)
+
+```bash
+export CF_ACCESS_CLIENT_ID=…
+export CF_ACCESS_CLIENT_SECRET=…
+scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.workers.dev
+```
+
+Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 13 tools, modern list cache hints, modern
+get_scorecard hit/miss.
+
+### Check 8 — telemetry (manual)
+
+In one terminal:
+
+```bash
+wrangler tail --env staging --search 'event=mcp.request'
+```
+
+In another, run check 5 from the smoke script (modern `tools/list` with `clientInfo.name: anc-mcp-smoke` in `_meta`).
+Confirm exactly **one** JSON line per POST with `era=modern`, `method=tools/list`, `client_name=anc-mcp-smoke`,
+`protocol_version=2026-07-28`, `host`, `outcome=ok`, `ms_bucket` — and **no** IP, slug, or tool-result fields.
+
+### Legacy lane disable (staging-only manual)
+
+1. Set staging `MCP_LEGACY_ENABLED=false` (wrangler var or secret override).
+2. POST legacy `initialize` → expect shell `legacy_rejected` in tail and JSON-RPC `-32099` at transport layer (KD2
+   sunset HTTP shape still TBD; record observed envelope here when flipped).
+3. Re-run modern checks 5–6 → expect pass.
+
+Do **not** leave legacy disabled on staging during normal soak unless deliberately testing sunset; preflight/postflight
+legacy curl recipes assume dual-stack.
+
+### Bundle size (U1 gate)
+
+Recorded at implementation time (`wrangler deploy --dry-run --env staging`):
+
+| Ref                    | Total upload | gzip    |
+| ---------------------- | ------------ | ------- |
+| `origin/dev` (v1 SDK)  | 3792.53 KiB  | 745.69 KiB |
+| dual-stack branch (v2) | 2164.99 KiB  | 411.56 KiB |
+
+Material reduction; no acceptance waiver required.
+
+## Legacy sunset advisory
+
+Flip `MCP_LEGACY_ENABLED=false` in production only when **both** hold:
+
+1. Legacy share **< 1%** of `mcp.request` volume for **30 consecutive days**.
+2. Top-N legacy `client_name` breakdown reviewed — era percentage alone is insufficient; a single long-tail integrator
+   may dominate the legacy bucket.
+
+Procedure: staging-first disable → 6/6 modern smoke + legacy-off manual checklist → soak → production var flip → monitor
+`era:legacy` tail volume for 48h.
 
 ## Discoverability surfaces operators own
 

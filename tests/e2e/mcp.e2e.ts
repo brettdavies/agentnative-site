@@ -2,7 +2,6 @@
 //
 // Opt-in suite (project: staging-mcp). Excluded from the default
 // `bun run test:e2e` run because it hits the real CF staging Worker, the
-// agents@^0.13.3 + @modelcontextprotocol/sdk runtime in workerd, and the
 // real registry-index.json + mcp-catalog.json bundle. Use to validate a
 // staging deploy before promoting to production or to triage a
 // regression that the bun unit suite can't reproduce against workerd.
