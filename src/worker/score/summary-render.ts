@@ -187,6 +187,14 @@ const MARKDOWN_HEADERS = {
   'X-Robots-Tag': 'noindex',
 } as const;
 
+function liveScoreHeaders(base: Record<string, string>, pathname: string): Headers {
+  const headers = new Headers(base);
+  if (!pathname.endsWith('.md')) {
+    headers.set('Vary', 'Accept, User-Agent');
+  }
+  return headers;
+}
+
 function substituteShell(
   template: string,
   fields: { title: string; description: string; canonicalPath: string; body: string },
@@ -320,7 +328,10 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
 
   if (wantMarkdown) {
     const md = buildScoreSummaryMarkdown(renderInput);
-    return new Response(md, { status: 200, headers: MARKDOWN_HEADERS });
+    return new Response(md, {
+      status: 200,
+      headers: liveScoreHeaders(MARKDOWN_HEADERS, new URL(request.url).pathname),
+    });
   }
 
   const body = buildScoreSummaryBody(renderInput);
@@ -335,14 +346,20 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   try {
     template = await loadShellTemplate(env);
   } catch (err) {
-    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain' },
-    });
+    return applyHeaders(
+      new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      }),
+      { request, servedMarkdown: false, pathname: new URL(request.url).pathname },
+    );
   }
 
   const html = substituteShell(template, { title, description, canonicalPath, body });
-  return new Response(html, { status: 200, headers: HTML_HEADERS });
+  return new Response(html, {
+    status: 200,
+    headers: liveScoreHeaders(HTML_HEADERS, new URL(request.url).pathname),
+  });
 }
 
 async function renderNotFound(

@@ -251,8 +251,8 @@ Rollback is `wrangler rollback`.
   and `/index.md`; `web` on `/web`, `/web.md`, and every `/web?view=*`; only `web:{domain}` on `/web/<domain>` and its
   `.md` twin. Same tag on every HTML/markdown variant. Explicit `.md` twins still have no `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
-  `/web/scoring*`, `POST /mcp`, `/api/score`, `/api/audit-web`, and every Worker 404 (including a pre-audit
-  `/web/<domain>` and `/score/live/<missing>`).
+  `/web/scoring*`, `POST /mcp`, `/api/score`, `/api/audit-web`, and every Worker 4xx/5xx (including a pre-audit
+  `/web/<domain>` and `/score/live/<missing>`). A stored 5xx would otherwise become a skip-Worker HIT.
 
 Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry `Cache-Control: public,
 max-age=31536000, immutable`.

@@ -325,6 +325,20 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(body).toContain('anc.dev MCP server');
   });
 
+  test('curl GET /mcp with */* serves the markdown twin', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'GET',
+        headers: { accept: '*/*', 'user-agent': 'curl/8.7.1' },
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/markdown');
+  });
+
   test('Accept: text/html serves dist/mcp.html', async () => {
     const env = makeEnv();
     const res = await getMcp(env, 'text/html');
@@ -347,6 +361,7 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(res.status).toBe(301);
     expect(res.headers.get('location')).toBe('https://anc.dev/.well-known/mcp/server-card.json');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('vary')).toBe('Accept, User-Agent');
   });
 
   test('the JSON redirect targets the inbound request origin (env-aware)', async () => {

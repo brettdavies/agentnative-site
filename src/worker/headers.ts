@@ -32,7 +32,7 @@ import { homeTag, webDomainTag, webTag } from './audit-web/hit-min-tags';
 //
 //   MISS                                  Cache-Control: no-store
 //                                         Cloudflare-CDN-Cache-Control: no-store
-//                                         (Worker 404s; /web/scoring*; scoring
+//                                         (status >= 400; /web/scoring*; scoring
 //                                         overlay also strips Cache-Tag)
 //
 //   Path-keyed files (.json, .svg, .txt,  Cache-Control: public, max-age=300,
@@ -234,7 +234,7 @@ function classifyCacheClass(
   linkPathname: string,
   status: number,
 ): { klass: CacheClass; tag?: string } {
-  if (status === 404 || isAlwaysMissPath(requestPathname)) {
+  if (status >= 400 || isAlwaysMissPath(requestPathname)) {
     return { klass: 'miss' };
   }
   if (isHashedAsset(linkPathname) || isHashedAsset(requestPathname)) {

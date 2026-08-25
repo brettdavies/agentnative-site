@@ -26,6 +26,7 @@ import {
 } from '../src/worker/audit-web/hit-min-purge';
 import { runWebPublicListingBackfill, type WebBackfillEnv } from '../src/worker/audit-web/public-listing-backfill';
 import { resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
+import { Cached, type Env } from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 type ListedObject = { key: string; customMetadata?: Record<string, string> };
@@ -947,6 +948,39 @@ describe('HIT-min tag purge', () => {
     } as unknown as ExecutionContext;
     await invokeCachedPurge(ctx, ['web']);
     expect(cacheCalls).toEqual([]);
+  });
+
+  test('queueHitMinPurge outside ALS logs queue_without_store', () => {
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    };
+    try {
+      queueHitMinPurge(['web']);
+    } finally {
+      console.log = orig;
+    }
+    expect(logs.some((line) => line.includes('queue_without_store'))).toBe(true);
+  });
+
+  test('Cached.purgeHitMinTags calls ctx.cache.purge with unique tags', async () => {
+    const calls: unknown[] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      cache: {
+        async purge(opts: { tags: string[] }) {
+          calls.push(opts);
+          return { success: true, errors: [] };
+        },
+      },
+    } as unknown as ExecutionContext;
+    const cached = new Cached(ctx, {} as Env);
+    const result = await cached.purgeHitMinTags(['home', 'web', 'home']);
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([{ tags: ['home', 'web'] }]);
   });
 
   test('put does not purge on its own', async () => {

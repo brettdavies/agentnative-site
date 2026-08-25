@@ -218,7 +218,16 @@ export function classifyGatewayRequest(request: Request): Request {
   applyUaClass(headers, siteClass);
 
   if (mcpGetPathname(url.pathname)) {
-    headers.set('accept', MCP_GET_CLASS_ACCEPT[detectMcpGetFormat(request)]);
+    const mcpFormat = detectMcpGetFormat(request);
+    // detectMcpGetFormat defaults */* to HTML so a human clicking /mcp gets
+    // the page. Keep that for browser UAs. A markdown-class UA (curl) with
+    // no type preference still gets the markdown twin — otherwise the
+    // gateway would stamp text/html and freeze HTML as a skip-Worker HIT.
+    if (mcpFormat === 'html' && siteClass === 'markdown') {
+      headers.set('accept', SITE_CLASS_ACCEPT.markdown);
+    } else {
+      headers.set('accept', MCP_GET_CLASS_ACCEPT[mcpFormat]);
+    }
   } else if (!url.pathname.startsWith('/api/')) {
     // Negotiated HTML/markdown site surface only. /api/score and friends
     // keep the inbound Accept so q-value JSON vs markdown still works (KTD8).

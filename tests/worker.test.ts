@@ -215,6 +215,13 @@ describe('classifyGatewayRequest — format-class table', () => {
     expect(html.headers.get('accept')).toBe('text/html');
   });
 
+  test('GET /mcp with curl UA and */* is markdown, not HTML', () => {
+    const curl = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.curl));
+    const browser = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.browser));
+    expect(curl.headers.get('accept')).toBe('text/markdown');
+    expect(browser.headers.get('accept')).toBe('text/html');
+  });
+
   test('www.anc.dev coalesces to anc.dev; staging hosts are left alone', () => {
     const www = classifyGatewayRequest(req('https://www.anc.dev/about', 'text/html', UA.browser));
     expect(new URL(www.url).hostname).toBe('anc.dev');
@@ -481,6 +488,18 @@ describe('applyHeaders — MISS class', () => {
       pathname: '/anc-web-audit-no-such-page',
     });
     expect(res.status).toBe(404);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('Worker 5xx is no-store and untagged so it cannot become a skip-Worker HIT', () => {
+    const res = applyHeaders(new Response('boom', { status: 500 }), {
+      request: req('https://anc.dev/about'),
+      servedMarkdown: false,
+      pathname: '/about',
+    });
+    expect(res.status).toBe(500);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
     expect(res.headers.get('Cache-Tag')).toBeNull();

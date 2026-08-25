@@ -127,10 +127,24 @@ describe('homepage web-board inject', () => {
     expect(webPane).not.toContain('<script');
   });
 
-  test('the sitekey substitution still runs alongside the board inject', async () => {
-    const html = await fetchHomepage(makeEnv([frontpageEntry('top.dev', 80)]));
-    expect(html).toContain('content="sitekey-test"');
-    expect(html).not.toContain('{{TURNSTILE_SITEKEY}}');
+  test('injected homepage does not copy the asset ETag onto the rewritten body', async () => {
+    const env = makeEnv(null);
+    env.ASSETS = {
+      async fetch(): Promise<Response> {
+        return new Response(HOMEPAGE_SHELL, {
+          status: 200,
+          headers: {
+            'content-type': 'text/html; charset=utf-8',
+            etag: '"asset-etag"',
+            'last-modified': 'Wed, 01 Jan 2020 00:00:00 GMT',
+          },
+        });
+      },
+    } as unknown as Fetcher;
+    const resp = await worker.fetch(new Request('https://anc.dev/'), env, ctx());
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get('etag')).toBeNull();
+    expect(resp.headers.get('last-modified')).toBeNull();
   });
 
   test('a minimal env without SCORE_CACHE degrades to the empty state, not an error', async () => {

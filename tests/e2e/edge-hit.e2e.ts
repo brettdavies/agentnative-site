@@ -69,9 +69,10 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(second.headers()['content-type']).toContain('text/html');
     expect(varyIsAcceptUserAgent(second.headers()['vary'])).toBe(true);
     expect(isSkipWorkerHit(second.headers())).toBe(true);
-    const curl = await request.get(`${STAGING_BASE}/about`, { headers: { ...ACCESS_HEADERS, ...CURL } });
+    const curl = await warmThenGet(request, '/about', CURL);
     expect(curl.headers()['content-type']).toContain('text/markdown');
     expect(varyIsAcceptUserAgent(curl.headers()['vary'])).toBe(true);
+    expect(isSkipWorkerHit(curl.headers())).toBe(true);
   });
 
   test('repeat GET / is HIT with Age, Vary, and homepage boards; curl is markdown', async ({ request }) => {
@@ -82,9 +83,10 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(isSkipWorkerHit(second.headers())).toBe(true);
     const html = await second.text();
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
-    const curl = await request.get(`${STAGING_BASE}/`, { headers: { ...ACCESS_HEADERS, ...CURL } });
+    const curl = await warmThenGet(request, '/', CURL);
     expect(curl.headers()['content-type']).toContain('text/markdown');
     expect(varyIsAcceptUserAgent(curl.headers()['vary'])).toBe(true);
+    expect(isSkipWorkerHit(curl.headers())).toBe(true);
     const md = await curl.text();
     expect(md).toMatch(/## (CLI|Web) /);
     expect(md.toLowerCase()).not.toContain('live-score');
@@ -92,11 +94,10 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
 
   test('warm HTML HIT on / then Accept text/markdown is markdown, not the HTML object', async ({ request }) => {
     await warmThenGet(request, '/', BROWSER);
-    const md = await request.get(`${STAGING_BASE}/`, {
-      headers: { ...ACCESS_HEADERS, accept: 'text/markdown' },
-    });
+    const md = await warmThenGet(request, '/', { accept: 'text/markdown' });
     expect(md.headers()['content-type']).toContain('text/markdown');
     expect(varyIsAcceptUserAgent(md.headers()['vary'])).toBe(true);
+    expect(isSkipWorkerHit(md.headers())).toBe(true);
   });
 
   test('GET /index.md has no Vary and is HIT-min; /about.md is HIT-1d', async ({ request }) => {
@@ -104,10 +105,13 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(index.headers()['content-type']).toContain('text/markdown');
     expect(index.headers()['vary'] ?? '').toBe('');
     expect(isSkipWorkerHit(index.headers())).toBe(true);
+    expect(index.headers()['cache-control'] ?? '').toContain('max-age=0');
+    expect(index.headers()['cloudflare-cdn-cache-control'] ?? '').toContain('max-age=300');
     const about = await warmThenGet(request, '/about.md', {});
     expect(about.headers()['content-type']).toContain('text/markdown');
     expect(about.headers()['vary'] ?? '').toBe('');
     expect(isSkipWorkerHit(about.headers())).toBe(true);
+    expect(about.headers()['cloudflare-cdn-cache-control'] ?? '').toContain('max-age=86400');
   });
 
   test('GET /web/scoring is not a skip-Worker HIT', async ({ request }) => {

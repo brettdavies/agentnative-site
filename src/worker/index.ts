@@ -303,6 +303,7 @@ function mcpDescriptorRedirect(request: Request): Response {
     headers: {
       location: `${origin}${MCP_DESCRIPTOR_CANONICAL_PATH}`,
       'cache-control': MCP_DESCRIPTOR_CACHE,
+      vary: 'Accept, User-Agent',
       ...DISCOVERY_CORS_HEADERS,
     },
   });
@@ -761,11 +762,14 @@ async function injectHomepageBoards(
   const entries = aggregate?.entries ?? [];
   let substituted = opts.markdown ? body : body.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
   substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', frontpageBoardSlice(opts.markdown, entries));
+  const headers = new Headers(upstream.headers);
+  headers.delete('etag');
+  headers.delete('last-modified');
   return applyHeaders(
     new Response(substituted, {
       status: upstream.status,
       statusText: upstream.statusText,
-      headers: upstream.headers,
+      headers,
     }),
     { request: opts.request, servedMarkdown: opts.servedMarkdown, pathname: opts.pathname },
   );

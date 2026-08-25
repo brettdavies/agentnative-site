@@ -936,11 +936,14 @@ describe('/api/score — R2 cache tier', () => {
   });
 
   test('cached hit returns Cache-Control: public, max-age=300 for CDN-edge cooperation', async () => {
-    // The per-write Cache-Control header keeps CDN edges from
-    // over-caching while R2 lifecycle handles the long TTL.
+    // The per-write Cache-Control header keeps browsers from
+    // over-caching while R2 lifecycle handles the long TTL. Workers
+    // Caching must not store /api/score (MISS class; Accept-varied).
     const env = makeEnv({ cacheContent: { [CACHE_KEY_UNCURATED]: CACHED_UNCURATED_PAYLOAD } });
     const res = await handleScore(postScore('cargo binstall uncurated-tool'), env);
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Vary')).toBe('Accept');
   });
 
   test('live (DO-served) responses get Cache-Control: no-store', async () => {

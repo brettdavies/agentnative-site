@@ -25,7 +25,10 @@ export function runWithHitMinPurge<T>(ctx: ExecutionContext, fn: () => T): T {
 
 export function queueHitMinPurge(tags: readonly string[]): void {
   const store = als.getStore();
-  if (!store) return;
+  if (!store) {
+    console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'queue_without_store', tags }));
+    return;
+  }
   for (const tag of tags) {
     if (tag) store.tags.add(tag);
   }
