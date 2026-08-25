@@ -111,5 +111,6 @@ export async function runLlmsTxtQuality(check: WebCheck, ctx: HandlerContext): P
 
   if (misses.length === 0) return { status: 'pass', evidence };
   const status = misses.includes('broken') ? 'broken' : misses.includes('absent') ? 'absent' : 'error';
-  return { status, evidence };
+  const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes('nested-probe budget exhausted'));
+  return { status, evidence, ...(exhausted ? { incomplete: true } : {}) };
 }

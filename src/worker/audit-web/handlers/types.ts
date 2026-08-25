@@ -23,6 +23,11 @@ export type EvidenceItem = Record<string, unknown>;
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
+  /**
+   * When true, the handler exhausted the remaining per-audit budget mid-probe.
+   * The engine treats the run as incomplete and the route must not cache it.
+   */
+  incomplete?: boolean;
 }
 
 export interface HandlerContext {
@@ -55,4 +60,9 @@ export interface HandlerContext {
    * issuing a second fetch of the antecedent source.
    */
   retainedBodies?: ReadonlyMap<string, string>;
+  /**
+   * Session id from wave-1 MCP initialize (`Mcp-Session-Id`), or null when
+   * the server is stateless. Wave-2 MCP probes send it when present.
+   */
+  mcpSessionId?: string | null;
 }

@@ -236,6 +236,57 @@ describe('API hygiene + MCP resources + ARD', () => {
     expect(rows.find((r) => r.id === 'mcp-resources-list')?.status).toBe('broken');
   });
 
+  test('resources-list follows initialize session id and initialized notification', async () => {
+    const methods: string[] = [];
+    const fetchImpl = siteFetch((url, init) => {
+      if (url.endsWith('/mcp') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        methods.push(body.method);
+        const session = new Headers(init.headers).get('mcp-session-id');
+        if (body.method === 'initialize') {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              result: {
+                serverInfo: { name: 'anc', version: '0.1.0' },
+                protocolVersion: '2025-06-18',
+                capabilities: { resources: {} },
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-1' } },
+          );
+        }
+        if (body.method === 'notifications/initialized') {
+          if (session !== 'sess-1') return new Response('no session', { status: 400 });
+          return new Response(null, { status: 202 });
+        }
+        if (body.method === 'resources/list') {
+          if (session !== 'sess-1') {
+            return new Response(
+              JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'no session' } }),
+              {
+                status: 400,
+                headers: { 'content-type': 'application/json' },
+              },
+            );
+          }
+          return resourcesList([{ uri: 'anc://x' }]);
+        }
+      }
+      if (url.endsWith('/openapi.json')) return new Response('nope', { status: 404 });
+      return new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } });
+    });
+    const rows = resultsOf(
+      await collect(
+        runWebAudit({ url: 'https://example.com/', registry: registryOf(CHECKS), fetchOptions: { fetchImpl } }),
+      ),
+    );
+    expect(methods).toContain('notifications/initialized');
+    expect(methods.indexOf('notifications/initialized')).toBeLessThan(methods.indexOf('resources/list'));
+    expect(rows.find((r) => r.id === 'mcp-resources-list')?.status).toBe('pass');
+  });
+
   test('missing ai-catalog is optional-absent n_a', async () => {
     const fetchImpl = siteFetch((url) => {
       if (url.endsWith('/ai-catalog.json')) return new Response('gone', { status: 404 });

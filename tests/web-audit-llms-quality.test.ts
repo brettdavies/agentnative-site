@@ -176,6 +176,32 @@ describe('llms.txt quality trio', () => {
     const outcome = await runLlmsTxtQuality(check, ctx);
     expect(calls).toBeLessThan(8);
     expect(outcome.status).toBe('error');
+    expect(outcome.incomplete).toBe(true);
     expect(JSON.stringify(outcome.evidence)).toContain('nested-probe budget exhausted');
+  });
+
+  test('a handler that overruns the audit deadline marks the run incomplete', async () => {
+    const fetchImpl = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } });
+    }) as unknown as typeof fetch;
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: registryOf([
+          makeCheck({
+            id: 'robots',
+            antecedent: 'none',
+            handler: 'http',
+            with: { path: '/robots.txt', expect: { status: [200] } },
+          }),
+        ]),
+        fetchOptions: { fetchImpl },
+        perAuditDeadlineMs: 25,
+        perCheckTimeoutMs: 80,
+      }),
+    );
+    const complete = events.find((e) => e.type === 'complete');
+    expect(complete?.type === 'complete' && complete.complete).toBe(false);
   });
 });

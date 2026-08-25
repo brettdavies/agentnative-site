@@ -68,6 +68,20 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
   }
 
   const html = root.body ?? '';
+  if (root.status < 200 || root.status >= 300) {
+    return {
+      status: 'broken',
+      evidence: [
+        {
+          url: ctx.base,
+          status: root.status,
+          ok: false,
+          why: [`root status ${root.status} is not 2xx`],
+        },
+      ],
+    };
+  }
+
   const floor = floorMet(html);
   if (floor.ok) {
     return { status: 'pass', evidence: [{ url: ctx.base, status: root.status, ok: true, why: floor.why }] };
@@ -114,6 +128,7 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
     }
   }
 
+  const exhausted = evidence.some((row) => Array.isArray(row.why) && row.why.includes('nested-probe budget exhausted'));
   return {
     status: 'absent',
     evidence: [
@@ -124,5 +139,6 @@ export async function runContentWithoutJs(check: WebCheck, ctx: HandlerContext):
         ],
       },
     ],
+    ...(exhausted ? { incomplete: true } : {}),
   };
 }

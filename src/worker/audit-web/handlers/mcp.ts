@@ -7,7 +7,7 @@
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
-import { guardedFetch } from '../ssrf';
+import { type GuardedFetchOptions, guardedFetch } from '../ssrf';
 import { timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
@@ -42,6 +42,37 @@ function buildBody(op: McpWith['op'], method: string, protocolVersion: string): 
   return JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} });
 }
 
+export function mcpSessionIdFrom(outcome: ProbeOutcome | undefined): string | null {
+  const raw = outcome?.evidence[0]?.session_id;
+  return typeof raw === 'string' && raw.length > 0 ? raw : null;
+}
+
+const INITIALIZED_BODY = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+
+/** Best-effort session handshake after initialize; failures do not fail the audit. */
+export async function notifyMcpInitialized(
+  endpoint: string,
+  sessionId: string,
+  opts: {
+    timeoutMs: number;
+    fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  },
+): Promise<void> {
+  await guardedFetch(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        'Mcp-Session-Id': sessionId,
+      },
+      body: INITIALIZED_BODY,
+    },
+    { ...opts.fetchOptions, timeoutMs: opts.timeoutMs },
+  );
+}
+
 export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const endpoint = ctx.mcpEndpoint;
   if (!endpoint) {
@@ -53,6 +84,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     Accept: 'application/json, text/event-stream',
   };
   if (w.origin) headers.Origin = w.origin;
+  if (w.op !== 'initialize' && ctx.mcpSessionId) headers['Mcp-Session-Id'] = ctx.mcpSessionId;
 
   const resp = await guardedFetch(
     endpoint,
@@ -83,6 +115,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.serverInfo = serverInfo ?? null;
     ev.protocolVersion = result.protocolVersion ?? null;
     ev.capabilities = capabilities ? Object.keys(capabilities) : [];
+    ev.session_id = resp.headers['mcp-session-id'] ?? null;
     ok = w.assert === 'capabilities' ? !!capabilities && Object.keys(capabilities).length > 0 : !!serverInfo?.name;
   } else if (w.op === 'tools-list') {
     if (w.assert === 'cors') {

@@ -329,6 +329,27 @@ describe('runMcp', () => {
     expect(outcome.evidence[0].serverInfo).toEqual({ name: 'anc', version: '0.1.0' });
     expect(outcome.evidence[0].protocolVersion).toBe('2025-06-18');
     expect(outcome.evidence[0].capabilities).toEqual(['tools', 'resources']);
+    expect(outcome.evidence[0].session_id).toBeNull();
+  });
+
+  test('initialize records Mcp-Session-Id when the server issues one', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { serverInfo: { name: 'anc' }, capabilities: { tools: {} } },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-1' } },
+        ),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].session_id).toBe('sess-1');
   });
 
   test('capabilities assertion is broken on an empty capabilities object', async () => {
@@ -455,6 +476,25 @@ describe('runMcp', () => {
       ctx({ fetchImpl: empty, mcpEndpoint: 'https://example.com/mcp' }),
     );
     expect(miss.status).toBe('broken');
+  });
+
+  test('resources-list sends Mcp-Session-Id when the context carries a session', async () => {
+    const seen: Array<{ method: string; session: string | null }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const headers = new Headers(init?.headers);
+      seen.push({ method: body.method, session: headers.get('mcp-session-id') });
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { resources: [{ uri: 'anc://x' }] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'resources-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp', mcpSessionId: 'sess-1' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(seen).toEqual([{ method: 'resources/list', session: 'sess-1' }]);
   });
 });
 
@@ -728,6 +768,26 @@ describe('runContentWithoutJs', () => {
     );
     expect(outcome.status).toBe('pass');
     expect(extra).toBe(0);
+  });
+
+  test('rich HTML on a non-2xx root is broken, not a pass', async () => {
+    const fetchImpl = stubFetch(() => new Response('nope', { status: 404 }));
+    const notFound = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 404, headers: { 'content-type': 'text/html' }, body: rich, error: null },
+      }),
+    );
+    const serverError = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 500, headers: { 'content-type': 'text/html' }, body: rich, error: null },
+      }),
+    );
+    expect(notFound.status).toBe('broken');
+    expect(serverError.status).toBe('broken');
   });
 
   test('thin HTML with a live llms.txt content link is na', async () => {
