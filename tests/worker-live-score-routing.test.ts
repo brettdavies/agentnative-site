@@ -11,6 +11,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import worker, { type Env } from '../src/worker/index';
+import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/score/summary-render';
 
 const SHELL_TEMPLATE = `<!doctype html>
@@ -58,6 +59,12 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 
 beforeEach(() => {
   _resetShellTemplateCache();
+  // The registry-index promise is cached at module level and shared with
+  // /api/score. Other test files seed it with a registry that curates
+  // ripgrep; without a reset here the curated-tool redirect fires a 301
+  // where these tests expect the live-path 404 (order-dependent across
+  // bun versions).
+  _resetRegistryIndexCache();
 });
 
 describe('/live-score URL canonicalization', () => {
