@@ -22,12 +22,15 @@ import {
 } from './antecedents';
 import type { ProbeResponse } from './assert';
 import { discoverMcpEndpoint } from './discovery';
+import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
+import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
+import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
-import { runMcp } from './handlers/mcp';
+import { mcpSessionIdFrom, notifyMcpInitialized, runMcp } from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
@@ -68,6 +71,9 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     webmcp: runWebMcp,
     'scoped-llms': runScopedLlms,
     'markdown-frontmatter': runMarkdownFrontmatter,
+    'content-without-js': runContentWithoutJs,
+    'llms-txt-quality': runLlmsTxtQuality,
+    'api-hygiene': runApiHygiene,
   };
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
@@ -236,6 +242,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   let incomplete = false;
   const results: EngineResult[] = [];
   const scopedDirs: string[] = [];
+  const retainedBodies = new Map<string, string>();
+  let mcpSessionId: string | null = null;
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -245,7 +253,9 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
     root: root ?? undefined,
     scopedDirs,
+    retainedBodies,
     fetchOptions: input.fetchOptions,
+    mcpSessionId,
   });
 
   const probeOne = async (
@@ -259,6 +269,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
       const handler = check.eval === 'canonical-redirect' ? runCanonicalRedirect : HANDLERS[check.handler];
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
+      if (outcome.incomplete || deadline - now() <= 0) incomplete = true;
       return { check, outcome, result: toResult(check, outcome) };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -287,6 +298,18 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   // Section directories for the scoped-llms probes: the root llms.txt
   // link index unioned with sitemap paths, both retained in wave 1.
   scopedDirs.push(...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base));
+  const llmsTxtBody = retainedBody(sources, 'llms-txt');
+  if (llmsTxtBody.length > 0) retainedBodies.set('llms-txt', llmsTxtBody);
+  const openapiBody = retainedBody(sources, 'openapi');
+  if (openapiBody.length > 0) retainedBodies.set('openapi', openapiBody);
+  mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
+  if (mcpSessionId && discovery.endpoint) {
+    await notifyMcpInitialized(discovery.endpoint, mcpSessionId, {
+      timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
+      fetchOptions: input.fetchOptions,
+    });
+    if (deadline - now() <= 0) incomplete = true;
+  }
 
   // Gate: declared-type filter first, then the antecedent token. Returns
   // the n_a/error result when the check must not be scored.

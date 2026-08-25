@@ -4,10 +4,13 @@
 // fetch is the only network path).
 
 import { describe, expect, test } from 'bun:test';
+import { deriveApiProbeUrl, runApiHygiene } from '../src/worker/audit-web/handlers/api-hygiene';
 import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
+import { runContentWithoutJs } from '../src/worker/audit-web/handlers/content-without-js';
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
+import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
 import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
@@ -326,6 +329,27 @@ describe('runMcp', () => {
     expect(outcome.evidence[0].serverInfo).toEqual({ name: 'anc', version: '0.1.0' });
     expect(outcome.evidence[0].protocolVersion).toBe('2025-06-18');
     expect(outcome.evidence[0].capabilities).toEqual(['tools', 'resources']);
+    expect(outcome.evidence[0].session_id).toBeNull();
+  });
+
+  test('initialize records Mcp-Session-Id when the server issues one', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { serverInfo: { name: 'anc' }, capabilities: { tools: {} } },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-1' } },
+        ),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].session_id).toBe('sess-1');
   });
 
   test('capabilities assertion is broken on an empty capabilities object', async () => {
@@ -424,6 +448,53 @@ describe('runMcp', () => {
     expect(outcome.status).toBe('broken');
     expect(outcome.evidence[0].status).toBe(401);
     expect(outcome.evidence[0].www_authenticate).toBe('Bearer realm="mcp"');
+  });
+
+  test('resources-list passes on a non-empty resources array and is broken when empty', async () => {
+    const nonempty = stubFetch(
+      () =>
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { resources: [{ uri: 'anc://registry' }] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const pass = await runMcp(
+      check({ handler: 'mcp', with: { op: 'resources-list' } }),
+      ctx({ fetchImpl: nonempty, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(pass.status).toBe('pass');
+    expect(pass.evidence[0].resources).toEqual(['anc://registry']);
+    const empty = stubFetch(
+      () =>
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { resources: [] } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const miss = await runMcp(
+      check({ handler: 'mcp', with: { op: 'resources-list' } }),
+      ctx({ fetchImpl: empty, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(miss.status).toBe('broken');
+  });
+
+  test('resources-list sends Mcp-Session-Id when the context carries a session', async () => {
+    const seen: Array<{ method: string; session: string | null }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      const headers = new Headers(init?.headers);
+      seen.push({ method: body.method, session: headers.get('mcp-session-id') });
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { resources: [{ uri: 'anc://x' }] } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'resources-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp', mcpSessionId: 'sess-1' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(seen).toEqual([{ method: 'resources/list', session: 'sess-1' }]);
   });
 });
 
@@ -674,6 +745,141 @@ describe('runMarkdownFrontmatter', () => {
   test('CRLF line endings pass', async () => {
     const fetchImpl = stubFetch(() => md('---\r\ntitle: X\r\n---\r\n\r\n# H\r\n'));
     const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
+    expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runContentWithoutJs', () => {
+  const rich = `<html><body><h1>Title</h1><p>${'Readable prose. '.repeat(20)}</p></body></html>`;
+  const thin = '<html><body><div id="app"></div></body></html>';
+
+  test('rich HTML with an H1 passes without probing llms.txt links', async () => {
+    let extra = 0;
+    const fetchImpl = stubFetch(() => {
+      extra += 1;
+      return new Response('nope', { status: 404 });
+    });
+    const outcome = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 200, headers: { 'content-type': 'text/html' }, body: rich, error: null },
+      }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(extra).toBe(0);
+  });
+
+  test('rich HTML on a non-2xx root is broken, not a pass', async () => {
+    const fetchImpl = stubFetch(() => new Response('nope', { status: 404 }));
+    const notFound = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 404, headers: { 'content-type': 'text/html' }, body: rich, error: null },
+      }),
+    );
+    const serverError = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 500, headers: { 'content-type': 'text/html' }, body: rich, error: null },
+      }),
+    );
+    expect(notFound.status).toBe('broken');
+    expect(serverError.status).toBe('broken');
+  });
+
+  test('thin HTML with a live llms.txt content link is na', async () => {
+    const fetchImpl = stubFetch((url) => {
+      expect(url).toBe('https://example.com/guide.md');
+      return new Response('# Guide\n\nSubstantial twin body for the soften path to count as content.\n', {
+        status: 200,
+      });
+    });
+    const outcome = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 200, headers: { 'content-type': 'text/html' }, body: thin, error: null },
+        retainedBodies: new Map([['llms-txt', '# Site\n\n- [Guide](https://example.com/guide.md)\n']]),
+      }),
+    );
+    expect(outcome.status).toBe('na');
+  });
+});
+
+describe('runLlmsTxtQuality', () => {
+  test('format requires h1, blockquote summary, and a link index', async () => {
+    const fetchImpl = stubFetch(() => new Response('unused', { status: 404 }));
+    const pass = await runLlmsTxtQuality(
+      check({ id: 'llms-txt-format', handler: 'llms-txt-quality', with: { op: 'format' } }),
+      ctx({
+        fetchImpl,
+        retainedBodies: new Map([['llms-txt', '# Site\n\n> Summary\n\n- [A](https://example.com/a)\n']]),
+      }),
+    );
+    expect(pass.status).toBe('pass');
+    const miss = await runLlmsTxtQuality(
+      check({ id: 'llms-txt-format', handler: 'llms-txt-quality', with: { op: 'format' } }),
+      ctx({ fetchImpl, retainedBodies: new Map([['llms-txt', '# Site\n']]) }),
+    );
+    expect(miss.status).toBe('absent');
+  });
+});
+
+describe('runApiHygiene', () => {
+  const spec = JSON.stringify({
+    openapi: '3.1.0',
+    paths: {
+      '/v1/items/{id}': {
+        get: { responses: { '404': { description: 'missing' } } },
+      },
+    },
+  });
+
+  test('deriveApiProbeUrl prefers a documented 4xx GET and falls back when the body is unusable', () => {
+    const derived = deriveApiProbeUrl(spec, 'https://example.com/');
+    expect(derived.source).toBe('openapi-4xx');
+    expect(derived.url).toBe('https://example.com/v1/items/anc-web-audit-no-such');
+    expect(deriveApiProbeUrl('not json', 'https://example.com/').source).toBe('fallback');
+  });
+
+  test('json-errors passes on a JSON 404 and is broken on HTML', async () => {
+    const jsonFetch = stubFetch(
+      () =>
+        new Response(JSON.stringify({ error: 'not_found' }), {
+          status: 404,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const pass = await runApiHygiene(
+      check({ handler: 'api-hygiene', with: { op: 'json-errors' } }),
+      ctx({ fetchImpl: jsonFetch, retainedBodies: new Map([['openapi', spec]]) }),
+    );
+    expect(pass.status).toBe('pass');
+    const htmlFetch = stubFetch(
+      () => new Response('<html>nope</html>', { status: 404, headers: { 'content-type': 'text/html' } }),
+    );
+    const miss = await runApiHygiene(
+      check({ handler: 'api-hygiene', with: { op: 'json-errors' } }),
+      ctx({ fetchImpl: htmlFetch, retainedBodies: new Map([['openapi', spec]]) }),
+    );
+    expect(miss.status).toBe('broken');
+  });
+
+  test('rate-limit passes when RateLimit-Limit is present', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response('{}', {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'ratelimit-limit': '60' },
+        }),
+    );
+    const outcome = await runApiHygiene(
+      check({ handler: 'api-hygiene', with: { op: 'rate-limit' } }),
+      ctx({ fetchImpl, retainedBodies: new Map([['openapi', spec]]) }),
+    );
     expect(outcome.status).toBe('pass');
   });
 });

@@ -144,6 +144,9 @@ describe('llms.txt Programmatic access section', () => {
     expect(section).toContain('https://anc.dev/mcp');
     expect(section).toContain('https://anc.dev/.well-known/mcp/server-card.json');
     expect(section).toContain('https://anc.dev/mcp-skill.md');
+    expect(section).toContain('No authentication');
+    expect(section).toContain('initialize');
+    expect(section).toContain('Full recipes');
   });
 
   test('only one Programmatic access section exists in llms.txt', async () => {

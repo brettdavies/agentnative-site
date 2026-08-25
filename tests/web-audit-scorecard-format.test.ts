@@ -223,6 +223,17 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(passBlock).not.toContain('<strong>Fix:</strong>');
   });
 
+  test('fixable rows carry keyword and status on the prompt carrier; pass and n_a do not', () => {
+    expect(html).toContain('data-keyword="must" data-status="absent"');
+    expect(html).toContain('data-keyword="should" data-status="absent"');
+    expect(html).not.toContain('data-status="pass"');
+    expect(html).not.toContain('data-status="n_a"');
+    expect(html).not.toContain('data-assemble-prompt');
+    expect(html).not.toContain('<input');
+    expect(html).not.toContain('<button');
+    expect(html).toContain('data-web-audit-result');
+  });
+
   test('no badge-embed markup and no P-principle grouping', () => {
     expect(html).not.toContain('Embed the badge');
     expect(html).not.toContain('badge floor');
@@ -282,6 +293,8 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('- Fix: Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(md).toContain('```text');
     expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(md).not.toContain('Assemble fix prompts');
+    expect(md).not.toContain('Include SHOULD');
   });
 
   test('each check row carries its per-check tier', () => {

@@ -5,20 +5,26 @@
 //   HTML responses         Link: </p<n>.md>; rel="alternate"; type="text/markdown"
 //                          X-Llms-Txt: /llms.txt
 //                          Vary: Accept, User-Agent
-//                          Cache-Control: public, max-age=300, s-maxage=86400,
+//                          Cache-Control: public, max-age=300,
 //                                         stale-while-revalidate=60
+//                          Cloudflare-CDN-Cache-Control: no-store
 //
 //   Markdown responses     Content-Type: text/markdown; charset=utf-8
 //                          X-Robots-Tag: noindex
 //                          Vary: Accept, User-Agent
-//                          Cache-Control: public, max-age=300, s-maxage=86400,
+//                          Cache-Control: public, max-age=300,
 //                                         stale-while-revalidate=60
+//                          Cloudflare-CDN-Cache-Control: no-store
 //
 //   HTML + Markdown carry Vary because the twin is negotiated on the SAME URL
 //   by both Accept and User-Agent (see accept.ts): a shared cache MUST key on
-//   both or it serves one client's variant to another. Cloudflare's own edge
-//   ignores Vary except Accept-Encoding, but these dynamic responses are not
-//   edge-cached, and browsers and third-party proxies honor it.
+//   both or it serves one client's variant to another. Browsers and
+//   third-party proxies honor Vary. Cloudflare's zone cache does not
+//   preserve it (production HIT on 2026-08-25 kept Link + s-maxage=86400
+//   and omitted Vary). Negotiated responses therefore skip shared-cache
+//   reuse so the Worker-emitted Vary reaches clients. JSON, SVG, and other
+//   single-representation files (.txt, .xml, …) are path-keyed, not
+//   negotiated, and keep the long edge TTL.
 //
 //   JSON responses (.json) Content-Type: application/json; charset=utf-8
 //                          Access-Control-Allow-Origin: *
@@ -49,6 +55,12 @@
 //                          composes with the markdown branch (both set
 //                          noindex; last write wins, same value either way).
 
+// Browser TTL only. Shared caches (Cloudflare's zone cache in particular)
+// must not store negotiated variants: a HIT that drops Vary fails
+// markdown-vary even when the Worker emitted it. Cloudflare-CDN-Cache-Control
+// is not forwarded to clients (CDN-Cache-Control would be).
+const NEGOTIATED_CACHE = 'public, max-age=300, stale-while-revalidate=60';
+const CDN_NO_STORE = 'no-store';
 const SHORT_CACHE = 'public, max-age=300, s-maxage=86400, stale-while-revalidate=60';
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 
@@ -141,6 +153,19 @@ function isSvg(pathname: string): boolean {
   return pathname.endsWith('.svg');
 }
 
+// Source files with no HTML twin. A curl/agent UA would otherwise rewrite
+// `/llms.txt` to `/llms.txt.md` (same `.json` pitfall DESIGN.md §3.4 called
+// out for `/skill.json`). Keep this list extension-only: `/web/anc.dev` is
+// a result page, not a file, and is dispatched before asset CN.
+function isUntwinnedSource(pathname: string): boolean {
+  return /\.(txt|xml|css|js|mjs|map|png|ico|woff2|webmanifest)$/i.test(pathname);
+}
+
+/** True when the path is one representation: never rewritten to a `.md` twin. */
+export function isSingleRepresentation(pathname: string): boolean {
+  return isJson(pathname) || isSvg(pathname) || isHashedAsset(pathname) || isUntwinnedSource(pathname);
+}
+
 /**
  * Clone the response and replace its header set with the project's policy.
  * We clone so upstream 304 / redirect status codes flow through unchanged.
@@ -153,7 +178,8 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
     headers.set('X-Robots-Tag', 'noindex');
     headers.set('Vary', 'Accept, User-Agent');
-    headers.set('Cache-Control', SHORT_CACHE);
+    headers.set('Cache-Control', NEGOTIATED_CACHE);
+    headers.set('Cloudflare-CDN-Cache-Control', CDN_NO_STORE);
   } else if (isJson(opts.pathname)) {
     headers.set('Content-Type', 'application/json; charset=utf-8');
     headers.set('Access-Control-Allow-Origin', '*');
@@ -165,12 +191,15 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     headers.set('Cache-Control', SHORT_CACHE);
   } else if (isHashedAsset(opts.pathname)) {
     headers.set('Cache-Control', IMMUTABLE_CACHE);
+  } else if (isUntwinnedSource(opts.pathname)) {
+    headers.set('Cache-Control', SHORT_CACHE);
   } else {
     const twinLink = `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`;
     headers.set('Link', opts.pathname === '/' ? `${twinLink}, ${ROOT_DISCOVERY_LINKS}` : twinLink);
     headers.set('X-Llms-Txt', '/llms.txt');
     headers.set('Vary', 'Accept, User-Agent');
-    headers.set('Cache-Control', SHORT_CACHE);
+    headers.set('Cache-Control', NEGOTIATED_CACHE);
+    headers.set('Cloudflare-CDN-Cache-Control', CDN_NO_STORE);
     // CSP applies to HTML responses only — the markdown / JSON / SVG
     // branches above MUST stay free of HTML-only directives like
     // frame-ancestors (Cloudflare WAF flags inconsistent enforcement).

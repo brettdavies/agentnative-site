@@ -28,3 +28,45 @@ export function substituteHost(value: string, host: string): string {
 export function timeoutMsFor(checkTimeoutSeconds: number | undefined, defaultTimeoutMs: number): number {
   return typeof checkTimeoutSeconds === 'number' ? Math.round(checkTimeoutSeconds * 1000) : defaultTimeoutMs;
 }
+
+/** Remaining nested-fetch budget; 0 means stop and do not issue another request. */
+export function remainingDeadlineMs(deadlineAtMs: number, nowMs = Date.now()): number {
+  return Math.max(0, deadlineAtMs - nowMs);
+}
+
+const MARKDOWN_HREF_RE = /\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+
+function isRecoveryPath(pathname: string): boolean {
+  return (
+    pathname.endsWith('/sitemap.xml') ||
+    pathname.endsWith('/llms.txt') ||
+    pathname === '/docs' ||
+    pathname.startsWith('/docs/')
+  );
+}
+
+/**
+ * True when markdown contains at least one href that resolves to a
+ * same-origin sitemap.xml, llms.txt, or /docs recovery surface.
+ */
+export function sameOriginRecoveryLink(body: string, base: string): { ok: boolean; why: string } {
+  let origin: string;
+  try {
+    origin = new URL(base).origin;
+  } catch {
+    return { ok: false, why: 'unparseable audit origin' };
+  }
+  for (const match of body.matchAll(MARKDOWN_HREF_RE)) {
+    let url: URL;
+    try {
+      url = new URL(match[1], base);
+    } catch {
+      continue;
+    }
+    if (url.origin !== origin) continue;
+    if (isRecoveryPath(url.pathname)) {
+      return { ok: true, why: `same-origin recovery ${url.pathname}` };
+    }
+  }
+  return { ok: false, why: 'no same-origin sitemap.xml, llms.txt, or /docs link' };
+}

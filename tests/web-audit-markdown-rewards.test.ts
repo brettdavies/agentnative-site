@@ -64,14 +64,15 @@ const MARKDOWN_CHECKS: WebCheck[] = [
   }),
   makeCheck({
     id: 'markdown-vary',
-    tier: 'optional',
-    keyword: 'may',
+    tier: 'recommended',
+    keyword: 'should',
     antecedent: 'markdown-twin',
     with: { path: '/', expect: { header_regex: { name: 'vary', pattern: '(?=.*accept(?!-))(?=.*user-agent)' } } },
   }),
 ];
 
-const NEW_CHECK_IDS = ['markdown-cli-ua', 'markdown-agent-ua', 'markdown-accept-plain', 'markdown-vary'] as const;
+const MAY_CHECK_IDS = ['markdown-cli-ua', 'markdown-agent-ua', 'markdown-accept-plain'] as const;
+const NEW_CHECK_IDS = [...MAY_CHECK_IDS, 'markdown-vary'] as const;
 
 function registryOf(checks: WebCheck[]): WebAuditRegistry {
   return {
@@ -162,14 +163,15 @@ describe('markdown-to-agents rewards: a site that serves the twin to every clien
     }
   });
 
-  test('the four passes are counted as verified MAY coverage', async () => {
+  test('the three remaining MAY passes are counted as verified MAY coverage; markdown-vary is SHOULD', async () => {
     const { fetchImpl } = siteFetch(twinRoot);
     const events = await collect(
       runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
     );
     const sc = scorecardOf(events);
-    expect(sc.coverage_summary.may.total).toBe(4);
-    expect(sc.coverage_summary.may.verified).toBe(4);
+    expect(sc.coverage_summary.may.total).toBe(3);
+    expect(sc.coverage_summary.may.verified).toBe(3);
+    expect(resultsOf(events).find((r) => r.id === 'markdown-vary')?.keyword).toBe('should');
   });
 
   test('markdown-vary reuses the canonical root fetch instead of issuing a second plain GET /', async () => {
@@ -221,17 +223,27 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
     return htmlResponse({ link: MD_ALTERNATE_LINK });
   }
 
-  test('the four checks are n_a with na_reason optional-absent (applicable, unimplemented, no penalty)', async () => {
+  test('the three MAY checks are n_a with na_reason optional-absent (applicable, unimplemented, no penalty)', async () => {
     const { fetchImpl } = siteFetch(shipsMdButUnimplemented);
     const events = await collect(
       runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
     );
     const rows = resultsOf(events);
-    for (const id of NEW_CHECK_IDS) {
+    for (const id of MAY_CHECK_IDS) {
       const row = rows.find((r) => r.id === id);
       expect(row?.status).toBe('n_a');
       expect(row?.na_reason).toBe('optional-absent');
     }
+  });
+
+  test('markdown-vary with missing Vary is absent, not n_a / optional-absent', async () => {
+    const { fetchImpl } = siteFetch(shipsMdButUnimplemented);
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
+    );
+    const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
+    expect(row?.status).toBe('absent');
+    expect(row?.na_reason).toBeUndefined();
   });
 
   test('markdown-vary rejects Vary: Accept-Encoding, User-Agent (Accept-Encoding is not Accept)', async () => {
@@ -245,7 +257,7 @@ describe('markdown-to-agents rewards: a markdown site that never adopts the affo
       runWebAudit({ url: 'https://example.com/', registry: registryOf(MARKDOWN_CHECKS), fetchOptions: { fetchImpl } }),
     );
     const row = resultsOf(events).find((r) => r.id === 'markdown-vary');
-    expect(row?.status).toBe('n_a');
-    expect(row?.na_reason).toBe('optional-absent');
+    expect(row?.status).toBe('absent');
+    expect(row?.na_reason).toBeUndefined();
   });
 });

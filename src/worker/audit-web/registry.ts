@@ -15,7 +15,10 @@ export type WebCheckHandler =
   | 'auth-md'
   | 'webmcp'
   | 'scoped-llms'
-  | 'markdown-frontmatter';
+  | 'markdown-frontmatter'
+  | 'content-without-js'
+  | 'llms-txt-quality'
+  | 'api-hygiene';
 
 /** Declared audit site type (the entry-point argument). */
 export type WebSiteType = 'content' | 'api';
@@ -28,6 +31,7 @@ export type AntecedentToken =
   | 'html-root'
   | 'mcp-present'
   | 'mcp-auth'
+  | 'mcp-resources'
   | 'api-surface'
   | 'schemas-ref'
   | 'docs-site'

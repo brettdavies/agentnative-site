@@ -3017,4 +3017,19 @@ describe('llms surface — twin frontmatter stays out (regression lock)', () => 
       ].join('\n'),
     );
   });
+
+  test('Programmatic access includes a no-auth initialize crumb and still links mcp-skill.md', () => {
+    const out = buildLlmsIndex({
+      introTitle: 'The agent-native standard',
+      summary: 'One bar for agent-readiness.',
+      principles: [{ n: 1, slug: 'p1-non-interactive-by-default', title: 'P1 — Non-Interactive by Default' }],
+      programmaticAccess: [{ label: 'MCP server (streamable HTTP)', path: '/mcp' }],
+    });
+    expect(out).toContain('## Programmatic access');
+    expect(out).toContain('https://anc.dev/mcp');
+    expect(out).toContain('No authentication');
+    expect(out).toContain('initialize');
+    expect(out).toContain('https://anc.dev/mcp-skill.md');
+    expect(out).toContain('Full recipes');
+  });
 });

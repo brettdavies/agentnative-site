@@ -34,6 +34,11 @@ export type GuardedFetchInit = {
 export type GuardedFetchOptions = {
   /** Deadline for the whole request chain (redirects included). */
   timeoutMs?: number;
+  /**
+   * Cap on response body bytes. `0` skips the body (status/headers only).
+   * Unset keeps the historical full `response.text()` read.
+   */
+  maxBodyBytes?: number;
   /** Maximum Location hops before the chain aborts. */
   maxRedirects?: number;
   /**
@@ -291,7 +296,7 @@ export async function guardedFetch(
       });
       let body = '';
       try {
-        body = await response.text();
+        body = await readBody(response, opts.maxBodyBytes);
       } catch (err) {
         return fail(errMsg(err));
       }
@@ -307,6 +312,58 @@ export async function guardedFetch(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Status-only probes: never buffer the response body. */
+export const STATUS_ONLY_BODY_BYTES = 0;
+/** Cap for probes that inspect a short body (JSON errors, twin text). */
+export const AUDIT_PROBE_MAX_BODY_BYTES = 64 * 1024;
+
+async function readBody(response: Response, maxBodyBytes: number | undefined): Promise<string> {
+  if (maxBodyBytes === 0) {
+    if (response.body) {
+      try {
+        await response.body.cancel();
+      } catch {
+        // Already locked or closed.
+      }
+    }
+    return '';
+  }
+  if (maxBodyBytes === undefined) {
+    return await response.text();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    const remaining = maxBodyBytes - received;
+    if (remaining <= 0) {
+      await reader.cancel();
+      break;
+    }
+    if (value.byteLength > remaining) {
+      chunks.push(value.slice(0, remaining));
+      received = maxBodyBytes;
+      await reader.cancel();
+      break;
+    }
+    chunks.push(value);
+    received += value.byteLength;
+  }
+  let total = 0;
+  for (const chunk of chunks) total += chunk.byteLength;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(out);
 }
 
 function errMsg(err: unknown): string {

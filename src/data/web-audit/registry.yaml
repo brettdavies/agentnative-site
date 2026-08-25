@@ -16,6 +16,11 @@
 #   dns-doh        DNS-over-HTTPS (JSON API) record lookup
 #   auth-md        agent auth/registration metadata doc probe
 #   webmcp         browser WebMCP tool-exposure scan of the root HTML
+#   scoped-llms    per-section llms.txt probes
+#   markdown-frontmatter  leading YAML fence on the markdown twin
+#   content-without-js    SSR content floor with llms.txt twin softening
+#   llms-txt-quality      format / links / when-to-use ops on retained llms.txt
+#   api-hygiene           JSON error bodies / rate-limit headers from a safe GET
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -79,6 +84,7 @@ checks:
     handler: http
     with:
       path_any: [/openapi.json, /openapi.yaml, /.well-known/openapi.json]
+      retain_body: true
       expect: { status: [200], body_regex: "openapi|swagger" }
     hint: Publish an OpenAPI 3.1 description for the REST surface so non-MCP agents can call it.
 
@@ -109,6 +115,30 @@ checks:
       path: /.well-known/api-catalog
       expect: { status: [200], body_regex: "linkset" }
     hint: Serve /.well-known/api-catalog as application/linkset+json with a linkset[] of anchor + service-desc entries.
+
+  - id: json-errors
+    category: api
+    tier: recommended
+    principle: P4
+    site_types: [api]
+    antecedent: api-surface
+    weight: 2
+    title: API client errors return JSON, not HTML
+    handler: api-hygiene
+    with: { op: json-errors }
+    hint: Answer unknown or documented 4xx API GETs with a JSON error body, not an HTML page.
+
+  - id: rate-limit-headers
+    category: api
+    tier: recommended
+    principle: P6
+    site_types: [api]
+    antecedent: api-surface
+    weight: 2
+    title: API responses advertise rate-limit headers
+    handler: api-hygiene
+    with: { op: rate-limit }
+    hint: Send RateLimit-* or X-RateLimit-* (or Retry-After) on API responses so agents can back off.
 
   # ---- MCP -----------------------------------------------------------------
   - id: mcp-initialize
@@ -146,6 +176,18 @@ checks:
     handler: mcp
     with: { op: tools-list }
     hint: Return `result.tools[]`, each with `name`, `description`, and a JSON `inputSchema`.
+
+  - id: mcp-resources-list
+    category: mcp
+    tier: recommended
+    principle: P2
+    site_types: [mcp]
+    antecedent: mcp-resources
+    weight: 3
+    title: resources/list returns at least one resource when advertised
+    handler: mcp
+    with: { op: resources-list }
+    hint: When initialize advertises capabilities.resources, return a non-empty result.resources array from resources/list.
 
   - id: mcp-unknown-method
     category: mcp
@@ -265,6 +307,42 @@ checks:
       expect: { status: [200], body_regex: "^#|\\]\\(https?://" }
     hint: 'Serve /llms.txt (llmstxt.org): H1 title, summary blockquote, categorized link index.'
 
+  - id: llms-txt-format
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: root-llms-txt
+    weight: 1
+    title: llms.txt has H1, summary, and a link index
+    handler: llms-txt-quality
+    with: { op: format }
+    hint: 'Structure /llms.txt with an H1 title, a blockquote summary, and a markdown link index (llmstxt.org). Presence alone is not enough.'
+
+  - id: llms-txt-links
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: root-llms-txt
+    weight: 1
+    title: llms.txt links resolve
+    handler: llms-txt-quality
+    with: { op: links, max_candidates: 8 }
+    hint: 'Keep every markdown href in /llms.txt fetchable (2xx/3xx). Dead index links waste an agent round-trip.'
+
+  - id: llms-txt-when-to-use
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: root-llms-txt
+    weight: 1
+    title: llms.txt has a when-to-use or programmatic-access section
+    handler: llms-txt-quality
+    with: { op: when-to-use }
+    hint: 'Add a short heading such as "When to use" or "Programmatic access" so an agent knows when the MCP or docs apply.'
+
   - id: llms-full-txt
     category: content-for-agents
     tier: optional
@@ -350,6 +428,23 @@ checks:
       expect: { content_type: "markdown|text/plain" }
     hint: 'Serve the markdown twin to AI on-demand user-fetchers (ChatGPT-User, Claude-User, Perplexity-User) that state no content-type preference.'
 
+  - id: agent-ua-reachable
+    category: bot-crawl-policy
+    tier: recommended
+    principle: P7
+    site_types: [all]
+    antecedent: http-root
+    weight: 1
+    title: AI user-fetch User-Agent can reach the homepage
+    handler: http
+    with:
+      path: /
+      headers: { User-Agent: "ChatGPT-User/1.0 (+https://openai.com/bot)", Accept: "*/*" }
+      expect:
+        status_below: 300
+        body_not_regex: "just a moment|attention required|cf-challenge|enable javascript and cookies|captcha"
+    hint: 'Allow on-demand user-fetchers (ChatGPT-User and peers) to GET / with Accept */* and receive 2xx, not a bot-challenge interstitial. Distinct from serving markdown to that UA.'
+
   - id: markdown-accept-plain
     category: content-for-agents
     tier: optional
@@ -367,7 +462,7 @@ checks:
 
   - id: markdown-vary
     category: content-for-agents
-    tier: optional
+    tier: recommended
     principle: P2
     site_types: [all]
     antecedent: markdown-twin
@@ -421,6 +516,18 @@ checks:
       path: /
       expect: { body_regex: "application/ld\\+json" }
     hint: Embed Schema.org JSON-LD (e.g. TechArticle / WebAPI) in <head> for structured metadata.
+
+  - id: content-without-js
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: html-root
+    weight: 1
+    title: Root HTML has an H1 and readable text without JavaScript
+    handler: content-without-js
+    with: {}
+    hint: 'Serve an H1 and at least ~200 characters of visible text in the raw root HTML. A thin shell is acceptable only when llms.txt links resolvable same-origin content.'
 
   - id: semantic-html
     category: content-for-agents
@@ -479,6 +586,38 @@ checks:
       retain_body: true
       expect: { status: [200] }
     hint: Publish sitemap.xml so crawlers and agents can enumerate content URLs.
+
+  - id: agent-friendly-404
+    category: discoverability
+    tier: recommended
+    principle: P8
+    site_types: [all]
+    antecedent: http-root
+    weight: 1
+    title: Unknown paths return HTTP 404 or 410
+    handler: http
+    with:
+      path: /anc-web-audit-no-such-page
+      expect: { status: [404, 410] }
+    hint: 'Return a real HTTP 404 or 410 for unknown paths. A 200 SPA shell is a soft-404 and hides recovery from agents.'
+
+  - id: agent-friendly-404-md
+    category: discoverability
+    tier: recommended
+    principle: P8
+    site_types: [all]
+    antecedent: http-root
+    weight: 1
+    title: 404 body is markdown with a recovery link
+    handler: http
+    with:
+      path: /anc-web-audit-no-such-page
+      headers: { Accept: text/markdown }
+      expect:
+        status: [404, 410]
+        content_type: "markdown|text/plain"
+        same_origin_recovery_link: true
+    hint: 'On Accept text/markdown, serve a short 404 markdown body that links at least one recovery surface (sitemap, llms.txt, or a docs index). Verify with curl -sS -o /dev/null -w "%{http_code}".'
 
   - id: link-headers
     category: discoverability
@@ -594,6 +733,20 @@ checks:
       path_any: [/.well-known/agent-card.json, /.well-known/agent.json]
       expect: { status: [200], content_type: "json", body_regex: "\"name\"|supportedInterfaces|skills" }
     hint: Serve /.well-known/agent-card.json (a2a-protocol.org) with name, version, and supportedInterfaces.
+
+  - id: ai-catalog
+    category: agent-discovery-auth
+    tier: optional
+    principle: P8
+    site_types: [all]
+    antecedent: none
+    weight: 1
+    title: /.well-known/ai-catalog.json published (ARD)
+    handler: http
+    with:
+      path: /.well-known/ai-catalog.json
+      expect: { status: [200], content_type: "json", body_regex: "specVersion|entries" }
+    hint: Serve /.well-known/ai-catalog.json with specVersion and an entries array (Agentic Resource Discovery).
 
   - id: agent-skills
     category: agent-discovery-auth

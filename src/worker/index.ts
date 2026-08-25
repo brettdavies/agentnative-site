@@ -33,10 +33,11 @@ import {
   parseWebResultPath,
   type WebAuditRouteEnv,
 } from './audit-web/route';
-import { applyHeaders } from './headers';
+import { applyHeaders, isSingleRepresentation } from './headers';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
+import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
@@ -653,10 +654,12 @@ export default {
 
     const pathIsMarkdown = pathname.endsWith('.md');
     const pathIsJson = pathname.endsWith('.json');
-    // CN rewrite is markdown-only. Skip for `.json` paths so `Accept:
-    // text/markdown` against `/skill.json` returns the JSON unchanged
-    // instead of rewriting to a non-existent `/skill.json.md` twin.
-    const preferMarkdown = !pathIsMarkdown && !pathIsJson && detectPreference(request) === 'markdown';
+    // CN rewrite is for HTML pages that have a markdown twin. Skip
+    // single-representation files so `curl /llms.txt` (UA heuristic) and
+    // `Accept: text/markdown` against `/skill.json` do not look up a
+    // non-existent `*.md` twin. Same skip as DESIGN.md §3.4 for JSON.
+    const preferMarkdown =
+      !pathIsMarkdown && !isSingleRepresentation(pathname) && detectPreference(request) === 'markdown';
     const servedMarkdown = pathIsMarkdown || preferMarkdown;
 
     let assetRequest = request;
@@ -699,6 +702,24 @@ export default {
         });
         return applyHeaders(rewritten, { request, servedMarkdown, pathname });
       }
+    }
+
+    if (
+      upstream.status === 404 &&
+      !pathIsJson &&
+      !pathname.endsWith('.svg') &&
+      !pathname.startsWith('/fonts/') &&
+      pathname !== '/og-image.png'
+    ) {
+      const origin = url.origin;
+      const body = servedMarkdown ? notFoundMarkdown(origin) : notFoundHtml(origin);
+      const headers = new Headers(upstream.headers);
+      headers.set('Content-Type', servedMarkdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8');
+      return applyHeaders(new Response(body, { status: 404, statusText: upstream.statusText, headers }), {
+        request,
+        servedMarkdown,
+        pathname,
+      });
     }
 
     return applyHeaders(upstream, { request, servedMarkdown, pathname });
