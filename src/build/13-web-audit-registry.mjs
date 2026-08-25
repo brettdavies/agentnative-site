@@ -31,6 +31,7 @@ export const WEB_AUDIT_HANDLERS = new Set([
   'scoped-llms',
   'markdown-frontmatter',
   'content-without-js',
+  'llms-txt-quality',
 ]);
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([

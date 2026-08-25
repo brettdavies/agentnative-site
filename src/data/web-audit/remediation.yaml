@@ -462,3 +462,30 @@ remediation:
       say "Just a moment", fail the check.
     resources:
       - { label: OpenAI user-fetchers, url: "https://platform.openai.com/docs/bots" }
+  llms-txt-format:
+    title: llms.txt has H1, summary, and a link index
+    goal: Structure /llms.txt with an H1, a blockquote summary, and a markdown link index
+    fix: |
+      Follow the llmstxt.org shape: start with `# Title`, add a `>` summary blockquote, then a
+      categorized list of markdown links. A file that is present but is only a heading, or only a
+      blob of prose, fails this row even when the presence check passes.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-txt-links:
+    title: llms.txt links resolve
+    goal: Make every markdown href in /llms.txt fetchable
+    fix: |
+      Probe the markdown links in `/llms.txt` and replace 404s. An agent that follows a dead index
+      link wastes a round-trip and may conclude the project has no docs. Keep the list short and
+      current; drop links you are not willing to keep alive.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-txt-when-to-use:
+    title: llms.txt has a when-to-use or programmatic-access section
+    goal: Tell agents when to use the MCP or docs from a short llms.txt heading
+    fix: |
+      Add a heading such as `## When to use` or `## Programmatic access` with a few lines on when
+      an agent should connect (for example: "Use the MCP when you need to search or score a CLI").
+      The audit looks for that heading; it does not grade the prose with an LLM.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }

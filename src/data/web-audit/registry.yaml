@@ -19,6 +19,7 @@
 #   scoped-llms    per-section llms.txt probes
 #   markdown-frontmatter  leading YAML fence on the markdown twin
 #   content-without-js    SSR content floor with llms.txt twin softening
+#   llms-txt-quality      format / links / when-to-use ops on retained llms.txt
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -267,6 +268,42 @@ checks:
       retain_body: true
       expect: { status: [200], body_regex: "^#|\\]\\(https?://" }
     hint: 'Serve /llms.txt (llmstxt.org): H1 title, summary blockquote, categorized link index.'
+
+  - id: llms-txt-format
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: root-llms-txt
+    weight: 1
+    title: llms.txt has H1, summary, and a link index
+    handler: llms-txt-quality
+    with: { op: format }
+    hint: 'Structure /llms.txt with an H1 title, a blockquote summary, and a markdown link index (llmstxt.org). Presence alone is not enough.'
+
+  - id: llms-txt-links
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: root-llms-txt
+    weight: 1
+    title: llms.txt links resolve
+    handler: llms-txt-quality
+    with: { op: links, max_candidates: 8 }
+    hint: 'Keep every markdown href in /llms.txt fetchable (2xx/3xx). Dead index links waste an agent round-trip.'
+
+  - id: llms-txt-when-to-use
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: root-llms-txt
+    weight: 1
+    title: llms.txt has a when-to-use or programmatic-access section
+    handler: llms-txt-quality
+    with: { op: when-to-use }
+    hint: 'Add a short heading such as "When to use" or "Programmatic access" so an agent knows when the MCP or docs apply.'
 
   - id: llms-full-txt
     category: content-for-agents

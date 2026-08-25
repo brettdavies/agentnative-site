@@ -27,6 +27,7 @@ import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
+import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import { runMcp } from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
@@ -70,6 +71,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     'scoped-llms': runScopedLlms,
     'markdown-frontmatter': runMarkdownFrontmatter,
     'content-without-js': runContentWithoutJs,
+    'llms-txt-quality': runLlmsTxtQuality,
   };
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {

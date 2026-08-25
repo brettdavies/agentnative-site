@@ -9,6 +9,7 @@ import { runContentWithoutJs } from '../src/worker/audit-web/handlers/content-wi
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
+import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
 import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
@@ -716,5 +717,24 @@ describe('runContentWithoutJs', () => {
       }),
     );
     expect(outcome.status).toBe('na');
+  });
+});
+
+describe('runLlmsTxtQuality', () => {
+  test('format requires h1, blockquote summary, and a link index', async () => {
+    const fetchImpl = stubFetch(() => new Response('unused', { status: 404 }));
+    const pass = await runLlmsTxtQuality(
+      check({ id: 'llms-txt-format', handler: 'llms-txt-quality', with: { op: 'format' } }),
+      ctx({
+        fetchImpl,
+        retainedBodies: new Map([['llms-txt', '# Site\n\n> Summary\n\n- [A](https://example.com/a)\n']]),
+      }),
+    );
+    expect(pass.status).toBe('pass');
+    const miss = await runLlmsTxtQuality(
+      check({ id: 'llms-txt-format', handler: 'llms-txt-quality', with: { op: 'format' } }),
+      ctx({ fetchImpl, retainedBodies: new Map([['llms-txt', '# Site\n']]) }),
+    );
+    expect(miss.status).toBe('absent');
   });
 });

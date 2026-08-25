@@ -30,9 +30,9 @@ async function load() {
 }
 
 describe('web remediation catalog coverage', () => {
-  test('every registry check id has a remediation entry (no misses across all 45)', async () => {
+  test('every registry check id has a remediation entry (no misses across all 48)', async () => {
     const { checkIds, remediation } = await load();
-    expect(checkIds.length).toBe(45);
+    expect(checkIds.length).toBe(48);
     for (const id of checkIds) {
       expect(remediation[id]).toBeDefined();
       expect(remediation[id].title.length).toBeGreaterThan(0);
