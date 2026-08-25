@@ -50,9 +50,13 @@ function makeEnv(bodyByPath: Record<string, string> = {}, opts: { notFoundUnless
         const listed = Object.hasOwn(bodyByPath, path);
         const status = opts.notFoundUnlessListed && !listed ? 404 : 200;
         const body = bodyByPath[path] ?? (status === 404 ? '' : `asset:${path}`);
+        const headers: Record<string, string> = { 'X-Echo-Path': path };
+        // Mirror Static Assets: .txt files are text/plain, not HTML. Needed so
+        // curl-/llms.txt tests can assert the Worker does not overwrite to markdown.
+        if (path.endsWith('.txt')) headers['Content-Type'] = 'text/plain';
         return new Response(body, {
           status,
-          headers: { 'X-Echo-Path': path },
+          headers,
         });
       },
     } as unknown as Fetcher,
@@ -249,6 +253,23 @@ describe('applyHeaders — markdown branch', () => {
   });
 });
 
+describe('applyHeaders — untwinned source (.txt / .xml)', () => {
+  test('/llms.txt keeps upstream text/plain, edge TTL, and no HTML/markdown chrome', () => {
+    const res = applyHeaders(new Response('# index\n', { headers: { 'Content-Type': 'text/plain' } }), {
+      request: req('https://anc.dev/llms.txt', '*/*', UA.curl),
+      servedMarkdown: false,
+      pathname: '/llms.txt',
+    });
+    expect(res.headers.get('Content-Type')).toBe('text/plain');
+    expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
+    expect(res.headers.get('Vary')).toBeNull();
+    expect(res.headers.get('Link')).toBeNull();
+    expect(res.headers.get('X-Llms-Txt')).toBeNull();
+    expect(res.headers.get('Content-Security-Policy')).toBeNull();
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
+  });
+});
+
 describe('applyHeaders — JSON branch (skill-distribution)', () => {
   test('/skill.json: application/json + CORS + noindex + short cache + no Link', () => {
     const res = applyHeaders(new Response('{}'), {
@@ -417,16 +438,22 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
   test('/ with */* + curl UA → fetches /index.md (bare `curl anc.dev`)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(req('https://anc.dev/', '*/*', UA.curl), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
     expect(res.headers.get('X-Echo-Path')).toBe('/index.md');
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
   });
 
-  test('/llms.txt with */* + curl UA fetches /llms.txt, not /llms.txt.md', async () => {
+  // Regression: markdown-UA rewrite used to look up /llms.txt.md and 404.
+  // Bare `curl /llms.txt` must return the file as text/plain; `curl /` still
+  // negotiates the homepage twin (test above).
+  test('/llms.txt with */* + curl UA is 200 text/plain, not a rewritten 404', async () => {
     const env = makeEnv({ '/llms.txt': '# The agent-native standard\n' }, { notFoundUnlessListed: true });
     const res = await worker.fetch(req('https://anc.dev/llms.txt', '*/*', UA.curl), env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Echo-Path')).toBe('/llms.txt');
+    expect(res.headers.get('Content-Type')).toBe('text/plain');
+    expect(res.headers.get('Content-Type')).not.toContain('markdown');
     expect(await res.text()).toContain('# The agent-native standard');
     expect(res.headers.get('Content-Security-Policy')).toBeNull();
     expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
