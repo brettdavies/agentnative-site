@@ -1,3 +1,5 @@
+import { homeTag, webDomainTag, webTag } from './audit-web/hit-min-tags';
+
 // Response-header policy for the agentnative-site Worker.
 //
 // Contract (docs/DESIGN.md §3.4):
@@ -189,13 +191,13 @@ function isAlwaysMissPath(pathname: string): boolean {
  * Link/twin generation so `/web.md` is not treated as extensionless).
  */
 export function hitMinCacheTag(pathname: string): string | null {
-  if (pathname === '/' || pathname === '/index.md') return 'home';
-  if (pathname === '/web' || pathname === '/web.md') return 'web';
+  if (pathname === '/' || pathname === '/index.md') return homeTag();
+  if (pathname === '/web' || pathname === '/web.md') return webTag();
   const match = pathname.match(/^\/web\/([^/]+?)(\.md)?$/);
   if (!match) return null;
   const domain = match[1];
   if (domain === 'scoring') return null;
-  return `web:${domain}`;
+  return webDomainTag(domain);
 }
 
 type CacheClass = 'hit-1d' | 'hit-min' | 'miss' | 'short' | 'immutable';

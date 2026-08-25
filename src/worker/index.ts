@@ -13,7 +13,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
-import { getAggregate, type WebCacheEnv } from './audit-web/cache';
+import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import {
   buildFrontpageBoardEmptyState,
@@ -716,39 +716,8 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   if (isHomepage && upstream.ok) {
     const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
     const wantsMarkdown = servedMarkdown || pathname === '/index.md' || contentType.includes('text/markdown');
-    if (wantsMarkdown) {
-      const md = await upstream.text();
-      let substituted = md;
-      if (substituted.includes('{{WEB_BOARD_ROWS}}')) {
-        const aggregate = await getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION);
-        const entries = aggregate?.entries ?? [];
-        const board =
-          entries.length > 0 ? buildFrontpageBoardMarkdown(entries) : buildFrontpageBoardMarkdownEmptyState();
-        substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', board);
-      }
-      const rewritten = new Response(substituted, {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        headers: upstream.headers,
-      });
-      return applyHeaders(rewritten, { request, servedMarkdown, pathname });
-    }
-    if (contentType.includes('text/html')) {
-      const html = await upstream.text();
-      const sitekey = env.TURNSTILE_SITEKEY ?? '';
-      let substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
-      if (substituted.includes('{{WEB_BOARD_ROWS}}')) {
-        const aggregate = await getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION);
-        const entries = aggregate?.entries ?? [];
-        const board = entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
-        substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', board);
-      }
-      const rewritten = new Response(substituted, {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        headers: upstream.headers,
-      });
-      return applyHeaders(rewritten, { request, servedMarkdown, pathname });
+    if (wantsMarkdown || contentType.includes('text/html')) {
+      return injectHomepageBoards(upstream, env, { request, servedMarkdown, pathname, markdown: wantsMarkdown });
     }
   }
 
@@ -771,6 +740,35 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   }
 
   return applyHeaders(upstream, { request, servedMarkdown, pathname });
+}
+
+function frontpageBoardSlice(markdown: boolean, entries: WebAggregateEntry[]): string {
+  if (markdown) {
+    return entries.length > 0 ? buildFrontpageBoardMarkdown(entries) : buildFrontpageBoardMarkdownEmptyState();
+  }
+  return entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
+}
+
+async function injectHomepageBoards(
+  upstream: Response,
+  env: Env,
+  opts: { request: Request; servedMarkdown: boolean; pathname: string; markdown: boolean },
+): Promise<Response> {
+  const [body, aggregate] = await Promise.all([
+    upstream.text(),
+    getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION),
+  ]);
+  const entries = aggregate?.entries ?? [];
+  let substituted = opts.markdown ? body : body.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
+  substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', frontpageBoardSlice(opts.markdown, entries));
+  return applyHeaders(
+    new Response(substituted, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: upstream.headers,
+    }),
+    { request: opts.request, servedMarkdown: opts.servedMarkdown, pathname: opts.pathname },
+  );
 }
 
 function loopbackCachedFetch(ctx: ExecutionContext, env: Env, request: Request): Promise<Response> {

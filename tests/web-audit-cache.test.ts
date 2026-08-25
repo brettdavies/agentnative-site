@@ -932,6 +932,23 @@ describe('HIT-min tag purge', () => {
     expect(calls).toEqual([{ tags: ['web:other.dev', 'web'] }]);
   });
 
+  test('invokeCachedPurge does not fall back to gateway ctx.cache.purge', async () => {
+    const cacheCalls: unknown[] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      cache: {
+        async purge(opts: unknown) {
+          cacheCalls.push(opts);
+          return { success: true };
+        },
+      },
+    } as unknown as ExecutionContext;
+    await invokeCachedPurge(ctx, ['web']);
+    expect(cacheCalls).toEqual([]);
+  });
+
   test('put does not purge on its own', async () => {
     const { ctx, calls } = makePurgeCtx();
     const { env } = makeR2Stub();

@@ -7,17 +7,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-export function homeTag(): string {
-  return 'home';
-}
-
-export function webTag(): string {
-  return 'web';
-}
-
-export function webDomainTag(domain: string): string {
-  return `web:${domain}`;
-}
+export { homeTag, webDomainTag, webTag } from './hit-min-tags';
 
 type PurgeResult = { success: boolean; errors?: unknown[] };
 
@@ -62,14 +52,6 @@ export async function invokeCachedPurge(ctx: ExecutionContext, tags: readonly st
       const result = await rpc.purgeHitMinTags(unique);
       if (!result.success) {
         console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors ?? [] }));
-      }
-      return;
-    }
-    const cache = ctx.cache;
-    if (cache && typeof cache.purge === 'function') {
-      const result = await cache.purge({ tags: unique });
-      if (!result.success) {
-        console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors }));
       }
       return;
     }
