@@ -45,6 +45,16 @@ remediation:
       calling. A tool without an `inputSchema` forces the agent to guess argument shapes.
     resources:
       - { label: MCP tools, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/tools" }
+  mcp-resources-list:
+    title: resources/list returns at least one resource when advertised
+    goal: Honor capabilities.resources with a non-empty resources/list result
+    fix: |
+      If `initialize` advertises `capabilities.resources`, implement `resources/list` and return a
+      `result.resources` array with at least one entry (`uri` plus a name or description). An empty
+      list or a transport failure means the capability was advertised but is not actually there.
+      Omit `capabilities.resources` entirely if the server has no resources.
+    resources:
+      - { label: MCP resources, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/resources" }
   mcp-unknown-method:
     title: unknown JSON-RPC method returns -32601
     goal: Reject unknown JSON-RPC methods with error -32601 instead of a hang or 500
@@ -355,6 +365,25 @@ remediation:
       description you publish.
     resources:
       - { label: RFC 9727, url: "https://www.rfc-editor.org/rfc/rfc9727" }
+  json-errors:
+    title: API client errors return JSON, not HTML
+    goal: Return a JSON error body on client-error API responses so agents can parse the failure
+    fix: |
+      On a client-error API response (4xx), return `Content-Type: application/json` and a JSON object
+      (for example `{ "error": { "code": "not_found", "message": "..." } }`), not an HTML error page.
+      Agents cannot recover from a soft-HTML 404. The audit probes a documented OpenAPI 4xx GET when
+      one exists, otherwise `GET /anc-web-audit-no-such-api`.
+    resources:
+      - { label: RFC 9457 (problem+json), url: "https://www.rfc-editor.org/rfc/rfc9457" }
+  rate-limit-headers:
+    title: API responses advertise rate-limit headers
+    goal: Advertise remaining quota on API responses so agents can back off instead of retrying blindly
+    fix: |
+      Send IETF RateLimit headers (`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`) or
+      the common `X-RateLimit-*` aliases on API responses. A 429 should also carry `Retry-After`.
+      Without them an agent has no budget and will retry until it is locked out.
+    resources:
+      - { label: IETF RateLimit header draft, url: "https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/" }
   a2a-agent-card:
     title: A2A Agent Card published
     goal: Publish an A2A Agent Card for agent-to-agent discovery
@@ -364,6 +393,16 @@ remediation:
       over the agent-to-agent protocol.
     resources:
       - { label: A2A protocol, url: "https://a2a-protocol.org/latest/specification/" }
+  ai-catalog:
+    title: /.well-known/ai-catalog.json published
+    goal: Publish an Agentic Resource Discovery catalog so agents can enumerate your AI artifacts
+    fix: |
+      Serve `/.well-known/ai-catalog.json` as JSON with `specVersion` and an `entries` array (the
+      AI Catalog / ARD envelope). Each entry should identify an artifact (`identifier`, `type`, and
+      a `url` or inline `data`). Missing the file is fine (this check is MAY); a 200 that is not a
+      catalog is worse than absence.
+    resources:
+      - { label: AI Catalog, url: "https://agenticresourcediscovery.org/ai_catalog_spec/" }
   agent-skills:
     title: Agent-skills discovery index published
     goal: Publish an agent-skills discovery index so agents can enumerate your skills

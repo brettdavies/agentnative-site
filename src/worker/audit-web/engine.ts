@@ -22,6 +22,7 @@ import {
 } from './antecedents';
 import type { ProbeResponse } from './assert';
 import { discoverMcpEndpoint } from './discovery';
+import { runApiHygiene } from './handlers/api-hygiene';
 import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
@@ -72,6 +73,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     'markdown-frontmatter': runMarkdownFrontmatter,
     'content-without-js': runContentWithoutJs,
     'llms-txt-quality': runLlmsTxtQuality,
+    'api-hygiene': runApiHygiene,
   };
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
@@ -295,6 +297,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   scopedDirs.push(...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base));
   const llmsTxtBody = retainedBody(sources, 'llms-txt');
   if (llmsTxtBody.length > 0) retainedBodies.set('llms-txt', llmsTxtBody);
+  const openapiBody = retainedBody(sources, 'openapi');
+  if (openapiBody.length > 0) retainedBodies.set('openapi', openapiBody);
 
   // Gate: declared-type filter first, then the antecedent token. Returns
   // the n_a/error result when the check must not be scored.

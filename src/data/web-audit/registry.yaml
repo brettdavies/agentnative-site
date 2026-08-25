@@ -20,6 +20,7 @@
 #   markdown-frontmatter  leading YAML fence on the markdown twin
 #   content-without-js    SSR content floor with llms.txt twin softening
 #   llms-txt-quality      format / links / when-to-use ops on retained llms.txt
+#   api-hygiene           JSON error bodies / rate-limit headers from a safe GET
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -83,6 +84,7 @@ checks:
     handler: http
     with:
       path_any: [/openapi.json, /openapi.yaml, /.well-known/openapi.json]
+      retain_body: true
       expect: { status: [200], body_regex: "openapi|swagger" }
     hint: Publish an OpenAPI 3.1 description for the REST surface so non-MCP agents can call it.
 
@@ -113,6 +115,30 @@ checks:
       path: /.well-known/api-catalog
       expect: { status: [200], body_regex: "linkset" }
     hint: Serve /.well-known/api-catalog as application/linkset+json with a linkset[] of anchor + service-desc entries.
+
+  - id: json-errors
+    category: api
+    tier: recommended
+    principle: P4
+    site_types: [api]
+    antecedent: api-surface
+    weight: 2
+    title: API client errors return JSON, not HTML
+    handler: api-hygiene
+    with: { op: json-errors }
+    hint: Answer unknown or documented 4xx API GETs with a JSON error body, not an HTML page.
+
+  - id: rate-limit-headers
+    category: api
+    tier: recommended
+    principle: P6
+    site_types: [api]
+    antecedent: api-surface
+    weight: 2
+    title: API responses advertise rate-limit headers
+    handler: api-hygiene
+    with: { op: rate-limit }
+    hint: Send RateLimit-* or X-RateLimit-* (or Retry-After) on API responses so agents can back off.
 
   # ---- MCP -----------------------------------------------------------------
   - id: mcp-initialize
@@ -150,6 +176,18 @@ checks:
     handler: mcp
     with: { op: tools-list }
     hint: Return `result.tools[]`, each with `name`, `description`, and a JSON `inputSchema`.
+
+  - id: mcp-resources-list
+    category: mcp
+    tier: recommended
+    principle: P2
+    site_types: [mcp]
+    antecedent: mcp-resources
+    weight: 3
+    title: resources/list returns at least one resource when advertised
+    handler: mcp
+    with: { op: resources-list }
+    hint: When initialize advertises capabilities.resources, return a non-empty result.resources array from resources/list.
 
   - id: mcp-unknown-method
     category: mcp
@@ -695,6 +733,20 @@ checks:
       path_any: [/.well-known/agent-card.json, /.well-known/agent.json]
       expect: { status: [200], content_type: "json", body_regex: "\"name\"|supportedInterfaces|skills" }
     hint: Serve /.well-known/agent-card.json (a2a-protocol.org) with name, version, and supportedInterfaces.
+
+  - id: ai-catalog
+    category: agent-discovery-auth
+    tier: optional
+    principle: P8
+    site_types: [all]
+    antecedent: none
+    weight: 1
+    title: /.well-known/ai-catalog.json published (ARD)
+    handler: http
+    with:
+      path: /.well-known/ai-catalog.json
+      expect: { status: [200], content_type: "json", body_regex: "specVersion|entries" }
+    hint: Serve /.well-known/ai-catalog.json with specVersion and an entries array (Agentic Resource Discovery).
 
   - id: agent-skills
     category: agent-discovery-auth

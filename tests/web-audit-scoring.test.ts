@@ -49,9 +49,9 @@ async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 48 checks', async () => {
+  test('normalizes to exactly 52 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(48);
+    expect(registry.checks.length).toBe(52);
   });
 
   test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
@@ -73,6 +73,7 @@ describe('web-audit registry shape', () => {
         'markdown-frontmatter',
         'content-without-js',
         'llms-txt-quality',
+        'api-hygiene',
       ]).toContain(check.handler);
       expect(Array.isArray(check.site_types) && check.site_types.length > 0).toBe(true);
       for (const st of check.site_types) expect(['content', 'api', 'mcp', 'all']).toContain(st);
@@ -134,25 +135,25 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 3 / recommended 23 / optional 22', async () => {
+  test('tier counts are exactly required 3 / recommended 26 / optional 23', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 3, recommended: 23, optional: 22 });
+    expect(counts).toEqual({ required: 3, recommended: 26, optional: 23 });
   });
 
-  test('derived keyword counts match must 3 / should 23 / may 22', async () => {
+  test('derived keyword counts match must 3 / should 26 / may 23', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 3, should: 23, may: 22 });
+    expect(counts).toEqual({ must: 3, should: 26, may: 23 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 4, P2: 21, P3: 4, P4: 3, P6: 3, P7: 5, P8: 8 });
+    expect(counts).toEqual({ P1: 4, P2: 22, P3: 4, P4: 4, P6: 4, P7: 5, P8: 9 });
     expect(counts.P5).toBeUndefined();
   });
 
@@ -237,10 +238,10 @@ describe('web-audit registry shape', () => {
     );
   });
 
-  test('normalized JSON round-trips to 48 entries', async () => {
+  test('normalized JSON round-trips to 52 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(48);
+    expect(roundTripped.checks.length).toBe(52);
   });
 });
 
@@ -336,13 +337,13 @@ describe('buildWebScorecard', () => {
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
-  test('the real registry keeps its 3/23/22 tier distribution and universeMax under the split', async () => {
+  test('the real registry keeps its 3/26/23 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
-    // 3 MUST x5 + 23 SHOULD x3 + 22 MAY x1 = 106.
+    // 3 MUST x5 + 26 SHOULD x3 + 23 MAY x1 = 116.
     const universeMax = universeMaxOf(
       registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
     );
-    expect(universeMax).toBe(106);
+    expect(universeMax).toBe(116);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

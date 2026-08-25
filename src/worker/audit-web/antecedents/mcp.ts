@@ -11,12 +11,20 @@ const mcpAuth: AntecedentResolver = (ctx) => {
   return evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize')) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
 };
 
+const mcpResources: AntecedentResolver = (ctx) => {
+  if (ctx.mcpEndpoint === null) return 'n_a';
+  const caps = sourceEvidence(ctx, 'mcp-initialize')[0]?.capabilities;
+  return Array.isArray(caps) && caps.includes('resources') ? 'apply' : 'n_a';
+};
+
 export const mcpResolvers = {
   'mcp-present': mcpPresent,
   'mcp-auth': mcpAuth,
+  'mcp-resources': mcpResources,
 } satisfies Partial<Record<AntecedentToken, AntecedentResolver>>;
 
 export const mcpEvidence = {
   'mcp-present': 'no MCP endpoint discovered',
   'mcp-auth': 'MCP endpoint does not challenge for auth',
+  'mcp-resources': 'initialize does not advertise capabilities.resources',
 } satisfies Partial<Record<AntecedentToken, string>>;

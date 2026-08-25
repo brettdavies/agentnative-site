@@ -1,9 +1,9 @@
 // `mcp` probe handler (plan U4). Builds the JSON-RPC payload per op
-// (initialize / tools-list / error) with `Accept: application/json,
-// text/event-stream` and the pinned protocol version, POSTs through the
-// SSRF guard, parses JSON or SSE via parseJsonRpc, and evaluates
-// serverInfo / capabilities / tools / error-code / CORS. Returns n_a
-// when no endpoint was discovered. Port of handler_mcp.
+// (initialize / tools-list / resources-list / error) with `Accept:
+// application/json, text/event-stream` and the pinned protocol version,
+// POSTs through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
+// evaluates serverInfo / capabilities / tools / resources / error-code /
+// CORS. Returns n_a when no endpoint was discovered. Port of handler_mcp.
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
@@ -12,7 +12,7 @@ import { timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
 type McpWith = {
-  op: 'initialize' | 'tools-list' | 'error';
+  op: 'initialize' | 'tools-list' | 'resources-list' | 'error';
   assert?: 'capabilities' | 'cors';
   method?: string;
   expect_code?: number;
@@ -35,6 +35,9 @@ function buildBody(op: McpWith['op'], method: string, protocolVersion: string): 
   }
   if (op === 'tools-list') {
     return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+  }
+  if (op === 'resources-list') {
+    return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list', params: {} });
   }
   return JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} });
 }
@@ -95,6 +98,10 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
       ev.with_input_schema = Array.isArray(tools) ? tools.filter((t) => t.inputSchema).length : 0;
       ok = Array.isArray(tools);
     }
+  } else if (w.op === 'resources-list') {
+    const resources = result.resources as Array<{ uri?: string; name?: string }> | undefined;
+    ev.resources = Array.isArray(resources) ? resources.map((r) => r.uri ?? r.name ?? null) : null;
+    ok = Array.isArray(resources) && resources.length > 0;
   } else {
     const code = (rpc.error as { code?: number } | undefined)?.code ?? null;
     ev.error_code = code;
