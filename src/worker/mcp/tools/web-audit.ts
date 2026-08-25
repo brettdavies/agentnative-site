@@ -46,6 +46,7 @@ import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
+import { requestHeader } from '../request-header';
 
 export interface WebAuditToolsEnv {
   ASSETS: Fetcher;
@@ -130,7 +131,9 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
         'both outcomes: a hit returns { found:true, scorecard, share_url }; a miss returns { found:false, ' +
         'next_tool:"audit_website" }. The companion tool audit_website runs a fresh audit on a miss.',
-      inputSchema: { url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".') },
+      inputSchema: {
+        url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".'),
+      },
     },
     async ({ url }) => {
       const parsed = coerceUrl(url);
@@ -236,8 +239,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       }
 
       // cf-connecting-ip presence (no anon fallback).
-      const ip = extra?.requestInfo?.headers?.['cf-connecting-ip'];
-      const ipString = typeof ip === 'string' ? ip : null;
+      const ipString = requestHeader(extra, 'cf-connecting-ip');
       if (!ipString) {
         return jsonRpcError32099(
           'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable.',

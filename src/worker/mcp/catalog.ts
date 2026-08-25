@@ -52,6 +52,10 @@ export interface Catalog {
   registry: CatalogRegistryEntry[];
   principles: CatalogPrinciple[];
   spec_sections: CatalogSpecSection[];
+  /** Build emit (KTD7) — registered MCP tool names for shell rate-limit trust. */
+  registered_tool_names?: string[];
+  /** Build emit (KTD7) — registered resource template names. */
+  registered_resource_templates?: string[];
 }
 
 const CATALOG_PATH = '/_internal/mcp-catalog.json';
@@ -71,6 +75,14 @@ export async function loadCatalog(env: CatalogEnv): Promise<Catalog> {
   const catalog = (await res.json()) as Catalog;
   cached = { env, catalog };
   return catalog;
+}
+
+/** Sync read after loadCatalog has warmed the isolate cache (KTD3). */
+export function getWarmCatalog(): Catalog {
+  if (!cached) {
+    throw new Error('mcp catalog not loaded — call loadCatalog(env) before getWarmCatalog()');
+  }
+  return cached.catalog;
 }
 
 export function resetCatalogCacheForTests(): void {

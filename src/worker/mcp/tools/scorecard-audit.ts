@@ -42,6 +42,7 @@ import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from 
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import type { Catalog } from '../catalog';
+import { requestHeader } from '../request-header';
 
 export interface ScorecardAuditEnv extends OrchestrateEnv {
   MCP_LIVE_SCORING_ENABLED?: string;
@@ -228,8 +229,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       }
 
       // Step 4: cf-connecting-ip presence check (no anon fallback).
-      const ip = extra?.requestInfo?.headers?.['cf-connecting-ip'];
-      const ipString = typeof ip === 'string' ? ip : null;
+      const ipString = requestHeader(extra, 'cf-connecting-ip');
       if (!ipString) {
         return jsonRpcError32099(
           'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable on the audit tier.',

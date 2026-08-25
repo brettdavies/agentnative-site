@@ -44,7 +44,9 @@ export function registerSpecTools(server: McpServer, catalog: Catalog): void {
       description:
         'Return the full body of a single spec section by slug. Fields: slug, title, body_markdown, spec_version. ' +
         'Look-not-found returns isError: false with a typed { found: false, message } body.',
-      inputSchema: { slug: z.string().describe('The section slug, e.g. "p1-non-interactive-by-default" or "scoring".') },
+      inputSchema: {
+        slug: z.string().describe('The section slug, e.g. "p1-non-interactive-by-default" or "scoring".'),
+      },
     },
     async ({ slug }) => {
       const section = catalog.spec_sections.find((s) => s.slug === slug);
