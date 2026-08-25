@@ -132,18 +132,18 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 3 / recommended 15 / optional 23', async () => {
+  test('tier counts are exactly required 3 / recommended 16 / optional 22', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 3, recommended: 15, optional: 23 });
+    expect(counts).toEqual({ required: 3, recommended: 16, optional: 22 });
   });
 
-  test('derived keyword counts match must 3 / should 15 / may 23', async () => {
+  test('derived keyword counts match must 3 / should 16 / may 22', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 3, should: 15, may: 23 });
+    expect(counts).toEqual({ must: 3, should: 16, may: 22 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
@@ -334,15 +334,14 @@ describe('buildWebScorecard', () => {
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
-  test('the real registry keeps its 3/15/23 tier distribution and universeMax under the split', async () => {
+  test('the real registry keeps its 3/16/22 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
-    // 3 MUST x5 + 15 SHOULD x3 + 23 MAY x1 = 83. Retiering a check (e.g. the
-    // deferred openapi MUST -> SHOULD) would move this; the display split
-    // alone must not.
+    // 3 MUST x5 + 16 SHOULD x3 + 22 MAY x1 = 85. Retiering markdown-vary
+    // MAY → SHOULD (agent-recovery U1) moved this; the display split alone must not.
     const universeMax = universeMaxOf(
       registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
     );
-    expect(universeMax).toBe(83);
+    expect(universeMax).toBe(85);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

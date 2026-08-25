@@ -367,7 +367,7 @@ checks:
 
   - id: markdown-vary
     category: content-for-agents
-    tier: optional
+    tier: recommended
     principle: P2
     site_types: [all]
     antecedent: markdown-twin

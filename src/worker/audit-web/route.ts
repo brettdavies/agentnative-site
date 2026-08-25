@@ -15,6 +15,7 @@
 // persisted.
 
 import { detectPreference } from '../accept';
+import { applyHeaders } from '../headers';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -510,17 +511,33 @@ export function parseWebScoringPath(pathname: string): WebScoringPathMatch | nul
   return DOMAIN_SLUG_RE.test(m[1]) ? { domain: m[1], isMarkdown: m[2] === '.md' } : null;
 }
 
+// Content-Type + noindex only. Vary / Link / CSP / negotiated cache come
+// from applyHeaders so result pages share the asset-path policy. X-Robots-Tag
+// survives the HTML branch (applyHeaders does not clear it).
 const HTML_HEADERS = {
   'Content-Type': 'text/html; charset=utf-8',
-  'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=60',
   'X-Robots-Tag': 'noindex',
 } as const;
 
 const MARKDOWN_HEADERS = {
   'Content-Type': 'text/markdown; charset=utf-8',
-  'Cache-Control': 'public, max-age=300, s-maxage=300, stale-while-revalidate=60',
   'X-Robots-Tag': 'noindex',
 } as const;
+
+function withNegotiatedHeaders(
+  request: Request,
+  response: Response,
+  servedMarkdown: boolean,
+  pathname: string,
+  opts: { noStore?: boolean } = {},
+): Response {
+  const headed = applyHeaders(response, { request, servedMarkdown, pathname });
+  if (opts.noStore) {
+    headed.headers.set('Cache-Control', 'no-store');
+    headed.headers.delete('Cloudflare-CDN-Cache-Control');
+  }
+  return headed;
+}
 
 let shellTemplatePromise: Promise<string> | null = null;
 async function loadShellTemplate(env: { ASSETS: Fetcher }): Promise<string> {
@@ -583,11 +600,11 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   }
   const url = new URL(request.url);
   const match = parseWebResultPath(url.pathname);
-  if (!match) return renderNotFound(env, '(invalid)', false);
+  if (!match) return renderNotFound(request, env, '(invalid)', false);
 
   const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
   const hit = await lookupByDomain(env, match.domain);
-  if (!hit) return renderNotFound(env, match.domain, wantMarkdown);
+  if (!hit) return renderNotFound(request, env, match.domain, wantMarkdown);
 
   // A missing remediation catalog degrades to generic prompts.
   let remediation: WebRemediationCatalog = {};
@@ -629,7 +646,12 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
   };
 
   if (wantMarkdown) {
-    return new Response(buildWebSummaryMarkdown(input), { status: 200, headers: MARKDOWN_HEADERS });
+    return withNegotiatedHeaders(
+      request,
+      new Response(buildWebSummaryMarkdown(input), { status: 200, headers: MARKDOWN_HEADERS }),
+      true,
+      url.pathname,
+    );
   }
 
   const pct = scorecard.score_pct ?? 0;
@@ -650,10 +672,21 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     canonicalPath: `/web/${match.domain}`,
     body: buildWebSummaryBody(input),
   });
-  return new Response(html, { status: 200, headers: HTML_HEADERS });
+  return withNegotiatedHeaders(
+    request,
+    new Response(html, { status: 200, headers: HTML_HEADERS }),
+    false,
+    url.pathname,
+  );
 }
 
-async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdown: boolean): Promise<Response> {
+async function renderNotFound(
+  request: Request,
+  env: WebAuditRouteEnv,
+  domain: string,
+  wantMarkdown: boolean,
+): Promise<Response> {
+  const pathname = new URL(request.url).pathname;
   if (wantMarkdown) {
     const lines = [
       `# ${domain} is not audited yet`,
@@ -661,7 +694,12 @@ async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdow
       'No cached agent-readiness audit exists for this domain. Run one at [anc.dev/web-audit](https://anc.dev/web-audit) or call the `audit_website` MCP tool.',
       '',
     ];
-    return new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS });
+    return withNegotiatedHeaders(
+      request,
+      new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS }),
+      true,
+      pathname,
+    );
   }
   const body = `<header class="scorecard-header">
   <h1><code>${esc(domain)}</code> is not audited yet</h1>
@@ -685,7 +723,7 @@ async function renderNotFound(env: WebAuditRouteEnv, domain: string, wantMarkdow
     canonicalPath: `/web/${domain}`,
     body,
   });
-  return new Response(html, { status: 404, headers: HTML_HEADERS });
+  return withNegotiatedHeaders(request, new Response(html, { status: 404, headers: HTML_HEADERS }), false, pathname);
 }
 
 // ---------------------------------------------------------------------------
@@ -715,11 +753,17 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
   }
   const url = new URL(request.url);
   const match = parseWebScoringPath(url.pathname);
-  if (!match) return renderNotFound(env, '(invalid)', detectPreference(request) === 'markdown');
+  if (!match) return renderNotFound(request, env, '(invalid)', detectPreference(request) === 'markdown');
 
   const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
   if (wantMarkdown) {
-    return new Response(scoringMarkdown(match.domain), { status: 200, headers: SCORING_MARKDOWN_HEADERS });
+    return withNegotiatedHeaders(
+      request,
+      new Response(scoringMarkdown(match.domain), { status: 200, headers: SCORING_MARKDOWN_HEADERS }),
+      true,
+      url.pathname,
+      { noStore: true },
+    );
   }
 
   const title = match.domain ? `Auditing ${match.domain} — anc.dev` : 'Audit a website — anc.dev';
@@ -739,7 +783,13 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
   }
   const body = match.domain ? scoringBody(match.domain, env.TURNSTILE_SITEKEY ?? '') : scoringPointerBody();
   const html = substituteShell(template, { title, description, canonicalPath, body });
-  return new Response(html, { status: 200, headers: SCORING_HTML_HEADERS });
+  return withNegotiatedHeaders(
+    request,
+    new Response(html, { status: 200, headers: SCORING_HTML_HEADERS }),
+    false,
+    url.pathname,
+    { noStore: true },
+  );
 }
 
 // The sitekey meta and the page script are injected in the body substitution

@@ -576,6 +576,7 @@ describe('handleWebScoringPage', () => {
     expect(resp.headers.get('content-type')).toContain('text/html');
     expect(resp.headers.get('cache-control')).toBe('no-store');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
+    expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
     const html = await resp.text();
     expect(html).toContain('name="turnstile-sitekey" content="1x00000000000000000000AA"');
     expect(html).toContain('src="/js/web-audit-scoring.js"');
@@ -621,6 +622,7 @@ describe('handleWebScoringPage', () => {
     expect(resp.headers.get('content-type')).toContain('text/markdown');
     expect(resp.headers.get('cache-control')).toBe('no-store');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
+    expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
     const md = await resp.text();
     expect(md).toContain('/web/example.com.md');
     expect(md).toContain('audit_website');
@@ -663,6 +665,7 @@ describe('handleWebResultPage', () => {
     expect(resp.status).toBe(200);
     expect(resp.headers.get('content-type')).toContain('text/html');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
+    expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
     const html = await resp.text();
     expect(html).toContain('82%');
   });
@@ -672,6 +675,7 @@ describe('handleWebResultPage', () => {
     const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env);
     expect(resp.status).toBe(200);
     expect(resp.headers.get('content-type')).toContain('text/markdown');
+    expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
     const md = await resp.text();
     expect(md).toContain('82%');
   });

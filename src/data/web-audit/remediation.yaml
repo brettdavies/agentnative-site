@@ -215,7 +215,10 @@ remediation:
       `Vary: Accept, User-Agent` on every response. Without it a shared cache (a CDN or a corporate
       proxy) can store the markdown twin under the bare URL and then hand it to a browser, or vice
       versa. Listing both request headers you negotiate on tells every cache to key its stored copies
-      by them, so each client class gets the variant it asked for.
+      by them, so each client class gets the variant it asked for. If the CDN ignores or strips Vary
+      (Cloudflare's zone cache historically keeps only `Accept-Encoding`), do not give that cache a
+      long `s-maxage` on negotiated responses — otherwise HIT replies reach clients with no Vary and
+      the check still fails.
     resources:
       - { label: RFC 9110 (Vary), url: "https://www.rfc-editor.org/rfc/rfc9110#name-vary" }
   markdown-frontmatter:

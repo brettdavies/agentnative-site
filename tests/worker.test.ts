@@ -188,6 +188,23 @@ describe('applyHeaders — HTML branch', () => {
     expect(res.headers.get('X-Robots-Tag')).toBeNull();
   });
 
+  // Characterization (2026-08-25 production curl): `https://anc.dev/` HTML HIT
+  // carried applyHeaders Link + `s-maxage=86400` but omitted Vary. Cloudflare's
+  // zone cache stores the Worker response and does not preserve Vary except
+  // Accept-Encoding unless a Cache Rule enables it. Negotiated HTML/markdown
+  // therefore MUST NOT invite shared-cache reuse; JSON/SVG still may.
+  test('HTML negotiated responses skip shared-cache TTL so Vary reaches clients', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/'),
+      servedMarkdown: false,
+      pathname: '/',
+    });
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+  });
+
   test('/ HTML: Link carries the twin alternate plus the machine-surface discovery rels', () => {
     const res = applyHeaders(new Response('html'), {
       request: req('https://anc.dev/'),
@@ -216,6 +233,18 @@ describe('applyHeaders — markdown branch', () => {
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
     expect(res.headers.get('Link')).toBeNull();
   });
+
+  test('markdown negotiated responses skip shared-cache TTL so Vary reaches clients', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/'),
+      servedMarkdown: true,
+      pathname: '/',
+    });
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+  });
 });
 
 describe('applyHeaders — JSON branch (skill-distribution)', () => {
@@ -229,6 +258,9 @@ describe('applyHeaders — JSON branch (skill-distribution)', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(res.headers.get('Cache-Control')).toContain('stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
+    expect(res.headers.get('Vary')).toBeNull();
     // No markdown-twin advertisement on JSON paths.
     expect(res.headers.get('Link')).toBeNull();
     expect(res.headers.get('X-Llms-Txt')).toBeNull();
