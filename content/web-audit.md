@@ -16,17 +16,25 @@ The audit runs entirely as network probes: HTTP requests, a JSON-RPC handshake o
 and DNS-over-HTTPS lookups. There is no crawler and nothing is installed. Every check carries a MUST, SHOULD, or MAY
 keyword and belongs to one of six categories:
 
-- **Discoverability** — `robots.txt`, `sitemap.xml`, `Link` headers, `<link rel>` pointers, and DNS-AID records under
-  `_agents`.
+- **Discoverability** — `robots.txt`, `sitemap.xml`, `Link` headers, `<link rel>` pointers, DNS-AID records under
+  `_agents`, and an agent-friendly 404: a nonsense path MUST return HTTP 404 or 410 (a soft-200 SPA shell is broken),
+  and the markdown 404 twin SHOULD carry at least one recovery link (`sitemap.xml`, `llms.txt`, or docs).
 - **Content for agents** — `llms.txt` (root and per-section), `llms-full.txt`, and markdown content negotiation:
   `Accept: text/markdown`, the markdown twin served to bare CLI/library User-Agents and AI user-fetchers that state no
   content-type preference, `Accept: text/plain` treated as a markdown request, and `Vary: Accept, User-Agent` on the
-  negotiated response. Plus the root-HTML affordances (meta description, `<noscript>`, JSON-LD, semantic landmarks).
-- **Bot & crawl policy** — AI-crawler rules, Content-Signal directives, `security.txt`, and Web Bot Auth.
-- **API** — an OpenAPI description, referenced JSON Schemas, and a `.well-known/api-catalog` (RFC 9727).
-- **MCP** — the `initialize` handshake, `tools/list` with input schemas, JSON-RPC error codes, a prompt GET answer (no
-  held-open hang), CORS preflight and actual, the `.well-known` server card, a usage doc, and WebMCP.
-- **Agent discovery & auth** — the A2A agent card, agent-skills index, OAuth discovery metadata, and `auth.md`.
+  negotiated response. Root HTML MUST carry an H1 and enough visible text for a non-JS agent; a discoverable `llms.txt`
+  twin can mark that floor not-applicable rather than crediting a JS shell. When `llms.txt` is present, three quality
+  rows score format (H1, summary, link index), whether those links resolve, and a when-to-use / programmatic-access
+  heading. Plus the other root-HTML affordances (meta description, `<noscript>`, JSON-LD, semantic landmarks).
+- **Bot & crawl policy** — AI-crawler rules, Content-Signal directives, `security.txt`, Web Bot Auth, and agent-UA
+  reachability (`GET /` with a user-fetcher User-Agent must not land on a challenge interstitial).
+- **API** — an OpenAPI description, referenced JSON Schemas, a `.well-known/api-catalog` (RFC 9727), JSON client-error
+  bodies (not HTML), and rate-limit headers on a safe GET.
+- **MCP** — the `initialize` handshake, `tools/list` with input schemas, `resources/list` when `capabilities.resources`
+  is advertised, JSON-RPC error codes, a prompt GET answer (no held-open hang), CORS preflight and actual, the
+  `.well-known` server card, a usage doc, and WebMCP.
+- **Agent discovery & auth** — the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
+  OAuth discovery metadata, and `auth.md`.
 
 A check is scored only when it applies: MCP checks need a discovered endpoint, API checks need an API surface, and a
 declared site type (`content` or `api`) scopes the rest. Anything that does not apply is `n_a` and never counts against
@@ -34,6 +42,9 @@ the site. Two scores come out of one run: the **site score** (the headline) meas
 apply to it, so a site perfect for its type approaches 100%; the **global score** measures it against a maximally
 agent-ready site, so exposing and nailing more surfaces ranks higher. A present-but-broken surface costs more than an
 absent one — it misleads agents.
+
+The HTML result page can assemble MUST failure prompts into one copy buffer (SHOULD and MAY are opt-in). The markdown
+twin keeps per-check fenced prompts and does not carry that widget.
 
 ## From an agent
 

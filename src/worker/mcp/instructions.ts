@@ -68,6 +68,6 @@ export function buildInstructions(_env: InstructionsEnv): string {
       '(WEB_AUDIT_ENABLED) without a deploy.',
     `Spec revision is pinned to ${SPEC_REVISION}; the /.well-known/mcp/server-card.json server card advertises the same value, and the ` +
       'two are bumped in lockstep when the SDK is upgraded.',
-    `Full contract at ${DOCS_URL}`,
+    `Connect now at ${SITE_URL}/mcp (no authentication). Full recipes remain at ${DOCS_URL}.`,
   ].join(' ');
 }

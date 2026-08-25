@@ -137,6 +137,12 @@ The per-check remediation page for a web-audit check, served at a content URL wi
 pointer entry in the agent-skills discovery index. Scorecard remediation prompts point agents at it as the durable
 how-to-fix reference.
 
+### Assemble prompt
+
+The `/web/<domain>` HTML widget that concatenates those per-check prompts for failed rows. Default selection is MUST
+failures (`broken` or `absent`); SHOULD and MAY are independent opt-ins, and an empty MUST set does not pull them in. It
+mounts in the browser only, so the markdown twin keeps per-check fenced prompts and no-JS HTML has no dead controls.
+
 ### Leaderboard aggregate
 
 The precomputed board object the homepage web pane, the MCP board listing, and the curated view of `/web` all read: a

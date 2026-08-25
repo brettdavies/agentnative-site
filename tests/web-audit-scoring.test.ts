@@ -157,6 +157,25 @@ describe('web-audit registry shape', () => {
     expect(counts.P5).toBeUndefined();
   });
 
+  test('the recovery checks, llms.txt quality trio, API hygiene, MCP resources, and ARD ids are registered', async () => {
+    const registry = await loadNormalized();
+    const ids = new Set(registry.checks.map((c) => c.id));
+    for (const id of [
+      'json-errors',
+      'rate-limit-headers',
+      'mcp-resources-list',
+      'ai-catalog',
+      'llms-txt-format',
+      'llms-txt-links',
+      'llms-txt-when-to-use',
+      'agent-friendly-404',
+      'content-without-js',
+      'agent-ua-reachable',
+    ]) {
+      expect(ids.has(id)).toBe(true);
+    }
+  });
+
   test('mcp_discovery carries well_known, common_paths, and the pinned protocol version', async () => {
     const registry = await loadNormalized();
     expect(registry.mcp_discovery.well_known.length).toBeGreaterThan(0);
