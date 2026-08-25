@@ -28,6 +28,14 @@ import { describe, expect, test } from 'bun:test';
 import * as workerEntry from '../src/worker/index';
 
 describe('Worker entry — named export contract for CF Sandbox / Containers SDK', () => {
+  test('exports `Cached` as the named site WorkerEntrypoint', () => {
+    // wrangler.jsonc `exports.Cached` is the cached inner fetch target
+    // (KTD1). Missing the class export makes `ctx.exports.Cached` undefined
+    // at request time the same way a missing ContainerProxy does.
+    expect((workerEntry as Record<string, unknown>).Cached).toBeDefined();
+    expect(typeof (workerEntry as Record<string, unknown>).Cached).toBe('function');
+  });
+
   test('exports `Sandbox` class for the DurableObject + Container binding lookup', () => {
     // wrangler.jsonc references `class_name: "Sandbox"` in both the
     // `containers[]` and `durable_objects.bindings[]` blocks. Wrangler

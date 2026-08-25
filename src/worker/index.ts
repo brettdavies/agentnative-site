@@ -11,6 +11,7 @@
 //   - Response headers applied in src/worker/headers.ts (Link rel=alternate,
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { getAggregate, type WebCacheEnv } from './audit-web/cache';
 import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
@@ -60,6 +61,15 @@ export { WebRescoreWorkflow } from './audit-web/rescore-workflow';
 // find `class_name: "Sandbox"` from wrangler.jsonc's containers +
 // durable_objects sections.
 export { Sandbox } from './score/do';
+
+// Cached inner fetch entrypoint (KTD1). wrangler.jsonc `exports.Cached` is
+// the skip-Worker HIT target; default `fetch` stays the uncached gateway.
+// U2 moves today's default handler body onto this class.
+export class Cached extends WorkerEntrypoint<Env> {
+  async fetch(_request: Request): Promise<Response> {
+    throw new Error('Cached.fetch is unwired; the gateway still owns the site handler');
+  }
+}
 
 // At runtime wrangler injects every binding declared in wrangler.jsonc
 // (ASSETS plus the SCORE_* set used by /api/score). The Env interface is
