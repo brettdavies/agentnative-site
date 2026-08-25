@@ -7,7 +7,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { buildAgentSkillsIndex, buildAgentSkillsIndexMd } from '../src/build/11a-discovery-emit.mjs';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { buildSkillMarkdown, emitWebAuditSkillPages } from '../src/build/15-web-audit-skills.mjs';

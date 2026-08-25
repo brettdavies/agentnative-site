@@ -1,18 +1,18 @@
 // `mcp` probe handler (plan U4). Builds the JSON-RPC payload per op
-// (initialize / tools-list / error) with `Accept: application/json,
-// text/event-stream` and the pinned protocol version, POSTs through the
-// SSRF guard, parses JSON or SSE via parseJsonRpc, and evaluates
-// serverInfo / capabilities / tools / error-code / CORS. Returns n_a
-// when no endpoint was discovered. Port of handler_mcp.
+// (initialize / tools-list / resources-list / error) with `Accept:
+// application/json, text/event-stream` and the pinned protocol version,
+// POSTs through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
+// evaluates serverInfo / capabilities / tools / resources / error-code /
+// CORS. Returns n_a when no endpoint was discovered. Port of handler_mcp.
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
-import { guardedFetch } from '../ssrf';
+import { type GuardedFetchOptions, guardedFetch } from '../ssrf';
 import { timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
 type McpWith = {
-  op: 'initialize' | 'tools-list' | 'error';
+  op: 'initialize' | 'tools-list' | 'resources-list' | 'error';
   assert?: 'capabilities' | 'cors';
   method?: string;
   expect_code?: number;
@@ -36,7 +36,41 @@ function buildBody(op: McpWith['op'], method: string, protocolVersion: string): 
   if (op === 'tools-list') {
     return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
   }
+  if (op === 'resources-list') {
+    return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list', params: {} });
+  }
   return JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} });
+}
+
+export function mcpSessionIdFrom(outcome: ProbeOutcome | undefined): string | null {
+  const raw = outcome?.evidence[0]?.session_id;
+  return typeof raw === 'string' && raw.length > 0 ? raw : null;
+}
+
+const INITIALIZED_BODY = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
+
+/** Best-effort session handshake after initialize; failures do not fail the audit. */
+export async function notifyMcpInitialized(
+  endpoint: string,
+  sessionId: string,
+  opts: {
+    timeoutMs: number;
+    fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  },
+): Promise<void> {
+  await guardedFetch(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        'Mcp-Session-Id': sessionId,
+      },
+      body: INITIALIZED_BODY,
+    },
+    { ...opts.fetchOptions, timeoutMs: opts.timeoutMs },
+  );
 }
 
 export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
@@ -50,6 +84,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     Accept: 'application/json, text/event-stream',
   };
   if (w.origin) headers.Origin = w.origin;
+  if (w.op !== 'initialize' && ctx.mcpSessionId) headers['Mcp-Session-Id'] = ctx.mcpSessionId;
 
   const resp = await guardedFetch(
     endpoint,
@@ -80,6 +115,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.serverInfo = serverInfo ?? null;
     ev.protocolVersion = result.protocolVersion ?? null;
     ev.capabilities = capabilities ? Object.keys(capabilities) : [];
+    ev.session_id = resp.headers['mcp-session-id'] ?? null;
     ok = w.assert === 'capabilities' ? !!capabilities && Object.keys(capabilities).length > 0 : !!serverInfo?.name;
   } else if (w.op === 'tools-list') {
     if (w.assert === 'cors') {
@@ -95,6 +131,10 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
       ev.with_input_schema = Array.isArray(tools) ? tools.filter((t) => t.inputSchema).length : 0;
       ok = Array.isArray(tools);
     }
+  } else if (w.op === 'resources-list') {
+    const resources = result.resources as Array<{ uri?: string; name?: string }> | undefined;
+    ev.resources = Array.isArray(resources) ? resources.map((r) => r.uri ?? r.name ?? null) : null;
+    ok = Array.isArray(resources) && resources.length > 0;
   } else {
     const code = (rpc.error as { code?: number } | undefined)?.code ?? null;
     ev.error_code = code;

@@ -30,13 +30,16 @@ function frontpageEntry(domain: string, globalScore: number): WebAggregateEntry 
   };
 }
 
-function makeEnv(aggregate: WebAggregateEntry[] | null): Env {
+function makeEnv(aggregate: WebAggregateEntry[] | null, extraKeys: Record<string, unknown> = {}): Env {
   const store = new Map<string, string>();
   if (aggregate) {
     store.set(
       aggregateKeyFor('leaderboard-frontpage', SPEC_VERSION),
       JSON.stringify({ spec_version: SPEC_VERSION, generated_at: new Date().toISOString(), entries: aggregate }),
     );
+  }
+  for (const [k, v] of Object.entries(extraKeys)) {
+    store.set(k, typeof v === 'string' ? v : JSON.stringify(v));
   }
   return {
     ASSETS: {
@@ -118,6 +121,26 @@ describe('homepage web-board inject', () => {
     (env as { SCORE_CACHE?: unknown }).SCORE_CACHE = undefined;
     const html = await fetchHomepage(env);
     expect(html).toContain('Scoring in progress');
+  });
+
+  // Boundary guard: the homepage pane reads only the curated frontpage
+  // aggregate. A cached non-seeded audit sitting in R2 (which the /web all
+  // view surfaces) must never leak into the teaser board. The mock bucket
+  // also has no list(), so an enumeration attempt fails loudly.
+  test('a non-seeded cached audit in R2 never appears in the injected rows', async () => {
+    const unseededKey = `audits/web/${'a'.repeat(64)}/${SPEC_VERSION}.json`;
+    const html = await fetchHomepage(
+      makeEnv([frontpageEntry('top.dev', 80)], {
+        [unseededKey]: {
+          spec_version: SPEC_VERSION,
+          target_url: 'https://user-submitted.dev/',
+          scorecard: { target_url: 'https://user-submitted.dev/', score_pct: 99 },
+          scored_at: new Date().toISOString(),
+        },
+      }),
+    );
+    expect(html).toContain('href="/web/top.dev"');
+    expect(html).not.toContain('user-submitted.dev');
   });
 });
 

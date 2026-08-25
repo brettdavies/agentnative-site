@@ -27,4 +27,20 @@ describe('resolveAntecedent: mcp', () => {
     expect(resolveAntecedent('mcp-auth', ctx(base))).toBe('n_a');
     expect(resolveAntecedent('mcp-auth', ctx())).toBe('n_a');
   });
+
+  test('mcp-resources holds only when initialize advertised capabilities.resources', () => {
+    const base = { mcpEndpoint: 'https://x.dev/mcp' };
+    const withResources = ctx({
+      ...base,
+      sources: new Map([['mcp-initialize', outcome('pass', [{ capabilities: ['tools', 'resources'] }])]]),
+    });
+    expect(resolveAntecedent('mcp-resources', withResources)).toBe('apply');
+    const toolsOnly = ctx({
+      ...base,
+      sources: new Map([['mcp-initialize', outcome('pass', [{ capabilities: ['tools'] }])]]),
+    });
+    expect(resolveAntecedent('mcp-resources', toolsOnly)).toBe('n_a');
+    expect(resolveAntecedent('mcp-resources', ctx(base))).toBe('n_a');
+    expect(resolveAntecedent('mcp-resources', ctx())).toBe('n_a');
+  });
 });

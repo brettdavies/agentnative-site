@@ -139,7 +139,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   const naCount = (counts.n_a ?? 0) + (counts.skip ?? 0);
   if (naCount) chips.push(`<span class="chip chip--muted">${naCount} n/a</span>`);
 
-  let html = `<article class="container scorecard-page"><nav class="crumb" aria-label="Breadcrumb">
+  let html = `<article class="container scorecard-page" data-web-audit-result><nav class="crumb" aria-label="Breadcrumb">
   <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(name)}</span>
 </nav>
 <header class="scorecard-hero">
@@ -209,7 +209,7 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
     // data attribute and attaches a Copy-prompt button client-side, so a
     // no-JS render shows the prose + resource links with no dead control.
     // The .md twin keeps the fenced prompt for fetch-only agents.
-    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" hidden></span>\n`;
+    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
   }
 
   return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>

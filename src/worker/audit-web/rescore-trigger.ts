@@ -5,6 +5,7 @@
 // in KV; the authoritative liveness check is the Workflow instance status
 // (a stale pointer to a finished batch never blocks a new start).
 
+import { runWebPublicListingBackfill, type WebBackfillEnv } from './public-listing-backfill';
 import type { WebRescoreWorkflowBinding } from './rescore-workflow';
 
 export interface WebRescoreTriggerEnv {
@@ -12,6 +13,8 @@ export interface WebRescoreTriggerEnv {
   WEB_RESCORE_WORKFLOW: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
 }
+
+export type WebBackfillTriggerEnv = WebBackfillEnv & { WEB_RESCORE_SECRET?: string };
 
 const CURRENT_INSTANCE_KEY = 'web_rescore:current';
 
@@ -63,24 +66,80 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 /**
- * POST /api/web-rescore — the deploy hook. Authed by a shared secret
- * header; a missing Worker-side secret is a fail-fast 500 (a silent 401
- * would hide the misconfiguration from the deploy pass).
+ * Shared gate for the secret-authed rescore endpoints: POST-only, a
+ * fail-fast 500 when the Worker-side secret is unset (a silent 401 would
+ * hide the misconfiguration from the deploy pass), and a constant-time
+ * secret compare. Resolves the rejection response, or null when the
+ * request is authorized.
  */
-export async function handleWebRescore(request: Request, env: WebRescoreTriggerEnv): Promise<Response> {
+async function requireRescoreAuth(request: Request, secret: string | undefined): Promise<Response | null> {
   if (request.method !== 'POST') {
     return new Response('method not allowed\n', {
       status: 405,
       headers: { Allow: 'POST', 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     });
   }
-  if (!env.WEB_RESCORE_SECRET) {
+  if (!secret) {
     return jsonResponse({ error: 'service_misconfigured', message: 'WEB_RESCORE_SECRET missing' }, 500);
   }
   const presented = request.headers.get('x-web-rescore-secret');
-  if (!presented || !(await secretsMatch(presented, env.WEB_RESCORE_SECRET))) {
+  if (!presented || !(await secretsMatch(presented, secret))) {
     return jsonResponse({ error: 'unauthorized' }, 401);
   }
+  return null;
+}
+
+/** POST /api/web-rescore — the deploy hook, behind the shared-secret gate. */
+export async function handleWebRescore(request: Request, env: WebRescoreTriggerEnv): Promise<Response> {
+  const denied = await requireRescoreAuth(request, env.WEB_RESCORE_SECRET);
+  if (denied) return denied;
   const { instanceId, coalesced } = await startWebRescore(env);
   return jsonResponse({ started: !coalesced, coalesced, instance_id: instanceId }, 202);
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function optionalPositiveInt(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * POST /api/web-audit-backfill — the one-time `public_listing` backfill,
+ * behind the same `WEB_RESCORE_SECRET` constant-time gate as the rescore
+ * hook. Body (all optional): `dry_run` (report only), `cursor` (resume a
+ * prior run), `max_writes` (per-run object cap, both modes). Returns the
+ * run's written/skipped/failed tally plus the resume cursor. Completion
+ * differs by mode: a real run re-runs from the start until it reports zero
+ * writes; a dry run writes nothing, so it is cursored forward until `done`.
+ * A seed-load failure aborts the batch and
+ * surfaces as a 500 rather than a partial success that could stamp curated
+ * domains false.
+ */
+export async function handleWebBackfill(request: Request, env: WebBackfillTriggerEnv): Promise<Response> {
+  const denied = await requireRescoreAuth(request, env.WEB_RESCORE_SECRET);
+  if (denied) return denied;
+
+  const body: Record<string, unknown> = await request
+    .json()
+    .then((v) => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {}))
+    .catch(() => ({}));
+
+  try {
+    const result = await runWebPublicListingBackfill(env, {
+      dryRun: body.dry_run === true,
+      cursor: optionalString(body.cursor),
+      maxWrites: optionalPositiveInt(body.max_writes),
+    });
+    return jsonResponse(result, 200);
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        scope: 'web-backfill.trigger',
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return jsonResponse({ error: 'backfill_aborted', message: 'seed load failed; no objects written' }, 500);
+  }
 }

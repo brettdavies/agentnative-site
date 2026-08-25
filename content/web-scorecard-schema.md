@@ -22,6 +22,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.2**, independent of
   "audience": null,
   "audit_profile": null,
   "site_type": null,
+  "public_listing": false,
   "summary": { ... },
   "coverage_summary": { ... },
   "score_pct": 81,
@@ -42,6 +43,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.2**, independent of
 | `audience`         | null                | engine  | Always `null` for web targets; the audience classifier is a CLI concept.                          |
 | `audit_profile`    | null                | engine  | Always `null` for web targets; audit profiles are a CLI concept.                                  |
 | `site_type`        | string \| null      | engine  | The declared site type the run scoped to: `content`, `api`, or `null` (everything ran).           |
+| `public_listing`   | boolean             | engine  | The submitter's opt-in to the public board listing. `false` unless explicitly set.                |
 | `summary`          | object              | derived | Tally of check outcomes by status. See [summary](#summary).                                       |
 | `coverage_summary` | object              | derived | MUST / SHOULD / MAY totals and how many were verified. See [coverage_summary](#coverage_summary). |
 | `score_pct`        | integer             | derived | The headline RELATIVE score, 0-100. Equals `score.relative`. See [scoring](#the-two-score-model). |
@@ -85,6 +87,11 @@ Per applicable check, with per-tier difficulty weights (currently 5 for MUST, 3 
 
 Per-category rollups in the fixed display order. `counted` excludes `n_a` / `skip` / `error` rows, so a category with
 nothing applicable reads `0/0`.
+
+`categories[]` and `results[].category` are re-derived from the current registry at read time, so every render of a
+cached scorecard (the `audit_website` and `get_website_audit` MCP tools, the `/web/<domain>` page, and its `.md` twin)
+reflects the current category shape regardless of when it was cached. The `score` and `score_pct` reflect the registry
+at audit time; re-grouping the categories earns no points and never changes the stored score.
 
 ```json
 "categories": [
@@ -163,9 +170,9 @@ One object per check.
 
 ## Remediation on the MCP surface
 
-Scorecard rows carry no remediation; the fix guidance is assembled at read time. The `audit_website` MCP tool returns
-each row with a derived `result` line, and non-passing (`broken` / `absent`) rows additionally carry an inline
-`remediation` object:
+Scorecard rows carry no remediation; the fix guidance is assembled at read time. Both the `audit_website` and
+`get_website_audit` MCP tools return each row with a derived `result` line, and non-passing (`broken` / `absent`) rows
+additionally carry an inline `remediation` object:
 
 ```json
 "remediation": {

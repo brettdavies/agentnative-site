@@ -47,6 +47,26 @@ export async function isSeededDomain(env: WebSeedEnv, domain: string): Promise<b
   return entries.some((e) => e.domain === domain);
 }
 
+/**
+ * Board exclude set for the user-row enumeration: the already-rendered
+ * curated domains plus every seeded domain. Both are excluded because the
+ * curated aggregate can lag the seed in either direction (a freshly seeded
+ * domain not yet rebuilt, or a domain dropped from the seed still in the
+ * aggregate), and a duplicate row is worse than a missing one. A seed-load
+ * failure degrades to the curated-only set, which still dedups every domain
+ * the board actually renders, so the /web board and the list_website_audits
+ * tool can never diverge on which user rows survive dedup.
+ */
+export async function boardExcludeDomains(env: WebSeedEnv, curatedDomains: Iterable<string>): Promise<Set<string>> {
+  const excludeDomains = new Set(curatedDomains);
+  try {
+    for (const s of await loadWebSeed(env)) excludeDomains.add(s.domain);
+  } catch {
+    // Seed unavailable: the curated-domain exclusion still dedups every rendered row.
+  }
+  return excludeDomains;
+}
+
 function isWebSeedEntry(value: unknown): value is WebSeedEntry & { description?: string } {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;

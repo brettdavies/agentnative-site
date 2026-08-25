@@ -30,13 +30,15 @@ scoring-policy value, not fixed in this glossary.
 
 ### Markdown twin
 
-The verbatim markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
-text/markdown`, and concatenated into `llms-full.txt`. It is the agent-facing half of the site's dual-surface contract:
-one markdown source emits both an HTML page for browsers and this twin for agents.
+The markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
+text/markdown`. It opens with a short frontmatter block (title, description, canonical URL) followed by the source body
+verbatim, with site-internal links resolved to absolute URLs. The frontmatter-free body is what gets concatenated into
+`llms-full.txt`. It is the agent-facing half of the site's dual-surface contract: one markdown source emits both an HTML
+page for browsers and this twin for agents.
 
-Because the twin is served from the source verbatim, only prose belongs in the content source. Interactive HTML that
-renders correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build
-template and substituted per surface rather than authored inline.
+Because the twin's body is the source verbatim, only prose belongs in the content source. Interactive HTML that renders
+correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build template and
+substituted per surface rather than authored inline.
 
 ## Live scoring
 
@@ -134,6 +136,53 @@ agent-ready site, so exposing and nailing more surfaces ranks higher; the web le
 The per-check remediation page for a web-audit check, served at a content URL with a markdown twin and listed as a
 pointer entry in the agent-skills discovery index. Scorecard remediation prompts point agents at it as the durable
 how-to-fix reference.
+
+### Assemble prompt
+
+The `/web/<domain>` HTML widget that concatenates those per-check prompts for failed rows. Default selection is MUST
+failures (`broken` or `absent`); SHOULD and MAY are independent opt-ins, and an empty MUST set does not pull them in. It
+mounts in the browser only, so the markdown twin keeps per-check fenced prompts and no-JS HTML has no dead controls.
+
+### Leaderboard aggregate
+
+The precomputed board object the homepage web pane, the MCP board listing, and the curated view of `/web` all read: a
+ranked full board plus a top-N frontpage slice, rebuilt from the per-domain web scorecards. It keeps those surfaces in
+agreement, so a fresh audit cannot leave one showing a different score than another. When it is absent (a fresh deploy,
+or a spec-version change that rotates every cached key) the surfaces that depend on it render a scoring-in-progress
+state until the next rescore rebuilds it.
+
+### Board view
+
+The two ways `/web` (and its markdown twin) render the ranked list: the curated view shows only the leaderboard
+aggregate's registry-seeded rows; the all view, the default, adds every other non-expired cached audit — sites a user
+submitted on demand rather than the registry — read live rather than from the aggregate. The homepage pane and the MCP
+board listing always render curated only; there is no all-view equivalent for either.
+
+### Public listing
+
+A per-domain, submitter-set boolean stored on a web-audit envelope and mirrored into the R2 board metadata, recording
+whether the submitter consents to that domain appearing on public board-listing surfaces. Curated (seeded) domains are
+exempt and always exposed regardless of the flag. Explicit values always take effect; an omitted value never erases a
+previously stored choice, and only a domain's first-ever audit defaults it to unlisted. Because the flag is out-of-band
+state relative to an audit's own inputs, every write path capable of rewriting a domain's stored audit, a fresh
+submission, a flag-only patch, a scheduled rescore, or a registry-fingerprint reflow, must explicitly resolve and carry
+it forward, or it silently reverts to the default.
+
+### Staleness window
+
+More than one independent threshold gates behavior from the same web-audit freshness stamp, and they must not be
+conflated. One controls whether an on-demand request serves the cached result or falls through to a fresh audit; a
+separate one controls how long an unseeded entry stays visible before it ages off the board's display, even though the
+underlying cached record persists. The two are tuned independently for different jobs, and a write path that restamps
+freshness for an unrelated reason resets both at once, whether or not that is intended. Distinct from the cadence a Web
+rescore batch uses to decide which curated domains are due for re-audit, a third, separately-tuned window.
+
+### Web rescore
+
+The batch process that re-audits every curated board domain and rebuilds the leaderboard aggregate. It runs on a weekly
+schedule and after each deploy; only one batch runs at a time, so overlapping triggers coalesce rather than
+double-spending the audit budget. It is what keeps the board's live scores fresh without committing any scorecard
+snapshots. Distinct from an on-demand audit of a single domain, which caches its own result without starting a batch.
 
 ## Agent discovery
 

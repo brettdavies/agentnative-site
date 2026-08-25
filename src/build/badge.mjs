@@ -79,6 +79,15 @@ export function badgeFormat(score, specVersion = SPEC_VERSION) {
   };
 }
 
+// badge-maker's flat style renders the text shadow as a gaussian halo
+// (stdDeviation 16 at 0.8 opacity) that muddies the small badge glyphs. The
+// library exposes no shadow control, so dial the blur radius and halo opacity
+// down on the returned SVG for a subtle drop shadow. The literals track
+// badge-maker's markup; re-check them on a badge-maker bump.
+function softenBadgeShadow(svg) {
+  return svg.replaceAll('stdDeviation="16"', 'stdDeviation="4"').replaceAll('fill-opacity=".8"', 'fill-opacity=".4"');
+}
+
 /**
  * Render an SVG badge for a tool's score.
  *
@@ -90,5 +99,5 @@ export function badgeFormat(score, specVersion = SPEC_VERSION) {
  * @returns {string} SVG source
  */
 export function renderBadgeSvg(score, specVersion) {
-  return makeBadge(badgeFormat(score, specVersion));
+  return softenBadgeShadow(makeBadge(badgeFormat(score, specVersion)));
 }

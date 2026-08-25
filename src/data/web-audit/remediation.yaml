@@ -45,6 +45,16 @@ remediation:
       calling. A tool without an `inputSchema` forces the agent to guess argument shapes.
     resources:
       - { label: MCP tools, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/tools" }
+  mcp-resources-list:
+    title: resources/list returns at least one resource when advertised
+    goal: Honor capabilities.resources with a non-empty resources/list result
+    fix: |
+      If `initialize` advertises `capabilities.resources`, implement `resources/list` and return a
+      `result.resources` array with at least one entry (`uri` plus a name or description). An empty
+      list or a transport failure means the capability was advertised but is not actually there.
+      Omit `capabilities.resources` entirely if the server has no resources.
+    resources:
+      - { label: MCP resources, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/resources" }
   mcp-unknown-method:
     title: unknown JSON-RPC method returns -32601
     goal: Reject unknown JSON-RPC methods with error -32601 instead of a hang or 500
@@ -172,6 +182,67 @@ remediation:
       same URL via content negotiation, invisibly to crawlers.
     resources:
       - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+  markdown-cli-ua:
+    title: Bare CLI User-Agent receives the markdown twin
+    goal: Serve the markdown twin to shell HTTP clients that state no content-type preference
+    fix: |
+      Sniff the request User-Agent and serve the markdown twin to bare shell clients (`curl`, `wget`,
+      and language HTTP libraries) that send `Accept: */*` or no `Accept` at all. A scripted `curl
+      https://your.site/` should get the raw markdown source, not the HTML shell, so pipelines parse
+      content instead of scraping chrome. Return the same twin you already expose to
+      `Accept: text/markdown`, keyed on the User-Agent this time.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+      - { label: RFC 9110 (User-Agent), url: "https://www.rfc-editor.org/rfc/rfc9110#name-user-agent" }
+  markdown-agent-ua:
+    title: AI user-fetch User-Agent receives the markdown twin
+    goal: Serve the markdown twin to AI on-demand user-fetchers that state no content-type preference
+    fix: |
+      Recognize the AI on-demand user-fetch User-Agents (`ChatGPT-User`, `Claude-User`,
+      `Perplexity-User`) and serve them the markdown twin when they send `Accept: */*` or no `Accept`.
+      These fetchers retrieve a page on a person's behalf and parse markdown far more reliably than a
+      JS-rendered page, so handing them source improves what the assistant reads back. Match the token
+      case-insensitively and fall through to HTML for everything you do not recognize.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+      - { label: OpenAI bots and User-Agents, url: "https://platform.openai.com/docs/bots" }
+  markdown-accept-plain:
+    title: Accept text/plain returns the markdown twin
+    goal: Treat Accept text/plain as a request for the raw markdown source
+    fix: |
+      Treat `Accept: text/plain` as a markdown request and return the raw markdown source rather than
+      the HTML shell. Many clients and libraries default to `text/plain` when they want the bytes, not
+      a rendered document, so honoring it hands them the same twin you serve for `Accept:
+      text/markdown`. Set the response `Content-Type` to `text/markdown` (or `text/plain`) so the
+      negotiated content type is unambiguous.
+    resources:
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
+  markdown-vary:
+    title: Negotiated responses carry Vary Accept, User-Agent
+    goal: Emit Vary Accept, User-Agent so shared caches never serve one client the wrong variant
+    fix: |
+      When the same URL serves HTML or markdown depending on the request, emit
+      `Vary: Accept, User-Agent` on every response. Without it a shared cache (a CDN or a corporate
+      proxy) can store the markdown twin under the bare URL and then hand it to a browser, or vice
+      versa. Listing both request headers you negotiate on tells every cache to key its stored copies
+      by them, so each client class gets the variant it asked for. If the CDN ignores or strips Vary
+      (Cloudflare's zone cache historically keeps only `Accept-Encoding`), do not give that cache a
+      long `s-maxage` on negotiated responses — otherwise HIT replies reach clients with no Vary and
+      the check still fails.
+    resources:
+      - { label: RFC 9110 (Vary), url: "https://www.rfc-editor.org/rfc/rfc9110#name-vary" }
+  markdown-frontmatter:
+    title: Markdown twin carries YAML frontmatter
+    goal: Prefix the markdown twin with a YAML frontmatter block so agents read page metadata without parsing the body
+    fix: |
+      Open each markdown twin with a YAML frontmatter block: a `---` fence line, `title`, `description`, and a
+      canonical `url` key, then a closing `---` fence, before the first heading. An agent then lifts the page's
+      title, summary, and canonical URL from structured keys instead of inferring them from prose, which is both
+      cheaper and less error-prone. Keep the block well-formed: an opened fence with no terminator, or a fence pair
+      with no keys, is worse than no frontmatter because it misleads a parser.
+    resources:
+      - { label: YAML front matter (Jekyll), url: "https://jekyllrb.com/docs/front-matter/" }
+      - { label: RFC 7763 (text/markdown), url: "https://www.rfc-editor.org/rfc/rfc7763" }
   root-meta-description:
     title: Root HTML has a descriptive meta description
     goal: Add a meta description naming what the service does and its agent entry points
@@ -294,6 +365,25 @@ remediation:
       description you publish.
     resources:
       - { label: RFC 9727, url: "https://www.rfc-editor.org/rfc/rfc9727" }
+  json-errors:
+    title: API client errors return JSON, not HTML
+    goal: Return a JSON error body on client-error API responses so agents can parse the failure
+    fix: |
+      On a client-error API response (4xx), return `Content-Type: application/json` and a JSON object
+      (for example `{ "error": { "code": "not_found", "message": "..." } }`), not an HTML error page.
+      Agents cannot recover from a soft-HTML 404. The audit probes a documented OpenAPI 4xx GET when
+      one exists, otherwise `GET /anc-web-audit-no-such-api`.
+    resources:
+      - { label: RFC 9457 (problem+json), url: "https://www.rfc-editor.org/rfc/rfc9457" }
+  rate-limit-headers:
+    title: API responses advertise rate-limit headers
+    goal: Advertise remaining quota on API responses so agents can back off instead of retrying blindly
+    fix: |
+      Send IETF RateLimit headers (`RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`) or
+      the common `X-RateLimit-*` aliases on API responses. A 429 should also carry `Retry-After`.
+      Without them an agent has no budget and will retry until it is locked out.
+    resources:
+      - { label: IETF RateLimit header draft, url: "https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/" }
   a2a-agent-card:
     title: A2A Agent Card published
     goal: Publish an A2A Agent Card for agent-to-agent discovery
@@ -303,6 +393,16 @@ remediation:
       over the agent-to-agent protocol.
     resources:
       - { label: A2A protocol, url: "https://a2a-protocol.org/latest/specification/" }
+  ai-catalog:
+    title: /.well-known/ai-catalog.json published
+    goal: Publish an Agentic Resource Discovery catalog so agents can enumerate your AI artifacts
+    fix: |
+      Serve `/.well-known/ai-catalog.json` as JSON with `specVersion` and an `entries` array (the
+      AI Catalog / ARD envelope). Each entry should identify an artifact (`identifier`, `type`, and
+      a `url` or inline `data`). Missing the file is fine (this check is MAY); a 200 that is not a
+      catalog is worse than absence.
+    resources:
+      - { label: AI Catalog, url: "https://agenticresourcediscovery.org/ai_catalog_spec/" }
   agent-skills:
     title: Agent-skills discovery index published
     goal: Publish an agent-skills discovery index so agents can enumerate your skills
@@ -360,3 +460,71 @@ remediation:
       let a browser-hosted agent act on the page without scraping the DOM.
     resources:
       - { label: WebMCP spec, url: "https://webmachinelearning.github.io/webmcp/" }
+  agent-friendly-404:
+    title: Unknown paths return HTTP 404 or 410
+    goal: Return a real HTTP 404 or 410 for unknown paths instead of a 200 SPA shell
+    fix: |
+      Configure the origin so a nonsense path under the site returns HTTP 404 or 410, not 200 with
+      the application shell. A soft-404 hides recovery from agents: they treat the page as content
+      and never look for a sitemap or `llms.txt`. Verify with
+      `curl -sS -o /dev/null -w "%{http_code}" https://example.com/this-path-does-not-exist` — it
+      MUST print `404` (or `410`).
+    resources:
+      - { label: RFC 9110 status codes, url: "https://www.rfc-editor.org/rfc/rfc9110#name-status-codes" }
+  agent-friendly-404-md:
+    title: 404 body is markdown with a recovery link
+    goal: Serve a short markdown 404 that links at least one agent recovery surface
+    fix: |
+      When `Accept: text/markdown` hits an unknown path, return 404 or 410 with a short markdown
+      body that includes at least one recovery link: sitemap, `llms.txt`, a docs index, or an
+      equivalent same-origin href. Linking both sitemap and `llms.txt` as absolute URLs is the
+      stronger pattern. Zero links is a miss even when the status is correct.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  content-without-js:
+    title: Root HTML has an H1 and readable text without JavaScript
+    goal: Put an H1 and enough visible text in the raw root HTML that a non-JS agent can read the page
+    fix: |
+      Render an `<h1>` and at least about 200 characters of visible text in the raw HTML of `/` so
+      a client that does not execute JavaScript still gets a page. A thin SPA shell is acceptable
+      only when `/llms.txt` is present and links resolvable same-origin content (the audit then
+      marks this check not applicable, not a pass). Dead `llms.txt` links do not soften the floor.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  agent-ua-reachable:
+    title: AI user-fetch User-Agent can reach the homepage
+    goal: Let on-demand user-fetchers GET / with Accept */* and receive 2xx, not a challenge page
+    fix: |
+      Allow AI user-fetch clients such as `ChatGPT-User` to `GET /` with `Accept: */*` and receive
+      a 2xx response whose body is not an obvious bot-challenge interstitial. This is reachability,
+      not content type: serving HTML is fine. Blocklists that 403 these UAs, or challenge pages that
+      say "Just a moment", fail the check.
+    resources:
+      - { label: OpenAI user-fetchers, url: "https://platform.openai.com/docs/bots" }
+  llms-txt-format:
+    title: llms.txt has H1, summary, and a link index
+    goal: Structure /llms.txt with an H1, a blockquote summary, and a markdown link index
+    fix: |
+      Follow the llmstxt.org shape: start with `# Title`, add a `>` summary blockquote, then a
+      categorized list of markdown links. A file that is present but is only a heading, or only a
+      blob of prose, fails this row even when the presence check passes.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-txt-links:
+    title: llms.txt links resolve
+    goal: Make every markdown href in /llms.txt fetchable
+    fix: |
+      Probe the markdown links in `/llms.txt` and replace 404s. An agent that follows a dead index
+      link wastes a round-trip and may conclude the project has no docs. Keep the list short and
+      current; drop links you are not willing to keep alive.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  llms-txt-when-to-use:
+    title: llms.txt has a when-to-use or programmatic-access section
+    goal: Tell agents when to use the MCP or docs from a short llms.txt heading
+    fix: |
+      Add a heading such as `## When to use` or `## Programmatic access` with a few lines on when
+      an agent should connect (for example: "Use the MCP when you need to search or score a CLI").
+      The audit looks for that heading; it does not grade the prose with an LLM.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }

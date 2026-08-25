@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -30,9 +30,9 @@ async function load() {
 }
 
 describe('web remediation catalog coverage', () => {
-  test('every registry check id has a remediation entry (no misses across all 36)', async () => {
+  test('every registry check id has a remediation entry (no misses across all 52)', async () => {
     const { checkIds, remediation } = await load();
-    expect(checkIds.length).toBe(36);
+    expect(checkIds.length).toBe(52);
     for (const id of checkIds) {
       expect(remediation[id]).toBeDefined();
       expect(remediation[id].title.length).toBeGreaterThan(0);

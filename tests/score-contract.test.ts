@@ -17,7 +17,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { buildRegistryIndex } from '../src/build/registry-index.mjs';
 import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/score/handler';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';

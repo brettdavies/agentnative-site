@@ -13,7 +13,7 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
@@ -29,6 +29,10 @@ export const WEB_AUDIT_HANDLERS = new Set([
   'auth-md',
   'webmcp',
   'scoped-llms',
+  'markdown-frontmatter',
+  'content-without-js',
+  'llms-txt-quality',
+  'api-hygiene',
 ]);
 export const WEB_AUDIT_SITE_TYPES = new Set(['content', 'api', 'mcp', 'all']);
 export const WEB_AUDIT_ANTECEDENTS = new Set([
@@ -37,11 +41,13 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'html-root',
   'mcp-present',
   'mcp-auth',
+  'mcp-resources',
   'api-surface',
   'schemas-ref',
   'docs-site',
   'root-llms-txt',
   'root-llms-full-txt',
+  'markdown-twin',
   'robots-present',
   'auth-present',
 ]);

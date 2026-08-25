@@ -68,6 +68,12 @@ export function buildLlmsIndex({
       lines.push(`- [${entry.label}](${base}${entry.path})`);
     }
     lines.push('');
+    lines.push(
+      `No authentication. Connect now: POST JSON-RPC \`initialize\` to \`${base}/mcp\` with protocolVersion \`2025-06-18\`.`,
+    );
+    lines.push('');
+    lines.push(`Full recipes: [MCP client skill](${base}/mcp-skill.md).`);
+    lines.push('');
   }
   lines.push('## Principles');
   lines.push('');

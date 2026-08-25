@@ -6,7 +6,7 @@
 import { assertHttp, classifyAliasProbe, type ExpectBlock } from '../assert';
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
-import { resolveUrl, substituteEndpoint, timeoutMsFor } from './shared';
+import { resolveUrl, sameOriginRecoveryLink, substituteEndpoint, timeoutMsFor } from './shared';
 import type { HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
 type HttpWith = {
@@ -59,7 +59,13 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
     const resp = reuseRoot
       ? (ctx.root as NonNullable<HandlerContext['root']>)
       : await guardedFetch(url, { method, headers }, { ...ctx.fetchOptions, timeoutMs });
-    const { ok, reasons } = assertHttp(expect, resp);
+    const asserted = assertHttp(expect, resp);
+    const recovery =
+      asserted.ok && expect.same_origin_recovery_link
+        ? sameOriginRecoveryLink(resp.body ?? '', ctx.base)
+        : { ok: true, why: '' };
+    const ok = asserted.ok && recovery.ok;
+    const reasons = recovery.why ? [...asserted.reasons, recovery.why] : asserted.reasons;
     evidence.push({
       url,
       status: resp.status,

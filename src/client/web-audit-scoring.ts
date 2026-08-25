@@ -15,6 +15,7 @@
 // A cache hit returns a single application/json body { cached, scorecard, share_url }.
 
 import { getTurnstileToken, readSitekey, takeTurnstileToken } from './turnstile';
+import { buildAuditWebBody, takePublicListing } from './web-audit-listing';
 
 interface CheckEvent {
   type: 'check';
@@ -164,12 +165,18 @@ async function run(args: RunArgs): Promise<void> {
     }
   }
 
+  // Consume the form's stashed listing choice only once the POST is
+  // certain: a token failure above leaves the stash for the reload retry.
+  // No stash (a direct or shared scoring link) omits the field so the
+  // server preserves the stored choice.
+  const publicListing = takePublicListing(host);
+
   let resp: Response;
   try {
     resp = await fetch('/api/audit-web', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
-      body: JSON.stringify({ url, turnstile_token: token }),
+      body: JSON.stringify(buildAuditWebBody(url, token, publicListing)),
     });
   } catch {
     setStatus('Network error — could not reach the audit service.');

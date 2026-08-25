@@ -5,13 +5,15 @@
 //      Renaming ANY of these breaks every inbound link, HN comment, blog
 //      quote, or agent citation in perpetuity.
 //
-//   2. llms.txt shape — H1 + `>` summary + H2 "Principles" + 7 `.md`
+//   2. llms.txt shape — H1 + `>` summary + H2 "Principles" + 8 `.md`
 //      bullets + H2 "Scorecards". Shape is the llmstxt.org contract for
 //      agent discovery.
 //
-//   3. Markdown byte-equivalence: sha256(dist/p<n>.md) must equal
-//      sha256(content/principles/p<n>-*.md). The `/p<n>.md` endpoint
-//      promises the authored bytes, not a re-wrapped derivative.
+//   3. Markdown twin equivalence: dist/p<n>.md must equal
+//      composeTwin(frontmatter, content/principles/p<n>-*.md). The
+//      `/p<n>.md` endpoint promises the authored bytes behind a
+//      title/description/url frontmatter block, not a re-wrapped
+//      derivative.
 //
 //   4. Scorecard pages — leaderboard exists with a <table>, at least one
 //      per-tool scorecard page exists, and sitemap includes scorecard paths.
@@ -104,23 +106,40 @@ describe('regression #2 — llms.txt shape (llmstxt.org + A5)', () => {
   });
 });
 
-describe('regression #3 — markdown twin reflects source with site-relative links absolutified', () => {
+describe('regression #3 — markdown twin is frontmatter + source with site-relative links absolutified', () => {
   test.each(
-    Array.from({ length: 7 }, (_, i) => {
+    Array.from({ length: LOCKED_SLUGS.length }, (_, i) => {
       const n = i + 1;
       return [n, `${LOCKED_SLUGS[i]}.md`] as const;
     }),
-  )('dist/p%s.md == absolutifyMarkdownLinks(content/principles/%s)', async (n, sourceName) => {
-    const { absolutifyMarkdownLinks } = await import('../src/build/util.mjs');
+  )('dist/p%s.md == composeTwin(frontmatter, content/principles/%s)', async (n, sourceName) => {
+    const { composeTwin } = await import('../src/build/util.mjs');
+    const { extractDescription, extractTitle } = await import('../src/build/content.mjs');
     const distContent = await readFile(join(DIST, `p${n}.md`), 'utf8');
     const sourceContent = await readFile(join(CONTENT, 'principles', sourceName), 'utf8');
-    expect(distContent).toBe(absolutifyMarkdownLinks(sourceContent));
+    const expected = composeTwin(
+      {
+        title: extractTitle(sourceContent),
+        description: extractDescription(sourceContent),
+        canonicalPath: `/p${n}`,
+      },
+      sourceContent,
+    );
+    expect(distContent).toBe(expected);
   });
 
   test('absolutification idempotency: re-applying the transform is a no-op', async () => {
     const { absolutifyMarkdownLinks } = await import('../src/build/util.mjs');
     const distContent = await readFile(join(DIST, 'p1.md'), 'utf8');
     expect(absolutifyMarkdownLinks(distContent)).toBe(distContent);
+  });
+
+  test.each(
+    Array.from({ length: LOCKED_SLUGS.length }, (_, i) => i + 1),
+  )('dist/p%s.html carries no frontmatter fence or url line', async (n) => {
+    const html = await readFile(join(DIST, `p${n}.html`), 'utf8');
+    expect(html).not.toContain('---\ntitle:');
+    expect(html).not.toMatch(/^url: /m);
   });
 
   test('every dist/*.md page emits absolute https://anc.dev/ URLs for site-internal links', async () => {
@@ -258,7 +277,8 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
     const html = await readFile(join(DIST, 'install.html'), 'utf8');
     const md = await readFile(join(DIST, 'install.md'), 'utf8');
     expect(html).toContain('<h1');
-    expect(md).toMatch(/^#\s+Install anc/);
+    // The twin opens with its YAML frontmatter block; the H1 follows it.
+    expect(md).toMatch(/^#\s+Install anc/m);
     await expect(readFile(join(DIST, 'install.json'), 'utf8')).rejects.toThrow(/ENOENT/);
   });
 

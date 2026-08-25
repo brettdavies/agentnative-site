@@ -27,6 +27,17 @@ export function rootContentType(ctx: AntecedentContext): string {
   return ctx.root?.headers['content-type'] ?? '';
 }
 
+/**
+ * Gate for antecedents scoped to an HTML root document: `'error'` when the
+ * root never answered, `'n_a'` when it answered as non-HTML, and `null`
+ * when it is HTML and the caller should keep resolving.
+ */
+export function htmlRootGate(ctx: AntecedentContext): Exclude<AntecedentResolution, 'apply'> | null {
+  if (ctx.root === null || ctx.root.status === null) return 'error';
+  if (!rootContentType(ctx).includes('text/html')) return 'n_a';
+  return null;
+}
+
 export function sourcePassed(ctx: AntecedentContext, checkId: string): boolean {
   return ctx.sources.get(checkId)?.status === 'pass';
 }

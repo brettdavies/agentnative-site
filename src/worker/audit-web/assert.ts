@@ -31,6 +31,14 @@ export type ExpectBlock = {
   header_present?: string;
   header_regex?: { name: string; pattern: string };
   body_regex?: string;
+  /** Fail when the body matches (cheap challenge/interstitial heuristic). */
+  body_not_regex?: string;
+  /**
+   * Markdown 404 recovery: at least one markdown href must resolve to a
+   * same-origin sitemap.xml, llms.txt, or /docs path. Evaluated by the
+   * http handler (needs the audited origin), not assertHttp.
+   */
+  same_origin_recovery_link?: boolean;
 };
 
 export type AssertOutcome = { ok: boolean; reasons: string[] };
@@ -82,6 +90,11 @@ export function assertHttp(expect: ExpectBlock, resp: ProbeResponse): AssertOutc
     const ok = new RegExp(expect.body_regex, 'im').test(body);
     reasons.push(`body ${ok ? 'matches' : 'no match'} /${expect.body_regex}/`);
     if (!ok) return { ok: false, reasons };
+  }
+  if (expect.body_not_regex !== undefined) {
+    const hit = new RegExp(expect.body_not_regex, 'im').test(body);
+    reasons.push(`body ${hit ? 'matches forbidden' : 'avoids'} /${expect.body_not_regex}/`);
+    if (hit) return { ok: false, reasons };
   }
   return { ok: true, reasons };
 }

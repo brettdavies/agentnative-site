@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
@@ -49,9 +49,9 @@ async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 36 checks', async () => {
+  test('normalizes to exactly 52 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(36);
+    expect(registry.checks.length).toBe(52);
   });
 
   test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
@@ -62,7 +62,19 @@ describe('web-audit registry shape', () => {
       expect(['required', 'recommended', 'optional']).toContain(check.tier);
       expect(check.principle).toMatch(/^P[1-8]$/);
       expect(['must', 'should', 'may']).toContain(check.keyword);
-      expect(['http', 'cors-preflight', 'mcp', 'dns-doh', 'auth-md', 'webmcp', 'scoped-llms']).toContain(check.handler);
+      expect([
+        'http',
+        'cors-preflight',
+        'mcp',
+        'dns-doh',
+        'auth-md',
+        'webmcp',
+        'scoped-llms',
+        'markdown-frontmatter',
+        'content-without-js',
+        'llms-txt-quality',
+        'api-hygiene',
+      ]).toContain(check.handler);
       expect(Array.isArray(check.site_types) && check.site_types.length > 0).toBe(true);
       for (const st of check.site_types) expect(['content', 'api', 'mcp', 'all']).toContain(st);
       expect(typeof check.antecedent).toBe('string');
@@ -123,26 +135,45 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 3 / recommended 15 / optional 18', async () => {
+  test('tier counts are exactly required 3 / recommended 26 / optional 23', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 3, recommended: 15, optional: 18 });
+    expect(counts).toEqual({ required: 3, recommended: 26, optional: 23 });
   });
 
-  test('derived keyword counts match must 3 / should 15 / may 18', async () => {
+  test('derived keyword counts match must 3 / should 26 / may 23', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 3, should: 15, may: 18 });
+    expect(counts).toEqual({ must: 3, should: 26, may: 23 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 4, P2: 12, P3: 4, P4: 3, P6: 3, P7: 4, P8: 6 });
+    expect(counts).toEqual({ P1: 4, P2: 22, P3: 4, P4: 4, P6: 4, P7: 5, P8: 9 });
     expect(counts.P5).toBeUndefined();
+  });
+
+  test('the recovery checks, llms.txt quality trio, API hygiene, MCP resources, and ARD ids are registered', async () => {
+    const registry = await loadNormalized();
+    const ids = new Set(registry.checks.map((c) => c.id));
+    for (const id of [
+      'json-errors',
+      'rate-limit-headers',
+      'mcp-resources-list',
+      'ai-catalog',
+      'llms-txt-format',
+      'llms-txt-links',
+      'llms-txt-when-to-use',
+      'agent-friendly-404',
+      'content-without-js',
+      'agent-ua-reachable',
+    ]) {
+      expect(ids.has(id)).toBe(true);
+    }
   });
 
   test('mcp_discovery carries well_known, common_paths, and the pinned protocol version', async () => {
@@ -226,10 +257,10 @@ describe('web-audit registry shape', () => {
     );
   });
 
-  test('normalized JSON round-trips to 36 entries', async () => {
+  test('normalized JSON round-trips to 52 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(36);
+    expect(roundTripped.checks.length).toBe(52);
   });
 });
 
@@ -319,20 +350,19 @@ describe('buildWebScorecard', () => {
   });
 });
 
-// The load-bearing proof of KTD1: reassigning a check's display category
+// The load-bearing proof that display categories are score-neutral:
+// reassigning a check's display category
 // (mcp-api -> api/mcp) must not move any score. score.ts reads keyword +
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
-describe('scoring invariance under the API/MCP category split (U4, KTD1)', () => {
-  test('the real registry keeps its 3/15/18 tier distribution, so universeMax is unchanged', async () => {
+describe('scoring invariance under the API/MCP category split', () => {
+  test('the real registry keeps its 3/26/23 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
-    // 3 MUST x5 + 15 SHOULD x3 + 18 MAY x1 = 78. Retiering a check (e.g. the
-    // deferred openapi MUST -> SHOULD) would move this; the display split
-    // alone must not.
+    // 3 MUST x5 + 26 SHOULD x3 + 23 MAY x1 = 116.
     const universeMax = universeMaxOf(
       registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
     );
-    expect(universeMax).toBe(78);
+    expect(universeMax).toBe(116);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

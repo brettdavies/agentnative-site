@@ -61,12 +61,12 @@ anchors, and semantic HTML. Keep this framing in every decision.
 - `content/*.md`: markdown source of truth for every page (principle files, check, about, index)
 - Cloudflare Worker: routes requests. `.md` suffix OR `Accept: text/markdown` returns raw markdown source; otherwise
   returns HTML rendered from the same markdown via CommonMark
-- **Interactive widgets never live in `content/*.md`.** The `.md` twin and `llms-full.txt` serve the markdown source
-  verbatim, so a raw `<form>`, `<input>`, or `<button>` leaks dead controls into the agent-facing surface. A page that
-  needs a browser widget declares a `widget` slot in `src/build/07-subpages.mjs` (a `{{PLACEHOLDER}}` that renders as
-  HTML in the page and as a prose pointer in the twin); the homepage form lives the same way in
-  `src/build/06-homepage.mjs`. Content markdown stays prose. Enforced by `tests/content-no-form-widgets.test.ts` and the
-  `scripts/hooks/pre-commit` widget guard.
+- **Interactive widgets never live in `content/*.md`.** The `.md` twin (behind a title/description/url frontmatter
+  block) and `llms-full.txt` both carry the markdown source's body verbatim, so a raw `<form>`, `<input>`, or `<button>`
+  leaks dead controls into the agent-facing surface. A page that needs a browser widget declares a `widget` slot in
+  `src/build/07-subpages.mjs` (a `{{PLACEHOLDER}}` that renders as HTML in the page and as a prose pointer in the twin);
+  the homepage form lives the same way in `src/build/06-homepage.mjs`. Content markdown stays prose. Enforced by
+  `tests/content-no-form-widgets.test.ts` and the `scripts/hooks/pre-commit` widget guard.
 - `/llms.txt`, `/llms-full.txt`: llmstxt.org convention (summary index + full concatenated spec)
 - `/mcp`: streamable HTTP Model Context Protocol server. Client skill in [`content/mcp-skill.md`](content/mcp-skill.md);
   canonical server card at `/.well-known/mcp/server-card.json` (legacy aliases `/.well-known/mcp`, `/mcp.json`,
@@ -314,6 +314,12 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 - `ci.yml`: fast PR gate (lint · build · test · wrangler dry-run).
 - `deep-check.yml`: scheduled Playwright + Lighthouse with a preflight that only runs when ci.yml has passed since the
   last deep-check.
+- **Local gate order after a rebase or branch switch: `bun run build` before `bun test`, never the reverse.**
+  `tests/regression.test.ts` reads `dist/` directly rather than rebuilding it (see the file's own header comment), and
+  `dist/` is gitignored so it does not track the branch or commit currently checked out. Running `bun test` first
+  asserts against whatever the *previous* checkout left in `dist/` and fails with output that reads exactly like a
+  content regression, when the actual cause is a stale build artifact. `ci.yml` already encodes the correct order (lint
+  · build · test); mirror it locally.
 - **Playwright browsers:** system-provided on the dev host — dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
   never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
   `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
