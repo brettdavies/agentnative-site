@@ -19,6 +19,15 @@ const HOMEPAGE_SHELL = `<!doctype html>
   </div>
 </body></html>`;
 
+const HOMEPAGE_MD = `# anc.dev
+
+CLI names stay baked: ripgrep.
+
+## Web leaderboard
+
+{{WEB_BOARD_ROWS}}
+`;
+
 function frontpageEntry(domain: string, globalScore: number): WebAggregateEntry {
   return {
     domain,
@@ -43,8 +52,16 @@ function makeEnv(aggregate: WebAggregateEntry[] | null, extraKeys: Record<string
   }
   return {
     ASSETS: {
-      async fetch() {
-        return new Response(HOMEPAGE_SHELL, { status: 200, headers: { 'content-type': 'text/html' } });
+      async fetch(request: Request | string): Promise<Response> {
+        const url = typeof request === 'string' ? request : request.url;
+        const path = new URL(url).pathname;
+        if (path === '/index.md') {
+          return new Response(HOMEPAGE_MD, {
+            status: 200,
+            headers: { 'content-type': 'text/markdown; charset=utf-8' },
+          });
+        }
+        return new Response(HOMEPAGE_SHELL, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
       },
     } as unknown as Fetcher,
     SCORE_CACHE: {
@@ -68,8 +85,8 @@ function ctx(): ExecutionContext {
   return { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
 }
 
-async function fetchHomepage(env: Env): Promise<string> {
-  const resp = await worker.fetch(new Request('https://anc.dev/'), env, ctx());
+async function fetchHomepage(env: Env, opts?: { url?: string; headers?: HeadersInit }): Promise<string> {
+  const resp = await worker.fetch(new Request(opts?.url ?? 'https://anc.dev/', { headers: opts?.headers }), env, ctx());
   expect(resp.status).toBe(200);
   return resp.text();
 }
@@ -144,11 +161,41 @@ describe('homepage web-board inject', () => {
   });
 });
 
+describe('homepage markdown board inject', () => {
+  test('curl GET / and GET /index.md both include CLI names and the same R2 web domains', async () => {
+    const env = makeEnv([frontpageEntry('top.dev', 80), frontpageEntry('next.dev', 60)]);
+    const negotiated = await fetchHomepage(env, {
+      url: 'https://anc.dev/',
+      headers: { accept: '*/*', 'user-agent': 'curl/8.7.1' },
+    });
+    const twin = await fetchHomepage(env, { url: 'https://anc.dev/index.md' });
+    for (const md of [negotiated, twin]) {
+      expect(md).toContain('ripgrep');
+      expect(md).toContain('top.dev');
+      expect(md).toContain('next.dev');
+      expect(md).not.toContain('{{WEB_BOARD_ROWS}}');
+      expect(md).not.toContain('lrow');
+      expect(md.toLowerCase()).not.toContain('live-score');
+      expect(md.toLowerCase()).not.toContain('turnstile');
+      expect(md).not.toContain('/api/score');
+    }
+  });
+
+  test('HTML / still injects the web pane and keeps the baked CLI table', async () => {
+    const html = await fetchHomepage(makeEnv([frontpageEntry('top.dev', 80)]));
+    expect(html).toContain('href="/score/ripgrep"');
+    expect(html).toContain('href="/web/top.dev"');
+    expect(html).toContain('class="lrow');
+    expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
+  });
+});
+
 describe('built homepage carries the placeholder', () => {
   test('06-homepage emits the {{WEB_BOARD_ROWS}} marker in the web pane', async () => {
     const { readFile } = await import('node:fs/promises');
     const source = await readFile(new URL('../src/build/06-homepage.mjs', import.meta.url), 'utf8');
     expect(source).toContain('{{WEB_BOARD_ROWS}}');
+    expect(source).toContain('## Web leaderboard');
     expect(source).not.toContain('buildWebBoardRows');
   });
 });

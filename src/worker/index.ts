@@ -14,7 +14,12 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { getAggregate, type WebCacheEnv } from './audit-web/cache';
-import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
+import {
+  buildFrontpageBoardEmptyState,
+  buildFrontpageBoardMarkdown,
+  buildFrontpageBoardMarkdownEmptyState,
+  buildFrontpageBoardRows,
+} from './audit-web/leaderboard-render';
 import {
   handleWebBackfill,
   handleWebRescore,
@@ -680,20 +685,35 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
   const upstream = await env.ASSETS.fetch(assetRequest);
 
-  // Homepage HTML: substitute the {{TURNSTILE_SITEKEY}} and
-  // {{WEB_BOARD_ROWS}} placeholders. Runs AFTER the markdown-CN rewrite
-  // above so /index.md content (no placeholders) flows through
-  // untouched. Production with no TURNSTILE_SITEKEY set substitutes
-  // with the empty string, which the homepage JS treats as "form
-  // disabled, install anc locally" per the deliberate
-  // fail-loud-pre-promotion posture. The web-board region is filled
-  // server-side from the R2 leaderboard-frontpage aggregate so the
-  // homepage stays zero-JS while its web scores stay live; an absent
-  // aggregate (cold start / spec bump) renders the scoring-in-progress
-  // state.
-  if ((pathname === '/' || pathname === '/index.html') && !servedMarkdown && upstream.ok) {
-    const contentType = upstream.headers.get('content-type') ?? '';
-    if (contentType.toLowerCase().includes('text/html')) {
+  // Homepage: substitute {{TURNSTILE_SITEKEY}} on HTML and {{WEB_BOARD_ROWS}}
+  // on HTML and markdown. Runs AFTER the markdown-CN rewrite so negotiated
+  // `/` and `/index.md` share the same inject. Production with no
+  // TURNSTILE_SITEKEY set substitutes the empty string (form JS disables).
+  // The web-board region is filled from the R2 leaderboard-frontpage
+  // aggregate so a cache HIT cannot contain the placeholder. Markdown
+  // never receives Turnstile / live-score tokens (R6 form-silence).
+  const isHomepage = pathname === '/' || pathname === '/index.html' || pathname === '/index.md';
+  if (isHomepage && upstream.ok) {
+    const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    const wantsMarkdown = servedMarkdown || pathname === '/index.md' || contentType.includes('text/markdown');
+    if (wantsMarkdown) {
+      const md = await upstream.text();
+      let substituted = md;
+      if (substituted.includes('{{WEB_BOARD_ROWS}}')) {
+        const aggregate = await getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION);
+        const entries = aggregate?.entries ?? [];
+        const board =
+          entries.length > 0 ? buildFrontpageBoardMarkdown(entries) : buildFrontpageBoardMarkdownEmptyState();
+        substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', board);
+      }
+      const rewritten = new Response(substituted, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: upstream.headers,
+      });
+      return applyHeaders(rewritten, { request, servedMarkdown, pathname });
+    }
+    if (contentType.includes('text/html')) {
       const html = await upstream.text();
       const sitekey = env.TURNSTILE_SITEKEY ?? '';
       let substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
