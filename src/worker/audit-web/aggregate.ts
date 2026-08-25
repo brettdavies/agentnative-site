@@ -14,6 +14,7 @@ import {
   type WebAggregateEntry,
   type WebCacheEnv,
 } from './cache';
+import { homeTag, queueHitMinPurge, webTag } from './hit-min-purge';
 import { isSeededDomain, loadWebSeed, type WebSeedEnv } from './seed';
 
 export type WebAggregateEnv = WebCacheEnv & WebSeedEnv;
@@ -51,7 +52,7 @@ type ScoreShape = { score_pct?: number; score?: { relative?: number; global?: nu
 export async function rebuildWebAggregates(
   env: WebAggregateEnv,
   specVersion: string,
-): Promise<{ seeded: number; scored: number }> {
+): Promise<{ seeded: number; scored: number; wrote: boolean }> {
   const seed = await loadWebSeed(env);
   const entries: WebAggregateEntry[] = [];
   for (const s of seed) {
@@ -75,11 +76,16 @@ export async function rebuildWebAggregates(
   // /web ranks by GLOBAL; the homepage pane headlines the site score, so
   // its top-N slice ranks by RELATIVE.
   sortByGlobal(entries);
-  await putAggregate(env, 'leaderboard', entries, specVersion);
+  const wroteBoard = await putAggregate(env, 'leaderboard', entries, specVersion);
   const byRelative = entries.slice();
   sortByRelative(byRelative);
-  await putAggregate(env, 'leaderboard-frontpage', pinnedFrontpageSlice(byRelative), specVersion);
-  return { seeded: seed.length, scored: entries.length };
+  const wroteFrontpage = await putAggregate(
+    env,
+    'leaderboard-frontpage',
+    pinnedFrontpageSlice(byRelative),
+    specVersion,
+  );
+  return { seeded: seed.length, scored: entries.length, wrote: wroteBoard || wroteFrontpage };
 }
 
 /**
@@ -95,7 +101,8 @@ export async function rebuildAggregatesIfSeeded(
 ): Promise<void> {
   try {
     if (!(await isSeededDomain(env, domain))) return;
-    await rebuildWebAggregates(env, specVersion);
+    const result = await rebuildWebAggregates(env, specVersion);
+    if (result.wrote) queueHitMinPurge([homeTag(), webTag()]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.log(JSON.stringify({ scope: 'web-aggregate', domain, error: message }));

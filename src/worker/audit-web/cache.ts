@@ -164,7 +164,7 @@ export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit
  * spec_version or a scorecard without a target_url). Best-effort: a write
  * failure logs but never throws to the caller.
  */
-export async function put(env: WebCacheEnv, url: string, scorecard: unknown, specVersion: string): Promise<void> {
+export async function put(env: WebCacheEnv, url: string, scorecard: unknown, specVersion: string): Promise<boolean> {
   if (!specVersion) throw new Error('web-cache.put: specVersion required (refusal-to-cache-half-state)');
   const targetUrl = (scorecard as { target_url?: unknown } | null)?.target_url;
   if (typeof targetUrl !== 'string' || targetUrl.length === 0) {
@@ -177,7 +177,7 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
     scorecard,
     scored_at: new Date().toISOString(),
   };
-  await writeAuditObject(env, await keyFor(url, specVersion), payload, 'web-cache.put');
+  return writeAuditObject(env, await keyFor(url, specVersion), payload, 'web-cache.put');
 }
 
 /**
@@ -398,7 +398,7 @@ export async function putAggregate(
   kind: WebAggregateKind,
   entries: WebAggregateEntry[],
   specVersion: string,
-): Promise<void> {
+): Promise<boolean> {
   if (!specVersion) throw new Error('web-cache.putAggregate: specVersion required (refusal-to-cache-half-state)');
   const payload: CachedWebAggregate = {
     spec_version: specVersion,
@@ -410,8 +410,10 @@ export async function putAggregate(
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
       httpMetadata: { contentType: 'application/json', cacheControl: CACHE_CONTROL },
     });
+    return true;
   } catch (err) {
     console.log(JSON.stringify({ scope: 'web-cache.putAggregate', key, error: errMsg(err) }));
+    return false;
   }
 }
 

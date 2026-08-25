@@ -109,4 +109,10 @@ describe('Worker entry — named export contract for CF Sandbox / Containers SDK
     const proto = (workerEntry.Sandbox as unknown as { prototype: Record<string, unknown> }).prototype;
     expect(typeof proto.fetch).toBe('function');
   });
+
+  test('Cached class exposes fetch and purgeHitMinTags', () => {
+    const proto = (workerEntry.Cached as unknown as { prototype: Record<string, unknown> }).prototype;
+    expect(typeof proto.fetch).toBe('function');
+    expect(typeof proto.purgeHitMinTags).toBe('function');
+  });
 });

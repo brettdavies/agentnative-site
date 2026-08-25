@@ -14,6 +14,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { getAggregate, type WebCacheEnv } from './audit-web/cache';
+import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import {
   buildFrontpageBoardEmptyState,
   buildFrontpageBoardMarkdown,
@@ -71,7 +72,26 @@ export { Sandbox } from './score/do';
 // the skip-Worker HIT target; default `fetch` is the uncached gateway.
 export class Cached extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    return handleSiteRequest(request, this.env, this.ctx);
+    return runWithHitMinPurge(this.ctx, async () => {
+      const response = await handleSiteRequest(request, this.env, this.ctx);
+      await flushHitMinPurge();
+      return response;
+    });
+  }
+
+  /** Purge HIT-min objects by Cache-Tag. Scoped to this cached entrypoint. */
+  async purgeHitMinTags(tags: string[]): Promise<{ success: boolean; errors: { message: string }[] }> {
+    const cache = this.ctx.cache;
+    if (!cache || typeof cache.purge !== 'function') {
+      console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'cache_purge_unavailable', tags }));
+      return { success: false, errors: [{ message: 'cache_purge_unavailable' }] };
+    }
+    const unique = [...new Set(tags.filter((t) => t.length > 0))];
+    const result = await cache.purge({ tags: unique });
+    if (!result.success) {
+      console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors }));
+    }
+    return result;
   }
 }
 
@@ -357,7 +377,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   // One-time public_listing backfill (same secret gate as the rescore
   // hook). Bounded per call; the operator re-runs until it writes zero.
   if (pathname === '/api/web-audit-backfill') {
-    return handleWebBackfill(request, env as WebBackfillTriggerEnv);
+    return handleWebBackfill(request, env as WebBackfillTriggerEnv, ctx);
   }
 
   // MCP server card (SEP-1649): the canonical path serves the JSON

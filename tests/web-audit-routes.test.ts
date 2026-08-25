@@ -1122,6 +1122,33 @@ describe('handleWebAudit public_listing', () => {
     expect(stored.scored_at).toBe(scoredAt);
   });
 
+  test('a listing patch purges the web tag once, never a /web path prefix', async () => {
+    const scoredAt = freshStamp();
+    const { bucket } = makeR2(await prefill({ scoredAt, stored: false }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const calls: Array<{ tags?: string[]; pathPrefixes?: string[] }> = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            calls.push({ tags });
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, ctx, {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.tags).toEqual(['web']);
+    expect(calls[0]?.pathPrefixes).toBeUndefined();
+  });
+
   test('fresh hit + stored true + explicit true serves cached (redundant, no write)', async () => {
     const prefilled = await prefill({ scoredAt: freshStamp(), stored: true });
     const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);

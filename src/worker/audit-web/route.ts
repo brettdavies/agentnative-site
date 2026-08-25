@@ -36,6 +36,14 @@ import {
   sha256Hex,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
+import {
+  flushHitMinPurge,
+  invokeCachedPurge,
+  queueHitMinPurge,
+  runWithHitMinPurge,
+  webDomainTag,
+  webTag,
+} from './hit-min-purge';
 
 export { canonicalTargetOf };
 
@@ -318,6 +326,7 @@ export async function handleWebAudit(
         cookieHeader(setCookie),
       );
     }
+    await invokeCachedPurge(ctx, [webTag()]);
     const patchedScorecard = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
     return jsonResponse(
       { cached: true, scorecard: patchedScorecard, share_url: shareUrl },
@@ -335,45 +344,48 @@ export async function handleWebAudit(
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
 
-  const pump = (async () => {
-    let scorecard: unknown = null;
-    let complete = false;
-    try {
-      for await (const event of runWebAudit({
-        url: canonicalTarget,
-        registry,
-        siteType,
-        publicListing: auditListing,
-        specVersion: SPEC_VERSION,
-        fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
-      })) {
-        if (event.type === 'discovery') {
-          await writer
-            .write(encoder.encode(`${JSON.stringify({ type: 'discovery', mcp_endpoint: event.endpoint })}\n`))
-            .catch(() => {});
-        } else if (event.type === 'result') {
-          await writer.write(encoder.encode(checkEvent(event.result))).catch(() => {});
-        } else {
-          scorecard = event.scorecard;
-          complete = event.complete;
+  ctx.waitUntil(
+    runWithHitMinPurge(ctx, async () => {
+      let scorecard: unknown = null;
+      let complete = false;
+      try {
+        for await (const event of runWebAudit({
+          url: canonicalTarget,
+          registry,
+          siteType,
+          publicListing: auditListing,
+          specVersion: SPEC_VERSION,
+          fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
+        })) {
+          if (event.type === 'discovery') {
+            await writer
+              .write(encoder.encode(`${JSON.stringify({ type: 'discovery', mcp_endpoint: event.endpoint })}\n`))
+              .catch(() => {});
+          } else if (event.type === 'result') {
+            await writer.write(encoder.encode(checkEvent(event.result))).catch(() => {});
+          } else {
+            scorecard = event.scorecard;
+            complete = event.complete;
+          }
         }
+        if (scorecard && complete) {
+          const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+          if (wrote) queueHitMinPurge([webTag(), webDomainTag(shareDomain)]);
+          await rebuildAggregatesIfSeeded(env, shareDomain, SPEC_VERSION);
+        }
+        const terminal = complete
+          ? { type: 'complete', scorecard, share_url: shareUrl }
+          : { type: 'incomplete', scorecard, share_url: null };
+        await writer.write(encoder.encode(`${JSON.stringify(terminal)}\n`)).catch(() => {});
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await writer.write(encoder.encode(`${JSON.stringify({ type: 'error', message })}\n`)).catch(() => {});
+      } finally {
+        await writer.close().catch(() => {});
+        await flushHitMinPurge();
       }
-      if (scorecard && complete) {
-        await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
-        await rebuildAggregatesIfSeeded(env, shareDomain, SPEC_VERSION);
-      }
-      const terminal = complete
-        ? { type: 'complete', scorecard, share_url: shareUrl }
-        : { type: 'incomplete', scorecard, share_url: null };
-      await writer.write(encoder.encode(`${JSON.stringify(terminal)}\n`)).catch(() => {});
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await writer.write(encoder.encode(`${JSON.stringify({ type: 'error', message })}\n`)).catch(() => {});
-    } finally {
-      await writer.close().catch(() => {});
-    }
-  })();
-  ctx.waitUntil(pump);
+    }),
+  );
 
   return new Response(readable, {
     status: 200,

@@ -16,6 +16,7 @@
 
 import { SPEC_VERSION } from '../spec-version.gen';
 import { get as cacheGet, isPerDomainAuditKey, patchStoredPublicListing, type WebCacheEnv } from './cache';
+import { flushHitMinPurge, queueHitMinPurge, webTag } from './hit-min-purge';
 import { isSeededDomain, loadWebSeed, type WebSeedEnv } from './seed';
 
 export type WebBackfillEnv = WebCacheEnv & WebSeedEnv;
@@ -129,6 +130,7 @@ export async function runWebPublicListingBackfill(
       return result;
     }
 
+    let wroteThisPage = false;
     for (const obj of page.objects) {
       if (!isPerDomainAuditKey(obj.key, specVersion)) continue; // skip aggregate + off-version keys
       result.scanned++;
@@ -178,8 +180,16 @@ export async function runWebPublicListingBackfill(
       if (dryRun) continue;
 
       const ok = await patchStoredPublicListing(env, cached, value);
-      if (ok) result.written++;
-      else result.failed++;
+      if (ok) {
+        result.written++;
+        wroteThisPage = true;
+      } else result.failed++;
+    }
+
+    if (wroteThisPage) {
+      queueHitMinPurge([webTag()]);
+      await flushHitMinPurge();
+      wroteThisPage = false;
     }
 
     cursor = page.truncated ? page.cursor : undefined;
