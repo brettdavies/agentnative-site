@@ -3,6 +3,8 @@
 // Buttons are added client-side so the no-JS case is a clean render with
 // no dead controls (docs/DESIGN.md §4.8 C6).
 
+import { carriersFromElements, selectAssemblePrompts } from './assemble-prompt';
+
 const COPIED_MS = 1500;
 
 async function copyText(text: string): Promise<boolean> {
@@ -139,11 +141,90 @@ function attachDataButtons() {
   }
 }
 
+function attachAssemblePrompt() {
+  const page = document.querySelector('.scorecard-page');
+  const hero = page?.querySelector('.scorecard-hero');
+  if (!page || !hero || page.querySelector('[data-assemble-prompt]')) return;
+
+  const carriers = carriersFromElements(page.querySelectorAll('[data-copy-text][data-keyword]'));
+  const section = document.createElement('section');
+  section.className = 'assemble-prompt';
+  section.setAttribute('data-assemble-prompt', '');
+  section.setAttribute('aria-label', 'Assemble fix prompts');
+
+  const heading = document.createElement('h2');
+  heading.className = 'assemble-prompt__title';
+  heading.textContent = 'Assemble fix prompts';
+
+  const lede = document.createElement('p');
+  lede.className = 'assemble-prompt__lede';
+  lede.textContent =
+    'Copies MUST failures (broken or missing) in page order. SHOULD and MAY are opt-in and stay off unless you enable them.';
+
+  const opts = document.createElement('div');
+  opts.className = 'assemble-prompt__opts';
+
+  const shouldLabel = document.createElement('label');
+  shouldLabel.className = 'assemble-prompt__opt';
+  const shouldBox = document.createElement('input');
+  shouldBox.type = 'checkbox';
+  shouldBox.setAttribute('data-assemble-should', '');
+  shouldLabel.append(shouldBox, document.createTextNode(' Include SHOULD'));
+
+  const mayLabel = document.createElement('label');
+  mayLabel.className = 'assemble-prompt__opt';
+  const mayBox = document.createElement('input');
+  mayBox.type = 'checkbox';
+  mayBox.setAttribute('data-assemble-may', '');
+  mayLabel.append(mayBox, document.createTextNode(' Include MAY'));
+  opts.append(shouldLabel, mayLabel);
+
+  const status = document.createElement('p');
+  status.className = 'assemble-prompt__status';
+  status.setAttribute('data-assemble-status', '');
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'btn btn--primary';
+  copyBtn.setAttribute('data-assemble-copy', '');
+  copyBtn.innerHTML = '<span data-copy-label>Copy assembled prompt</span>';
+
+  let assembled = '';
+  const refresh = () => {
+    assembled = selectAssemblePrompts(carriers, {
+      includeShould: shouldBox.checked,
+      includeMay: mayBox.checked,
+    });
+    const emptyMust = selectAssemblePrompts(carriers, { includeShould: false, includeMay: false }).length === 0;
+    if (assembled.length === 0) {
+      status.textContent = emptyMust
+        ? 'No MUST failures. Enable SHOULD or MAY to include those tiers.'
+        : 'No failures in the selected tiers.';
+      copyBtn.disabled = true;
+    } else {
+      status.textContent = '';
+      copyBtn.disabled = false;
+    }
+  };
+
+  copyBtn.addEventListener('click', async () => {
+    if (assembled.length === 0) return;
+    if (await copyText(assembled)) flashCopied(copyBtn);
+  });
+  shouldBox.addEventListener('change', refresh);
+  mayBox.addEventListener('change', refresh);
+
+  section.append(heading, lede, opts, status, copyBtn);
+  hero.after(section);
+  refresh();
+}
+
 function init() {
   attachPreButtons();
   attachAnchorCopy();
   attachPromptButtons();
   attachDataButtons();
+  attachAssemblePrompt();
 }
 
 if (document.readyState === 'loading') {
@@ -151,5 +232,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
-export {};

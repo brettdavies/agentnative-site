@@ -209,7 +209,7 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
     // data attribute and attaches a Copy-prompt button client-side, so a
     // no-JS render shows the prose + resource links with no dead control.
     // The .md twin keeps the fenced prompt for fetch-only agents.
-    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" hidden></span>\n`;
+    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
   }
 
   return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>
