@@ -15,6 +15,7 @@ flip with `wrangler secret put`.
 | -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MCP_ENABLED`              | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
 | `MCP_LIVE_SCORING_ENABLED` | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
+| `MCP_LEGACY_ENABLED`       | legacy `initialize` lane    | When `'false'`, shell logs `legacy_rejected` and returns JSON-RPC `-32099` before SDK dispatch. Modern lane unaffected. Staging default `'true'` in `wrangler.jsonc` `vars`.                             |
 
 Decision flow:
 
@@ -52,54 +53,53 @@ quota, then face rate-limited cache misses on their legitimate calls.
 If a future use case needs browser access, it gets its own KTD revision, an explicit allow-list, and a rate-limit policy
 designed for browser traffic. Do not add a wildcard CORS header to this endpoint without that review.
 
-## Structured logging
+## Structured logging (`mcp.request`)
 
-Every `POST /mcp` request emits one structured `[mcp-call]` log line. Schema:
+Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"event":"mcp.request"`. Replaces the
+former `[mcp-call]` shape.
 
-| Field             | Source                                          | Notes                                                    |
-| ----------------- | ----------------------------------------------- | -------------------------------------------------------- |
-| `origin`          | request `Origin` header (or `null`)             | Useful for spotting unexpected browser-origin probes.    |
-| `user_agent`      | request `User-Agent` header                     | Identifies which agent runtimes are calling.             |
-| `client_ip`       | CF-injected `cf-connecting-ip`                  | Rate-limit key for both `MCP_LIMITER` and audit limiter. |
-| `country`         | CF-injected geo header                          | Useful when triaging an abuse pattern.                   |
-| `response_format` | chosen `application/json` / `text/event-stream` | Negotiated from `Accept`.                                |
-| `gate_result`     | `passed` or `rate_limited`                      | The log fires AFTER the rate-limit gate decision.        |
+| Field              | Notes                                                                 |
+| ------------------ | --------------------------------------------------------------------- |
+| `era`              | `legacy` or `modern` (`isLegacyRequest`)                              |
+| `method`           | `Mcp-Method` header when present; else JSON-RPC method when known     |
+| `name`             | `Mcp-Name` when present (nullable)                                    |
+| `client_name`      | Truncated from initialize / `_meta` clientInfo when available         |
+| `protocol_version` | From header or `_meta` when available                               |
+| `host`             | Request host                                                          |
+| `response_format`  | `json` or `sse` from Accept negotiation                               |
+| `outcome`          | `ok`, `error`, `legacy_rejected`, `rate_limited`, `disabled`, `accept_rejected`, … |
+| `error_code`       | Numeric JSON-RPC transport code only (nullable); no tool payloads     |
+| `ms_bucket`        | `<50`, `50-200`, `200-1000`, `>1000`                                  |
 
-**Important:** the log fires after the gate so Workers Logs volume stays bounded under attack, but still records the
-denial. A flood that trips `MCP_LIMITER` produces one log line per request, not zero.
-
-To query:
+No IP, slug, query text, or tool results appear in the log line. Use Cloudflare rate-limit analytics for IP triage.
 
 ```bash
-# Tail live
-wrangler tail --env production --search '[mcp-call]'
-
-# Pull a window via Workers Logs API or the dashboard search
+wrangler tail --env staging --search 'event=mcp.request'
 ```
 
-When triaging abuse: filter by `client_ip` + `gate_result: rate_limited` to confirm a single source is the cause. When
-triaging unexpected traffic shape: filter by `origin` (browser probes) or `user_agent` (a new client).
+When triaging era mix before legacy sunset: filter `era:legacy` vs `era:modern` and group by `client_name`. Legacy share
+alone is insufficient — review top-N legacy `client_name` values over 30 days before flipping
+`MCP_LEGACY_ENABLED=false`.
 
 ## Spec revision pin
 
-Spec revision `2025-06-18` is pinned in three places that MUST stay in lockstep:
+Declared spec revision `2026-07-28` is pinned in lockstep across:
 
-1. `src/worker/mcp/instructions.ts`: the `SPEC_REVISION` constant baked into the handshake `instructions` field.
-2. `src/build/11a-discovery-emit.mjs`: the `MCP_SPEC_VERSION` constant baked into the server card `protocolVersion`.
-3. The MCP SDK version in `package.json`: the SDK enforces the protocol-level pin on `initialize`.
+1. `src/worker/mcp/instructions.ts` — `SPEC_REVISION` in handshake `instructions`.
+2. `src/build/11a-discovery-emit.mjs` — server card `protocolVersion`.
+3. `content/mcp-skill.md` — wire-level reference block.
+4. `AGENTS.md` § MCP server — agent onboarding summary.
 
-Tests assert each literal value so any drift breaks the build (`tests/worker-mcp.test.ts`,
-`tests/build-discovery-emit.test.ts`). When upgrading the SDK:
+Legacy clients may still send `initialize` with client `protocolVersion=2025-06-18`; the SDK dual-stack answers per
+pinned server revision. Tests assert literals in `tests/worker-mcp.test.ts`, `tests/build-discovery-emit.test.ts`, and
+`tests/e2e/discoverability.e2e.ts`.
 
-1. Bump the SDK in `package.json` and `bun install`.
-2. Read the SDK changelog for the new pinned revision.
-3. Update both constants above to match.
-4. Update the literal expectations in `tests/worker-mcp.test.ts` and `tests/build-discovery-emit.test.ts`.
-5. Update the literal `2025-06-18` references in `content/mcp-skill.md` and this file.
-6. Run `bun test` and the staging-mcp e2e suite. If the SDK introduced wire-shape changes, expect failures in
-   `tests/e2e/discoverability.e2e.ts` and triage from there.
+When upgrading `@modelcontextprotocol/server` / `agents`:
 
-Bumping any one of these alone is a bug, not a feature.
+1. Bump pins in `package.json` and `bun install`.
+2. Update all four surfaces above to the new declared revision.
+3. Update test literals and `scripts/release/mcp-smoke.sh` checks 1–2.
+4. Run `bun run build && bun test` and staging `scripts/release/mcp-smoke.sh <staging-url>` (expect 6/6 scripted checks).
 
 ## Rate-limit policy rationale
 
@@ -108,9 +108,9 @@ refactor doesn't drop the security argument.
 
 ### Read tier (`MCP_LIMITER`): 60 req / 60s per IP, anon fallback allowed
 
-Per-request cost is trivial (in-isolate catalog read, no container, no R2 write). A small anon flood is recoverable
-within the 60-second window. A shared anon bucket is acceptable because the worst case is a brief denial-of-service for
-unkeyed traffic, since no resource cost amplifies.
+Read tier keys are **era-aware**: `legacy:{ip}` for legacy requests; `modern:{mcp-name}:{ip}` when `Mcp-Name` names a
+registered tool or resource template (from `registered_tool_names` / `registered_resource_templates` in the catalog
+emit); otherwise `modern:{ip}`. Spoofed `Mcp-Name` values fall back to `modern:{ip}`.
 
 ### Audit tier (`MCP_AUDIT_LIMITER`): 5 audits / 60min per IP, NO anon fallback
 

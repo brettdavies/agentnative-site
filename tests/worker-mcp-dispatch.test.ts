@@ -15,8 +15,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { detectMcpFormat, detectMcpGetFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
-import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { parseMcpHttpBody, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -52,6 +52,8 @@ const FIXTURE_CATALOG = {
       body_markdown: '# Scoring\n\nFixture.\n',
     },
   ],
+  registered_tool_names: ['get_scorecard', 'list_principles', 'score_cli'],
+  registered_resource_templates: ['registry', 'tool', 'principle', 'spec', 'scorecard'],
 };
 
 interface RateStub {
@@ -67,7 +69,7 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
   description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
   documentation: 'https://anc.dev/mcp-skill.md',
   serverInfo: { name: 'anc.dev agent-native CLI standard registry', version: '0.5.0' },
-  protocolVersion: '2025-06-18',
+  protocolVersion: '2026-07-28',
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
   capabilities: {
@@ -147,6 +149,11 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
   };
 }
 
+async function readMcpJson(res: Response) {
+  const raw = await res.text();
+  return parseMcpHttpBody(raw, res.headers.get('content-type'));
+}
+
 async function postMcp(env: Env, accept: string, body: object): Promise<Response> {
   return worker.fetch(
     new Request('https://anc.dev/mcp', {
@@ -173,11 +180,11 @@ function initBody() {
 }
 
 beforeEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
 });
 
 afterEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
 });
 
 describe('detectMcpFormat', () => {
@@ -485,7 +492,7 @@ describe('POST /mcp — MCP_LIMITER gate', () => {
     const res = await postMcp(env, 'application/json', initBody());
     expect(res.status).toBe(200);
     expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
-    const body = (await res.json()) as { jsonrpc: string; error?: { code: number; message: string } };
+    const body = (await readMcpJson(res)) as { jsonrpc: string; error?: { code: number; message: string } };
     expect(body.jsonrpc).toBe('2.0');
     expect(body.error?.code).toBe(-32099);
     expect(body.error?.message.toLowerCase()).toContain('rate limit');
@@ -508,27 +515,41 @@ describe('POST /mcp — MCP_LIMITER gate', () => {
       env,
       {} as ExecutionContext,
     );
-    expect(limiter.lastKey).toBe('198.51.100.42');
+    expect(limiter.lastKey).toBe('legacy:198.51.100.42');
   });
 
   test('falls back to shared anon bucket when cf-connecting-ip is absent', async () => {
     const limiter: RateStub = { calls: 0, shouldSucceed: true };
     const env = makeEnv({ limiter });
     await postMcp(env, 'application/json', initBody());
-    expect(limiter.lastKey).toBe('anon');
+    expect(limiter.lastKey).toBe('legacy:anon');
   });
 
   test('absent MCP_LIMITER binding passes through to the handler', async () => {
     const env = makeEnv();
     const res = await postMcp(env, 'application/json', initBody());
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { result?: { serverInfo?: { name?: string } } };
+    const body = (await readMcpJson(res)) as { result?: { serverInfo?: { name?: string } } };
     expect(body.result?.serverInfo?.name).toBe('anc');
   });
 });
 
-describe('POST /mcp — visitor log fires after the gate decision', () => {
-  test('emits exactly one log line per request with the gate_result field', async () => {
+describe('POST /mcp — mcp.request telemetry fires after the gate decision', () => {
+  function parseMcpRequestLogs(seen: Array<{ args: unknown[] }>) {
+    return seen
+      .map((s) => {
+        if (typeof s.args[0] !== 'string') return null;
+        try {
+          const parsed = JSON.parse(s.args[0]) as { event?: string };
+          return parsed.event === 'mcp.request' ? parsed : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  }
+
+  test('emits exactly one mcp.request line per request with era and outcome', async () => {
     const limiter: RateStub = { calls: 0, shouldSucceed: true };
     const env = makeEnv({ limiter });
     const seen: Array<{ args: unknown[] }> = [];
@@ -541,14 +562,16 @@ describe('POST /mcp — visitor log fires after the gate decision', () => {
     } finally {
       console.log = originalLog;
     }
-    const mcpLines = seen.filter((s) => s.args[0] === '[mcp-call]');
+    const mcpLines = parseMcpRequestLogs(seen);
     expect(mcpLines.length).toBe(1);
-    const payload = mcpLines[0].args[1] as { gate_result?: string; format?: string };
-    expect(payload.gate_result).toBe('passed');
-    expect(payload.format).toBe('json');
+    const payload = mcpLines[0] as { era?: string; outcome?: string; response_format?: string; ip?: string };
+    expect(payload.era).toBe('legacy');
+    expect(payload.outcome).toBe('ok');
+    expect(payload.response_format).toBe('json');
+    expect(payload.ip).toBeUndefined();
   });
 
-  test('log emits gate_result: rate_limited when the limiter denies', async () => {
+  test('log emits outcome rate_limited when the limiter denies', async () => {
     const limiter: RateStub = { calls: 0, shouldSucceed: false };
     const env = makeEnv({ limiter });
     const seen: Array<{ args: unknown[] }> = [];
@@ -561,10 +584,11 @@ describe('POST /mcp — visitor log fires after the gate decision', () => {
     } finally {
       console.log = originalLog;
     }
-    const mcpLines = seen.filter((s) => s.args[0] === '[mcp-call]');
+    const mcpLines = parseMcpRequestLogs(seen);
     expect(mcpLines.length).toBe(1);
-    const payload = mcpLines[0].args[1] as { gate_result?: string };
-    expect(payload.gate_result).toBe('rate_limited');
+    const payload = mcpLines[0] as { outcome?: string; error_code?: number };
+    expect(payload.outcome).toBe('rate_limited');
+    expect(payload.error_code).toBe(-32099);
   });
 });
 

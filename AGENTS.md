@@ -79,7 +79,9 @@ render step. Deploy via `wrangler`.
 
 ## MCP server
 
-`POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server pinned to spec revision `2025-06-18`.
+`POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server on spec revision `2026-07-28`, with SDK
+v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no
+`initialize`) clients on one endpoint.
 The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (served at `/mcp-skill.md` and
 `/mcp-skill/`); operator-facing material lives in [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and
 is not published. This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and
@@ -127,6 +129,8 @@ tools compose the same `/api/score` orchestration core, so cache semantics never
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
 - `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
   `next_tool: get_scorecard` redirect; the read tier stays alive.
+- `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32099` at the shell before the SDK handles
+  legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
 - `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the `/api/audit-web` route). Falsy returns `audited:
   false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
@@ -144,16 +148,17 @@ browser-reachable `/mcp` would let any malicious web page trigger `score_cli` ru
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
 
-**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `[mcp-call]`
-log line carrying `Origin`, `User-Agent`, Cloudflare-injected client IP and country, the chosen response format, and a
-`gate_result` of `passed` or `rate_limited`. Firing after the rate-limit gate keeps Workers Logs volume bounded under
+**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one
+`event: mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome,
+and ms bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under
 attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
 inventory is published.
 
-**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json` `protocolVersion`,
-`content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
-carry the same `2025-06-18` literal. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each
-occurrence so a single-source bump breaks the build.
+**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json`
+`protocolVersion`, `content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s
+`SPEC_REVISION` constant all carry the same `2026-07-28` literal. Legacy clients may still send `2025-06-18` in
+`initialize`; the server answers per SDK dual-stack behavior. `tests/worker-mcp.test.ts` and
+`tests/e2e/discoverability.e2e.ts` assert each occurrence so a single-source bump breaks the build.
 
 ## Voice
 

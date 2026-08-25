@@ -6,8 +6,11 @@ lookup. The catalog is public: no authentication, no API key.
 
 ## Quick reference
 
-The server speaks streamable HTTP per MCP spec revision `2025-06-18`. Drive it from any MCP-aware client (Claude Code,
-Codex, Cursor) or raw JSON-RPC:
+The server speaks streamable HTTP per MCP spec revision `2026-07-28`. The endpoint serves **dual-stack** clients: legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no `initialize`).
+
+### Legacy quick start
+
+Drive it from any MCP-aware client (Claude Code, Codex, Cursor) or raw JSON-RPC:
 
 ```bash
 # 1. initialize the session (returns InitializeResult with instructions)
@@ -30,6 +33,24 @@ curl -sS https://anc.dev/mcp -H 'Content-Type: application/json' -d '{
   "jsonrpc": "2.0", "id": 3, "method": "tools/call",
   "params": {"name": "get_scorecard", "arguments": {"slug": "ripgrep"}}
 }'
+```
+
+### Modern quick start (no initialize)
+
+```bash
+META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"demo","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}'
+
+# tools/list — Mcp-Name header omitted
+curl -sS https://anc.dev/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/list\",\"params\":{$META}}"
+
+# tools/call — Mcp-Name required
+curl -sS https://anc.dev/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: get_scorecard' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\",\"params\":{\"name\":\"get_scorecard\",\"arguments\":{\"slug\":\"ripgrep\"},$META}}"
 ```
 
 All examples below show the `arguments` object passed to `tools/call`; the JSON-RPC envelope around it is the same shape
@@ -307,8 +328,7 @@ For clients that need the protocol details.
 **Endpoint.** `POST https://anc.dev/mcp`. Other methods return `405 Method Not Allowed` with `Allow: POST`. No
 authentication.
 
-**Transport.** Streamable HTTP per MCP spec revision `2025-06-18`. The handshake's `protocolVersion` and the server
-card's `protocolVersion` / `version` are pinned in lockstep; tests assert each literal so drift breaks the build.
+**Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client `protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name` (call only), and `_meta` inside JSON-RPC **params** (including `io.modelcontextprotocol/clientCapabilities` on both list and call). The server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks the build.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.
