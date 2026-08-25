@@ -14,9 +14,13 @@
 // dependency trees):
 //
 //   cloudflare:workers — DurableObject, WorkerEntrypoint, RpcTarget,
-//                        WorkflowEntrypoint, exports, env. Used by
-//                        @cloudflare/containers (transitive via
-//                        @cloudflare/sandbox) and by agents.
+//                        WorkflowEntrypoint, exports, env, tracing. Used
+//                        by @cloudflare/containers (transitive via
+//                        @cloudflare/sandbox) and by agents. `tracing` is
+//                        a named import in @cloudflare/sandbox's dist, so
+//                        it must exist at link time; exporting undefined
+//                        drops the SDK into its no-tracer fallback
+//                        (`tracing?.enterSpan?.bind(tracing)`).
 //   cloudflare:email   — EmailMessage. Used by agents/dist/index.js.
 //
 // If a future SDK bump adds another `cloudflare:*` import the failure
@@ -41,6 +45,7 @@ plugin({
         'export class RpcTarget {}',
         'export const exports = {};',
         'export const env = undefined;',
+        'export const tracing = undefined;',
       ].join('\n'),
       loader: 'js',
     }));
