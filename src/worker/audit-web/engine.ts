@@ -23,6 +23,7 @@ import {
 import type { ProbeResponse } from './assert';
 import { discoverMcpEndpoint } from './discovery';
 import { runAuthMd } from './handlers/auth-md';
+import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
@@ -68,6 +69,7 @@ const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: Handl
     webmcp: runWebMcp,
     'scoped-llms': runScopedLlms,
     'markdown-frontmatter': runMarkdownFrontmatter,
+    'content-without-js': runContentWithoutJs,
   };
 
 function retainedBody(sources: ReadonlyMap<string, ProbeOutcome>, checkId: string): string {
@@ -236,6 +238,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   let incomplete = false;
   const results: EngineResult[] = [];
   const scopedDirs: string[] = [];
+  const retainedBodies = new Map<string, string>();
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -245,6 +248,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     defaultTimeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),
     root: root ?? undefined,
     scopedDirs,
+    retainedBodies,
     fetchOptions: input.fetchOptions,
   });
 
@@ -287,6 +291,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   // Section directories for the scoped-llms probes: the root llms.txt
   // link index unioned with sitemap paths, both retained in wave 1.
   scopedDirs.push(...enumerateScopedDirs(retainedBody(sources, 'llms-txt'), retainedBody(sources, 'sitemap'), base));
+  const llmsTxtBody = retainedBody(sources, 'llms-txt');
+  if (llmsTxtBody.length > 0) retainedBodies.set('llms-txt', llmsTxtBody);
 
   // Gate: declared-type filter first, then the antecedent token. Returns
   // the n_a/error result when the check must not be scored.

@@ -170,6 +170,20 @@ describe('assertHttp — semantics', () => {
     expect(fail.ok).toBe(false);
     expect(fail.reasons).toEqual(['status 503 not below 500']);
   });
+
+  test('body_not_regex fails when the challenge interstitial is present', () => {
+    const { ok, reasons } = assertHttp(
+      { body_not_regex: 'just a moment|cf-challenge' },
+      resp({ body: '<h1>Just a moment...</h1>' }),
+    );
+    expect(ok).toBe(false);
+    expect(reasons[0]).toContain('matches forbidden');
+  });
+
+  test('body_not_regex passes when the body is ordinary HTML', () => {
+    const { ok } = assertHttp({ body_not_regex: 'just a moment|cf-challenge' }, resp({ body: '<h1>Hello</h1>' }));
+    expect(ok).toBe(true);
+  });
 });
 
 describe('parseJsonRpc', () => {

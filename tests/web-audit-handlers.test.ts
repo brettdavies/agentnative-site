@@ -5,6 +5,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
+import { runContentWithoutJs } from '../src/worker/audit-web/handlers/content-without-js';
 import { runCorsPreflight } from '../src/worker/audit-web/handlers/cors-preflight';
 import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
@@ -675,5 +676,45 @@ describe('runMarkdownFrontmatter', () => {
     const fetchImpl = stubFetch(() => md('---\r\ntitle: X\r\n---\r\n\r\n# H\r\n'));
     const outcome = await runMarkdownFrontmatter(fmCheck, ctx({ fetchImpl }));
     expect(outcome.status).toBe('pass');
+  });
+});
+
+describe('runContentWithoutJs', () => {
+  const rich = `<html><body><h1>Title</h1><p>${'Readable prose. '.repeat(20)}</p></body></html>`;
+  const thin = '<html><body><div id="app"></div></body></html>';
+
+  test('rich HTML with an H1 passes without probing llms.txt links', async () => {
+    let extra = 0;
+    const fetchImpl = stubFetch(() => {
+      extra += 1;
+      return new Response('nope', { status: 404 });
+    });
+    const outcome = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 200, headers: { 'content-type': 'text/html' }, body: rich, error: null },
+      }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(extra).toBe(0);
+  });
+
+  test('thin HTML with a live llms.txt content link is na', async () => {
+    const fetchImpl = stubFetch((url) => {
+      expect(url).toBe('https://example.com/guide.md');
+      return new Response('# Guide\n\nSubstantial twin body for the soften path to count as content.\n', {
+        status: 200,
+      });
+    });
+    const outcome = await runContentWithoutJs(
+      check({ id: 'content-without-js', handler: 'content-without-js' }),
+      ctx({
+        fetchImpl,
+        root: { status: 200, headers: { 'content-type': 'text/html' }, body: thin, error: null },
+        retainedBodies: new Map([['llms-txt', '# Site\n\n- [Guide](https://example.com/guide.md)\n']]),
+      }),
+    );
+    expect(outcome.status).toBe('na');
   });
 });

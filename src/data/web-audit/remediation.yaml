@@ -421,3 +421,44 @@ remediation:
       let a browser-hosted agent act on the page without scraping the DOM.
     resources:
       - { label: WebMCP spec, url: "https://webmachinelearning.github.io/webmcp/" }
+  agent-friendly-404:
+    title: Unknown paths return HTTP 404 or 410
+    goal: Return a real HTTP 404 or 410 for unknown paths instead of a 200 SPA shell
+    fix: |
+      Configure the origin so a nonsense path under the site returns HTTP 404 or 410, not 200 with
+      the application shell. A soft-404 hides recovery from agents: they treat the page as content
+      and never look for a sitemap or `llms.txt`. Verify with
+      `curl -sS -o /dev/null -w "%{http_code}" https://example.com/this-path-does-not-exist` — it
+      MUST print `404` (or `410`).
+    resources:
+      - { label: RFC 9110 status codes, url: "https://www.rfc-editor.org/rfc/rfc9110#name-status-codes" }
+  agent-friendly-404-md:
+    title: 404 body is markdown with a recovery link
+    goal: Serve a short markdown 404 that links at least one agent recovery surface
+    fix: |
+      When `Accept: text/markdown` hits an unknown path, return 404 or 410 with a short markdown
+      body that includes at least one recovery link: sitemap, `llms.txt`, a docs index, or an
+      equivalent same-origin href. Linking both sitemap and `llms.txt` as absolute URLs is the
+      stronger pattern. Zero links is a miss even when the status is correct.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  content-without-js:
+    title: Root HTML has an H1 and readable text without JavaScript
+    goal: Put an H1 and enough visible text in the raw root HTML that a non-JS agent can read the page
+    fix: |
+      Render an `<h1>` and at least about 200 characters of visible text in the raw HTML of `/` so
+      a client that does not execute JavaScript still gets a page. A thin SPA shell is acceptable
+      only when `/llms.txt` is present and links resolvable same-origin content (the audit then
+      marks this check not applicable, not a pass). Dead `llms.txt` links do not soften the floor.
+    resources:
+      - { label: llmstxt.org, url: "https://llmstxt.org/" }
+  agent-ua-reachable:
+    title: AI user-fetch User-Agent can reach the homepage
+    goal: Let on-demand user-fetchers GET / with Accept */* and receive 2xx, not a challenge page
+    fix: |
+      Allow AI user-fetch clients such as `ChatGPT-User` to `GET /` with `Accept: */*` and receive
+      a 2xx response whose body is not an obvious bot-challenge interstitial. This is reachability,
+      not content type: serving HTML is fine. Blocklists that 403 these UAs, or challenge pages that
+      say "Just a moment", fail the check.
+    resources:
+      - { label: OpenAI user-fetchers, url: "https://platform.openai.com/docs/bots" }

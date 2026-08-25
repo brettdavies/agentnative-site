@@ -41,15 +41,17 @@ const UA = {
  * both body text and a custom header. The handler under test sees this as
  * an opaque upstream response and layers its own headers on top.
  */
-function makeEnv(bodyByPath: Record<string, string> = {}) {
+function makeEnv(bodyByPath: Record<string, string> = {}, opts: { notFoundUnlessListed?: boolean } = {}) {
   return {
     ASSETS: {
       async fetch(request: Request | string): Promise<Response> {
         const url = typeof request === 'string' ? request : request.url;
         const path = new URL(url).pathname;
-        const body = bodyByPath[path] ?? `asset:${path}`;
+        const listed = Object.hasOwn(bodyByPath, path);
+        const status = opts.notFoundUnlessListed && !listed ? 404 : 200;
+        const body = bodyByPath[path] ?? (status === 404 ? '' : `asset:${path}`);
         return new Response(body, {
-          status: 200,
+          status,
           headers: { 'X-Echo-Path': path },
         });
       },
@@ -660,5 +662,46 @@ describe('worker.fetch — /api/score routing', () => {
       {} as ExecutionContext,
     );
     expect(res.headers.get('Content-Type')).toContain('application/json');
+  });
+});
+
+describe('worker.fetch — agent-friendly 404', () => {
+  test('unknown HTML path returns 404 with origin-absolute recovery links and Vary', async () => {
+    const env = makeEnv({}, { notFoundUnlessListed: true });
+    const res = await worker.fetch(req('https://anc.dev/anc-web-audit-no-such-page'), env, {} as ExecutionContext);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    const html = await res.text();
+    expect(html).toContain('<h1>Not found</h1>');
+    expect(html).toContain('https://anc.dev/sitemap.xml');
+    expect(html).toContain('https://anc.dev/llms.txt');
+    expect(html).not.toContain('href="/sitemap.xml"');
+  });
+
+  test('unknown path with Accept markdown returns 404 markdown linking both recovery URLs', async () => {
+    const env = makeEnv({}, { notFoundUnlessListed: true });
+    const res = await worker.fetch(
+      req('https://anc.dev/anc-web-audit-no-such-page', 'text/markdown'),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    const md = await res.text();
+    expect(md).toContain('[Sitemap](https://anc.dev/sitemap.xml)');
+    expect(md).toContain('[llms.txt](https://anc.dev/llms.txt)');
+  });
+
+  test('staging origin does not emit the production host in 404 markdown', async () => {
+    const env = makeEnv({}, { notFoundUnlessListed: true });
+    const res = await worker.fetch(
+      req('https://agentnative-site-staging.workers.dev/missing', 'text/markdown'),
+      env,
+      {} as ExecutionContext,
+    );
+    const md = await res.text();
+    expect(md).toContain('[Sitemap](https://agentnative-site-staging.workers.dev/sitemap.xml)');
+    expect(md).not.toContain('https://anc.dev');
   });
 });

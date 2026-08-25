@@ -49,4 +49,10 @@ export interface HandlerContext {
   scopedDirs?: string[];
   /** Passed straight to guardedFetch (fetchImpl injection for tests, hop cap). */
   fetchOptions?: Pick<GuardedFetchOptions, 'fetchImpl' | 'maxRedirects'>;
+  /**
+   * Wave-1 retained response bodies keyed by check id (e.g. `llms-txt`).
+   * Handlers that soften on a discoverable twin read this instead of
+   * issuing a second fetch of the antecedent source.
+   */
+  retainedBodies?: ReadonlyMap<string, string>;
 }

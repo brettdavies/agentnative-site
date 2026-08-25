@@ -16,6 +16,9 @@
 #   dns-doh        DNS-over-HTTPS (JSON API) record lookup
 #   auth-md        agent auth/registration metadata doc probe
 #   webmcp         browser WebMCP tool-exposure scan of the root HTML
+#   scoped-llms    per-section llms.txt probes
+#   markdown-frontmatter  leading YAML fence on the markdown twin
+#   content-without-js    SSR content floor with llms.txt twin softening
 #
 # Fields:
 #   id          stable slug, also the remediation-doc key
@@ -350,6 +353,23 @@ checks:
       expect: { content_type: "markdown|text/plain" }
     hint: 'Serve the markdown twin to AI on-demand user-fetchers (ChatGPT-User, Claude-User, Perplexity-User) that state no content-type preference.'
 
+  - id: agent-ua-reachable
+    category: bot-crawl-policy
+    tier: recommended
+    principle: P7
+    site_types: [all]
+    antecedent: http-root
+    weight: 1
+    title: AI user-fetch User-Agent can reach the homepage
+    handler: http
+    with:
+      path: /
+      headers: { User-Agent: "ChatGPT-User/1.0 (+https://openai.com/bot)", Accept: "*/*" }
+      expect:
+        status_below: 300
+        body_not_regex: "just a moment|attention required|cf-challenge|enable javascript and cookies|captcha"
+    hint: 'Allow on-demand user-fetchers (ChatGPT-User and peers) to GET / with Accept */* and receive 2xx, not a bot-challenge interstitial. Distinct from serving markdown to that UA.'
+
   - id: markdown-accept-plain
     category: content-for-agents
     tier: optional
@@ -422,6 +442,18 @@ checks:
       expect: { body_regex: "application/ld\\+json" }
     hint: Embed Schema.org JSON-LD (e.g. TechArticle / WebAPI) in <head> for structured metadata.
 
+  - id: content-without-js
+    category: content-for-agents
+    tier: recommended
+    principle: P2
+    site_types: [all]
+    antecedent: html-root
+    weight: 1
+    title: Root HTML has an H1 and readable text without JavaScript
+    handler: content-without-js
+    with: {}
+    hint: 'Serve an H1 and at least ~200 characters of visible text in the raw root HTML. A thin shell is acceptable only when llms.txt links resolvable same-origin content.'
+
   - id: semantic-html
     category: content-for-agents
     tier: optional
@@ -479,6 +511,38 @@ checks:
       retain_body: true
       expect: { status: [200] }
     hint: Publish sitemap.xml so crawlers and agents can enumerate content URLs.
+
+  - id: agent-friendly-404
+    category: discoverability
+    tier: recommended
+    principle: P8
+    site_types: [all]
+    antecedent: http-root
+    weight: 1
+    title: Unknown paths return HTTP 404 or 410
+    handler: http
+    with:
+      path: /anc-web-audit-no-such-page
+      expect: { status: [404, 410] }
+    hint: 'Return a real HTTP 404 or 410 for unknown paths. A 200 SPA shell is a soft-404 and hides recovery from agents.'
+
+  - id: agent-friendly-404-md
+    category: discoverability
+    tier: recommended
+    principle: P8
+    site_types: [all]
+    antecedent: http-root
+    weight: 1
+    title: 404 body is markdown with a recovery link
+    handler: http
+    with:
+      path: /anc-web-audit-no-such-page
+      headers: { Accept: text/markdown }
+      expect:
+        status: [404, 410]
+        content_type: "markdown|text/plain"
+        body_regex: "\\]\\([^)]*(sitemap\\.xml|llms\\.txt|/docs)"
+    hint: 'On Accept text/markdown, serve a short 404 markdown body that links at least one recovery surface (sitemap, llms.txt, or a docs index). Verify with curl -sS -o /dev/null -w "%{http_code}".'
 
   - id: link-headers
     category: discoverability

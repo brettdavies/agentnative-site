@@ -37,6 +37,7 @@ import { applyHeaders } from './headers';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
+import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
@@ -699,6 +700,24 @@ export default {
         });
         return applyHeaders(rewritten, { request, servedMarkdown, pathname });
       }
+    }
+
+    if (
+      upstream.status === 404 &&
+      !pathIsJson &&
+      !pathname.endsWith('.svg') &&
+      !pathname.startsWith('/fonts/') &&
+      pathname !== '/og-image.png'
+    ) {
+      const origin = url.origin;
+      const body = servedMarkdown ? notFoundMarkdown(origin) : notFoundHtml(origin);
+      const headers = new Headers(upstream.headers);
+      headers.set('Content-Type', servedMarkdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8');
+      return applyHeaders(new Response(body, { status: 404, statusText: upstream.statusText, headers }), {
+        request,
+        servedMarkdown,
+        pathname,
+      });
     }
 
     return applyHeaders(upstream, { request, servedMarkdown, pathname });

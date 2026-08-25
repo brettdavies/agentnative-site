@@ -15,7 +15,8 @@ export type WebCheckHandler =
   | 'auth-md'
   | 'webmcp'
   | 'scoped-llms'
-  | 'markdown-frontmatter';
+  | 'markdown-frontmatter'
+  | 'content-without-js';
 
 /** Declared audit site type (the entry-point argument). */
 export type WebSiteType = 'content' | 'api';
