@@ -40,6 +40,20 @@ Because the twin's body is the source verbatim, only prose belongs in the conten
 correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build template and
 substituted per surface rather than authored inline.
 
+### Format-class edge cache
+
+The skip-Worker cache in front of this Worker (Cloudflare Workers Caching), keyed on a tiny agent-vs-browser class plus
+`Accept` for negotiated URLs. A HIT on those URLs must still show `Vary: Accept, User-Agent`. Exact User-Agent strings
+are not the class; a gateway normalizes them before the cached entrypoint. Zone Cache Rules are a different cache and do
+not skip this Worker.
+
+### HIT-1d / HIT-min / MISS
+
+Three edge classes for this site. HIT-1d is bake-at-build (about a day of freshness, empty cache on a new Worker
+version). HIT-min is live-board HTML and markdown (`max-age=300`, purge by Cache-Tag when R2 is rewritten). MISS is
+every-request `no-store` (`/web/scoring*`, POST `/mcp`, `/api/score`, `/api/audit-web`). Homepage HTML and homepage
+markdown share HIT-min because they are one object that includes the live web pane.
+
 ## Live scoring
 
 ### anc100
