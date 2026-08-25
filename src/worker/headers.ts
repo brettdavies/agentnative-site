@@ -22,8 +22,9 @@
 //   third-party proxies honor Vary. Cloudflare's zone cache does not
 //   preserve it (production HIT on 2026-08-25 kept Link + s-maxage=86400
 //   and omitted Vary). Negotiated responses therefore skip shared-cache
-//   reuse so the Worker-emitted Vary reaches clients. JSON/SVG are
-//   path-keyed, not negotiated, and keep the long edge TTL.
+//   reuse so the Worker-emitted Vary reaches clients. JSON, SVG, and other
+//   single-representation files (.txt, .xml, …) are path-keyed, not
+//   negotiated, and keep the long edge TTL.
 //
 //   JSON responses (.json) Content-Type: application/json; charset=utf-8
 //                          Access-Control-Allow-Origin: *
@@ -152,6 +153,19 @@ function isSvg(pathname: string): boolean {
   return pathname.endsWith('.svg');
 }
 
+// Source files with no HTML twin. A curl/agent UA would otherwise rewrite
+// `/llms.txt` to `/llms.txt.md` (same `.json` pitfall DESIGN.md §3.4 called
+// out for `/skill.json`). Keep this list extension-only: `/web/anc.dev` is
+// a result page, not a file, and is dispatched before asset CN.
+function isUntwinnedSource(pathname: string): boolean {
+  return /\.(txt|xml|css|js|mjs|map|png|ico|woff2|webmanifest)$/i.test(pathname);
+}
+
+/** True when the path is one representation: never rewritten to a `.md` twin. */
+export function isSingleRepresentation(pathname: string): boolean {
+  return isJson(pathname) || isSvg(pathname) || isHashedAsset(pathname) || isUntwinnedSource(pathname);
+}
+
 /**
  * Clone the response and replace its header set with the project's policy.
  * We clone so upstream 304 / redirect status codes flow through unchanged.
@@ -177,6 +191,8 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     headers.set('Cache-Control', SHORT_CACHE);
   } else if (isHashedAsset(opts.pathname)) {
     headers.set('Cache-Control', IMMUTABLE_CACHE);
+  } else if (isUntwinnedSource(opts.pathname)) {
+    headers.set('Cache-Control', SHORT_CACHE);
   } else {
     const twinLink = `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`;
     headers.set('Link', opts.pathname === '/' ? `${twinLink}, ${ROOT_DISCOVERY_LINKS}` : twinLink);

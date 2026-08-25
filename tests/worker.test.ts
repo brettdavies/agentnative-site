@@ -422,6 +422,29 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
   });
 
+  test('/llms.txt with */* + curl UA fetches /llms.txt, not /llms.txt.md', async () => {
+    const env = makeEnv({ '/llms.txt': '# The agent-native standard\n' }, { notFoundUnlessListed: true });
+    const res = await worker.fetch(req('https://anc.dev/llms.txt', '*/*', UA.curl), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Echo-Path')).toBe('/llms.txt');
+    expect(await res.text()).toContain('# The agent-native standard');
+    expect(res.headers.get('Content-Security-Policy')).toBeNull();
+    expect(res.headers.get('Cache-Control')).toContain('s-maxage=86400');
+  });
+
+  test('/robots.txt and /sitemap.xml skip the markdown twin rewrite', async () => {
+    const env = makeEnv(
+      { '/robots.txt': 'User-agent: *\n', '/sitemap.xml': '<urlset/>' },
+      { notFoundUnlessListed: true },
+    );
+    const robots = await worker.fetch(req('https://anc.dev/robots.txt', '*/*', UA.curl), env, {} as ExecutionContext);
+    const sitemap = await worker.fetch(req('https://anc.dev/sitemap.xml', '*/*', UA.curl), env, {} as ExecutionContext);
+    expect(robots.status).toBe(200);
+    expect(robots.headers.get('X-Echo-Path')).toBe('/robots.txt');
+    expect(sitemap.status).toBe(200);
+    expect(sitemap.headers.get('X-Echo-Path')).toBe('/sitemap.xml');
+  });
+
   test('/ with */* + browser UA → HTML branch (fetches /)', async () => {
     const env = makeEnv();
     const res = await worker.fetch(req('https://anc.dev/', '*/*', UA.browser), env, {} as ExecutionContext);

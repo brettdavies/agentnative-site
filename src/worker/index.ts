@@ -33,7 +33,7 @@ import {
   parseWebResultPath,
   type WebAuditRouteEnv,
 } from './audit-web/route';
-import { applyHeaders } from './headers';
+import { applyHeaders, isSingleRepresentation } from './headers';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
 import { buildMcpHandler, type McpEnv } from './mcp/server';
 import { logVisitor } from './mcp/visitor-log';
@@ -654,10 +654,12 @@ export default {
 
     const pathIsMarkdown = pathname.endsWith('.md');
     const pathIsJson = pathname.endsWith('.json');
-    // CN rewrite is markdown-only. Skip for `.json` paths so `Accept:
-    // text/markdown` against `/skill.json` returns the JSON unchanged
-    // instead of rewriting to a non-existent `/skill.json.md` twin.
-    const preferMarkdown = !pathIsMarkdown && !pathIsJson && detectPreference(request) === 'markdown';
+    // CN rewrite is for HTML pages that have a markdown twin. Skip
+    // single-representation files so `curl /llms.txt` (UA heuristic) and
+    // `Accept: text/markdown` against `/skill.json` do not look up a
+    // non-existent `*.md` twin. Same skip as DESIGN.md §3.4 for JSON.
+    const preferMarkdown =
+      !pathIsMarkdown && !isSingleRepresentation(pathname) && detectPreference(request) === 'markdown';
     const servedMarkdown = pathIsMarkdown || preferMarkdown;
 
     let assetRequest = request;
