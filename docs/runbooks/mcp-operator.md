@@ -8,14 +8,16 @@ the client skill plus the server card at `/.well-known/mcp/server-card.json`, no
 
 ## Kill switches
 
-Two `wrangler secret` flags give zero-deploy emergency control. Both default `false` in production, `true` in staging;
-flip with `wrangler secret put`.
+Two `wrangler secret` flags give zero-deploy emergency control (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`). Both default
+`false` in production, `true` in staging; flip with `wrangler secret put`. Staging also binds `MCP_LEGACY_ENABLED` as a
+plain `vars` entry (not a secret) — flip that one with `wrangler deploy --var`, not `secret put` (see Legacy lane
+disable below).
 
-| Secret                     | Scope                     | Falsy behavior                                                                                                                                                                                          |
-| -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_ENABLED`              | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
-| `MCP_LIVE_SCORING_ENABLED` | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
-| `MCP_LEGACY_ENABLED`       | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` and returns JSON-RPC `-32099` before SDK dispatch. Modern lane unaffected. Staging default `'true'` in `wrangler.jsonc` `vars`.                            |
+| Flag                       | Binding shape (staging) | Scope                     | Falsy behavior                                                                                                                                                                                          |
+| -------------------------- | ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_ENABLED`              | secret                  | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
+| `MCP_LIVE_SCORING_ENABLED` | secret                  | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
+| `MCP_LEGACY_ENABLED`       | `vars` (`"true"`)       | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` and returns JSON-RPC `-32099` before SDK dispatch. Modern lane unaffected.                                                                                 |
 
 Decision flow:
 
@@ -191,15 +193,26 @@ probe fix.
 
 ### Legacy lane disable (staging-only manual)
 
-1. Set staging `MCP_LEGACY_ENABLED=false` (wrangler var or secret override).
-2. POST legacy `initialize` → expect shell `legacy_rejected` in tail and JSON-RPC `-32099` at transport layer (KD2
-   sunset HTTP shape still TBD; record observed envelope here when flipped).
-3. Re-run modern checks 5–6 → expect pass.
+Staging declares `MCP_LEGACY_ENABLED` in `wrangler.jsonc` `env.staging.vars`. Do **not** `wrangler secret put` that name
+while it remains a vars binding — Cloudflare API **10053** (binding name already in use). Temporary flip:
 
-Do **not** leave legacy disabled on staging during normal soak unless deliberately testing sunset; preflight/postflight
-legacy curl recipes assume dual-stack.
+```bash
+bun x wrangler deploy --env staging --var MCP_LEGACY_ENABLED:false
+```
 
-**Not run in the 2026-08-26 U6 pass** (optional leg); leave for a deliberate sunset drill.
+1. After that deploy, POST legacy `initialize` → expect HTTP 200 with JSON-RPC `{ "error": { "code": -32099, "message":
+   "legacy MCP requests are disabled" } }` and shell log `"outcome":"legacy_rejected"`.
+2. Re-run modern checks 5–6 → expect pass.
+3. Restore dual-stack (required for normal soak — preflight/postflight legacy recipes assume it):
+
+```bash
+bun x wrangler deploy --env staging
+```
+
+Plain deploy reloads `"true"` from `wrangler.jsonc` vars.
+
+**Observed 2026-08-26** (staging drill after U6): envelope and `legacy_rejected` telemetry matched the above; modern
+lane stayed green; restore deploy returned legacy `initialize` to `server=anc`.
 
 ### Bundle size (U1 gate)
 
