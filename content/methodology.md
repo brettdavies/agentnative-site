@@ -255,17 +255,33 @@ four probe types:
   a body pattern. Covers `llms.txt`, OpenAPI, JSON Schemas, root-HTML affordances (meta description, `<link rel>`,
   `<noscript>`, JSON-LD, semantic landmarks), `robots.txt` rules, and the `.well-known` discovery documents.
 - **MCP** — a JSON-RPC handshake over streamable-HTTP: `initialize` for `serverInfo` and capabilities, `tools/list` for
-  the tool array and input schemas, an unknown-method probe for the `-32601` error code, and the actual-request CORS
-  header.
+  the tool array and input schemas, a modern-era pair on protocol `2026-07-28` (a header-routed `tools/list` carrying
+  the per-request `_meta` envelope with no `initialize`, and `server/discover` for supported versions and server
+  identity), an unknown-method probe for the `-32601` error code, and the actual-request CORS header.
 - **CORS preflight** — an `OPTIONS` request that checks the MCP endpoint answers browser-origin agents.
 - **DNS-over-HTTPS** — SVCB lookups for DNS-AID records under the `_agents` namespace.
 
 The audit first discovers the MCP endpoint from the site's well-known cards, then falls back to probing common paths
-with `initialize`. MCP-shape checks apply only when an endpoint is found; on a site without one they are marked `n_a`
-and excluded from the score. The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY
-checks informational, the same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard
-is isomorphic with a CLI scorecard and renders through the same presentation. Web results carry no badge; they live at a
-shareable [`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+with `initialize`, then with a modern header-routed `tools/list`, so a modern-only server is still discovered. MCP-shape
+checks apply only when an endpoint is found; on a site without one they are marked `n_a` and excluded from the score.
+The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY checks informational, the
+same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI
+scorecard and renders through the same presentation. Web results carry no badge; they live at a shareable
+[`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+
+### Scoring change (2026-08-26)
+
+The web-audit check universe expanded on 2026-08-26, and public board numbers move with it:
+
+- The modern MCP era (protocol revision `2026-07-28`) is scored as its own lane: a required header-routed `tools/list`
+  check and a recommended `server/discover` check. Legacy checks are unchanged. A dual-stack server earns both lanes; a
+  single-era server fails exactly the lane it lacks, and an era-shaped refusal (a well-formed `-32601` or `-32022`
+  error) reads `absent`, not `broken`.
+- The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
+  deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
+- Because the universe grew, global scores read lower until a site re-audits under the new universe. Seeded scorecards
+  reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next stale
+  access and age out of the display within 30 days, so expect board movement to settle inside that window.
 
 ## Re-running the same audits locally
 

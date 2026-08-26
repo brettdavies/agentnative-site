@@ -55,6 +55,35 @@ remediation:
       Omit `capabilities.resources` entirely if the server has no resources.
     resources:
       - { label: MCP resources, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/resources" }
+  mcp-modern-tools-list:
+    title: header-routed tools/list (2026-07-28) returns tools without initialize
+    goal: Answer a modern header-routed tools/list without requiring an initialize handshake
+    fix: |
+      Serve the modern MCP era (protocol revision `2026-07-28`): answer a `POST` whose headers
+      carry `MCP-Protocol-Version: 2026-07-28` and `Mcp-Method: tools/list` with a `result.tools`
+      array, with no prior `initialize` or `notifications/initialized`. Modern requests are
+      per-request enveloped: `params._meta` carries `io.modelcontextprotocol/protocolVersion`,
+      `io.modelcontextprotocol/clientInfo`, and `io.modelcontextprotocol/clientCapabilities`.
+      The `clientCapabilities` key is mandatory on every modern request; reject a request that
+      omits it with a well-formed `-32602`. `Mcp-Name` rides only `tools/call` (the tool name)
+      and `resources/read` (the resource URI), never `tools/list`.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+      - { label: MCP tools (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/server/tools" }
+  mcp-server-discover:
+    title: server/discover answers with server identity on the modern lane
+    goal: Answer server/discover with supported versions, capabilities, and server identity
+    fix: |
+      Implement `server/discover` (protocol revision `2026-07-28`): return a result carrying
+      `supportedVersions` (the modern revisions you serve) and your advertised `capabilities`,
+      and identify the server in the result's `_meta` under
+      `io.modelcontextprotocol/serverInfo` (`name` plus `version`). The request arrives
+      header-routed (`MCP-Protocol-Version: 2026-07-28`, `Mcp-Method: server/discover`) with the
+      `params._meta` envelope, whose `io.modelcontextprotocol/clientCapabilities` key is
+      mandatory. No `initialize` precedes it: `server/discover` is how a modern client learns
+      what the server offers before any session state exists.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
   mcp-unknown-method:
     title: unknown JSON-RPC method returns -32601
     goal: Reject unknown JSON-RPC methods with error -32601 instead of a hang or 500

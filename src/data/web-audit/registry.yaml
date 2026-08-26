@@ -189,6 +189,30 @@ checks:
     with: { op: resources-list }
     hint: When initialize advertises capabilities.resources, return a non-empty result.resources array from resources/list.
 
+  - id: mcp-modern-tools-list
+    category: mcp
+    tier: required
+    principle: P2
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 4
+    title: header-routed tools/list (2026-07-28) returns tools without initialize
+    handler: mcp
+    with: { op: modern-tools-list }
+    hint: Answer a header-routed tools/list (MCP-Protocol-Version 2026-07-28, Mcp-Method, _meta envelope) without requiring initialize.
+
+  - id: mcp-server-discover
+    category: mcp
+    tier: recommended
+    principle: P2
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 3
+    title: server/discover answers with server identity on the modern lane
+    handler: mcp
+    with: { op: server-discover }
+    hint: Answer server/discover with a well-formed discovery result on protocol 2026-07-28.
+
   - id: mcp-unknown-method
     category: mcp
     tier: recommended

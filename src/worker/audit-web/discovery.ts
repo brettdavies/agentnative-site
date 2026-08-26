@@ -1,10 +1,13 @@
-// MCP endpoint discovery (plan U5). Probes well-known cards first
-// (extracting mcp_endpoint / url / transport.endpoint), then POSTs
+// MCP endpoint discovery. Probes well-known cards first (extracting
+// mcp_endpoint / url / transport.endpoint), then POSTs legacy
 // `initialize` to the common paths and takes the first that returns a
-// serverInfo. Port of discover_mcp_endpoint. All egress flows through
-// the SSRF guard.
+// serverInfo; when that pass finds nothing, a modern header-routed
+// `tools/list` pass over the same paths takes the first `tools` result,
+// so a modern-only server is still discoverable. Evidence records which
+// probe found the endpoint. All egress flows through the SSRF guard.
 
 import { parseJsonRpc } from './assert';
+import { modernProbeBody, modernProbeHeaders } from './handlers/mcp';
 import { resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
 import type { WebAuditDiscoveryConfig } from './registry';
@@ -79,6 +82,23 @@ export async function discoverMcpEndpoint(
       return { endpoint: url, evidence };
     }
     evidence.push({ source: p, status: resp.status, probed: 'initialize (no serverInfo)' });
+  }
+
+  for (const p of cfg.common_paths) {
+    const url = resolveUrl(base, p);
+    if (!url) continue;
+    const resp = await guardedFetch(
+      url,
+      { method: 'POST', headers: modernProbeHeaders('tools/list'), body: modernProbeBody('tools/list') },
+      fetchOpts,
+    );
+    const rpc = parseJsonRpc(resp);
+    const result = rpc?.result as { tools?: unknown } | undefined;
+    if (result && Array.isArray(result.tools)) {
+      evidence.push({ source: p, endpoint: url, probed: 'modern-tools-list' });
+      return { endpoint: url, evidence };
+    }
+    evidence.push({ source: p, status: resp.status, probed: 'modern-tools-list (no tools)' });
   }
 
   return { endpoint: null, evidence };

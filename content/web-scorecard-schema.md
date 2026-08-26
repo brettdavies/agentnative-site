@@ -146,7 +146,7 @@ One object per check.
 
 | Field       | Type           | Meaning                                                                                                                                          |
 | ----------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`). The remediation-catalog and fix-skill key.                                   |
+| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`, `mcp-modern-tools-list`). The remediation-catalog and fix-skill key.          |
 | `label`     | string         | Human-readable check title.                                                                                                                      |
 | `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                    |
 | `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                           |
@@ -196,8 +196,9 @@ structured evidence, which differs by handler:
   The canonical-redirect rule (the MCP server card) additionally records a per-alias verdict.
 - **cors-preflight** — the URL, status, and the `Access-Control-Allow-Origin` / `-Methods` / `-Headers` values.
 - **mcp** — the endpoint, status, and the op-specific facts: `serverInfo` and `protocolVersion` for `initialize`, the
-  tool names and input-schema count for `tools-list`, the error code for the unknown-method probe, or the
-  `Access-Control-Allow-Origin` for the CORS assertion.
+  tool names and input-schema count for `tools-list` (legacy and modern header-routed alike), the supported protocol
+  versions and `serverInfo` identity for `server/discover`, the error code for the unknown-method probe or an era-shaped
+  refusal, or the `Access-Control-Allow-Origin` for the CORS assertion.
 - **dns-doh** — the queried name, the resolver, the DNS status code, and the answer count.
 - **auth-md / webmcp / scoped-llms** — the probed URLs (or root-HTML markers) and per-candidate outcomes.
 

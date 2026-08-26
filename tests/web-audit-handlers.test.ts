@@ -16,6 +16,7 @@ import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebCheck } from '../src/worker/audit-web/registry';
+import { MODERN_PROTOCOL } from './helpers/mcp-modern';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
   return {
@@ -495,6 +496,236 @@ describe('runMcp', () => {
     );
     expect(outcome.status).toBe('pass');
     expect(seen).toEqual([{ method: 'resources/list', session: 'sess-1' }]);
+  });
+});
+
+describe('runMcp modern era', () => {
+  const MCP = 'https://example.com/mcp';
+  const json = (body: object, headers: Record<string, string> = {}) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
+  const toolsResult = () => json({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } });
+  const rpcError = (code: number) => json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope' } });
+  const isModern = (init?: RequestInit) => new Headers(init?.headers).get('mcp-protocol-version') === MODERN_PROTOCOL;
+
+  test('modern-only server: initialize maps to absent, header-routed tools/list passes (AE3)', async () => {
+    for (const rejectCode of [-32022, -32601]) {
+      const fetchImpl = stubFetch((_url, init) => (isModern(init) ? toolsResult() : rpcError(rejectCode)));
+      const legacy = await runMcp(
+        check({ handler: 'mcp', with: { op: 'initialize' } }),
+        ctx({ fetchImpl, mcpEndpoint: MCP }),
+      );
+      expect(legacy.status).toBe('absent');
+      expect(legacy.evidence[0].error_code).toBe(rejectCode);
+      const modern = await runMcp(
+        check({ handler: 'mcp', with: { op: 'modern-tools-list' } }),
+        ctx({ fetchImpl, mcpEndpoint: MCP }),
+      );
+      expect(modern.status).toBe('pass');
+      expect(modern.evidence[0].tools).toEqual(['a']);
+      expect(modern.evidence[0].with_input_schema).toBe(1);
+    }
+  });
+
+  test('legacy-only server: modern probe maps to absent, legacy checks still pass', async () => {
+    const fetchImpl = stubFetch((_url, init) => {
+      if (isModern(init)) return rpcError(-32601);
+      const body = JSON.parse(String(init?.body));
+      if (body.method === 'initialize') {
+        return json({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { serverInfo: { name: 'anc' }, protocolVersion: '2025-06-18', capabilities: { tools: {} } },
+        });
+      }
+      return toolsResult();
+    });
+    const modern = await runMcp(
+      check({ handler: 'mcp', with: { op: 'modern-tools-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(modern.status).toBe('absent');
+    expect(modern.evidence[0].error_code).toBe(-32601);
+    const init = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(init.status).toBe('pass');
+    const tools = await runMcp(
+      check({ handler: 'mcp', with: { op: 'tools-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(tools.status).toBe('pass');
+  });
+
+  test('dual-stack server: both lanes pass', async () => {
+    const fetchImpl = stubFetch((_url, init) => {
+      if (isModern(init)) return toolsResult();
+      const body = JSON.parse(String(init?.body));
+      if (body.method === 'initialize') {
+        return json({ jsonrpc: '2.0', id: 1, result: { serverInfo: { name: 'anc' }, protocolVersion: '2025-06-18' } });
+      }
+      return toolsResult();
+    });
+    const legacy = await runMcp(
+      check({ handler: 'mcp', with: { op: 'initialize' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    const modern = await runMcp(
+      check({ handler: 'mcp', with: { op: 'modern-tools-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(legacy.status).toBe('pass');
+    expect(modern.status).toBe('pass');
+  });
+
+  test('modern tools/list probe sends the SEP-2243 wire shape with no initialize and no session attach', async () => {
+    const captured: Array<{
+      headers: Headers;
+      body: { method: string; params?: { _meta?: Record<string, unknown> } };
+    }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return toolsResult();
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'modern-tools-list' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: 'sess-1' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(captured.length).toBe(1);
+    const req = captured[0];
+    expect(req.body.method).toBe('tools/list');
+    expect(req.headers.get('mcp-protocol-version')).toBe(MODERN_PROTOCOL);
+    expect(req.headers.get('mcp-method')).toBe('tools/list');
+    expect(req.headers.get('mcp-session-id')).toBeNull();
+    expect(req.headers.get('mcp-name')).toBeNull();
+    const meta = req.body.params?._meta ?? {};
+    expect(meta['io.modelcontextprotocol/protocolVersion']).toBe(MODERN_PROTOCOL);
+    expect((meta['io.modelcontextprotocol/clientInfo'] as { name?: string }).name).toBeTruthy();
+    expect(meta['io.modelcontextprotocol/clientCapabilities']).toEqual({});
+  });
+
+  test('server/discover probe sends Mcp-Method server/discover, no Mcp-Name, no session attach', async () => {
+    const captured: Array<{
+      headers: Headers;
+      body: { method: string; params?: { _meta?: Record<string, unknown> } };
+    }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          supportedVersions: [MODERN_PROTOCOL],
+          capabilities: { tools: {} },
+          _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'anc', version: '0.1.0' } },
+        },
+      });
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'server-discover' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: 'sess-1' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(captured.length).toBe(1);
+    const req = captured[0];
+    expect(req.body.method).toBe('server/discover');
+    expect(req.headers.get('mcp-method')).toBe('server/discover');
+    expect(req.headers.get('mcp-name')).toBeNull();
+    expect(req.headers.get('mcp-session-id')).toBeNull();
+    expect(req.body.params?._meta?.['io.modelcontextprotocol/clientCapabilities']).toEqual({});
+  });
+
+  test('server/discover passes on a well-formed result with server identity and records evidence', async () => {
+    const fetchImpl = stubFetch(() =>
+      json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          supportedVersions: [MODERN_PROTOCOL],
+          capabilities: { tools: { listChanged: true } },
+          _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'anc', version: '0.1.0' } },
+        },
+      }),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'server-discover' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].supported_versions).toEqual([MODERN_PROTOCOL]);
+    expect(outcome.evidence[0].serverInfo).toEqual({ name: 'anc', version: '0.1.0' });
+  });
+
+  test('server/discover maps a JSON-RPC unavailability error to absent', async () => {
+    const fetchImpl = stubFetch(() => rpcError(-32601));
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'server-discover' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('server/discover is broken on a well-formed result without supportedVersions or identity', async () => {
+    const noVersions = stubFetch(() =>
+      json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { capabilities: {}, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'anc' } } },
+      }),
+    );
+    const noIdentity = stubFetch(() =>
+      json({ jsonrpc: '2.0', id: 1, result: { supportedVersions: [MODERN_PROTOCOL], capabilities: {} } }),
+    );
+    const missingVersions = await runMcp(
+      check({ handler: 'mcp', with: { op: 'server-discover' } }),
+      ctx({ fetchImpl: noVersions, mcpEndpoint: MCP }),
+    );
+    const missingIdentity = await runMcp(
+      check({ handler: 'mcp', with: { op: 'server-discover' } }),
+      ctx({ fetchImpl: noIdentity, mcpEndpoint: MCP }),
+    );
+    expect(missingVersions.status).toBe('broken');
+    expect(missingIdentity.status).toBe('broken');
+  });
+
+  test('a non-unavailability error code stays broken on either era probe', async () => {
+    const fetchImpl = stubFetch(() => rpcError(-32603));
+    for (const op of ['initialize', 'tools-list', 'modern-tools-list', 'server-discover']) {
+      const outcome = await runMcp(check({ handler: 'mcp', with: { op } }), ctx({ fetchImpl, mcpEndpoint: MCP }));
+      expect(outcome.status).toBe('broken');
+      expect(outcome.evidence[0].error_code).toBe(-32603);
+    }
+  });
+
+  test('a garbage non-JSON response stays broken on either era probe', async () => {
+    const fetchImpl = stubFetch(() => new Response('<html>oops</html>', { status: 200 }));
+    for (const op of ['initialize', 'modern-tools-list', 'server-discover']) {
+      const outcome = await runMcp(check({ handler: 'mcp', with: { op } }), ctx({ fetchImpl, mcpEndpoint: MCP }));
+      expect(outcome.status).toBe('broken');
+    }
+  });
+
+  test('the unknown-method error op keeps its expectation semantics under the era mapping', async () => {
+    const fetchImpl = stubFetch(() => rpcError(-32601));
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'error', method: 'nonexistent/method', expect_code: -32601 } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('modern ops return n_a when no endpoint was discovered', async () => {
+    let called = 0;
+    const fetchImpl = stubFetch(() => {
+      called++;
+      return new Response('');
+    });
+    for (const op of ['modern-tools-list', 'server-discover']) {
+      const outcome = await runMcp(check({ handler: 'mcp', with: { op } }), ctx({ fetchImpl, mcpEndpoint: null }));
+      expect(outcome.status).toBe('na');
+    }
+    expect(called).toBe(0);
   });
 });
 

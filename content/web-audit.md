@@ -31,8 +31,11 @@ keyword and belongs to one of six categories:
 - **API** — an OpenAPI description, referenced JSON Schemas, a `.well-known/api-catalog` (RFC 9727), JSON client-error
   bodies (not HTML), and rate-limit headers on a safe GET.
 - **MCP** — the `initialize` handshake, `tools/list` with input schemas, `resources/list` when `capabilities.resources`
-  is advertised, JSON-RPC error codes, a prompt GET answer (no held-open hang), CORS preflight and actual, the
-  `.well-known` server card, a usage doc, and WebMCP.
+  is advertised, the modern era (protocol revision `2026-07-28`) scored as its own lane (a header-routed `tools/list`
+  that needs no `initialize`, and `server/discover` answering with server identity), JSON-RPC error codes, a prompt GET
+  answer (no held-open hang), CORS preflight and actual, the `.well-known` server card, a usage doc, and WebMCP. Each
+  protocol era scores independently: a dual-stack server earns both lanes, and a single-era server fails exactly the
+  lane it lacks.
 - **Agent discovery & auth** — the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
   OAuth discovery metadata, and `auth.md`.
 
