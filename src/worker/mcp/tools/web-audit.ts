@@ -34,6 +34,7 @@ import {
 } from '../../audit-web/cache';
 import { enrichWebScorecardForDisplay } from '../../audit-web/display';
 import { runWebAudit } from '../../audit-web/engine';
+import { queueHitMinPurge, webDomainTag, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
 import {
   decidePublicListingWrite,
@@ -276,6 +277,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (listingWrite.path === 'patch') {
         const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
         if (!wrote) return isError('failed to persist the public_listing change; please retry.');
+        queueHitMinPurge([webTag()]);
         const patched = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
         return textContent({
           audited: false,
@@ -307,7 +309,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       if (!complete || !scorecard) {
         return isError('the audit did not finish within the deadline; nothing was cached. Retry.');
       }
-      await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+      const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+      if (wrote) queueHitMinPurge([webTag(), webDomainTag(domain)]);
       await rebuildAggregatesIfSeeded(env, domain, SPEC_VERSION);
       return textContent({
         audited: true,

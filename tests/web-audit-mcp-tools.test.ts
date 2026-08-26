@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import { keyFor } from '../src/worker/audit-web/cache';
+import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
@@ -860,6 +861,32 @@ describe('audit_website public_listing', () => {
     };
     expect(stored.scorecard.public_listing).toBe(true);
     expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  test('a listing patch queues a single web tag purge', async () => {
+    const store = new Map<string, string>();
+    await seed(store, { scoredAt: freshStamp(), stored: false });
+    const env = await envWithStore(store);
+    const calls: string[][] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            calls.push(tags);
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    await runWithHitMinPurge(ctx, async () => {
+      const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
+      expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+      await flushHitMinPurge();
+    });
+    expect(calls).toEqual([['web']]);
   });
 
   test('fresh hit + stored true + explicit true serves cached (redundant, no write)', async () => {

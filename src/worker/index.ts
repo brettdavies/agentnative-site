@@ -11,10 +11,17 @@
 //   - Response headers applied in src/worker/headers.ts (Link rel=alternate,
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
-import { getAggregate, type WebCacheEnv } from './audit-web/cache';
-import { buildFrontpageBoardEmptyState, buildFrontpageBoardRows } from './audit-web/leaderboard-render';
+import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
+import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
+import {
+  buildFrontpageBoardEmptyState,
+  buildFrontpageBoardMarkdown,
+  buildFrontpageBoardMarkdownEmptyState,
+  buildFrontpageBoardRows,
+} from './audit-web/leaderboard-render';
 import {
   handleWebBackfill,
   handleWebRescore,
@@ -74,6 +81,33 @@ export { WebRescoreWorkflow } from './audit-web/rescore-workflow';
 // find `class_name: "Sandbox"` from wrangler.jsonc's containers +
 // durable_objects sections.
 export { Sandbox } from './score/do';
+
+// Cached inner fetch entrypoint (KTD1). wrangler.jsonc `exports.Cached` is
+// the skip-Worker HIT target; default `fetch` is the uncached gateway.
+export class Cached extends WorkerEntrypoint<Env> {
+  async fetch(request: Request): Promise<Response> {
+    return runWithHitMinPurge(this.ctx, async () => {
+      const response = await handleSiteRequest(request, this.env, this.ctx);
+      await flushHitMinPurge();
+      return response;
+    });
+  }
+
+  /** Purge HIT-min objects by Cache-Tag. Scoped to this cached entrypoint. */
+  async purgeHitMinTags(tags: string[]): Promise<{ success: boolean; errors: { message: string }[] }> {
+    const cache = this.ctx.cache;
+    if (!cache || typeof cache.purge !== 'function') {
+      console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'cache_purge_unavailable', tags }));
+      return { success: false, errors: [{ message: 'cache_purge_unavailable' }] };
+    }
+    const unique = [...new Set(tags.filter((t) => t.length > 0))];
+    const result = await cache.purge({ tags: unique });
+    if (!result.success) {
+      console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors }));
+    }
+    return result;
+  }
+}
 
 // At runtime wrangler injects every binding declared in wrangler.jsonc
 // (ASSETS plus the SCORE_* set used by /api/score). The Env interface is
@@ -298,6 +332,7 @@ function mcpDescriptorRedirect(request: Request): Response {
     headers: {
       location: `${origin}${MCP_DESCRIPTOR_CANONICAL_PATH}`,
       'cache-control': MCP_DESCRIPTOR_CACHE,
+      vary: 'Accept, User-Agent',
       ...DISCOVERY_CORS_HEADERS,
     },
   });
@@ -346,508 +381,537 @@ const DISCOVERY_CORS_HEADERS = {
   'access-control-allow-origin': '*',
 } as const;
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const pathname = url.pathname;
+async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
 
-    // Live-scoring routes. Sits ABOVE the asset call so the asset-first
-    // invariant for everything else (every other path proxies to
-    // env.ASSETS) is preserved by exclusion, not by overlap.
-    if (isScorePath(pathname)) {
-      return handleScore(request, env as ScoreEnv);
-    }
+  // Live-scoring routes. Sits ABOVE the asset call so the asset-first
+  // invariant for everything else (every other path proxies to
+  // env.ASSETS) is preserved by exclusion, not by overlap.
+  if (isScorePath(pathname)) {
+    return handleScore(request, env as ScoreEnv);
+  }
 
-    // Web-audit streaming dispatch. Threads ctx so the engine's R2 write
-    // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
-    if (isWebAuditPath(pathname)) {
-      return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
-    }
+  // Web-audit streaming dispatch. Threads ctx so the engine's R2 write
+  // survives a mid-stream client disconnect via ctx.waitUntil (KTD-13).
+  if (isWebAuditPath(pathname)) {
+    return handleWebAudit(request, env as WebAuditRouteEnv, ctx);
+  }
 
-    // Post-deploy rescore hook (secret-authed). Shares the single-flight
-    // helper with the weekly cron in scheduled() below.
-    if (pathname === '/api/web-rescore') {
-      return handleWebRescore(request, env as WebRescoreTriggerEnv);
-    }
+  // Post-deploy rescore hook (secret-authed). Shares the single-flight
+  // helper with the weekly cron in scheduled() below.
+  if (pathname === '/api/web-rescore') {
+    return handleWebRescore(request, env as WebRescoreTriggerEnv);
+  }
 
-    // One-time public_listing backfill (same secret gate as the rescore
-    // hook). Bounded per call; the operator re-runs until it writes zero.
-    if (pathname === '/api/web-audit-backfill') {
-      return handleWebBackfill(request, env as WebBackfillTriggerEnv);
-    }
+  // One-time public_listing backfill (same secret gate as the rescore
+  // hook). Bounded per call; the operator re-runs until it writes zero.
+  if (pathname === '/api/web-audit-backfill') {
+    return handleWebBackfill(request, env as WebBackfillTriggerEnv, ctx);
+  }
 
-    // MCP server card (SEP-1649): the canonical path serves the JSON
-    // document from dist/_internal/mcp-server-card.json, origin-rewritten
-    // at serve time; the legacy pointer aliases 301 to it (R9) so one
-    // canonical body exists with no ambiguous duplicates.
-    if (pathname === MCP_DESCRIPTOR_CANONICAL_PATH && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return discoveryGetOnly405();
-      const body = await buildMcpDescriptorJsonBody(request, env);
-      if (body === null) return discoveryMetadataUnavailable();
-      return mcpDescriptorJsonResponse(body);
-    }
-    if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
-      if (request.method !== 'GET') return discoveryGetOnly405();
-      return mcpDescriptorRedirect(request);
-    }
+  // MCP server card (SEP-1649): the canonical path serves the JSON
+  // document from dist/_internal/mcp-server-card.json, origin-rewritten
+  // at serve time; the legacy pointer aliases 301 to it (R9) so one
+  // canonical body exists with no ambiguous duplicates.
+  if (pathname === MCP_DESCRIPTOR_CANONICAL_PATH && request.method !== 'OPTIONS') {
+    if (request.method !== 'GET') return discoveryGetOnly405();
+    const body = await buildMcpDescriptorJsonBody(request, env);
+    if (body === null) return discoveryMetadataUnavailable();
+    return mcpDescriptorJsonResponse(body);
+  }
+  if (MCP_DESCRIPTOR_ALIAS_PATHS.has(pathname) && request.method !== 'OPTIONS') {
+    if (request.method !== 'GET') return discoveryGetOnly405();
+    return mcpDescriptorRedirect(request);
+  }
 
-    if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
-      return discoveryGetOnly405();
-    }
+  if (DISCOVERY_GET_ONLY_PATHS.has(pathname) && request.method !== 'GET' && request.method !== 'OPTIONS') {
+    return discoveryGetOnly405();
+  }
 
-    // /.well-known/oauth-protected-resource + oauth-authorization-server —
-    // agent-readiness discovery metadata. Origin-aware rewrite keeps staging
-    // and local previews self-consistent.
-    if (pathname === '/.well-known/oauth-protected-resource' && request.method === 'GET') {
-      const body = await buildOriginAwareJsonBody(
-        request,
-        env,
-        '/.well-known/oauth-protected-resource',
-        rewriteOAuthProtectedResource,
-      );
-      if (body === null) return discoveryMetadataUnavailable();
-      return mcpDescriptorJsonResponse(body);
-    }
-    if (pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
-      const body = await buildOriginAwareJsonBody(
-        request,
-        env,
-        '/.well-known/oauth-authorization-server',
-        rewriteOAuthAuthorizationServer,
-      );
-      if (body === null) return discoveryMetadataUnavailable();
-      return mcpDescriptorJsonResponse(body);
-    }
+  // /.well-known/oauth-protected-resource + oauth-authorization-server —
+  // agent-readiness discovery metadata. Origin-aware rewrite keeps staging
+  // and local previews self-consistent.
+  if (pathname === '/.well-known/oauth-protected-resource' && request.method === 'GET') {
+    const body = await buildOriginAwareJsonBody(
+      request,
+      env,
+      '/.well-known/oauth-protected-resource',
+      rewriteOAuthProtectedResource,
+    );
+    if (body === null) return discoveryMetadataUnavailable();
+    return mcpDescriptorJsonResponse(body);
+  }
+  if (pathname === '/.well-known/oauth-authorization-server' && request.method === 'GET') {
+    const body = await buildOriginAwareJsonBody(
+      request,
+      env,
+      '/.well-known/oauth-authorization-server',
+      rewriteOAuthAuthorizationServer,
+    );
+    if (body === null) return discoveryMetadataUnavailable();
+    return mcpDescriptorJsonResponse(body);
+  }
 
-    // Public-catalog token endpoint. The MCP surface requires no credentials;
-    // POSTs receive a typed JSON body explaining the no-auth posture rather
-    // than a misleading 404. No CORS: browser-origin probes are not a
-    // supported client; posture is documented in auth.md and OAuth metadata.
-    if (pathname === '/oauth2/token' && request.method === 'POST') {
-      const origin = new URL(request.url).origin;
-      return new Response(
-        JSON.stringify({
-          error: 'public_catalog',
-          error_description:
-            'anc.dev publishes a public catalog. No OAuth tokens are issued; call the MCP endpoint directly.',
-          documentation: `${origin}/auth.md`,
-          mcp_endpoint: `${origin}/mcp`,
-        }),
-        {
-          status: 400,
+  // Public-catalog token endpoint. The MCP surface requires no credentials;
+  // POSTs receive a typed JSON body explaining the no-auth posture rather
+  // than a misleading 404. No CORS: browser-origin probes are not a
+  // supported client; posture is documented in auth.md and OAuth metadata.
+  if (pathname === '/oauth2/token' && request.method === 'POST') {
+    const origin = new URL(request.url).origin;
+    return new Response(
+      JSON.stringify({
+        error: 'public_catalog',
+        error_description:
+          'anc.dev publishes a public catalog. No OAuth tokens are issued; call the MCP endpoint directly.',
+        documentation: `${origin}/auth.md`,
+        mcp_endpoint: `${origin}/mcp`,
+      }),
+      {
+        status: 400,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        },
+      },
+    );
+  }
+
+  // /.well-known/api-catalog — RFC 9727 link set. The static asset is
+  // emitted extensionless (11b-agent-readiness), so CF Static Assets can't
+  // infer the content-type. Origin-rewrite the linkset URLs so staging and
+  // local previews stay self-consistent with the other discovery surfaces,
+  // stamp `application/linkset+json`, open CORS (public discovery surface),
+  // and mark the response noindex.
+  if (pathname === '/.well-known/api-catalog' && request.method === 'GET') {
+    const body = await buildOriginAwareJsonBody(request, env, '/.well-known/api-catalog', rewriteApiCatalog);
+    if (body === null) return discoveryMetadataUnavailable();
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'content-type': 'application/linkset+json; charset=utf-8',
+        'cache-control': MCP_DESCRIPTOR_CACHE,
+        'x-robots-tag': 'noindex',
+        ...DISCOVERY_CORS_HEADERS,
+      },
+    });
+  }
+
+  // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
+  // GET surface. Sits above /_internal/ interception and the asset
+  // fetch so the entry-point ordering keeps the /mcp branch in front
+  // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
+  //
+  // GET dispatch:
+  //   - Accept: application/json → 301 to the canonical server-card
+  //     path (the URL identity documents itself even when the JSON-RPC
+  //     handler is offline).
+  //   - Accept: text/html or text/markdown → no early return; control
+  //     flows past this branch into the asset-first dispatch, which
+  //     serves dist/mcp.html (and the .md twin via the standard
+  //     detectPreference content negotiation).
+  //
+  // POST dispatch enforces, in order:
+  //
+  //   1. MCP_ENABLED kill switch — 503 Retry-After when disabled.
+  //   2. Method check — non-POST returns 405 Allow: GET, POST.
+  //   3. Accept-header check — neither MIME acceptable returns 406
+  //      text/plain (no JSON-RPC envelope at the pre-JSON-RPC layer).
+  //   4. MCP_LIMITER gate — breach returns the -32099 JSON-RPC error
+  //      envelope at HTTP 200. The visitor-inventory log fires AFTER
+  //      this gate with `gate_result` so Workers Logs volume stays
+  //      bounded under attack while still recording the denial (R8).
+  //   5. SDK Accept-rewrite shim — the agents SDK's WorkerTransport
+  //      strictly requires `Accept: application/json, text/event-
+  //      stream`; we rewrite the outgoing Accept to that exact value
+  //      and build the handler in the matching jsonResponse mode
+  //      derived from the client's actual preference.
+  //   6. Handler response returned directly — NOT through applyHeaders
+  //      (which would strip the no-store directive and risk mis-
+  //      applying static-asset Cache-Control). All Access-Control-*
+  //      headers are stripped (corsOptions:false at createMcpHandler
+  //      plus stripCorsHeaders): the endpoint is server-to-agent
+  //      JSON-RPC, not browser-to-server (KTD-10 / R15). When the
+  //      client negotiated JSON, SSE bodies from the legacy transport
+  //      are coerced to application/json (coerceMcpJsonResponse).
+  if (pathname === '/mcp' && request.method !== 'OPTIONS') {
+    // OPTIONS deliberately falls through to the asset-first dispatch
+    // below — CF Static Assets returns 404, which is the deliberate
+    // browser-blocked posture for cross-origin preflights (KTD-10 /
+    // R15). MCP clients are agent runtimes that never issue OPTIONS,
+    // so this is the right shape.
+
+    if (request.method === 'GET') {
+      const getFormat = detectMcpGetFormat(request);
+      if (getFormat === 'json') {
+        return mcpDescriptorRedirect(request);
+      }
+      // 'html' or 'markdown' — control flows past this branch into
+      // the asset-first dispatch below. dist/mcp.html ships from
+      // emitSubPages with the full site shell (header, theme toggle,
+      // footer); detectPreference rewrites to dist/mcp.md when the
+      // caller prefers text/markdown.
+    } else {
+      // Step 1: MCP_ENABLED kill switch.
+      if (env.MCP_ENABLED !== 'true') {
+        const host = new URL(request.url).host;
+        logMcpRequest({
+          era: 'legacy',
+          method: null,
+          name: null,
+          client_name: null,
+          protocol_version: null,
+          host,
+          response_format: 'json',
+          outcome: 'disabled',
+          error_code: null,
+          duration_ms: 0,
+        });
+        return new Response('mcp is currently disabled by the operator\n', {
+          status: 503,
           headers: {
-            'content-type': 'application/json; charset=utf-8',
+            'content-type': 'text/plain; charset=utf-8',
+            'retry-after': '3600',
             'cache-control': 'no-store',
           },
-        },
-      );
-    }
+        });
+      }
 
-    // /.well-known/api-catalog — RFC 9727 link set. The static asset is
-    // emitted extensionless (11b-agent-readiness), so CF Static Assets can't
-    // infer the content-type. Origin-rewrite the linkset URLs so staging and
-    // local previews stay self-consistent with the other discovery surfaces,
-    // stamp `application/linkset+json`, open CORS (public discovery surface),
-    // and mark the response noindex.
-    if (pathname === '/.well-known/api-catalog' && request.method === 'GET') {
-      const body = await buildOriginAwareJsonBody(request, env, '/.well-known/api-catalog', rewriteApiCatalog);
-      if (body === null) return discoveryMetadataUnavailable();
-      return new Response(body, {
-        status: 200,
-        headers: {
-          'content-type': 'application/linkset+json; charset=utf-8',
-          'cache-control': MCP_DESCRIPTOR_CACHE,
-          'x-robots-tag': 'noindex',
-          ...DISCOVERY_CORS_HEADERS,
-        },
-      });
-    }
+      // Step 2: method check. GET handled above; POST falls through
+      // to the JSON-RPC pipeline; PUT/DELETE/PATCH lands here with
+      // Allow advertising the two serviceable methods.
+      if (request.method !== 'POST') {
+        return new Response('method not allowed\n', {
+          status: 405,
+          headers: {
+            Allow: 'GET, POST',
+            'content-type': 'text/plain; charset=utf-8',
+            'cache-control': 'no-store',
+          },
+        });
+      }
 
-    // /mcp — streamable HTTP MCP server (POST) plus a content-negotiated
-    // GET surface. Sits above /_internal/ interception and the asset
-    // fetch so the entry-point ordering keeps the /mcp branch in front
-    // of the asset-first dispatch (KTD-10 of the MCP endpoint plan).
-    //
-    // GET dispatch:
-    //   - Accept: application/json → 301 to the canonical server-card
-    //     path (the URL identity documents itself even when the JSON-RPC
-    //     handler is offline).
-    //   - Accept: text/html or text/markdown → no early return; control
-    //     flows past this branch into the asset-first dispatch, which
-    //     serves dist/mcp.html (and the .md twin via the standard
-    //     detectPreference content negotiation).
-    //
-    // POST dispatch enforces, in order:
-    //
-    //   1. MCP_ENABLED kill switch — 503 Retry-After when disabled.
-    //   2. Method check — non-POST returns 405 Allow: GET, POST.
-    //   3. Accept-header check — neither MIME acceptable returns 406
-    //      text/plain (no JSON-RPC envelope at the pre-JSON-RPC layer).
-    //   4. MCP_LIMITER gate — breach returns the -32099 JSON-RPC error
-    //      envelope at HTTP 200. The visitor-inventory log fires AFTER
-    //      this gate with `gate_result` so Workers Logs volume stays
-    //      bounded under attack while still recording the denial (R8).
-    //   5. SDK Accept-rewrite shim — the agents SDK's WorkerTransport
-    //      strictly requires `Accept: application/json, text/event-
-    //      stream`; we rewrite the outgoing Accept to that exact value
-    //      and build the handler in the matching jsonResponse mode
-    //      derived from the client's actual preference.
-    //   6. Handler response returned directly — NOT through applyHeaders
-    //      (which would strip the no-store directive and risk mis-
-    //      applying static-asset Cache-Control). All Access-Control-*
-    //      headers are stripped (corsOptions:false at createMcpHandler
-    //      plus stripCorsHeaders): the endpoint is server-to-agent
-    //      JSON-RPC, not browser-to-server (KTD-10 / R15). When the
-    //      client negotiated JSON, SSE bodies from the legacy transport
-    //      are coerced to application/json (coerceMcpJsonResponse).
-    if (pathname === '/mcp' && request.method !== 'OPTIONS') {
-      // OPTIONS deliberately falls through to the asset-first dispatch
-      // below — CF Static Assets returns 404, which is the deliberate
-      // browser-blocked posture for cross-origin preflights (KTD-10 /
-      // R15). MCP clients are agent runtimes that never issue OPTIONS,
-      // so this is the right shape.
-
-      if (request.method === 'GET') {
-        const getFormat = detectMcpGetFormat(request);
-        if (getFormat === 'json') {
-          return mcpDescriptorRedirect(request);
-        }
-        // 'html' or 'markdown' — control flows past this branch into
-        // the asset-first dispatch below. dist/mcp.html ships from
-        // emitSubPages with the full site shell (header, theme toggle,
-        // footer); detectPreference rewrites to dist/mcp.md when the
-        // caller prefers text/markdown.
-      } else {
-        // Step 1: MCP_ENABLED kill switch.
-        if (env.MCP_ENABLED !== 'true') {
-          const host = new URL(request.url).host;
-          logMcpRequest({
-            era: 'legacy',
-            method: null,
-            name: null,
-            client_name: null,
-            protocol_version: null,
-            host,
-            response_format: 'json',
-            outcome: 'disabled',
-            error_code: null,
-            duration_ms: 0,
-          });
-          return new Response('mcp is currently disabled by the operator\n', {
-            status: 503,
+      // Step 3: Accept-header check.
+      const format = detectMcpFormat(request);
+      const responseFormat: McpResponseFormat = format === 'json' ? 'json' : 'sse';
+      const host = new URL(request.url).host;
+      if (format === false) {
+        logMcpRequest({
+          era: 'legacy',
+          method: null,
+          name: null,
+          client_name: null,
+          protocol_version: null,
+          host,
+          response_format: 'json',
+          outcome: 'accept_rejected',
+          error_code: null,
+          duration_ms: 0,
+        });
+        // The 406 rejection happens before any JSON-RPC parsing so the
+        // body is plain text without a `jsonrpc`/`id`/`error` envelope.
+        return new Response(
+          'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
+          {
+            status: 406,
             headers: {
-              'content-type': 'text/plain; charset=utf-8',
-              'retry-after': '3600',
-              'cache-control': 'no-store',
-            },
-          });
-        }
-
-        // Step 2: method check. GET handled above; POST falls through
-        // to the JSON-RPC pipeline; PUT/DELETE/PATCH lands here with
-        // Allow advertising the two serviceable methods.
-        if (request.method !== 'POST') {
-          return new Response('method not allowed\n', {
-            status: 405,
-            headers: {
-              Allow: 'GET, POST',
               'content-type': 'text/plain; charset=utf-8',
               'cache-control': 'no-store',
             },
-          });
-        }
-
-        // Step 3: Accept-header check.
-        const format = detectMcpFormat(request);
-        const responseFormat: McpResponseFormat = format === 'json' ? 'json' : 'sse';
-        const host = new URL(request.url).host;
-        if (format === false) {
-          logMcpRequest({
-            era: 'legacy',
-            method: null,
-            name: null,
-            client_name: null,
-            protocol_version: null,
-            host,
-            response_format: 'json',
-            outcome: 'accept_rejected',
-            error_code: null,
-            duration_ms: 0,
-          });
-          // The 406 rejection happens before any JSON-RPC parsing so the
-          // body is plain text without a `jsonrpc`/`id`/`error` envelope.
-          return new Response(
-            'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
-            {
-              status: 406,
-              headers: {
-                'content-type': 'text/plain; charset=utf-8',
-                'cache-control': 'no-store',
-              },
-            },
-          );
-        }
-
-        const started = Date.now();
-        let parsedBody: unknown;
-        try {
-          parsedBody = await request.clone().json();
-        } catch {
-          parsedBody = undefined;
-        }
-
-        const legacyEra = await isLegacyRequest(request, parsedBody);
-        const era: McpEra = legacyEra ? 'legacy' : 'modern';
-        const legacyMode = resolveLegacyMode(env as McpEnv);
-
-        if (legacyMode === 'reject' && legacyEra) {
-          logMcpRequest({
-            era,
-            method: 'initialize',
-            name: null,
-            client_name: extractClientNameFromBody(parsedBody),
-            protocol_version: extractProtocolVersion(parsedBody, request),
-            host,
-            response_format: responseFormat,
-            outcome: 'legacy_rejected',
-            error_code: null,
-            duration_ms: Date.now() - started,
-          });
-          return jsonRpcError(-32099, 'legacy MCP requests are disabled');
-        }
-
-        // Step 4: MCP_LIMITER gate (era-aware read tier).
-        let gateResult: 'passed' | 'rate_limited' = 'passed';
-        if (env.MCP_LIMITER) {
-          const catalog = await loadCatalog(env as McpEnv);
-          const ip = request.headers.get('cf-connecting-ip') ?? 'anon';
-          const key = buildMcpRateLimitKey({
-            era,
-            ip,
-            mcpName: headerMcpName(request),
-            catalog,
-          });
-          const { success } = await env.MCP_LIMITER.limit({ key });
-          if (!success) gateResult = 'rate_limited';
-        }
-        if (gateResult === 'rate_limited') {
-          logMcpRequest({
-            era,
-            method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
-            name: headerMcpName(request),
-            client_name: extractClientNameFromBody(parsedBody),
-            protocol_version: extractProtocolVersion(parsedBody, request),
-            host,
-            response_format: responseFormat,
-            outcome: 'rate_limited',
-            error_code: -32099,
-            duration_ms: Date.now() - started,
-          });
-          return jsonRpcError(-32099, 'rate limit exceeded');
-        }
-
-        // Step 5: SDK Accept-rewrite shim.
-        const sdkHeaders = new Headers(request.headers);
-        sdkHeaders.set('accept', 'application/json, text/event-stream');
-        const sdkRequest = new Request(request, { headers: sdkHeaders });
-
-        // Step 6: warmed catalog + module-scoped handler.
-        await loadCatalog(env as McpEnv);
-        getWarmCatalog(); // assert warmed before sync factory read
-        const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
-        const rawResponse = await runWithMcpRequest(sdkRequest, () =>
-          runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
+          },
         );
-        // Legacy transport SSE→JSON when the client negotiated JSON (see
-        // coerce-json-response.ts). Modern responseMode:'json' already returns
-        // application/json; this is a no-op on that path.
-        const response = await coerceMcpJsonResponse(rawResponse, responseFormat);
-        const headers = new Headers(response.headers);
-        stripCorsHeaders(headers);
-        headers.set('cache-control', 'no-store');
+      }
 
-        const errorCode = await extractTransportErrorCode(response);
-        let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
-        if (outcome === 'ok' && !response.ok) outcome = 'error';
+      const started = Date.now();
+      let parsedBody: unknown;
+      try {
+        parsedBody = await request.clone().json();
+      } catch {
+        parsedBody = undefined;
+      }
 
+      const legacyEra = await isLegacyRequest(request, parsedBody);
+      const era: McpEra = legacyEra ? 'legacy' : 'modern';
+      const legacyMode = resolveLegacyMode(env as McpEnv);
+
+      if (legacyMode === 'reject' && legacyEra) {
         logMcpRequest({
           era,
-          method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
-          name: headerMcpName(request) ?? classifyToolName(parsedBody),
+          method: 'initialize',
+          name: null,
           client_name: extractClientNameFromBody(parsedBody),
           protocol_version: extractProtocolVersion(parsedBody, request),
           host,
           response_format: responseFormat,
-          outcome,
-          error_code: errorCode,
+          outcome: 'legacy_rejected',
+          error_code: null,
           duration_ms: Date.now() - started,
         });
-
-        return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+        return jsonRpcError(-32099, 'legacy MCP requests are disabled');
       }
-    }
 
-    // /score/live/<binary>.html → 301 to /score/live/<binary>. Mirrors
-    // the rest of the site (static `/score/<tool>.html` is canonicalized
-    // away from the .html extension by CF Static Assets'
-    // html_handling=auto-trailing-slash); the /score/live/ route is
-    // Worker-served so the same redirect is explicit here.
-    const liveScoreHtmlMatch = pathname.match(/^\/score\/live\/([a-z0-9][a-z0-9-]{0,63})\.html$/);
-    if (liveScoreHtmlMatch) {
-      const canonical = `/score/live/${liveScoreHtmlMatch[1]}`;
-      return new Response(null, {
-        status: 301,
-        headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
-      });
-    }
-
-    // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
-    // 301 the old path (and its markdown twin) so existing inbound links
-    // and any cached references resolve to the canonical page.
-    if (pathname === '/check' || pathname === '/check.md') {
-      const canonical = pathname.endsWith('.md') ? '/audit.md' : '/audit';
-      return new Response(null, {
-        status: 301,
-        headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
-      });
-    }
-
-    // Shareable live-score result page. Reads the cached scorecard from
-    // R2 by binary slug, renders an HTML summary view.
-    // Strict regex enforced by parseLiveScorePath — slugs must match
-    // /^[a-z0-9][a-z0-9-]{0,63}$/, so an attacker can't pivot this
-    // route into an arbitrary R2 key read. Accepts both /score/live/<binary>
-    // and /score/live/<binary>.md (markdown twin) per the site-wide
-    // twin invariant. The "live" segment is reserved as a registry name
-    // (scorecards.mjs) so no curated tool can collide with this route.
-    if (parseLiveScorePath(pathname)) {
-      return handleLiveScorePage(request, env as ScoreEnv);
-    }
-
-    // /web board + .md twin — Worker-rendered from the R2 leaderboard
-    // aggregate, dispatched ahead of the asset fetch so no static
-    // dist/web.html ever serves the board. Legacy extension/slash forms
-    // canonicalize like the rest of the site.
-    if (pathname === '/web.html' || pathname === '/web/') {
-      return new Response(null, {
-        status: 301,
-        headers: { Location: '/web', 'Cache-Control': 'public, max-age=300' },
-      });
-    }
-    if (isWebLeaderboardPath(pathname)) {
-      const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
-      const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
-      if (response.status !== 200) return response;
-      return applyHeaders(response, { request, servedMarkdown, pathname: '/web' });
-    }
-
-    // /web/scoring[/<domain>] — the transient in-progress streaming page.
-    // Reserved above the result-page dispatch so `scoring` is never treated
-    // as a cached-result domain (mirrors the reserved `live` segment under
-    // /score/).
-    if (isWebScoringPath(pathname)) {
-      return handleWebScoringPage(request, env as WebAuditRouteEnv);
-    }
-
-    // /web/<domain>.html → 301 to /web/<domain>. Mirrors the live-score
-    // .html canonicalization; the /web route is Worker-served so the
-    // extension redirect is explicit here.
-    const webHtmlMatch = pathname.match(/^\/web\/([^/]+)\.html$/);
-    if (webHtmlMatch) {
-      return new Response(null, {
-        status: 301,
-        headers: { Location: `/web/${webHtmlMatch[1]}`, 'Cache-Control': 'public, max-age=300' },
-      });
-    }
-
-    // Shareable web-audit result page + markdown twin. Reads the cached
-    // web scorecard from R2 by domain slug (strict regex in
-    // parseWebResultPath bounds the R2 lookup). Sits above the asset-first
-    // dispatch like the live-score page.
-    if (parseWebResultPath(pathname)) {
-      return handleWebResultPage(request, env as WebAuditRouteEnv);
-    }
-
-    // /_internal/* paths are build-only assets (shell templates the
-    // Worker fetches via env.ASSETS internally). Return 404 here so
-    // direct user navigation never sees the raw template with `{{...}}`
-    // placeholders. The Worker's internal fetch goes straight to
-    // env.ASSETS.fetch and bypasses this interceptor.
-    if (pathname.startsWith('/_internal/')) {
-      return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-    }
-
-    const pathIsMarkdown = pathname.endsWith('.md');
-    const pathIsJson = pathname.endsWith('.json');
-    // CN rewrite is for HTML pages that have a markdown twin. Skip
-    // single-representation files so `curl /llms.txt` (UA heuristic) and
-    // `Accept: text/markdown` against `/skill.json` do not look up a
-    // non-existent `*.md` twin. Same skip as DESIGN.md §3.4 for JSON.
-    const preferMarkdown =
-      !pathIsMarkdown && !isSingleRepresentation(pathname) && detectPreference(request) === 'markdown';
-    const servedMarkdown = pathIsMarkdown || preferMarkdown;
-
-    let assetRequest = request;
-    if (preferMarkdown) {
-      // Rewrite the asset lookup to the .md twin; the client-visible URL is
-      // unchanged (no redirect) — content negotiation MUST stay invisible
-      // to crawlers + link shorteners.
-      assetRequest = new Request(rewriteToMarkdown(url), request);
-    }
-
-    const upstream = await env.ASSETS.fetch(assetRequest);
-
-    // Homepage HTML: substitute the {{TURNSTILE_SITEKEY}} and
-    // {{WEB_BOARD_ROWS}} placeholders. Runs AFTER the markdown-CN rewrite
-    // above so /index.md content (no placeholders) flows through
-    // untouched. Production with no TURNSTILE_SITEKEY set substitutes
-    // with the empty string, which the homepage JS treats as "form
-    // disabled, install anc locally" per the deliberate
-    // fail-loud-pre-promotion posture. The web-board region is filled
-    // server-side from the R2 leaderboard-frontpage aggregate so the
-    // homepage stays zero-JS while its web scores stay live; an absent
-    // aggregate (cold start / spec bump) renders the scoring-in-progress
-    // state.
-    if ((pathname === '/' || pathname === '/index.html') && !servedMarkdown && upstream.ok) {
-      const contentType = upstream.headers.get('content-type') ?? '';
-      if (contentType.toLowerCase().includes('text/html')) {
-        const html = await upstream.text();
-        const sitekey = env.TURNSTILE_SITEKEY ?? '';
-        let substituted = html.replaceAll('{{TURNSTILE_SITEKEY}}', sitekey);
-        if (substituted.includes('{{WEB_BOARD_ROWS}}')) {
-          const aggregate = await getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION);
-          const entries = aggregate?.entries ?? [];
-          const board = entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
-          substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', board);
-        }
-        const rewritten = new Response(substituted, {
-          status: upstream.status,
-          statusText: upstream.statusText,
-          headers: upstream.headers,
+      // Step 4: MCP_LIMITER gate (era-aware read tier).
+      let gateResult: 'passed' | 'rate_limited' = 'passed';
+      if (env.MCP_LIMITER) {
+        const catalog = await loadCatalog(env as McpEnv);
+        const ip = request.headers.get('cf-connecting-ip') ?? 'anon';
+        const key = buildMcpRateLimitKey({
+          era,
+          ip,
+          mcpName: headerMcpName(request),
+          catalog,
         });
-        return applyHeaders(rewritten, { request, servedMarkdown, pathname });
+        const { success } = await env.MCP_LIMITER.limit({ key });
+        if (!success) gateResult = 'rate_limited';
       }
-    }
+      if (gateResult === 'rate_limited') {
+        logMcpRequest({
+          era,
+          method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
+          name: headerMcpName(request),
+          client_name: extractClientNameFromBody(parsedBody),
+          protocol_version: extractProtocolVersion(parsedBody, request),
+          host,
+          response_format: responseFormat,
+          outcome: 'rate_limited',
+          error_code: -32099,
+          duration_ms: Date.now() - started,
+        });
+        return jsonRpcError(-32099, 'rate limit exceeded');
+      }
 
-    if (
-      upstream.status === 404 &&
-      !pathIsJson &&
-      !pathname.endsWith('.svg') &&
-      !pathname.startsWith('/fonts/') &&
-      pathname !== '/og-image.png'
-    ) {
-      const origin = url.origin;
-      const body = servedMarkdown ? notFoundMarkdown(origin) : notFoundHtml(origin);
-      const headers = new Headers(upstream.headers);
-      headers.set('Content-Type', servedMarkdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8');
-      return applyHeaders(new Response(body, { status: 404, statusText: upstream.statusText, headers }), {
-        request,
-        servedMarkdown,
-        pathname,
+      // Step 5: SDK Accept-rewrite shim.
+      const sdkHeaders = new Headers(request.headers);
+      sdkHeaders.set('accept', 'application/json, text/event-stream');
+      const sdkRequest = new Request(request, { headers: sdkHeaders });
+
+      // Step 6: warmed catalog + module-scoped handler.
+      await loadCatalog(env as McpEnv);
+      getWarmCatalog(); // assert warmed before sync factory read
+      const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
+      const rawResponse = await runWithMcpRequest(sdkRequest, () =>
+        runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
+      );
+      // Legacy transport SSE→JSON when the client negotiated JSON (see
+      // coerce-json-response.ts). Modern responseMode:'json' already returns
+      // application/json; this is a no-op on that path.
+      const response = await coerceMcpJsonResponse(rawResponse, responseFormat);
+      const headers = new Headers(response.headers);
+      stripCorsHeaders(headers);
+      headers.set('cache-control', 'no-store');
+
+      const errorCode = await extractTransportErrorCode(response);
+      let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
+      if (outcome === 'ok' && !response.ok) outcome = 'error';
+
+      logMcpRequest({
+        era,
+        method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
+        name: headerMcpName(request) ?? classifyToolName(parsedBody),
+        client_name: extractClientNameFromBody(parsedBody),
+        protocol_version: extractProtocolVersion(parsedBody, request),
+        host,
+        response_format: responseFormat,
+        outcome,
+        error_code: errorCode,
+        duration_ms: Date.now() - started,
       });
-    }
 
-    return applyHeaders(upstream, { request, servedMarkdown, pathname });
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    }
+  }
+
+  // /score/live/<binary>.html → 301 to /score/live/<binary>. Mirrors
+  // the rest of the site (static `/score/<tool>.html` is canonicalized
+  // away from the .html extension by CF Static Assets'
+  // html_handling=auto-trailing-slash); the /score/live/ route is
+  // Worker-served so the same redirect is explicit here.
+  const liveScoreHtmlMatch = pathname.match(/^\/score\/live\/([a-z0-9][a-z0-9-]{0,63})\.html$/);
+  if (liveScoreHtmlMatch) {
+    const canonical = `/score/live/${liveScoreHtmlMatch[1]}`;
+    return new Response(null, {
+      status: 301,
+      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+
+  // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
+  // 301 the old path (and its markdown twin) so existing inbound links
+  // and any cached references resolve to the canonical page.
+  if (pathname === '/check' || pathname === '/check.md') {
+    const canonical = pathname.endsWith('.md') ? '/audit.md' : '/audit';
+    return new Response(null, {
+      status: 301,
+      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+
+  // Shareable live-score result page. Reads the cached scorecard from
+  // R2 by binary slug, renders an HTML summary view.
+  // Strict regex enforced by parseLiveScorePath — slugs must match
+  // /^[a-z0-9][a-z0-9-]{0,63}$/, so an attacker can't pivot this
+  // route into an arbitrary R2 key read. Accepts both /score/live/<binary>
+  // and /score/live/<binary>.md (markdown twin) per the site-wide
+  // twin invariant. The "live" segment is reserved as a registry name
+  // (scorecards.mjs) so no curated tool can collide with this route.
+  if (parseLiveScorePath(pathname)) {
+    return handleLiveScorePage(request, env as ScoreEnv);
+  }
+
+  // /web board + .md twin — Worker-rendered from the R2 leaderboard
+  // aggregate, dispatched ahead of the asset fetch so no static
+  // dist/web.html ever serves the board. Legacy extension/slash forms
+  // canonicalize like the rest of the site.
+  if (pathname === '/web.html' || pathname === '/web/') {
+    return new Response(null, {
+      status: 301,
+      headers: { Location: '/web', 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+  if (isWebLeaderboardPath(pathname)) {
+    const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
+    const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
+    if (response.status !== 200) return response;
+    return applyHeaders(response, { request, servedMarkdown, pathname: '/web' });
+  }
+
+  // /web/scoring[/<domain>] — the transient in-progress streaming page.
+  // Reserved above the result-page dispatch so `scoring` is never treated
+  // as a cached-result domain (mirrors the reserved `live` segment under
+  // /score/).
+  if (isWebScoringPath(pathname)) {
+    return handleWebScoringPage(request, env as WebAuditRouteEnv);
+  }
+
+  // /web/<domain>.html → 301 to /web/<domain>. Mirrors the live-score
+  // .html canonicalization; the /web route is Worker-served so the
+  // extension redirect is explicit here.
+  const webHtmlMatch = pathname.match(/^\/web\/([^/]+)\.html$/);
+  if (webHtmlMatch) {
+    return new Response(null, {
+      status: 301,
+      headers: { Location: `/web/${webHtmlMatch[1]}`, 'Cache-Control': 'public, max-age=300' },
+    });
+  }
+
+  // Shareable web-audit result page + markdown twin. Reads the cached
+  // web scorecard from R2 by domain slug (strict regex in
+  // parseWebResultPath bounds the R2 lookup). Sits above the asset-first
+  // dispatch like the live-score page.
+  if (parseWebResultPath(pathname)) {
+    return handleWebResultPage(request, env as WebAuditRouteEnv);
+  }
+
+  // /_internal/* paths are build-only assets (shell templates the
+  // Worker fetches via env.ASSETS internally). Return 404 here so
+  // direct user navigation never sees the raw template with `{{...}}`
+  // placeholders. The Worker's internal fetch goes straight to
+  // env.ASSETS.fetch and bypasses this interceptor.
+  if (pathname.startsWith('/_internal/')) {
+    return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+  }
+
+  const pathIsMarkdown = pathname.endsWith('.md');
+  const pathIsJson = pathname.endsWith('.json');
+  // CN rewrite is for HTML pages that have a markdown twin. Skip
+  // single-representation files so `curl /llms.txt` (UA heuristic) and
+  // `Accept: text/markdown` against `/skill.json` do not look up a
+  // non-existent `*.md` twin. Same skip as DESIGN.md §3.4 for JSON.
+  const preferMarkdown =
+    !pathIsMarkdown && !isSingleRepresentation(pathname) && detectPreference(request) === 'markdown';
+  const servedMarkdown = pathIsMarkdown || preferMarkdown;
+
+  let assetRequest = request;
+  if (preferMarkdown) {
+    // Rewrite the asset lookup to the .md twin; the client-visible URL is
+    // unchanged (no redirect) — content negotiation MUST stay invisible
+    // to crawlers + link shorteners.
+    assetRequest = new Request(rewriteToMarkdown(url), request);
+  }
+
+  const upstream = await env.ASSETS.fetch(assetRequest);
+
+  // Homepage: substitute {{TURNSTILE_SITEKEY}} on HTML and {{WEB_BOARD_ROWS}}
+  // on HTML and markdown. Runs AFTER the markdown-CN rewrite so negotiated
+  // `/` and `/index.md` share the same inject. Production with no
+  // TURNSTILE_SITEKEY set substitutes the empty string (form JS disables).
+  // The web-board region is filled from the R2 leaderboard-frontpage
+  // aggregate so a cache HIT cannot contain the placeholder. Markdown
+  // never receives Turnstile / live-score tokens (R6 form-silence).
+  const isHomepage = pathname === '/' || pathname === '/index.html' || pathname === '/index.md';
+  if (isHomepage && upstream.ok) {
+    const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    const wantsMarkdown = servedMarkdown || pathname === '/index.md' || contentType.includes('text/markdown');
+    if (wantsMarkdown || contentType.includes('text/html')) {
+      return injectHomepageBoards(upstream, env, { request, servedMarkdown, pathname, markdown: wantsMarkdown });
+    }
+  }
+
+  if (
+    upstream.status === 404 &&
+    !pathIsJson &&
+    !pathname.endsWith('.svg') &&
+    !pathname.startsWith('/fonts/') &&
+    pathname !== '/og-image.png'
+  ) {
+    const origin = url.origin;
+    const body = servedMarkdown ? notFoundMarkdown(origin) : notFoundHtml(origin);
+    const headers = new Headers(upstream.headers);
+    headers.set('Content-Type', servedMarkdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8');
+    return applyHeaders(new Response(body, { status: 404, statusText: upstream.statusText, headers }), {
+      request,
+      servedMarkdown,
+      pathname,
+    });
+  }
+
+  return applyHeaders(upstream, { request, servedMarkdown, pathname });
+}
+
+function frontpageBoardSlice(markdown: boolean, entries: WebAggregateEntry[]): string {
+  if (markdown) {
+    return entries.length > 0 ? buildFrontpageBoardMarkdown(entries) : buildFrontpageBoardMarkdownEmptyState();
+  }
+  return entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
+}
+
+async function injectHomepageBoards(
+  upstream: Response,
+  env: Env,
+  opts: { request: Request; servedMarkdown: boolean; pathname: string; markdown: boolean },
+): Promise<Response> {
+  const [body, aggregate] = await Promise.all([
+    upstream.text(),
+    getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION),
+  ]);
+  const entries = aggregate?.entries ?? [];
+  let substituted = opts.markdown ? body : body.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
+  substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', frontpageBoardSlice(opts.markdown, entries));
+  const headers = new Headers(upstream.headers);
+  headers.delete('etag');
+  headers.delete('last-modified');
+  return applyHeaders(
+    new Response(substituted, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    }),
+    { request: opts.request, servedMarkdown: opts.servedMarkdown, pathname: opts.pathname },
+  );
+}
+
+function loopbackCachedFetch(ctx: ExecutionContext, env: Env, request: Request): Promise<Response> {
+  const loopback = (ctx as { exports?: { Cached?: { fetch: (req: Request) => Response | Promise<Response> } } }).exports
+    ?.Cached;
+  if (loopback && typeof loopback.fetch === 'function') {
+    return Promise.resolve(loopback.fetch(request));
+  }
+  return new Cached(ctx, env).fetch(request);
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
   },
 
   // Weekly board rescore. The cron and the deploy hook coalesce through
