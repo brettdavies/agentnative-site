@@ -88,13 +88,25 @@ function boardCountLine(opts: Omit<WebBoardRenderOpts, 'sort'>): string {
   return `${total} ${siteNoun(total)} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted).`;
 }
 
+function boardSurfaceSeg(active: 'cli' | 'web'): string {
+  const cliChecked = active === 'cli' ? ' checked' : '';
+  const webChecked = active === 'web' ? ' checked' : '';
+  return `<div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
+    <input type="radio" name="board-surface" id="board-s-cli"${cliChecked} /><label for="board-s-cli">CLI</label>
+    <input type="radio" name="board-surface" id="board-s-web"${webChecked} /><label for="board-s-web">Website</label>
+  </div>`;
+}
+
+function boardHero(active: 'cli' | 'web'): string {
+  return `<section class="leaderboard-hero">
+  ${boardSurfaceSeg(active)}
+  <h1>Web Agent-Readiness Leaderboard</h1>
+  <p class="leaderboard-hero__lede">Agent-readiness scores for websites and their MCP servers, scored against the same <a href="/">eight principles</a> as the CLI leaderboard. See the <a href="/methodology">methodology</a> for how the web audit probes MCP shape, discovery surfaces, and machine-readable content.</p>`;
+}
+
 function heroMeta(opts: WebBoardRenderOpts): string {
   return `${boardCountLine(opts)} <a href="/web-audit">Audit your own</a>.`;
 }
-
-const BOARD_HERO = `<section class="leaderboard-hero">
-  <h1>Web Agent-Readiness Leaderboard</h1>
-  <p class="leaderboard-hero__lede">Agent-readiness scores for websites and their MCP servers, scored against the same <a href="/">eight principles</a> as the CLI leaderboard. See the <a href="/methodology">methodology</a> for how the web audit probes MCP shape, discovery surfaces, and machine-readable content.</p>`;
 
 /** Build the /web page body HTML from the assembled board entries. */
 export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoardRenderOpts): string {
@@ -103,7 +115,7 @@ export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoard
   const globalActive = sortKey === 'global';
 
   if (ranked.length === 0) {
-    return `${BOARD_HERO}
+    return `${boardHero('web')}
 </section>
 <section class="leaderboard-empty">
   <p>Scoring in progress: board results land after the next rescore pass. <a href="/web-audit">Audit a website</a> to see how it scores.</p>
@@ -129,7 +141,7 @@ export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoard
     })
     .join('\n');
 
-  return `${BOARD_HERO}
+  return `${boardHero('web')}
   <p class="leaderboard-hero__meta">${heroMeta(opts)}</p>
 </section>
 

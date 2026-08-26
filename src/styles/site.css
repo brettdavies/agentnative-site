@@ -1254,6 +1254,25 @@ body:has(#s-web:checked) .hero__proof > [data-s="web"] {
   display: block;
 }
 
+/* Header Leaderboards — dual anchors; visibility follows homepage segment or
+ * html[data-surface] off-home. Override global [data-s="web"] { display: none }
+ * inside .site-nav only. */
+.site-nav [data-leaderboards-nav][data-s="web"] {
+  display: none;
+}
+body:has(#s-web:checked) .site-nav [data-leaderboards-nav][data-s="cli"] {
+  display: none;
+}
+body:has(#s-web:checked) .site-nav [data-leaderboards-nav][data-s="web"] {
+  display: inline;
+}
+html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-leaderboards-nav][data-s="cli"] {
+  display: none;
+}
+html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-leaderboards-nav][data-s="web"] {
+  display: inline;
+}
+
 @keyframes principle-enter {
   from {
     opacity: 0;
