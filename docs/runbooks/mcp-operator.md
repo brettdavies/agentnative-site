@@ -15,7 +15,7 @@ flip with `wrangler secret put`.
 | -------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MCP_ENABLED`              | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
 | `MCP_LIVE_SCORING_ENABLED` | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
-| `MCP_LEGACY_ENABLED`       | legacy `initialize` lane    | When `'false'`, shell logs `legacy_rejected` and returns JSON-RPC `-32099` before SDK dispatch. Modern lane unaffected. Staging default `'true'` in `wrangler.jsonc` `vars`.                             |
+| `MCP_LEGACY_ENABLED`       | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` and returns JSON-RPC `-32099` before SDK dispatch. Modern lane unaffected. Staging default `'true'` in `wrangler.jsonc` `vars`.                            |
 
 Decision flow:
 
@@ -55,26 +55,27 @@ designed for browser traffic. Do not add a wildcard CORS header to this endpoint
 
 ## Structured logging (`mcp.request`)
 
-Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"event":"mcp.request"`. Replaces the
-former `[mcp-call]` shape.
+Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"event":"mcp.request"`. Replaces the former
+`[mcp-call]` shape.
 
-| Field              | Notes                                                                 |
-| ------------------ | --------------------------------------------------------------------- |
-| `era`              | `legacy` or `modern` (`isLegacyRequest`)                              |
-| `method`           | `Mcp-Method` header when present; else JSON-RPC method when known     |
-| `name`             | `Mcp-Name` when present (nullable)                                    |
-| `client_name`      | Truncated from initialize / `_meta` clientInfo when available         |
-| `protocol_version` | From header or `_meta` when available                               |
-| `host`             | Request host                                                          |
-| `response_format`  | `json` or `sse` from Accept negotiation                               |
+| Field              | Notes                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `era`              | `legacy` or `modern` (`isLegacyRequest`)                                           |
+| `method`           | `Mcp-Method` header when present; else JSON-RPC method when known                  |
+| `name`             | `Mcp-Name` when present (nullable)                                                 |
+| `client_name`      | Truncated from initialize / `_meta` clientInfo when available                      |
+| `protocol_version` | From header or `_meta` when available                                              |
+| `host`             | Request host                                                                       |
+| `response_format`  | `json` or `sse` from Accept negotiation                                            |
 | `outcome`          | `ok`, `error`, `legacy_rejected`, `rate_limited`, `disabled`, `accept_rejected`, … |
-| `error_code`       | Numeric JSON-RPC transport code only (nullable); no tool payloads     |
-| `ms_bucket`        | `<50`, `50-200`, `200-1000`, `>1000`                                  |
+| `error_code`       | Numeric JSON-RPC transport code only (nullable); no tool payloads                  |
+| `ms_bucket`        | `<50`, `50-200`, `200-1000`, `>1000`                                               |
 
 No IP, slug, query text, or tool results appear in the log line. Use Cloudflare rate-limit analytics for IP triage.
 
 ```bash
-wrangler tail --env staging --search 'event=mcp.request'
+# --search can look empty depending on envelope shape; prefer local filter:
+bun x wrangler tail --env staging --format json | rg 'event.:.mcp.request'
 ```
 
 When triaging era mix before legacy sunset: filter `era:legacy` vs `era:modern` and group by `client_name`. Legacy share
@@ -99,7 +100,8 @@ When upgrading `@modelcontextprotocol/server` / `agents`:
 1. Bump pins in `package.json` and `bun install`.
 2. Update all four surfaces above to the new declared revision.
 3. Update test literals and `scripts/release/mcp-smoke.sh` checks 1–2.
-4. Run `bun run build && bun test` and staging `scripts/release/mcp-smoke.sh <staging-url>` (expect 6/6 scripted checks).
+4. Run `bun run build && bun test` and staging `scripts/release/mcp-smoke.sh <staging-url>` (expect 6/6 scripted
+   checks).
 
 ## Rate-limit policy rationale
 
@@ -137,8 +139,9 @@ traffic under the ceiling rather than guessing.
 
 ## Staging proof (dual-stack migration)
 
-Run after a `dev` merge deploys to the staging Worker. Requires CF Access service-token headers (same pair as
-`scripts/release/preflight.sh` / `scripts/release/postflight.sh`).
+Run after the dual-stack Worker is on staging (normally a `dev` merge deploy; a manual `bun run build && bun x wrangler
+deploy --env staging` from `feat/mcp-2026-dual-protocol` is acceptable for this proof). Requires CF Access service-token
+headers (same pair as `scripts/release/preflight.sh` / `scripts/release/postflight.sh`).
 
 ### Scripted checks (6/6)
 
@@ -151,17 +154,40 @@ scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.worker
 Expect **6/6** pass: server card `2026-07-28`, legacy initialize + 13 tools, modern list cache hints, modern
 get_scorecard hit/miss.
 
+**Check 6 miss input (recorded 2026-08-26):** unknown registry slugs (`nope-not-a-tool`) are validator rejection
+(`isError: true`, `unrecognized_input`), not cache-miss. The smoke miss probe uses a well-formed `github_url` absent
+from registry + R2 (`https://github.com/example/anc-smoke-no-scorecard`) and expects inner `found: false` + `next_tool:
+score_cli`. Curated hits return `source=registry` with `entry` (not always an inline `scorecard` object).
+
+**Legacy Accept / JSON (recorded 2026-08-26):** the agents legacy transport requires dual Accept and defaults to SSE.
+Dispatch keeps the dual-Accept rewrite for the SDK, then coerces SSE → `application/json` when `detectMcpFormat`
+resolved to JSON (`src/worker/mcp/coerce-json-response.ts`). Modern lane uses `responseMode: 'json'` and needs no
+coerce. `createMcpHandler({ corsOptions: false })` plus `stripCorsHeaders` keep POST `/mcp` free of `Access-Control-*`
+(KTD-10).
+
 ### Check 8 — telemetry (manual)
 
 In one terminal:
 
 ```bash
-wrangler tail --env staging --search 'event=mcp.request'
+# Prefer no --search first: --search can match the outer wrangler envelope oddly and look empty
+# while logs are still flowing. Filter locally once lines appear.
+bun x wrangler tail --env staging --format json > /tmp/mcp-tail.json
 ```
 
 In another, run check 5 from the smoke script (modern `tools/list` with `clientInfo.name: anc-mcp-smoke` in `_meta`).
-Confirm exactly **one** JSON line per POST with `era=modern`, `method=tools/list`, `client_name=anc-mcp-smoke`,
-`protocol_version=2026-07-28`, `host`, `outcome=ok`, `ms_bucket` — and **no** IP, slug, or tool-result fields.
+Confirm exactly **one** JSON log message per POST with `era=modern`, `method=tools/list`, `client_name=anc-mcp-smoke`,
+`protocol_version=2026-07-28`, `host`, `outcome=ok`, `ms_bucket` — and **no** IP, slug, or tool-result fields in the
+`mcp.request` payload (Cloudflare's outer tail envelope may still show request headers; that is not our log line).
+
+**Observed 2026-08-26 (staging version `a34f7312…`, manual feature-branch deploy):**
+
+```json
+{"event":"mcp.request","era":"modern","method":"tools/list","name":null,"client_name":"anc-mcp-smoke","protocol_version":"2026-07-28","host":"agentnative-site-staging.brettdavies.workers.dev","response_format":"json","outcome":"ok","error_code":null,"ms_bucket":"<50"}
+```
+
+Scripted smoke: **6/6** (+ symmetry + live-cache figlet extension) green after the SSE→JSON coerce and check-6 miss
+probe fix.
 
 ### Legacy lane disable (staging-only manual)
 
@@ -173,16 +199,19 @@ Confirm exactly **one** JSON line per POST with `era=modern`, `method=tools/list
 Do **not** leave legacy disabled on staging during normal soak unless deliberately testing sunset; preflight/postflight
 legacy curl recipes assume dual-stack.
 
+**Not run in the 2026-08-26 U6 pass** (optional leg); leave for a deliberate sunset drill.
+
 ### Bundle size (U1 gate)
 
 Recorded at implementation time (`wrangler deploy --dry-run --env staging`):
 
-| Ref                    | Total upload | gzip    |
-| ---------------------- | ------------ | ------- |
+| Ref                    | Total upload | gzip       |
+| ---------------------- | ------------ | ---------- |
 | `origin/dev` (v1 SDK)  | 3792.53 KiB  | 745.69 KiB |
 | dual-stack branch (v2) | 2164.99 KiB  | 411.56 KiB |
 
-Material reduction; no acceptance waiver required.
+Manual staging deploy 2026-08-26 (with coerce): **2166.43 KiB / gzip 411.97 KiB**. Material reduction; no acceptance
+waiver required.
 
 ## Legacy sunset advisory
 
@@ -204,11 +233,13 @@ Discovery surfaces advertise the MCP endpoint. Operators are responsible for kee
   (`/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`) serve the same JSON body via the Worker.
 - `/.well-known/api-catalog`: RFC 9727 link set; `service-desc` and `status` both point at the server card.
 - `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/.well-known/jwks.json`,
-  `/auth.md`: agent-readiness OAuth metadata for a public/no-auth catalog. `POST /oauth2/token` returns `public_catalog`.
+  `/auth.md`: agent-readiness OAuth metadata for a public/no-auth catalog. `POST /oauth2/token` returns
+  `public_catalog`.
 - `/.well-known/ai.txt`: `Programmatic-API: https://anc.dev/mcp` plus the canonical contact
   (`97-boss-beetle@icloud.com`).
 - `/.well-known/security.txt`: RFC 9116 contact; `Expires` must stay at least 300 days in the future (tests assert).
-- `/llms.txt`: Programmatic access section listing `/mcp`, `/.well-known/mcp/server-card.json`, and the client-skill URL.
+- `/llms.txt`: Programmatic access section listing `/mcp`, `/.well-known/mcp/server-card.json`, and the client-skill
+  URL.
 - `InitializeResult.instructions`: session-time summary plus a pointer back to the client-skill URL.
 
 When the client-skill URL changes (a rename, a domain move), all surfaces have to update together. The drift gate is the
@@ -217,13 +248,13 @@ test suite; trust it, but pull the e2e suite locally before deploying to confirm
 ## CORS policy
 
 Discovery metadata is **read-only** and returns `Access-Control-Allow-Origin: *` (server card, api-catalog, OAuth
-PRM/AS, JWKS). This is deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin.
-No credentials or metered operations are exposed through them.
+PRM/AS, JWKS). This is deliberate: automated scanners and browser-based catalog tools fetch these URLs cross-origin. No
+credentials or metered operations are exposed through them.
 
 **Server-to-agent paths omit CORS:**
 
-- `POST /mcp` — JSON-RPC including metered `score_cli`. A browser-reachable endpoint would let any malicious page trigger
-  audits charged to the visitor's IP (KTD-10).
+- `POST /mcp` — JSON-RPC including metered `score_cli`. A browser-reachable endpoint would let any malicious page
+  trigger audits charged to the visitor's IP (KTD-10).
 - `POST /oauth2/token` — returns a typed `public_catalog` error only; posture is in `auth.md` and OAuth metadata.
 
 Full prose lives in `/auth.md` under **CORS posture**. Do not add CORS to `POST /mcp` without an explicit KTD revision.
