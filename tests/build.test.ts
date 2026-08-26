@@ -2860,6 +2860,14 @@ describe('emitHomepage — index.md twin frontmatter', () => {
     expect(indexHtml).not.toContain('---\ntitle:');
     expect(indexHtml).not.toMatch(/^url: /m);
   });
+
+  test('index.html bakes the web hero from hero-anc.dev.json (no Worker placeholder)', async () => {
+    const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
+    expect(indexHtml).not.toContain('{{WEB_HERO_CARD}}');
+    expect(indexHtml).toContain('data-s="web"');
+    expect(indexHtml).toContain('audit_website anc.dev');
+    expect(indexHtml).toContain('bigscore__n">97');
+  });
 });
 
 describe('emitSubPages — twin frontmatter', () => {

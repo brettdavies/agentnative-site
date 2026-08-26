@@ -5,7 +5,13 @@
 // Inputs are plain data (no filesystem). assets.mjs reads the inline
 // theme-init script from disk and passes it in.
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadInstallCommands } from './install-commands.mjs';
 import { escHtml, resolveBaseUrl, SITE_SPEC_VERSION } from './util.mjs';
+
+const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../content');
+const INSTALL_COMMANDS = loadInstallCommands(CONTENT_DIR);
 
 const SITE_NAME = 'anc.dev';
 const SITE_TAGLINE = 'the agent-native standard';
@@ -311,12 +317,35 @@ ${NAV_LINKS.map(
 ).join('\n')}
         </nav>
         <div class="site-header__cta">
-          <button type="button" class="theme-cycle" data-theme-cycle aria-label="Theme: system">◐</button>
+          <div
+            class="site-header__install-cmd"
+            data-install-cmd
+            data-brew="${escHtml(INSTALL_COMMANDS.brew)}"
+            data-cargo="${escHtml(INSTALL_COMMANDS.cargo)}"
+            data-binstall="${escHtml(INSTALL_COMMANDS.binstall)}"
+            hidden
+          >
+            <div class="install-cmd" role="group" aria-label="Install anc">
+              <button type="button" class="install-cmd__pm" data-install-pm>
+                <span data-install-pm-label>brew</span>
+                <span class="install-cmd__cycle" aria-hidden="true">↻</span>
+              </button>
+              <button type="button" class="install-cmd__copy" data-install-copy>
+                <span class="install-cmd__prompt" aria-hidden="true">$</span>
+                <code class="install-cmd__text" data-install-text></code>
+                <span class="install-cmd__icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </span>
+                <span class="visually-hidden" data-copy-label>Copy</span>
+              </button>
+            </div>
+          </div>
+          <a class="btn btn--primary site-header__install" href="/install" data-install-fallback>Install&nbsp;▸</a>
+          <button type="button" class="theme-cycle" data-theme-cycle aria-label="Toggle theme">◐</button>
           <label class="nav-burger">
             <input type="checkbox" id="nav-open" class="nav-burger__cb" aria-label="Menu" />
             <span aria-hidden="true">☰</span>
           </label>
-          <a class="btn btn--primary site-header__install" href="/install">Install&nbsp;▸</a>
         </div>
       </div>
     </header>

@@ -406,15 +406,15 @@ describe('web leaderboard (U15)', () => {
   const entries = [entry('small-perfect.dev', 100, 45), entry('big-platform.dev', 88, 79)];
   const boardOpts = { view: 'all', curatedCount: 2, userCount: 0 } as const;
 
-  test('default order is GLOBAL descending: the bigger routine outranks the small perfect site', () => {
+  test('default order is RELATIVE descending: the perfect-for-its-type site outranks the bigger routine', () => {
     const ranked = rankWebEntries(entries);
-    expect(ranked.map((e) => e.domain)).toEqual(['big-platform.dev', 'small-perfect.dev']);
+    expect(ranked.map((e) => e.domain)).toEqual(['small-perfect.dev', 'big-platform.dev']);
     expect(ranked[0].rank).toBe(1);
   });
 
-  test('the RELATIVE key re-ranks the perfect-for-its-type site to the top', () => {
-    const ranked = rankWebEntries(entries, 'relative');
-    expect(ranked.map((e) => e.domain)).toEqual(['small-perfect.dev', 'big-platform.dev']);
+  test('the GLOBAL key re-ranks the bigger routine to the top', () => {
+    const ranked = rankWebEntries(entries, 'global');
+    expect(ranked.map((e) => e.domain)).toEqual(['big-platform.dev', 'small-perfect.dev']);
   });
 
   test('renders both score columns, row sort data, the toggle control, and /web links', () => {
@@ -435,10 +435,10 @@ describe('web leaderboard (U15)', () => {
     expect(html).toContain('Scoring in progress');
   });
 
-  test('markdown twin lists GLOBAL-ordered rows with both columns, origin-absolute', () => {
+  test('markdown twin lists RELATIVE-ordered rows with both columns, origin-absolute', () => {
     const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev', boardOpts);
-    expect(md).toContain('| 1 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% | curated |');
-    expect(md).toContain('| 2 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% | curated |');
+    expect(md).toContain('| 1 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% | curated |');
+    expect(md).toContain('| 2 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% | curated |');
   });
 
   test('the CLI leaderboard hero is not present on the web board', () => {

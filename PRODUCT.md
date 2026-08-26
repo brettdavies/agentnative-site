@@ -47,8 +47,8 @@ Not primary audiences: managers deciding budget, procurement, the general public
 
 ## Visual system
 
-**Theme.** Both modes, user-toggleable. `prefers-color-scheme` as the default, explicit `[data-theme]` override,
-`system` as a third state. Dark mode is deliberately designed, not inverted (see `DESIGN.md` §4.2).
+**Theme.** Both modes, user-toggleable. `prefers-color-scheme` as the unset default; the header control swaps explicit
+light ↔ dark (no third “system” stop). Dark mode is deliberately designed, not inverted (see `DESIGN.md` §4.2).
 
 **Palette posture.** Cool-neutral base (hue 250), one accent in the same hue family, three semantic warm accents for
 MUST / SHOULD / MAY. Inline keyword color only; block-level variants deferred to live-site iteration. OKLCH throughout
