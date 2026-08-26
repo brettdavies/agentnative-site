@@ -7,7 +7,7 @@
 // section response so the agent can cross-check the version it's
 // reading.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Catalog, CatalogSpecSection } from '../catalog';
 
@@ -27,20 +27,27 @@ function tocEntry(s: CatalogSpecSection) {
 }
 
 export function registerSpecTools(server: McpServer, catalog: Catalog): void {
-  server.tool(
+  server.registerTool(
     'list_spec_sections',
-    'Return the table of contents for the vendored agentnative spec at the current spec_version. Each entry carries ' +
-      'slug, title, level (1 for top-level files, 2 for sub-folder files such as principles/p*.md), and parent_slug ' +
-      '(null for top-level sections).',
-    {},
+    {
+      description:
+        'Return the table of contents for the vendored agentnative spec at the current spec_version. Each entry carries ' +
+        'slug, title, level (1 for top-level files, 2 for sub-folder files such as principles/p*.md), and parent_slug ' +
+        '(null for top-level sections).',
+    },
     async () => textContent({ spec_version: catalog.spec_version, sections: catalog.spec_sections.map(tocEntry) }),
   );
 
-  server.tool(
+  server.registerTool(
     'get_spec_section',
-    'Return the full body of a single spec section by slug. Fields: slug, title, body_markdown, spec_version. ' +
-      'Look-not-found returns isError: false with a typed { found: false, message } body.',
-    { slug: z.string().describe('The section slug, e.g. "p1-non-interactive-by-default" or "scoring".') },
+    {
+      description:
+        'Return the full body of a single spec section by slug. Fields: slug, title, body_markdown, spec_version. ' +
+        'Look-not-found returns isError: false with a typed { found: false, message } body.',
+      inputSchema: {
+        slug: z.string().describe('The section slug, e.g. "p1-non-interactive-by-default" or "scoring".'),
+      },
+    },
     async ({ slug }) => {
       const section = catalog.spec_sections.find((s) => s.slug === slug);
       if (!section) {

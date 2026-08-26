@@ -3,7 +3,7 @@
 // tools/list ordering — agent introspection lists tools in the order
 // they were registered.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import type { Catalog } from '../catalog';
 import { registerPrincipleTools } from './principles';
 import { registerRegistryTools } from './registry';

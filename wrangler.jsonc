@@ -407,7 +407,8 @@
       "vars": {
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
         "MCP_CACHE_BYPASS_ALLOWED": "true",
-        "WEB_AUDIT_ENABLED": "true"
+        "WEB_AUDIT_ENABLED": "true",
+        "MCP_LEGACY_ENABLED": "true"
       }
     }
   }

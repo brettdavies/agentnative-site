@@ -18,7 +18,7 @@
 // the registry/hints indexes, or an asset-fetch failure on the curated
 // JSON path.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { loadHintsIndex, lookupOnly, type OrchestrateEnv } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
@@ -50,20 +50,23 @@ function rawFromInput(args: {
 }
 
 export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, env: ScorecardReadEnv): void {
-  server.tool(
+  server.registerTool(
     'get_scorecard',
-    'Cheap read-only lookup over the agent-native CLI scorecard surface. Composes the shared /api/score orchestrator ' +
-      'so the cache semantics match the human form on anc.dev/. Provide ONE of: slug (registry slug), binary (CLI ' +
-      'binary name), install (full install command, e.g. "brew install ripgrep"), or github_url ' +
-      '(https://github.com/owner/repo, branch URLs accepted). Returns isError: false for all cache-state outcomes ' +
-      '(hit returns the inline scorecard plus source; miss returns next_tool: score_cli). isError: true is reserved ' +
-      'for validator rejection, infrastructure errors, or asset-fetch failure. The companion tool score_cli runs a ' +
-      'fresh container audit on cache miss.',
     {
-      slug: z.string().optional().describe('Registry slug, e.g. "ripgrep".'),
-      binary: z.string().optional().describe('CLI binary name. Treated as a slug for the registry lookup.'),
-      install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
-      github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo, branch URLs accepted).'),
+      description:
+        'Cheap read-only lookup over the agent-native CLI scorecard surface. Composes the shared /api/score orchestrator ' +
+        'so the cache semantics match the human form on anc.dev/. Provide ONE of: slug (registry slug), binary (CLI ' +
+        'binary name), install (full install command, e.g. "brew install ripgrep"), or github_url ' +
+        '(https://github.com/owner/repo, branch URLs accepted). Returns isError: false for all cache-state outcomes ' +
+        '(hit returns the inline scorecard plus source; miss returns next_tool: score_cli). isError: true is reserved ' +
+        'for validator rejection, infrastructure errors, or asset-fetch failure. The companion tool score_cli runs a ' +
+        'fresh container audit on cache miss.',
+      inputSchema: {
+        slug: z.string().optional().describe('Registry slug, e.g. "ripgrep".'),
+        binary: z.string().optional().describe('CLI binary name. Treated as a slug for the registry lookup.'),
+        install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
+        github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo, branch URLs accepted).'),
+      },
     },
     async (args) => {
       const choice = rawFromInput(args);

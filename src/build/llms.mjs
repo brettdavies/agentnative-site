@@ -69,7 +69,7 @@ export function buildLlmsIndex({
     }
     lines.push('');
     lines.push(
-      `No authentication. Connect now: POST JSON-RPC \`initialize\` to \`${base}/mcp\` with protocolVersion \`2025-06-18\`.`,
+      `No authentication. Connect now: POST JSON-RPC to \`${base}/mcp\` — legacy clients send \`initialize\` with client protocolVersion \`2025-06-18\`; modern clients use \`MCP-Protocol-Version: 2026-07-28\`, SEP-2243 headers, and \`_meta\` in params (no \`initialize\`). Declared server revision: \`2026-07-28\`.`,
     );
     lines.push('');
     lines.push(`Full recipes: [MCP client skill](${base}/mcp-skill.md).`);

@@ -14,7 +14,7 @@
 // Drift gate per KTD-8 of the plan.
 
 const SITE_URL = 'https://anc.dev';
-const SPEC_REVISION = '2025-06-18';
+export const SPEC_REVISION = '2026-07-28';
 const DOCS_URL = `${SITE_URL}/mcp-skill.md`;
 const TOOL_COUNT = 13;
 const RESOURCE_TOTAL = 5;

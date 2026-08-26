@@ -290,8 +290,9 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 
 The MCP transport surface composes the same orchestrator core (`lookupOnly` for the read tier, `runFreshOnly` for the
 run-fresh tier) as the HTTP `/api/score` handler. What this section covers and the HTTP smoke above does not: transport
-wiring, the 9-tool surface, MCP kill switches (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`), and the orchestrator's
-MCP-side result envelope (`next_tool` bouncing, `source: "registry" | "live-cache" | "live"`).
+wiring, the 13-tool dual-stack surface (legacy + modern SEP-2243), MCP kill switches (`MCP_ENABLED`,
+`MCP_LIVE_SCORING_ENABLED`, `MCP_LEGACY_ENABLED`), and the orchestrator's MCP-side result envelope (`next_tool` bouncing,
+`source: "registry" | "live-cache" | "live"`).
 
 Preflight defaults to the **staging** target (`https://agentnative-site-staging.brettdavies.workers.dev` through CF
 Access), matching the target shape of `do-smoke` and `dist`. This catches MCP regressions on the deployed staging code
@@ -315,20 +316,27 @@ differences between callers are the base URL and the env-driven auth headers whe
 The curl recipes below show the **staging** shape (with CF Access headers). For the **local** shape, drop the two
 `CF-Access-Client-*` header lines and replace the staging URL with `http://localhost:8787`.
 
-- [ ] **`/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true` in the
-  `env.staging` block, content negotiation (the dual-MIME `Accept` header), and that no tool was dropped between
-  releases:
+- [ ] **`/mcp` dual-stack smoke passes checks 1–6.** Prefer the scripted suite (legacy initialize + modern list/call,
+  server card `2026-07-28`, cache hints):
 
   ```bash
+  scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.workers.dev
+  ```
+
+  Manual spot-checks when triaging a single gate:
+
+  ```bash
+  # Legacy initialize — client sends 2025-06-18; server declares 2026-07-28 in instructions
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"preflight","version":"1"}}}' \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     https://agentnative-site-staging.brettdavies.workers.dev/mcp \
-    | jq '{server: .result.serverInfo.name, protocol: .result.protocolVersion}'
-  # expect: server: "anc", protocol: "2025-06-18"
+    | jq '{server: .result.serverInfo.name, instructions: (.result.instructions | contains("2026-07-28"))}'
+  # expect: server: "anc", instructions: true
 
+  # Legacy tools/list — 13 tools
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
@@ -336,10 +344,22 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
     https://agentnative-site-staging.brettdavies.workers.dev/mcp \
     | jq '.result.tools | length'
-  # expect: 9
+  # expect: 13
+
+  META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"preflight","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}'
+  # Modern tools/list — no initialize; cache hints on result
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
+    -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
+    https://agentnative-site-staging.brettdavies.workers.dev/mcp \
+    | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
+  # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
   ```
 
-  A 503 or `MCP_ENABLED` kill-switch envelope means the staging env block has the switch flipped. A non-9 tool count is
+  A 503 or `MCP_ENABLED` kill-switch envelope means the staging env block has the switch flipped. A non-13 tool count is
   a tool-wiring regression — block.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Exercises the

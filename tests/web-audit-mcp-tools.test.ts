@@ -14,9 +14,10 @@ import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hi
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
-import { buildMcpHandler, type McpEnv } from '../src/worker/mcp/server';
+import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const DATA = join(REPO_ROOT, 'src', 'data', 'web-audit');
@@ -146,54 +147,46 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
   } as unknown as McpEnv;
 }
 
-type JsonRpcResult = { result?: { content?: Array<{ text: string }>; isError?: boolean } };
+type JsonRpcResult = {
+  result?: {
+    content?: Array<{ text: string }>;
+    isError?: boolean;
+    tools?: Array<{ name: string; description?: string }>;
+  };
+  error?: { code: number; message: string };
+};
 
 async function callTool(env: McpEnv, name: string, args: Record<string, unknown>, ip?: string): Promise<JsonRpcResult> {
-  const init = await buildMcpHandler(env, { jsonResponse: true });
-  await init(
-    new Request('https://anc.dev/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } },
-      }),
-    }),
+  await mcpInitialize(env);
+
+  const callHeaders: Record<string, string> = {};
+  if (ip) callHeaders['cf-connecting-ip'] = ip;
+
+  const { status, body } = await mcpRpc(
     env,
-    {} as ExecutionContext,
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    },
+    callHeaders,
   );
-  const handler = await buildMcpHandler(env, { jsonResponse: true });
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    accept: 'application/json, text/event-stream',
-  };
-  if (ip) headers['cf-connecting-ip'] = ip;
-  const res = await handler(
-    new Request('https://anc.dev/mcp', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name, arguments: args } }),
-    }),
-    env,
-    {} as ExecutionContext,
-  );
-  return JSON.parse(await res.text()) as JsonRpcResult;
+  expect(status).toBe(200);
+  return body as JsonRpcResult;
 }
 
 function jsonContent(body: JsonRpcResult): Record<string, unknown> {
-  const text = body.result?.content?.[0]?.text;
-  if (typeof text !== 'string') throw new Error('no content');
-  return JSON.parse(text) as Record<string, unknown>;
+  return getJsonToolContent(body as JsonRpcBody) as Record<string, unknown>;
 }
 
 beforeEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
   resetWebAuditRegistryCacheForTests();
   resetWebRemediationCacheForTests();
 });
 afterEach(() => {
+  resetMcpTestState();
   resetCatalogCacheForTests();
   resetWebAuditRegistryCacheForTests();
   resetWebRemediationCacheForTests();
@@ -608,18 +601,14 @@ describe('list_website_audits', () => {
 
   test('the tool description presents the board as curated + opted-in', async () => {
     const env = await makeEnv();
-    const handler = await buildMcpHandler(env, { jsonResponse: true });
-    const res = await handler(
-      new Request('https://anc.dev/mcp', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-      }),
-      env,
-      {} as ExecutionContext,
-    );
-    const body = JSON.parse(await res.text()) as { result: { tools: Array<{ name: string; description: string }> } };
-    const tool = body.result.tools.find((t) => t.name === 'list_website_audits');
+    const { body } = await mcpRpc(env, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {},
+    });
+    const tools = body.result?.tools as Array<{ name: string; description: string }> | undefined;
+    const tool = tools?.find((t) => t.name === 'list_website_audits');
     expect(tool?.description).toContain('curated + opted-in');
   });
 });
@@ -627,18 +616,13 @@ describe('list_website_audits', () => {
 describe('tool registration', () => {
   test('all four web tools appear in tools/list after the existing tools', async () => {
     const env = await makeEnv();
-    const handler = await buildMcpHandler(env, { jsonResponse: true });
-    const res = await handler(
-      new Request('https://anc.dev/mcp', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
-      }),
-      env,
-      {} as ExecutionContext,
-    );
-    const body = JSON.parse(await res.text()) as { result: { tools: Array<{ name: string }> } };
-    const names = body.result.tools.map((t) => t.name);
+    const { body } = await mcpRpc(env, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: {},
+    });
+    const names = (body.result?.tools as Array<{ name: string }> | undefined)?.map((t) => t.name) ?? [];
     for (const name of ['audit_website', 'get_website_audit', 'list_website_audits', 'get_web_remediation']) {
       expect(names).toContain(name);
     }

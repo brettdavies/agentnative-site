@@ -15,7 +15,7 @@
 // the webapp route. Cache state is data, not failure: read outcomes
 // return isError:false.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
 import {
@@ -47,6 +47,7 @@ import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
+import { requestHeader } from '../request-header';
 
 export interface WebAuditToolsEnv {
   ASSETS: Fetcher;
@@ -124,12 +125,17 @@ async function resolveScorecard(env: WebAuditToolsEnv, domain: string): Promise<
 }
 
 export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv): void {
-  server.tool(
+  server.registerTool(
     'get_website_audit',
-    'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
-      'both outcomes: a hit returns { found:true, scorecard, share_url }; a miss returns { found:false, ' +
-      'next_tool:"audit_website" }. The companion tool audit_website runs a fresh audit on a miss.',
-    { url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".') },
+    {
+      description:
+        'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
+        'both outcomes: a hit returns { found:true, scorecard, share_url }; a miss returns { found:false, ' +
+        'next_tool:"audit_website" }. The companion tool audit_website runs a fresh audit on a miss.',
+      inputSchema: {
+        url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".'),
+      },
+    },
     async ({ url }) => {
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
@@ -153,31 +159,34 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     },
   );
 
-  server.tool(
+  server.registerTool(
     'audit_website',
-    'Run a fresh website agent-readiness audit and return the complete scorecard. Returns a single terminal scorecard ' +
-      '(no progress notifications — the server is stateless per-request). A cached result younger than 5 minutes is ' +
-      'returned without re-running; an older one re-runs (and is still served as-is when the audit is disabled). A ' +
-      'fresh audit is gated like score_cli: disabled when WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request ' +
-      'without cf-connecting-ip returns -32099 (no anon fallback); a per-IP burst limiter plus a ' +
-      '30-fresh-audits-per-hour-per-IP window apply.',
     {
-      url: z.string().describe('The website URL or bare domain to audit.'),
-      site_type: z
-        .enum(['content', 'api'])
-        .optional()
-        .describe(
-          'Declared site type scoping applicability: "content" (blog/docs/marketing) or "api" (REST API and/or ' +
-            'interactive app). Omit to run everything. MCP surfaces are auto-detected regardless.',
-        ),
-      public_listing: z
-        .boolean()
-        .optional()
-        .describe(
-          'Opt this domain in to (true) or out of (false) the public web leaderboard at anc.dev/web. Omit to keep ' +
-            "the current stored choice — a blank never erases a prior opt-in. Defaults to off only on a domain's " +
-            'first-ever audit.',
-        ),
+      description:
+        'Run a fresh website agent-readiness audit and return the complete scorecard. Returns a single terminal scorecard ' +
+        '(no progress notifications — the server is stateless per-request). A cached result younger than 5 minutes is ' +
+        'returned without re-running; an older one re-runs (and is still served as-is when the audit is disabled). A ' +
+        'fresh audit is gated like score_cli: disabled when WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request ' +
+        'without cf-connecting-ip returns -32099 (no anon fallback); a per-IP burst limiter plus a ' +
+        '30-fresh-audits-per-hour-per-IP window apply.',
+      inputSchema: {
+        url: z.string().describe('The website URL or bare domain to audit.'),
+        site_type: z
+          .enum(['content', 'api'])
+          .optional()
+          .describe(
+            'Declared site type scoping applicability: "content" (blog/docs/marketing) or "api" (REST API and/or ' +
+              'interactive app). Omit to run everything. MCP surfaces are auto-detected regardless.',
+          ),
+        public_listing: z
+          .boolean()
+          .optional()
+          .describe(
+            'Opt this domain in to (true) or out of (false) the public web leaderboard at anc.dev/web. Omit to keep ' +
+              "the current stored choice — a blank never erases a prior opt-in. Defaults to off only on a domain's " +
+              'first-ever audit.',
+          ),
+      },
     },
     async ({ url, site_type, public_listing }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
@@ -231,8 +240,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       }
 
       // cf-connecting-ip presence (no anon fallback).
-      const ip = extra?.requestInfo?.headers?.['cf-connecting-ip'];
-      const ipString = typeof ip === 'string' ? ip : null;
+      const ipString = requestHeader(extra, 'cf-connecting-ip');
       if (!ipString) {
         return jsonRpcError32099(
           'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable.',
@@ -314,20 +322,23 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     },
   );
 
-  server.tool(
+  server.registerTool(
     'list_website_audits',
-    'Return the web leaderboard (curated + opted-in): summaries of the websites on anc.dev/web. Each entry carries ' +
-      'domain, url, name, score_pct, and share_url. view "curated" (the default) returns only the curated board; ' +
-      `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
-      'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
     {
-      view: z
-        .enum(['curated', 'all'])
-        .optional()
-        .describe(
-          'Which board to return: "curated" (default) for the curated leaderboard only, or "all" to also include ' +
-            'user-submitted domains that opted in to public listing. Mirrors anc.dev/web?view=all.',
-        ),
+      description:
+        'Return the web leaderboard (curated + opted-in): summaries of the websites on anc.dev/web. Each entry carries ' +
+        'domain, url, name, score_pct, and share_url. view "curated" (the default) returns only the curated board; ' +
+        `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
+        'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
+      inputSchema: {
+        view: z
+          .enum(['curated', 'all'])
+          .optional()
+          .describe(
+            'Which board to return: "curated" (default) for the curated leaderboard only, or "all" to also include ' +
+              'user-submitted domains that opted in to public listing. Mirrors anc.dev/web?view=all.',
+          ),
+      },
     },
     async ({ view }) => {
       const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);

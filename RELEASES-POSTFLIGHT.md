@@ -182,26 +182,42 @@ as two sub-gates: cache-miss via `bypass_cache: true` (asserts `source=fresh-aud
 binary without bypass (asserts `source=live-cache`). Both paths must produce their expected outcome. Without the flag
 (prod), the gate runs once and accepts either outcome.
 
-- [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
-  at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:
+- [ ] **Production `/mcp` dual-stack smoke passes checks 1–6.** Prefer the scripted suite:
 
   ```bash
+  scripts/release/mcp-smoke.sh https://anc.dev
+  ```
+
+  Manual spot-checks when triaging a single gate:
+
+  ```bash
+  # Legacy initialize — client 2025-06-18; instructions mention server revision 2026-07-28
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"postflight","version":"1"}}}' \
     https://anc.dev/mcp \
-    | jq '{server: .result.serverInfo.name, protocol: .result.protocolVersion}'
-  # expect: server: "anc", protocol: "2025-06-18"
+    | jq '{server: .result.serverInfo.name, instructions: (.result.instructions | contains("2026-07-28"))}'
+  # expect: server: "anc", instructions: true
 
+  # Legacy tools/list — 13 tools
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     https://anc.dev/mcp \
     | jq '.result.tools | length'
-  # expect: 9
+  # expect: 13
+
+  META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"postflight","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}'
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
+    https://anc.dev/mcp \
+    | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
+  # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
   ```
 
-  A 503 / kill-switch envelope means `MCP_ENABLED` is wrong at the top level (production). A non-9 tool count is a
+  A 503 / kill-switch envelope means `MCP_ENABLED` is wrong at the top level (production). A non-13 tool count is a
   tool-wiring regression that escaped preflight — block and roll back if it cannot be hotfixed quickly.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Same shape as

@@ -35,13 +35,14 @@
 //      never touches R2 directly.
 //   8. Map the discriminated kind to the typed-state response.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { loadHintsIndex, lookupOnly, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import type { Catalog } from '../catalog';
+import { requestHeader } from '../request-header';
 
 export interface ScorecardAuditEnv extends OrchestrateEnv {
   MCP_LIVE_SCORING_ENABLED?: string;
@@ -116,28 +117,31 @@ async function consumeHourlyBudget(
 }
 
 export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog, env: ScorecardAuditEnv): void {
-  server.tool(
+  server.registerTool(
     'score_cli',
-    'Run a fresh container audit for a CLI when no cached scorecard exists. Provide ONE of: slug, binary, install, ' +
-      'github_url (same validator as get_scorecard). On registry or R2-cache hit, returns isError: false with ' +
-      'next_tool: get_scorecard — cache state is data, not failure. On cache miss, runs a metered container audit ' +
-      'gated by MCP_AUDIT_LIMITER (5 per 60-second burst) AND a KV-backed per-hour window (5 audits per 60 minutes ' +
-      'per IP — the plan ceiling that the CF binding alone cannot express). No anon fallback at the audit tier: a ' +
-      'request without cf-connecting-ip returns -32099 immediately. Disabled when MCP_LIVE_SCORING_ENABLED is not ' +
-      '"true" — the read tier on get_scorecard stays alive serving cached scorecards.',
     {
-      slug: z.string().optional().describe('Registry slug, e.g. "ripgrep".'),
-      binary: z.string().optional().describe('CLI binary name.'),
-      install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
-      github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo).'),
-      bypass_cache: z
-        .boolean()
-        .optional()
-        .describe(
-          'Release-smoke escape hatch: when true AND the operator has bound MCP_CACHE_BYPASS_ALLOWED="true" ' +
-            '(staging env only), skip the R2 read tier so the live container DO path is always exercised. ' +
-            'Silently ignored when the env binding is absent (prod). Rate limiters still apply.',
-        ),
+      description:
+        'Run a fresh container audit for a CLI when no cached scorecard exists. Provide ONE of: slug, binary, install, ' +
+        'github_url (same validator as get_scorecard). On registry or R2-cache hit, returns isError: false with ' +
+        'next_tool: get_scorecard — cache state is data, not failure. On cache miss, runs a metered container audit ' +
+        'gated by MCP_AUDIT_LIMITER (5 per 60-second burst) AND a KV-backed per-hour window (5 audits per 60 minutes ' +
+        'per IP — the plan ceiling that the CF binding alone cannot express). No anon fallback at the audit tier: a ' +
+        'request without cf-connecting-ip returns -32099 immediately. Disabled when MCP_LIVE_SCORING_ENABLED is not ' +
+        '"true" — the read tier on get_scorecard stays alive serving cached scorecards.',
+      inputSchema: {
+        slug: z.string().optional().describe('Registry slug, e.g. "ripgrep".'),
+        binary: z.string().optional().describe('CLI binary name.'),
+        install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
+        github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo).'),
+        bypass_cache: z
+          .boolean()
+          .optional()
+          .describe(
+            'Release-smoke escape hatch: when true AND the operator has bound MCP_CACHE_BYPASS_ALLOWED="true" ' +
+              '(staging env only), skip the R2 read tier so the live container DO path is always exercised. ' +
+              'Silently ignored when the env binding is absent (prod). Rate limiters still apply.',
+          ),
+      },
     },
     async (args, extra) => {
       // Step 1: MCP_LIVE_SCORING_ENABLED kill switch.
@@ -225,8 +229,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       }
 
       // Step 4: cf-connecting-ip presence check (no anon fallback).
-      const ip = extra?.requestInfo?.headers?.['cf-connecting-ip'];
-      const ipString = typeof ip === 'string' ? ip : null;
+      const ipString = requestHeader(extra, 'cf-connecting-ip');
       if (!ipString) {
         return jsonRpcError32099(
           'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable on the audit tier.',

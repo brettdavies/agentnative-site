@@ -12,6 +12,7 @@
 //     X-Llms-Txt, Cache-Control, staging X-Robots-Tag guard).
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
+import { isLegacyRequest } from '@modelcontextprotocol/server';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
@@ -41,9 +42,22 @@ import {
   type WebAuditRouteEnv,
 } from './audit-web/route';
 import { applyHeaders, isSingleRepresentation } from './headers';
+import { getWarmCatalog, loadCatalog } from './mcp/catalog';
+import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
-import { buildMcpHandler, type McpEnv } from './mcp/server';
-import { logVisitor } from './mcp/visitor-log';
+import { runWithMcpEnv } from './mcp/env-context';
+import { buildMcpRateLimitKey, headerMcpMethod, headerMcpName } from './mcp/rate-limit';
+import { runWithMcpRequest } from './mcp/request-context';
+import { getMcpHandler, type McpEnv, resolveLegacyMode } from './mcp/server';
+import {
+  extractClientNameFromBody,
+  extractProtocolVersion,
+  extractTransportErrorCode,
+  logMcpRequest,
+  type McpEra,
+  type McpRequestOutcome,
+  type McpResponseFormat,
+} from './mcp/telemetry';
 import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
@@ -128,6 +142,7 @@ export interface Env {
   MCP_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   MCP_ENABLED?: string;
   MCP_LIVE_SCORING_ENABLED?: string;
+  MCP_LEGACY_ENABLED?: string;
   // Web-audit bindings. WEB_AUDIT_LIMITER is the session-keyed burst
   // limiter (`<sid>:<sha256(target)>`, 10/60s) on the fresh /api/audit-web
   // path; WEB_AUDIT_LIMITER_IP is the coarse per-IP fallback (30/60s) and
@@ -161,6 +176,20 @@ function jsonRpcError(code: number, message: string): Response {
       'cache-control': 'no-store',
     },
   });
+}
+
+function classifyRpcMethod(parsedBody: unknown): string | null {
+  if (typeof parsedBody !== 'object' || parsedBody === null) return null;
+  const method = (parsedBody as { method?: unknown }).method;
+  return typeof method === 'string' ? method : null;
+}
+
+function classifyToolName(parsedBody: unknown): string | null {
+  if (typeof parsedBody !== 'object' || parsedBody === null) return null;
+  const params = (parsedBody as { params?: unknown }).params;
+  if (typeof params !== 'object' || params === null) return null;
+  const name = (params as { name?: unknown }).name;
+  return typeof name === 'string' ? name : null;
 }
 
 function rewriteToMarkdown(url: URL): URL {
@@ -499,9 +528,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   //      derived from the client's actual preference.
   //   6. Handler response returned directly — NOT through applyHeaders
   //      (which would strip the no-store directive and risk mis-
-  //      applying static-asset Cache-Control). No Access-Control-
-  //      Allow-Origin header is set: the endpoint is server-to-agent
-  //      JSON-RPC, not browser-to-server (KTD-10 / R15).
+  //      applying static-asset Cache-Control). All Access-Control-*
+  //      headers are stripped (corsOptions:false at createMcpHandler
+  //      plus stripCorsHeaders): the endpoint is server-to-agent
+  //      JSON-RPC, not browser-to-server (KTD-10 / R15). When the
+  //      client negotiated JSON, SSE bodies from the legacy transport
+  //      are coerced to application/json (coerceMcpJsonResponse).
   if (pathname === '/mcp' && request.method !== 'OPTIONS') {
     // OPTIONS deliberately falls through to the asset-first dispatch
     // below — CF Static Assets returns 404, which is the deliberate
@@ -522,6 +554,19 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     } else {
       // Step 1: MCP_ENABLED kill switch.
       if (env.MCP_ENABLED !== 'true') {
+        const host = new URL(request.url).host;
+        logMcpRequest({
+          era: 'legacy',
+          method: null,
+          name: null,
+          client_name: null,
+          protocol_version: null,
+          host,
+          response_format: 'json',
+          outcome: 'disabled',
+          error_code: null,
+          duration_ms: 0,
+        });
         return new Response('mcp is currently disabled by the operator\n', {
           status: 503,
           headers: {
@@ -548,7 +593,21 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
       // Step 3: Accept-header check.
       const format = detectMcpFormat(request);
+      const responseFormat: McpResponseFormat = format === 'json' ? 'json' : 'sse';
+      const host = new URL(request.url).host;
       if (format === false) {
+        logMcpRequest({
+          era: 'legacy',
+          method: null,
+          name: null,
+          client_name: null,
+          protocol_version: null,
+          host,
+          response_format: 'json',
+          outcome: 'accept_rejected',
+          error_code: null,
+          duration_ms: 0,
+        });
         // The 406 rejection happens before any JSON-RPC parsing so the
         // body is plain text without a `jsonrpc`/`id`/`error` envelope.
         return new Response(
@@ -563,15 +622,61 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
         );
       }
 
-      // Step 4: MCP_LIMITER gate, then visitor log with gate_result.
+      const started = Date.now();
+      let parsedBody: unknown;
+      try {
+        parsedBody = await request.clone().json();
+      } catch {
+        parsedBody = undefined;
+      }
+
+      const legacyEra = await isLegacyRequest(request, parsedBody);
+      const era: McpEra = legacyEra ? 'legacy' : 'modern';
+      const legacyMode = resolveLegacyMode(env as McpEnv);
+
+      if (legacyMode === 'reject' && legacyEra) {
+        logMcpRequest({
+          era,
+          method: 'initialize',
+          name: null,
+          client_name: extractClientNameFromBody(parsedBody),
+          protocol_version: extractProtocolVersion(parsedBody, request),
+          host,
+          response_format: responseFormat,
+          outcome: 'legacy_rejected',
+          error_code: null,
+          duration_ms: Date.now() - started,
+        });
+        return jsonRpcError(-32099, 'legacy MCP requests are disabled');
+      }
+
+      // Step 4: MCP_LIMITER gate (era-aware read tier).
       let gateResult: 'passed' | 'rate_limited' = 'passed';
       if (env.MCP_LIMITER) {
-        const key = request.headers.get('cf-connecting-ip') ?? 'anon';
+        const catalog = await loadCatalog(env as McpEnv);
+        const ip = request.headers.get('cf-connecting-ip') ?? 'anon';
+        const key = buildMcpRateLimitKey({
+          era,
+          ip,
+          mcpName: headerMcpName(request),
+          catalog,
+        });
         const { success } = await env.MCP_LIMITER.limit({ key });
         if (!success) gateResult = 'rate_limited';
       }
-      logVisitor(request, { format, gate_result: gateResult });
       if (gateResult === 'rate_limited') {
+        logMcpRequest({
+          era,
+          method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
+          name: headerMcpName(request),
+          client_name: extractClientNameFromBody(parsedBody),
+          protocol_version: extractProtocolVersion(parsedBody, request),
+          host,
+          response_format: responseFormat,
+          outcome: 'rate_limited',
+          error_code: -32099,
+          duration_ms: Date.now() - started,
+        });
         return jsonRpcError(-32099, 'rate limit exceeded');
       }
 
@@ -580,18 +685,38 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       sdkHeaders.set('accept', 'application/json, text/event-stream');
       const sdkRequest = new Request(request, { headers: sdkHeaders });
 
-      // Step 6: build per-request handler and return its response
-      // directly. The handler sets its own content-type for both JSON
-      // and SSE; we always set Cache-Control: no-store and strip any
-      // Access-Control-Allow-Origin the SDK added because the endpoint
-      // is server-to-agent JSON-RPC, not browser-to-server (KTD-10).
-      // Browser-origin POSTs fail the browser's same-origin check;
-      // returning ACAO would defeat the deliberate posture.
-      const handler = await buildMcpHandler(env as McpEnv, { jsonResponse: format === 'json' });
-      const response = await handler(sdkRequest, env as McpEnv, ctx);
+      // Step 6: warmed catalog + module-scoped handler.
+      await loadCatalog(env as McpEnv);
+      getWarmCatalog(); // assert warmed before sync factory read
+      const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
+      const rawResponse = await runWithMcpRequest(sdkRequest, () =>
+        runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
+      );
+      // Legacy transport SSE→JSON when the client negotiated JSON (see
+      // coerce-json-response.ts). Modern responseMode:'json' already returns
+      // application/json; this is a no-op on that path.
+      const response = await coerceMcpJsonResponse(rawResponse, responseFormat);
       const headers = new Headers(response.headers);
-      headers.delete('access-control-allow-origin');
+      stripCorsHeaders(headers);
       headers.set('cache-control', 'no-store');
+
+      const errorCode = await extractTransportErrorCode(response);
+      let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
+      if (outcome === 'ok' && !response.ok) outcome = 'error';
+
+      logMcpRequest({
+        era,
+        method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
+        name: headerMcpName(request) ?? classifyToolName(parsedBody),
+        client_name: extractClientNameFromBody(parsedBody),
+        protocol_version: extractProtocolVersion(parsedBody, request),
+        host,
+        response_format: responseFormat,
+        outcome,
+        error_code: errorCode,
+        duration_ms: Date.now() - started,
+      });
+
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
   }

@@ -2,7 +2,6 @@
 //
 // Opt-in suite (project: staging-mcp). Excluded from the default
 // `bun run test:e2e` run because it hits the real CF staging Worker, the
-// agents@^0.13.3 + @modelcontextprotocol/sdk runtime in workerd, and the
 // real registry-index.json + mcp-catalog.json bundle. Use to validate a
 // staging deploy before promoting to production or to triage a
 // regression that the bun unit suite can't reproduce against workerd.
@@ -64,7 +63,7 @@ type JsonRpcBody = {
 };
 
 test.describe('staging /mcp — handshake', () => {
-  test('initialize returns serverInfo.name "anc" and protocolVersion "2025-06-18"', async ({ request }) => {
+  test('initialize returns serverInfo.name "anc" and instructions mention 2026-07-28', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/mcp`, {
       headers: MCP_HEADERS,
       data: JSON.stringify({
@@ -82,7 +81,7 @@ test.describe('staging /mcp — handshake', () => {
     const body = (await res.json()) as JsonRpcBody;
     expect(body.error).toBeUndefined();
     expect(body.result?.serverInfo?.name).toBe('anc');
-    expect(body.result?.protocolVersion).toBe('2025-06-18');
+    expect(body.result?.instructions ?? '').toContain('2026-07-28');
   });
 
   test('initialize advertises stateless capabilities (no resources/subscribe)', async ({ request }) => {
@@ -115,7 +114,7 @@ test.describe('staging /mcp — handshake', () => {
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
-    expect(instructions).toContain('2025-06-18');
+    expect(instructions).toContain('2026-07-28');
     expect(instructions).toContain('https://anc.dev/mcp-skill.md');
   });
 });
