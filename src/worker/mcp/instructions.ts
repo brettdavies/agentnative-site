@@ -55,7 +55,8 @@ export function buildInstructions(_env: InstructionsEnv): string {
       'rate-limit breach, infrastructure error).',
     'Errors carry on two layers. Tool-level failures return CallToolResult with isError: true plus a textual ' +
       'message; the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes ' +
-      'at HTTP 200: -32700 parse error for malformed JSON, -32099 for rate-limit breach (either limiter). The 406 ' +
+      'at HTTP 200: -32700 parse error for malformed JSON, -32099 for rate-limit breach (either limiter), and ' +
+      `-32022 with data.supported listing ${SPEC_REVISION} when the disabled legacy lane rejects a request. The 406 ` +
       'Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope.',
     `Rate limits are split. ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP gate ` +
       `every call (MCP_LIMITER). ${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per ` +

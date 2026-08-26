@@ -6,7 +6,8 @@ lookup. The catalog is public: no authentication, no API key.
 
 ## Quick reference
 
-The server speaks streamable HTTP per MCP spec revision `2026-07-28`. The endpoint serves **dual-stack** clients: legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no `initialize`).
+The server speaks streamable HTTP per MCP spec revision `2026-07-28`. The endpoint serves **dual-stack** clients: legacy
+(`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no `initialize`).
 
 ### Legacy quick start
 
@@ -273,13 +274,16 @@ concrete resource (`anc://registry`).
 
 Two error layers. The discriminator is whether the JSON-RPC envelope itself succeeded.
 
-| Symptom                                           | Layer        | Recovery                                                                                                   |
-| ------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
-| `CallToolResult` with `isError: true`             | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).    |
-| JSON-RPC envelope with `error.code: -32700`       | Transport    | Malformed JSON body. Fix the request and resend.                                                           |
-| JSON-RPC envelope with `error.code: -32099`       | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                   |
-| HTTP `406 Not Acceptable` (plain-text body)       | Pre-JSON-RPC | Your `Accept` header doesn't include `application/json` or `text/event-stream`. Send one or both.          |
-| HTTP `503 Service Unavailable` with `Retry-After` | Pre-JSON-RPC | Operator kill switch. Honor `Retry-After`. The read tier may still be available even if `score_cli` isn't. |
+| Symptom                                           | Layer        | Recovery                                                                                                                       |
+| ------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `CallToolResult` with `isError: true`             | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).                        |
+| JSON-RPC envelope with `error.code: -32700`       | Transport    | Malformed JSON body. Fix the request and resend.                                                                               |
+| JSON-RPC envelope with `error.code: -32099`       | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
+| JSON-RPC envelope with `error.code: -32022`       | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
+| JSON-RPC envelope with `error.code: -32020`       | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |
+| JSON-RPC envelope with `error.code: -32602`       | Transport    | Invalid params — also the miss code for an unknown tool or resource (the legacy `-32002` resource-miss code is never emitted). |
+| HTTP `406 Not Acceptable` (plain-text body)       | Pre-JSON-RPC | Your `Accept` header doesn't include `application/json` or `text/event-stream`. Send one or both.                              |
+| HTTP `503 Service Unavailable` with `Retry-After` | Pre-JSON-RPC | Operator kill switch. Honor `Retry-After`. The read tier may still be available even if `score_cli` isn't.                     |
 
 ### Common tool-level error shapes
 
@@ -328,7 +332,11 @@ For clients that need the protocol details.
 **Endpoint.** `POST https://anc.dev/mcp`. Other methods return `405 Method Not Allowed` with `Allow: POST`. No
 authentication.
 
-**Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client `protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name` (call only), and `_meta` inside JSON-RPC **params** (including `io.modelcontextprotocol/clientCapabilities` on both list and call). The server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks the build.
+**Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client
+`protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name`
+(call only), and `_meta` inside JSON-RPC **params** (including `io.modelcontextprotocol/clientCapabilities` on both list
+and call). The server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks the
+build.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.

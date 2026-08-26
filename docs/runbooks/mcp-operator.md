@@ -17,7 +17,7 @@ disable below).
 | -------------------------- | ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MCP_ENABLED`              | secret                  | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
 | `MCP_LIVE_SCORING_ENABLED` | secret                  | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
-| `MCP_LEGACY_ENABLED`       | `vars` (`"true"`)       | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` and returns JSON-RPC `-32099` before SDK dispatch. Modern lane unaffected.                                                                                 |
+| `MCP_LEGACY_ENABLED`       | `vars` (`"true"`)       | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                    |
 
 Decision flow:
 
@@ -200,8 +200,9 @@ while it remains a vars binding — Cloudflare API **10053** (binding name alrea
 bun x wrangler deploy --env staging --var MCP_LEGACY_ENABLED:false
 ```
 
-1. After that deploy, POST legacy `initialize` → expect HTTP 200 with JSON-RPC `{ "error": { "code": -32099, "message":
-   "legacy MCP requests are disabled" } }` and shell log `"outcome":"legacy_rejected"`.
+1. After that deploy, POST legacy `initialize` → expect HTTP 200 with JSON-RPC `{ "error": { "code": -32022, "message":
+   "legacy MCP requests are disabled; use MCP 2026-07-28", "data": { "supported": ["2026-07-28"] } } }`, the request
+   `id` echoed, and shell log `"outcome":"legacy_rejected"` with `"error_code":-32022`.
 2. Re-run modern checks 5–6 → expect pass.
 3. Restore dual-stack (required for normal soak — preflight/postflight legacy recipes assume it):
 
