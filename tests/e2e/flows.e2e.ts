@@ -20,29 +20,28 @@ test.describe('cold HN land → browse principles → theme dark → reload stil
     await expect(page.locator('h1')).toContainText('Progressive Help Discovery');
   });
 
-  test('theme button cycles to dark and persists across reload via localStorage', async ({ page }) => {
+  test('theme button toggles to the opposite of OS preference and persists across reload', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
     await page.goto('/');
     const btn = page.locator('[data-theme-cycle]').first();
-    // Cycle: system → light → dark.
-    await btn.click();
+    // Unset → follows OS (light). One click pins dark.
+    await expect(btn).toHaveAttribute('data-theme-choice', 'light');
     await btn.click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    // data-theme-choice reflects state after reload.
     await expect(page.locator('[data-theme-cycle]').first()).toHaveAttribute('data-theme-choice', 'dark');
   });
 
-  test('cycling back to system clears localStorage and removes data-theme', async ({ page }) => {
+  test('second click swaps back to light (no system stop in the cycle)', async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
     await page.goto('/');
     const btn = page.locator('[data-theme-cycle]').first();
-    // system → light → dark → system.
-    await btn.click();
-    await btn.click();
-    await btn.click();
-    await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/);
-    await expect(btn).toHaveAttribute('data-theme-choice', 'system');
+    await btn.click(); // → dark
+    await btn.click(); // → light
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect(btn).toHaveAttribute('data-theme-choice', 'light');
   });
 });
 
@@ -139,14 +138,19 @@ test.describe('code-copy + anchor-copy', () => {
     // The copy button is injected by src/client/clipboard.ts: each <pre> is
     // wrapped in <div class="code-wrap"> and the <button class="copy-button">
     // is appended to the wrap as a SIBLING of <pre> (not a child). Visibility
-    // is gated by `:root.js main .code-wrap .copy-button { display: inline-block }`,
+    // is gated by `:root.js main .code-wrap .copy-button { display: inline-flex }`,
     // so we wait for the .js root class added by theme-init.ts before locating.
     await page.locator('html.js').waitFor();
     const button = page.locator('main .code-wrap .copy-button').first();
+    await expect(button.locator('.copy-button__icon svg')).toHaveCount(1);
+    await expect(button).toHaveAttribute('aria-label', 'Copy code');
     await button.scrollIntoViewIfNeeded();
     await button.click();
     const copied = await page.evaluate(() => navigator.clipboard.readText());
     expect(copied.length).toBeGreaterThan(0);
+    await expect(button).toHaveAttribute('data-copy-state', 'copied');
+    await expect(button).not.toHaveAttribute('data-copy-state', 'copied', { timeout: 3000 });
+    await expect(button.locator('.copy-button__icon svg')).toHaveCount(1);
   });
 
   test('anchor permalink copies canonical URL and updates the hash', async ({ page, context, browserName }) => {
@@ -200,6 +204,8 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await expect(page.locator('.spec[data-s="cli"] .spec__row')).toHaveCount(8);
     await expect(page.locator('.spec[data-s="web"]')).toBeHidden();
     await expect(page.locator('form[data-live-score-form]')).toBeVisible();
+    await expect(page.locator('.hero__proof > [data-s="cli"]')).toBeVisible();
+    await expect(page.locator('.hero__proof > [data-s="web"]')).toBeHidden();
     // Board rows are threaded from the computed leaderboard — non-empty,
     // each with a meter.
     const rows = page.locator('.board[data-s="cli"] .lrow');
@@ -207,20 +213,26 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await expect(rows.first().locator('.meter')).toBeVisible();
   });
 
-  test('activating the Website radio swaps board, spec index, and input together (no JS)', async ({ browser }) => {
+  test('activating the Website radio swaps board, spec index, hero, and input together (no JS)', async ({
+    browser,
+  }) => {
     const ctx = await browser.newContext({ javaScriptEnabled: false });
     const page = await ctx.newPage();
     await page.goto('/');
     // CLI is the no-JS default.
     await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
+    await expect(page.locator('.hero__proof > [data-s="cli"]')).toBeVisible();
 
     await page.locator('label[for="s-web"]').click();
     await expect(page.locator('.board[data-s="web"]')).toBeVisible();
     await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
-    await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(5);
+    await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(6);
     await expect(page.locator('.spec[data-s="cli"]')).toBeHidden();
     await expect(page.locator('form[data-s="web"] input[name="url"]')).toBeVisible();
     await expect(page.locator('form[data-live-score-form]')).toBeHidden();
+    await expect(page.locator('.hero__proof > [data-s="web"]')).toBeVisible();
+    await expect(page.locator('.hero__proof > [data-s="cli"]')).toBeHidden();
+    await expect(page.locator('.hero__proof > [data-s="web"]')).toContainText('anc.dev');
     await ctx.close();
   });
 
@@ -260,6 +272,28 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
       expect(overflow, `overflow at ${width}px`).toBeLessThanOrEqual(0);
     }
   });
+
+  test('selecting Website updates visible Leaderboards href in header', async ({ page }) => {
+    await page.goto('/');
+    const nav = page.locator('.site-nav');
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    await page.locator('label[for="s-web"]').click();
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await page.reload();
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await expect(page.locator('#s-web')).toBeChecked();
+  });
+
+  test('no-JS: visible Leaderboards href follows homepage segment', async ({ browser }) => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const page = await ctx.newPage();
+    await page.goto('/');
+    const nav = page.locator('.site-nav');
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    await page.locator('label[for="s-web"]').click();
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await ctx.close();
+  });
 });
 
 test.describe('shell — grouped nav, hamburger, footer rows', () => {
@@ -268,10 +302,62 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
     await page.goto('/');
     const nav = page.getByRole('navigation', { name: 'Primary' });
     await expect(nav).toBeVisible();
-    await expect(nav.locator('a')).toHaveCount(6);
+    await expect(nav.locator('a')).toHaveCount(7);
+    await expect(nav.locator('a:visible')).toHaveCount(6);
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
     await expect(page.locator('.nav-burger')).toBeHidden();
     await expect(page.locator('.site-footer__source')).toBeVisible();
     await expect(page.locator('.site-footer__meta')).toBeVisible();
+  });
+
+  for (const width of [1100, 1180, 1280] as const) {
+    test(`laptop (${width}): full nav inline, hamburger hidden, no header overflow`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/');
+      const nav = page.getByRole('navigation', { name: 'Primary' });
+      await expect(nav).toBeVisible();
+      await expect(nav.locator('a')).toHaveCount(7);
+      await expect(nav.locator('a:visible')).toHaveCount(6);
+      await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
+      await expect(page.locator('.nav-burger')).toBeHidden();
+
+      const overflow = await page.evaluate(() => {
+        const row = document.querySelector('.site-header__row');
+        if (!row) return { ok: false, reason: 'missing row' };
+        const style = getComputedStyle(row);
+        const navEl = document.querySelector('.site-nav');
+        const burger = document.querySelector('.nav-burger');
+        const links = [...(navEl?.querySelectorAll('a') ?? [])].map((a) => ({
+          text: a.textContent?.trim() ?? '',
+          visible: (a as HTMLElement).offsetParent !== null && getComputedStyle(a).display !== 'none',
+        }));
+        return {
+          ok: true,
+          rowWidth: row.clientWidth,
+          scrollWidth: row.scrollWidth,
+          overflows: row.scrollWidth > row.clientWidth + 1,
+          flexWrap: style.flexWrap,
+          burgerDisplay: burger ? getComputedStyle(burger).display : null,
+          navDisplay: navEl ? getComputedStyle(navEl).display : null,
+          links,
+          tagVisible: getComputedStyle(document.querySelector('.site-brand__tag')!).display !== 'none',
+        };
+      });
+      expect(overflow.ok).toBe(true);
+      expect(overflow.overflows).toBe(false);
+      expect(overflow.burgerDisplay).toBe('none');
+      expect(overflow.navDisplay).toBe('flex');
+      expect(overflow.links).toBeDefined();
+      expect(overflow.links!.filter((l) => l.visible).length).toBe(6);
+      expect(overflow.links!.filter((l) => !l.visible).length).toBe(1);
+    });
+  }
+
+  test('tablet (1024): hamburger replaces inline nav', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.goto('/');
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeHidden();
+    await expect(page.locator('.nav-burger')).toBeVisible();
   });
 
   test('mobile (390): inline links hidden, hamburger toggles the panel by pointer', async ({ page }) => {
@@ -325,6 +411,40 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
     await page.keyboard.press('Escape');
     await expect(nav).toBeHidden();
     await expect(page.locator('.nav-burger__cb')).toBeFocused();
+  });
+});
+
+test.describe('leaderboard surface nav', () => {
+  test('stored web preference flips visible Leaderboards off homepage', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label[for="s-web"]').click();
+    await page.goto('/about');
+    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+  });
+
+  test('cold /web visit does not write preference (Leaderboards stays CLI default)', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('anc-surface'));
+    await page.goto('/web');
+    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    const stored = await page.evaluate(() => localStorage.getItem('anc-surface'));
+    expect(stored).toBeNull();
+  });
+
+  test('Probe A navigates CLI → Website and writes preference', async ({ page }) => {
+    await page.goto('/scorecards');
+    await page.locator('label[for="board-s-web"]').click();
+    await expect(page).toHaveURL(/\/web$/);
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
+    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+  });
+
+  test('Probe A navigates Website → CLI and writes preference', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label[for="s-web"]').click();
+    await page.goto('/web');
+    await page.locator('label[for="board-s-cli"]').click();
+    await expect(page).toHaveURL(/\/scorecards$/);
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
 

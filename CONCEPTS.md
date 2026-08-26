@@ -26,6 +26,17 @@ The agent-native badge a tool earns when its scorecard clears the credit-weighte
 compliance signal on a tool's scorecard and the mark a project displays to claim agent-native status. The threshold is a
 scoring-policy value, not fixed in this glossary.
 
+## Visitor preference
+
+### Visitor surface preference
+
+The visitor's chosen CLI vs Website leaderboard surface (`cli` | `web`), stored in `localStorage` under `anc-surface`.
+Writers are the homepage CLI|Website segment and the board Probe A segment; readers are the dual header Leaderboards
+anchors (CSS visibility flip via homepage `:has` or off-home `html[data-surface]`). Preference drives where Leaderboards
+points next even when it differs from the board currently displayed; visiting a board URL alone does not write
+preference. On the homepage, no-JS `:has` keeps Leaderboards, Full board, and segment in sync; board Probe A requires
+JavaScript to navigate between full boards.
+
 ## Content surface
 
 ### Markdown twin

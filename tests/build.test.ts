@@ -496,6 +496,33 @@ describe('emitShell — OG image alt text', () => {
   });
 });
 
+describe('emitShell — Leaderboards dual nav + surface script', () => {
+  function shell(path = '/about') {
+    return emitShell({
+      title: 'About',
+      description: 'About anc.dev',
+      canonicalPath: path,
+      bodyHtml: '<article>body</article>',
+      themeInitJs: '/* theme init */',
+      baseUrl: undefined,
+    });
+  }
+
+  test('emits two Leaderboards anchors and sitewide surface.js', () => {
+    const html = shell();
+    expect(html).toContain('data-leaderboards-nav');
+    expect(html).toContain('href="/scorecards" data-s="cli" data-leaderboards-nav');
+    expect(html).toContain('href="/web" data-s="web" data-leaderboards-nav');
+    expect(html).toContain('<script src="/js/surface.js" defer></script>');
+  });
+
+  test('aria-current follows pathname on the matching Leaderboards anchor only', () => {
+    expect(shell('/scorecards')).toContain('href="/scorecards" data-s="cli" data-leaderboards-nav aria-current="page"');
+    expect(shell('/scorecards')).not.toContain('data-s="web" data-leaderboards-nav aria-current');
+    expect(shell('/web')).toContain('href="/web" data-s="web" data-leaderboards-nav aria-current="page"');
+  });
+});
+
 // -------------------------------------------------------------------
 // Scorecards module
 // -------------------------------------------------------------------
@@ -1840,6 +1867,8 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     const lb = [entry('rg', 'agent-optimized', null), entry('lazygit', null, 'human-tui'), entry('eza', null, null)];
     const html = buildLeaderboardBody(lb, '<p>m</p>');
     expect(html).toContain('class="leaderboard-hero__meta"');
+    expect(html).toContain('data-surface-board-seg');
+    expect(html).toContain('id="board-s-cli" checked');
     expect(html).toContain('3 audited tools in the corpus');
     // All button no longer carries the redundant "(N)" count — the new
     // subhead owns the headcount.
@@ -2859,6 +2888,14 @@ describe('emitHomepage — index.md twin frontmatter', () => {
     const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
     expect(indexHtml).not.toContain('---\ntitle:');
     expect(indexHtml).not.toMatch(/^url: /m);
+  });
+
+  test('index.html bakes the web hero from hero-anc.dev.json (no Worker placeholder)', async () => {
+    const indexHtml = await readFile(join(distDir, 'index.html'), 'utf8');
+    expect(indexHtml).not.toContain('{{WEB_HERO_CARD}}');
+    expect(indexHtml).toContain('data-s="web"');
+    expect(indexHtml).toContain('audit_website anc.dev');
+    expect(indexHtml).toContain('bigscore__n">97');
   });
 });
 

@@ -1,9 +1,9 @@
 // Runtime web-leaderboard renderer: the /web board, its markdown twin,
 // and the homepage frontpage rows, all rendered at request time from the
-// R2 board aggregate. Web entries carry the two-score pair (GLOBAL is the
-// default sort, RELATIVE the toggle) and no tier/language/principle
-// columns; the toggle behavior lives in src/client/web-leaderboard.ts and
-// operates on the rendered rows. When the aggregate is absent or empty
+// R2 board aggregate. Web entries carry the two-score pair (RELATIVE is the
+// default sort; GLOBAL is the `?sort=global` toggle) and no tier/language/
+// principle columns; the toggle behavior lives in src/client/web-leaderboard.ts
+// and operates on the rendered rows. When the aggregate is absent or empty
 // (cold start, or a SPEC_VERSION bump that rotated every key) the board
 // renders a scoring-in-progress empty state rather than failing.
 
@@ -19,16 +19,22 @@ export type WebBoardRenderOpts = {
   view: WebBoardView;
   curatedCount: number;
   userCount: number;
+  /** Explicit sort from `?sort=`; null/undefined means the Relative default. */
   sort?: 'global' | 'relative' | null;
 };
 
+/** Resolve the board sort key: Relative unless Global is explicitly requested. */
+export function effectiveWebSort(sort: 'global' | 'relative' | null | undefined): 'global' | 'relative' {
+  return sort === 'global' ? 'global' : 'relative';
+}
+
 /**
- * Rank entries by the given score key (GLOBAL by default), ties broken by
+ * Rank entries by the given score key (RELATIVE by default), ties broken by
  * the other key then domain.
  */
 export function rankWebEntries<T extends WebAggregateEntry>(
   entries: T[],
-  sortKey: 'global' | 'relative' = 'global',
+  sortKey: 'global' | 'relative' = 'relative',
 ): (T & { rank: number })[] {
   const otherKey = sortKey === 'global' ? 'relative' : 'global';
   return entries
@@ -45,14 +51,15 @@ export function rankWebEntries<T extends WebAggregateEntry>(
 
 /**
  * Shareable URL for a board view. The toggle is plain server-rendered
- * navigation (zero JS); a present sort selection rides along on the HTML
- * links so switching view keeps the chosen order.
+ * navigation (zero JS); a non-default Global sort rides along on the HTML
+ * links so switching view keeps that order. Relative (the default) omits
+ * `?sort=` so `/web` stays the clean share URL.
  */
 function viewHref(target: WebBoardView, sort: 'global' | 'relative' | null | undefined, markdown: boolean): string {
   const base = markdown ? '/web.md' : '/web';
   const params: string[] = [];
   if (target === 'curated') params.push('view=curated');
-  if (!markdown && sort) params.push(`sort=${sort}`);
+  if (!markdown && sort === 'global') params.push('sort=global');
   return params.length > 0 ? `${base}?${params.join('&')}` : base;
 }
 
@@ -81,20 +88,34 @@ function boardCountLine(opts: Omit<WebBoardRenderOpts, 'sort'>): string {
   return `${total} ${siteNoun(total)} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted).`;
 }
 
+function boardSurfaceSeg(active: 'cli' | 'web'): string {
+  const cliChecked = active === 'cli' ? ' checked' : '';
+  const webChecked = active === 'web' ? ' checked' : '';
+  return `<div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
+    <input type="radio" name="board-surface" id="board-s-cli"${cliChecked} /><label for="board-s-cli">CLI</label>
+    <input type="radio" name="board-surface" id="board-s-web"${webChecked} /><label for="board-s-web">Website</label>
+  </div>`;
+}
+
+function boardHero(active: 'cli' | 'web'): string {
+  return `<section class="leaderboard-hero">
+  ${boardSurfaceSeg(active)}
+  <h1>Web Agent-Readiness Leaderboard</h1>
+  <p class="leaderboard-hero__lede">Agent-readiness scores for websites and their MCP servers, scored against the same <a href="/">eight principles</a> as the CLI leaderboard. See the <a href="/methodology">methodology</a> for how the web audit probes MCP shape, discovery surfaces, and machine-readable content.</p>`;
+}
+
 function heroMeta(opts: WebBoardRenderOpts): string {
   return `${boardCountLine(opts)} <a href="/web-audit">Audit your own</a>.`;
 }
 
-const BOARD_HERO = `<section class="leaderboard-hero">
-  <h1>Web Agent-Readiness Leaderboard</h1>
-  <p class="leaderboard-hero__lede">Agent-readiness scores for websites and their MCP servers, scored against the same <a href="/">eight principles</a> as the CLI leaderboard. See the <a href="/methodology">methodology</a> for how the web audit probes MCP shape, discovery surfaces, and machine-readable content.</p>`;
-
 /** Build the /web page body HTML from the assembled board entries. */
 export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoardRenderOpts): string {
-  const ranked = rankWebEntries(entries);
+  const sortKey = effectiveWebSort(opts.sort);
+  const ranked = rankWebEntries(entries, sortKey);
+  const globalActive = sortKey === 'global';
 
   if (ranked.length === 0) {
-    return `${BOARD_HERO}
+    return `${boardHero('web')}
 </section>
 <section class="leaderboard-empty">
   <p>Scoring in progress: board results land after the next rescore pass. <a href="/web-audit">Audit a website</a> to see how it scores.</p>
@@ -120,15 +141,15 @@ export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoard
     })
     .join('\n');
 
-  return `${BOARD_HERO}
+  return `${boardHero('web')}
   <p class="leaderboard-hero__meta">${heroMeta(opts)}</p>
 </section>
 
 <section class="leaderboard-filters" aria-label="View and sort">
   ${viewToggleNav(opts)}
   <div class="tier-filters" role="group" aria-label="Sort the board by">
-    <button type="button" class="tier-filter tier-filter--active" data-web-sort="global">Global</button>
-    <button type="button" class="tier-filter" data-web-sort="relative">Relative</button>
+    <button type="button" class="tier-filter${globalActive ? '' : ' tier-filter--active'}" data-web-sort="relative" aria-pressed="${globalActive ? 'false' : 'true'}">Relative</button>
+    <button type="button" class="tier-filter${globalActive ? ' tier-filter--active' : ''}" data-web-sort="global" aria-pressed="${globalActive ? 'true' : 'false'}">Global</button>
   </div>
 </section>
 
@@ -154,10 +175,10 @@ ${rows}
   <p>Each website is probed for its MCP server shape, MCP and agent discovery surfaces, machine-readable content
   (llms.txt, OpenAPI, JSON Schemas), root-HTML affordances, and crawl policy. Checks that do not apply to a site
   (no MCP server, no API surface, a different declared site type) are excluded rather than counted against it.
-  <strong>Global</strong> measures absolute agent capability against a maximally agent-ready site, so exposing and
-  nailing more surfaces ranks higher; <strong>Relative</strong> measures how agent-ready a site is for the checks
-  that apply to it, so a site perfect for its type approaches 100%. The board sorts by Global; each result page
-  headlines Relative.</p>
+  <strong>Relative</strong> measures how agent-ready a site is for the checks that apply to it, so a site perfect
+  for its type approaches 100%; <strong>Global</strong> measures absolute agent capability against a maximally
+  agent-ready site, so exposing and nailing more surfaces ranks higher. The board sorts by Relative by default;
+  each result page headlines Relative.</p>
   <p>The curated set is hand-picked; the all view also lists sites audited on demand, which stay on the board
   until their cached result ages out. To score any public site, use the <a href="/web-audit">web audit</a> or the
   <code>audit_website</code> MCP tool.</p>
@@ -166,7 +187,7 @@ ${rows}
 }
 
 /**
- * Build the /web.md markdown twin (GLOBAL order, both columns). Links are
+ * Build the /web.md markdown twin (RELATIVE order, both columns). Links are
  * absolutized against the serving origin so staging and local previews
  * stay self-consistent. The view switch renders as an in-body line (the
  * active view as plain text) because a bare query parameter would be
@@ -177,7 +198,7 @@ export function buildWebLeaderboardMarkdown(
   origin: string,
   opts: Omit<WebBoardRenderOpts, 'sort'>,
 ): string {
-  const ranked = rankWebEntries(entries);
+  const ranked = rankWebEntries(entries, 'relative');
   const viewSwitch =
     opts.view === 'curated'
       ? `View: [All](${origin}/web.md) | Curated`
@@ -192,7 +213,7 @@ export function buildWebLeaderboardMarkdown(
     '',
     countLine,
     '',
-    'Sorted by the Global score (absolute agent capability); Relative is the score for the checks that apply to each site.',
+    'Sorted by the Relative score (checks that apply to each site); Global measures absolute agent capability.',
     '',
   ];
   if (ranked.length === 0) {
@@ -220,7 +241,7 @@ export function buildWebLeaderboardMarkdown(
  */
 export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
   // The homepage pane headlines the site score (RELATIVE) and ranks by it,
-  // unlike /web which sorts by GLOBAL.
+  // matching /web's default sort.
   return rankWebEntries(entries, 'relative')
     .map((entry) => {
       const pct = entry.score.relative;

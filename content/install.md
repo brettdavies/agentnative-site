@@ -10,14 +10,6 @@ project directory.
 brew install brettdavies/tap/agentnative
 ```
 
-The tap publishes prebuilt bottles for Apple Silicon Macs (macOS 14 Sonoma and 15 Sequoia) and x86_64 Linux, with SHA256
-integrity hashes recorded in the formula. Intel Mac and arm64 Linux users compile from source via the same formula. To
-update in place:
-
-```bash
-brew upgrade brettdavies/tap/agentnative
-```
-
 ## Cargo
 
 ```bash
@@ -40,8 +32,8 @@ archive for your platform, extract, and put the `anc` binary on `$PATH`.
 ## What's next
 
 Once installed, invoke the CLI as `anc`. See [/audit](/audit) for usage: flags, output shapes, and how to interpret the
-per-principle audit IDs. The principles themselves are spelled out at [/](/), with one page per principle (`/p1` through
-`/p8`).
+per-principle audit IDs. The principles themselves are spelled out on [the homepage](/), with one page per principle
+(`/p1` through `/p8`).
 
 To install the **agent-native-cli skill bundle** instead (the Claude Code / Codex / Cursor / OpenCode skill that teaches
 an agent to write CLIs against this standard), see [/skill](/skill).
