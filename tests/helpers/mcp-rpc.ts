@@ -9,6 +9,8 @@ import {
   resetMcpHandlerCacheForTests,
   resolveLegacyMode,
 } from '../../src/worker/mcp/server';
+import { _resetHintsIndexCache } from '../../src/worker/score/orchestrate';
+import { _resetRegistryIndexCache } from '../../src/worker/score/registry-lookup';
 
 export type JsonRpcBody = {
   jsonrpc: '2.0';
@@ -121,6 +123,12 @@ export async function mcpInitialize(env: McpEnv): Promise<JsonRpcBody> {
 export function resetMcpTestState(): void {
   resetCatalogCacheForTests();
   resetMcpHandlerCacheForTests();
+  // Score-path indexes are isolate-scoped promises. Earlier suites can
+  // cache a fixture without ripgrep (or an empty index); without a reset,
+  // get_scorecard validates against the stale map and returns
+  // unrecognized_input for curated slugs.
+  _resetRegistryIndexCache();
+  _resetHintsIndexCache();
 }
 
 export function getJsonToolContent(body: JsonRpcBody): unknown {
