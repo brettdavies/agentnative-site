@@ -88,6 +88,10 @@ export function getMcpHandler(opts: GetMcpHandlerOptions): McpHandler {
     const sdkHandler = createMcpHandler(() => createAncServer(getWarmCatalog()), {
       legacy: opts.legacy,
       responseMode: opts.jsonResponse ? 'json' : 'auto',
+      // KTD-10: POST /mcp is server-to-agent. Default agents wrapper enables
+      // CORS headers (corsOptions={}); disable at the source. Dispatch also
+      // strips Access-Control-* as defense in depth.
+      corsOptions: false,
     });
     handler = sdkHandler as unknown as McpHandler;
     handlerCache.set(key, handler);

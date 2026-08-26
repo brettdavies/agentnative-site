@@ -534,6 +534,33 @@ describe('POST /mcp — MCP_LIMITER gate', () => {
   });
 });
 
+describe('POST /mcp — Accept negotiation content-type', () => {
+  test('Accept: application/json returns application/json (not SSE) for legacy initialize', async () => {
+    // Regression: agents legacy transport requires dual Accept and defaults
+    // to SSE; dispatch must coerce so smoke/clients that request JSON get JSON.
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).not.toContain('event-stream');
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    expect(res.headers.get('access-control-allow-methods')).toBeNull();
+    const body = (await readMcpJson(res)) as {
+      result?: { serverInfo?: { name?: string }; instructions?: string };
+    };
+    expect(body.result?.serverInfo?.name).toBe('anc');
+    expect(body.result?.instructions ?? '').toContain('2026-07-28');
+  });
+
+  test('Accept dual MIME (json wins) still returns application/json for legacy initialize', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json, text/event-stream', initBody());
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).not.toContain('event-stream');
+  });
+});
+
 describe('POST /mcp — mcp.request telemetry fires after the gate decision', () => {
   function parseMcpRequestLogs(seen: Array<{ args: unknown[] }>) {
     return seen

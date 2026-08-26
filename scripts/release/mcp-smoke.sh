@@ -281,8 +281,10 @@ run_check_5_modern_tools_list() {
         -d "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/list\",\"params\":{$META}}" \
         "${BASE_URL}/mcp" 2>/dev/null || echo "000")
     tool_count=$(jq '.result.tools | length' "$OUT/5-modern-list.json" 2>/dev/null || echo "0")
-    ttl=$(jq '[.. | objects | .ttlMs? // empty] | first // empty' "$OUT/5-modern-list.json" 2>/dev/null || true)
-    cache_scope=$(jq '[.. | objects | .cacheScope? // empty] | first // empty' "$OUT/5-modern-list.json" 2>/dev/null || true)
+    # -r: cacheScope is a JSON string; without raw output the value is `"public"`
+    # (quoted) and the == public comparison fails even when the field is correct.
+    ttl=$(jq -r '[.. | objects | .ttlMs? // empty] | first // empty' "$OUT/5-modern-list.json" 2>/dev/null || true)
+    cache_scope=$(jq -r '[.. | objects | .cacheScope? // empty] | first // empty' "$OUT/5-modern-list.json" 2>/dev/null || true)
 
     if [[ "$http_code" == "503" ]]; then
         report 5 modern-tools-list no "HTTP 503 (MCP_ENABLED off?)"

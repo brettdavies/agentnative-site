@@ -36,6 +36,7 @@ import {
 } from './audit-web/route';
 import { applyHeaders, isSingleRepresentation } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
+import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
 import { runWithMcpEnv } from './mcp/env-context';
 import { buildMcpRateLimitKey, headerMcpMethod, headerMcpName } from './mcp/rate-limit';
@@ -493,9 +494,12 @@ export default {
     //      derived from the client's actual preference.
     //   6. Handler response returned directly — NOT through applyHeaders
     //      (which would strip the no-store directive and risk mis-
-    //      applying static-asset Cache-Control). No Access-Control-
-    //      Allow-Origin header is set: the endpoint is server-to-agent
-    //      JSON-RPC, not browser-to-server (KTD-10 / R15).
+    //      applying static-asset Cache-Control). All Access-Control-*
+    //      headers are stripped (corsOptions:false at createMcpHandler
+    //      plus stripCorsHeaders): the endpoint is server-to-agent
+    //      JSON-RPC, not browser-to-server (KTD-10 / R15). When the
+    //      client negotiated JSON, SSE bodies from the legacy transport
+    //      are coerced to application/json (coerceMcpJsonResponse).
     if (pathname === '/mcp' && request.method !== 'OPTIONS') {
       // OPTIONS deliberately falls through to the asset-first dispatch
       // below — CF Static Assets returns 404, which is the deliberate
@@ -651,11 +655,15 @@ export default {
         await loadCatalog(env as McpEnv);
         getWarmCatalog(); // assert warmed before sync factory read
         const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
-        const response = await runWithMcpRequest(sdkRequest, () =>
+        const rawResponse = await runWithMcpRequest(sdkRequest, () =>
           runWithMcpEnv(env as McpEnv, () => handler.fetch(sdkRequest, { parsedBody })),
         );
+        // Legacy transport SSE→JSON when the client negotiated JSON (see
+        // coerce-json-response.ts). Modern responseMode:'json' already returns
+        // application/json; this is a no-op on that path.
+        const response = await coerceMcpJsonResponse(rawResponse, responseFormat);
         const headers = new Headers(response.headers);
-        headers.delete('access-control-allow-origin');
+        stripCorsHeaders(headers);
         headers.set('cache-control', 'no-store');
 
         const errorCode = await extractTransportErrorCode(response);
