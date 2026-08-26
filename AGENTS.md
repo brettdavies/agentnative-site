@@ -135,11 +135,11 @@ tools compose the same `/api/score` orchestration core, so cache semantics never
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
 the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
-`-32700` for malformed JSON, `-32099` for rate-limit breach at either limiter, and `-32022` (`data.supported:
-["2026-07-28"]`) when the disabled legacy lane rejects a request. The `406 Not Acceptable` Accept-header rejection is
-the one transport error that bypasses the JSON-RPC envelope (the rejection is pre-parse, so there is no `id` to echo
-back). **Cache state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`,
-and a `score_cli` hit is `isError: false` with `audited: false, next_tool`.
+`-32099` for rate-limit breach at either limiter, and `-32022` (`data.supported: ["2026-07-28"]`) when the disabled
+legacy lane rejects a request. Malformed JSON never becomes an envelope: the SDK answers it with a bare HTTP 400, and
+the `406 Not Acceptable` Accept-header rejection likewise bypasses the JSON-RPC envelope (both rejections are pre-parse,
+so there is no `id` to echo back). **Cache state is data, not failure**: a `get_scorecard` miss is `isError: false` with
+`found: false, next_tool`, and a `score_cli` hit is `isError: false` with `audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs

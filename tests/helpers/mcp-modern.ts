@@ -114,14 +114,7 @@ export function legacyToolsListBatchBody(ids: readonly [number, number] = [70, 7
 
 /** A batch body the pinned SDK rejects (-32600): modern-envelope elements may not ride in arrays. */
 export function modernElementBatchBody(id = 74) {
-  return [
-    {
-      jsonrpc: '2.0' as const,
-      id,
-      method: 'tools/list',
-      params: { ...MODERN_META },
-    },
-  ];
+  return [modernToolsListBody(id)];
 }
 
 /** Negative probe: _meta without clientCapabilities (AE7). */

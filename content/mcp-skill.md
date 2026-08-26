@@ -277,7 +277,7 @@ Two error layers. The discriminator is whether the JSON-RPC envelope itself succ
 | Symptom                                           | Layer        | Recovery                                                                                                                       |
 | ------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | `CallToolResult` with `isError: true`             | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).                        |
-| JSON-RPC envelope with `error.code: -32700`       | Transport    | Malformed JSON body. Fix the request and resend.                                                                               |
+| Bare HTTP 400 (no JSON-RPC envelope)              | Transport    | Malformed JSON body; the request never parsed, so no envelope and no `id` echo. Fix the request and resend.                    |
 | JSON-RPC envelope with `error.code: -32099`       | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
 | JSON-RPC envelope with `error.code: -32022`       | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
 | JSON-RPC envelope with `error.code: -32020`       | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |

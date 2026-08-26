@@ -19,8 +19,8 @@ import type { McpEnv } from '../src/worker/mcp/server';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import {
   deepFindFirst,
-  MODERN_META,
-  MODERN_PROTOCOL,
+  modernResourcesReadBody,
+  modernResourcesReadHeaders,
   modernToolCallBody,
   modernToolCallBodyMissingCapabilities,
   modernToolCallHeaders,
@@ -653,17 +653,8 @@ describe('MCP modern-era wire (no initialize)', () => {
     const env = makeEnv();
     const { body } = await mcpRpc(
       env,
-      {
-        jsonrpc: '2.0',
-        id: 60,
-        method: 'resources/read',
-        params: { uri: 'anc://tool/does-not-exist', ...MODERN_META },
-      },
-      {
-        'MCP-Protocol-Version': MODERN_PROTOCOL,
-        'Mcp-Method': 'resources/read',
-        'Mcp-Name': 'tool',
-      },
+      modernResourcesReadBody('anc://tool/does-not-exist', 60),
+      modernResourcesReadHeaders('tool'),
     );
     // Header validation, not a resource miss: Mcp-Name on modern
     // resources/read must mirror params.uri. A mirroring header reaches the
