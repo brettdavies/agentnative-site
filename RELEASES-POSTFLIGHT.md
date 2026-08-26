@@ -110,8 +110,10 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   ENV_URL=https://anc.dev   # or https://agentnative-site-staging.brettdavies.workers.dev for staging
   # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
 
-  curl -fSsL "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
-  curl -fSsL "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
+  # Accept: text/html is required — curl's default Accept negotiates markdown on
+  # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
+  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
+  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"input":"ripgrep","turnstile_token":"x"}' \
