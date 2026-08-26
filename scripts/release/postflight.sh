@@ -264,13 +264,20 @@ gate_pages() {
     header "Distribution surface against $ENV_URL"
     require_bin curl; require_bin jq
 
-    if ecurl -fSsL -m 10 "${ENV_URL}/" 2>/dev/null | grep -q '<title>'; then
+    # Explicit Accept: text/html — curl's default Accept negotiates text/markdown
+    # on extensionless URLs (agent-native content negotiation). Capture the body
+    # before grepping: with `set -o pipefail`, `curl | grep -q` false-fails when
+    # the marker appears early (curl gets SIGPIPE / exit 23) even though HTML is fine.
+    local home_html scorecards_html
+    home_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/" 2>/dev/null || true)
+    if printf '%s' "$home_html" | grep -q '<title>'; then
         gate_pass "${ENV_URL}/ home page renders (has <title>)"
     else
         gate_fail "${ENV_URL}/ home page" "did not return HTML with <title>"
     fi
 
-    if ecurl -fSsL -m 10 "${ENV_URL}/scorecards" 2>/dev/null | grep -q 'leaderboard-table'; then
+    scorecards_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/scorecards" 2>/dev/null || true)
+    if printf '%s' "$scorecards_html" | grep -q 'leaderboard-table'; then
         gate_pass "${ENV_URL}/scorecards renders (has leaderboard-table)"
     else
         gate_fail "${ENV_URL}/scorecards" "did not return HTML with leaderboard-table"
