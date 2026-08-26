@@ -1,10 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildMcpCatalog as _buildMcpCatalog } from '../src/build/11-mcp-catalog.mjs';
 import type { Catalog } from '../src/worker/mcp/catalog';
+import type { McpEnv } from '../src/worker/mcp/server';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { mcpRpcExpect200, resetMcpTestState } from './helpers/mcp-rpc';
 
 const buildMcpCatalog = _buildMcpCatalog as (args: unknown) => Catalog;
 
@@ -182,6 +184,14 @@ describe('buildMcpCatalog: shape invariants', () => {
 });
 
 describe('built dist artifacts', () => {
+  beforeEach(() => {
+    resetMcpTestState();
+  });
+
+  afterEach(() => {
+    resetMcpTestState();
+  });
+
   test('dist/_internal/mcp-catalog.json exists after build', async () => {
     const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-catalog.json'), 'utf8');
     const parsed = JSON.parse(raw);
@@ -252,6 +262,24 @@ describe('built dist artifacts', () => {
     const parsed = JSON.parse(raw);
     const versionRaw = await readFile(join(REPO_ROOT, 'src', 'data', 'spec', 'VERSION'), 'utf8');
     expect(parsed.spec_version).toBe(versionRaw.trim());
+  });
+
+  test('build-emitted registered_tool_names equals the names served by tools/list', async () => {
+    // Drift gate over the real built catalog: the shell trusts
+    // registered_tool_names for rate-limit key construction, so the emitted
+    // list must track what the server actually registers.
+    const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-catalog.json'), 'utf8');
+    const emitted = (JSON.parse(raw) as { registered_tool_names?: string[] }).registered_tool_names ?? [];
+    const env = {
+      ASSETS: {
+        fetch: () =>
+          Promise.resolve(new Response(raw, { status: 200, headers: { 'content-type': 'application/json' } })),
+      } as unknown as Fetcher,
+    } as McpEnv;
+    const result = await mcpRpcExpect200(env, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    const served = (result.result?.tools ?? []).map((t) => t.name);
+    expect(emitted.length).toBe(13);
+    expect([...emitted].sort()).toEqual([...served].sort());
   });
 
   test('content/mcp-skill.md renders to dist/mcp-skill.html and dist/mcp-skill.md', async () => {

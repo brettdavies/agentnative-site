@@ -81,11 +81,10 @@ render step. Deploy via `wrangler`.
 
 `POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server on spec revision `2026-07-28`, with SDK
 v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no
-`initialize`) clients on one endpoint.
-The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (served at `/mcp-skill.md` and
-`/mcp-skill/`); operator-facing material lives in [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and
-is not published. This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and
-how it fails.
+`initialize`) clients on one endpoint. The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md)
+(served at `/mcp-skill.md` and `/mcp-skill/`); operator-facing material lives in
+[`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published. This section is the
+agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
 
 **Discovery siblings.** `/.well-known/mcp/server-card.json` (SEP-1649 canonical server card; legacy aliases
 `/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`), `/.well-known/ai.txt` (`Programmatic-API` declaration),
@@ -122,24 +121,29 @@ a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; 
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Three kill switches, surgical and zero-deploy.** Default `"false"` in production and `"true"` in staging. Flip via
-`wrangler secret put`.
+**Four kill switches, surgical.** Three are secret-bound and zero-deploy: `MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`, and
+`WEB_AUDIT_ENABLED` default `"false"` in production and `"true"` in staging and flip via `wrangler secret put`.
+`MCP_LEGACY_ENABLED` is a staging `vars` binding: unbound in production (where the legacy lane serves), it flips via a
+deploy with `--var`, never `wrangler secret put` (Cloudflare API 10053 rejects a secret on a var-bound name; see the
+[operator runbook](docs/runbooks/mcp-operator.md)).
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
 - `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
   `next_tool: get_scorecard` redirect; the read tier stays alive.
-- `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32099` at the shell before the SDK handles
-  legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
+- `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`)
+  at the shell before the SDK handles legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
 - `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the `/api/audit-web` route). Falsy returns `audited:
   false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
-the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
-`-32700` for malformed JSON, `-32099` for rate-limit breach at either limiter. The `406 Not Acceptable` Accept-header
-rejection is the one transport error that bypasses the JSON-RPC envelope (the rejection is pre-parse, so there is no
-`id` to echo back). **Cache state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false,
-next_tool`, and a `score_cli` hit is `isError: false` with `audited: false, next_tool`.
+the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
+(`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
+legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
+batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The `406 Not
+Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache state is
+data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a `score_cli` hit is
+`isError: false` with `audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
@@ -148,17 +152,17 @@ browser-reachable `/mcp` would let any malicious web page trigger `score_cli` ru
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
 
-**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one
-`event: mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome,
-and ms bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under
-attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
+**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
+mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome, and ms
+bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under attack
+while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
 inventory is published.
 
-**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json`
-`protocolVersion`, `content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s
-`SPEC_REVISION` constant all carry the same `2026-07-28` literal. Legacy clients may still send `2025-06-18` in
-`initialize`; the server answers per SDK dual-stack behavior. `tests/worker-mcp.test.ts` and
-`tests/e2e/discoverability.e2e.ts` assert each occurrence so a single-source bump breaks the build.
+**Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json` `protocolVersion`,
+`content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
+carry the same `2026-07-28` literal. Legacy clients may still send `2025-06-18` in `initialize`; the server answers per
+SDK dual-stack behavior. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each occurrence so a
+single-source bump breaks the build.
 
 ## Voice
 

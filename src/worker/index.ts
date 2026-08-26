@@ -48,7 +48,7 @@ import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp
 import { runWithMcpEnv } from './mcp/env-context';
 import { buildMcpRateLimitKey, headerMcpMethod, headerMcpName } from './mcp/rate-limit';
 import { runWithMcpRequest } from './mcp/request-context';
-import { getMcpHandler, type McpEnv, resolveLegacyMode } from './mcp/server';
+import { getMcpHandler, type McpEnv, resolveLegacyMode, SPEC_REVISION } from './mcp/server';
 import {
   extractClientNameFromBody,
   extractProtocolVersion,
@@ -163,19 +163,31 @@ export interface Env {
 
 /**
  * Build a JSON-RPC error envelope at HTTP 200 — the MCP transport
- * surface for rate-limit breach. The MCP client parses JSON-RPC, not
- * HTTP status codes; returning 429 would mis-route the error past the
- * client's JSON-RPC dispatcher. Used at the MCP_LIMITER gate (here) and
- * by score_cli's MCP_AUDIT_LIMITER gate (which lands in U5).
+ * surface for shell-layer denials (legacy-lane reject, rate-limit
+ * breach). The MCP client parses JSON-RPC, not HTTP status codes;
+ * returning a 4xx would mis-route the error past the client's JSON-RPC
+ * dispatcher.
  */
-function jsonRpcError(code: number, message: string): Response {
-  return new Response(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code, message } }), {
+function jsonRpcError(
+  code: number,
+  message: string,
+  id: string | number | null,
+  data?: Record<string, unknown>,
+): Response {
+  const error = data === undefined ? { code, message } : { code, message, data };
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id, error }), {
     status: 200,
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
     },
   });
+}
+
+function jsonRpcId(parsedBody: unknown): string | number | null {
+  if (typeof parsedBody !== 'object' || parsedBody === null) return null;
+  const id = (parsedBody as { id?: unknown }).id;
+  return typeof id === 'string' || typeof id === 'number' ? id : null;
 }
 
 function classifyRpcMethod(parsedBody: unknown): string | null {
@@ -517,16 +529,20 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   //   2. Method check — non-POST returns 405 Allow: GET, POST.
   //   3. Accept-header check — neither MIME acceptable returns 406
   //      text/plain (no JSON-RPC envelope at the pre-JSON-RPC layer).
-  //   4. MCP_LIMITER gate — breach returns the -32099 JSON-RPC error
+  //   4. MCP_LEGACY_ENABLED legacy gate — when the legacy lane is
+  //      disabled, a legacy-era request returns the -32022 JSON-RPC
+  //      error envelope (data.supported names the served protocol
+  //      revision) at HTTP 200 with the request id echoed.
+  //   5. MCP_LIMITER gate — breach returns the -32099 JSON-RPC error
   //      envelope at HTTP 200. The visitor-inventory log fires AFTER
   //      this gate with `gate_result` so Workers Logs volume stays
-  //      bounded under attack while still recording the denial (R8).
-  //   5. SDK Accept-rewrite shim — the agents SDK's WorkerTransport
+  //      bounded under attack while still recording the denial.
+  //   6. SDK Accept-rewrite shim — the agents SDK's WorkerTransport
   //      strictly requires `Accept: application/json, text/event-
   //      stream`; we rewrite the outgoing Accept to that exact value
   //      and build the handler in the matching jsonResponse mode
   //      derived from the client's actual preference.
-  //   6. Handler response returned directly — NOT through applyHeaders
+  //   7. Handler response returned directly — NOT through applyHeaders
   //      (which would strip the no-store directive and risk mis-
   //      applying static-asset Cache-Control). All Access-Control-*
   //      headers are stripped (corsOptions:false at createMcpHandler
@@ -634,23 +650,34 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       const era: McpEra = legacyEra ? 'legacy' : 'modern';
       const legacyMode = resolveLegacyMode(env as McpEnv);
 
-      if (legacyMode === 'reject' && legacyEra) {
+      // Step 4: MCP_LEGACY_ENABLED legacy gate. Unparseable bodies
+      // classify as legacy-era by default, so the gate additionally
+      // requires a parsed body: malformed JSON falls through to the
+      // SDK's -32700 parse error instead of a misleading era reject.
+      if (legacyMode === 'reject' && legacyEra && parsedBody !== undefined) {
         logMcpRequest({
           era,
-          method: 'initialize',
-          name: null,
+          method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
+          name: headerMcpName(request) ?? classifyToolName(parsedBody),
           client_name: extractClientNameFromBody(parsedBody),
           protocol_version: extractProtocolVersion(parsedBody, request),
           host,
           response_format: responseFormat,
           outcome: 'legacy_rejected',
-          error_code: null,
+          error_code: -32022,
           duration_ms: Date.now() - started,
         });
-        return jsonRpcError(-32099, 'legacy MCP requests are disabled');
+        return jsonRpcError(
+          -32022,
+          `legacy MCP requests are disabled; use MCP ${SPEC_REVISION}`,
+          jsonRpcId(parsedBody),
+          {
+            supported: [SPEC_REVISION],
+          },
+        );
       }
 
-      // Step 4: MCP_LIMITER gate (era-aware read tier).
+      // Step 5: MCP_LIMITER gate (era-aware read tier).
       let gateResult: 'passed' | 'rate_limited' = 'passed';
       if (env.MCP_LIMITER) {
         const catalog = await loadCatalog(env as McpEnv);
@@ -677,15 +704,15 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
           error_code: -32099,
           duration_ms: Date.now() - started,
         });
-        return jsonRpcError(-32099, 'rate limit exceeded');
+        return jsonRpcError(-32099, 'rate limit exceeded', jsonRpcId(parsedBody));
       }
 
-      // Step 5: SDK Accept-rewrite shim.
+      // Step 6: SDK Accept-rewrite shim.
       const sdkHeaders = new Headers(request.headers);
       sdkHeaders.set('accept', 'application/json, text/event-stream');
       const sdkRequest = new Request(request, { headers: sdkHeaders });
 
-      // Step 6: warmed catalog + module-scoped handler.
+      // Step 7: warmed catalog + module-scoped handler.
       await loadCatalog(env as McpEnv);
       getWarmCatalog(); // assert warmed before sync factory read
       const handler = getMcpHandler({ jsonResponse: format === 'json', legacy: legacyMode });
