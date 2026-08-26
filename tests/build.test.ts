@@ -523,6 +523,33 @@ describe('emitShell — Leaderboards dual nav + surface script', () => {
   });
 });
 
+describe('emitShell — Audit dual nav', () => {
+  function shell(path = '/about') {
+    return emitShell({
+      title: 'About',
+      description: 'About anc.dev',
+      canonicalPath: path,
+      bodyHtml: '<article>body</article>',
+      themeInitJs: '/* theme init */',
+      baseUrl: undefined,
+    });
+  }
+
+  test('emits two Audit anchors alongside Leaderboards', () => {
+    const html = shell();
+    expect(html).toContain('data-audit-nav');
+    expect(html).toContain('href="/audit" data-s="cli" data-audit-nav');
+    expect(html).toContain('href="/web-audit" data-s="web" data-audit-nav');
+  });
+
+  test('aria-current follows pathname on the matching Audit anchor only', () => {
+    expect(shell('/audit')).toContain('href="/audit" data-s="cli" data-audit-nav aria-current="page"');
+    expect(shell('/audit')).not.toContain('data-s="web" data-audit-nav aria-current');
+    expect(shell('/web-audit')).toContain('href="/web-audit" data-s="web" data-audit-nav aria-current="page"');
+    expect(shell('/web-audit/skill/openapi')).toContain('data-s="web" data-audit-nav aria-current="page"');
+  });
+});
+
 // -------------------------------------------------------------------
 // Scorecards module
 // -------------------------------------------------------------------
@@ -2926,6 +2953,15 @@ describe('emitSubPages — twin frontmatter', () => {
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
     expect(auditHtml).not.toContain('---\ntitle:');
     expect(auditHtml).not.toMatch(/^url: /m);
+    expect(auditHtml).toContain('data-surface-audit-seg');
+    expect(auditHtml).toContain('id="audit-s-cli" checked');
+    expect(auditMd).not.toContain('data-surface-audit-seg');
+  });
+
+  test('web-audit landing emits audit Probe A with Website checked', async () => {
+    const webAuditHtml = await readFile(join(distDir, 'web-audit.html'), 'utf8');
+    expect(webAuditHtml).toContain('data-surface-audit-seg');
+    expect(webAuditHtml).toContain('id="audit-s-web" checked');
   });
 
   test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {

@@ -12,6 +12,7 @@ import {
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   renderAudienceBanner as sharedRenderAudienceBanner,
 } from '../shared/scorecard-format.mjs';
+import { renderSurfaceSeg } from '../shared/surface-seg.mjs';
 
 const BADGE_FLOOR_DISPLAY_PCT = BADGE_ELIGIBILITY_FLOOR_PCT;
 
@@ -73,10 +74,14 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   const eligibleCount = leaderboard.filter((e) => e.scorecard.badge.eligible).length;
   const floorPct = BADGE_FLOOR_DISPLAY_PCT;
 
-  const boardSurfaceSeg = `<div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
-    <input type="radio" name="board-surface" id="board-s-cli" checked /><label for="board-s-cli">CLI</label>
-    <input type="radio" name="board-surface" id="board-s-web" /><label for="board-s-web">Website</label>
-  </div>`;
+  const boardSurfaceSeg = renderSurfaceSeg({
+    dataAttr: 'data-surface-board-seg',
+    radioName: 'board-surface',
+    cliId: 'board-s-cli',
+    webId: 'board-s-web',
+    checked: 'cli',
+    ariaLabel: 'Leaderboard surface',
+  });
 
   return `<section class="leaderboard-hero">
   ${boardSurfaceSeg}

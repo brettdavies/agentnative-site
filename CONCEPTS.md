@@ -31,11 +31,12 @@ scoring-policy value, not fixed in this glossary.
 ### Visitor surface preference
 
 The visitor's chosen CLI vs Website leaderboard surface (`cli` | `web`), stored in `localStorage` under `anc-surface`.
-Writers are the homepage CLI|Website segment and the board Probe A segment; readers are the dual header Leaderboards
-anchors (CSS visibility flip via homepage `:has` or off-home `html[data-surface]`). Preference drives where Leaderboards
-points next even when it differs from the board currently displayed; visiting a board URL alone does not write
-preference. On the homepage, no-JS `:has` keeps Leaderboards, Full board, and segment in sync; board Probe A requires
-JavaScript to navigate between full boards.
+Writers are the homepage CLI|Website segment, the board Probe A segment, and the audit landing Probe A segment; readers
+are the dual header Leaderboards and Audit anchors (CSS visibility flip via homepage `:has` or off-home
+`html[data-surface]`). Preference drives where Leaderboards and Audit point next even when it differs from the board or
+audit page currently displayed; visiting a board or audit URL alone does not write preference. On the homepage, no-JS
+`:has` keeps Leaderboards, Audit, Full board, and segment in sync; board and audit Probe A require JavaScript to
+navigate between peer landing pages.
 
 ## Content surface
 

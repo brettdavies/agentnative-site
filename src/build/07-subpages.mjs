@@ -20,16 +20,36 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { renderSurfaceSeg } from '../shared/surface-seg.mjs';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { composeTwin } from './util.mjs';
+
+const auditSurfaceSegCli = renderSurfaceSeg({
+  dataAttr: 'data-surface-audit-seg',
+  radioName: 'audit-surface',
+  cliId: 'audit-s-cli',
+  webId: 'audit-s-web',
+  checked: 'cli',
+  ariaLabel: 'Audit surface',
+});
+
+const auditSurfaceSegWeb = renderSurfaceSeg({
+  dataAttr: 'data-surface-audit-seg',
+  radioName: 'audit-surface',
+  cliId: 'audit-s-cli',
+  webId: 'audit-s-web',
+  checked: 'web',
+  ariaLabel: 'Audit surface',
+});
 
 // The CLI "score a binary" hero. A plain GET form (works without JS) that
 // prefills the homepage demo via ?score=.
 const CLI_AUDIT_WIDGET = {
   placeholder: '{{CLI_AUDIT_FORM}}',
   html: `<section class="audit-hero" aria-labelledby="audit-hero-heading">
+  ${auditSurfaceSegCli}
   <h2 id="audit-hero-heading" class="audit-hero__title">Score a binary, live.</h2>
   <p class="audit-hero__lede">The homepage demo runs binary and behavioral audits in a sandbox. For source and project depth, run <code>anc audit</code> locally.</p>
   <form class="board-try audit-hero__form" method="get" action="/">
@@ -45,6 +65,7 @@ const CLI_AUDIT_WIDGET = {
 const WEB_AUDIT_WIDGET = {
   placeholder: '{{WEB_AUDIT_FORM}}',
   html: `<section class="audit-hero" aria-labelledby="web-audit-heading" data-web-audit-section>
+  ${auditSurfaceSegWeb}
   <h2 id="web-audit-heading" class="audit-hero__title">Score a website, live.</h2>
   <p class="audit-hero__lede">Enter a public URL. We open an in-progress page that streams each check as it resolves, then forwards to a shareable <code>/web/&lt;domain&gt;</code> scorecard.</p>
   <form class="board-try audit-hero__form" method="get" action="/web/scoring" novalidate data-web-audit-form>
