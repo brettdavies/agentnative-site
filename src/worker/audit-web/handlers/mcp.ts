@@ -3,8 +3,9 @@
 // pinned protocol version; modern-era modern-tools-list / server-discover
 // header-routed per SEP-2243), POSTs through the SSRF guard, parses JSON
 // or SSE via parseJsonRpc, and evaluates serverInfo / capabilities /
-// tools / resources / discovery / error-code / CORS. Returns n_a when no
-// endpoint was discovered.
+// tools / resources / discovery / error-code. Returns n_a when no
+// endpoint was discovered. CORS classification lives in the
+// cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
@@ -14,10 +15,9 @@ import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
 
 type McpWith = {
   op: 'initialize' | 'tools-list' | 'resources-list' | 'error' | 'modern-tools-list' | 'server-discover';
-  assert?: 'capabilities' | 'cors';
+  assert?: 'capabilities';
   method?: string;
   expect_code?: number;
-  origin?: string;
   timeout?: number;
 };
 
@@ -137,7 +137,6 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
         'Content-Type': 'application/json',
         Accept: 'application/json, text/event-stream',
       };
-  if (w.origin) headers.Origin = w.origin;
   if (!modernOp && w.op !== 'initialize' && ctx.mcpSessionId) headers['Mcp-Session-Id'] = ctx.mcpSessionId;
 
   const resp = await guardedFetch(
@@ -164,9 +163,8 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // Era-mismatch classification for the result-expecting ops on both
   // lanes: an unavailability-coded refusal means the probed era is not
   // offered (absent), any other error envelope stays broken. The error
-  // op keeps its own expect_code semantics; the CORS assert classifies
-  // from headers, not the envelope.
-  if (rpc.error !== undefined && w.op !== 'error' && w.assert !== 'cors') {
+  // op keeps its own expect_code semantics.
+  if (rpc.error !== undefined && w.op !== 'error') {
     const code = (rpc.error as { code?: number } | undefined)?.code;
     ev.error_code = typeof code === 'number' ? code : null;
     return {
@@ -186,19 +184,10 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.session_id = resp.headers['mcp-session-id'] ?? null;
     ok = w.assert === 'capabilities' ? !!capabilities && Object.keys(capabilities).length > 0 : !!serverInfo?.name;
   } else if (w.op === 'tools-list' || w.op === 'modern-tools-list') {
-    if (w.assert === 'cors') {
-      const acao = resp.headers['access-control-allow-origin'] ?? null;
-      ev.allow_origin = acao;
-      // A missing Allow-Origin is CORS-not-implemented (absent), matching
-      // the preflight handler; only a malformed response is broken.
-      return { status: acao !== null ? 'pass' : 'absent', evidence: [ev] };
-    }
-    {
-      const tools = result.tools as Array<{ name?: string; inputSchema?: unknown }> | undefined;
-      ev.tools = Array.isArray(tools) ? tools.map((t) => t.name ?? null) : null;
-      ev.with_input_schema = Array.isArray(tools) ? tools.filter((t) => t.inputSchema).length : 0;
-      ok = Array.isArray(tools);
-    }
+    const tools = result.tools as Array<{ name?: string; inputSchema?: unknown }> | undefined;
+    ev.tools = Array.isArray(tools) ? tools.map((t) => t.name ?? null) : null;
+    ev.with_input_schema = Array.isArray(tools) ? tools.filter((t) => t.inputSchema).length : 0;
+    ok = Array.isArray(tools);
   } else if (w.op === 'server-discover') {
     const supported = result.supportedVersions;
     const meta = result._meta as Record<string, unknown> | undefined;

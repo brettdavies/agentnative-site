@@ -11,7 +11,7 @@
 #
 # Handlers (implemented in src/worker/audit-web/handlers/):
 #   http           general request + assertions (status / headers / content-type / body regex)
-#   cors-preflight OPTIONS preflight; passes on 200/204 with Access-Control-Allow-Origin
+#   cors-preflight two-probe CORS posture pair (OPTIONS preflight + Origin-bearing POST)
 #   mcp            JSON-RPC over the discovered endpoint (op: initialize | tools-list | error)
 #   dns-doh        DNS-over-HTTPS (JSON API) record lookup
 #   auth-md        agent auth/registration metadata doc probe
@@ -255,6 +255,7 @@ checks:
       origin: https://example.com
       request_method: POST
       request_headers: content-type
+      surface: preflight
     hint: Answer OPTIONS with 204 + Access-Control-Allow-Origin/Methods/Headers so browser-origin agents work.
 
   - id: mcp-cors-actual
@@ -265,8 +266,13 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: POST response carries Access-Control-Allow-Origin
-    handler: mcp
-    with: { op: tools-list, origin: https://example.com, assert: cors }
+    handler: cors-preflight
+    with:
+      path: "{mcp_endpoint}"
+      origin: https://example.com
+      request_method: POST
+      request_headers: content-type
+      surface: actual
     hint: Echo Access-Control-Allow-Origin on the actual POST, not only the preflight.
 
   - id: well-known-mcp-card

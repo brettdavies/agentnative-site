@@ -9,9 +9,11 @@
 // surfaces). `group` mirrors `principle` for the interim shared-renderer
 // path; the category-grouped web renderer replaces that consumer.
 
-import type { EvidenceItem } from './handlers/types';
+import type { EvidenceItem, NaReason } from './handlers/types';
 import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
 import { type CategoryRollup, categoryRollups, type ScoreConfig, scoreWebAudit, universeMaxOf } from './score';
+
+export type { NaReason } from './handlers/types';
 
 /**
  * Web scorecard status vocabulary (tri-state outcome model): `absent`
@@ -19,13 +21,6 @@ import { type CategoryRollup, categoryRollups, type ScoreConfig, scoreWebAudit, 
  * a present-but-invalid surface differently from a missing one.
  */
 export type ScorecardStatus = 'pass' | 'broken' | 'absent' | 'n_a' | 'skip' | 'error';
-
-/**
- * Why a row is n_a: `antecedent-unmet` = the check does not apply to
- * this site (declared type or runtime antecedent); `optional-absent` =
- * it applies, is a MAY, and simply is not implemented.
- */
-export type NaReason = 'antecedent-unmet' | 'optional-absent';
 
 export interface EngineResult {
   id: string;

@@ -109,7 +109,9 @@ export function resultLine(status: ScorecardStatus, evidence: string | null, naR
     case 'absent':
       return `Not found${detail}`;
     case 'n_a':
-      return naReason === 'optional-absent' ? `Not implemented, optional${detail}` : `Not applicable${detail}`;
+      if (naReason === 'optional-absent') return `Not implemented, optional${detail}`;
+      if (naReason === 'posture-consistent') return `Deliberate posture, not scored${detail}`;
+      return `Not applicable${detail}`;
     case 'skip':
       return `Not evaluated: audit deadline exceeded${detail}`;
     case 'error':

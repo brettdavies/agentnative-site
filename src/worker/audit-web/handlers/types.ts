@@ -20,9 +20,22 @@ export type ProbeStatus = 'pass' | 'broken' | 'absent' | 'na' | 'error';
 /** Handler-specific evidence rows, kept structurally open like the extracted JSON. */
 export type EvidenceItem = Record<string, unknown>;
 
+/**
+ * Why a row is n_a: `antecedent-unmet` = the check does not apply to
+ * this site (declared type or runtime antecedent); `optional-absent` =
+ * it applies, is a MAY, and simply is not implemented;
+ * `posture-consistent` = the probed surfaces show a deliberate,
+ * consistent opt-out (the CORS pair with Allow-Origin on neither
+ * surface). A handler with nothing to probe (no discovered MCP
+ * endpoint) emits n_a with no reason.
+ */
+export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent';
+
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
+  /** Handler-stated reason for an `na` status; the engine passes it through to the result row. */
+  na_reason?: NaReason;
   /**
    * When true, the handler exhausted the remaining per-audit budget mid-probe.
    * The engine treats the run as incomplete and the route must not cache it.

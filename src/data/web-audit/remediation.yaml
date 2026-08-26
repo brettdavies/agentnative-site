@@ -109,22 +109,28 @@ remediation:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-cors-preflight:
     title: CORS preflight succeeds with Access-Control-Allow-* headers
-    goal: Answer OPTIONS preflights on the MCP endpoint with Access-Control-Allow-* headers
+    goal: Serve one consistent CORS posture on the MCP endpoint, full preflight support or none
     fix: |
-      Answer the `OPTIONS` preflight on your MCP endpoint with `204` (or `200`) and the
+      The audit scores CORS posture, not presence. Omitting `Access-Control-Allow-Origin` from
+      both the `OPTIONS` preflight and the `POST` response is a consistent no-CORS posture (a
+      server-to-agent-only endpoint) and scores `n_a` with no penalty. This check fails only when
+      the posture is partial or misconfigured: the preflight carries `Access-Control-Allow-Origin`
+      on a non-2xx response, or the `POST` carries it while the preflight does not. To support
+      browser-origin agents, answer the preflight with `204` (or `200`) plus
       `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and
-      `Access-Control-Allow-Headers` response headers, so a browser-origin agent can call the
-      endpoint. If your MCP surface is deliberately server-to-agent only (no browser clients),
-      this SHOULD is a considered choice, not a defect.
+      `Access-Control-Allow-Headers`, and mirror `Access-Control-Allow-Origin` on the `POST`
+      response. To stay no-CORS, strip the headers from both surfaces.
     resources:
       - { label: MDN CORS preflight, url: "https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request" }
   mcp-cors-actual:
     title: POST response carries Access-Control-Allow-Origin
-    goal: Echo Access-Control-Allow-Origin on the actual MCP POST response
+    goal: Mirror the declared CORS posture on the actual MCP POST response
     fix: |
-      Echo `Access-Control-Allow-Origin` on the actual `POST` response, not only on the preflight.
-      A browser blocks the response body when the header is absent even if the preflight passed.
-      Omit it deliberately only if browser-origin agents are not a supported client.
+      Echo `Access-Control-Allow-Origin` on the actual `POST` response whenever the preflight
+      declares CORS: a browser blocks the response body when the header is absent even though the
+      preflight passed. Omitting the header from both the preflight and the `POST` is a consistent
+      no-CORS posture and scores `n_a` with no penalty; this check fails when the preflight
+      declares CORS but the `POST` omits the header.
     resources:
       - { label: MDN CORS, url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" }
   well-known-mcp-card:

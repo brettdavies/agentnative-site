@@ -257,8 +257,10 @@ four probe types:
 - **MCP** — a JSON-RPC handshake over streamable-HTTP: `initialize` for `serverInfo` and capabilities, `tools/list` for
   the tool array and input schemas, a modern-era pair on protocol `2026-07-28` (a header-routed `tools/list` carrying
   the per-request `_meta` envelope with no `initialize`, and `server/discover` for supported versions and server
-  identity), an unknown-method probe for the `-32601` error code, and the actual-request CORS header.
-- **CORS preflight** — an `OPTIONS` request that checks the MCP endpoint answers browser-origin agents.
+  identity), and an unknown-method probe for the `-32601` error code.
+- **CORS posture** — each of the two CORS checks issues both an `OPTIONS` preflight and an Origin-bearing `POST`, then
+  classifies its own surface from the pair: a consistent no-CORS posture on both reads `n_a`, while partial or
+  misconfigured CORS fails.
 - **DNS-over-HTTPS** — SVCB lookups for DNS-AID records under the `_agents` namespace.
 
 The audit first discovers the MCP endpoint from the site's well-known cards, then falls back to probing common paths

@@ -7,7 +7,9 @@
 // no duplicate `/` fetch. Each check finalizes to
 // pass / broken / absent / n_a / skip / error; an applicable MAY that
 // comes back absent is re-tagged n_a with na_reason 'optional-absent',
-// while an unmet antecedent yields na_reason 'antecedent-unmet'.
+// an unmet antecedent yields na_reason 'antecedent-unmet', and a
+// handler-stated na_reason (the CORS pair's 'posture-consistent')
+// passes through to the result row.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -112,12 +114,19 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
         ? `${tools.length} tools, ${first.with_input_schema} with input schema`
         : 'no tools array';
     }
-    if ('allow_origin' in first) return `allow-origin ${first.allow_origin ?? 'absent'}`;
     if ('error_code' in first) return `error code ${first.error_code}`;
   }
 
   if (check.handler === 'cors-preflight') {
-    return `${first.status} allow-origin ${first.allow_origin ?? 'absent'}`;
+    const side = (label: string, row: EvidenceItem | undefined): string =>
+      row ? `${label} ${row.error ?? row.status ?? 'error'} allow-origin ${row.allow_origin ?? 'absent'}` : label;
+    return `${side(
+      'preflight',
+      outcome.evidence.find((e) => e.probe === 'preflight'),
+    )}; ${side(
+      'post',
+      outcome.evidence.find((e) => e.probe === 'post'),
+    )}`;
   }
 
   if (check.handler === 'dns-doh') {
@@ -152,6 +161,7 @@ function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
   return {
     ...baseFields(check),
     status: probeStatusToScorecard(outcome.status),
+    ...(outcome.na_reason !== undefined ? { na_reason: outcome.na_reason } : {}),
     evidence: summarizeEvidence(check, outcome),
     raw_evidence: outcome.evidence,
   };

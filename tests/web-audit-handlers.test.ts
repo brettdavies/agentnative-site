@@ -16,6 +16,8 @@ import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebCheck } from '../src/worker/audit-web/registry';
+import { scoreWebAudit } from '../src/worker/audit-web/score';
+import type { EngineResult } from '../src/worker/audit-web/scorecard';
 import { MODERN_PROTOCOL } from './helpers/mcp-modern';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
@@ -238,67 +240,171 @@ describe('runHttp', () => {
   });
 });
 
-describe('runCorsPreflight', () => {
-  test('passes on 204 with Access-Control-Allow-Origin', async () => {
-    const fetchImpl = stubFetch((_url, init) => {
-      expect(init?.method).toBe('OPTIONS');
-      return new Response(null, {
-        status: 204,
+describe('runCorsPreflight posture pair', () => {
+  const MCP = 'https://example.com/mcp';
+  const RPC_TOOLS = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } });
+
+  function corsCheck(surface: 'preflight' | 'actual'): WebCheck {
+    return check({
+      id: surface === 'preflight' ? 'mcp-cors-preflight' : 'mcp-cors-actual',
+      handler: 'cors-preflight',
+      with: {
+        path: '{mcp_endpoint}',
+        origin: 'https://example.com',
+        request_method: 'POST',
+        request_headers: 'content-type',
+        surface,
+      },
+    });
+  }
+
+  function pairFetch(preflight: () => Response, post: () => Response): typeof fetch {
+    return stubFetch((_url, init) => (init?.method === 'OPTIONS' ? preflight() : post()));
+  }
+
+  const preflightBare =
+    (status = 204) =>
+    () =>
+      new Response(status === 204 ? null : 'x', { status });
+  const preflightAcao =
+    (status = 204) =>
+    () =>
+      new Response(status === 204 ? null : 'x', {
+        status,
         headers: {
           'access-control-allow-origin': '*',
           'access-control-allow-methods': 'POST, OPTIONS',
           'access-control-allow-headers': 'content-type',
         },
       });
+  const postBare = () => () =>
+    new Response(RPC_TOOLS, { status: 200, headers: { 'content-type': 'application/json' } });
+  const postAcao = () => () =>
+    new Response(RPC_TOOLS, {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
     });
-    const outcome = await runCorsPreflight(
-      check({
-        handler: 'cors-preflight',
-        with: {
-          path: '{mcp_endpoint}',
-          origin: 'https://example.com',
-          request_method: 'POST',
-          request_headers: 'content-type',
-        },
-      }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-    );
-    expect(outcome.status).toBe('pass');
-    expect(outcome.evidence[0].allow_origin).toBe('*');
-    expect(outcome.evidence[0].allow_methods).toBe('POST, OPTIONS');
+
+  async function classify(surface: 'preflight' | 'actual', fetchImpl: typeof fetch) {
+    return runCorsPreflight(corsCheck(surface), ctx({ fetchImpl, mcpEndpoint: MCP }));
+  }
+
+  test('no ACAO on OPTIONS or POST is a consistent no-CORS posture: both ids n_a (AE4)', async () => {
+    const fetchImpl = pairFetch(preflightBare(), postBare());
+    const pre = await classify('preflight', fetchImpl);
+    const act = await classify('actual', fetchImpl);
+    expect(pre.status).toBe('na');
+    expect(pre.na_reason).toBe('posture-consistent');
+    expect(act.status).toBe('na');
+    expect(act.na_reason).toBe('posture-consistent');
   });
 
-  test('a 204 without Access-Control-Allow-Origin is absent (CORS not implemented)', async () => {
-    const fetchImpl = stubFetch(() => new Response(null, { status: 204 }));
-    const outcome = await runCorsPreflight(
-      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-    );
-    expect(outcome.status).toBe('absent');
+  test('a bare 405 preflight beside a bare POST still reads posture-consistent (anc-shaped surface)', async () => {
+    const fetchImpl = pairFetch(preflightBare(405), postBare());
+    const pre = await classify('preflight', fetchImpl);
+    const act = await classify('actual', fetchImpl);
+    expect(pre.status).toBe('na');
+    expect(pre.na_reason).toBe('posture-consistent');
+    expect(act.status).toBe('na');
+    expect(act.na_reason).toBe('posture-consistent');
   });
 
-  test('an Allow-Origin on a failing preflight status is broken (misconfigured)', async () => {
-    const fetchImpl = stubFetch(
-      () => new Response('oops', { status: 500, headers: { 'access-control-allow-origin': '*' } }),
-    );
-    const outcome = await runCorsPreflight(
-      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-    );
-    expect(outcome.status).toBe('broken');
+  test('the n_a pair leaves the relative score unchanged (AE4)', () => {
+    const others: Array<Pick<EngineResult, 'keyword' | 'status'>> = [
+      { keyword: 'must', status: 'pass' },
+      { keyword: 'should', status: 'pass' },
+      { keyword: 'should', status: 'absent' },
+    ];
+    const pair: Array<Pick<EngineResult, 'keyword' | 'status'>> = [
+      { keyword: 'should', status: 'n_a' },
+      { keyword: 'should', status: 'n_a' },
+    ];
+    expect(scoreWebAudit([...others, ...pair], 100)).toEqual(scoreWebAudit(others, 100));
   });
 
-  test('returns n_a when the path has no endpoint to resolve', async () => {
+  test('full CORS passes both ids', async () => {
+    const fetchImpl = pairFetch(preflightAcao(), postAcao());
+    const pre = await classify('preflight', fetchImpl);
+    const act = await classify('actual', fetchImpl);
+    expect(pre.status).toBe('pass');
+    expect(act.status).toBe('pass');
+    expect(pre.evidence.map((e) => e.probe)).toEqual(['preflight', 'post']);
+    expect(act.evidence.map((e) => e.probe)).toEqual(['post', 'preflight']);
+    expect(pre.evidence[0].allow_origin).toBe('*');
+    expect(pre.evidence[0].allow_methods).toBe('POST, OPTIONS');
+    expect(act.evidence[0].allow_origin).toBe('*');
+  });
+
+  test('preflight declares CORS but the POST is bare: actual broken, preflight pass', async () => {
+    const fetchImpl = pairFetch(preflightAcao(), postBare());
+    expect((await classify('preflight', fetchImpl)).status).toBe('pass');
+    expect((await classify('actual', fetchImpl)).status).toBe('broken');
+  });
+
+  test('POST carries ACAO but the preflight is bare: preflight broken, actual pass', async () => {
+    const fetchImpl = pairFetch(preflightBare(), postAcao());
+    expect((await classify('preflight', fetchImpl)).status).toBe('broken');
+    expect((await classify('actual', fetchImpl)).status).toBe('pass');
+  });
+
+  test('ACAO on a failing preflight: preflight broken, actual classifies from its own POST probe', async () => {
+    const withPost = pairFetch(preflightAcao(500), postAcao());
+    expect((await classify('preflight', withPost)).status).toBe('broken');
+    expect((await classify('actual', withPost)).status).toBe('pass');
+    const withBarePost = pairFetch(preflightAcao(500), postBare());
+    expect((await classify('preflight', withBarePost)).status).toBe('broken');
+    const act = await classify('actual', withBarePost);
+    expect(act.status).toBe('broken');
+    expect(act.na_reason).toBeUndefined();
+  });
+
+  test('a transport failure on either probe yields error for both ids', async () => {
+    const failing = (): Response => {
+      throw new Error('connect timeout');
+    };
+    for (const fetchImpl of [pairFetch(failing, postAcao()), pairFetch(preflightAcao(), failing)]) {
+      expect((await classify('preflight', fetchImpl)).status).toBe('error');
+      expect((await classify('actual', fetchImpl)).status).toBe('error');
+    }
+  });
+
+  test('one run issues exactly the OPTIONS preflight and the Origin-bearing POST', async () => {
+    const captured: Array<{ method: string; headers: Headers; body: string | null }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({
+        method: init?.method ?? 'GET',
+        headers: new Headers(init?.headers),
+        body: init?.body ? String(init.body) : null,
+      });
+      return init?.method === 'OPTIONS'
+        ? new Response(null, { status: 204 })
+        : new Response(RPC_TOOLS, { status: 200 });
+    });
+    await runCorsPreflight(corsCheck('preflight'), ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: 'sess-1' }));
+    expect(captured.length).toBe(2);
+    const opts = captured.find((r) => r.method === 'OPTIONS');
+    const post = captured.find((r) => r.method === 'POST');
+    expect(opts?.headers.get('origin')).toBe('https://example.com');
+    expect(opts?.headers.get('access-control-request-method')).toBe('POST');
+    expect(opts?.headers.get('access-control-request-headers')).toBe('content-type');
+    expect(post?.headers.get('origin')).toBe('https://example.com');
+    expect(post?.headers.get('content-type')).toBe('application/json');
+    expect(post?.headers.get('mcp-session-id')).toBe('sess-1');
+    expect(JSON.parse(post?.body ?? '{}').method).toBe('tools/list');
+  });
+
+  test('returns a reasonless n_a when the path has no endpoint to resolve, probing nothing', async () => {
     let called = 0;
     const fetchImpl = stubFetch(() => {
       called++;
       return new Response('');
     });
     const outcome = await runCorsPreflight(
-      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } }),
+      check({ handler: 'cors-preflight', with: { path: '{mcp_endpoint}', surface: 'preflight' } }),
       ctx({ fetchImpl, mcpEndpoint: null }),
     );
     expect(outcome.status).toBe('na');
+    expect(outcome.na_reason).toBeUndefined();
     expect(called).toBe(0);
   });
 });
@@ -397,22 +503,6 @@ describe('runMcp', () => {
     );
     expect(outcome.status).toBe('pass');
     expect(outcome.evidence[0].error_code).toBe(-32601);
-  });
-
-  test('cors assertion checks Access-Control-Allow-Origin on the POST', async () => {
-    const fetchImpl = stubFetch(
-      () =>
-        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }), {
-          status: 200,
-          headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
-        }),
-    );
-    const outcome = await runMcp(
-      check({ handler: 'mcp', with: { op: 'tools-list', origin: 'https://example.com', assert: 'cors' } }),
-      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
-    );
-    expect(outcome.status).toBe('pass');
-    expect(outcome.evidence[0].allow_origin).toBe('*');
   });
 
   test('returns n_a when no endpoint was discovered', async () => {
