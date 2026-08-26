@@ -105,13 +105,17 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(index.headers()['content-type']).toContain('text/markdown');
     expect(index.headers()['vary'] ?? '').toBe('');
     expect(isSkipWorkerHit(index.headers())).toBe(true);
+    // HIT-min browser class. Cloudflare-CDN-Cache-Control is an
+    // origin-to-cache instruction and is not replayed on a skip-Worker HIT.
     expect(index.headers()['cache-control'] ?? '').toContain('max-age=0');
-    expect(index.headers()['cloudflare-cdn-cache-control'] ?? '').toContain('max-age=300');
+    expect(index.headers()['cache-control'] ?? '').toContain('must-revalidate');
     const about = await warmThenGet(request, '/about.md', {});
     expect(about.headers()['content-type']).toContain('text/markdown');
     expect(about.headers()['vary'] ?? '').toBe('');
     expect(isSkipWorkerHit(about.headers())).toBe(true);
-    expect(about.headers()['cloudflare-cdn-cache-control'] ?? '').toContain('max-age=86400');
+    expect(about.headers()['cache-control'] ?? '').toContain('max-age=300');
+    expect(about.headers()['cache-control'] ?? '').not.toContain('s-maxage');
+    expect(about.headers()['cache-control'] ?? '').not.toContain('must-revalidate');
   });
 
   test('GET /web/scoring is not a skip-Worker HIT', async ({ request }) => {
