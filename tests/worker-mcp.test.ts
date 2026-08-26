@@ -19,8 +19,8 @@ import type { McpEnv } from '../src/worker/mcp/server';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import {
   deepFindFirst,
-  MODERN_META,
-  MODERN_PROTOCOL,
+  modernResourcesReadBody,
+  modernResourcesReadHeaders,
   modernToolCallBody,
   modernToolCallBodyMissingCapabilities,
   modernToolCallHeaders,
@@ -578,7 +578,7 @@ describe('MCP resources/read', () => {
     expect(parsed.slug).toBe('ripgrep');
   });
 
-  test('reading an unknown template URI surfaces a JSON-RPC error envelope', async () => {
+  test('reading an unknown template URI surfaces a JSON-RPC -32602 error envelope', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, {
@@ -588,6 +588,28 @@ describe('MCP resources/read', () => {
       params: { uri: 'anc://tool/does-not-exist' },
     });
     expect(result.error).toBeDefined();
+    // The resource handler throws a -32002-tagged error, but the legacy lane
+    // shares the SDK encode seam that rewrites -32002 to -32602 on the wire.
+    expect(result.error?.code).toBe(-32602);
+  });
+});
+
+describe('MCP JSON-RPC error-code pins', () => {
+  test('unknown method answers -32601', async () => {
+    const env = makeEnv();
+    const result = await rpc(env, { jsonrpc: '2.0', id: 90, method: 'nonexistent/method' });
+    expect(result.error?.code).toBe(-32601);
+  });
+
+  test('tools/call with an unknown tool name answers -32602', async () => {
+    const env = makeEnv();
+    const result = await rpc(env, {
+      jsonrpc: '2.0',
+      id: 91,
+      method: 'tools/call',
+      params: { name: 'not_a_real_tool', arguments: {} },
+    });
+    expect(result.error?.code).toBe(-32602);
   });
 });
 
@@ -627,23 +649,16 @@ describe('MCP modern-era wire (no initialize)', () => {
     expect(body.error?.message ?? '').toContain('clientCapabilities');
   });
 
-  test('modern resource-not-found error code (SDK v2)', async () => {
+  test('modern resources/read with a non-mirroring Mcp-Name is rejected -32020 (header mismatch)', async () => {
     const env = makeEnv();
     const { body } = await mcpRpc(
       env,
-      {
-        jsonrpc: '2.0',
-        id: 60,
-        method: 'resources/read',
-        params: { uri: 'anc://tool/does-not-exist', ...MODERN_META },
-      },
-      {
-        'MCP-Protocol-Version': MODERN_PROTOCOL,
-        'Mcp-Method': 'resources/read',
-        'Mcp-Name': 'tool',
-      },
+      modernResourcesReadBody('anc://tool/does-not-exist', 60),
+      modernResourcesReadHeaders('tool'),
     );
-    // SDK v2 maps missing resources to -32020 on this lane (legacy remains -32002).
+    // Header validation, not a resource miss: Mcp-Name on modern
+    // resources/read must mirror params.uri. A mirroring header reaches the
+    // resource handler and an unknown URI then answers -32602.
     expect(body.error?.code).toBe(-32020);
   });
 });
