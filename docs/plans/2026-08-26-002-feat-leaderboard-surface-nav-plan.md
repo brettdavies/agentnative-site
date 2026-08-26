@@ -6,9 +6,25 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 execution: code
+status: completed
+last-revised: 2026-08-26
+shipped_in: "PR #275 squash-merged to `dev` 2026-08-26 as `533278a`. Not yet on `main` / anc.dev."
 ---
 
 # feat: Leaderboard surface nav (CLI|Website preference)
+
+> **Implementation status (2026-08-26): SHIPPED to `dev` via PR #275 (`533278a`).** U1–U4 landed. Post-nav programmatic
+> focus was planned then **removed before merge** (KD8): Probe A uses a plain `location.assign` reload with browser-default
+> focus. Layout polish for Probe A beside web filter rows remains deferred.
+>
+> **Units shipped (squash of `feat/leaderboard-surface-nav`):**
+>
+> - **U1** — `src/client/surface.ts` + `/js/surface.js`; dual Leaderboards anchors in `shell.mjs`; nav-scoped `:has` /
+>   `html[data-surface]` CSS; `tests/surface.test.ts`, shell/build tests, nav count e2e (7 total / 6 visible).
+> - **U2** — homepage `#s-cli` / `#s-web` restore + write in `surface.ts`; e2e href flip + no-JS `:has` Leaderboards parity.
+> - **U3** — Probe A in `scorecards-render.mjs` and `leaderboard-render.ts` (populated + empty `/web`); board ids
+>   `board-s-cli` / `board-s-web`; bidirectional Probe A e2e; no stamp-on-visit.
+> - **U4** — `CONCEPTS.md` **Visitor surface preference** entry; board no-JS gap documented in plan + glossary.
 
 ## Goal Capsule
 
@@ -166,6 +182,8 @@ Product Contract from ce-plan-bootstrap (session brief); no separate brainstorm 
 
 ### U1. Shared surface module + dual Leaderboards shell/CSS
 
+**Status:** Shipped in #275.
+
 **Goal:** Compact preference helper, dual Leaderboards anchors, `:has` homepage parity, off-home `data-surface` reader.
 
 **Requirements:** R1–R3, R7; AE1, AE3 (off-home); KD1–KD2; KTD1–KTD4, KTD2b
@@ -210,6 +228,8 @@ guards
 
 ### U2. Homepage bind (restore + write)
 
+**Status:** Shipped in #275.
+
 **Goal:** Homepage segment is a preference writer/reader without breaking no-JS CSS.
 
 **Requirements:** R4, R7; AE2, AE3 (homepage half); KTD4 (homepage writer/reader)
@@ -243,6 +263,8 @@ guards
 ---
 
 ### U3. Probe A on `/scorecards` and `/web`
+
+**Status:** Shipped in #275.
 
 **Goal:** Peer board switch that writes preference and navigates.
 
@@ -281,6 +303,8 @@ destination page via U1 `data-surface` load reader
 
 ### U4. CONCEPTS entry + no-JS board gap
 
+**Status:** Shipped in #275.
+
 **Goal:** Glossary term for visitor surface preference; explicit no-JS limitation on board cross-nav.
 
 **Requirements:** R9; KD7; AE7
@@ -315,14 +339,41 @@ destination page via U1 `data-surface` load reader
 
 ## Definition of Done
 
-- [ ] R1–R9 satisfied; AE1–AE7 covered by tests or explicit browser check
-- [ ] Shared helper used by homepage, boards, and shell — no duplicated storage keys/logic
-- [ ] Dual Leaderboards anchors keep fixed hrefs (visibility flip only; no JS href rewrite); `surface.js` on all pages
+- [x] R1–R9 satisfied; AE1–AE7 covered by tests or explicit browser check
+- [x] Shared helper used by homepage, boards, and shell — no duplicated storage keys/logic
+- [x] Dual Leaderboards anchors keep fixed hrefs (visibility flip only; no JS href rewrite); `surface.js` on all pages
   including Worker `/web`
-- [ ] No stamp-on-visit on `/web` or `/scorecards`; Audit nav untouched
-- [ ] Build + unit + relevant e2e green
-- [ ] Browser-verify: `/`, `/scorecards`, `/web` — homepage toggle, Probe A both directions, cold `/web` no stamp
-- [ ] Probe A placement acceptable (layout polish deferred); U4 CONCEPTS entry + no-JS board gap documented
+- [x] No stamp-on-visit on `/web` or `/scorecards`; Audit nav untouched
+- [x] Build + unit + relevant e2e green
+- [x] Browser-verify: `/`, `/scorecards`, `/web` — homepage toggle, Probe A both directions, cold `/web` no stamp
+- [x] Probe A placement acceptable (layout polish deferred); U4 CONCEPTS entry + no-JS board gap documented
+
+---
+
+## Shipped vs plan
+
+These landed in #275 and are the working contract.
+
+- **Storage key** is `anc-surface` (`cli` | `web`); invalid/absent reads as `cli` (KTD1).
+- **Dual Leaderboards nav** — two static anchors with `data-leaderboards-nav`; visibility via homepage
+  `body:has(#s-web:checked)` or off-home `html[data-surface]`; global `[data-s="web"] { display: none }` overridden
+  inside `.site-nav` only.
+- **Homepage** — JS restores radios from storage; `:has` drives nav + panes without setting `html[data-surface]` when
+  `#s-cli` exists (KTD2b).
+- **Probe A** — distinct board radio ids; `[data-surface-board-seg]` bind in `surface.ts`; full-page navigate on peer
+  selection; no write on cold board visit (AE5).
+- **Preference-wins nav** — Leaderboards href follows stored preference even when it disagrees with the current board
+  URL (R9/KD6); `aria-current` only when anchor href matches pathname.
+- **No post-nav focus** — KD8; no `sessionStorage` focus flag and no `#main tabindex="-1"` (rejected during review).
+- **Out of scope unchanged** — Audit nav parity; `/impeccable layout` for crowded web hero; plain no-JS peer links on
+  boards.
+
+## Deferred to Follow-Up Work
+
+- Audit primary-nav parity with board surface preference (R8 / KD5).
+- Board-hero layout polish if Probe A feels cramped next to Relative|Global and All|Curated filters (`/impeccable
+  layout`).
+- Optional plain peer links in board hero for no-JS cross-board navigation (rejected for v1 in KD7).
 
 ---
 
@@ -342,4 +393,4 @@ destination page via U1 `data-surface` load reader
 - Repo patterns: `theme.ts`, `install-cmd.ts`, `shell.mjs`, homepage `:has` segment (`06-homepage.mjs`)
 - Learnings (qmd): per-gesture persistence vs render flip; tri-state omit-don’t-false; header-scoped href tests;
   relative-transition e2e — see paths cited under KTD1/KTD4 and Verification Contract
-- Gaps to capture post-ship if useful: no prior doc for `:has` segment on board heroes or dynamic Leaderboards href
+- Shipped implementation: `src/client/surface.ts`, PR #275 (`533278a` on `dev`)
