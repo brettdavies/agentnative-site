@@ -6,11 +6,30 @@ product_contract_source: ce-plan-bootstrap
 title: "feat: Web-audit agent-recovery checks, Vary dogfood, assemble-prompt"
 type: feat
 date: 2026-08-25-1211
-status: ready
+status: completed
+last-revised: 2026-08-26
+shipped_in: "PR #265 squash-merged to `dev` as `e30a194`; production release #266 as `8648f8f`. U1 cache posture later superseded on `dev` by edge-HIT restore PR #270 (`f150f83`) — see sibling plan."
 scope: web
 ---
 
 # feat: Web-audit agent-recovery checks, Vary dogfood, assemble-prompt
+
+> **Implementation status (2026-08-26): SHIPPED.** All units U1–U6 landed in PR
+> [#265](https://github.com/brettdavies/agentnative-site/pull/265) (`e30a194`) and shipped to production in release
+> [#266](https://github.com/brettdavies/agentnative-site/pull/266) (`8648f8f`). Registry is at 52 checks; assemble-prompt
+> lives on `/web/<domain>`; dogfood 404 bodies use env-absolute sitemap + `llms.txt` (`src/worker/not-found.ts`); MCP
+> connect crumb is in `llms.txt` + `initialize.instructions`.
+>
+> **U1 cache follow-on (not this plan):** #265/#266 made Vary client-visible by setting
+> `Cloudflare-CDN-Cache-Control: no-store` on negotiated HTML/markdown (still what `anc.dev` serves today). That satisfied
+> R1–R2. Restoring skip-Worker edge HIT *while* keeping Vary is a separate completed plan:
+> `docs/plans/2026-08-25-1613-feat-edge-hit-restore-plan.md` (PR #270 on `dev`, not yet on `main`). Do not re-open U1
+> here to undo or re-litigate that work.
+>
+> **Adjacent landings after this plan (out of scope):** MCP dual-protocol migration #272; postflight HTML gate #273;
+> staging legacy MCP var docs #274. They do not reopen R1–R13.
+>
+> **Active work remaining on this plan:** none. Deferred follow-ups below stay deferred.
 
 ## Goal Capsule
 
@@ -25,6 +44,8 @@ scope: web
 - **Stop when:** Production negotiated responses carry client-visible `Vary: Accept, User-Agent`; `markdown-vary` fails
   loudly when Vary is wrong; new checks and remediations ship end-to-end; assemble-prompt works on the HTML result page;
   curated board reflows after registry fingerprint change. No SEO/brand, payments, or live-journey work.
+- **Outcome:** Stop conditions met on production via #266. Edge HIT without losing Vary is tracked in the
+  edge-hit-restore sibling plan, not as residual U1 work here.
 
 ## Product Contract
 
@@ -150,10 +171,13 @@ OpenAPI-as-Essential for every site type, new MCP multi-prompt assemble tool, sy
   instead of `optional-absent` N/A. (session-settled intent: fail loudly — chosen over leaving MAY and treating N/A as
   the signal)
 - KTD2. U1 investigates: (a) asset `/` already runs `applyHeaders` (Vary intended) but production HIT responses omit
-  Vary under long `s-maxage` — fix so Vary reaches clients; (b) `/web/<domain>` result and `/web/scoring*` skip
-  `applyHeaders` today (leaderboard `/web` already applies them) — call `applyHeaders` or mirror Vary+Link+CSP; (c) do
-  not treat a cache-key-only CDN fix without client-visible Vary as satisfying R2. Prefer fixing emit/cache policy over
-  weakening the check.
+  Vary under long `s-maxage` — fix so Vary reaches clients; (b) `/web/<domain>` result and `/web/scoring*` skipped
+  `applyHeaders` at plan time (leaderboard `/web` already applied them) — call `applyHeaders` or mirror Vary+Link+CSP;
+  (c) do not treat a cache-key-only CDN fix without client-visible Vary as satisfying R2. Prefer fixing emit/cache
+  policy over weakening the check. **Shipped as:** #265 emitted Vary and used CDN `no-store` on negotiated variants so
+  HIT could not strip it; `/web/<domain>` paths gained the same header policy. **Superseded on `dev` for cache shape
+  only:** #270 restores skip-Worker HIT with HIT-1d / HIT-min (sibling plan) — R1’s “client-visible Vary” constraint
+  remains; the interim no-store lever does not.
 - KTD3. New checks follow the existing STAR chain: `registry.yaml` → `remediation.yaml` → antecedents/handlers → build
   13/15 → tests. Keyword derived from tier only.
 - KTD4. No MCP assemble tool; agents compose from per-check `remediation.prompt` / `get_web_remediation`. Assemble UI is
@@ -199,7 +223,13 @@ after rows exist. U6 last (docs + reflow verification).
 
 ## Implementation Units
 
+> Per-unit progress is derived from git (`ce-work`), not checkboxes. Status notes below are plan-revision annotations
+> after the 2026-08-26 reconcile against `dev` @ `cfef113` and production `anc.dev`.
+
 ### U1. Vary dogfood + markdown-vary fail loudly
+
+**Status:** Shipped in #265 / #266. Cache posture on `anc.dev` still matches the #266 no-store dogfood; skip-Worker HIT
+restore is the sibling edge-hit plan (#270 on `dev`).
 
 **Goal:** Fix Vary emission / CDN interaction and make `markdown-vary` fail loudly when Vary is missing or wrong.
 
@@ -244,6 +274,9 @@ Cache-Control globally.
 ---
 
 ### U2. Agent recovery checks (404, content-without-JS, agent-UA)
+
+**Status:** Shipped in #265. Check ids: `agent-friendly-404`, `agent-friendly-404-md`, `content-without-js`,
+`agent-ua-reachable`. Dogfood: `src/worker/not-found.ts`.
 
 **Goal:** Add the three agent-recovery / honesty probes with antecedents and remediations.
 
@@ -300,6 +333,9 @@ solution.
 
 ### U3. llms.txt quality trio
 
+**Status:** Shipped in #265. Check ids: `llms-txt-format`, `llms-txt-links`, `llms-txt-when-to-use` (handler
+`llms-txt-quality`).
+
 **Goal:** Three SHOULD/MAY quality checks gated on `root-llms-txt`, keeping presence `llms-txt` intact; shape the
 when-to-use bar so anc.dev’s own index can carry MCP “when to use / connect” guidance.
 
@@ -335,6 +371,8 @@ when-to-use bar so anc.dev’s own index can carry MCP “when to use / connect�
 ---
 
 ### U4. API hygiene, MCP resources honesty, ARD
+
+**Status:** Shipped in #265. Check ids: `json-errors`, `rate-limit-headers`, `mcp-resources-list`, `ai-catalog`.
 
 **Goal:** API-gated JSON error + rate-limit checks; MCP resources when advertised; optional ARD catalog.
 
@@ -376,6 +414,9 @@ when-to-use bar so anc.dev’s own index can carry MCP “when to use / connect�
 
 ### U5. Assemble-prompt result-page widget
 
+**Status:** Shipped in #265. Client mount in `src/client/clipboard.ts` + `src/client/assemble-prompt.ts`; tests in
+`tests/web-audit-assemble-prompt.test.ts`.
+
 **Goal:** Human HTML widget that assembles fix prompts from failed rows by tier.
 
 **Requirements:** R11 — cites KD3, KTD4
@@ -411,6 +452,9 @@ learning.
 ---
 
 ### U6. Docs, methodology copy, board reflow verify
+
+**Status:** Shipped in #265 / #266. Connect crumb later dual-protocol-aware in build (`src/build/llms.mjs`) via #272 on
+`dev`; production `llms.txt` trails until that release lands on `main`.
 
 **Goal:** Update human/agent methodology copy, ship the MCP connect crumb dogfood, and verify curated board reflow after
 registry fingerprint change.
@@ -463,13 +507,24 @@ staging/prod post-deploy; curl `llms.txt` for the MCP crumb.
 
 ## Definition of Done
 
-- All units U1–U6 complete with enumerated tests green.
-- R1–R13 satisfied; non-goals untouched.
-- Session-settled KD1–KD4 and KTD1 honored.
-- No interactive widgets in `content/*.md`.
-- Curated board reflows after registry change; remediations 1:1 with new ids.
+- All units U1–U6 complete with enumerated tests green. **Met** (#265; production #266).
+- R1–R13 satisfied; non-goals untouched. **Met.**
+- Session-settled KD1–KD4 and KTD1 honored. **Met.**
+- No interactive widgets in `content/*.md`. **Met.**
+- Curated board reflows after registry change; remediations 1:1 with new ids. **Met** (52-check registry).
 - Dogfood: anc.dev negotiated responses carry client-visible `Vary` under cache HIT/MISS, and `markdown-vary` is a real
-  SHOULD signal.
+  SHOULD signal. **Met** on production (2026-08-26 curl: `Vary: Accept, User-Agent` with CDN `no-store` under
+  `cf-cache-status: HIT`).
+
+## Residuals (not active units)
+
+| Item                                                   | Where it lives                                                                                                        |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| Skip-Worker edge HIT while keeping Vary                | Sibling plan `docs/plans/2026-08-25-1613-feat-edge-hit-restore-plan.md` (#270 on `dev`; release to `main` still open) |
+| Dual-protocol MCP crumb / `SPEC_REVISION` `2026-07-28` | Shipped on `dev` via #272; production trails until the next `main` release                                            |
+| Unseeded public rows mid-reflow UX banner              | Deferred follow-up (unchanged)                                                                                        |
+| Sync `~/.claude/skills/agent-web-audit`                | Deferred / out of scope (unchanged)                                                                                   |
+| Optional MCP `assembled_prompts` field                 | Deferred follow-up (unchanged)                                                                                        |
 
 ## Appendix
 
@@ -477,11 +532,12 @@ staging/prod post-deploy; curl `llms.txt` for the MCP crumb.
 
 - is-agentic is a Vercel shell over Ora (`GET https://ora.ai/api/checks` — 124 checks). Landscape already captured in
   session; no additional external research run for this plan.
-- Production observation (2026-08-25): `https://anc.dev/` HTML has Link/CSP from `applyHeaders` but no `Vary`,
-  `cf-cache-status: HIT`, `s-maxage=86400`. Markdown Accept response likewise lacks Vary/Link.
-- `markdown-vary` today: `tier: optional` → MAY → `finalizeOptional` → `optional-absent` N/A — explains “not failing
-  loudly.”
-- Institutional learnings to read before implement:
+- Pre-fix production observation (2026-08-25, **superseded by #266**): `https://anc.dev/` HTML had Link/CSP from
+  `applyHeaders` but no `Vary`, `cf-cache-status: HIT`, `s-maxage=86400`. Post-#266 (verified 2026-08-26): Vary is
+  present; CDN policy is `no-store` on negotiated variants until edge-HIT restore ships to `main`.
+- Pre-fix `markdown-vary`: `tier: optional` → MAY → `finalizeOptional` → `optional-absent` N/A. Post-#265: `tier:
+  recommended` (SHOULD).
+- Institutional learnings referenced during implementation:
   `docs/solutions/conventions/content-md-twin-serves-widgets-verbatim.md`,
   `docs/solutions/logic-errors/accept-header-q-value-parsing-content-negotiation-2026-04-14.md`,
   `docs/solutions/design-patterns/derive-cached-record-display-metadata-at-read-time.md`,
@@ -491,4 +547,10 @@ staging/prod post-deploy; curl `llms.txt` for the MCP crumb.
 ### Product Contract preservation
 
 Product Contract authored in this bootstrap (`product_contract_source: ce-plan-bootstrap`); no separate brainstorm
-enrichment. Session-settled product decisions recorded as KD1–KD4 with Governs links.
+enrichment. Session-settled product decisions recorded as KD1–KD4 with Governs links. 2026-08-26 revise: Product
+Contract unchanged; planning annotations only (shipped status, KTD2 cache follow-on, residuals table).
+
+### Revise provenance (2026-08-26)
+
+Reconciled against `origin/dev` @ `cfef113` and production curls. Load-bearing commits/PRs: #265 / `e30a194` (this
+plan), #266 / `8648f8f` (production), #270 / `f150f83` + #271 (edge HIT sibling), #272 (MCP dual-protocol, adjacent).
