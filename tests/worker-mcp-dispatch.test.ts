@@ -16,6 +16,19 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { detectMcpFormat, detectMcpGetFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import {
+  legacyToolsListBatchBody,
+  modernElementBatchBody,
+  modernResourcesReadBody,
+  modernResourcesReadHeaders,
+  modernToolCallBody,
+  modernToolCallBodyWithClientName,
+  modernToolCallHeaders,
+  modernToolsListBody,
+  modernToolsListHeaders,
+  toolsListBodyClaimingVersion,
+  toolsListHeadersClaimingVersion,
+} from './helpers/mcp-modern';
 import { parseMcpHttpBody, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
@@ -83,9 +96,10 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
 const FIXTURE_MCP_HTML = '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>';
 const FIXTURE_MCP_MD = '# anc.dev MCP server\n\nFixture body.\n';
 
-function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
+function makeEnv(opts: { enabled?: boolean; limiter?: RateStub; legacyEnabled?: boolean } = {}): Env {
   const enabled = opts.enabled ?? true;
   return {
+    ...(opts.legacyEnabled !== undefined && { MCP_LEGACY_ENABLED: opts.legacyEnabled ? 'true' : 'false' }),
     ASSETS: {
       fetch(req: Request) {
         const path = new URL(req.url).pathname;
@@ -152,6 +166,34 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
 async function readMcpJson(res: Response) {
   const raw = await res.text();
   return parseMcpHttpBody(raw, res.headers.get('content-type'));
+}
+
+function parseMcpRequestLogs(seen: Array<{ args: unknown[] }>) {
+  return seen
+    .map((s) => {
+      if (typeof s.args[0] !== 'string') return null;
+      try {
+        const parsed = JSON.parse(s.args[0]) as { event?: string };
+        return parsed.event === 'mcp.request' ? parsed : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+async function captureMcpRequestLogs(run: () => Promise<void>) {
+  const seen: Array<{ args: unknown[] }> = [];
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    seen.push({ args });
+  };
+  try {
+    await run();
+  } finally {
+    console.log = originalLog;
+  }
+  return parseMcpRequestLogs(seen);
 }
 
 async function postMcp(env: Env, accept: string, body: object): Promise<Response> {
@@ -577,20 +619,6 @@ describe('POST /mcp — Accept negotiation content-type', () => {
 });
 
 describe('POST /mcp — mcp.request telemetry fires after the gate decision', () => {
-  function parseMcpRequestLogs(seen: Array<{ args: unknown[] }>) {
-    return seen
-      .map((s) => {
-        if (typeof s.args[0] !== 'string') return null;
-        try {
-          const parsed = JSON.parse(s.args[0]) as { event?: string };
-          return parsed.event === 'mcp.request' ? parsed : null;
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-  }
-
   test('emits exactly one mcp.request line per request with era and outcome', async () => {
     const limiter: RateStub = { calls: 0, shouldSucceed: true };
     const env = makeEnv({ limiter });
@@ -691,6 +719,258 @@ describe('POST /mcp — malformed JSON-RPC body', () => {
     );
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).toBeLessThan(500);
+  });
+});
+
+describe('POST /mcp — era-aware rate keys, sunset switch, and telemetry PII posture', () => {
+  async function postMcpHeaders(env: Env, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
+    return worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
+        body: JSON.stringify(body),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+  }
+
+  test('modern tools/call with a registered Mcp-Name keys modern:{name}:anon', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(
+      env,
+      modernToolCallBody('get_scorecard', { slug: 'curl' }),
+      modernToolCallHeaders('get_scorecard'),
+    );
+    expect(limiter.lastKey).toBe('modern:get_scorecard:anon');
+  });
+
+  test('modern tools/call keys modern:{name}:{ip} when cf-connecting-ip is present', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(env, modernToolCallBody('get_scorecard', { slug: 'curl' }), {
+      ...modernToolCallHeaders('get_scorecard'),
+      'cf-connecting-ip': '198.51.100.42',
+    });
+    expect(limiter.lastKey).toBe('modern:get_scorecard:198.51.100.42');
+  });
+
+  test('a spoofed Mcp-Name outside the registered names falls back to modern:{ip}', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(env, modernToolCallBody('not_a_real_tool', {}), modernToolCallHeaders('not_a_real_tool'));
+    expect(limiter.lastKey).toBe('modern:anon');
+  });
+
+  test('modern tools/list without Mcp-Name keys modern:{ip}', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(env, modernToolsListBody(), modernToolsListHeaders());
+    expect(limiter.lastKey).toBe('modern:anon');
+  });
+
+  test('MCP_LEGACY_ENABLED=false rejects legacy initialize with -32022 + data.supported at HTTP 200', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    let res: Response | undefined;
+    const lines = await captureMcpRequestLogs(async () => {
+      res = await postMcp(env, 'application/json', initBody());
+    });
+    expect(res?.status).toBe(200);
+    const body = (await readMcpJson(res as Response)) as {
+      id?: unknown;
+      error?: { code: number; message: string; data?: { supported?: string[] } };
+    };
+    expect(body.error?.code).toBe(-32022);
+    expect(body.error?.data?.supported).toEqual(['2026-07-28']);
+    expect(body.error?.message ?? '').toContain('2026-07-28');
+    expect(body.id).toBe(1);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { outcome?: string; era?: string; error_code?: number };
+    expect(line.outcome).toBe('legacy_rejected');
+    expect(line.era).toBe('legacy');
+    expect(line.error_code).toBe(-32022);
+  });
+
+  test('the reject log carries the classified method for a legacy tools/call', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const lines = await captureMcpRequestLogs(async () => {
+      await postMcp(env, 'application/json', {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'get_scorecard', arguments: { slug: 'curl' } },
+      });
+    });
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { method?: string; outcome?: string };
+    expect(line.method).toBe('tools/call');
+    expect(line.outcome).toBe('legacy_rejected');
+  });
+
+  test('MCP_LEGACY_ENABLED=false still serves modern tools/list', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    let res: Response | undefined;
+    const lines = await captureMcpRequestLogs(async () => {
+      res = await postMcpHeaders(env, modernToolsListBody(), modernToolsListHeaders());
+    });
+    expect(res?.status).toBe(200);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { era?: string; outcome?: string };
+    expect(line.era).toBe('modern');
+    expect(line.outcome).toBe('ok');
+  });
+
+  test('MCP_LEGACY_ENABLED=false rejects an all-legacy batch at the shell with a null id', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const res = await postMcp(env, 'application/json', legacyToolsListBatchBody());
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32022);
+    expect(body.id).toBeNull();
+  });
+
+  test('legacy tools/call emits one mcp.request line with no IP, no arguments, null client_name', async () => {
+    const env = makeEnv();
+    const lines = await captureMcpRequestLogs(async () => {
+      await postMcpHeaders(
+        env,
+        {
+          jsonrpc: '2.0',
+          id: 6,
+          method: 'tools/call',
+          params: { name: 'get_scorecard', arguments: { slug: 'ripgrep' } },
+        },
+        { 'cf-connecting-ip': '198.51.100.42' },
+      );
+    });
+    expect(lines.length).toBe(1);
+    const serialized = JSON.stringify(lines[0]);
+    expect(serialized).not.toContain('cf-connecting-ip');
+    expect(serialized).not.toContain('198.51.100.42');
+    expect(serialized).not.toContain('ripgrep');
+    expect((lines[0] as { client_name?: unknown }).client_name).toBeNull();
+  });
+
+  test('client_name populates from modern _meta clientInfo, truncated to 64 chars', async () => {
+    const env = makeEnv();
+    const lines = await captureMcpRequestLogs(async () => {
+      await postMcpHeaders(
+        env,
+        modernToolCallBodyWithClientName('get_scorecard', { slug: 'curl' }, 'x'.repeat(80)),
+        modernToolCallHeaders('get_scorecard'),
+      );
+    });
+    expect(lines.length).toBe(1);
+    const clientName = (lines[0] as { client_name?: string }).client_name ?? '';
+    expect(clientName.length).toBe(64);
+    expect(clientName).toBe(`${'x'.repeat(63)}…`);
+  });
+
+  test('the rate-limit envelope keeps -32099 with the request id echoed', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: false };
+    const env = makeEnv({ limiter });
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32099);
+    expect(body.id).toBe(1);
+  });
+
+  test('modern resources/read with a mirroring Mcp-Name answers an unknown resource with -32602', async () => {
+    // The resource handler throws a -32002-tagged error, but the wire code is
+    // -32602: the SDK's era encode seam rewrites -32002 on both lanes.
+    const env = makeEnv();
+    const res = await postMcpHeaders(
+      env,
+      modernResourcesReadBody('anc://tool/does-not-exist'),
+      modernResourcesReadHeaders('anc://tool/does-not-exist'),
+    );
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32602);
+    expect(body.id).toBe(13);
+  });
+
+  test('modern resources/read with a non-mirroring Mcp-Name is rejected -32020 at HTTP 400', async () => {
+    const env = makeEnv();
+    const res = await postMcpHeaders(
+      env,
+      modernResourcesReadBody('anc://tool/does-not-exist', 62),
+      modernResourcesReadHeaders('anc://registry'),
+    );
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32020);
+    expect(body.id).toBe(62);
+  });
+
+  test('an all-legacy batch array is served by the legacy lane, not rejected', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+        body: JSON.stringify(legacyToolsListBatchBody([72, 73])),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).toContain('"id":72');
+    expect(raw).toContain('"id":73');
+    expect(raw).not.toContain('-32600');
+  });
+
+  test('a JSON-negotiated batch is served at HTTP 200, coerced to the first SSE event', async () => {
+    // The legacy transport streams one SSE event per batched response;
+    // coerceMcpJsonResponse keeps only the first data line, so a JSON client
+    // sees a single envelope rather than a JSON array.
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', legacyToolsListBatchBody([72, 73]));
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: unknown; result?: { tools?: unknown[] } };
+    expect(body.error).toBeUndefined();
+    expect(body.id).toBe(72);
+    expect((body.result?.tools ?? []).length).toBeGreaterThan(0);
+  });
+
+  test('a batch carrying a modern-envelope element is rejected -32600', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', modernElementBatchBody());
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32600);
+    expect(body.id).toBeNull();
+  });
+
+  test('an empty batch array is rejected -32600', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', []);
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as { error?: { code: number } };
+    expect(body.error?.code).toBe(-32600);
+  });
+
+  test('a modern claim of an unsupported protocol version draws the SDK -32022 at HTTP 400', async () => {
+    // Status split: the SDK's version reject is HTTP 400, distinct from the
+    // shell's legacy reject, which stays in-band at HTTP 200.
+    const env = makeEnv();
+    const res = await postMcpHeaders(
+      env,
+      toolsListBodyClaimingVersion('2025-03-26'),
+      toolsListHeadersClaimingVersion('2025-03-26'),
+    );
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as {
+      id?: unknown;
+      error?: { code: number; data?: { supported?: string[]; requested?: string } };
+    };
+    expect(body.error?.code).toBe(-32022);
+    expect(body.error?.data?.supported).toEqual(['2026-07-28']);
+    expect(body.error?.data?.requested).toBe('2025-03-26');
+    expect(body.id).toBe(14);
   });
 });
 
