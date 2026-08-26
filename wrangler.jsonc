@@ -22,6 +22,19 @@
   // per-user `WRANGLER_SEND_METRICS` or per-machine `wrangler telemetry
   // disable` state.
   "send_metrics": false,
+  // Workers Caching skip-Worker HIT (R10 / KTD1 / KTD5). Top-level cache is
+  // on so unlisted WorkerEntrypoints inherit cache-on; default fetch is the
+  // uncached gateway; `Cached` is the inner stored entrypoint; ContainerProxy
+  // is opted out so a HIT cannot replay sandbox egress. `cross_version_cache`
+  // stays unset so a new Worker version starts cold (R4). Sandbox and
+  // WebRescoreWorkflow stay out of `type: worker` (DO / Workflow, not fetch
+  // entrypoints). Mirror the same map under env.staging (KTD6).
+  "cache": { "enabled": true },
+  "exports": {
+    "default": { "type": "worker", "cache": { "enabled": false } },
+    "Cached": { "type": "worker", "cache": { "enabled": true } },
+    "ContainerProxy": { "type": "worker", "cache": { "enabled": false } }
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -237,6 +250,15 @@
       // `agentnative-site-sandbox`.
       "name": "agentnative-site-staging",
       "workers_dev": true,
+      // Staging is the skip-Worker proof surface (KTD6). `cache` / `exports`
+      // inherit like `routes`; state the map explicitly so a top-level edit
+      // cannot silently leave staging uncached.
+      "cache": { "enabled": true },
+      "exports": {
+        "default": { "type": "worker", "cache": { "enabled": false } },
+        "Cached": { "type": "worker", "cache": { "enabled": true } },
+        "ContainerProxy": { "type": "worker", "cache": { "enabled": false } }
+      },
       // Load-bearing override: `routes` is an inheritable key. An empty
       // array breaks inheritance from the top-level
       // `[{pattern: "anc.dev", custom_domain: true}]`, which would

@@ -122,6 +122,16 @@ function buildCliBoardRows(leaderboard) {
     .join('\n');
 }
 
+/** Markdown CLI board slice for index.md — baked at build, no form widgets. */
+function buildCliBoardMarkdown(leaderboard) {
+  const rows = leaderboard.slice(0, BOARD_ROWS).map((entry) => {
+    const pct = entry.scorecard.badge.score_pct;
+    const name = entry.tool.name;
+    return `| ${entry.rank} | [${name}](/score/${name}) | ${pct}% |`;
+  });
+  return ['| # | Tool | Score |', '|---|------|-------|', ...rows, ''].join('\n');
+}
+
 function buildSpecRows(principles) {
   return principles
     .map((p) => {
@@ -323,6 +333,13 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     introLede,
     '',
     useSource.trim(),
+    '',
+    '## CLI leaderboard',
+    '',
+    buildCliBoardMarkdown(leaderboard),
+    '## Web leaderboard',
+    '',
+    '{{WEB_BOARD_ROWS}}',
     '',
     '## Score a binary, live.',
     '',

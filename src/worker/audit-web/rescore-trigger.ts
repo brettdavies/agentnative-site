@@ -5,6 +5,7 @@
 // in KV; the authoritative liveness check is the Workflow instance status
 // (a stale pointer to a finished batch never blocks a new start).
 
+import { runWithHitMinPurge } from './hit-min-purge';
 import { runWebPublicListingBackfill, type WebBackfillEnv } from './public-listing-backfill';
 import type { WebRescoreWorkflowBinding } from './rescore-workflow';
 
@@ -117,7 +118,11 @@ function optionalPositiveInt(value: unknown): number | undefined {
  * surfaces as a 500 rather than a partial success that could stamp curated
  * domains false.
  */
-export async function handleWebBackfill(request: Request, env: WebBackfillTriggerEnv): Promise<Response> {
+export async function handleWebBackfill(
+  request: Request,
+  env: WebBackfillTriggerEnv,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const denied = await requireRescoreAuth(request, env.WEB_RESCORE_SECRET);
   if (denied) return denied;
 
@@ -127,11 +132,13 @@ export async function handleWebBackfill(request: Request, env: WebBackfillTrigge
     .catch(() => ({}));
 
   try {
-    const result = await runWebPublicListingBackfill(env, {
-      dryRun: body.dry_run === true,
-      cursor: optionalString(body.cursor),
-      maxWrites: optionalPositiveInt(body.max_writes),
-    });
+    const result = await runWithHitMinPurge(ctx, () =>
+      runWebPublicListingBackfill(env, {
+        dryRun: body.dry_run === true,
+        cursor: optionalString(body.cursor),
+        maxWrites: optionalPositiveInt(body.max_writes),
+      }),
+    );
     return jsonResponse(result, 200);
   } catch (err) {
     console.log(

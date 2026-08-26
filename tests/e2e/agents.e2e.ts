@@ -75,6 +75,45 @@ test.describe('CN decision table — live Worker', () => {
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     expect(res.headers()['vary']).toBe('Accept, User-Agent');
+    // wrangler dev is not skip-Worker proof; do not assert Cf-Cache-Status.
+    const md = await res.text();
+    expect(md.toLowerCase()).not.toContain('live-score');
+    expect(md.toLowerCase()).not.toContain('turnstile');
+    expect(md).not.toContain('/api/score');
+    expect(md).toMatch(/## (CLI|Web) /);
+  });
+
+  test('Chrome GET /about is HTML with Vary; curl is markdown', async ({ request }) => {
+    const html = await request.get(`${BASE}/about`, {
+      headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 Chrome/120.0 Safari/537.36' },
+    });
+    expect(html.status()).toBe(200);
+    expect(html.headers()['content-type']).toContain('text/html');
+    expect(html.headers()['vary']).toBe('Accept, User-Agent');
+    const md = await request.get(`${BASE}/about`, { headers: CURL });
+    expect(md.headers()['content-type']).toContain('text/markdown');
+    expect(md.headers()['vary']).toBe('Accept, User-Agent');
+  });
+
+  test('HTML GET / then curl */* is markdown with boards, not the HTML object', async ({ request }) => {
+    const html = await request.get(`${BASE}/`, {
+      headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 Chrome/120.0 Safari/537.36' },
+    });
+    expect(html.headers()['content-type']).toContain('text/html');
+    const curl = await request.get(`${BASE}/`, { headers: CURL });
+    expect(curl.headers()['content-type']).toContain('text/markdown');
+    expect(curl.headers()['vary']).toBe('Accept, User-Agent');
+    const md = await curl.text();
+    expect(md).toMatch(/## (CLI|Web) /);
+  });
+
+  test('HTML GET / then Accept text/markdown is markdown, not the HTML object', async ({ request }) => {
+    await request.get(`${BASE}/`, {
+      headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 Chrome/120.0 Safari/537.36' },
+    });
+    const md = await request.get(`${BASE}/`, { headers: { accept: 'text/markdown' } });
+    expect(md.headers()['content-type']).toContain('text/markdown');
+    expect(md.headers()['vary']).toBe('Accept, User-Agent');
   });
 
   test('HEAD /p3 includes Link header', async ({ request }) => {

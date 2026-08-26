@@ -18,8 +18,15 @@ import {
   type WebAggregateEntry,
   type WebCacheEnv,
 } from '../src/worker/audit-web/cache';
+import {
+  flushHitMinPurge,
+  invokeCachedPurge,
+  queueHitMinPurge,
+  runWithHitMinPurge,
+} from '../src/worker/audit-web/hit-min-purge';
 import { runWebPublicListingBackfill, type WebBackfillEnv } from '../src/worker/audit-web/public-listing-backfill';
 import { resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
+import { Cached, type Env } from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 type ListedObject = { key: string; customMetadata?: Record<string, string> };
@@ -165,9 +172,9 @@ describe('cache.put / get', () => {
 
   test('a write failure never throws to the caller', async () => {
     const { env } = makeR2Stub({ throwOnPut: true });
-    await expect(
-      put(env, 'https://example.com/', sampleScorecard('https://example.com/'), SPEC_VERSION),
-    ).resolves.toBeUndefined();
+    await expect(put(env, 'https://example.com/', sampleScorecard('https://example.com/'), SPEC_VERSION)).resolves.toBe(
+      false,
+    );
   });
 
   test('corrupted stored JSON returns null and best-effort deletes', async () => {
@@ -290,7 +297,7 @@ describe('aggregate cache', () => {
 
   test('an aggregate write failure never throws to the caller', async () => {
     const { env } = makeR2Stub({ throwOnPut: true });
-    await expect(putAggregate(env, 'leaderboard', ENTRIES, SPEC_VERSION)).resolves.toBeUndefined();
+    await expect(putAggregate(env, 'leaderboard', ENTRIES, SPEC_VERSION)).resolves.toBe(false);
   });
 });
 
@@ -886,5 +893,103 @@ describe('runWebPublicListingBackfill', () => {
 
     expect(r.written).toBe(1);
     expect(readMeta(store, key)?.public_listing).toBe('false');
+  });
+});
+
+describe('HIT-min tag purge', () => {
+  function makePurgeCtx() {
+    const calls: Array<{ tags?: string[]; pathPrefixes?: string[] }> = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            calls.push({ tags });
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    return { ctx, calls };
+  }
+
+  test('queued tags flush once with the union, never a path prefix', async () => {
+    const { ctx, calls } = makePurgeCtx();
+    await runWithHitMinPurge(ctx, async () => {
+      queueHitMinPurge(['home', 'web']);
+      queueHitMinPurge(['web', 'web:example.com']);
+      await flushHitMinPurge();
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.tags?.sort()).toEqual(['home', 'web', 'web:example.com']);
+    expect(calls[0]?.pathPrefixes).toBeUndefined();
+  });
+
+  test('invokeCachedPurge sends tags only', async () => {
+    const { ctx, calls } = makePurgeCtx();
+    await invokeCachedPurge(ctx, ['web:other.dev', 'web']);
+    expect(calls).toEqual([{ tags: ['web:other.dev', 'web'] }]);
+  });
+
+  test('invokeCachedPurge does not fall back to gateway ctx.cache.purge', async () => {
+    const cacheCalls: unknown[] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      cache: {
+        async purge(opts: unknown) {
+          cacheCalls.push(opts);
+          return { success: true };
+        },
+      },
+    } as unknown as ExecutionContext;
+    await invokeCachedPurge(ctx, ['web']);
+    expect(cacheCalls).toEqual([]);
+  });
+
+  test('queueHitMinPurge outside ALS logs queue_without_store', () => {
+    const logs: string[] = [];
+    const orig = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    };
+    try {
+      queueHitMinPurge(['web']);
+    } finally {
+      console.log = orig;
+    }
+    expect(logs.some((line) => line.includes('queue_without_store'))).toBe(true);
+  });
+
+  test('Cached.purgeHitMinTags calls ctx.cache.purge with unique tags', async () => {
+    const calls: unknown[] = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      cache: {
+        async purge(opts: { tags: string[] }) {
+          calls.push(opts);
+          return { success: true, errors: [] };
+        },
+      },
+    } as unknown as ExecutionContext;
+    const cached = new Cached(ctx, {} as Env);
+    const result = await cached.purgeHitMinTags(['home', 'web', 'home']);
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([{ tags: ['home', 'web'] }]);
+  });
+
+  test('put does not purge on its own', async () => {
+    const { ctx, calls } = makePurgeCtx();
+    const { env } = makeR2Stub();
+    await runWithHitMinPurge(ctx, async () => {
+      await put(env, 'https://example.com/', sampleScorecard('https://example.com/'), SPEC_VERSION);
+      await flushHitMinPurge();
+    });
+    expect(calls).toEqual([]);
   });
 });

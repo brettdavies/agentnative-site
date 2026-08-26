@@ -236,3 +236,23 @@ export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
 export function buildFrontpageBoardEmptyState(): string {
   return `        <p class="board-rubric">Scoring in progress: web results land after the next rescore pass. <a href="/web">See the board</a> or <a href="/web-audit">audit a website</a>.</p>`;
 }
+
+/**
+ * Homepage markdown web-board slice: a compact table like /web.md, never
+ * HTML `lrow` markup (R6). Ranked by RELATIVE, matching the HTML pane.
+ */
+export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): string {
+  const ranked = rankWebEntries(entries, 'relative');
+  const lines = ['| # | Site | Score |', '|---|------|-------|'];
+  for (const entry of ranked) {
+    const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
+    lines.push(`| ${entry.rank} | [${label}](/web/${entry.domain}) | ${entry.score.relative}% |`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+/** Homepage markdown empty state when the frontpage aggregate is missing. */
+export function buildFrontpageBoardMarkdownEmptyState(): string {
+  return 'Scoring in progress: web results land after the next rescore pass. [See the board](/web.md) or [audit a website](/web-audit).\n';
+}

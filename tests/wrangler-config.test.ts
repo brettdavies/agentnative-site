@@ -261,3 +261,84 @@ describe('RELEASES-RATIONALE.md — R2 score-cache key shape (plan U7)', () => {
     expect(architecture).toMatch(/scores\/\{binary\}\/\{anc-version\}\.json/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Workers Caching per-entrypoint map (edge HIT restore U1)
+// ---------------------------------------------------------------------------
+
+// Top-level `cache.enabled` plus an `exports` map is the skip-Worker HIT
+// lever (R10 / KTD1 / KTD5). Unlisted WorkerEntrypoints inherit cache-on,
+// so ContainerProxy must be opted out; Sandbox and WebRescoreWorkflow stay
+// out of `type: worker` unless dry-run proves the map is exclusive.
+// `cross_version_cache` stays unset so a new Worker version starts cold.
+// env.staging mirrors the same map because staging is the skip-Worker proof
+// surface (KTD6) and inheritable keys must be explicit in this repo.
+
+const SITE_CACHE_EXPORT = 'Cached';
+
+function workerExportCache(
+  exportsMap: Record<string, unknown> | undefined,
+  name: string,
+): { type: unknown; cache: { enabled?: unknown } | undefined } {
+  const entry = exportsMap?.[name] as Record<string, unknown> | undefined;
+  if (!entry) throw new Error(`exports.${name} missing`);
+  return {
+    type: entry.type,
+    cache: entry.cache as { enabled?: unknown } | undefined,
+  };
+}
+
+function assertEntrypointCacheMap(block: Record<string, unknown>, label: string): void {
+  const cache = block.cache as Record<string, unknown> | undefined;
+  expect(cache, `${label} cache block`).toBeDefined();
+  expect(cache?.enabled, `${label} cache.enabled`).toBe(true);
+  expect(Object.hasOwn(cache ?? {}, 'cross_version_cache'), `${label} cache.cross_version_cache must be unset`).toBe(
+    false,
+  );
+
+  const exportsMap = block.exports as Record<string, unknown> | undefined;
+  expect(exportsMap, `${label} exports`).toBeDefined();
+
+  const def = workerExportCache(exportsMap, 'default');
+  expect(def.type).toBe('worker');
+  expect(def.cache?.enabled, `${label} default cache`).toBe(false);
+
+  const inner = workerExportCache(exportsMap, SITE_CACHE_EXPORT);
+  expect(inner.type).toBe('worker');
+  expect(inner.cache?.enabled, `${label} ${SITE_CACHE_EXPORT} cache`).toBe(true);
+
+  const proxy = workerExportCache(exportsMap, 'ContainerProxy');
+  expect(proxy.type).toBe('worker');
+  expect(proxy.cache?.enabled, `${label} ContainerProxy cache`).toBe(false);
+
+  expect(exportsMap?.Sandbox, `${label} must not list Sandbox as type: worker`).toBeUndefined();
+  expect(exportsMap?.WebRescoreWorkflow, `${label} must not list WebRescoreWorkflow as type: worker`).toBeUndefined();
+}
+
+describe('wrangler.jsonc — Workers Caching per-entrypoint map (edge HIT restore U1)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('package.json pins wrangler ^4.124.0 so cache.enabled is a real schema key', () => {
+    const pkg = JSON.parse(readFileSync(join(import.meta.dir, '..', 'package.json'), 'utf8')) as {
+      devDependencies: { wrangler: string };
+    };
+    expect(pkg.devDependencies.wrangler).toBe('^4.124.0');
+  });
+
+  test('top-level pins inner cache on, default and ContainerProxy cache off, cross_version_cache unset', () => {
+    assertEntrypointCacheMap(config, 'top-level');
+  });
+
+  test('env.staging mirrors the same cache/exports map', () => {
+    assertEntrypointCacheMap(staging, 'env.staging');
+  });
+
+  test('generated types include cache.purge on the cached entrypoint context', () => {
+    const dts = readFileSync(join(import.meta.dir, '..', 'src/worker-configuration.d.ts'), 'utf8');
+    const ctx = dts.match(/interface ExecutionContext(?:<[^>]*>)?\s*\{[\s\S]*?\n\}/);
+    expect(ctx, 'ExecutionContext interface').toBeTruthy();
+    expect(ctx?.[0]).toMatch(/cache\?: CacheContext/);
+    expect(dts).toMatch(/interface CacheContext \{\s*purge\(options: CachePurgeOptions\): Promise<CachePurgeResult>;/);
+  });
+});
