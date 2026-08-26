@@ -30,11 +30,12 @@ scoring-policy value, not fixed in this glossary.
 
 ### Markdown twin
 
-The markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
-text/markdown`. It opens with a short frontmatter block (title, description, canonical URL) followed by the source body
-verbatim, with site-internal links resolved to absolute URLs. The frontmatter-free body is what gets concatenated into
-`llms-full.txt`. It is the agent-facing half of the site's dual-surface contract: one markdown source emits both an HTML
-page for browsers and this twin for agents.
+The markdown version of every content page, served at the same path with a `.md` suffix, under an explicit markdown
+`Accept`, or when Accept is absent/`*/*` and the client is a markdown-eligible agent (for example curl). It opens with a
+short frontmatter block (title, description, canonical URL) followed by the source body verbatim, with site-internal
+links resolved to absolute URLs. The frontmatter-free body is what gets concatenated into `llms-full.txt`. It is the
+agent-facing half of the site's dual-surface contract: one markdown source emits both an HTML page for browsers and this
+twin for agents. HTML smokes must send `Accept: text/html`; bare curl is not a browser.
 
 Because the twin's body is the source verbatim, only prose belongs in the content source. Interactive HTML that renders
 correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build template and
