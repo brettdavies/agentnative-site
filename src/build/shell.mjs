@@ -32,6 +32,23 @@ const NAV_LINKS = [
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
 
+const leaderboardsCliCurrent = (path) => path === '/scorecards' || path.startsWith('/score/');
+const leaderboardsWebCurrent = (path) =>
+  path === '/web' || (path.startsWith('/web/') && !path.startsWith('/web-audit'));
+
+const renderLeaderboardsNav = (path) => {
+  const cliCurrent = leaderboardsCliCurrent(path) ? ' aria-current="page"' : '';
+  const webCurrent = leaderboardsWebCurrent(path) ? ' aria-current="page"' : '';
+  return `          <a href="/scorecards" data-s="cli" data-leaderboards-nav${cliCurrent}>Leaderboards</a>
+          <a href="/web" data-s="web" data-leaderboards-nav${webCurrent}>Leaderboards</a>`;
+};
+
+const renderNavLink = (entry, path) => {
+  if (entry.label === 'Leaderboards') return renderLeaderboardsNav(path);
+  const current = navCurrent(path, entry.match) ? ' aria-current="page"' : '';
+  return `          <a href="${entry.href}"${current}>${entry.label}</a>`;
+};
+
 // Alt text for the OG card. Single source-of-truth: applies to every
 // page's og:image:alt + twitter:image:alt because the site uses one
 // shared OG image (see docs/DESIGN.md §4.13). The card itself is
@@ -311,10 +328,7 @@ ${MACHINE_ENTRY_POINTS.map((e) => `          <li><a href="${e.href}">${e.href}</
           <span class="site-brand__tag">${SITE_TAGLINE}</span>
         </a>
         <nav class="site-nav" aria-label="Primary">
-${NAV_LINKS.map(
-  (l) =>
-    `          <a href="${l.href}"${navCurrent(canonicalPath, l.match) ? ' aria-current="page"' : ''}>${l.label}</a>`,
-).join('\n')}
+${NAV_LINKS.map((l) => renderNavLink(l, canonicalPath)).join('\n')}
         </nav>
         <div class="site-header__cta">
           <div
@@ -387,6 +401,7 @@ ${SOURCE_REPOS.map(
       </div>
     </footer>
     <script src="/js/theme.js" defer></script>
+    <script src="/js/surface.js" defer></script>
     <script src="/js/nav.js" defer></script>
     <script src="/js/clipboard.js" defer></script>
 ${extraScripts.map((s) => `    <script src="${s}" defer></script>`).join('\n')}

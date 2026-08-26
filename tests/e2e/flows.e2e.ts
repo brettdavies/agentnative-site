@@ -272,6 +272,28 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
       expect(overflow, `overflow at ${width}px`).toBeLessThanOrEqual(0);
     }
   });
+
+  test('selecting Website updates visible Leaderboards href in header', async ({ page }) => {
+    await page.goto('/');
+    const nav = page.locator('.site-nav');
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    await page.locator('label[for="s-web"]').click();
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await page.reload();
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await expect(page.locator('#s-web')).toBeChecked();
+  });
+
+  test('no-JS: visible Leaderboards href follows homepage segment', async ({ browser }) => {
+    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const page = await ctx.newPage();
+    await page.goto('/');
+    const nav = page.locator('.site-nav');
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    await page.locator('label[for="s-web"]').click();
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await ctx.close();
+  });
 });
 
 test.describe('shell — grouped nav, hamburger, footer rows', () => {
@@ -280,7 +302,9 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
     await page.goto('/');
     const nav = page.getByRole('navigation', { name: 'Primary' });
     await expect(nav).toBeVisible();
-    await expect(nav.locator('a')).toHaveCount(6);
+    await expect(nav.locator('a')).toHaveCount(7);
+    await expect(nav.locator('a:visible')).toHaveCount(6);
+    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
     await expect(page.locator('.nav-burger')).toBeHidden();
     await expect(page.locator('.site-footer__source')).toBeVisible();
     await expect(page.locator('.site-footer__meta')).toBeVisible();
@@ -292,7 +316,9 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       await page.goto('/');
       const nav = page.getByRole('navigation', { name: 'Primary' });
       await expect(nav).toBeVisible();
-      await expect(nav.locator('a')).toHaveCount(6);
+      await expect(nav.locator('a')).toHaveCount(7);
+      await expect(nav.locator('a:visible')).toHaveCount(6);
+      await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
       await expect(page.locator('.nav-burger')).toBeHidden();
 
       const overflow = await page.evaluate(() => {
@@ -322,7 +348,8 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       expect(overflow.burgerDisplay).toBe('none');
       expect(overflow.navDisplay).toBe('flex');
       expect(overflow.links).toBeDefined();
-      expect(overflow.links!.every((l) => l.visible)).toBe(true);
+      expect(overflow.links!.filter((l) => l.visible).length).toBe(6);
+      expect(overflow.links!.filter((l) => !l.visible).length).toBe(1);
     });
   }
 
@@ -384,6 +411,40 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
     await page.keyboard.press('Escape');
     await expect(nav).toBeHidden();
     await expect(page.locator('.nav-burger__cb')).toBeFocused();
+  });
+});
+
+test.describe('leaderboard surface nav', () => {
+  test('stored web preference flips visible Leaderboards off homepage', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label[for="s-web"]').click();
+    await page.goto('/about');
+    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+  });
+
+  test('cold /web visit does not write preference (Leaderboards stays CLI default)', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('anc-surface'));
+    await page.goto('/web');
+    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    const stored = await page.evaluate(() => localStorage.getItem('anc-surface'));
+    expect(stored).toBeNull();
+  });
+
+  test('Probe A navigates CLI → Website and writes preference', async ({ page }) => {
+    await page.goto('/scorecards');
+    await page.locator('label[for="board-s-web"]').click();
+    await expect(page).toHaveURL(/\/web$/);
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
+    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+  });
+
+  test('Probe A navigates Website → CLI and writes preference', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label[for="s-web"]').click();
+    await page.goto('/web');
+    await page.locator('label[for="board-s-cli"]').click();
+    await expect(page).toHaveURL(/\/scorecards$/);
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
 

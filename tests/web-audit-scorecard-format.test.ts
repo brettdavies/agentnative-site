@@ -419,6 +419,8 @@ describe('web leaderboard (U15)', () => {
 
   test('renders both score columns, row sort data, the toggle control, and /web links', () => {
     const html = buildWebLeaderboardBody(entries, boardOpts);
+    expect(html).toContain('data-surface-board-seg');
+    expect(html).toContain('id="board-s-web"');
     expect(html).toContain('href="/web/small-perfect.dev"');
     expect(html).toContain('data-web-sort="global"');
     expect(html).toContain('data-web-sort="relative"');
@@ -433,6 +435,7 @@ describe('web leaderboard (U15)', () => {
     const html = buildWebLeaderboardBody([], { view: 'all', curatedCount: 0, userCount: 0 });
     expect(html).not.toContain('<tbody>');
     expect(html).toContain('Scoring in progress');
+    expect(html).toContain('data-surface-board-seg');
   });
 
   test('markdown twin lists RELATIVE-ordered rows with both columns, origin-absolute', () => {

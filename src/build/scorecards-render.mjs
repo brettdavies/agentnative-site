@@ -73,7 +73,13 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   const eligibleCount = leaderboard.filter((e) => e.scorecard.badge.eligible).length;
   const floorPct = BADGE_FLOOR_DISPLAY_PCT;
 
+  const boardSurfaceSeg = `<div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
+    <input type="radio" name="board-surface" id="board-s-cli" checked /><label for="board-s-cli">CLI</label>
+    <input type="radio" name="board-surface" id="board-s-web" /><label for="board-s-web">Website</label>
+  </div>`;
+
   return `<section class="leaderboard-hero">
+  ${boardSurfaceSeg}
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
   <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">eight principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
   <p class="leaderboard-hero__meta">${leaderboard.length} audited tools in the corpus.</p>

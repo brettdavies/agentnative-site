@@ -20,9 +20,9 @@ and board-hero layout polish stay out.
 **Authority:** session-settled design brief (this conversation) > this plan > existing theme/`install-cmd` client
 patterns.
 
-**Stop when:** Leaderboards href follows preference sitewide; homepage segment restores/writes preference; both boards
-expose Probe A that writes preference and navigates; tests cover the preference helper and the nav rewrite; no Audit
-changes; no stamp-on-visit.
+**Stop when:** Leaderboards destination follows preference (dual-anchor visibility flip, not href rewrite); homepage
+segment restores/writes preference; both boards expose Probe A that writes preference and navigates; CONCEPTS documents
+preference + no-JS board gap; tests cover the preference helper and nav flip; no Audit changes; no stamp-on-visit.
 
 ---
 
@@ -47,8 +47,11 @@ retarget Leaderboards, and add the same peer switch on `/scorecards` and `/web`.
   board, external link).
 - **R7.** No-JS on `/`: Leaderboards follows the homepage segment via **dual header links** and existing
   `body:has(#s-web:checked)` — same parity model as Full board (CLI → `/scorecards`, Website → `/web`). No-JS off `/`:
-  Leaderboards stays `/scorecards` (no `#s-web` on page).
+  Leaderboards stays `/scorecards` (no `#s-web` on page). Board pages: Probe A is JS-only; document the gap (see R9).
 - **R8.** Audit primary-nav asymmetry is out of this plan.
+- **R9.** Header **Leaderboards** always reflects **stored preference**, not the board currently displayed. A visitor on
+  `/web` with empty storage still sees Leaderboards → `/scorecards` until an explicit control writes preference (AE5).
+  Same when stored `web` but viewing `/scorecards`: nav shows `/web`. No pathname-based nav override.
 
 ### Key Decisions
 
@@ -60,14 +63,21 @@ retarget Leaderboards, and add the same peer switch on `/scorecards` and `/web`.
 - **KD4.** Do not stamp on board visit. `(session-settled: user-directed — chosen over stamp-on-visit: preference only
   from explicit surface controls)`
 - **KD5.** Boards this pass; Audit later. `(session-settled: user-directed)`
+- **KD6.** Preference drives Leaderboards destination even when it disagrees with the current board URL — not a bug.
+  `(session-settled: user-directed — chosen over pathname-reflects-current-board for nav display)`
+- **KD7.** Board no-JS: homepage `:has` parity is the bar; board Probe A is JS-enhanced. Document the gap in-plan and in
+  CONCEPTS. `(session-settled: user-directed — chosen over plain peer links in hero)`
+- **KD8.** No programmatic focus after Probe A full-page navigation — browser default focus on load is sufficient.
+  `(session-settled: user-directed — chosen over #main sessionStorage focus flag)`
 
 ### Scope Boundaries
 
 **In:** shared preference module; shell Leaderboards hook + sitewide script; homepage bind; Probe A on both board
-heroes; unit + e2e coverage.
+heroes; CONCEPTS entry; unit + e2e coverage.
 
 **Out / deferred:** Audit nav parity; board-hero layout polish if A feels cramped next to Relative|Global / All|Curated;
-markdown-twin changes beyond existing board links; changing Full board from dual-pane CSS to a single rewritten link.
+plain peer links for no-JS board cross-nav; markdown-twin changes beyond existing board links; changing Full board from
+dual-pane CSS to a single rewritten link.
 
 ### Acceptance Examples
 
@@ -81,6 +91,8 @@ markdown-twin changes beyond existing board links; changing Full board from dual
   until an explicit control writes.
 - **AE6.** JS disabled on `/` → CLI|Website CSS panes still swap; visible Leaderboards link follows segment
   (`/scorecards` or `/web`) via `:has`, matching Full board.
+- **AE7.** JS disabled on `/scorecards` or `/web` → board segment radios render but do not navigate; visitor uses footer
+  or in-page links to switch boards. Documented limitation, not a failure.
 
 ---
 
@@ -97,7 +109,8 @@ markdown-twin changes beyond existing board links; changing Full board from dual
 
 - **KTD1.** Mirror `src/client/theme.ts` / `install-cmd.ts`: small exported helpers (`getSurface`, `setSurface`,
   `leaderboardsHref`), storage key e.g. `anc-surface`, values `cli` | `web`, silent catch if `localStorage` blocked.
-  Absent/invalid key reads as `cli` — never treat “no choice” as an implicit `web`. `(session-settled: user-directed —
+  Absent/invalid key reads as `cli` — never treat “no choice” as an implicit `web`. `leaderboardsHref` is read-only
+  (tests/diagnostics); production nav uses static dual anchors + CSS flip only. `(session-settled: user-directed —
   chosen over a heavier store/event bus)`; tri-state transport per
   `docs/solutions/design-patterns/transport-a-cross-page-tri-state-field-as-boolean-or-null-omit-dont-false.md`
 - **KTD2.** Emit **two** Leaderboards anchors in `shell.mjs` (Full-board parity): `data-s="cli"` → `/scorecards`,
@@ -115,8 +128,10 @@ markdown-twin changes beyond existing board links; changing Full board from dual
   on dual anchors. Board visit is render-only (checked state reflects URL, no `setSurface`) per
   `docs/solutions/design-patterns/flip-render-and-per-gesture-persistence-as-separate-briefs.md`
 - **KTD5.** Probe A markup: reuse `.seg` in `.leaderboard-hero` above the h1 on both boards; CLI checked on
-  `/scorecards`, Website checked on `/web`. Clicking the already-current option is a no-op (no navigation). Layout
-  polish deferred.
+  `/scorecards`, Website checked on `/web`. **Board segments use distinct radio ids** (e.g. `board-s-cli` /
+  `board-s-web`) — never reuse homepage `#s-cli` / `#s-web` on board pages (global `body:has(#s-web:checked)` nav rules
+  would fire on render-only checked state and violate AE5). Homepage `:has` nav rules stay scoped to homepage radios
+  only. Clicking the already-current option is a no-op (no navigation). Layout polish deferred.
 
 ### High-Level Technical Design
 
@@ -153,7 +168,7 @@ Product Contract from ce-plan-bootstrap (session brief); no separate brainstorm 
 
 **Goal:** Compact preference helper, dual Leaderboards anchors, `:has` homepage parity, off-home `data-surface` reader.
 
-**Requirements:** R1–R3, R7; KD1–KD2; KTD1–KTD3, KTD2b
+**Requirements:** R1–R3, R7; AE1, AE3 (off-home); KD1–KD2; KTD1–KTD4, KTD2b
 
 **Dependencies:** none
 
@@ -161,16 +176,19 @@ Product Contract from ce-plan-bootstrap (session brief); no separate brainstorm 
 - create `src/client/surface.ts`
 - modify `src/build/01-assets.mjs` (bundle → `dist/js/surface.js`)
 - modify `src/build/shell.mjs` (dual Leaderboards anchors; defer `/js/surface.js`)
-- modify `src/styles/site.css` (`.site-nav` `:has` + `html[data-surface]` flip rules)
+- modify `src/styles/site.css` (`.site-nav` `:has` + scoped `html[data-surface]` flip rules; override global
+  `[data-s="web"] { display: none }` inside `.site-nav` only)
 - create `tests/surface.test.ts`
 - modify `tests/build.test.ts` or `tests/regression.test.ts` (both anchors in dist shell)
+- modify `tests/e2e/flows.e2e.ts` (nav link count: 7 total, 6 visible; one visible `[data-leaderboards-nav]`)
 
 **Approach:**
 1. Export get/set + surface→href map; default `cli` when missing/invalid.
-2. Shell: special-case Leaderboards in nav — two `<a>` tags with `data-s` + `data-leaderboards-nav`; `aria-current` on
-   the visible matching board when on `/scorecards` / `/web` / `/score/*`.
-3. CSS: homepage `body:has(#s-web:checked)` toggles which Leaderboards anchor shows; `html[data-surface="web"]` toggles
-   off-homepage (mirror pattern for cli default).
+2. Shell: special-case Leaderboards in nav — two `<a>` tags with `data-s` + `data-leaderboards-nav`;
+   `aria-current="page"` only on the anchor whose href matches the current pathname (never on the hidden sibling).
+3. CSS: homepage `body:has(#s-web:checked)` toggles which Leaderboards anchor shows (homepage `#s-cli`/`#s-web` only);
+   `html:not(:has(#s-cli)) [data-surface="web"]` toggles off-homepage. Nav-scoped rules must override global
+   `[data-s="web"] { display: none }`.
 4. JS on load: if not homepage (no `#s-cli`), set `document.documentElement.dataset.surface` from storage.
 5. Bundle and emit like `theme.js`; include in every shell.
 
@@ -181,7 +199,10 @@ guards
 - Missing key → `cli`, `leaderboardsHref()` → `/scorecards`
 - Stored `web` → `/web`; invalid → `cli`
 - Built `index.html`: two `[data-leaderboards-nav]` anchors with distinct hrefs
-- CSS presence: nav-scoped `:has` rules (structural grep or snapshot comment in test)
+- AE1: cold visit, empty storage → visible CLI Leaderboards anchor href `/scorecards`
+- AE3 (off-home): seed `web`, load `/about` (or post-Probe-A destination) → visible web anchor href `/web`
+- AE5 (nav half): cold load `/web`, empty storage → visible CLI anchor href `/scorecards`; storage unchanged
+- CSS presence: nav-scoped `:has` and `[data-surface]` rules (structural grep or snapshot comment in test)
 
 **Verification:** unit tests green; dist homepage HTML has dual Leaderboards links + `/js/surface.js`
 
@@ -191,19 +212,20 @@ guards
 
 **Goal:** Homepage segment is a preference writer/reader without breaking no-JS CSS.
 
-**Requirements:** R4, R7; AE2, AE3, AE6
+**Requirements:** R4, R7; AE2, AE3 (homepage half); KTD4 (homepage writer/reader)
 
 **Dependencies:** U1
 
 **Files:**
 - modify `src/client/surface.ts` (homepage bind when `#s-cli` / `#s-web` present)
 - optionally touch `src/build/06-homepage.mjs` only if a data attribute helps discovery (prefer existing ids)
-- modify `tests/e2e/flows.e2e.ts` (extend homepage surface toggle / nav href assertions)
+- modify `tests/e2e/flows.e2e.ts` (extend homepage surface toggle / nav href assertions; visible nav link count)
 
 **Approach:**
 1. On load: if radios exist, check the radio matching stored preference (triggers existing `:has` for panes **and**
    Leaderboards nav — no separate nav rewrite).
-2. On `change` of the radiogroup: `setSurface` + set `html[data-surface]` (keeps nav consistent if JS also runs).
+2. On `change` of the radiogroup: `setSurface` only. Do **not** set `html[data-surface]` when `#s-cli`/`#s-web` exist
+   (KTD2b: homepage nav is `:has`-only).
 3. Do not change Full board dual links; Leaderboards now mirrors that pattern in the header.
 
 **Patterns to follow:** existing `.seg` / `#s-cli` / `#s-web` in `06-homepage.mjs`; e2e “homepage surface toggle”
@@ -224,49 +246,60 @@ guards
 
 **Goal:** Peer board switch that writes preference and navigates.
 
-**Requirements:** R5–R6; AE4–AE5; KTD5
+**Requirements:** R5–R6; AE4–AE5; KTD4 (board render-only, no stamp-on-visit); KTD5
 
 **Dependencies:** U1
 
 **Files:**
-- modify `src/build/scorecards-render.mjs` (hero segment)
-- modify `src/worker/audit-web/leaderboard-render.ts` (hero segment; do **not** add a second surface script tag)
-- modify `src/client/surface.ts` (bind Probe A segments via a shared selector, e.g. `[data-surface-board-seg]`)
-- light CSS only if spacing in `.leaderboard-hero` is broken (reuse `.seg`; no layout redesign)
+- modify `src/build/scorecards-render.mjs` (hero segment with `board-s-cli` / `board-s-web` ids)
+- modify `src/worker/audit-web/leaderboard-render.ts` (hero segment in **both** populated and empty branches; do **not**
+  add a second surface script tag)
+- modify `src/client/surface.ts` (bind Probe A segments via `[data-surface-board-seg]`)
+- light CSS only if `.leaderboard-hero` `.seg` margin/padding is illegible (no filter-row or grid redesign)
 - modify `tests/web-audit-leaderboard-route.test.ts` and/or `tests/regression.test.ts` / e2e for segment presence +
   navigation
 
 **Approach:**
-1. Insert `.seg` above h1; mark with `data-surface-board-seg`; set checked state to current board.
-2. On change to the other value: `setSurface` then `location.assign` peer URL.
-3. Confirm load path does not call `setSurface` (AE5).
+1. Extract shared hero prefix (Probe A + h1 + lede) for web board populated **and** empty paths. Use distinct board
+   radio ids; `role="radiogroup"` `aria-label="Leaderboard surface"`.
+2. On change to the other value: `setSurface`, then `location.assign` peer URL.
+3. Confirm load path does not call `setSurface` (AE5 on both `/web` and cold `/scorecards`).
 
-**Patterns to follow:** homepage `.seg` markup; web board’s existing filter row stays below hero
+**Patterns to follow:** homepage `.seg` markup (semantics only — not ids); web board’s existing filter row stays below
+hero
 
 **Test scenarios:**
 - Covers AE4: from `/scorecards`, choose Website → lands on `/web`, storage `web`
-- Covers AE5: cold `/web` with empty storage → no write
-- Built `/scorecards` HTML and Worker `/web` HTML both contain the board segment
+- Covers AE4 reverse: from `/web`, choose CLI → lands on `/scorecards`, storage `cli`
+- Covers AE5: cold `/web` and cold `/scorecards` with empty storage → no write; Leaderboards stays CLI default
+- Built `/scorecards` HTML and Worker `/web` HTML (including empty board) both contain the board segment
 
-**Verification:** unit/route tests see markup; e2e click switches boards and updates Leaderboards href
+**Verification:** unit/route tests see markup; e2e click switches boards both directions; post-nav Leaderboards on
+destination page via U1 `data-surface` load reader
 
 ---
 
-### U4. CONCEPTS + smoke (optional thin)
+### U4. CONCEPTS entry + no-JS board gap
 
-**Goal:** Name the preference in the glossary if useful; otherwise skip.
+**Goal:** Glossary term for visitor surface preference; explicit no-JS limitation on board cross-nav.
 
-**Requirements:** none product-facing beyond discoverability
+**Requirements:** R9; KD7; AE7
 
 **Dependencies:** U1–U3
 
 **Files:**
-- optionally modify `CONCEPTS.md` (one short entry for visitor surface preference — distinct from “Content surface” /
-  markdown twin)
+- modify `CONCEPTS.md` (entry **Visitor surface preference** — `cli` | `web`, `localStorage` key, drives Leaderboards +
+  homepage segment; distinct from “Content surface” / markdown twin)
+- add short **No-JS board cross-nav** note under Scope Boundaries or Risks in this plan if not already sufficient
+
+**Approach:**
+1. One glossary entry: writers (homepage segment, Probe A), readers (dual nav + `:has` on `/`), no stamp-on-visit,
+   preference-wins nav policy (R9).
+2. State board Probe A requires JS; homepage has full no-JS parity (AE6 vs AE7).
 
 **Test expectation:** none — glossary only
 
-**Verification:** term matches shipped behavior if added
+**Verification:** CONCEPTS entry matches shipped behavior; AE7 limitation documented
 
 ---
 
@@ -282,21 +315,27 @@ guards
 
 ## Definition of Done
 
-- [ ] R1–R8 satisfied; AE1–AE6 covered by tests or explicit browser check
+- [ ] R1–R9 satisfied; AE1–AE7 covered by tests or explicit browser check
 - [ ] Shared helper used by homepage, boards, and shell — no duplicated storage keys/logic
-- [ ] No stamp-on-visit; Audit nav untouched
-- [ ] Build + unit + relevant e2e green; visual check of Probe A placement acceptable (polish deferred)
+- [ ] Dual Leaderboards anchors keep fixed hrefs (visibility flip only; no JS href rewrite); `surface.js` on all pages
+  including Worker `/web`
+- [ ] No stamp-on-visit on `/web` or `/scorecards`; Audit nav untouched
+- [ ] Build + unit + relevant e2e green
+- [ ] Browser-verify: `/`, `/scorecards`, `/web` — homepage toggle, Probe A both directions, cold `/web` no stamp
+- [ ] Probe A placement acceptable (layout polish deferred); U4 CONCEPTS entry + no-JS board gap documented
 
 ---
 
 ## Risks & Dependencies
 
-| Risk                                                             | Mitigation                                                |
-| ---------------------------------------------------------------- | --------------------------------------------------------- |
-| Probe A crowded next to web filters                              | Ship minimal hero placement; defer `/impeccable layout`   |
-| Worker `/web` misses script if only on scorecards `extraScripts` | Sitewide shell script (KTD3)                              |
-| Dual Leaderboards anchors confuse `aria-current` or nav layout   | Nav-scoped CSS; one visible at a time; test active states |
-| Label-only query for Leaderboards link breaks                    | `data-leaderboards-nav` on both anchors                   |
+| Risk                                                             | Mitigation                                                                                                         |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Probe A crowded next to web filters                              | Ship minimal hero placement; defer `/impeccable layout`                                                            |
+| Worker `/web` misses script if only on scorecards `extraScripts` | Sitewide shell script (KTD3)                                                                                       |
+| Dual Leaderboards anchors confuse `aria-current` or nav layout   | Nav-scoped CSS; one visible at a time; `aria-current` on href-matching anchor only (R9: may differ from board URL) |
+| Nav preference ≠ current board confuses visitors                 | Intentional (R9/KD6); CONCEPTS explains preference-wins policy                                                     |
+| Board no-JS cannot use Probe A                                   | Documented (R7/AE7/KD7); homepage has full no-JS parity                                                            |
+| Label-only query for Leaderboards link breaks                    | `data-leaderboards-nav` on both anchors                                                                            |
 
 ## Sources & Research
 
