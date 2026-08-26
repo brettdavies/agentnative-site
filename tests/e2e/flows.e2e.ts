@@ -446,14 +446,6 @@ test.describe('leaderboard surface nav', () => {
     await expect(page).toHaveURL(/\/scorecards$/);
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
-
-  test('Probe A lands keyboard focus in #main on destination', async ({ page }) => {
-    await page.goto('/scorecards');
-    await page.locator('label[for="board-s-web"]').click();
-    await expect(page).toHaveURL(/\/web$/);
-    const focused = await page.evaluate(() => document.activeElement?.id ?? null);
-    expect(focused).toBe('main');
-  });
 });
 
 test.describe('scorecard remediation copy-prompt', () => {

@@ -363,7 +363,7 @@ ${NAV_LINKS.map((l) => renderNavLink(l, canonicalPath)).join('\n')}
         </div>
       </div>
     </header>
-    <main id="main" tabindex="-1">
+    <main id="main">
 ${bodyHtml}
     </main>
     <footer class="site-footer">

@@ -4,7 +4,6 @@
 export type Surface = 'cli' | 'web';
 
 const STORAGE_KEY = 'anc-surface';
-const FOCUS_FLAG = 'anc-surface-nav-focus';
 
 const CLI_HREF = '/scorecards';
 const WEB_HREF = '/web';
@@ -42,24 +41,6 @@ function surfaceFromBoardRadio(id: string): Surface {
 
 function peerBoardHref(surface: Surface): string {
   return surface === 'web' ? WEB_HREF : CLI_HREF;
-}
-
-function setNavFocusFlag(): void {
-  try {
-    sessionStorage.setItem(FOCUS_FLAG, '1');
-  } catch {
-    // Best-effort; navigation still proceeds.
-  }
-}
-
-function restoreNavFocus(): void {
-  try {
-    if (sessionStorage.getItem(FOCUS_FLAG) !== '1') return;
-    sessionStorage.removeItem(FOCUS_FLAG);
-  } catch {
-    return;
-  }
-  document.getElementById('main')?.focus({ preventScroll: false });
 }
 
 function applyOffHomeReader(): void {
@@ -103,7 +84,6 @@ function bindBoardProbe(): void {
       const next = surfaceFromBoardRadio(radio.id);
       const staying = (onCliBoard && next === 'cli') || (onWebBoard && next === 'web');
       if (staying) return;
-      setNavFocusFlag();
       setSurface(next);
       globalThis.location.assign(peerBoardHref(next));
     });
@@ -112,7 +92,6 @@ function bindBoardProbe(): void {
 
 function init(): void {
   applyOffHomeReader();
-  restoreNavFocus();
   bindHomepage();
   bindBoardProbe();
 }

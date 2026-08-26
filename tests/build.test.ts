@@ -514,7 +514,6 @@ describe('emitShell — Leaderboards dual nav + surface script', () => {
     expect(html).toContain('href="/scorecards" data-s="cli" data-leaderboards-nav');
     expect(html).toContain('href="/web" data-s="web" data-leaderboards-nav');
     expect(html).toContain('<script src="/js/surface.js" defer></script>');
-    expect(html).toContain('<main id="main" tabindex="-1">');
   });
 
   test('aria-current follows pathname on the matching Leaderboards anchor only', () => {

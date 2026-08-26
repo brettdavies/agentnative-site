@@ -21,9 +21,8 @@ and board-hero layout polish stay out.
 patterns.
 
 **Stop when:** Leaderboards destination follows preference (dual-anchor visibility flip, not href rewrite); homepage
-segment restores/writes preference; both boards expose Probe A that writes preference and navigates; post-nav focus on
-`#main`; CONCEPTS documents preference + no-JS board gap; tests cover the preference helper and nav flip; no Audit
-changes; no stamp-on-visit.
+segment restores/writes preference; both boards expose Probe A that writes preference and navigates; CONCEPTS documents
+preference + no-JS board gap; tests cover the preference helper and nav flip; no Audit changes; no stamp-on-visit.
 
 ---
 
@@ -53,8 +52,6 @@ retarget Leaderboards, and add the same peer switch on `/scorecards` and `/web`.
 - **R9.** Header **Leaderboards** always reflects **stored preference**, not the board currently displayed. A visitor on
   `/web` with empty storage still sees Leaderboards → `/scorecards` until an explicit control writes preference (AE5).
   Same when stored `web` but viewing `/scorecards`: nav shows `/web`. No pathname-based nav override.
-- **R10.** After Probe A full-page navigation, move focus to `#main` (skip-link target) on the destination board so
-  keyboard users land in content, not at document start.
 
 ### Key Decisions
 
@@ -70,11 +67,13 @@ retarget Leaderboards, and add the same peer switch on `/scorecards` and `/web`.
   `(session-settled: user-directed — chosen over pathname-reflects-current-board for nav display)`
 - **KD7.** Board no-JS: homepage `:has` parity is the bar; board Probe A is JS-enhanced. Document the gap in-plan and in
   CONCEPTS. `(session-settled: user-directed — chosen over plain peer links in hero)`
+- **KD8.** No programmatic focus after Probe A full-page navigation — browser default focus on load is sufficient.
+  `(session-settled: user-directed — chosen over #main sessionStorage focus flag)`
 
 ### Scope Boundaries
 
 **In:** shared preference module; shell Leaderboards hook + sitewide script; homepage bind; Probe A on both board
-heroes; post-nav focus management; CONCEPTS entry; unit + e2e coverage.
+heroes; CONCEPTS entry; unit + e2e coverage.
 
 **Out / deferred:** Audit nav parity; board-hero layout polish if A feels cramped next to Relative|Global / All|Curated;
 plain peer links for no-JS board cross-nav; markdown-twin changes beyond existing board links; changing Full board from
@@ -94,7 +93,6 @@ dual-pane CSS to a single rewritten link.
   (`/scorecards` or `/web`) via `:has`, matching Full board.
 - **AE7.** JS disabled on `/scorecards` or `/web` → board segment radios render but do not navigate; visitor uses footer
   or in-page links to switch boards. Documented limitation, not a failure.
-- **AE8.** Probe A CLI → Website (or reverse) → destination `#main` receives focus; one-shot flag cleared.
 
 ---
 
@@ -134,10 +132,6 @@ dual-pane CSS to a single rewritten link.
   `board-s-web`) — never reuse homepage `#s-cli` / `#s-web` on board pages (global `body:has(#s-web:checked)` nav rules
   would fire on render-only checked state and violate AE5). Homepage `:has` nav rules stay scoped to homepage radios
   only. Clicking the already-current option is a no-op (no navigation). Layout polish deferred.
-- **KTD6.** Post-nav focus (AE8): before `location.assign`, set one-shot `sessionStorage` flag (e.g.
-  `anc-surface-nav-focus=1`); on board load in `surface.ts`, if flag present focus `#main` with `preventScroll: false`
-  (natural scroll), then remove flag. Do not focus on cold bookmark/direct visits. Prefer `#main` over `h1` — matches
-  skip-link landmark. `document.referrer` alone is insufficient (privacy stripping).
 
 ### High-Level Technical Design
 
@@ -268,9 +262,8 @@ guards
 **Approach:**
 1. Extract shared hero prefix (Probe A + h1 + lede) for web board populated **and** empty paths. Use distinct board
    radio ids; `role="radiogroup"` `aria-label="Leaderboard surface"`.
-2. On change to the other value: set focus flag (KTD6), `setSurface`, then `location.assign` peer URL.
-3. On board load: run focus-restoration reader when flag set (KTD6).
-4. Confirm load path does not call `setSurface` (AE5 on both `/web` and cold `/scorecards`).
+2. On change to the other value: `setSurface`, then `location.assign` peer URL.
+3. Confirm load path does not call `setSurface` (AE5 on both `/web` and cold `/scorecards`).
 
 **Patterns to follow:** homepage `.seg` markup (semantics only — not ids); web board’s existing filter row stays below
 hero
@@ -279,11 +272,10 @@ hero
 - Covers AE4: from `/scorecards`, choose Website → lands on `/web`, storage `web`
 - Covers AE4 reverse: from `/web`, choose CLI → lands on `/scorecards`, storage `cli`
 - Covers AE5: cold `/web` and cold `/scorecards` with empty storage → no write; Leaderboards stays CLI default
-- Covers AE8: after Probe A navigate, `#main` is focused (e2e `document.activeElement` or Playwright focus check)
 - Built `/scorecards` HTML and Worker `/web` HTML (including empty board) both contain the board segment
 
 **Verification:** unit/route tests see markup; e2e click switches boards both directions; post-nav Leaderboards on
-destination page via U1 `data-surface` load reader; focus lands on `#main`
+destination page via U1 `data-surface` load reader
 
 ---
 
@@ -319,19 +311,17 @@ destination page via U1 `data-surface` load reader; focus lands on `#main`
 - E2e: assert post-gesture transitions (cli→web), not absolute initial theme/storage state
 - Structural href checks: slice header chrome before asserting Leaderboards destination (body Full board links differ)
 - Browser-verify: `/`, `/scorecards`, `/web` — toggle Website on homepage, confirm Leaderboards; Probe A both
-  directions; cold `/web` does not flip nav until an explicit control; Probe A lands focus in `#main`
-- Keyboard: Tab after Probe A → focus in main content, not re-trapped in header
+  directions; cold `/web` does not flip nav until an explicit control
 
 ## Definition of Done
 
-- [ ] R1–R10 satisfied; AE1–AE8 covered by tests or explicit browser check
+- [ ] R1–R9 satisfied; AE1–AE7 covered by tests or explicit browser check
 - [ ] Shared helper used by homepage, boards, and shell — no duplicated storage keys/logic
 - [ ] Dual Leaderboards anchors keep fixed hrefs (visibility flip only; no JS href rewrite); `surface.js` on all pages
   including Worker `/web`
 - [ ] No stamp-on-visit on `/web` or `/scorecards`; Audit nav untouched
 - [ ] Build + unit + relevant e2e green
-- [ ] Browser-verify: `/`, `/scorecards`, `/web` — homepage toggle, Probe A both directions, cold `/web` no stamp,
-  post-nav focus in `#main`
+- [ ] Browser-verify: `/`, `/scorecards`, `/web` — homepage toggle, Probe A both directions, cold `/web` no stamp
 - [ ] Probe A placement acceptable (layout polish deferred); U4 CONCEPTS entry + no-JS board gap documented
 
 ---
@@ -345,7 +335,6 @@ destination page via U1 `data-surface` load reader; focus lands on `#main`
 | Dual Leaderboards anchors confuse `aria-current` or nav layout   | Nav-scoped CSS; one visible at a time; `aria-current` on href-matching anchor only (R9: may differ from board URL) |
 | Nav preference ≠ current board confuses visitors                 | Intentional (R9/KD6); CONCEPTS explains preference-wins policy                                                     |
 | Board no-JS cannot use Probe A                                   | Documented (R7/AE7/KD7); homepage has full no-JS parity                                                            |
-| Post-nav focus fires on bookmark visit                           | One-shot sessionStorage flag only (KTD6), not referrer                                                             |
 | Label-only query for Leaderboards link breaks                    | `data-leaderboards-nav` on both anchors                                                                            |
 
 ## Sources & Research
