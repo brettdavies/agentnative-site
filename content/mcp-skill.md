@@ -274,16 +274,19 @@ concrete resource (`anc://registry`).
 
 Two error layers. The discriminator is whether the JSON-RPC envelope itself succeeded.
 
-| Symptom                                           | Layer        | Recovery                                                                                                                       |
-| ------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `CallToolResult` with `isError: true`             | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).                        |
-| Bare HTTP 400 (no JSON-RPC envelope)              | Transport    | Malformed JSON body; the request never parsed, so no envelope and no `id` echo. Fix the request and resend.                    |
-| JSON-RPC envelope with `error.code: -32099`       | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
-| JSON-RPC envelope with `error.code: -32022`       | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
-| JSON-RPC envelope with `error.code: -32020`       | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |
-| JSON-RPC envelope with `error.code: -32602`       | Transport    | Invalid params — also the miss code for an unknown tool or resource (the legacy `-32002` resource-miss code is never emitted). |
-| HTTP `406 Not Acceptable` (plain-text body)       | Pre-JSON-RPC | Your `Accept` header doesn't include `application/json` or `text/event-stream`. Send one or both.                              |
-| HTTP `503 Service Unavailable` with `Retry-After` | Pre-JSON-RPC | Operator kill switch. Honor `Retry-After`. The read tier may still be available even if `score_cli` isn't.                     |
+| Symptom                                                | Layer        | Recovery                                                                                                                       |
+| ------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `CallToolResult` with `isError: true`                  | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).                        |
+| `error.code: -32700` at HTTP 400                       | Transport    | Malformed JSON body; the envelope's `id` is `null` because the request never parsed. Fix the request and resend.               |
+| JSON-RPC envelope with `error.code: -32099`            | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
+| `error.code: -32022` at HTTP 200, no `data.requested`  | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
+| `error.code: -32022` at HTTP 400 with `data.requested` | Transport    | Your claimed protocol version is unsupported. Resend claiming a version from `error.data.supported`.                           |
+| JSON-RPC envelope with `error.code: -32020`            | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |
+| JSON-RPC envelope with `error.code: -32600`            | Transport    | Invalid request at HTTP 400: an empty batch, a non-JSON-RPC object, or a batch mixing modern-envelope elements.                |
+| JSON-RPC envelope with `error.code: -32601`            | Transport    | Unknown method. Check the method name against the wire reference below.                                                        |
+| JSON-RPC envelope with `error.code: -32602`            | Transport    | Invalid params; also the miss code for an unknown tool or resource (the legacy `-32002` resource-miss code is never emitted).  |
+| HTTP `406 Not Acceptable` (plain-text body)            | Pre-JSON-RPC | Your `Accept` header doesn't include `application/json` or `text/event-stream`. Send one or both.                              |
+| HTTP `503 Service Unavailable` with `Retry-After`      | Pre-JSON-RPC | Operator kill switch. Honor `Retry-After`. The read tier may still be available even if `score_cli` isn't.                     |
 
 ### Common tool-level error shapes
 

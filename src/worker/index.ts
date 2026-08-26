@@ -650,8 +650,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       const era: McpEra = legacyEra ? 'legacy' : 'modern';
       const legacyMode = resolveLegacyMode(env as McpEnv);
 
-      // Step 4: MCP_LEGACY_ENABLED legacy gate.
-      if (legacyMode === 'reject' && legacyEra) {
+      // Step 4: MCP_LEGACY_ENABLED legacy gate. Unparseable bodies
+      // classify as legacy-era by default, so the gate additionally
+      // requires a parsed body: malformed JSON falls through to the
+      // SDK's -32700 parse error instead of a misleading era reject.
+      if (legacyMode === 'reject' && legacyEra && parsedBody !== undefined) {
         logMcpRequest({
           era,
           method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),

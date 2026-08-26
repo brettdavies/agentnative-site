@@ -53,20 +53,22 @@ const INSTRUCTIONS = [
     'next_tool: get_scorecard. isError: true is reserved for genuine tool-execution failures (validator rejection, ' +
     'rate-limit breach, infrastructure error).',
   'Errors carry on two layers. Tool-level failures return CallToolResult with isError: true plus a textual ' +
-    'message; the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes ' +
-    'at HTTP 200: -32099 for rate-limit breach (either limiter), and ' +
-    `-32022 with data.supported listing ${SPEC_REVISION} when the disabled legacy lane rejects a request. Malformed ` +
-    'JSON never becomes an envelope: it is answered with a bare HTTP 400 (the request never parsed, so there is no ' +
-    'id to echo). The 406 Accept-header rejection also bypasses the JSON-RPC envelope.',
+    'message; the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error ' +
+    'envelopes at HTTP 200 (-32099 rate-limit breach at either limiter, ' +
+    `-32022 with data.supported listing ${SPEC_REVISION} when the disabled legacy lane rejects a request) or at ` +
+    'HTTP 400 (-32700 malformed JSON with id null, -32600 invalid batch, -32020 header mismatch, and -32022 with ' +
+    'data.requested for an unsupported version claim). The 406 Accept-header rejection is the one transport error ' +
+    'that bypasses the JSON-RPC envelope.',
   `Rate limits are split. ${READ_LIMIT_REQUESTS} requests per ${READ_LIMIT_WINDOW_SECONDS} seconds per IP gate ` +
     `every call (MCP_LIMITER). ${AUDIT_LIMIT_REQUESTS} fresh audits per ${AUDIT_LIMIT_WINDOW_MINUTES} minutes per ` +
     'IP gate score_cli cache-miss audits only (MCP_AUDIT_LIMITER). audit_website has its own budget: a per-IP ' +
     `burst limiter (WEB_AUDIT_LIMITER_IP) plus ${WEB_AUDIT_HOURLY_REQUESTS} fresh audits per 60 minutes per IP, ` +
     'no anon fallback. All keyed on ' +
     'cf-connecting-ip; the read tier falls back to a shared anon bucket, the audit tiers reject on missing IP ' +
-    'rather than consuming a shared bucket. Three env-var kill switches let the operator disable the whole surface ' +
-    '(MCP_ENABLED), only the cost-bearing CLI audit tool (MCP_LIVE_SCORING_ENABLED), or the website audit ' +
-    '(WEB_AUDIT_ENABLED) without a deploy.',
+    'rather than consuming a shared bucket. Three of the four kill switches let the operator disable the whole ' +
+    'surface (MCP_ENABLED), only the cost-bearing CLI audit tool (MCP_LIVE_SCORING_ENABLED), or the website audit ' +
+    '(WEB_AUDIT_ENABLED) without a deploy; the fourth (MCP_LEGACY_ENABLED) surfaces as the -32022 legacy reject ' +
+    'above.',
   `Spec revision is pinned to ${SPEC_REVISION}; the /.well-known/mcp/server-card.json server card advertises the same value, and the ` +
     'two are bumped in lockstep when the SDK is upgraded.',
   `Connect now at ${SITE_URL}/mcp (no authentication). Full recipes remain at ${DOCS_URL}.`,

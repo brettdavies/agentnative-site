@@ -105,11 +105,14 @@ export function extractProtocolVersion(parsedBody: unknown, request: Request): s
 }
 
 export function logMcpRequest(input: McpRequestLogInput): void {
+  // method and name can carry client-supplied strings on paths that
+  // fire before the rate limiter; cap them like client_name so a
+  // flood cannot amplify log volume with unbounded values.
   const payload = {
     event: 'mcp.request',
     era: input.era,
-    method: input.method,
-    name: input.name,
+    method: truncateClientName(input.method),
+    name: truncateClientName(input.name),
     client_name: input.client_name,
     protocol_version: input.protocol_version,
     host: input.host,

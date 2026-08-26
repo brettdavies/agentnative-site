@@ -2,12 +2,16 @@
 
 export const MODERN_PROTOCOL = '2026-07-28';
 
-export const MODERN_META = {
-  _meta: {
-    'io.modelcontextprotocol/protocolVersion': MODERN_PROTOCOL,
-    'io.modelcontextprotocol/clientInfo': { name: 'anc-mcp-test', version: '0' },
+function modernRequestMeta(protocolVersion: string, clientName: string) {
+  return {
+    'io.modelcontextprotocol/protocolVersion': protocolVersion,
+    'io.modelcontextprotocol/clientInfo': { name: clientName, version: '0' },
     'io.modelcontextprotocol/clientCapabilities': {},
-  },
+  };
+}
+
+export const MODERN_META = {
+  _meta: modernRequestMeta(MODERN_PROTOCOL, 'anc-mcp-test'),
 } as const;
 
 export function modernToolsListBody(id = 10) {
@@ -44,14 +48,6 @@ export function modernToolCallHeaders(toolName: string): Record<string, string> 
     'MCP-Protocol-Version': MODERN_PROTOCOL,
     'Mcp-Method': 'tools/call',
     'Mcp-Name': toolName,
-  };
-}
-
-function modernRequestMeta(protocolVersion: string, clientName: string) {
-  return {
-    'io.modelcontextprotocol/protocolVersion': protocolVersion,
-    'io.modelcontextprotocol/clientInfo': { name: clientName, version: '0' },
-    'io.modelcontextprotocol/clientCapabilities': {},
   };
 }
 

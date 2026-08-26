@@ -212,8 +212,10 @@ bun x wrangler deploy --env staging
 
 Plain deploy reloads `"true"` from `wrangler.jsonc` vars.
 
-**Observed 2026-08-26** (staging drill after U6): envelope and `legacy_rejected` telemetry matched the above; modern
-lane stayed green; restore deploy returned legacy `initialize` to `server=anc`.
+**Observed 2026-08-26** (staging drill after U6, on the build whose reject envelope was `-32099`): reject envelope and
+`legacy_rejected` telemetry matched that build's expectations; modern lane stayed green; restore deploy returned legacy
+`initialize` to `server=anc`. The `-32022` envelope above is pinned by the dispatch suite; the next staging drill
+re-attests it live.
 
 ### Bundle size (U1 gate)
 

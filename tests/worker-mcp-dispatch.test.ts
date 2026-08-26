@@ -7,8 +7,8 @@
 //
 // U4 lands the dispatch in src/worker/index.ts above the asset-first
 // branch. Tests go through the full Worker entry so the gate ordering
-// (1: MCP_ENABLED, 2: method, 3: format, 4: limiter+log) is exercised
-// end-to-end. The catalog read is stubbed via env.ASSETS in the same
+// (1: MCP_ENABLED, 2: method, 3: format, 4: legacy gate, 5: limiter+log)
+// is exercised end-to-end. The catalog read is stubbed via env.ASSETS in the same
 // shape as tests/worker-mcp.test.ts so this file does not need a real
 // dist/_internal/mcp-catalog.json on disk.
 
@@ -683,15 +683,11 @@ describe('POST /mcp — response posture', () => {
 });
 
 describe('POST /mcp — malformed JSON-RPC body', () => {
-  test('non-JSON body surfaces a transport-level error (SDK 400 with a parse-error body)', async () => {
-    // The agents SDK owns the JSON-RPC parse step. A non-JSON body
-    // surfaces as an HTTP 400 with a transport-level error body (the
-    // SDK does not wrap pre-parse failures in a JSON-RPC -32700
-    // envelope). This is reasonable behavior: the request never became
-    // a JSON-RPC envelope, so there's no id to echo back. The test
-    // pins the actual transport surface so a future SDK upgrade that
-    // changes the shape (e.g., to a 200 + JSON-RPC envelope) is
-    // visible.
+  test('non-JSON body answers a -32700 JSON-RPC envelope at HTTP 400 with id null', async () => {
+    // The agents SDK owns the JSON-RPC parse step and wraps parse
+    // failures in a -32700 envelope delivered at HTTP 400; the id is
+    // null because the request never parsed. Pinning the body shape,
+    // not just the status range, keeps the documented contract honest.
     const env = makeEnv();
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp', {
@@ -702,8 +698,35 @@ describe('POST /mcp — malformed JSON-RPC body', () => {
       env,
       {} as ExecutionContext,
     );
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      jsonrpc?: string;
+      id?: unknown;
+      error?: { code?: number };
+    };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error?.code).toBe(-32700);
+    expect(body.id).toBeNull();
+  });
+
+  test('malformed JSON under MCP_LEGACY_ENABLED=false still answers -32700 at 400, never the era reject', async () => {
+    // Unparseable bodies classify as legacy-era by default; the sunset
+    // gate requires a parsed body precisely so a corrupted request from
+    // any client keeps its parse-error diagnosis instead of being told
+    // to switch eras.
+    const env = makeEnv({ legacyEnabled: false });
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: 'not-json{{',
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: { code?: number } };
+    expect(body.error?.code).toBe(-32700);
   });
 });
 

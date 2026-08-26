@@ -121,8 +121,11 @@ a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; 
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Four kill switches, surgical and zero-deploy.** Default `"false"` in production and `"true"` in staging. Flip via
-`wrangler secret put`.
+**Four kill switches, surgical.** Three are secret-bound and zero-deploy: `MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`, and
+`WEB_AUDIT_ENABLED` default `"false"` in production and `"true"` in staging and flip via `wrangler secret put`.
+`MCP_LEGACY_ENABLED` is a staging `vars` binding: unbound in production (where the legacy lane serves), it flips via a
+deploy with `--var`, never `wrangler secret put` (Cloudflare API 10053 rejects a secret on a var-bound name; see the
+[operator runbook](docs/runbooks/mcp-operator.md)).
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
@@ -134,12 +137,13 @@ tools compose the same `/api/score` orchestration core, so cache semantics never
   false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
-the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
-`-32099` for rate-limit breach at either limiter, and `-32022` (`data.supported: ["2026-07-28"]`) when the disabled
-legacy lane rejects a request. Malformed JSON never becomes an envelope: the SDK answers it with a bare HTTP 400, and
-the `406 Not Acceptable` Accept-header rejection likewise bypasses the JSON-RPC envelope (both rejections are pre-parse,
-so there is no `id` to echo back). **Cache state is data, not failure**: a `get_scorecard` miss is `isError: false` with
-`found: false, next_tool`, and a `score_cli` hit is `isError: false` with `audited: false, next_tool`.
+the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
+(`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
+legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
+batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The `406 Not
+Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache state is
+data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a `score_cli` hit is
+`isError: false` with `audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
