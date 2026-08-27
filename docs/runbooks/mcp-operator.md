@@ -68,12 +68,27 @@ Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"ev
 | `client_name`      | Truncated from initialize / `_meta` clientInfo when available                      |
 | `protocol_version` | From header or `_meta` when available                                              |
 | `host`             | Request host                                                                       |
-| `response_format`  | `json` or `sse` from Accept negotiation                                            |
+| `response_format`  | `sse` when the served `content-type` is `text/event-stream`, else `json`           |
 | `outcome`          | `ok`, `error`, `legacy_rejected`, `rate_limited`, `disabled`, `accept_rejected`, … |
 | `error_code`       | Numeric JSON-RPC transport code only (nullable); no tool payloads                  |
 | `ms_bucket`        | `<50`, `50-200`, `200-1000`, `>1000`                                               |
 
 No IP, slug, query text, or tool results appear in the log line. Use Cloudflare rate-limit analytics for IP triage.
+
+### Reading `response_format`
+
+The field records what went on the wire, not what the client asked for, so `response_format:sse` counts real streams and
+nothing else.
+
+An SSE-preferring `Accept` does not imply an SSE response. The modern lane runs `responseMode: 'auto'`, which answers a
+single JSON body unless a tool emits a related message before its result. No `anc` tool reports progress mid-call, so a
+modern-era request answers `application/json` whatever its `Accept` said. The legacy lane does stream: the transport
+defaults to SSE, and dispatch coerces that back to JSON only for a JSON-preferring client. A modern-era
+`subscriptions/listen` also streams.
+
+Exits that never reach the MCP dispatch log `json`: the `MCP_ENABLED` kill switch (503 `text/plain`) and the Accept
+rejection (406 `text/plain`) carry no MCP body, and the field answers "was this a stream". The `legacy_rejected` and
+`rate_limited` exits log `json` too; both serve a JSON-RPC error envelope as `application/json`.
 
 ```bash
 # --search can look empty depending on envelope shape; prefer local filter:

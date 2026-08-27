@@ -56,7 +56,7 @@ import {
   logMcpRequest,
   type McpEra,
   type McpRequestOutcome,
-  type McpResponseFormat,
+  servedResponseFormat,
 } from './mcp/telemetry';
 import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
@@ -571,19 +571,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       // Step 1: MCP_ENABLED kill switch.
       if (env.MCP_ENABLED !== 'true') {
         const host = new URL(request.url).host;
-        logMcpRequest({
-          era: 'legacy',
-          method: null,
-          name: null,
-          client_name: null,
-          protocol_version: null,
-          host,
-          response_format: 'json',
-          outcome: 'disabled',
-          error_code: null,
-          duration_ms: 0,
-        });
-        return new Response('mcp is currently disabled by the operator\n', {
+        const disabled = new Response('mcp is currently disabled by the operator\n', {
           status: 503,
           headers: {
             'content-type': 'text/plain; charset=utf-8',
@@ -591,6 +579,19 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
             'cache-control': 'no-store',
           },
         });
+        logMcpRequest({
+          era: 'legacy',
+          method: null,
+          name: null,
+          client_name: null,
+          protocol_version: null,
+          host,
+          response_format: servedResponseFormat(disabled),
+          outcome: 'disabled',
+          error_code: null,
+          duration_ms: 0,
+        });
+        return disabled;
       }
 
       // Step 2: method check. GET handled above; POST falls through
@@ -609,24 +610,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
       // Step 3: Accept-header check.
       const format = detectMcpFormat(request);
-      const responseFormat: McpResponseFormat = format === 'json' ? 'json' : 'sse';
       const host = new URL(request.url).host;
       if (format === false) {
-        logMcpRequest({
-          era: 'legacy',
-          method: null,
-          name: null,
-          client_name: null,
-          protocol_version: null,
-          host,
-          response_format: 'json',
-          outcome: 'accept_rejected',
-          error_code: null,
-          duration_ms: 0,
-        });
         // The 406 rejection happens before any JSON-RPC parsing so the
         // body is plain text without a `jsonrpc`/`id`/`error` envelope.
-        return new Response(
+        const rejected = new Response(
           'POST /mcp serves application/json or text/event-stream; the request Accept header allowed neither.\n',
           {
             status: 406,
@@ -636,6 +624,19 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
             },
           },
         );
+        logMcpRequest({
+          era: 'legacy',
+          method: null,
+          name: null,
+          client_name: null,
+          protocol_version: null,
+          host,
+          response_format: servedResponseFormat(rejected),
+          outcome: 'accept_rejected',
+          error_code: null,
+          duration_ms: 0,
+        });
+        return rejected;
       }
 
       const started = Date.now();
@@ -655,19 +656,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       // requires a parsed body: malformed JSON falls through to the
       // SDK's -32700 parse error instead of a misleading era reject.
       if (legacyMode === 'reject' && legacyEra && parsedBody !== undefined) {
-        logMcpRequest({
-          era,
-          method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
-          name: headerMcpName(request) ?? classifyToolName(parsedBody),
-          client_name: extractClientNameFromBody(parsedBody),
-          protocol_version: extractProtocolVersion(parsedBody, request),
-          host,
-          response_format: responseFormat,
-          outcome: 'legacy_rejected',
-          error_code: -32022,
-          duration_ms: Date.now() - started,
-        });
-        return jsonRpcError(
+        const rejected = jsonRpcError(
           -32022,
           `legacy MCP requests are disabled; use MCP ${SPEC_REVISION}`,
           jsonRpcId(parsedBody),
@@ -675,6 +664,19 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
             supported: [SPEC_REVISION],
           },
         );
+        logMcpRequest({
+          era,
+          method: headerMcpMethod(request) ?? classifyRpcMethod(parsedBody),
+          name: headerMcpName(request) ?? classifyToolName(parsedBody),
+          client_name: extractClientNameFromBody(parsedBody),
+          protocol_version: extractProtocolVersion(parsedBody, request),
+          host,
+          response_format: servedResponseFormat(rejected),
+          outcome: 'legacy_rejected',
+          error_code: -32022,
+          duration_ms: Date.now() - started,
+        });
+        return rejected;
       }
 
       // Step 5: MCP_LIMITER gate (era-aware read tier).
@@ -692,6 +694,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
         if (!success) gateResult = 'rate_limited';
       }
       if (gateResult === 'rate_limited') {
+        const limited = jsonRpcError(-32099, 'rate limit exceeded', jsonRpcId(parsedBody));
         logMcpRequest({
           era,
           method: headerMcpMethod(request) ?? (legacyEra ? 'tools/call' : null),
@@ -699,12 +702,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
           client_name: extractClientNameFromBody(parsedBody),
           protocol_version: extractProtocolVersion(parsedBody, request),
           host,
-          response_format: responseFormat,
+          response_format: servedResponseFormat(limited),
           outcome: 'rate_limited',
           error_code: -32099,
           duration_ms: Date.now() - started,
         });
-        return jsonRpcError(-32099, 'rate limit exceeded', jsonRpcId(parsedBody));
+        return limited;
       }
 
       // Step 6: SDK Accept-rewrite shim.
@@ -722,14 +725,23 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       // Legacy transport SSE→JSON when the client negotiated JSON (see
       // coerce-json-response.ts). Modern responseMode:'json' already returns
       // application/json; this is a no-op on that path.
-      const response = await coerceMcpJsonResponse(rawResponse, responseFormat);
+      const response = await coerceMcpJsonResponse(rawResponse, format);
       const headers = new Headers(response.headers);
       stripCorsHeaders(headers);
       headers.set('cache-control', 'no-store');
 
+      // Read the error code before the body is handed to the outgoing
+      // Response: extractTransportErrorCode clones, and a cloned body cannot
+      // be taken after another Response has adopted it.
       const errorCode = await extractTransportErrorCode(response);
       let outcome: McpRequestOutcome = errorCode != null ? 'error' : 'ok';
       if (outcome === 'ok' && !response.ok) outcome = 'error';
+
+      const outgoing = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
 
       logMcpRequest({
         era,
@@ -738,13 +750,15 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
         client_name: extractClientNameFromBody(parsedBody),
         protocol_version: extractProtocolVersion(parsedBody, request),
         host,
-        response_format: responseFormat,
+        // Derived from the coerced response so the value matches what the
+        // client receives, not what its Accept header asked for.
+        response_format: servedResponseFormat(outgoing),
         outcome,
         error_code: errorCode,
         duration_ms: Date.now() - started,
       });
 
-      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      return outgoing;
     }
   }
 

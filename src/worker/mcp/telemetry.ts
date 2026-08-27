@@ -31,6 +31,26 @@ export interface McpRequestLogInput {
 
 const MAX_ERROR_BODY_BYTES = 4096;
 
+/**
+ * The format actually served, read off the response the client receives.
+ *
+ * The modern lane is built with `responseMode: 'auto'`, which the SDK defines
+ * as a single JSON body unless the handler emits a related message before its
+ * result. Tools that report nothing mid-call therefore answer JSON even when
+ * the client asked for a stream, so an Accept-derived value logs `'sse'` while
+ * JSON goes on the wire and an operator filtering `response_format = 'sse'`
+ * over-counts. Because `auto` is dynamic, no intent-derived value stays correct
+ * once any tool starts reporting progress; only the served content-type does.
+ *
+ * Exits that carry no MCP body (the kill switch and the Accept rejection) serve
+ * `text/plain` and land on `'json'`: under the served reading the field answers
+ * "was this a stream", and those responses are not streams.
+ */
+export function servedResponseFormat(response: Response): McpResponseFormat {
+  const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+  return contentType.includes('text/event-stream') ? 'sse' : 'json';
+}
+
 export function msBucket(ms: number): '<50' | '50-200' | '200-1000' | '>1000' {
   if (ms < 50) return '<50';
   if (ms < 200) return '50-200';
