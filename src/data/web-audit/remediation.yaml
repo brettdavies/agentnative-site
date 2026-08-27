@@ -93,6 +93,96 @@ remediation:
       "unsupported" from "failed"; anything else looks like an outage.
     resources:
       - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-malformed-body:
+    title: a non-JSON body draws -32700 (or a typed HTTP 400/415 refusal)
+    goal: Refuse an unparseable request body with a parse-error envelope or a typed HTTP refusal
+    fix: |
+      Answer a `POST` whose body is not valid JSON with the JSON-RPC parse-error envelope
+      (`error.code: -32700`, `id: null`); delivering it at HTTP `400` is fine. A bare HTTP `400`
+      or `415` with no envelope also conforms as a typed refusal. What fails the check: a `200`
+      with garbage, a hang, or any other bare status (a bare `404` reads as a dead endpoint, not
+      a refusal).
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-batch-reject:
+    title: a batch carrying a modern-envelope request is rejected -32600
+    goal: Refuse JSON array batches that carry modern-era envelopes with -32600
+    fix: |
+      Reject a JSON array batch whose element carries the modern `params._meta` envelope
+      (protocol revision `2026-07-28`) with `error.code: -32600` (Invalid Request) and `id: null`.
+      Modern-era requests are single-request only: an envelope-bearing element inside an array is
+      never valid, so serving it (or answering anything other than `-32600`) is non-conforming.
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+      - { label: MCP transports (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports" }
+  mcp-unknown-tool:
+    title: tools/call with an unknown tool name returns -32602
+    goal: Reject an unknown tool name with -32602 instead of a hang, a 500, or a fake result
+    fix: |
+      Answer a `tools/call` whose `params.name` matches no registered tool with
+      `error.code: -32602` (Invalid params). Agents rely on the code to distinguish "no such
+      tool" from a transport failure; a hang, a `500`, or a `200` result for a tool that does
+      not exist all read as a broken server.
+    resources:
+      - { label: MCP tools, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/tools" }
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-modern-unknown-method:
+    title: an unknown method on the modern lane returns -32601
+    goal: Reject unknown header-routed methods with -32601 on the 2026-07-28 lane
+    fix: |
+      Reject a modern request (`MCP-Protocol-Version: 2026-07-28`, `Mcp-Method` naming a method
+      you do not implement) with `error.code: -32601` (Method not found). Delivering the envelope
+      at HTTP `404` conforms; a bare `404` with no envelope does not (it is indistinguishable
+      from a dead endpoint).
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-clientcaps:
+    title: _meta missing clientCapabilities is rejected (-32602 or -32600)
+    goal: Enforce the mandatory clientCapabilities key on every modern request
+    fix: |
+      Reject a modern request whose `params._meta` omits
+      `io.modelcontextprotocol/clientCapabilities` with a well-formed error envelope. The check
+      accepts two codes: `-32602` (Invalid params, the SDK-typed refusal) as the primary, and
+      `-32600` (Invalid Request family) from conforming non-SDK servers. The key is mandatory on
+      every `2026-07-28` request even when the client has no capabilities to declare; an empty
+      object is valid.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-header-mismatch:
+    title: an Mcp-Method header disagreeing with the body method draws -32020
+    goal: Validate the SEP-2243 header mirror between Mcp-Method and the body method
+    fix: |
+      Reject a request whose `Mcp-Method` header names a different method than the JSON-RPC body
+      with `error.code: -32020` (header mismatch). The SEP-2243 headers exist so infrastructure
+      can route without parsing bodies; a disagreeing pair means the routing layer and the
+      handler would act on different methods, so it must be refused rather than silently
+      resolved in either direction.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-version-reject:
+    title: an unsupported protocol version is rejected -32022 with data.supported
+    goal: Refuse unsupported protocol version claims with -32022 and advertise the served revisions
+    fix: |
+      Reject a request claiming an unsupported `MCP-Protocol-Version` with
+      `error.code: -32022` (UnsupportedProtocolVersion) and populate `error.data.supported` with
+      the revisions you serve (for example `["2026-07-28"]`); echoing the claim in
+      `error.data.requested` helps debugging. The `data.supported` array is what lets a typed
+      client fall back to a revision you both speak, so an envelope without it fails the check.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-resources-miss:
+    title: modern resources/read with an unknown URI returns -32602
+    goal: Answer an unknown resource URI with the typed miss code, not a hang or a fake result
+    fix: |
+      Answer a modern `resources/read` (with `Mcp-Name` mirroring `params.uri`) for a URI that
+      matches no resource with `error.code: -32602`. That is the code current SDK lines put on
+      the wire for a resource miss; `-32002` (the legacy resource-not-found code) is also
+      tolerated from non-SDK servers. A hang, a `500`, or a fabricated `200` result fails. This
+      check only runs when the server advertises resources on either era lane.
+    resources:
+      - { label: MCP resources (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/server/resources" }
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
   mcp-get-fast-fail:
     title: GET on the MCP endpoint answers fast
     goal: Answer GET on the MCP endpoint fast (a fast-fail status or a documented surface), never a held-open hang

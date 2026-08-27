@@ -3,7 +3,8 @@
 // routed through the SSRF-guarded fetch (verified by asserting the stub
 // fetch is the only network path).
 
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import { deriveApiProbeUrl, runApiHygiene } from '../src/worker/audit-web/handlers/api-hygiene';
 import { runAuthMd } from '../src/worker/audit-web/handlers/auth-md';
 import { runContentWithoutJs } from '../src/worker/audit-web/handlers/content-without-js';
@@ -15,10 +16,13 @@ import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdow
 import { runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
-import type { WebCheck } from '../src/worker/audit-web/registry';
+import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 import { scoreWebAudit } from '../src/worker/audit-web/score';
 import type { EngineResult } from '../src/worker/audit-web/scorecard';
-import { MODERN_PROTOCOL } from './helpers/mcp-modern';
+import worker, { type Env } from '../src/worker/index';
+import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { MODERN_PROTOCOL, modernElementBatchBody } from './helpers/mcp-modern';
+import { resetMcpTestState } from './helpers/mcp-rpc';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
   return {
@@ -816,6 +820,549 @@ describe('runMcp modern era', () => {
       expect(outcome.status).toBe('na');
     }
     expect(called).toBe(0);
+  });
+
+  test('server/discover records the advertised capability groups as evidence', async () => {
+    const fetchImpl = stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              supportedVersions: [MODERN_PROTOCOL],
+              capabilities: { tools: {}, resources: {} },
+              _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'anc', version: '0.1.0' } },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'server-discover' } }),
+      ctx({ fetchImpl, mcpEndpoint: 'https://example.com/mcp' }),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].capabilities).toEqual(['tools', 'resources']);
+  });
+});
+
+const CONFORMANCE_OPS = [
+  'malformed-body',
+  'batch-reject',
+  'unknown-tool',
+  'modern-unknown-method',
+  'modern-clientcaps',
+  'modern-header-mismatch',
+  'modern-version-reject',
+  'modern-resources-miss',
+] as const;
+
+describe('runMcp error-code conformance', () => {
+  const MCP = 'https://example.com/mcp';
+  const json = (body: object, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const rpcError = (code: number, status = 200, data?: Record<string, unknown>) =>
+    json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope', ...(data !== undefined ? { data } : {}) } }, status);
+  const run = (w: Record<string, unknown>, fetchImpl: typeof fetch, sessionId?: string) =>
+    runMcp(check({ handler: 'mcp', with: w }), ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: sessionId ?? null }));
+
+  test('each probe passes against a conforming stub (nine cases incl. legacy unknown-method)', async () => {
+    const cases: Array<{ w: Record<string, unknown>; response: () => Response; code: number }> = [
+      {
+        w: { op: 'error', method: 'nonexistent/method', expect_code: -32601 },
+        response: () => rpcError(-32601),
+        code: -32601,
+      },
+      { w: { op: 'malformed-body' }, response: () => rpcError(-32700, 400), code: -32700 },
+      { w: { op: 'batch-reject' }, response: () => rpcError(-32600, 400), code: -32600 },
+      { w: { op: 'unknown-tool' }, response: () => rpcError(-32602), code: -32602 },
+      { w: { op: 'modern-unknown-method' }, response: () => rpcError(-32601), code: -32601 },
+      { w: { op: 'modern-clientcaps' }, response: () => rpcError(-32602, 400), code: -32602 },
+      { w: { op: 'modern-header-mismatch' }, response: () => rpcError(-32020, 400), code: -32020 },
+      {
+        w: { op: 'modern-version-reject' },
+        response: () => rpcError(-32022, 400, { supported: [MODERN_PROTOCOL], requested: '2025-03-26' }),
+        code: -32022,
+      },
+      { w: { op: 'modern-resources-miss' }, response: () => rpcError(-32602), code: -32602 },
+    ];
+    expect(cases.length).toBe(9);
+    for (const c of cases) {
+      const outcome = await run(c.w, stubFetch(c.response));
+      expect(outcome.status).toBe('pass');
+      expect(outcome.evidence[0].error_code).toBe(c.code);
+    }
+  });
+
+  test('malformed-body sends the raw non-JSON body with legacy headers and no session attach', async () => {
+    const captured: Array<{ headers: Headers; body: string }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: String(init?.body) });
+      return rpcError(-32700, 400);
+    });
+    const outcome = await run({ op: 'malformed-body' }, fetchImpl, 'sess-1');
+    expect(outcome.status).toBe('pass');
+    expect(captured.length).toBe(1);
+    expect(captured[0].body).toBe('not-json{{');
+    expect(() => JSON.parse(captured[0].body)).toThrow();
+    expect(captured[0].headers.get('mcp-protocol-version')).toBeNull();
+    expect(captured[0].headers.get('mcp-session-id')).toBeNull();
+  });
+
+  test('batch-reject sends a single-element array carrying the modern envelope', async () => {
+    const captured: string[] = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push(String(init?.body));
+      return rpcError(-32600, 400);
+    });
+    const outcome = await run({ op: 'batch-reject' }, fetchImpl);
+    expect(outcome.status).toBe('pass');
+    const body = JSON.parse(captured[0]) as Array<{ method: string; params: { _meta: Record<string, unknown> } }>;
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBe(1);
+    expect(body[0].method).toBe('tools/list');
+    const helperElement = modernElementBatchBody()[0];
+    expect(Object.keys(body[0].params._meta).sort()).toEqual(Object.keys(helperElement.params._meta).sort());
+  });
+
+  test('unknown-tool sends a legacy tools/call with a name outside any real catalog', async () => {
+    const captured: Array<{ headers: Headers; body: { method: string; params?: { name?: string } } }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return rpcError(-32602);
+    });
+    const outcome = await run({ op: 'unknown-tool' }, fetchImpl);
+    expect(outcome.status).toBe('pass');
+    expect(captured[0].body.method).toBe('tools/call');
+    expect(captured[0].body.params?.name?.length).toBeGreaterThan(0);
+    expect(captured[0].headers.get('mcp-protocol-version')).toBeNull();
+  });
+
+  test('modern probes carry era headers, the _meta envelope, and no session attach', async () => {
+    const captured: Array<{
+      headers: Headers;
+      body: { method: string; params?: { _meta?: Record<string, unknown> } };
+    }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return rpcError(-32601);
+    });
+    await run({ op: 'modern-unknown-method' }, fetchImpl, 'sess-1');
+    expect(captured.length).toBe(1);
+    const req = captured[0];
+    expect(req.headers.get('mcp-protocol-version')).toBe(MODERN_PROTOCOL);
+    expect(req.headers.get('mcp-method')).toBe(req.body.method);
+    expect(req.headers.get('mcp-session-id')).toBeNull();
+    const meta = req.body.params?._meta ?? {};
+    expect(meta['io.modelcontextprotocol/clientCapabilities']).toEqual({});
+  });
+
+  test('modern-clientcaps omits clientCapabilities while keeping the other two _meta keys', async () => {
+    const captured: Array<{ body: { params?: { _meta?: Record<string, unknown> } } }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ body: JSON.parse(String(init?.body)) });
+      return rpcError(-32602, 400);
+    });
+    const outcome = await run({ op: 'modern-clientcaps' }, fetchImpl);
+    expect(outcome.status).toBe('pass');
+    const meta = captured[0].body.params?._meta ?? {};
+    expect(meta['io.modelcontextprotocol/clientCapabilities']).toBeUndefined();
+    expect(meta['io.modelcontextprotocol/protocolVersion']).toBe(MODERN_PROTOCOL);
+    expect(meta['io.modelcontextprotocol/clientInfo']).toBeDefined();
+  });
+
+  test('modern-header-mismatch sends an Mcp-Method header disagreeing with the body method', async () => {
+    const captured: Array<{ headers: Headers; body: { method: string } }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return rpcError(-32020, 400);
+    });
+    const outcome = await run({ op: 'modern-header-mismatch' }, fetchImpl);
+    expect(outcome.status).toBe('pass');
+    const req = captured[0];
+    expect(req.headers.get('mcp-method')).not.toBe(req.body.method);
+    expect(req.headers.get('mcp-protocol-version')).toBe(MODERN_PROTOCOL);
+  });
+
+  test('modern-version-reject claims the same unsupported version in header and _meta', async () => {
+    const captured: Array<{ headers: Headers; body: { params?: { _meta?: Record<string, unknown> } } }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return rpcError(-32022, 400, { supported: [MODERN_PROTOCOL] });
+    });
+    const outcome = await run({ op: 'modern-version-reject' }, fetchImpl);
+    expect(outcome.status).toBe('pass');
+    const req = captured[0];
+    const claimed = req.headers.get('mcp-protocol-version');
+    expect(claimed).not.toBe(MODERN_PROTOCOL);
+    expect(req.body.params?._meta?.['io.modelcontextprotocol/protocolVersion']).toBe(claimed);
+  });
+
+  test('modern-resources-miss mirrors the unknown resource URI in Mcp-Name', async () => {
+    const captured: Array<{ headers: Headers; body: { method: string; params?: { uri?: string } } }> = [];
+    const fetchImpl = stubFetch((_url, init) => {
+      captured.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
+      return rpcError(-32602);
+    });
+    const outcome = await run({ op: 'modern-resources-miss' }, fetchImpl);
+    expect(outcome.status).toBe('pass');
+    const req = captured[0];
+    expect(req.body.method).toBe('resources/read');
+    expect(req.headers.get('mcp-method')).toBe('resources/read');
+    expect(req.body.params?.uri?.length).toBeGreaterThan(0);
+    expect(req.headers.get('mcp-name')).toBe(req.body.params?.uri ?? '');
+  });
+
+  test('malformed-body accepts a bare typed HTTP 400/415 refusal but not other bare statuses', async () => {
+    for (const [status, expected] of [
+      [400, 'pass'],
+      [415, 'pass'],
+      [404, 'broken'],
+      [500, 'broken'],
+    ] as const) {
+      const outcome = await run(
+        { op: 'malformed-body' },
+        stubFetch(() => new Response('nope', { status })),
+      );
+      expect(outcome.status).toBe(expected);
+    }
+  });
+
+  test('malformed-body answered 200 with garbage is broken', async () => {
+    const outcome = await run(
+      { op: 'malformed-body' },
+      stubFetch(() => new Response('<html>ok</html>', { status: 200 })),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('modern-unknown-method accepts HTTP 404 delivery only when the body carries the -32601 envelope', async () => {
+    const withEnvelope = await run(
+      { op: 'modern-unknown-method' },
+      stubFetch(() => rpcError(-32601, 404)),
+    );
+    expect(withEnvelope.status).toBe('pass');
+    const bare = await run(
+      { op: 'modern-unknown-method' },
+      stubFetch(() => new Response('not found', { status: 404 })),
+    );
+    expect(bare.status).toBe('broken');
+  });
+
+  test('a bare HTTP 404 with no envelope is broken on every conformance probe (dead-endpoint guard)', async () => {
+    for (const op of CONFORMANCE_OPS) {
+      if (op === 'malformed-body') continue;
+      const outcome = await run(
+        { op },
+        stubFetch(() => new Response('not found', { status: 404 })),
+      );
+      expect(outcome.status).toBe('broken');
+    }
+    const malformed = await run(
+      { op: 'malformed-body' },
+      stubFetch(() => new Response('not found', { status: 404 })),
+    );
+    expect(malformed.status).toBe('broken');
+  });
+
+  test('a bare non-200 without an envelope is broken outside the typed-HTTP arm', async () => {
+    for (const op of CONFORMANCE_OPS) {
+      if (op === 'malformed-body') continue;
+      const outcome = await run(
+        { op },
+        stubFetch(() => new Response('bad request', { status: 400 })),
+      );
+      expect(outcome.status).toBe('broken');
+    }
+  });
+
+  test('modern-clientcaps also passes on -32600 (invalid-request family)', async () => {
+    const outcome = await run(
+      { op: 'modern-clientcaps' },
+      stubFetch(() => rpcError(-32600, 400)),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].error_code).toBe(-32600);
+  });
+
+  test('modern-version-reject is broken when the envelope omits data.supported', async () => {
+    const noData = await run(
+      { op: 'modern-version-reject' },
+      stubFetch(() => rpcError(-32022, 400)),
+    );
+    expect(noData.status).toBe('broken');
+    const wrongData = await run(
+      { op: 'modern-version-reject' },
+      stubFetch(() => rpcError(-32022, 400, { requested: '2025-03-26' })),
+    );
+    expect(wrongData.status).toBe('broken');
+  });
+
+  test('an unavailability-coded refusal that is not the expected code maps to absent', async () => {
+    const cases: Array<[string, number]> = [
+      ['unknown-tool', -32022],
+      ['batch-reject', -32022],
+      ['modern-header-mismatch', -32601],
+      ['modern-version-reject', -32601],
+      ['modern-resources-miss', -32601],
+      ['modern-clientcaps', -32022],
+    ];
+    for (const [op, code] of cases) {
+      const outcome = await run(
+        { op },
+        stubFetch(() => rpcError(code)),
+      );
+      expect(outcome.status).toBe('absent');
+      expect(outcome.evidence[0].error_code).toBe(code);
+    }
+  });
+
+  test('any other well-formed error code stays broken', async () => {
+    const cases: Array<[string, number]> = [
+      ['malformed-body', -32600],
+      ['modern-unknown-method', -32602],
+      ['modern-clientcaps', -32603],
+      ['modern-resources-miss', -32020],
+    ];
+    for (const [op, code] of cases) {
+      const outcome = await run(
+        { op },
+        stubFetch(() => rpcError(code)),
+      );
+      expect(outcome.status).toBe('broken');
+    }
+  });
+
+  test('a result envelope answering a conformance probe is broken (the request should have been refused)', async () => {
+    const outcome = await run(
+      { op: 'unknown-tool' },
+      stubFetch(() => json({ jsonrpc: '2.0', id: 1, result: { content: [] } })),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('modern-resources-miss tolerates the legacy-compat -32002 miss code', async () => {
+    const outcome = await run(
+      { op: 'modern-resources-miss' },
+      stubFetch(() => rpcError(-32002)),
+    );
+    expect(outcome.status).toBe('pass');
+    expect(outcome.evidence[0].error_code).toBe(-32002);
+  });
+
+  test('conformance ops return n_a without a fetch when no endpoint was discovered', async () => {
+    let called = 0;
+    const fetchImpl = stubFetch(() => {
+      called++;
+      return new Response('');
+    });
+    for (const op of CONFORMANCE_OPS) {
+      const outcome = await runMcp(check({ handler: 'mcp', with: { op } }), ctx({ fetchImpl, mcpEndpoint: null }));
+      expect(outcome.status).toBe('na');
+    }
+    expect(called).toBe(0);
+  });
+});
+
+describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
+  const BASE = 'https://example.com/';
+  const json = (body: object, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const rpcError = (code: number, status = 200) =>
+    json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope' } }, status);
+
+  const registry: WebAuditRegistry = {
+    version: 1,
+    mcp_discovery: { well_known: ['/.well-known/mcp.json'], common_paths: ['/mcp'], protocol_version: '2025-06-18' },
+    category_order: ['mcp'],
+    categories: { mcp: 'MCP' },
+    checks: [
+      check({
+        id: 'mcp-initialize',
+        category: 'mcp',
+        antecedent: 'mcp-present',
+        handler: 'mcp',
+        with: { op: 'initialize' },
+      }),
+      check({
+        id: 'mcp-server-discover',
+        category: 'mcp',
+        antecedent: 'mcp-present',
+        handler: 'mcp',
+        with: { op: 'server-discover' },
+      }),
+      check({
+        id: 'mcp-modern-resources-miss',
+        category: 'mcp',
+        antecedent: 'mcp-resources',
+        handler: 'mcp',
+        with: { op: 'modern-resources-miss' },
+      }),
+    ],
+  };
+
+  function siteStub(opts: { legacyResources: boolean; modernResources: boolean; legacyServes: boolean }): typeof fetch {
+    return stubFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      const headers = new Headers(init?.headers);
+      if (method !== 'POST') {
+        return url === BASE
+          ? new Response('<html><body><h1>x</h1></body></html>', {
+              status: 200,
+              headers: { 'content-type': 'text/html' },
+            })
+          : new Response('not found', { status: 404 });
+      }
+      if (headers.get('mcp-protocol-version') === MODERN_PROTOCOL) {
+        const mcpMethod = headers.get('mcp-method');
+        if (mcpMethod === 'tools/list') {
+          return json({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } });
+        }
+        if (mcpMethod === 'server/discover') {
+          const capabilities = opts.modernResources ? { tools: {}, resources: {} } : { tools: {} };
+          return json({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              supportedVersions: [MODERN_PROTOCOL],
+              capabilities,
+              _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'anc', version: '0.1.0' } },
+            },
+          });
+        }
+        if (mcpMethod === 'resources/read') return rpcError(-32602);
+        return rpcError(-32601);
+      }
+      if (!opts.legacyServes) return rpcError(-32601);
+      const capabilities = opts.legacyResources ? { tools: {}, resources: {} } : { tools: {} };
+      return json({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { serverInfo: { name: 'anc' }, protocolVersion: '2025-06-18', capabilities },
+      });
+    });
+  }
+
+  async function auditRows(fetchImpl: typeof fetch) {
+    const rows: EngineResult[] = [];
+    for await (const event of runWebAudit({
+      url: BASE,
+      registry,
+      fetchOptions: { fetchImpl },
+    }) as AsyncGenerator<AuditEvent>) {
+      if (event.type === 'result') rows.push(event.result);
+    }
+    return rows;
+  }
+
+  test('resources advertised on neither lane gates the miss probe to n_a antecedent-unmet', async () => {
+    const rows = await auditRows(siteStub({ legacyResources: false, modernResources: false, legacyServes: true }));
+    const miss = rows.find((r) => r.id === 'mcp-modern-resources-miss');
+    expect(miss?.status).toBe('n_a');
+    expect(miss?.na_reason).toBe('antecedent-unmet');
+  });
+
+  test('a modern-only server advertising resources via server/discover probes and classifies', async () => {
+    const rows = await auditRows(siteStub({ legacyResources: false, modernResources: true, legacyServes: false }));
+    expect(rows.find((r) => r.id === 'mcp-initialize')?.status).toBe('absent');
+    const miss = rows.find((r) => r.id === 'mcp-modern-resources-miss');
+    expect(miss?.status).toBe('pass');
+    expect(miss?.na_reason).toBeUndefined();
+  });
+
+  test('legacy capabilities evidence still satisfies the antecedent', async () => {
+    const rows = await auditRows(siteStub({ legacyResources: true, modernResources: false, legacyServes: true }));
+    expect(rows.find((r) => r.id === 'mcp-modern-resources-miss')?.status).toBe('pass');
+  });
+});
+
+describe('runMcp conformance dogfood against the in-process handler', () => {
+  const DOGFOOD_CATALOG = {
+    generated_at: '2026-06-05T18:00:00.000Z',
+    spec_version: SPEC_VERSION,
+    registry: [
+      {
+        slug: 'curl',
+        name: 'curl',
+        binary: 'curl',
+        install: 'brew install curl',
+        version: '8.20.0',
+        anc_version: ANC_VERSION,
+        scorecard_url: '/score/curl',
+        score_pct: 73,
+        repo: 'curl/curl',
+      },
+    ],
+    principles: [
+      {
+        n: 1,
+        slug: 'non-interactive-by-default',
+        title: 'P1: Non-Interactive by Default',
+        body_markdown: '# P1\n\nFixture.\n',
+        requirements: [],
+      },
+    ],
+    spec_sections: [
+      { slug: 'scoring', title: 'Scoring', level: 2, parent_slug: null, body_markdown: '# Scoring\n\nFixture.\n' },
+    ],
+    registered_tool_names: ['get_scorecard', 'list_principles', 'score_cli'],
+    registered_resource_templates: ['registry', 'tool', 'principle', 'spec', 'scorecard'],
+  };
+
+  function dogfoodEnv(): Env {
+    return {
+      ASSETS: {
+        fetch(req: Request) {
+          const path = new URL(req.url).pathname;
+          if (path === '/_internal/mcp-catalog.json') {
+            return Promise.resolve(
+              new Response(JSON.stringify(DOGFOOD_CATALOG), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            );
+          }
+          return Promise.resolve(new Response('not found', { status: 404 }));
+        },
+      } as unknown as Fetcher,
+      MCP_ENABLED: 'true',
+      MCP_LIVE_SCORING_ENABLED: 'true',
+    };
+  }
+
+  beforeEach(() => {
+    resetMcpTestState();
+  });
+  afterEach(() => {
+    resetMcpTestState();
+  });
+
+  test('the full conformance matrix passes against the in-process worker', async () => {
+    const env = dogfoodEnv();
+    const inProcess: typeof fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      worker.fetch(new Request(input as string | URL, init), env, {} as ExecutionContext)) as typeof fetch;
+    const probes: Array<Record<string, unknown>> = [
+      { op: 'error', method: 'nonexistent/method', expect_code: -32601 },
+      ...CONFORMANCE_OPS.map((op) => ({ op })),
+    ];
+    const originalLog = console.log;
+    console.log = () => {};
+    const matrix: Array<{ op: unknown; status: string; code: unknown }> = [];
+    try {
+      for (const w of probes) {
+        const outcome = await runMcp(
+          check({ handler: 'mcp', with: w }),
+          ctx({ fetchImpl: inProcess, mcpEndpoint: 'https://anc.dev/mcp' }),
+        );
+        matrix.push({ op: w.op, status: outcome.status, code: outcome.evidence[0]?.error_code });
+      }
+    } finally {
+      console.log = originalLog;
+    }
+    for (const row of matrix) {
+      expect(`${String(row.op)}:${row.status}`).toBe(`${String(row.op)}:pass`);
+    }
   });
 });
 

@@ -12,6 +12,7 @@ export const WAVE1_CHECK_IDS: ReadonlySet<string> = new Set([
   'openapi',
   'oauth-discovery',
   'mcp-initialize',
+  'mcp-server-discover',
   'sitemap',
   'accept-markdown',
 ]);

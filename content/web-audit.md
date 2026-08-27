@@ -32,10 +32,13 @@ keyword and belongs to one of six categories:
   bodies (not HTML), and rate-limit headers on a safe GET.
 - **MCP** — the `initialize` handshake, `tools/list` with input schemas, `resources/list` when `capabilities.resources`
   is advertised, the modern era (protocol revision `2026-07-28`) scored as its own lane (a header-routed `tools/list`
-  that needs no `initialize`, and `server/discover` answering with server identity), JSON-RPC error codes, a prompt GET
-  answer (no held-open hang), CORS preflight and actual, the `.well-known` server card, a usage doc, and WebMCP. Each
-  protocol era scores independently: a dual-stack server earns both lanes, and a single-era server fails exactly the
-  lane it lacks.
+  that needs no `initialize`, and `server/discover` answering with server identity), per-era JSON-RPC error-code
+  conformance (on the legacy lane: a parse-error envelope or typed HTTP refusal for a malformed body, batch rejection,
+  and the unknown-method and unknown-tool codes; on the modern lane: the unknown-method code, the mandatory
+  `clientCapabilities` refusal, the header-mirror mismatch code, the version reject carrying `data.supported`, and the
+  resources-read miss code), a prompt GET answer (no held-open hang), CORS preflight and actual, the `.well-known`
+  server card, a usage doc, and WebMCP. Each protocol era scores independently: a dual-stack server earns both lanes,
+  and a single-era server fails exactly the lane it lacks.
 - **Agent discovery & auth** — the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
   OAuth discovery metadata, and `auth.md`.
 
