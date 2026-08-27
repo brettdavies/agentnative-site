@@ -13,8 +13,13 @@ import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
-import { modernProbeBody, runMcp } from '../src/worker/audit-web/handlers/mcp';
-import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
+import {
+  CONFORMANCE_OPS,
+  MODERN_LANE_DEPENDENT_OPS,
+  modernProbeBody,
+  runMcp,
+} from '../src/worker/audit-web/handlers/mcp';
+import type { HandlerContext, McpLaneEvidence } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 import { scoreWebAudit } from '../src/worker/audit-web/score';
@@ -59,6 +64,11 @@ function check(partial: Partial<WebCheck>): WebCheck {
     with: {},
     ...partial,
   };
+}
+
+/** Lane evidence with every field defaulted, so a new field lands in one place. */
+function lanes(overrides: Partial<McpLaneEvidence> = {}): McpLaneEvidence {
+  return { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [], ...overrides };
 }
 
 const MCP = 'https://example.com/mcp';
@@ -912,10 +922,10 @@ describe('runMcp era-lane classification', () => {
 
   test('resources-list is broken on -32601 once the legacy lane advertised resources', async () => {
     const refuses = stubFetch(() => rpcError(-32601));
-    const advertised = await run({ op: 'resources-list' }, refuses, { modern: 'unknown', legacyResources: true });
+    const advertised = await run({ op: 'resources-list' }, refuses, lanes({ legacyAdvertised: ['resources'] }));
     expect(advertised.status).toBe('broken');
     expect(advertised.evidence[0].error_code).toBe(-32601);
-    const notAdvertised = await run({ op: 'resources-list' }, refuses, { modern: 'unknown', legacyResources: false });
+    const notAdvertised = await run({ op: 'resources-list' }, refuses, lanes());
     expect(notAdvertised.status).toBe('absent');
   });
 
@@ -934,10 +944,78 @@ describe('runMcp era-lane classification', () => {
     }
   });
 
+  test('a session-required code is an era signal only at a status that can carry one', async () => {
+    // -32000 is JSON-RPC's reserved generic server error, so a target
+    // under load or shedding requests can answer with it while serving
+    // the modern lane perfectly.
+    const notEraSignals: Array<[string, () => Response]> = [
+      ['500', () => rpcError(-32000, 500)],
+      ['502', () => rpcError(-32000, 502)],
+      ['503', () => rpcError(-32000, 503)],
+      ['429', () => rpcError(-32000, 429)],
+      ['408', () => rpcError(-32000, 408)],
+    ];
+    for (const [label, response] of notEraSignals) {
+      const outcome = await run({ op: 'server-discover' }, stubFetch(response));
+      expect(`-32000 at ${label}:${outcome.status}`).toBe(`-32000 at ${label}:broken`);
+    }
+    for (const status of [200, 400, 401, 415]) {
+      const outcome = await run(
+        { op: 'server-discover' },
+        stubFetch(() => rpcError(-32000, status)),
+      );
+      expect(`-32000 at ${status}:${outcome.status}`).toBe(`-32000 at ${status}:absent`);
+    }
+  });
+
+  test('modern-tools-list is broken on -32601 once server/discover advertised tools', async () => {
+    const refuses = stubFetch(() => rpcError(-32601));
+    const advertised = await run({ op: 'modern-tools-list' }, refuses, {
+      modern: 'present',
+      legacyAdvertised: [],
+      modernAdvertised: ['tools'],
+    });
+    expect(advertised.status).toBe('broken');
+    expect(advertised.evidence[0].error_code).toBe(-32601);
+    const notAdvertised = await run({ op: 'modern-tools-list' }, refuses, lanes({ modern: 'present' }));
+    expect(notAdvertised.status).toBe('absent');
+  });
+
+  test('tools-list is broken on -32601 once the legacy lane advertised tools', async () => {
+    const refuses = stubFetch(() => rpcError(-32601));
+    const advertised = await run({ op: 'tools-list' }, refuses, lanes({ legacyAdvertised: ['tools'] }));
+    expect(advertised.status).toBe('broken');
+    const notAdvertised = await run({ op: 'tools-list' }, refuses, lanes());
+    expect(notAdvertised.status).toBe('absent');
+  });
+
+  test("an advertisement on one lane never reaches the other lane's row", async () => {
+    // A modern-only server advertising tools must not be charged broken
+    // for a legacy tools/list it never claimed, and the mirror case.
+    const refuses = stubFetch(() => rpcError(-32601));
+    const modernOnly = await run({ op: 'tools-list' }, refuses, {
+      modern: 'present',
+      legacyAdvertised: [],
+      modernAdvertised: ['tools'],
+    });
+    expect(modernOnly.status).toBe('absent');
+    const legacyOnly = await run({ op: 'modern-tools-list' }, refuses, {
+      modern: 'present',
+      legacyAdvertised: ['tools'],
+      modernAdvertised: [],
+    });
+    expect(legacyOnly.status).toBe('absent');
+  });
+
   test('server/discover stays broken when the server tried to serve the method and failed', async () => {
     const faults: Array<[string, () => Response]> = [
       ['internal error', () => rpcError(-32603)],
       ['internal error at 500', () => rpcError(-32603, 500)],
+      // The only case that separates judging the code first from judging
+      // the status first: a non-unavailability code riding a status the
+      // envelope-free arm would accept as a typed refusal.
+      ['internal error at 400', () => rpcError(-32603, 400)],
+      ['invalid params at 415', () => rpcError(-32602, 415)],
       ['bare 500', () => new Response('boom', { status: 500 })],
       ['bare 503', () => new Response('unavailable', { status: 503 })],
       ['200 with garbage', () => new Response('<html>oops</html>', { status: 200 })],
@@ -965,24 +1043,18 @@ describe('runMcp era-lane classification', () => {
 
   test('resources-list stays broken on a non-unavailability code either way', async () => {
     const fails = stubFetch(() => rpcError(-32603));
-    for (const legacyResources of [true, false]) {
-      const outcome = await run({ op: 'resources-list' }, fails, { modern: 'unknown', legacyResources });
-      expect(`${legacyResources}:${outcome.status}`).toBe(`${legacyResources}:broken`);
+    for (const advertised of [['resources'], []]) {
+      const outcome = await run({ op: 'resources-list' }, fails, lanes({ legacyAdvertised: advertised }));
+      const label = advertised.length > 0 ? 'advertised' : 'not advertised';
+      expect(`${label}:${outcome.status}`).toBe(`${label}:broken`);
     }
   });
 });
 
 describe('runMcp modern-lane gate', () => {
-  const MODERN_DEPENDENT = [
-    'modern-tools-list',
-    'modern-unknown-method',
-    'modern-clientcaps',
-    'modern-header-mismatch',
-    'modern-version-reject',
-    'modern-resources-miss',
-  ];
+  const MODERN_DEPENDENT = [...MODERN_LANE_DEPENDENT_OPS];
 
-  test('an unevidenced modern lane settles every dependent row absent without a request', async () => {
+  test('an unevidenced modern lane settles every dependent row n_a without a request', async () => {
     let calls = 0;
     const fetchImpl = stubFetch(() => {
       calls++;
@@ -991,9 +1063,10 @@ describe('runMcp modern-lane gate', () => {
     for (const op of MODERN_DEPENDENT) {
       const outcome = await runMcp(
         check({ handler: 'mcp', with: { op } }),
-        ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: { modern: 'unevidenced', legacyResources: false } }),
+        ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: lanes({ modern: 'unevidenced' }) }),
       );
-      expect(`${op}:${outcome.status}`).toBe(`${op}:absent`);
+      expect(`${op}:${outcome.status}`).toBe(`${op}:na`);
+      expect(`${op}:${String(outcome.na_reason)}`).toBe(`${op}:era-absent`);
       expect(outcome.evidence[0].why).toEqual(['no modern lane: server/discover returned no result']);
     }
     expect(calls).toBe(0);
@@ -1007,7 +1080,7 @@ describe('runMcp modern-lane gate', () => {
     });
     const outcome = await runMcp(
       check({ handler: 'mcp', with: { op: 'server-discover' } }),
-      ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: { modern: 'unevidenced', legacyResources: false } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: lanes({ modern: 'unevidenced' }) }),
     );
     expect(outcome.status).toBe('absent');
     expect(calls).toBe(1);
@@ -1022,24 +1095,13 @@ describe('runMcp modern-lane gate', () => {
       });
       const outcome = await runMcp(
         check({ handler: 'mcp', with: { op: 'modern-tools-list' } }),
-        ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: { modern, legacyResources: false } }),
+        ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: lanes({ modern }) }),
       );
       expect(`${modern}:${outcome.status}`).toBe(`${modern}:pass`);
       expect(`${modern}:${calls}`).toBe(`${modern}:1`);
     }
   });
 });
-
-const CONFORMANCE_OPS = [
-  'malformed-body',
-  'batch-reject',
-  'unknown-tool',
-  'modern-unknown-method',
-  'modern-clientcaps',
-  'modern-header-mismatch',
-  'modern-version-reject',
-  'modern-resources-miss',
-] as const;
 
 describe('runMcp error-code conformance', () => {
   const run = (w: Record<string, unknown>, fetchImpl: typeof fetch, sessionId?: string) =>
@@ -1397,6 +1459,55 @@ describe('runMcp error-code conformance', () => {
     }
   });
 
+  test('an MCP probe stops reading at the shared audit body cap', async () => {
+    // An uncapped read lets a hostile endpoint make the auditor buffer
+    // whatever it sends, once per probe.
+    const oversized = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32602, message: 'x'.repeat(70 * 1024) },
+    });
+    const outcome = await run(
+      { op: 'unknown-tool' },
+      stubFetch(() => new Response(oversized, { status: 200, headers: { 'content-type': 'application/json' } })),
+    );
+    expect(outcome.status).toBe('broken');
+    expect((outcome.evidence[0].why as string[])[0]).toBe('no parseable JSON-RPC response');
+  });
+
+  test('the re-ask is bounded by the row budget, not granted a second full timeout', async () => {
+    // probeOne tests the per-audit deadline only between checks, so a
+    // second hop inside one row has to slice that row's own budget or the
+    // audit can overrun by a full per-check timeout.
+    let calls = 0;
+    const fetchImpl = stubFetch(() => {
+      calls++;
+      return rpcError(-32000, 400);
+    });
+    const outcome = await runMcp(
+      check({ handler: 'mcp', with: { op: 'unknown-tool' } }),
+      ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: 'sess-1', defaultTimeoutMs: 0 }),
+    );
+    expect(calls).toBe(1);
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a malformed error envelope is reported as malformed, not as a result', async () => {
+    // The string becomes the Issue line on the owner's remediation
+    // prompt, so naming the wrong defect sends them after the wrong bug.
+    const noCode = await run(
+      { op: 'unknown-tool' },
+      stubFetch(() => json({ jsonrpc: '2.0', id: 1, error: { message: 'nope' } })),
+    );
+    expect(noCode.status).toBe('broken');
+    expect((noCode.evidence[0].why as string[])[0]).toBe('the JSON-RPC error envelope carries no numeric error.code');
+    const aResult = await run(
+      { op: 'unknown-tool' },
+      stubFetch(() => toolsResult()),
+    );
+    expect((aResult.evidence[0].why as string[])[0]).toBe('expected a JSON-RPC error envelope, got a result');
+  });
+
   test('a stateless target keeps every conformance probe to a single request', async () => {
     for (const op of CONFORMANCE_OPS) {
       let calls = 0;
@@ -1691,13 +1802,14 @@ describe('era lanes resolved across a whole audit (engine)', () => {
     return rows;
   }
 
-  test('every legacy-only shape lands the modern MUST absent, never a free pass or a penalty', async () => {
+  test('every legacy-only shape lands the modern MUST out of scoring, never a free pass or a penalty', async () => {
     for (const [label, fetchImpl] of Object.entries(shapes)) {
       const rows = await auditRows(fetchImpl);
       const modern = rows.find((r) => r.id === 'mcp-modern-tools-list');
-      expect(`${label}:${modern?.status}`).toBe(`${label}:absent`);
+      expect(`${label}:${modern?.status}`).toBe(`${label}:n_a`);
+      expect(`${label}:${modern?.na_reason}`).toBe(`${label}:era-absent`);
       expect(`${label}:${modern?.evidence}`).toBe(`${label}:no modern lane: server/discover returned no result`);
-      expect(`${label}:${rows.find((r) => r.id === 'mcp-modern-clientcaps')?.status}`).toBe(`${label}:absent`);
+      expect(`${label}:${rows.find((r) => r.id === 'mcp-modern-clientcaps')?.status}`).toBe(`${label}:n_a`);
       expect(`${label}:${rows.find((r) => r.id === 'mcp-initialize')?.status}`).toBe(`${label}:pass`);
     }
   });

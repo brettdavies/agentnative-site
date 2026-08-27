@@ -7,8 +7,8 @@
 // pass / broken / absent / n_a / skip / error; an applicable MAY that
 // comes back absent is re-tagged n_a with na_reason 'optional-absent',
 // an unmet antecedent yields na_reason 'antecedent-unmet', and a
-// handler-stated na_reason (the CORS pair's 'posture-consistent')
-// passes through to the result row.
+// handler-stated na_reason (the CORS pair's 'posture-consistent', the
+// MCP modern-lane gate's 'era-absent') passes through to the result row.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -31,7 +31,13 @@ import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
 import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
-import { advertisesResources, mcpModernLaneFrom, mcpSessionIdFrom, notifyMcpInitialized, runMcp } from './handlers/mcp';
+import {
+  advertisedCapabilities,
+  mcpModernLaneFrom,
+  mcpSessionIdFrom,
+  notifyMcpInitialized,
+  runMcp,
+} from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
 import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
@@ -265,7 +271,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const scopedDirs: string[] = [];
   const retainedBodies = new Map<string, string>();
   let mcpSessionId: string | null = null;
-  let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyResources: false };
+  let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [] };
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -328,7 +334,8 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
   mcpLanes = {
     modern: mcpModernLaneFrom(sources.get('mcp-server-discover')),
-    legacyResources: advertisesResources(sources.get('mcp-initialize')?.evidence ?? []),
+    legacyAdvertised: advertisedCapabilities(sources.get('mcp-initialize')?.evidence ?? []),
+    modernAdvertised: advertisedCapabilities(sources.get('mcp-server-discover')?.evidence ?? []),
   };
   if (mcpSessionId && discovery.endpoint) {
     await notifyMcpInitialized(discovery.endpoint, mcpSessionId, {

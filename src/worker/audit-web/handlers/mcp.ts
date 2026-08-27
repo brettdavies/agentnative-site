@@ -4,35 +4,85 @@
 // header-routed per SEP-2243; the per-era error-code conformance family),
 // POSTs through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
 // evaluates serverInfo / capabilities / tools / resources / discovery /
-// error-code. Returns n_a when no endpoint was discovered, and absent
-// without a request when wave 1 evidenced no modern lane. CORS
-// classification lives in the cors-preflight posture handler.
+// error-code. Returns n_a when no endpoint was discovered, and n_a
+// (`era-absent`) without a request when wave 1 evidenced no modern lane.
+// CORS classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
-import { type GuardedFetchOptions, guardedFetch } from '../ssrf';
-import { timeoutMsFor } from './shared';
-import type { EvidenceItem, HandlerContext, McpModernLane, ProbeOutcome } from './types';
+import { AUDIT_PROBE_MAX_BODY_BYTES, type GuardedFetchOptions, guardedFetch } from '../ssrf';
+import { remainingDeadlineMs, timeoutMsFor } from './shared';
+import type { EvidenceItem, HandlerContext, McpLaneEvidence, McpModernLane, ProbeOutcome } from './types';
 
-type ConformanceOp =
-  | 'malformed-body'
-  | 'batch-reject'
-  | 'unknown-tool'
-  | 'modern-unknown-method'
-  | 'modern-clientcaps'
-  | 'modern-header-mismatch'
-  | 'modern-version-reject'
-  | 'modern-resources-miss';
+/**
+ * Per-op facts every family-dependent behavior in this file derives from.
+ * One declaration rather than a set per behavior: an op added to the
+ * table without a `family` cannot compile, and an op added anywhere else
+ * cannot exist, because `McpOp` is the table's key set. That is what
+ * stops a new op from silently joining the era family (and inheriting its
+ * softening) by being absent from a membership set someone forgot.
+ */
+type McpOpSpec = {
+  /** Which classification branch judges the answer. Conformance rows ask
+   * a question the lane has already proven it serves, so no era
+   * softening reaches them; era rows name a method the lane could be
+   * missing. */
+  family: 'era' | 'conformance';
+  /** Which protocol era's wire shape the row probes. */
+  era: 'legacy' | 'modern';
+  /** Wire method for a modern era probe; the Mcp-Method header and the
+   * body both read it, so they cannot disagree (the -32020 condition the
+   * suite itself probes for). */
+  method?: string;
+  /** Capability group the row reads, as named in its own lane's
+   * handshake. Refusing a method the handshake advertised contradicts
+   * the handshake, so the era softening must not reach such a row. */
+  advertises?: string;
+  /** The row whose answer decides the modern lane. It is never gated on
+   * its own answer, and its refusal is read as the era's absence. */
+  discriminates?: true;
+};
+
+const MCP_OPS = {
+  initialize: { family: 'era', era: 'legacy' },
+  'tools-list': { family: 'era', era: 'legacy', advertises: 'tools' },
+  'resources-list': { family: 'era', era: 'legacy', advertises: 'resources' },
+  error: { family: 'era', era: 'legacy' },
+  'malformed-body': { family: 'conformance', era: 'legacy' },
+  'batch-reject': { family: 'conformance', era: 'legacy' },
+  'unknown-tool': { family: 'conformance', era: 'legacy' },
+  'server-discover': { family: 'era', era: 'modern', method: 'server/discover', discriminates: true },
+  'modern-tools-list': { family: 'era', era: 'modern', method: 'tools/list', advertises: 'tools' },
+  'modern-unknown-method': { family: 'conformance', era: 'modern' },
+  'modern-clientcaps': { family: 'conformance', era: 'modern' },
+  'modern-header-mismatch': { family: 'conformance', era: 'modern' },
+  'modern-version-reject': { family: 'conformance', era: 'modern' },
+  'modern-resources-miss': { family: 'conformance', era: 'modern' },
+} as const satisfies Record<string, McpOpSpec>;
+
+export type McpOp = keyof typeof MCP_OPS;
+
+type OpsOfFamily<F extends McpOpSpec['family']> = {
+  [K in McpOp]: (typeof MCP_OPS)[K]['family'] extends F ? K : never;
+}[McpOp];
+
+type ConformanceOp = OpsOfFamily<'conformance'>;
+
+const ALL_OPS = Object.keys(MCP_OPS) as McpOp[];
+
+// `as const` is what makes ConformanceOp derivable, and it also narrows
+// each row to only the keys it declares; reading an optional key off an
+// arbitrary op needs the widened view.
+function specOf(op: McpOp): McpOpSpec {
+  return MCP_OPS[op];
+}
+
+function opsWhere(predicate: (spec: McpOpSpec) => boolean): readonly McpOp[] {
+  return ALL_OPS.filter((op) => predicate(specOf(op)));
+}
 
 type McpWith = {
-  op:
-    | 'initialize'
-    | 'tools-list'
-    | 'resources-list'
-    | 'error'
-    | 'modern-tools-list'
-    | 'server-discover'
-    | ConformanceOp;
+  op: McpOp;
   assert?: 'capabilities';
   method?: string;
   expect_code?: number;
@@ -74,14 +124,7 @@ const RATE_LIMITED_CODE = -32099;
 // a strict one refuses the version claim), which makes its answer
 // evidence about leniency rather than about the era. These rows are
 // therefore scored only against a lane server/discover evidenced.
-const MODERN_LANE_DEPENDENT_OPS: ReadonlySet<McpWith['op']> = new Set([
-  'modern-tools-list',
-  'modern-unknown-method',
-  'modern-clientcaps',
-  'modern-header-mismatch',
-  'modern-version-reject',
-  'modern-resources-miss',
-]);
+export const MODERN_LANE_DEPENDENT_OPS = opsWhere((spec) => spec.era === 'modern' && spec.discriminates !== true);
 
 // A stateful 2025-era server refuses a sessionless POST with -32000
 // before it ever reaches the code these rows probe, which scores its
@@ -89,7 +132,14 @@ const MODERN_LANE_DEPENDENT_OPS: ReadonlySet<McpWith['op']> = new Set([
 // the session legacy initialize issued puts the row back on its own
 // question; a stateless target never issues a session and so stays a
 // single request.
-const LEGACY_CONFORMANCE_OPS: ReadonlySet<McpWith['op']> = new Set(['malformed-body', 'batch-reject', 'unknown-tool']);
+export const LEGACY_CONFORMANCE_OPS = opsWhere((spec) => spec.family === 'conformance' && spec.era === 'legacy');
+
+/** Every row judged by the conformance branch, in registry order. */
+export const CONFORMANCE_OPS = opsWhere((spec) => spec.family === 'conformance');
+
+/** Every row judged by the era branch, in registry order. */
+export const ERA_OPS = opsWhere((spec) => spec.family === 'era');
+
 const SESSION_REQUIRED_CODE = -32000;
 
 // A refusal delivered as an HTTP status with no JSON-RPC envelope: the
@@ -97,23 +147,9 @@ const SESSION_REQUIRED_CODE = -32000;
 // set so a dead endpoint earns nothing on any row that consults it.
 const TYPED_REFUSAL_STATUSES: readonly number[] = [400, 415];
 
-// `server/discover` exists only on the modern lane, so the row that
-// proves a lane is missing must not be penalized for proving it: every
-// answer meaning "this method is not served here" reads as an absent era,
-// the same reading the six rows this outcome gates already take. Beyond
-// the shared unavailability codes, a legacy server declines it two more
-// ways: -32000 when it wants a session the modern lane never issues, and
-// a typed HTTP refusal when it rejects the modern version claim before
-// any handler runs.
-const DISCOVER_UNAVAILABLE_CODES = new Set([...LANE_UNAVAILABLE_CODES, SESSION_REQUIRED_CODE]);
-
-// Single source of a modern op's wire method: the Mcp-Method header and
-// the body method both read this map, so they cannot disagree (the
-// -32020 condition the suite itself probes for).
-const MODERN_OP_METHODS: Partial<Record<McpWith['op'], string>> = {
-  'modern-tools-list': 'tools/list',
-  'server-discover': 'server/discover',
-};
+// Statuses whose shape is "not now" rather than "not here": a target
+// asking to be retried is reporting load, not a protocol era.
+const RETRY_SHAPED_STATUSES: readonly number[] = [408, 429];
 
 const CLIENT_INFO = { name: 'agent-web-audit', version: '1.0' };
 
@@ -261,11 +297,11 @@ const CONFORMANCE_PROBES: Record<ConformanceOp, ConformanceProbe> = {
   },
 };
 
-function conformanceFor(op: McpWith['op']): ConformanceProbe | undefined {
-  return op in CONFORMANCE_PROBES ? CONFORMANCE_PROBES[op as ConformanceOp] : undefined;
+function conformanceFor(op: McpOp): ConformanceProbe | undefined {
+  return specOf(op).family === 'conformance' ? CONFORMANCE_PROBES[op as ConformanceOp] : undefined;
 }
 
-function buildBody(op: McpWith['op'], method: string, protocolVersion: string): string {
+function buildBody(op: McpOp, method: string, protocolVersion: string): string {
   if (op === 'initialize') {
     return legacyInitializeBody(protocolVersion);
   }
@@ -275,7 +311,7 @@ function buildBody(op: McpWith['op'], method: string, protocolVersion: string): 
   if (op === 'resources-list') {
     return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list', params: {} });
   }
-  const modernMethod = MODERN_OP_METHODS[op];
+  const modernMethod = specOf(op).method;
   if (modernMethod !== undefined) {
     return modernProbeBody(modernMethod);
   }
@@ -287,10 +323,15 @@ export function mcpSessionIdFrom(outcome: ProbeOutcome | undefined): string | nu
   return typeof raw === 'string' && raw.length > 0 ? raw : null;
 }
 
+/** Capability groups a handshake evidence row advertised. */
+export function advertisedCapabilities(items: EvidenceItem[]): readonly string[] {
+  const caps = items[0]?.capabilities;
+  return Array.isArray(caps) ? caps.filter((group): group is string => typeof group === 'string') : [];
+}
+
 /** A `capabilities` evidence row advertising the resources group. */
 export function advertisesResources(items: EvidenceItem[]): boolean {
-  const caps = items[0]?.capabilities;
-  return Array.isArray(caps) && caps.includes('resources');
+  return advertisedCapabilities(items).includes('resources');
 }
 
 /**
@@ -334,28 +375,56 @@ export async function notifyMcpInitialized(
 }
 
 /**
- * A lane's own era probe answered with an unavailability code is
- * reporting an era it does not serve, not a broken surface. The legacy
- * resources read is excluded once the legacy lane advertised
- * `capabilities.resources`: refusing a capability you advertise
- * contradicts your own handshake, and that misconfiguration has to stay
- * visible on the scorecard.
+ * Whether the row reads a capability its own lane advertised one request
+ * earlier. Refusing a method named in your own handshake contradicts
+ * that handshake, so the misconfiguration stays visible on the scorecard
+ * instead of reading as an era you do not serve. The advertisement is
+ * read from the lane the row probes, so a single-era server is never
+ * charged against the other lane's capabilities.
  */
-function eraLaneUnavailable(op: McpWith['op'], code: number | null, ctx: HandlerContext): boolean {
+function refusesOwnAdvertisement(op: McpOp, lanes: McpLaneEvidence | undefined): boolean {
+  const group = specOf(op).advertises;
+  if (group === undefined || lanes === undefined) return false;
+  const advertised = specOf(op).era === 'modern' ? lanes.modernAdvertised : lanes.legacyAdvertised;
+  return advertised.includes(group);
+}
+
+/**
+ * A lane's own era probe answered with an unavailability code is
+ * reporting an era it does not serve, not a broken surface, unless the
+ * lane advertised the very capability it is refusing.
+ */
+function eraLaneUnavailable(op: McpOp, code: number | null, ctx: HandlerContext): boolean {
   if (code === null || !LANE_UNAVAILABLE_CODES.has(code)) return false;
-  if (op === 'resources-list' && ctx.mcpLanes?.legacyResources === true) return false;
-  return true;
+  return !refusesOwnAdvertisement(op, ctx.mcpLanes);
+}
+
+/**
+ * Whether a status is compatible with reading an answer as an era signal
+ * at all. A 5xx and a retry-shaped status both describe the target's
+ * condition rather than its protocol surface, so an answer delivered at
+ * one cannot settle which eras the server serves.
+ */
+function eraReadableStatus(status: number | null): boolean {
+  return status === null || (status < 500 && !RETRY_SHAPED_STATUSES.includes(status));
 }
 
 /**
  * Whether a `server/discover` answer reports the modern lane's absence.
- * An error envelope is judged on its code alone, so an internal error
- * stays broken however it is delivered; only an envelope-free answer is
- * judged on its status, so a malformed result and a 5xx both keep the
+ * An error envelope is judged on its code, so an internal error stays
+ * broken however it is delivered; only an envelope-free answer is judged
+ * on its status, so a malformed result and a 5xx both keep the
  * broken-surface penalty a server that tried and failed has earned.
+ *
+ * -32601 and -32022 name the absence unambiguously and are read at any
+ * status. -32000 is JSON-RPC's reserved generic server error, whose
+ * session-required meaning is one reading among many, so it counts only
+ * where that reading is coherent: a server error or a rate limit
+ * carrying it is reporting load, not an era.
  */
 function modernLaneRefused(status: number | null, code: number | null): boolean {
-  if (code !== null) return DISCOVER_UNAVAILABLE_CODES.has(code);
+  if (code === SESSION_REQUIRED_CODE) return eraReadableStatus(status);
+  if (code !== null) return LANE_UNAVAILABLE_CODES.has(code);
   return status !== null && TYPED_REFUSAL_STATUSES.includes(status);
 }
 
@@ -365,14 +434,19 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     return { status: 'na', evidence: [{ why: ['no MCP endpoint discovered'] }] };
   }
   const w = check.with as McpWith;
-  if (MODERN_LANE_DEPENDENT_OPS.has(w.op) && ctx.mcpLanes?.modern === 'unevidenced') {
+  // n_a rather than absent: the row is settled without a request, so it
+  // carries no observation to score. Scoring it would price withholding
+  // `server/discover` below serving it, and would print remediation for
+  // a lane no probe ever reached.
+  if (MODERN_LANE_DEPENDENT_OPS.includes(w.op) && ctx.mcpLanes?.modern === 'unevidenced') {
     return {
-      status: 'absent',
+      status: 'na',
+      na_reason: 'era-absent',
       evidence: [{ url: endpoint, why: ['no modern lane: server/discover returned no result'] }],
     };
   }
   const conformance = conformanceFor(w.op);
-  const modernMethod = MODERN_OP_METHODS[w.op];
+  const modernMethod = specOf(w.op).method;
   // Modern probes stay sessionless (no Mcp-Session-Id) and carry no
   // Mcp-Name: neither op is a tools/call or resources/read. Conformance
   // probes open fully table-shaped, and only the legacy three re-ask with
@@ -386,17 +460,28 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     headers['Mcp-Session-Id'] = ctx.mcpSessionId;
   }
   const body = conformance ? conformance.body() : buildBody(w.op, w.method ?? '', ctx.protocolVersion);
-  const fetchOpts = { ...ctx.fetchOptions, timeoutMs: timeoutMsFor(w.timeout, ctx.defaultTimeoutMs) };
+  // Every MCP probe reads at most a small JSON-RPC envelope, so the
+  // shared audit cap bounds what a hostile endpoint can make the auditor
+  // buffer.
+  const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
+  const fetchOpts = { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: AUDIT_PROBE_MAX_BODY_BYTES };
+  // The re-ask below is a second hop on one row's budget; the row's
+  // deadline is what bounds it, so the retry gets the remainder rather
+  // than a second full timeout the engine only checks between checks.
+  const deadlineAt = Date.now() + timeoutMs;
 
   let resp = await guardedFetch(endpoint, { method: 'POST', headers, body }, fetchOpts);
   let rpc = parseJsonRpc(resp);
-  if (LEGACY_CONFORMANCE_OPS.has(w.op) && ctx.mcpSessionId && jsonRpcErrorCode(rpc) === SESSION_REQUIRED_CODE) {
-    resp = await guardedFetch(
-      endpoint,
-      { method: 'POST', headers: { ...headers, 'Mcp-Session-Id': ctx.mcpSessionId }, body },
-      fetchOpts,
-    );
-    rpc = parseJsonRpc(resp);
+  if (LEGACY_CONFORMANCE_OPS.includes(w.op) && ctx.mcpSessionId && jsonRpcErrorCode(rpc) === SESSION_REQUIRED_CODE) {
+    const slice = remainingDeadlineMs(deadlineAt);
+    if (slice > 0) {
+      resp = await guardedFetch(
+        endpoint,
+        { method: 'POST', headers: { ...headers, 'Mcp-Session-Id': ctx.mcpSessionId }, body },
+        { ...fetchOpts, timeoutMs: slice },
+      );
+      rpc = parseJsonRpc(resp);
+    }
   }
   const ev: EvidenceItem = { url: endpoint, status: resp.status, error: resp.error };
   const wwwAuthenticate = resp.headers['www-authenticate'];
@@ -417,7 +502,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // Settled ahead of the arms below because a legacy server declines this
   // method both with an envelope and without one, and the arms that would
   // otherwise catch those two answers read them as a broken surface.
-  if (w.op === 'server-discover' && modernLaneRefused(resp.status, code)) {
+  if (specOf(w.op).discriminates === true && modernLaneRefused(resp.status, code)) {
     const reason = code !== null ? `code ${code}` : `HTTP ${resp.status}`;
     if (code !== null) ev.error_code = code;
     ev.why = [`no modern lane: server/discover refused with ${reason}`];
@@ -455,7 +540,13 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
         ev.why = ['typed HTTP refusal with no JSON-RPC envelope'];
         return { status: 'pass', evidence: [ev] };
       }
-      ev.why = ['expected a JSON-RPC error envelope, got a result'];
+      // Two distinguishable defects reach here, and the Issue line on the
+      // owner's remediation prompt is this string.
+      ev.why = [
+        rpc.error !== undefined
+          ? 'the JSON-RPC error envelope carries no numeric error.code'
+          : 'expected a JSON-RPC error envelope, got a result',
+      ];
       return { status: 'broken', evidence: [ev] };
     }
     if (conformance.accept.includes(code)) {

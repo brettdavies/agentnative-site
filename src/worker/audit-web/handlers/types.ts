@@ -26,10 +26,16 @@ export type EvidenceItem = Record<string, unknown>;
  * it applies, is a MAY, and simply is not implemented;
  * `posture-consistent` = the probed surfaces show a deliberate,
  * consistent opt-out (the CORS pair with Allow-Origin on neither
- * surface). A handler with nothing to probe (no discovered MCP
- * endpoint) emits n_a with no reason.
+ * surface); `era-absent` = the protocol era the row probes was never
+ * evidenced, so the row was settled without a request. A handler with
+ * nothing to probe (no discovered MCP endpoint) emits n_a with no reason.
+ *
+ * `era-absent` is n_a rather than absent because a row settled without a
+ * request carries no observation: scoring it as absent would let a
+ * server suppress a whole family of scored rows by withholding the one
+ * method that evidences the era.
  */
-export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent';
+export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent' | 'era-absent';
 
 /**
  * Whether the target serves the modern MCP era, read from the wave-1
@@ -42,8 +48,10 @@ export type McpModernLane = 'present' | 'unevidenced' | 'unknown';
 /** Era-lane facts the wave-1 MCP probes establish for the wave-2 rows. */
 export interface McpLaneEvidence {
   modern: McpModernLane;
-  /** The legacy `initialize` result advertised `capabilities.resources`. */
-  legacyResources: boolean;
+  /** Capability groups the legacy `initialize` result advertised. */
+  legacyAdvertised: readonly string[];
+  /** Capability groups the modern `server/discover` result advertised. */
+  modernAdvertised: readonly string[];
 }
 
 export interface ProbeOutcome {
@@ -95,8 +103,8 @@ export interface HandlerContext {
   mcpSessionId?: string | null;
   /**
    * Era-lane evidence from the wave-1 MCP probes. Modern-era rows score
-   * only against a lane `server/discover` evidenced, and the legacy
-   * resources read is judged against the legacy lane's own capability
+   * only against a lane `server/discover` evidenced, and a row that reads
+   * a capability its own lane advertised is judged against that
    * advertisement.
    */
   mcpLanes?: McpLaneEvidence;

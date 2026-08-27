@@ -81,7 +81,9 @@ remediation:
       header-routed (`MCP-Protocol-Version: 2026-07-28`, `Mcp-Method: server/discover`) with the
       `params._meta` envelope, whose `io.modelcontextprotocol/clientCapabilities` key is
       mandatory. No `initialize` precedes it: `server/discover` is how a modern client learns
-      what the server offers before any session state exists.
+      what the server offers before any session state exists. Answering it is also what brings
+      the rest of the modern-lane checks into scoring, so serve the `2026-07-28` revision behind
+      it rather than this one method on its own.
     resources:
       - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
   mcp-unknown-method:

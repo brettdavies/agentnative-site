@@ -279,11 +279,14 @@ Two rules shape how MCP results score:
   header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
   single-era server reads `absent` on the lane it lacks rather than `broken`, so it is never penalized for an era it
   never claimed. `server/discover` decides the modern lane, because it is the only method a legacy server cannot answer:
-  a refusal saying the method is not served here reads `absent` on that check and settles every other modern check
-  `absent` without a probe, while a malformed result or a server error stays `broken`. On the legacy lane, an era-shaped
-  refusal (a well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be
-  missing. The error-code conformance checks are judged strictly: they ask about a request the lane has already proven
-  it accepts, so any code other than the expected one is `broken`.
+  a refusal saying the method is not served here reads `absent` on that check and leaves every other modern check `n_a`,
+  excluded from both scores because no probe ever reached it, while a malformed result or a server error stays `broken`.
+  A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx or a rate-limit
+  status it reports load rather than an era, and stays `broken`. On the legacy lane, an era-shaped refusal (a
+  well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
+  the lane's own handshake advertised the capability it is refusing, which contradicts the handshake and stays `broken`.
+  The error-code conformance checks are judged strictly: they ask about a request the lane has already proven it
+  accepts, so any code other than the expected one is `broken`.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
   deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
 
