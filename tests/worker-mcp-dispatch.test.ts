@@ -15,6 +15,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { detectMcpFormat, detectMcpGetFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
+import { extractTransportErrorCode } from '../src/worker/mcp/telemetry';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import {
   legacyToolsListBatchBody,
@@ -201,11 +202,16 @@ async function postMcp(env: Env, accept: string, body: object): Promise<Response
   return postMcpHeaders(env, body, { accept });
 }
 
+// `host` is defaulted rather than inherited from the URL: the Fetch API treats
+// Host as a forbidden header, so a synthesized Request carries none and the
+// SDK's allowlist would answer every case below with its missing-Host 403. A
+// real request always carries one, so supplying it here is what makes the
+// harness resemble the wire.
 async function postMcpHeaders(env: Env, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
   return worker.fetch(
     new Request('https://anc.dev/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
+      headers: { 'content-type': 'application/json', accept: 'application/json', host: 'anc.dev', ...headers },
       body: JSON.stringify(body),
     }),
     env,
@@ -537,7 +543,7 @@ describe('POST /mcp — Accept gate', () => {
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', host: 'anc.dev' },
         body: JSON.stringify(initBody()),
       }),
       env,
@@ -779,6 +785,114 @@ describe('POST /mcp — response posture', () => {
   });
 });
 
+describe('POST /mcp — Host allowlist', () => {
+  async function postFrom(env: Env, url: string, host: string): Promise<Response> {
+    return worker.fetch(
+      new Request(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', host },
+        body: JSON.stringify(initBody()),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+  }
+
+  test('a rebinding Host is rejected 403 with -32000 and no access-control headers', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postFrom(env, 'https://anc.dev/mcp', 'evil.example'),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { jsonrpc?: string; error?: { code?: number } };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error?.code).toBe(-32000);
+    for (const [name] of res.headers) expect(name.toLowerCase().startsWith('access-control-')).toBe(false);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { outcome?: string; error_code?: number };
+    expect(line.outcome).toBe('error');
+    expect(line.error_code).toBe(-32000);
+  });
+
+  test('a Host carrying a port matches the bare allowlist entry', async () => {
+    // The SDK compares hostnames with the port stripped. Local dev, the
+    // Playwright webServer, and the local preflight script all bind a port,
+    // so a port-sensitive list would lock every one of them out.
+    const env = makeEnv();
+    const res = await postFrom(env, 'http://localhost:8787/mcp', 'localhost:8787');
+    expect(res.status).toBe(200);
+  });
+
+  test('the production and staging hosts are served', async () => {
+    const env = makeEnv();
+    for (const [url, host] of [
+      ['https://anc.dev/mcp', 'anc.dev'],
+      [
+        'https://agentnative-site-staging.brettdavies.workers.dev/mcp',
+        'agentnative-site-staging.brettdavies.workers.dev',
+      ],
+    ] as const) {
+      const res = await postFrom(env, url, host);
+      expect(`${host}:${res.status}`).toBe(`${host}:200`);
+    }
+  });
+
+  test('a browser Origin is rejected with the same -32000 the Host gate uses', async () => {
+    // `allowedOriginHostnames` is left unset, which is a localhost-only Origin
+    // gate rather than no Origin checking. It shares the transport code with
+    // the Host rejection, so telemetry alone cannot tell the two apart.
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          host: 'anc.dev',
+          origin: 'https://evil.example',
+        },
+        body: JSON.stringify(initBody()),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: { code?: number } };
+    expect(body.error?.code).toBe(-32000);
+  });
+});
+
+describe('extractTransportErrorCode', () => {
+  test('reads a JSON-RPC code out of a non-200 body', async () => {
+    const res = Response.json(
+      { jsonrpc: '2.0', error: { code: -32000, message: 'Invalid Host' }, id: null },
+      {
+        status: 403,
+      },
+    );
+    expect(await extractTransportErrorCode(res)).toBe(-32000);
+  });
+
+  test('a non-JSON 500 has no code', async () => {
+    const res = new Response('upstream exploded', { status: 500 });
+    expect(await extractTransportErrorCode(res)).toBeNull();
+  });
+
+  test('a body over the 4 KB cap is not parsed', async () => {
+    const res = Response.json(
+      { jsonrpc: '2.0', error: { code: -32000, message: 'x'.repeat(4096) }, id: null },
+      { status: 403 },
+    );
+    expect(await extractTransportErrorCode(res)).toBeNull();
+  });
+
+  test('the body survives extraction for the response the client receives', async () => {
+    const res = Response.json({ jsonrpc: '2.0', error: { code: -32000 }, id: null }, { status: 403 });
+    expect(await extractTransportErrorCode(res)).toBe(-32000);
+    expect(await res.text()).toContain('-32000');
+  });
+});
+
 describe('POST /mcp — malformed JSON-RPC body', () => {
   test('non-JSON body answers a -32700 JSON-RPC envelope at HTTP 400 with id null', async () => {
     // The agents SDK owns the JSON-RPC parse step and wraps parse
@@ -789,7 +903,7 @@ describe('POST /mcp — malformed JSON-RPC body', () => {
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        headers: { 'content-type': 'application/json', accept: 'application/json', host: 'anc.dev' },
         body: 'not-json{{',
       }),
       env,
@@ -815,7 +929,7 @@ describe('POST /mcp — malformed JSON-RPC body', () => {
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        headers: { 'content-type': 'application/json', accept: 'application/json', host: 'anc.dev' },
         body: 'not-json{{',
       }),
       env,

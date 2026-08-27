@@ -63,9 +63,16 @@ export function truncateClientName(name: string | null | undefined, max = 64): s
   return name.length <= max ? name : `${name.slice(0, max - 1)}…`;
 }
 
-/** Extract JSON-RPC transport error code from a response body (≤4 KB). */
+/**
+ * Extract a JSON-RPC transport error code from a response body (≤4 KB).
+ *
+ * Status is not a filter. The SDK answers its Host and Origin rejections with
+ * HTTP 403 carrying a JSON-RPC envelope, so reading 200s alone would log those
+ * rejections as `error_code: null` and leave the rebinding gate invisible to
+ * the operator filter that has to catch a wrong allowlist. Any body that does
+ * not parse as JSON with a numeric `error.code` still yields null.
+ */
 export async function extractTransportErrorCode(response: Response): Promise<number | null> {
-  if (!response.ok && response.status !== 200) return null;
   try {
     const clone = response.clone();
     const buf = await clone.arrayBuffer();

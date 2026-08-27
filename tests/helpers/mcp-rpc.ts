@@ -66,6 +66,7 @@ export async function mcpRpc(
       headers: {
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
+        host: 'anc.dev',
         ...headers,
       },
       body: JSON.stringify(body),
@@ -78,6 +79,7 @@ export async function mcpRpc(
             headers: {
               'content-type': 'application/json',
               accept: 'application/json, text/event-stream',
+              host: 'anc.dev',
               ...headers,
             },
             body: JSON.stringify(body),
