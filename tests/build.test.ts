@@ -430,6 +430,37 @@ describe('escHtml', () => {
 });
 
 // -------------------------------------------------------------------
+// emitShell — Turnstile sitekey meta (homepage + /web-audit form)
+// -------------------------------------------------------------------
+
+describe('emitShell — turnstile sitekey meta', () => {
+  const base = {
+    title: 'Score a website, live.',
+    description: 'Enter a public URL.',
+    canonicalPath: '/web-audit',
+    bodyHtml: '<article>body</article>',
+    themeInitJs: '/* theme init */',
+    baseUrl: undefined,
+  };
+
+  test('default shell does not emit the sitekey meta', () => {
+    const html = emitShell(base);
+    expect(html).not.toContain('turnstile-sitekey');
+    expect(html).not.toContain('{{TURNSTILE_SITEKEY}}');
+  });
+
+  test('turnstileSitekey: true emits the placeholder meta', () => {
+    const html = emitShell({ ...base, turnstileSitekey: true });
+    expect(html).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+  });
+
+  test('isIndex: true still emits the placeholder (homepage)', () => {
+    const html = emitShell({ ...base, canonicalPath: '/', isIndex: true });
+    expect(html).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+  });
+});
+
+// -------------------------------------------------------------------
 // emitShell — OG image alt-text wiring (R10)
 // -------------------------------------------------------------------
 
@@ -2962,6 +2993,12 @@ describe('emitSubPages — twin frontmatter', () => {
     const webAuditHtml = await readFile(join(distDir, 'web-audit.html'), 'utf8');
     expect(webAuditHtml).toContain('data-surface-audit-seg');
     expect(webAuditHtml).toContain('id="audit-s-web" checked');
+    expect(webAuditHtml).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+  });
+
+  test('CLI /audit HTML does not carry the Turnstile sitekey meta', async () => {
+    const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
+    expect(auditHtml).not.toContain('turnstile-sitekey');
   });
 
   test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
@@ -2970,6 +3007,8 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(webAuditMd).toContain('url: https://anc.dev/web-audit\n');
     expect(webAuditMd).toContain('Enter a public URL at');
     expect(webAuditMd).not.toContain('data-web-audit-form');
+    expect(webAuditMd).not.toContain('turnstile-sitekey');
+    expect(webAuditMd).not.toContain('{{TURNSTILE_SITEKEY}}');
   });
 
   test('subPageData still carries the frontmatter-free twin source for llms-full.txt', () => {
