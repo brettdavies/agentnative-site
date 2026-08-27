@@ -2,6 +2,11 @@
 
 export const MODERN_PROTOCOL = '2026-07-28';
 
+/** True when a stubbed request carries the modern SEP-2243 protocol-revision header. */
+export function isModernProbe(init?: RequestInit): boolean {
+  return new Headers(init?.headers).get('mcp-protocol-version') === MODERN_PROTOCOL;
+}
+
 function modernRequestMeta(protocolVersion: string, clientName: string) {
   return {
     'io.modelcontextprotocol/protocolVersion': protocolVersion,

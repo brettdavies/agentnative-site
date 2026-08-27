@@ -20,9 +20,45 @@ export type ProbeStatus = 'pass' | 'broken' | 'absent' | 'na' | 'error';
 /** Handler-specific evidence rows, kept structurally open like the extracted JSON. */
 export type EvidenceItem = Record<string, unknown>;
 
+/**
+ * Why a row is n_a: `antecedent-unmet` = the check does not apply to
+ * this site (declared type or runtime antecedent); `optional-absent` =
+ * it applies, is a MAY, and simply is not implemented;
+ * `posture-consistent` = the probed surfaces show a deliberate,
+ * consistent opt-out (the CORS pair with Allow-Origin on neither
+ * surface); `era-absent` = the protocol era the row probes was never
+ * evidenced, so the row was settled without a request. A handler with
+ * nothing to probe (no discovered MCP endpoint) emits n_a with no reason.
+ *
+ * `era-absent` is n_a rather than absent because a row settled without a
+ * request carries no observation: scoring it as absent would let a
+ * server suppress a whole family of scored rows by withholding the one
+ * method that evidences the era.
+ */
+export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent' | 'era-absent';
+
+/**
+ * Whether the target serves the modern MCP era, read from the wave-1
+ * `server/discover` probe: `present` when it answered with a JSON-RPC
+ * result, `unevidenced` when it answered any other way, and `unknown`
+ * when it never got an answer (transport failure, rate limit, deadline).
+ */
+export type McpModernLane = 'present' | 'unevidenced' | 'unknown';
+
+/** Era-lane facts the wave-1 MCP probes establish for the wave-2 rows. */
+export interface McpLaneEvidence {
+  modern: McpModernLane;
+  /** Capability groups the legacy `initialize` result advertised. */
+  legacyAdvertised: readonly string[];
+  /** Capability groups the modern `server/discover` result advertised. */
+  modernAdvertised: readonly string[];
+}
+
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
+  /** Handler-stated reason for an `na` status; the engine passes it through to the result row. */
+  na_reason?: NaReason;
   /**
    * When true, the handler exhausted the remaining per-audit budget mid-probe.
    * The engine treats the run as incomplete and the route must not cache it.
@@ -65,4 +101,11 @@ export interface HandlerContext {
    * the server is stateless. Wave-2 MCP probes send it when present.
    */
   mcpSessionId?: string | null;
+  /**
+   * Era-lane evidence from the wave-1 MCP probes. Modern-era rows score
+   * only against a lane `server/discover` evidenced, and a row that reads
+   * a capability its own lane advertised is judged against that
+   * advertisement.
+   */
+  mcpLanes?: McpLaneEvidence;
 }

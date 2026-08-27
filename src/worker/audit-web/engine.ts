@@ -1,13 +1,14 @@
 // Web-audit orchestrator (plan U5, reworked per plan-003 KTD-2). Runs
 // MCP endpoint discovery and the single canonical root fetch, then
 // evaluates in two waves: wave 1 probes the antecedent-source checks
-// (robots, llms-txt, llms-full-txt, openapi, oauth-discovery,
-// mcp-initialize, sitemap); wave 2 runs the dependent checks with
+// (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
 // no duplicate `/` fetch. Each check finalizes to
 // pass / broken / absent / n_a / skip / error; an applicable MAY that
 // comes back absent is re-tagged n_a with na_reason 'optional-absent',
-// while an unmet antecedent yields na_reason 'antecedent-unmet'.
+// an unmet antecedent yields na_reason 'antecedent-unmet', and a
+// handler-stated na_reason (the CORS pair's 'posture-consistent', the
+// MCP modern-lane gate's 'era-absent') passes through to the result row.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -30,9 +31,15 @@ import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
 import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
-import { mcpSessionIdFrom, notifyMcpInitialized, runMcp } from './handlers/mcp';
+import {
+  advertisedCapabilities,
+  mcpModernLaneFrom,
+  mcpSessionIdFrom,
+  notifyMcpInitialized,
+  runMcp,
+} from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
-import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
+import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
@@ -100,11 +107,21 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
 
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
-    if (check.with && (check.with as { op?: string }).op === 'initialize') {
+    // An era verdict states its reason in `why`; the response fields
+    // describe the refusal, not the surface the row is scoring.
+    if (outcome.status === 'absent' && Array.isArray(first.why)) return (first.why as string[]).join('; ');
+    const op = check.with ? (check.with as { op?: string }).op : undefined;
+    if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;
       return si?.name
         ? `serverInfo ${si.name}, protocol ${first.protocolVersion}`
         : 'no serverInfo in initialize result';
+    }
+    if (op === 'server-discover' && 'supported_versions' in first) {
+      const versions = first.supported_versions as unknown[] | null;
+      const si = first.serverInfo as { name?: string } | null;
+      if (!Array.isArray(versions)) return 'no supportedVersions in the server/discover result';
+      return `supports ${versions.join(', ')}, serverInfo ${si?.name ?? 'missing'}`;
     }
     if ('tools' in first) {
       const tools = first.tools as unknown[] | null;
@@ -112,12 +129,19 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
         ? `${tools.length} tools, ${first.with_input_schema} with input schema`
         : 'no tools array';
     }
-    if ('allow_origin' in first) return `allow-origin ${first.allow_origin ?? 'absent'}`;
     if ('error_code' in first) return `error code ${first.error_code}`;
   }
 
   if (check.handler === 'cors-preflight') {
-    return `${first.status} allow-origin ${first.allow_origin ?? 'absent'}`;
+    const side = (label: string, row: EvidenceItem | undefined): string =>
+      row ? `${label} ${row.error ?? row.status ?? 'error'} allow-origin ${row.allow_origin ?? 'absent'}` : label;
+    return `${side(
+      'preflight',
+      outcome.evidence.find((e) => e.probe === 'preflight'),
+    )}; ${side(
+      'post',
+      outcome.evidence.find((e) => e.probe === 'post'),
+    )}`;
   }
 
   if (check.handler === 'dns-doh') {
@@ -152,6 +176,7 @@ function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
   return {
     ...baseFields(check),
     status: probeStatusToScorecard(outcome.status),
+    ...(outcome.na_reason !== undefined ? { na_reason: outcome.na_reason } : {}),
     evidence: summarizeEvidence(check, outcome),
     raw_evidence: outcome.evidence,
   };
@@ -225,7 +250,9 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const deadline = now() + perAuditDeadlineMs;
 
   const discovery = await discoverMcpEndpoint(input.url, input.registry.mcp_discovery, {
-    timeoutMs: Math.min(perCheckTimeoutMs, Math.max(0, deadline - now())),
+    timeoutMs: perCheckTimeoutMs,
+    deadlineAt: deadline,
+    now,
     fetchOptions: input.fetchOptions,
   });
   yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };
@@ -244,6 +271,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const scopedDirs: string[] = [];
   const retainedBodies = new Map<string, string>();
   let mcpSessionId: string | null = null;
+  let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyAdvertised: [], modernAdvertised: [] };
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -256,6 +284,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     retainedBodies,
     fetchOptions: input.fetchOptions,
     mcpSessionId,
+    mcpLanes,
   });
 
   const probeOne = async (
@@ -303,6 +332,11 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const openapiBody = retainedBody(sources, 'openapi');
   if (openapiBody.length > 0) retainedBodies.set('openapi', openapiBody);
   mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
+  mcpLanes = {
+    modern: mcpModernLaneFrom(sources.get('mcp-server-discover')),
+    legacyAdvertised: advertisedCapabilities(sources.get('mcp-initialize')?.evidence ?? []),
+    modernAdvertised: advertisedCapabilities(sources.get('mcp-server-discover')?.evidence ?? []),
+  };
   if (mcpSessionId && discovery.endpoint) {
     await notifyMcpInitialized(discovery.endpoint, mcpSessionId, {
       timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),

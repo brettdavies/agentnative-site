@@ -52,6 +52,7 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'auth-present',
 ]);
 export const WEB_AUDIT_EVAL_RULES = new Set(['canonical-redirect', 'scoped-discovery']);
+export const CORS_SURFACES = new Set(['preflight', 'actual']);
 
 const PRINCIPLE_RE = /^P[1-8]$/;
 const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -161,6 +162,15 @@ export function normalizeWebAuditRegistry(doc) {
     }
     if (!check.with || typeof check.with !== 'object') {
       throw new Error(`web-audit registry: check "${id}" missing "with" handler parameters`);
+    }
+    // A handler that throws on a malformed `with` lands the check as
+    // `error`, which the scorer excludes from both scores while the run
+    // still terminates complete and caches — a silently short scorecard.
+    // Required per-handler `with` fields are therefore build-time gates.
+    if (check.handler === 'cors-preflight' && !CORS_SURFACES.has(check.with.surface)) {
+      throw new Error(
+        `web-audit registry: check "${id}" needs with.surface "preflight" or "actual" (got ${JSON.stringify(check.with.surface)})`,
+      );
     }
 
     return {

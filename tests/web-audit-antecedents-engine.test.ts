@@ -304,3 +304,56 @@ describe('runWebAudit markdown-frontmatter gating', () => {
     expect(row?.status).toBe('broken');
   });
 });
+
+describe('runWebAudit handler na_reason pass-through', () => {
+  const CORS_REGISTRY = registryOf([
+    makeCheck({
+      id: 'mcp-cors-preflight',
+      category: 'mcp',
+      principle: 'P6',
+      site_types: ['mcp'],
+      antecedent: 'mcp-present',
+      handler: 'cors-preflight',
+      with: { path: '{mcp_endpoint}', surface: 'preflight' },
+    }),
+    makeCheck({
+      id: 'mcp-cors-actual',
+      category: 'mcp',
+      principle: 'P6',
+      site_types: ['mcp'],
+      antecedent: 'mcp-present',
+      handler: 'cors-preflight',
+      with: { path: '{mcp_endpoint}', surface: 'actual' },
+    }),
+  ]);
+
+  // A no-CORS MCP server: discovery finds /mcp via initialize, the
+  // OPTIONS preflight and the Origin-bearing POST both answer bare.
+  const noCorsSite = stubFetch((url, init) => {
+    const path = new URL(url).pathname;
+    if (path === '/mcp' && init?.method === 'POST') {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: { serverInfo: { name: 'anc' }, protocolVersion: '2025-06-18', capabilities: { tools: {} } },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    if (path === '/mcp' && init?.method === 'OPTIONS') return new Response(null, { status: 204 });
+    return new Response('not found', { status: 404 });
+  });
+
+  test("the CORS pair's posture n_a carries na_reason posture-consistent on the result rows", async () => {
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: CORS_REGISTRY, fetchOptions: { fetchImpl: noCorsSite } }),
+    );
+    const rows = resultsOf(events);
+    for (const id of ['mcp-cors-preflight', 'mcp-cors-actual']) {
+      const row = rows.find((r) => r.id === id);
+      expect(row?.status).toBe('n_a');
+      expect(row?.na_reason).toBe('posture-consistent');
+    }
+  });
+});

@@ -220,6 +220,19 @@ ${body}    </details>
 `;
 }
 
+// Evidence strings carry probed-server values (serverInfo names,
+// Allow-Origin headers), so the target controls them. The HTML twin
+// neutralizes them through escHtml; on the markdown twin a newline
+// breaks out of the bullet and a backtick opens a code span, so inline
+// text is flattened and fenced blocks lose any embedded fence.
+function mdInline(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ').replaceAll('`', '\\`');
+}
+
+function mdFenced(text: string): string {
+  return text.replaceAll('```', "'''");
+}
+
 /** Markdown twin for /web/<domain>.md. Absolute links for cross-origin fetch. */
 export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   const sc = input.scorecard;
@@ -254,7 +267,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
       lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
       if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
       lines.push(`- Goal: ${entry?.goal ?? assembled.goal}.`);
-      lines.push(`- Result: ${result}`);
+      lines.push(`- Result: ${mdInline(result)}`);
       if (fixable) lines.push(`- Fix: ${assembled.fix.replace(/\s*\n\s*/g, ' ')}`);
       const resources = [
         ...assembled.resources.map((r) => `[${r.label}](${r.url})`),
@@ -262,7 +275,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
       ];
       lines.push(`- Resources: ${resources.join(', ')}`);
       if (fixable) {
-        lines.push('', '```text', assembled.prompt, '```');
+        lines.push('', '```text', mdFenced(assembled.prompt), '```');
       }
       lines.push('');
     }

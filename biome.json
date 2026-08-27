@@ -13,6 +13,8 @@
       "tsconfig.json",
       "wrangler.jsonc",
       "src/**",
+      "demo/src/**",
+      "demo/wrangler.jsonc",
       "tests/**",
       "!src/worker-configuration.d.ts",
       "!src/styles/foundation.css",

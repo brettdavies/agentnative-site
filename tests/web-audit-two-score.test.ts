@@ -209,7 +209,7 @@ describe('buildWebScorecard (schema 0.2)', () => {
 
   test('carries score_pct (RELATIVE), the score pair, and no badge', () => {
     expect(scorecard.schema_version).toBe(WEB_SCHEMA_VERSION);
-    expect(WEB_SCHEMA_VERSION).toBe('0.2');
+    expect(WEB_SCHEMA_VERSION).toBe('0.3');
     expect(typeof scorecard.score_pct).toBe('number');
     expect(scorecard.score_pct).toBe(scorecard.score.relative);
     expect(typeof scorecard.score.global).toBe('number');
