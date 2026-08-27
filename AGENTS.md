@@ -85,6 +85,9 @@ v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP
 (served at `/mcp-skill.md` and `/mcp-skill/`); operator-facing material lives in
 [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published. This section is the
 agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
+[`docs/runbooks/mcp-wire-protocol.md`](docs/runbooks/mcp-wire-protocol.md) is the wire-level reference behind it: the
+per-lane error-code table with the producing layer and delivery for each code, the SEP-2243 header mirror, the `_meta`
+envelope, cache-hint scope, and the GET posture. Read it before changing anything on the wire or bumping the revision.
 
 **Discovery siblings.** `/.well-known/mcp/server-card.json` (SEP-1649 canonical server card; legacy aliases
 `/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`), `/.well-known/ai.txt` (`Programmatic-API` declaration),

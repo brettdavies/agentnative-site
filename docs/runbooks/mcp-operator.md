@@ -6,6 +6,10 @@ covers the wire contract clients see; this runbook covers the surfaces operators
 posture rationale, spec-revision drift handling, and rate-limit policy. Unpublished by design: the published surface is
 the client skill plus the server card at `/.well-known/mcp/server-card.json`, not this runbook.
 
+For the wire itself, read [`mcp-wire-protocol.md`](mcp-wire-protocol.md): the per-lane error-code table with the
+producing layer and HTTP-versus-envelope delivery for each code, the SEP-2243 header-mirror rules, the modern `_meta`
+envelope, cache-hint scope semantics, and the GET posture. It is the starting point for a protocol-revision bump.
+
 ## Kill switches
 
 Three flags gate the MCP surface. Each name carries exactly one binding shape in every environment, and the flip verb
