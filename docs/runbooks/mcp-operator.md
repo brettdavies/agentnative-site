@@ -55,6 +55,33 @@ quota, then face rate-limited cache misses on their legitimate calls.
 If a future use case needs browser access, it gets its own KTD revision, an explicit allow-list, and a rate-limit policy
 designed for browser traffic. Do not add a wildcard CORS header to this endpoint without that review.
 
+### Host validation
+
+`POST /mcp` checks the `Host` header against a fixed allowlist declared as `MCP_ALLOWED_HOSTNAMES` in
+`src/worker/mcp/server.ts`: `anc.dev`, `www.anc.dev`, `agentnative-site-staging.brettdavies.workers.dev`, `localhost`,
+`127.0.0.1`. Anything else is answered with HTTP 403 and a JSON-RPC `-32000` envelope before the handler runs. That
+closes DNS rebinding: with no list passed, the SDK derives a default only for localhost and `workers.dev` endpoints, so
+a custom domain accepts whatever hostname resolves to the Worker.
+
+The compare strips the port, so the bare `localhost` entry covers every port the local surfaces bind: `wrangler dev` on
+8787, the Playwright `webServer`, and `preflight.sh` in local mode.
+
+The rejection still passes through the CORS strip, so the 403 carries no `access-control-*` header. It is filterable in
+`mcp.request` as `outcome: "error"` with `error_code: -32000`.
+
+A wrong allowlist is a total MCP outage, so watch that filter after any edit to the list or to the hostnames it names:
+
+```bash
+bun x wrangler tail --env staging --format json | rg 'error_code.:-32000'
+```
+
+**`-32000` is shared, so a line carrying it is not proof of a Host rejection.** `allowedOriginHostnames` is left unset,
+which is a localhost-only Origin gate rather than Origin checking turned off, and the SDK answers that rejection with
+the same 403 and the same `-32000`. A browser POST carrying any non-localhost `Origin` lands on a log line the Host
+rejection cannot be told apart from, because `mcp.request` records the request `host` from the URL and never the header
+or the Origin. To separate them, reproduce the call and read `error.message`: the Host path reports `Invalid Host:
+<hostname>` or `Missing Host header`, the Origin path reports `Invalid Origin: <hostname>`.
+
 ## Structured logging (`mcp.request`)
 
 Every `POST /mcp` attempt emits **exactly one** PII-free JSON log line with `"event":"mcp.request"`. Replaces the former

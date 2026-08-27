@@ -16,6 +16,20 @@ import { type RegisterToolsEnv, registerTools } from './tools';
 const SERVER_NAME = 'anc';
 const SERVER_VERSION = '0.1.0';
 
+// DNS-rebinding defense. The SDK only derives a default Host allowlist for
+// localhost and `workers.dev` endpoints, so a custom domain is unchecked until
+// this list is passed and any hostname resolving to the Worker is accepted.
+// `validateHostHeader` compares with the port stripped, so bare `localhost`
+// admits the dev server and the Playwright `webServer` on whatever port they
+// bind.
+const MCP_ALLOWED_HOSTNAMES = [
+  'anc.dev',
+  'www.anc.dev',
+  'agentnative-site-staging.brettdavies.workers.dev',
+  'localhost',
+  '127.0.0.1',
+];
+
 const CACHE_HINTS = {
   'tools/list': { ttlMs: 3_600_000, cacheScope: 'public' as const },
   'resources/list': { ttlMs: 3_600_000, cacheScope: 'public' as const },
@@ -88,9 +102,13 @@ export function getMcpHandler(opts: GetMcpHandlerOptions): McpHandler {
     const sdkHandler = createMcpHandler(() => createAncServer(getWarmCatalog()), {
       legacy: opts.legacy,
       responseMode: opts.jsonResponse ? 'json' : 'auto',
-      // KTD-10: POST /mcp is server-to-agent. Default agents wrapper enables
-      // CORS headers (corsOptions={}); disable at the source. Dispatch also
-      // strips Access-Control-* as defense in depth.
+      allowedHostnames: MCP_ALLOWED_HOSTNAMES,
+      // POST /mcp is server-to-agent. The wrapper's default `corsOptions={}`
+      // emits CORS headers, so it is disabled at the source; dispatch strips
+      // `Access-Control-*` as defense in depth. Leaving
+      // `allowedOriginHostnames` unset is not the same as origin checking off:
+      // the SDK then admits only localhost-class Origins, so a browser POST
+      // carrying any other Origin is rejected before the handler runs.
       corsOptions: false,
     });
     handler = sdkHandler as unknown as McpHandler;
