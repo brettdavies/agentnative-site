@@ -104,6 +104,56 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: scripts/smoke-api-score.sh https://agentnative-site-staging.brettdavies.workers.dev
 
+      # Settle the MCP route before smoking it. Edge propagation lags
+      # `wrangler deploy`, and a stale isolate 404s the new route; curl
+      # does not retry 4xx without --retry-all-errors. `|| true` keeps a
+      # never-settling route out of the deploy's pass/fail decision — the
+      # smoke below reports that state without blocking.
+      - name: Await MCP route propagation
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: |
+          curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -o /dev/null \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            https://agentnative-site-staging.brettdavies.workers.dev/.well-known/mcp/server-card.json || true
+
+      # Core checks only: the script's symmetry and live-audit gates each
+      # spend a unit of the per-IP audit budget and minutes of wall clock,
+      # which belongs to the release preflight/postflight, not to every
+      # push to `dev`. Observational for now — `continue-on-error` keeps a
+      # red MCP surface from blocking the deploy, and the companion step
+      # publishes the log.
+      #
+      # `shell: bash` is load-bearing: the default `bash -e {0}` has no
+      # `pipefail`, so `mcp-smoke.sh | tee` would exit with tee's status
+      # and a failing smoke would report `outcome: success`.
+      - name: Smoke live MCP surface
+        id: mcp_smoke
+        continue-on-error: true
+        shell: bash
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: |
+          scripts/release/mcp-smoke.sh --core-only \
+            https://agentnative-site-staging.brettdavies.workers.dev 2>&1 \
+            | tee "$RUNNER_TEMP/mcp-smoke.log"
+
+      # `if: failure()` never fires for a `continue-on-error` step — its
+      # job-level conclusion is success — so gate on the step outcome.
+      - name: Publish MCP smoke log
+        if: steps.mcp_smoke.outcome == 'failure'
+        run: |
+          {
+            echo "### MCP staging smoke failed (non-blocking)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/mcp-smoke.log"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
       # Repopulate R2 under the current SPEC_VERSION: a deploy (or a spec
       # bump that rotates every cache key) starts a full board rescore.
       # `curl -sSf` fails the job on any non-2xx, so a missing or wrong
