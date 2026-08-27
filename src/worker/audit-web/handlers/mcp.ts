@@ -4,8 +4,8 @@
 // header-routed per SEP-2243; the per-era error-code conformance family),
 // POSTs through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
 // evaluates serverInfo / capabilities / tools / resources / discovery /
-// error-code. Returns n_a when no endpoint was discovered, and n_a
-// (`era-absent`) without a request when wave 1 evidenced no modern lane.
+// error-code. Returns n_a when no endpoint was discovered, and an
+// unprobed `absent` when wave 1 evidenced no modern lane.
 // CORS classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
@@ -41,13 +41,18 @@ type McpOpSpec = {
   /** The row whose answer decides the modern lane. It is never gated on
    * its own answer, and its refusal is read as the era's absence. */
   discriminates?: true;
+  /** The row passes on a refusal code rather than on a result. A lane that
+   * refuses under the wrong code still gave the agent the outcome it
+   * asked for, so such a row separates a taxonomy defect from a trap the
+   * way the conformance family does. */
+  expectsRefusal?: true;
 };
 
 const MCP_OPS = {
   initialize: { family: 'era', era: 'legacy' },
   'tools-list': { family: 'era', era: 'legacy', advertises: 'tools' },
   'resources-list': { family: 'era', era: 'legacy', advertises: 'resources' },
-  error: { family: 'era', era: 'legacy' },
+  error: { family: 'era', era: 'legacy', expectsRefusal: true },
   'malformed-body': { family: 'conformance', era: 'legacy' },
   'batch-reject': { family: 'conformance', era: 'legacy' },
   'unknown-tool': { family: 'conformance', era: 'legacy' },
@@ -123,7 +128,7 @@ const RATE_LIMITED_CODE = -32099;
 // revision at all (a lenient one serves the legacy tools/list behind it,
 // a strict one refuses the version claim), which makes its answer
 // evidence about leniency rather than about the era. These rows are
-// therefore scored only against a lane server/discover evidenced.
+// therefore settled from the lane rather than probed on their own answer.
 export const MODERN_LANE_DEPENDENT_OPS = opsWhere((spec) => spec.era === 'modern' && spec.discriminates !== true);
 
 // A stateful 2025-era server refuses a sessionless POST with -32000
@@ -434,14 +439,16 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     return { status: 'na', evidence: [{ why: ['no MCP endpoint discovered'] }] };
   }
   const w = check.with as McpWith;
-  // n_a rather than absent: the row is settled without a request, so it
-  // carries no observation to score. Scoring it would price withholding
-  // `server/discover` below serving it, and would print remediation for
-  // a lane no probe ever reached.
+  // The lane is not there, and an agent reaching for it finds nothing, so
+  // the row occupies its slot at zero credit like any other absence. It is
+  // marked unprobed because no request was sent: the remediation for a
+  // specific conformance behavior on a lane the server does not serve
+  // would name a defect the audit never observed. The `server/discover`
+  // row carries the actionable advice for this shape.
   if (MODERN_LANE_DEPENDENT_OPS.includes(w.op) && ctx.mcpLanes?.modern === 'unevidenced') {
     return {
-      status: 'na',
-      na_reason: 'era-absent',
+      status: 'absent',
+      unprobed: true,
       evidence: [{ url: endpoint, why: ['no modern lane: server/discover returned no result'] }],
     };
   }
@@ -528,10 +535,14 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     return { status: 'broken', evidence: [ev] };
   }
 
-  // Conformance classification: the expected refusal code passes and
-  // every other well-formed code is a broken surface. These rows ask a
-  // question the lane has already proven it serves, so no era softening
-  // reaches them.
+  // Conformance classification: the expected refusal code passes. These
+  // rows ask a question the lane has already proven it serves, so no era
+  // softening reaches them, and the two ways of failing separate on
+  // whether the answer is usable. An envelope-shaped refusal carrying the
+  // wrong code still tells the agent the call failed and lets it move on,
+  // so it is a taxonomy defect rather than a trap; a result where a
+  // refusal was required, or an envelope with no numeric code, leaves the
+  // agent believing something that is not true.
   if (conformance) {
     const err = rpc.error as { data?: { supported?: unknown } } | undefined;
     ev.error_code = code;
@@ -552,14 +563,17 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     if (conformance.accept.includes(code)) {
       if (conformance.requireSupported) {
         if (!Array.isArray(err?.data?.supported)) {
+          // The refusal itself is correct and well-formed; the client
+          // simply cannot read what to renegotiate to.
           ev.why = ['error.data.supported missing from the version-reject envelope'];
-          return { status: 'broken', evidence: [ev] };
+          return { status: 'noncompliant', evidence: [ev] };
         }
         ev.supported_versions = err.data.supported;
       }
       return { status: 'pass', evidence: [ev] };
     }
-    return { status: 'broken', evidence: [ev] };
+    ev.why = [`expected error code ${conformance.accept.join(' or ')}, got ${code}`];
+    return { status: 'noncompliant', evidence: [ev] };
   }
 
   // Era-lane classification for the ops that ask a lane about itself
@@ -572,9 +586,16 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // broken.
   if (rpc.error !== undefined) {
     ev.error_code = code;
-    if (w.op === 'error' && code === (w.expect_code ?? -32601)) {
-      return { status: 'pass', evidence: [ev] };
+    const expected = w.expect_code ?? -32601;
+    if (specOf(w.op).expectsRefusal === true) {
+      if (code === expected) return { status: 'pass', evidence: [ev] };
+      if (eraLaneUnavailable(w.op, code, ctx)) return { status: 'absent', evidence: [ev] };
+      ev.why = [`expected error code ${expected}, got ${code}`];
+      return { status: 'noncompliant', evidence: [ev] };
     }
+    // Every remaining era row asked the lane for a result. An error where
+    // a result belongs is a lane that does not serve what it was asked
+    // for, so only the unavailability reading softens it.
     return { status: eraLaneUnavailable(w.op, code, ctx) ? 'absent' : 'broken', evidence: [ev] };
   }
 

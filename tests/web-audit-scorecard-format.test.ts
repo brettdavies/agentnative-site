@@ -519,6 +519,8 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
   const ENGINE_ROWS = [
     engineRow({ keyword: 'must', tier: 'required', status: 'pass' }),
     engineRow({ status: 'absent' }),
+    engineRow({ status: 'noncompliant' }),
+    engineRow({ status: 'absent', unprobed: true }),
     engineRow({ keyword: 'may', tier: 'optional', status: 'n_a', na_reason: 'optional-absent' }),
   ];
 
@@ -542,8 +544,8 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect('badge' in produced).toBe(false);
   });
 
-  test('schema_version is the site-owned 0.3, independent of the CLI schema', () => {
-    expect(produced.schema_version).toBe('0.3');
+  test('schema_version is the site-owned 0.4, independent of the CLI schema', () => {
+    expect(produced.schema_version).toBe('0.4');
   });
 
   test('the web tool shape is { name, url } with no CLI fields', () => {
@@ -556,10 +558,19 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(produced.public_listing).toBe(false);
   });
 
-  test('public_listing round-trips an explicit meta value; schema_version stays 0.3', () => {
+  test('coverage_summary counts a noncompliant row as applied but not verified', () => {
+    // A scored row has to appear in the coverage totals it was scored in,
+    // or the published coverage and the published score disagree about
+    // what the audit found applicable.
+    expect(produced.coverage_summary.should).toEqual({ total: 3, verified: 0 });
+    expect(produced.coverage_summary.must).toEqual({ total: 1, verified: 1 });
+    expect(produced.coverage_summary.may).toEqual({ total: 0, verified: 0 });
+  });
+
+  test('public_listing round-trips an explicit meta value; schema_version stays 0.4', () => {
     const listed = buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: true });
     expect(listed.public_listing).toBe(true);
-    expect(listed.schema_version).toBe('0.3');
+    expect(listed.schema_version).toBe('0.4');
     expect(buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: false }).public_listing).toBe(false);
   });
 
@@ -569,7 +580,7 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(typeof produced.score.global).toBe('number');
   });
 
-  test('every result row carries the documented fields (na_reason only when set)', () => {
+  test('every result row carries the documented fields (na_reason and unprobed only when set)', () => {
     const REQUIRED_ROW_FIELDS = [
       'category',
       'evidence',
@@ -583,10 +594,16 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
       'tier',
     ];
     for (const row of produced.results) {
-      const expected = row.status === 'n_a' ? [...REQUIRED_ROW_FIELDS, 'na_reason'] : REQUIRED_ROW_FIELDS;
+      const expected = [
+        ...REQUIRED_ROW_FIELDS,
+        ...(row.status === 'n_a' ? ['na_reason'] : []),
+        ...(row.unprobed === true ? ['unprobed'] : []),
+      ];
       expect(Object.keys(row).sort()).toEqual([...expected].sort());
       expect(row.layer).toBe('web');
     }
+    expect(produced.results.filter((r) => r.unprobed === true).length).toBe(1);
+    expect(produced.results.filter((r) => r.status === 'noncompliant').length).toBe(1);
   });
 
   test('a scorecard missing a documented required field fails conformance loudly', () => {
