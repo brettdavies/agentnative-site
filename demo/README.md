@@ -33,8 +33,8 @@ Between takes, restore the patient and the live Worker:
 scripts/sounding-restore.sh
 ```
 
-That checks `demo/` out from the annotated tag `sounding-broken` and runs `wrangler deploy`. It does not touch the rest
-of the repo. Add `--commit` only on a `feat/*` branch; it refuses `dev` and `main`.
+That restores `demo/src/index.ts` from the annotated tag `sounding-broken` and runs `wrangler deploy`. It does not stage
+files, and it refuses to run on `dev` or `main`.
 
 The passing shape is also `createSoundingHandler({ complete: true })`, used in tests, not in the default export.
 
