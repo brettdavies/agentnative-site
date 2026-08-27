@@ -10,6 +10,7 @@
 
 import type { WebCheck } from '../registry';
 import { guardedFetch } from '../ssrf';
+import { LEGACY_TOOLS_LIST_BODY, legacyProbeHeaders } from './mcp';
 import { resolveUrl, substituteEndpoint, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
 
@@ -21,8 +22,6 @@ type CorsWith = {
   request_headers?: string;
   timeout?: number;
 };
-
-const POST_BODY = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
 
 const POSTURE_WHY = 'no Allow-Origin on the preflight or the POST: consistent no-CORS posture';
 
@@ -41,11 +40,7 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
   }
   const origin = w.origin ?? 'https://example.com';
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
-  const postHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json, text/event-stream',
-    Origin: origin,
-  };
+  const postHeaders: Record<string, string> = { ...legacyProbeHeaders(), Origin: origin };
   if (ctx.mcpSessionId) postHeaders['Mcp-Session-Id'] = ctx.mcpSessionId;
 
   const [pre, post] = await Promise.all([
@@ -61,7 +56,11 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
       },
       { ...ctx.fetchOptions, timeoutMs },
     ),
-    guardedFetch(url, { method: 'POST', headers: postHeaders, body: POST_BODY }, { ...ctx.fetchOptions, timeoutMs }),
+    guardedFetch(
+      url,
+      { method: 'POST', headers: postHeaders, body: LEGACY_TOOLS_LIST_BODY },
+      { ...ctx.fetchOptions, timeoutMs },
+    ),
   ]);
 
   const preAcao = pre.headers['access-control-allow-origin'] ?? null;

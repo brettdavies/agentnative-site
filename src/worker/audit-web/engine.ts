@@ -1,8 +1,7 @@
 // Web-audit orchestrator (plan U5, reworked per plan-003 KTD-2). Runs
 // MCP endpoint discovery and the single canonical root fetch, then
 // evaluates in two waves: wave 1 probes the antecedent-source checks
-// (robots, llms-txt, llms-full-txt, openapi, oauth-discovery,
-// mcp-initialize, sitemap); wave 2 runs the dependent checks with
+// (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
 // no duplicate `/` fetch. Each check finalizes to
 // pass / broken / absent / n_a / skip / error; an applicable MAY that

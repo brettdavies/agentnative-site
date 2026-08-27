@@ -21,7 +21,7 @@ import { scoreWebAudit } from '../src/worker/audit-web/score';
 import type { EngineResult } from '../src/worker/audit-web/scorecard';
 import worker, { type Env } from '../src/worker/index';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { MODERN_PROTOCOL, modernElementBatchBody } from './helpers/mcp-modern';
+import { isModernProbe, MODERN_PROTOCOL, modernElementBatchBody } from './helpers/mcp-modern';
 import { resetMcpTestState } from './helpers/mcp-rpc';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
@@ -60,6 +60,13 @@ function check(partial: Partial<WebCheck>): WebCheck {
     ...partial,
   };
 }
+
+const MCP = 'https://example.com/mcp';
+const json = (body: object, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const rpcError = (code: number, status = 200, data?: Record<string, unknown>) =>
+  json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope', ...(data !== undefined ? { data } : {}) } }, status);
+const toolsResult = () => json({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } });
 
 describe('runHttp', () => {
   test('passes on a 200 /llms.txt with url + status evidence', async () => {
@@ -245,7 +252,6 @@ describe('runHttp', () => {
 });
 
 describe('runCorsPreflight posture pair', () => {
-  const MCP = 'https://example.com/mcp';
   const RPC_TOOLS = JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } });
 
   function corsCheck(surface: 'preflight' | 'actual'): WebCheck {
@@ -594,16 +600,9 @@ describe('runMcp', () => {
 });
 
 describe('runMcp modern era', () => {
-  const MCP = 'https://example.com/mcp';
-  const json = (body: object, headers: Record<string, string> = {}) =>
-    new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
-  const toolsResult = () => json({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } });
-  const rpcError = (code: number) => json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope' } });
-  const isModern = (init?: RequestInit) => new Headers(init?.headers).get('mcp-protocol-version') === MODERN_PROTOCOL;
-
   test('modern-only server: initialize maps to absent, header-routed tools/list passes (AE3)', async () => {
     for (const rejectCode of [-32022, -32601]) {
-      const fetchImpl = stubFetch((_url, init) => (isModern(init) ? toolsResult() : rpcError(rejectCode)));
+      const fetchImpl = stubFetch((_url, init) => (isModernProbe(init) ? toolsResult() : rpcError(rejectCode)));
       const legacy = await runMcp(
         check({ handler: 'mcp', with: { op: 'initialize' } }),
         ctx({ fetchImpl, mcpEndpoint: MCP }),
@@ -622,7 +621,7 @@ describe('runMcp modern era', () => {
 
   test('legacy-only server: modern probe maps to absent, legacy checks still pass', async () => {
     const fetchImpl = stubFetch((_url, init) => {
-      if (isModern(init)) return rpcError(-32601);
+      if (isModernProbe(init)) return rpcError(-32601);
       const body = JSON.parse(String(init?.body));
       if (body.method === 'initialize') {
         return json({
@@ -653,7 +652,7 @@ describe('runMcp modern era', () => {
 
   test('dual-stack server: both lanes pass', async () => {
     const fetchImpl = stubFetch((_url, init) => {
-      if (isModern(init)) return toolsResult();
+      if (isModernProbe(init)) return toolsResult();
       const body = JSON.parse(String(init?.body));
       if (body.method === 'initialize') {
         return json({ jsonrpc: '2.0', id: 1, result: { serverInfo: { name: 'anc' }, protocolVersion: '2025-06-18' } });
@@ -859,11 +858,6 @@ const CONFORMANCE_OPS = [
 ] as const;
 
 describe('runMcp error-code conformance', () => {
-  const MCP = 'https://example.com/mcp';
-  const json = (body: object, status = 200) =>
-    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  const rpcError = (code: number, status = 200, data?: Record<string, unknown>) =>
-    json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope', ...(data !== undefined ? { data } : {}) } }, status);
   const run = (w: Record<string, unknown>, fetchImpl: typeof fetch, sessionId?: string) =>
     runMcp(check({ handler: 'mcp', with: w }), ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: sessionId ?? null }));
 
@@ -1167,10 +1161,6 @@ describe('runMcp error-code conformance', () => {
 
 describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
   const BASE = 'https://example.com/';
-  const json = (body: object, status = 200) =>
-    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-  const rpcError = (code: number, status = 200) =>
-    json({ jsonrpc: '2.0', id: 1, error: { code, message: 'nope' } }, status);
 
   const registry: WebAuditRegistry = {
     version: 1,

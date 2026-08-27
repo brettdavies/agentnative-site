@@ -4,11 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import { discoverMcpEndpoint } from '../src/worker/audit-web/discovery';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
-import { MODERN_PROTOCOL } from './helpers/mcp-modern';
-
-function isModernProbe(init?: RequestInit): boolean {
-  return new Headers(init?.headers).get('mcp-protocol-version') === MODERN_PROTOCOL;
-}
+import { isModernProbe } from './helpers/mcp-modern';
 
 function modernToolsResponse(): Response {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } }), {

@@ -7,7 +7,7 @@
 // probe found the endpoint. All egress flows through the SSRF guard.
 
 import { parseJsonRpc } from './assert';
-import { modernProbeBody, modernProbeHeaders } from './handlers/mcp';
+import { legacyInitializeBody, legacyProbeHeaders, modernProbeBody, modernProbeHeaders } from './handlers/mcp';
 import { resolveUrl } from './handlers/shared';
 import type { EvidenceItem } from './handlers/types';
 import type { WebAuditDiscoveryConfig } from './registry';
@@ -21,19 +21,6 @@ export interface DiscoveryOptions {
 export interface DiscoveryResult {
   endpoint: string | null;
   evidence: EvidenceItem[];
-}
-
-function initializeBody(protocolVersion: string): string {
-  return JSON.stringify({
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion,
-      capabilities: {},
-      clientInfo: { name: 'agent-web-audit', version: '1.0' },
-    },
-  });
 }
 
 export async function discoverMcpEndpoint(
@@ -63,18 +50,15 @@ export async function discoverMcpEndpoint(
     evidence.push({ source: wk, note: 'card present, no endpoint field' });
   }
 
+  const legacyInit = {
+    method: 'POST',
+    headers: legacyProbeHeaders(),
+    body: legacyInitializeBody(cfg.protocol_version),
+  };
   for (const p of cfg.common_paths) {
     const url = resolveUrl(base, p);
     if (!url) continue;
-    const resp = await guardedFetch(
-      url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-        body: initializeBody(cfg.protocol_version),
-      },
-      fetchOpts,
-    );
+    const resp = await guardedFetch(url, legacyInit, fetchOpts);
     const rpc = parseJsonRpc(resp);
     const result = rpc?.result as { serverInfo?: unknown } | undefined;
     if (rpc && result && typeof result === 'object' && result.serverInfo) {
@@ -84,14 +68,11 @@ export async function discoverMcpEndpoint(
     evidence.push({ source: p, status: resp.status, probed: 'initialize (no serverInfo)' });
   }
 
+  const modernInit = { method: 'POST', headers: modernProbeHeaders('tools/list'), body: modernProbeBody('tools/list') };
   for (const p of cfg.common_paths) {
     const url = resolveUrl(base, p);
     if (!url) continue;
-    const resp = await guardedFetch(
-      url,
-      { method: 'POST', headers: modernProbeHeaders('tools/list'), body: modernProbeBody('tools/list') },
-      fetchOpts,
-    );
+    const resp = await guardedFetch(url, modernInit, fetchOpts);
     const rpc = parseJsonRpc(resp);
     const result = rpc?.result as { tools?: unknown } | undefined;
     if (result && Array.isArray(result.tools)) {

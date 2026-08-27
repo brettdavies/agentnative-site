@@ -41,7 +41,7 @@ type McpWith = {
 // The modern era is a handler concern, not registry config: the
 // registry's mcp_discovery.protocol_version stays the legacy pin and
 // keeps legacy discovery byte-stable.
-export const MODERN_PROTOCOL_VERSION = '2026-07-28';
+const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
 const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo';
 
@@ -50,15 +50,37 @@ const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo';
 // error envelope keeps the broken-surface penalty.
 const LANE_UNAVAILABLE_CODES = new Set([-32601, -32022]);
 
-const MODERN_OPS = new Set<McpWith['op']>(['modern-tools-list', 'server-discover']);
+// Single source of a modern op's wire method: the Mcp-Method header and
+// the body method both read this map, so they cannot disagree (the
+// -32020 condition the suite itself probes for).
+const MODERN_OP_METHODS: Partial<Record<McpWith['op'], string>> = {
+  'modern-tools-list': 'tools/list',
+  'server-discover': 'server/discover',
+};
 
 const CLIENT_INFO = { name: 'agent-web-audit', version: '1.0' };
 
-function legacyProbeHeaders(): Record<string, string> {
+export function legacyProbeHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
   };
+}
+
+export const LEGACY_TOOLS_LIST_BODY = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+
+/** Legacy initialize request body; discovery's legacy pass and the initialize check send the same bytes. */
+export function legacyInitializeBody(protocolVersion: string): string {
+  return JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion,
+      capabilities: {},
+      clientInfo: CLIENT_INFO,
+    },
+  });
 }
 
 /** Modern request headers (SEP-2243): header-routed, sessionless, no initialize. */
@@ -188,28 +210,17 @@ function conformanceFor(op: McpWith['op']): ConformanceProbe | undefined {
 
 function buildBody(op: McpWith['op'], method: string, protocolVersion: string): string {
   if (op === 'initialize') {
-    return JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        protocolVersion,
-        capabilities: {},
-        clientInfo: CLIENT_INFO,
-      },
-    });
+    return legacyInitializeBody(protocolVersion);
   }
   if (op === 'tools-list') {
-    return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    return LEGACY_TOOLS_LIST_BODY;
   }
   if (op === 'resources-list') {
     return JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'resources/list', params: {} });
   }
-  if (op === 'modern-tools-list') {
-    return modernProbeBody('tools/list');
-  }
-  if (op === 'server-discover') {
-    return modernProbeBody('server/discover');
+  const modernMethod = MODERN_OP_METHODS[op];
+  if (modernMethod !== undefined) {
+    return modernProbeBody(modernMethod);
   }
   return JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: {} });
 }
@@ -234,11 +245,7 @@ export async function notifyMcpInitialized(
     endpoint,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-        'Mcp-Session-Id': sessionId,
-      },
+      headers: { ...legacyProbeHeaders(), 'Mcp-Session-Id': sessionId },
       body: INITIALIZED_BODY,
     },
     { ...opts.fetchOptions, timeoutMs: opts.timeoutMs },
@@ -252,17 +259,17 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   }
   const w = check.with as McpWith;
   const conformance = conformanceFor(w.op);
-  const modernOp = MODERN_OPS.has(w.op);
+  const modernMethod = MODERN_OP_METHODS[w.op];
   // Modern probes stay sessionless (no Mcp-Session-Id) and carry no
   // Mcp-Name: neither op is a tools/call or resources/read. Conformance
   // probes are single self-contained requests: fully table-shaped
   // headers, never a session attach.
   const headers: Record<string, string> = conformance
     ? conformance.headers()
-    : modernOp
-      ? modernProbeHeaders(w.op === 'server-discover' ? 'server/discover' : 'tools/list')
+    : modernMethod !== undefined
+      ? modernProbeHeaders(modernMethod)
       : legacyProbeHeaders();
-  if (!conformance && !modernOp && w.op !== 'initialize' && ctx.mcpSessionId) {
+  if (!conformance && modernMethod === undefined && w.op !== 'initialize' && ctx.mcpSessionId) {
     headers['Mcp-Session-Id'] = ctx.mcpSessionId;
   }
 
