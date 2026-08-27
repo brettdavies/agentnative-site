@@ -82,9 +82,10 @@ Approach B, sequenced: video path green, then homepage CLI polish.
 
 **3-minute sequence:** open `https://anc.dev/web-audit` → `fill_audit_url` with Sounding
 (`https://sounding.brettdavies.workers.dev`) → `set_plan` → human clicks Audit → `/web/<sounding-host>` →
-`get_worksheet` + `get_fix_prompt` for all three MUST ids (never `mcp-cors-*`) → one pass in `demo/` covering `openapi`,
-`mcp-initialize`, and `mcp-tools-list` → redeploy → human Audit again. Two loops, one fix. Record last day. Between
-takes: `scripts/sounding-restore.sh`.
+`get_worksheet` + `get_fix_prompt` for all three MUST ids (never `mcp-cors-*`) → one pass in
+[sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo) covering `openapi`, `mcp-initialize`, and
+`mcp-tools-list` → redeploy → human Audit again. Two loops, one fix. Record last day. Between takes, restore that repo's
+`src/` from `main` and redeploy. Do not keep the patient Worker in this tree.
 
 **Script attach:**
 
@@ -124,9 +125,9 @@ unless it wraps that.
 **Result DOM hook:** `renderCheck` in `src/worker/audit-web/summary-render.ts` must emit `data-id="${escHtml(row.id)}"`
 on `.web-check`. `get_worksheet` and `assemble_fix_prompt` read that attribute. Skill URLs are not the id contract.
 
-**Assemble clip:** never CORS (`mcp-cors-*`). Target is Sounding (`demo/`), not anc.dev. MUST ids: `openapi`,
-`mcp-initialize`, `mcp-tools-list`. Two WebMCP loops, one fix pass for all three. Restore with
-`scripts/sounding-restore.sh` (tag `sounding-broken`).
+**Assemble clip:** never CORS (`mcp-cors-*`). Target is Sounding
+([brettdavies/sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo)), not this repo. MUST ids:
+`openapi`, `mcp-initialize`, `mcp-tools-list`. Two WebMCP loops, one fix pass for all three.
 
 **Not this week:** worker `webmcp` handler still greps markers.
 
@@ -135,10 +136,11 @@ on `.web-check`. `get_worksheet` and `assemble_fix_prompt` read that attribute. 
 1. **Public URL.** Locked: judges hit **anc.dev** (production). `release/*` → `main` before 3 Sep 1pm PT.
 2. **How much of B before the video.** One PR still includes homepage P1. Cut P1 from the release only if Friday slips.
 3. **Which check `id` the assemble clip uses.** Not anc.dev (live fails there are only `mcp-cors-*`). Clip target is
-   Sounding (`demo/`, Worker `sounding`, public `sounding.brettdavies.workers.dev`): MUST families we own (`openapi`
-   absent; `mcp-initialize` / `mcp-tools-list` broken). CORS on `/mcp` already passes. Two loops: worksheet + all three
-   `get_fix_prompt`s, one code pass, human Audit again. Between takes: `scripts/sounding-restore.sh` (tag
-   `sounding-broken`, `demo/` only). Record last day. Do not add Sounding to `src/data/web-audit/seed.yaml`.
+   Sounding ([brettdavies/sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo), Worker `sounding`,
+   public `sounding.brettdavies.workers.dev`): MUST families we own (`openapi` absent; `mcp-initialize` /
+   `mcp-tools-list` broken). CORS on `/mcp` already passes. Two loops: worksheet + all three `get_fix_prompt`s, one code
+   pass in that repo, human Audit again. Between takes, restore that repo from `main` and redeploy. Do not add Sounding
+   to `src/data/web-audit/seed.yaml`. Do not keep the patient Worker in this tree.
 4. **Origin trial.** ChatGPT in-app browser is the recording and judge default (WebMCP on, no Chrome flag). Judges who
    use Chrome follow Devpost (`#enable-webmcp-testing`). No origin-trial token on anc.dev this slice unless we later
    want stock Chrome 149+ to get tools without a flag.
@@ -164,7 +166,8 @@ another unauthenticated public Worker. After act tools are live, submit `anc.dev
 1. ~~Confirm the public URL path (assignment below).~~ Locked: judges hit **anc.dev**.
 2. ~~Replace `src/client/webmcp.ts` (`registerTool` first). Concatenate script on `/web-audit`; inject on `/web/<host>`
    result HTML only.~~ [#280](https://github.com/brettdavies/agentnative-site/pull/280)
-3. ~~Video-path tools + orientation + homepage P1.~~ Same PR. Clip target is Sounding (`demo/`); do not demo-fix CORS.
+3. ~~Video-path tools + orientation + homepage P1.~~ Same PR. Clip target is Sounding
+   ([sounding-webmcp-demo](https://github.com/brettdavies/sounding-webmcp-demo)); do not demo-fix CORS.
 4. ~~Tests: pathname → names; no scoring navigation/POST; discovery includes `/web-audit`.~~ `tests/webmcp.test.ts` plus
    attach tests. ChatGPT/Chrome `getTools()` is T5, not CI.
 5. Browser-verify light and dark; ChatGPT in-app or Chrome flag (T5).
