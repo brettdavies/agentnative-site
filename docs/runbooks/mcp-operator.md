@@ -8,16 +8,29 @@ the client skill plus the server card at `/.well-known/mcp/server-card.json`, no
 
 ## Kill switches
 
-Two `wrangler secret` flags give zero-deploy emergency control (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`). Both default
-`false` in production, `true` in staging; flip with `wrangler secret put`. Staging also binds `MCP_LEGACY_ENABLED` as a
-plain `vars` entry (not a secret) — flip that one with `wrangler deploy --var`, not `secret put` (see Legacy lane
-disable below).
+Three flags gate the MCP surface. Each name carries exactly one binding shape in every environment, and the flip verb
+follows the shape.
 
-| Flag                       | Binding shape (staging) | Scope                     | Falsy behavior                                                                                                                                                                                          |
-| -------------------------- | ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_ENABLED`              | secret                  | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
-| `MCP_LIVE_SCORING_ENABLED` | secret                  | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
-| `MCP_LEGACY_ENABLED`       | `vars` (`"true"`)       | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                    |
+| Flag                       | Binding shape                                       | Scope                     | Falsy behavior                                                                                                                                                                                          |
+| -------------------------- | --------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_ENABLED`              | secret, both environments                           | the entire `/mcp` branch  | `503 Service Unavailable` with `Retry-After: 3600` and a one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error. Discoverability siblings stay live.                  |
+| `MCP_LIVE_SCORING_ENABLED` | secret, both environments                           | only the `score_cli` tool | `score_cli` returns `isError: false` with `audited: false, message: "live scoring is currently disabled by the operator; cached scorecards remain available via get_scorecard"`. Read tier stays alive. |
+| `MCP_LEGACY_ENABLED`       | committed var `"true"`, top-level and `env.staging` | legacy `initialize` lane  | When `'false'`, shell logs `legacy_rejected` with `error_code: -32022` and returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`) before SDK dispatch. Modern lane unaffected.                    |
+
+The split is a decision, not an accident. `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets because incident
+response needs a flip that lands without a deploy and survives the next unrelated one, and because an unset secret reads
+as off: absence fails closed. `MCP_LEGACY_ENABLED` is a committed var because the legacy sunset is a planned, reviewable
+migration rather than an incident response, and because absence there means dual-stack on.
+`tests/wrangler-config.test.ts` pins both halves: the var is `"true"` in both blocks, and neither secret name appears in
+any `vars` block.
+
+**A binding name is a var or a secret, never both.** `wrangler secret put` against a name declared in any `vars` block
+is rejected with Cloudflare API **10053** (`Binding name '<NAME>' already in use`). Never run `wrangler secret put
+MCP_LEGACY_ENABLED`, in either environment.
+
+**Production commands carry no `--env` flag.** Production is the top-level `wrangler.jsonc` config and there is no
+`env.production` block, so `--env production` fails at config parse (`No environment found in configuration with name
+"production"`). Staging is `--env staging`.
 
 Decision flow:
 
@@ -27,18 +40,53 @@ Decision flow:
   flip `MCP_LIVE_SCORING_ENABLED` only. The seven catalog tools and `get_scorecard` keep serving cached scorecards;
   agents that were about to call `score_cli` get a typed "disabled" response and route themselves back to
   `get_scorecard`.
+- **Legacy client volume has fallen under the sunset thresholds** → flip `MCP_LEGACY_ENABLED`. That is a migration, not
+  an emergency; it goes through the committed-edit path below. See Legacy sunset advisory.
+
+### Flipping a secret
 
 ```bash
-# Disable only the cost-bearing audit path
-wrangler secret put MCP_LIVE_SCORING_ENABLED --env production
-# Enter: false
+# Production: no --env flag.
+wrangler secret put MCP_LIVE_SCORING_ENABLED   # enter: false, to disable only the cost-bearing audit path
+wrangler secret put MCP_ENABLED                # enter: false, to take the whole surface offline
 
-# Or take the whole surface offline
-wrangler secret put MCP_ENABLED --env production
-# Enter: false
+# Staging.
+wrangler secret put MCP_ENABLED --env staging
 ```
 
-Re-enable with the same command and the value `true`.
+Re-enable with the same command and the value `true`. No deploy in either direction; a warm isolate picks up the new
+value on its next request once the secret propagates, roughly 5 to 10 seconds at low traffic.
+
+### Flipping the var
+
+`MCP_LEGACY_ENABLED` has two flip paths, and the choice is about intent rather than convenience.
+
+**Planned sunset: committed edit through a PR.** Change the flag to `"false"` in the target environment's
+`wrangler.jsonc` block and merge it. The value is part of the deploy contract, so every later deploy re-asserts it; the
+change is reviewable, revertible, and durable.
+
+**Drill or emergency: transient `--var` override.**
+
+```bash
+bun x wrangler deploy --var MCP_LEGACY_ENABLED:false              # production
+bun x wrangler deploy --env staging --var MCP_LEGACY_ENABLED:false  # staging
+```
+
+Three hazards make this the second choice:
+
+- **It ships the local bundle.** `wrangler deploy` uploads whatever the working tree built, not what is deployed. Run it
+  only from a clean checkout of the branch that env serves (`main` for production, `dev` for staging) with a fresh `bun
+  run build`, or the override also ships unreviewed code.
+- **The next deploy silently reverts it.** Any later plain deploy, including a CI deploy fired by an unrelated merge,
+  re-asserts the committed `"true"`, re-enabling the legacy lane with no notification.
+- **It is not zero-deploy.** The override costs a full deploy cycle, so it is not a substitute for the secret-shaped
+  switches during an incident.
+
+Restore by deploying without the override, which reloads the committed literal:
+
+```bash
+bun x wrangler deploy --env staging   # or `bun x wrangler deploy` for production
+```
 
 ## Origin posture: server-to-agent, no CORS
 
@@ -235,8 +283,9 @@ probe fix.
 
 ### Legacy lane disable (staging-only manual)
 
-Staging declares `MCP_LEGACY_ENABLED` in `wrangler.jsonc` `env.staging.vars`. Do **not** `wrangler secret put` that name
-while it remains a vars binding — Cloudflare API **10053** (binding name already in use). Temporary flip:
+`MCP_LEGACY_ENABLED` is declared `"true"` in both `wrangler.jsonc` vars blocks, so the drill uses the transient `--var`
+override rather than `wrangler secret put`, which the var binding rejects with Cloudflare API **10053**. Full shape and
+hazard list: [Kill switches](#kill-switches). Temporary flip:
 
 ```bash
 bun x wrangler deploy --env staging --var MCP_LEGACY_ENABLED:false
@@ -279,8 +328,12 @@ Flip `MCP_LEGACY_ENABLED=false` in production only when **both** hold:
 2. Top-N legacy `client_name` breakdown reviewed — era percentage alone is insufficient; a single long-tail integrator
    may dominate the legacy bucket.
 
-Procedure: staging-first disable → 6/6 modern smoke + legacy-off manual checklist → soak → production var flip → monitor
+Procedure: staging-first disable → 6/6 modern smoke + legacy-off manual checklist → soak → production flip → monitor
 `era:legacy` tail volume for 48h.
+
+The production flip is the committed edit: set the top-level `vars.MCP_LEGACY_ENABLED` to `"false"` in `wrangler.jsonc`
+and merge that to `main`. A sunset is a durable state change, so it belongs in the deploy contract where a later deploy
+re-asserts it, not in a `--var` override that the next merge silently undoes.
 
 ## Discoverability surfaces operators own
 

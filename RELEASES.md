@@ -458,27 +458,35 @@ lives in [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-
 ## MCP endpoint release procedure
 
 `POST /mcp` (the Model Context Protocol server) reuses the live-scoring stack's `Sandbox` DO, R2 cache, and `SCORE_KV`.
-The MCP-specific additions to a release are two rate-limit bindings, two env-var kill switches, and a per-call visitor
-log. Operational characteristics differ from `/api/score` and merit explicit verification at each release.
+The MCP-specific additions to a release are two rate-limit bindings, three kill switches, and a per-call visitor log.
+Operational characteristics differ from `/api/score` and merit explicit verification at each release.
 
 ### Bindings added by the MCP endpoint
 
-| Binding                    | Type       | Production limits   | Staging defaults | Purpose                                                                                                                            |
-| -------------------------- | ---------- | ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_LIMITER`              | Rate Limit | 60 req / 60s per IP | same             | Gates every `POST /mcp`. Anon fallback on missing `cf-connecting-ip`.                                                              |
-| `MCP_AUDIT_LIMITER`        | Rate Limit | 5 req / 60s per IP  | same             | Gates `score_cli` cache-miss audits. **No anon fallback.** Binding floor only; hourly window enforced in `SCORE_KV` (see below).   |
-| `MCP_ENABLED`              | `vars`     | `"false"`           | `"true"`         | Kill switch for the whole `/mcp` branch. Falsy returns 503 with `Retry-After: 3600` and plain text body (no JSON-RPC envelope).    |
-| `MCP_LIVE_SCORING_ENABLED` | `vars`     | `"false"`           | `"true"`         | Kill switch for `score_cli` only. Falsy returns `isError: false` with `audited: false, next_tool: get_scorecard`. Reads stay live. |
+| Binding                    | Type       | Production            | Staging                             | Purpose                                                                                                                            |
+| -------------------------- | ---------- | --------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_LIMITER`              | Rate Limit | 60 req / 60s per IP   | same                                | Gates every `POST /mcp`. Anon fallback on missing `cf-connecting-ip`.                                                              |
+| `MCP_AUDIT_LIMITER`        | Rate Limit | 5 req / 60s per IP    | same                                | Gates `score_cli` cache-miss audits. **No anon fallback.** Binding floor only; hourly window enforced in `SCORE_KV` (see below).   |
+| `MCP_ENABLED`              | secret     | `wrangler secret put` | `wrangler secret put --env staging` | Kill switch for the whole `/mcp` branch. Falsy returns 503 with `Retry-After: 3600` and plain text body (no JSON-RPC envelope).    |
+| `MCP_LIVE_SCORING_ENABLED` | secret     | `wrangler secret put` | `wrangler secret put --env staging` | Kill switch for `score_cli` only. Falsy returns `isError: false` with `audited: false, next_tool: get_scorecard`. Reads stay live. |
+| `MCP_LEGACY_ENABLED`       | `vars`     | `"true"` (top-level)  | `"true"` (`env.staging`)            | Kill switch for the legacy `initialize` lane only. Falsy returns JSON-RPC `-32022` with `data.supported`. Modern lane stays live.  |
 
 Both rate-limit bindings carry `namespace_id` values pinned in `wrangler.jsonc`. The CF Rate Limiting platform only
 accepts `period: 10 | 60`, so `MCP_AUDIT_LIMITER` enforces a 5-per-60-seconds burst floor; the per-hour ceiling lives in
 an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_bucket>` with a 2-hour TTL.
 
+The two kill-switch shapes are not interchangeable. Secrets are set out of band and survive every deploy, which is what
+makes them usable mid-incident; an unset secret reads as off, so absence fails closed. The var is part of the deploy
+contract, re-asserted on every deploy, which is what makes the legacy sunset reviewable. A name is one shape or the
+other: `wrangler secret put` against a declared var name is rejected with Cloudflare API 10053.
+`tests/wrangler-config.test.ts` pins the split.
+
 ### Promotion checklist (first MCP release to main)
 
-1. **Flip both kill switches to live on production.** Production defaults `"false"`. Promotion requires `wrangler secret
-   put MCP_ENABLED true` and `wrangler secret put MCP_LIVE_SCORING_ENABLED true` against the production Worker. Secrets
-   are env-scoped, not migration-scoped; no deploy needed once set.
+1. **Flip both secret kill switches to live on production.** An unset secret reads as off, so promotion requires
+   `wrangler secret put MCP_ENABLED true` and `wrangler secret put MCP_LIVE_SCORING_ENABLED true` against the production
+   Worker. Secrets are env-scoped, not migration-scoped; no deploy needed once set. `MCP_LEGACY_ENABLED` needs no
+   promotion step: it is committed `"true"` and the deploy binds it.
 2. **Confirm both rate-limit bindings exist in `wrangler.jsonc` for the production env.** Production inherits from the
    top-level block by default; verify `MCP_LIMITER` and `MCP_AUDIT_LIMITER` both appear with the expected `namespace_id`
    and `simple` values.
@@ -538,10 +546,16 @@ wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `false`
 wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `true` to restore
 ```
 
-Both are env-scoped: pass `--env staging` to flip staging only. Propagation is bounded by the secret-read TTL on the
-next request to a fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery
-from a surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED`
-and keeps the read tier serving cached scorecards.
+Both are env-scoped: pass `--env staging` to flip staging only, and omit `--env` entirely for production, which is the
+top-level config with no `env.production` block. Propagation is bounded by the secret-read TTL on the next request to a
+fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery from a
+surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED` and
+keeps the read tier serving cached scorecards.
+
+`MCP_LEGACY_ENABLED` is a var, so `wrangler secret put` on that name fails with Cloudflare API 10053. Flip it by editing
+the committed `"true"` to `"false"` in the target environment's `wrangler.jsonc` block and shipping that through a PR;
+`wrangler deploy --var MCP_LEGACY_ENABLED:false` is the transient drill override, and the next plain deploy reverts it.
+Hazards and the full procedure: [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md).
 
 ## Staging access (Cloudflare Access)
 

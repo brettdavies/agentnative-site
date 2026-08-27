@@ -342,3 +342,49 @@ describe('wrangler.jsonc — Workers Caching per-entrypoint map (edge HIT restor
     expect(dts).toMatch(/interface CacheContext \{\s*purge\(options: CachePurgeOptions\): Promise<CachePurgeResult>;/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// MCP kill-switch binding shapes (plan U6)
+// ---------------------------------------------------------------------------
+
+// A Worker binding name is either a var or a secret, never both: `wrangler
+// secret put` against a deployed var name fails with Cloudflare API 10053, so a
+// name that drifts to a second shape breaks the operator's flip at the moment
+// the runbook is being followed under pressure. `MCP_LEGACY_ENABLED` is the
+// committed-var carve-out and is declared `"true"` in both blocks so the
+// production sunset flip has a declared home; `MCP_ENABLED` and
+// `MCP_LIVE_SCORING_ENABLED` are secret-bound, which is what buys the
+// zero-deploy flip that no redeploy can clobber. These guards pin the shape in
+// config so the drift is caught here rather than mid-incident.
+
+const SECRET_BOUND_MCP_FLAGS = ['MCP_ENABLED', 'MCP_LIVE_SCORING_ENABLED'] as const;
+
+describe('wrangler.jsonc — MCP kill-switch binding shapes (plan U6)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level vars declares MCP_LEGACY_ENABLED as the string "true"', () => {
+    const vars = config.vars as Record<string, unknown> | undefined;
+    expect(vars, 'top-level vars block').toBeDefined();
+    expect(vars?.MCP_LEGACY_ENABLED).toBe('true');
+  });
+
+  test('env.staging.vars declares MCP_LEGACY_ENABLED as the string "true"', () => {
+    const vars = staging.vars as Record<string, unknown> | undefined;
+    expect(vars, 'env.staging vars block').toBeDefined();
+    expect(vars?.MCP_LEGACY_ENABLED).toBe('true');
+  });
+
+  test('the secret-bound MCP flags are declared in no vars block (CF 10053 guard)', () => {
+    const blocks: Array<[string, Record<string, unknown>]> = [
+      ['top-level', config],
+      ['env.staging', staging],
+    ];
+    for (const [label, block] of blocks) {
+      const vars = (block.vars ?? {}) as Record<string, unknown>;
+      for (const name of SECRET_BOUND_MCP_FLAGS) {
+        expect(Object.hasOwn(vars, name), `${label} vars must not declare ${name}`).toBe(false);
+      }
+    }
+  });
+});

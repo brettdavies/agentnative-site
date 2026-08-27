@@ -213,16 +213,33 @@
   // TURNSTILE_SECRET is set via `wrangler secret put` and is not
   // committed. env.staging.vars carries Cloudflare's always-pass test
   // sitekey for CLI verification flows.
-  // MCP_ENABLED / MCP_LIVE_SCORING_ENABLED live as `wrangler secret put`
-  // values, not `vars`, so the operator can flip them at runtime without
-  // a redeploy clobbering the change (KTD-11 of the MCP endpoint plan).
-  // Undefined reads as falsy in src/worker/index.ts (the kill-switch
-  // check is `env.MCP_ENABLED !== 'true'`), so a missing secret returns
-  // 503 with `Retry-After: 3600` and the rest of the Worker is unaffected.
-  // MCP_ENABLED gates the entire /mcp branch; MCP_LIVE_SCORING_ENABLED
-  // gates only score_cli.
+  //
+  // Binding shape is per-flag and one shape per name: a Worker binding is a
+  // var or a secret, never both, so `wrangler secret put` against a declared
+  // var name is rejected with Cloudflare API 10053. Each MCP flag's shape is
+  // a decision, not an omission.
+  //
+  // MCP_ENABLED / MCP_LIVE_SCORING_ENABLED are `wrangler secret put` values,
+  // not `vars`, so the operator can flip them at runtime without a redeploy
+  // clobbering the change (KTD-11 of the MCP endpoint plan). Undefined reads
+  // as falsy in src/worker/index.ts (the kill-switch check is
+  // `env.MCP_ENABLED !== 'true'`), so a missing secret returns 503 with
+  // `Retry-After: 3600` and the rest of the Worker is unaffected. MCP_ENABLED
+  // gates the entire /mcp branch; MCP_LIVE_SCORING_ENABLED gates only
+  // score_cli. Neither name belongs in any `vars` block; the guard is
+  // tests/wrangler-config.test.ts.
+  //
+  // MCP_LEGACY_ENABLED is the intentional-var carve-out: the legacy sunset is
+  // a planned, reviewable migration rather than an incident response, so the
+  // flag is committed `"true"` here and under env.staging.vars. `false` is the
+  // only value that rejects the legacy lane (`resolveLegacyMode` in
+  // src/worker/mcp/server.ts treats absent as dual-stack), so binding it is a
+  // declaration, not a behavior change. Flip it with a committed edit through
+  // a PR, or transiently with `wrangler deploy --var`; never `secret put`.
+  // Procedure and hazards: docs/runbooks/mcp-operator.md § Kill switches.
   "vars": {
-    "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ"
+    "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ",
+    "MCP_LEGACY_ENABLED": "true"
   },
   // Production (top-level): anc.dev + www.anc.dev custom domains, no
   // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
@@ -389,6 +406,11 @@
       // staging deploy completes so the staging host serves /mcp
       // end-to-end during soak.
       //
+      // MCP_LEGACY_ENABLED mirrors the top-level `"true"`: same name, same
+      // var shape, both environments. `--var MCP_LEGACY_ENABLED:false` on a
+      // deploy is the drill flip and a plain redeploy restores this literal;
+      // `secret put` on the name is Cloudflare API 10053.
+      //
       // MCP_CACHE_BYPASS_ALLOWED gates the score_cli `bypass_cache: true`
       // argument that the release MCP smoke uses to exercise BOTH the
       // cache-hit short-circuit AND the live container DO path on every
@@ -400,7 +422,8 @@
       // audit_website MCP fresh path. Bound "true" here so the staging host
       // serves the web audit end-to-end during soak and e2e; production
       // stays gated (no top-level var) and flips on via `wrangler secret
-      // put WEB_AUDIT_ENABLED --env production` at promotion, matching the
+      // put WEB_AUDIT_ENABLED` at promotion (production is the top-level
+      // config, so the command carries no `--env` flag), matching the
       // MCP_ENABLED secret posture. Undefined reads as falsy in the route
       // (the check is `env.WEB_AUDIT_ENABLED !== 'true'`), so a missing
       // value returns 503 Retry-After.
