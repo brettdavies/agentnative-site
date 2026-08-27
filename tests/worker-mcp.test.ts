@@ -241,6 +241,47 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
 });
 
 describe('MCP tools/list', () => {
+  // Mirrors the sibling meum-web MCP server's tool-metadata shape: the
+  // SDK config carries title/description/inputSchema/annotations in that
+  // declaration order, and annotations are pinned exactly so a stray
+  // hint fails the gate rather than passing on a subset match.
+  interface ListedTool {
+    name: string;
+    title?: string;
+    description?: string;
+    annotations?: Record<string, unknown>;
+    inputSchema?: unknown;
+  }
+
+  const READ_ONLY_ANNOTATIONS = { readOnlyHint: true };
+
+  // score_cli and audit_website reach external systems and write cache /
+  // leaderboard state, so readOnlyHint is false and openWorldHint true.
+  const NON_READ_ANNOTATIONS = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  };
+
+  const NON_READ_TOOLS = new Set(['score_cli', 'audit_website']);
+
+  const TOOL_TITLES: Record<string, string> = {
+    list_tools: 'List scored CLI registry entries',
+    get_tool: 'Get a registry entry',
+    search_tools: 'Search the CLI registry',
+    list_principles: 'List agent-native principles',
+    get_principle: 'Get an agent-native principle',
+    list_spec_sections: 'List spec sections',
+    get_spec_section: 'Get a spec section',
+    get_scorecard: 'Get a cached CLI scorecard',
+    score_cli: 'Run a live CLI audit',
+    get_website_audit: 'Get a cached website audit',
+    audit_website: 'Run a live website audit',
+    list_website_audits: 'List cached website audits',
+    get_web_remediation: 'Get web-audit remediation guidance',
+  };
+
   test('returns exactly thirteen tools in the expected order', async () => {
     const env = makeEnv();
     await initialize(env);
@@ -272,6 +313,31 @@ describe('MCP tools/list', () => {
       expect(typeof tool.description).toBe('string');
       expect((tool.description ?? '').length).toBeGreaterThan(0);
       expect(tool.inputSchema).toBeDefined();
+    }
+  });
+
+  test('every tool carries a non-empty title and an annotations object', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const tools = (result.result?.tools ?? []) as ListedTool[];
+    expect(tools.length).toBe(13);
+    for (const tool of tools) {
+      expect(typeof tool.title).toBe('string');
+      expect((tool.title ?? '').length).toBeGreaterThan(0);
+      expect(tool.annotations).toBeDefined();
+      expect(typeof tool.annotations).toBe('object');
+    }
+  });
+
+  test('titles match the catalog and annotations pin each tool read-only posture', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const tools = (result.result?.tools ?? []) as ListedTool[];
+    for (const tool of tools) {
+      expect(tool.title).toBe(TOOL_TITLES[tool.name]);
+      expect(tool.annotations).toEqual(NON_READ_TOOLS.has(tool.name) ? NON_READ_ANNOTATIONS : READ_ONLY_ANNOTATIONS);
     }
   });
 });

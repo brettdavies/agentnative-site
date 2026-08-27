@@ -30,10 +30,12 @@ export function registerSpecTools(server: McpServer, catalog: Catalog): void {
   server.registerTool(
     'list_spec_sections',
     {
+      title: 'List spec sections',
       description:
         'Return the table of contents for the vendored agentnative spec at the current spec_version. Each entry carries ' +
         'slug, title, level (1 for top-level files, 2 for sub-folder files such as principles/p*.md), and parent_slug ' +
         '(null for top-level sections).',
+      annotations: { readOnlyHint: true },
     },
     async () => textContent({ spec_version: catalog.spec_version, sections: catalog.spec_sections.map(tocEntry) }),
   );
@@ -41,12 +43,14 @@ export function registerSpecTools(server: McpServer, catalog: Catalog): void {
   server.registerTool(
     'get_spec_section',
     {
+      title: 'Get a spec section',
       description:
         'Return the full body of a single spec section by slug. Fields: slug, title, body_markdown, spec_version. ' +
         'Look-not-found returns isError: false with a typed { found: false, message } body.',
       inputSchema: {
         slug: z.string().describe('The section slug, e.g. "p1-non-interactive-by-default" or "scoring".'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ slug }) => {
       const section = catalog.spec_sections.find((s) => s.slug === slug);

@@ -120,6 +120,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
   server.registerTool(
     'score_cli',
     {
+      title: 'Run a live CLI audit',
       description:
         'Run a fresh container audit for a CLI when no cached scorecard exists. Provide ONE of: slug, binary, install, ' +
         'github_url (same validator as get_scorecard). On registry or R2-cache hit, returns isError: false with ' +
@@ -142,6 +143,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
               'Silently ignored when the env binding is absent (prod). Rate limiters still apply.',
           ),
       },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async (args, extra) => {
       // Step 1: MCP_LIVE_SCORING_ENABLED kill switch.
