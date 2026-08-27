@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Live MCP surface smoke. Runs dual-stack checks 1–6 plus anc-specific extensions
+# Live MCP surface smoke. Runs dual-stack checks 1–7 plus anc-specific extensions
 # against `<base-url>/mcp`:
 #
 #   1. server-card: protocolVersion=2026-07-28, mcp_endpoint points at {base}/mcp
@@ -8,8 +8,9 @@
 #   4. legacy-get-scorecard: registry hit on curated slug ripgrep
 #   5. modern-tools-list: _meta + headers, ttlMs=3600000, cacheScope=public
 #   6. modern-get-scorecard: hit on ripgrep + miss on unknown slug
+#   7. malformed-body: non-JSON POST answers HTTP 400 + JSON-RPC -32700
 #
-# Anc-specific extensions (after check 6):
+# Anc-specific extensions (after check 7):
 #   - Symmetry contract: get_scorecard and score_cli on ripgrep both return
 #     source=registry; score_cli bounces with next_tool=get_scorecard.
 #   - Live audit: score_cli against `--mcp-binary` (fresh non-registry binary)
@@ -19,15 +20,20 @@
 #   - scripts/release/preflight.sh mcp                   -> http://localhost:8787 (local wrangler dev)
 #   - scripts/release/postflight.sh --env staging mcp    -> staging Worker (through CF Access)
 #   - scripts/release/postflight.sh --env prod mcp       -> https://anc.dev (no auth)
+#   - .github/workflows/deploy.yml (staging job)         -> staging Worker, --core-only
 #
 # Usage:
-#   scripts/release/mcp-smoke.sh [<base-url>] [--mcp-binary <binary>]
+#   scripts/release/mcp-smoke.sh [<base-url>] [--mcp-binary <binary>] [--core-only]
 #                                [--full-cache-coverage] [--result-file PATH]
 #
 # Environment:
 #   MCP_SMOKE_BASE         Aliases positional <base-url> when set and no URL arg given.
 #
 # Flags:
+#   --core-only            Run checks 1–7 and skip the symmetry and live-audit
+#                          gates. Those two each spend a unit of the per-IP audit
+#                          budget and minutes of wall clock, which a per-deploy
+#                          probe cannot afford. The exit contract is unchanged.
 #   --mcp-binary <binary>  Fresh non-registry binary for the live audit (default:
 #                          $MCP_BINARY or `figlet`). Must be in the bin-producing
 #                          allowlist; library-only packages (lodash, chalk, etc.)
@@ -84,6 +90,7 @@ BASE_URL=""
 MCP_BINARY="${MCP_BINARY:-figlet}"
 RESULT_FILE=""
 FULL_CACHE_COVERAGE=0
+CORE_ONLY=0
 
 # Bin-producing npm allowlist. Add only after confirming `npm view <pkg> bin`
 # returns a non-empty bin map; library-only packages produce no executable and
@@ -94,8 +101,10 @@ readonly MCP_BINARY_ALLOWLIST=(figlet prettier tsx nodemon npm-check-updates)
 # this list if additional production surfaces are added.
 readonly MCP_PROD_HOSTS=(anc.dev www.anc.dev)
 
+# Bounded by the comment block's own structure, so growing the header cannot
+# silently truncate the help text.
 usage() {
-  sed -n '2,65p' "$0" | sed 's/^# \?//'
+  awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
   exit 2
 }
 
@@ -104,6 +113,10 @@ while [[ $# -gt 0 ]]; do
     --mcp-binary)
       MCP_BINARY="$2"
       shift 2
+      ;;
+    --core-only)
+      CORE_ONLY=1
+      shift
       ;;
     --full-cache-coverage)
       FULL_CACHE_COVERAGE=1
@@ -362,6 +375,29 @@ run_check_6_modern_get_scorecard() {
   fi
 }
 
+# The Worker parses the JSON-RPC body from `request.clone()` and hands the
+# original stream to the SDK. That split is runtime-specific, and a lenient
+# `Request.clone()` in the unit-test runtime cannot reproduce how workerd drives
+# it, so only a probe over real HTTP exercises this contract.
+run_check_7_malformed_body() {
+  local http_code error_code
+  http_code=$(curl -sS -w '%{http_code}' -o "$OUT/7-malformed.json" -K "$CF_CONFIG" -m 15 \
+    -H 'Content-Type: application/json' -H 'Accept: application/json' \
+    --data-binary 'not json at all' \
+    "${BASE_URL}/mcp" 2>/dev/null || echo "000")
+  error_code=$(jq -r '.error.code // empty' "$OUT/7-malformed.json" 2>/dev/null || true)
+
+  if [[ "$http_code" == "503" ]]; then
+    report 7 malformed-body no "HTTP 503 (MCP_ENABLED off?)"
+    return
+  fi
+  if [[ "$http_code" == "400" && "$error_code" == "-32700" ]]; then
+    report 7 malformed-body ok "HTTP 400 with JSON-RPC $error_code parse error"
+  else
+    report 7 malformed-body no "http=$http_code error.code=$error_code (expected http=400 error.code=-32700)"
+  fi
+}
+
 # Anc-specific extensions (symmetry + live audit) ----------------------------
 
 run_gate_symmetry() {
@@ -531,8 +567,11 @@ run_check_3_legacy_tools_list
 run_check_4_legacy_get_scorecard
 run_check_5_modern_tools_list
 run_check_6_modern_get_scorecard
-run_gate_symmetry
-run_gate_live_audit
+run_check_7_malformed_body
+if [[ "$CORE_ONLY" -eq 0 ]]; then
+  run_gate_symmetry
+  run_gate_live_audit
+fi
 
 printf "\nRESULT: %d pass / %d fail\n" "$PASS_COUNT" "$FAIL_COUNT"
 printf "Response capture dir: %s\n" "$OUT"
