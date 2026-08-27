@@ -13,7 +13,7 @@
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
-import { assembleRemediation, resultLine, type WebRemediationCatalog } from './remediation';
+import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
 type WebScorecardRow = {
@@ -23,6 +23,7 @@ type WebScorecardRow = {
   keyword?: string;
   status: ScorecardStatus;
   na_reason?: NaReason;
+  unprobed?: true;
   evidence: string | null;
 };
 
@@ -57,6 +58,7 @@ const GLOBAL_LABEL = 'of a maximally agent-ready site';
 
 const STATUS_LABELS: Record<ScorecardStatus, string> = {
   pass: 'PASS',
+  noncompliant: 'NONCOMPLIANT',
   broken: 'BROKEN',
   absent: 'MISSING',
   n_a: 'N/A',
@@ -68,11 +70,13 @@ function statusLabel(status: ScorecardStatus): string {
   return STATUS_LABELS[status] ?? String(status).toUpperCase();
 }
 
-// Check-row marks: pass ✓, absent (missing) !, broken/error ✕, n_a/skip –.
-// Broken outranks absent in severity — a present-but-broken surface
-// misleads agents — so it carries the fail mark.
+// Check-row marks: pass ✓, noncompliant ~, absent (missing) !,
+// broken/error ✕, n_a/skip –. Broken outranks absent in severity (a
+// present-but-broken surface misleads agents) so it carries the fail
+// mark, while a noncompliant surface works and reads as a partial.
 const STATUS_MARKS: Record<ScorecardStatus, string> = {
   pass: '✓',
+  noncompliant: '~',
   broken: '✕',
   absent: '!',
   n_a: '–',
@@ -95,8 +99,9 @@ function tierChip(keyword: string | undefined): string {
   return `<span class="tier tier-${keyword}">${TIER_LABELS[keyword]}</span> `;
 }
 
-function isFixable(status: ScorecardStatus): boolean {
-  return status === 'broken' || status === 'absent';
+/** A row earns a fix prompt only when the run actually observed the surface. */
+function isFixable(row: Pick<WebScorecardRow, 'status' | 'unprobed'>): boolean {
+  return row.unprobed !== true && isFixableStatus(row.status);
 }
 
 function scoresOf(scorecard: WebScorecardShape): { relative: number; global: number } {
@@ -132,6 +137,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   for (const row of sc.results ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
   const chips: string[] = [];
   if (counts.pass) chips.push(`<span class="chip chip--ok">${counts.pass} pass</span>`);
+  if (counts.noncompliant) chips.push(`<span class="chip chip--warn">${counts.noncompliant} noncompliant</span>`);
   if (counts.absent) chips.push(`<span class="chip chip--warn">${counts.absent} missing</span>`);
   if (counts.broken) chips.push(`<span class="chip chip--fail">${counts.broken} broken</span>`);
   if (counts.error)
@@ -181,14 +187,16 @@ ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''} 
   html += `</section>
 <section class="scorecard-cta">
   <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
-</section></article>`;
+</section>
+<script defer src="/js/webmcp.js"></script>
+</article>`;
   return html;
 }
 
 function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origin: string): string {
   const entry = catalog[row.id];
   const result = resultLine(row.status, row.evidence, row.na_reason);
-  const fixable = isFixable(row.status);
+  const fixable = isFixable(row);
   const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
   const goal = entry?.goal ?? assembled.goal;
 
@@ -212,10 +220,23 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
     body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
   }
 
-  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>
+  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''} data-id="${escHtml(row.id)}">
       <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;
+}
+
+// Evidence strings carry probed-server values (serverInfo names,
+// Allow-Origin headers), so the target controls them. The HTML twin
+// neutralizes them through escHtml; on the markdown twin a newline
+// breaks out of the bullet and a backtick opens a code span, so inline
+// text is flattened and fenced blocks lose any embedded fence.
+function mdInline(text: string): string {
+  return text.replace(/[\r\n]+/g, ' ').replaceAll('`', '\\`');
+}
+
+function mdFenced(text: string): string {
+  return text.replaceAll('```', "'''");
 }
 
 /** Markdown twin for /web/<domain>.md. Absolute links for cross-origin fetch. */
@@ -247,12 +268,12 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     for (const row of rows) {
       const entry = catalog[row.id];
       const result = resultLine(row.status, row.evidence, row.na_reason);
-      const fixable = isFixable(row.status);
+      const fixable = isFixable(row);
       const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
       lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
       if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
       lines.push(`- Goal: ${entry?.goal ?? assembled.goal}.`);
-      lines.push(`- Result: ${result}`);
+      lines.push(`- Result: ${mdInline(result)}`);
       if (fixable) lines.push(`- Fix: ${assembled.fix.replace(/\s*\n\s*/g, ' ')}`);
       const resources = [
         ...assembled.resources.map((r) => `[${r.label}](${r.url})`),
@@ -260,7 +281,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
       ];
       lines.push(`- Resources: ${resources.join(', ')}`);
       if (fixable) {
-        lines.push('', '```text', assembled.prompt, '```');
+        lines.push('', '```text', mdFenced(assembled.prompt), '```');
       }
       lines.push('');
     }

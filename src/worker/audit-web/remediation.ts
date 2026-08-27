@@ -95,6 +95,16 @@ export function assembleRemediation(
 }
 
 /**
+ * Whether a status warrants a fix prompt. `noncompliant` joins `broken`
+ * and `absent`: the surface works, and the spec detail it violates is
+ * precisely what the fix addresses. A row's `unprobed` flag overrides
+ * this at the call site, because the run holds no observation to fix.
+ */
+export function isFixableStatus(status: ScorecardStatus): boolean {
+  return status === 'broken' || status === 'noncompliant' || status === 'absent';
+}
+
+/**
  * The always-shown Result line, derived uniformly from status + evidence
  * (affirmative for pass, negative otherwise). Bespoke per-check copy is
  * a deferred optional override.
@@ -104,12 +114,16 @@ export function resultLine(status: ScorecardStatus, evidence: string | null, naR
   switch (status) {
     case 'pass':
       return `Verified${detail}`;
+    case 'noncompliant':
+      return `Works but does not conform${detail}`;
     case 'broken':
       return `Present but broken${detail}`;
     case 'absent':
       return `Not found${detail}`;
     case 'n_a':
-      return naReason === 'optional-absent' ? `Not implemented, optional${detail}` : `Not applicable${detail}`;
+      if (naReason === 'optional-absent') return `Not implemented, optional${detail}`;
+      if (naReason === 'posture-consistent') return `Deliberate posture, not scored${detail}`;
+      return `Not applicable${detail}`;
     case 'skip':
       return `Not evaluated: audit deadline exceeded${detail}`;
     case 'error':

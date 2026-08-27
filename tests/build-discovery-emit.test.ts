@@ -50,7 +50,7 @@ describe('MCP server card seed (built dist/)', () => {
     expect(parsed.$schema).toContain('mcp-server-card');
     expect(parsed.mcp_endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.version).toBe('1.0');
-    expect(parsed.protocolVersion).toBe('2025-06-18');
+    expect(parsed.protocolVersion).toBe('2026-07-28');
     expect(parsed.transport.type).toBe('streamable-http');
     expect(parsed.transport.endpoint).toBe('https://anc.dev/mcp');
     expect(parsed.url).toBe('https://anc.dev/mcp');

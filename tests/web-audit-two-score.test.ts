@@ -12,6 +12,7 @@ import {
   categoryRollups,
   DEFAULT_BROKEN_FACTOR,
   DEFAULT_SCORE_WEIGHTS,
+  NONCOMPLIANT_CREDIT,
   type ScoreWeights,
   scoreWebAudit,
   universeMaxOf,
@@ -22,11 +23,12 @@ const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const FIXTURE_PATH = join(REPO_ROOT, 'tests', 'fixtures', 'web-audit-score-parity.json');
 const PY_TOOL = join(REPO_ROOT, 'scripts', 'scoring', 'score_model.py');
 
-type TierOutcome = [keyof ScoreWeights, 'pass' | 'broken' | 'absent' | 'n_a'];
+type TierOutcome = [keyof ScoreWeights, 'pass' | 'noncompliant' | 'broken' | 'absent' | 'n_a'];
 
 interface ParityFixture {
   weights: ScoreWeights;
   broken_factor: number;
+  noncompliant_credit: number;
   universe_tiers: Array<keyof ScoreWeights>;
   rows: TierOutcome[];
   expected: { relative: number; global: number };
@@ -109,9 +111,36 @@ describe('scoreWebAudit', () => {
     expect(noisy).toEqual(clean);
   });
 
-  test('defaults are 5/3/1 weights and a 0.75 broken factor', () => {
+  test('defaults are 5/3/1 weights, a 0.75 broken factor and a 0.25 noncompliant credit', () => {
     expect(DEFAULT_SCORE_WEIGHTS).toEqual({ must: 5, should: 3, may: 1 });
     expect(DEFAULT_BROKEN_FACTOR).toBe(0.75);
+    expect(NONCOMPLIANT_CREDIT).toBe(0.25);
+  });
+
+  test('noncompliant is priced between pass and absent at every tier', () => {
+    for (const keyword of ['must', 'should', 'may'] as const) {
+      const at = (status: 'pass' | 'noncompliant' | 'absent' | 'broken') =>
+        scoreWebAudit(
+          [
+            { keyword: 'must', status: 'pass' },
+            { keyword, status },
+          ],
+          UNIVERSE_MAX,
+        ).earned;
+      const ordered =
+        at('pass') > at('noncompliant') && at('noncompliant') > at('absent') && at('absent') > at('broken');
+      expect(`${keyword} ordered: ${ordered}`).toBe(`${keyword} ordered: true`);
+    }
+  });
+
+  test('a noncompliant row occupies its full weight in the relative denominator', () => {
+    // Unlike an absent SHOULD, a noncompliant row carries an observation,
+    // so it must not shrink the denominator the way a miss does.
+    const noncompliant = scoreWebAudit(bucketRows({ should_noncompliant: 1 }), UNIVERSE_MAX);
+    const absent = scoreWebAudit(bucketRows({ should_absent: 1 }), UNIVERSE_MAX);
+    // earned 0.75 over a denominator of 3 vs earned 0 over a denominator of 1.5.
+    expect(noncompliant.relative).toBe(25);
+    expect(absent.relative).toBe(0);
   });
 });
 
@@ -126,6 +155,7 @@ describe('score_model.py parity (shared fixture)', () => {
     const score = scoreWebAudit(rowsToResults(fixture.rows), universeMax, {
       weights: fixture.weights,
       brokenFactor: fixture.broken_factor,
+      noncompliantCredit: fixture.noncompliant_credit,
     });
     expect({ relative: score.relative, global: score.global }).toEqual(fixture.expected);
   });
@@ -159,9 +189,21 @@ describe('categoryRollups', () => {
       { id: 'mcp', name: 'MCP', passed: 0, counted: 0 },
     ]);
   });
+
+  test('a noncompliant row counts against the category but does not pass it', () => {
+    // A scored row has to appear in the denominator it was scored in, or
+    // the rollup and the score disagree about what applied to the site.
+    const results = [
+      { category: 'mcp', status: 'pass' },
+      { category: 'mcp', status: 'noncompliant' },
+    ] as Array<Pick<EngineResult, 'category' | 'status'>>;
+    expect(categoryRollups(results, ['mcp'], { mcp: 'MCP' })).toEqual([
+      { id: 'mcp', name: 'MCP', passed: 1, counted: 2 },
+    ]);
+  });
 });
 
-describe('buildWebScorecard (schema 0.2)', () => {
+describe('buildWebScorecard (schema 0.4)', () => {
   function engineRow(partial: Partial<EngineResult>): EngineResult {
     return {
       id: 'llms-txt',
@@ -209,7 +251,7 @@ describe('buildWebScorecard (schema 0.2)', () => {
 
   test('carries score_pct (RELATIVE), the score pair, and no badge', () => {
     expect(scorecard.schema_version).toBe(WEB_SCHEMA_VERSION);
-    expect(WEB_SCHEMA_VERSION).toBe('0.2');
+    expect(WEB_SCHEMA_VERSION).toBe('0.4');
     expect(typeof scorecard.score_pct).toBe('number');
     expect(scorecard.score_pct).toBe(scorecard.score.relative);
     expect(typeof scorecard.score.global).toBe('number');

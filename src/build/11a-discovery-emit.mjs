@@ -26,7 +26,7 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
-const MCP_SPEC_VERSION = '2025-06-18';
+const MCP_SPEC_VERSION = '2026-07-28';
 const MCP_CARD_SCHEMA = 'https://static.modelcontextprotocol.io/schemas/mcp-server-card/v1.json';
 const MCP_CARD_VERSION = '1.0';
 const ANC_CONTACT = '97-boss-beetle@icloud.com';

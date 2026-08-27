@@ -16,6 +16,7 @@
 
 import { SPEC_VERSION } from '../spec-version.gen';
 import { get as cacheGet, isPerDomainAuditKey, patchStoredPublicListing, type WebCacheEnv } from './cache';
+import { flushHitMinPurge, queueHitMinPurge, webTag } from './hit-min-purge';
 import { isSeededDomain, loadWebSeed, type WebSeedEnv } from './seed';
 
 export type WebBackfillEnv = WebCacheEnv & WebSeedEnv;
@@ -111,92 +112,104 @@ export async function runWebPublicListingBackfill(
   };
 
   let cursor = opts.cursor;
-  do {
-    let page: R2Objects;
-    try {
-      page = await env.SCORE_CACHE.list({
-        prefix: 'audits/web/',
-        include: ['customMetadata'],
-        cursor,
-        limit: BACKFILL_LIST_LIMIT,
-      });
-    } catch (err) {
-      // A list failure ends this run without claiming completion; the
-      // re-run-until-zero protocol picks up from the same cursor.
-      console.log(JSON.stringify({ scope: BACKFILL_SCOPE, phase: 'list', error: errMsg(err) }));
-      result.cursor = cursor ?? null;
-      result.done = false;
-      return result;
-    }
-
-    for (const obj of page.objects) {
-      if (!isPerDomainAuditKey(obj.key, specVersion)) continue; // skip aggregate + off-version keys
-      result.scanned++;
-
-      // Fill-if-absent: an object that already carries a flag in metadata is
-      // left untouched, so a re-run never overwrites an explicit value.
-      if (obj.customMetadata?.public_listing !== undefined) {
-        result.skipped++;
-        continue;
-      }
-
-      // No stored flag: read the body to derive the domain and to carry the
-      // prior scored_at forward through the preserving writer.
-      const cached = await cacheGet(env, obj.key);
-      if (!cached) {
-        // Unreadable or corrupt body (cacheGet logged and deleted it):
-        // count as failed so the run does not report a false zero.
-        result.failed++;
-        console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'unreadable', key: obj.key }));
-        continue;
-      }
-
-      let domain: string;
+  try {
+    do {
+      let page: R2Objects;
       try {
-        domain = new URL(cached.target_url).host;
-      } catch {
-        // A malformed target_url cannot be classified; count it failed so
-        // the run never converges to a false zero over an unmigrated object,
-        // and so the seed-load guard stays the only throw that escapes.
-        result.failed++;
-        console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'bad_target_url', key: obj.key }));
-        continue;
+        page = await env.SCORE_CACHE.list({
+          prefix: 'audits/web/',
+          include: ['customMetadata'],
+          cursor,
+          limit: BACKFILL_LIST_LIMIT,
+        });
+      } catch (err) {
+        // A list failure ends this run without claiming completion; the
+        // re-run-until-zero protocol picks up from the same cursor.
+        console.log(JSON.stringify({ scope: BACKFILL_SCOPE, phase: 'list', error: errMsg(err) }));
+        result.cursor = cursor ?? null;
+        result.done = false;
+        return result;
       }
-      const value = await isSeededDomain(env, domain);
-      result.would_write++;
-      result.diffs.push({ key: obj.key, domain, public_listing: value });
-      console.log(
-        JSON.stringify({
-          scope: BACKFILL_SCOPE,
-          action: dryRun ? 'would_add' : 'add',
-          key: obj.key,
-          domain,
-          public_listing: value,
-        }),
-      );
 
-      if (dryRun) continue;
+      let wroteThisPage = false;
+      for (const obj of page.objects) {
+        if (!isPerDomainAuditKey(obj.key, specVersion)) continue; // skip aggregate + off-version keys
+        result.scanned++;
 
-      const ok = await patchStoredPublicListing(env, cached, value);
-      if (ok) result.written++;
-      else result.failed++;
-    }
+        // Fill-if-absent: an object that already carries a flag in metadata is
+        // left untouched, so a re-run never overwrites an explicit value.
+        if (obj.customMetadata?.public_listing !== undefined) {
+          result.skipped++;
+          continue;
+        }
 
-    cursor = page.truncated ? page.cursor : undefined;
+        // No stored flag: read the body to derive the domain and to carry the
+        // prior scored_at forward through the preserving writer.
+        const cached = await cacheGet(env, obj.key);
+        if (!cached) {
+          // Unreadable or corrupt body (cacheGet logged and deleted it):
+          // count as failed so the run does not report a false zero.
+          result.failed++;
+          console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'unreadable', key: obj.key }));
+          continue;
+        }
 
-    // Bound the run in both modes: a dry run still pays a body read per
-    // unflagged object, so an unbounded pass would exhaust the invocation's
-    // subrequest budget on a large bucket. Once the budget is spent and
-    // objects remain, return the resume cursor.
-    const progressed = dryRun ? result.would_write : result.written + result.failed;
-    if (progressed >= maxWrites && cursor) {
-      result.cursor = cursor;
-      result.done = false;
-      return result;
-    }
-  } while (cursor);
+        let domain: string;
+        try {
+          domain = new URL(cached.target_url).host;
+        } catch {
+          // A malformed target_url cannot be classified; count it failed so
+          // the run never converges to a false zero over an unmigrated object,
+          // and so the seed-load guard stays the only throw that escapes.
+          result.failed++;
+          console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'bad_target_url', key: obj.key }));
+          continue;
+        }
+        const value = await isSeededDomain(env, domain);
+        result.would_write++;
+        result.diffs.push({ key: obj.key, domain, public_listing: value });
+        console.log(
+          JSON.stringify({
+            scope: BACKFILL_SCOPE,
+            action: dryRun ? 'would_add' : 'add',
+            key: obj.key,
+            domain,
+            public_listing: value,
+          }),
+        );
 
-  result.cursor = null;
-  result.done = true;
-  return result;
+        if (dryRun) continue;
+
+        const ok = await patchStoredPublicListing(env, cached, value);
+        if (ok) {
+          result.written++;
+          wroteThisPage = true;
+        } else result.failed++;
+      }
+
+      if (wroteThisPage) {
+        queueHitMinPurge([webTag()]);
+        wroteThisPage = false;
+      }
+
+      cursor = page.truncated ? page.cursor : undefined;
+
+      // Bound the run in both modes: a dry run still pays a body read per
+      // unflagged object, so an unbounded pass would exhaust the invocation's
+      // subrequest budget on a large bucket. Once the budget is spent and
+      // objects remain, return the resume cursor.
+      const progressed = dryRun ? result.would_write : result.written + result.failed;
+      if (progressed >= maxWrites && cursor) {
+        result.cursor = cursor;
+        result.done = false;
+        return result;
+      }
+    } while (cursor);
+
+    result.cursor = null;
+    result.done = true;
+    return result;
+  } finally {
+    await flushHitMinPurge();
+  }
 }

@@ -214,11 +214,29 @@ describe('all vs curated views', () => {
     expect(html).toMatch(/<a[^>]*class="tier-filter"[^>]*href="\/web"[^>]*>All<\/a>/);
   });
 
-  test('toggle links preserve a present ?sort=relative', async () => {
+  test('default board marks Relative active; Global is the opt-in', async () => {
+    const env = makeEnv(BOARD, { listed: [] });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web'), env)).text();
+    expect(html).toMatch(
+      /data-web-sort="relative"[^>]*aria-pressed="true"|class="tier-filter tier-filter--active"[^>]*data-web-sort="relative"/,
+    );
+    expect(html).toContain('data-web-sort="relative"');
+    expect(html).toContain('data-web-sort="global"');
+  });
+
+  test('toggle links preserve a present ?sort=global', async () => {
+    const env = makeEnv(BOARD, { listed: [listedAudit('user.dev', 40, 55)] });
+    const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?sort=global'), env)).text();
+    expect(html).toContain('href="/web?sort=global"');
+    expect(html).toContain('href="/web?view=curated&amp;sort=global"');
+  });
+
+  test('?sort=relative does not pollute view-toggle hrefs (Relative is the default)', async () => {
     const env = makeEnv(BOARD, { listed: [listedAudit('user.dev', 40, 55)] });
     const html = await (await handleWebLeaderboard(new Request('https://anc.dev/web?sort=relative'), env)).text();
-    expect(html).toContain('href="/web?sort=relative"');
-    expect(html).toContain('href="/web?view=curated&amp;sort=relative"');
+    expect(html).not.toContain('sort=relative');
+    expect(html).toContain('href="/web"');
+    expect(html).toContain('href="/web?view=curated"');
   });
 
   test('a user-submitted row carries the marker; curated rows do not', async () => {

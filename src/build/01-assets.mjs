@@ -74,6 +74,7 @@ export async function copyAssets({ repoRoot, distDir }) {
 
   // 7. Client JS.
   const themeJs = await bundleClient(join(repoRoot, 'src/client/theme.ts'), join(distDir, 'js/theme.js'));
+  const surfaceJs = await bundleClient(join(repoRoot, 'src/client/surface.ts'), join(distDir, 'js/surface.js'));
   // Nav panel Escape-to-close (the checkbox itself is keyboard-operable
   // without JS). Loaded with defer from every shell alongside theme.js.
   const navJs = await bundleClient(join(repoRoot, 'src/client/nav.ts'), join(distDir, 'js/nav.js'));
@@ -108,6 +109,7 @@ export async function copyAssets({ repoRoot, distDir }) {
   return {
     themeInit,
     themeJs,
+    surfaceJs,
     navJs,
     clipboardJs,
     leaderboardJs,

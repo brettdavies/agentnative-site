@@ -1,9 +1,9 @@
 // Inline <head> script — runs synchronously BEFORE paint to avoid a
 // flash of incorrect theme (FOUC). Two jobs:
 //
-//   1. Apply the persisted theme preference from localStorage to <html>.
+//   1. Apply a persisted light/dark preference from localStorage to <html>.
 //      If none set, leave `data-theme` off and let prefers-color-scheme
-//      drive via CSS.
+//      drive via CSS (the header button still resolves that as light/dark).
 //   2. Add `.js` to <html> class list so the progressive-enhancement CSS
 //      rule `:root.js .theme-cycle { display: inline-flex }` unhides the
 //      theme button (docs/DESIGN.md §4.8 C6).

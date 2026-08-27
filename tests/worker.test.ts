@@ -8,7 +8,7 @@
 // no wrangler dev needed.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { detectPreference } from '../src/worker/accept';
+import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isStagingHost } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/handler';
@@ -161,6 +161,133 @@ describe('detectPreference — User-Agent allowlist', () => {
 });
 
 // ---------------------------------------------------------------------------
+// classifyGatewayRequest — format-class cache key (edge HIT restore U2 / AE4)
+// ---------------------------------------------------------------------------
+
+describe('classifyGatewayRequest — format-class table', () => {
+  test('Chrome text/html and Chrome */* share one HTML class after normalize', () => {
+    const html = classifyGatewayRequest(req('https://anc.dev/about', 'text/html', UA.browser));
+    const star = classifyGatewayRequest(req('https://anc.dev/about', '*/*', UA.browser));
+    expect(html.headers.get('accept')).toBe('text/html');
+    expect(star.headers.get('accept')).toBe('text/html');
+    expect(html.headers.get('user-agent')).toBeNull();
+    expect(star.headers.get('user-agent')).toBeNull();
+  });
+
+  test('Safari vs Chrome HTML shards collapse to the same UA class', () => {
+    const chrome = classifyGatewayRequest(req('https://anc.dev/about', 'text/html', UA.browser));
+    const safari = classifyGatewayRequest(
+      req(
+        'https://anc.dev/about',
+        'text/html',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+      ),
+    );
+    expect(chrome.headers.get('accept')).toBe(safari.headers.get('accept'));
+    expect(chrome.headers.get('user-agent')).toBe(safari.headers.get('user-agent'));
+  });
+
+  test('curl */* is the markdown class; Chrome text/html is not', () => {
+    const curl = classifyGatewayRequest(req('https://anc.dev/', '*/*', UA.curl));
+    const chrome = classifyGatewayRequest(req('https://anc.dev/', 'text/html', UA.browser));
+    expect(curl.headers.get('accept')).toBe('text/markdown');
+    expect(curl.headers.get('user-agent')).toBe('curl/');
+    expect(chrome.headers.get('accept')).toBe('text/html');
+    expect(chrome.headers.get('user-agent')).toBeNull();
+  });
+
+  test('Accept: text/markdown with a browser UA is markdown (explicit Accept wins)', () => {
+    const classified = classifyGatewayRequest(req('https://anc.dev/', 'text/markdown', UA.browser));
+    expect(classified.headers.get('accept')).toBe('text/markdown');
+    expect(classified.headers.get('user-agent')).toBe('curl/');
+  });
+
+  test('header-less GET / is the HTML class (no-UA → HTML)', () => {
+    const classified = classifyGatewayRequest(req('https://anc.dev/'));
+    expect(classified.headers.get('accept')).toBe('text/html');
+    expect(classified.headers.get('user-agent')).toBeNull();
+  });
+
+  test('GET /mcp with Accept: application/json keeps JSON Accept (not the site HTML/markdown pair)', () => {
+    const json = classifyGatewayRequest(req('https://anc.dev/mcp', 'application/json'));
+    const html = classifyGatewayRequest(req('https://anc.dev/mcp', 'text/html', UA.browser));
+    expect(json.headers.get('accept')).toBe('application/json');
+    expect(html.headers.get('accept')).toBe('text/html');
+  });
+
+  test('GET /mcp with curl UA and */* is markdown, not HTML', () => {
+    const curl = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.curl));
+    const browser = classifyGatewayRequest(req('https://anc.dev/mcp', '*/*', UA.browser));
+    expect(curl.headers.get('accept')).toBe('text/markdown');
+    expect(browser.headers.get('accept')).toBe('text/html');
+  });
+
+  test('www.anc.dev coalesces to anc.dev; staging hosts are left alone', () => {
+    const www = classifyGatewayRequest(req('https://www.anc.dev/about', 'text/html', UA.browser));
+    expect(new URL(www.url).hostname).toBe('anc.dev');
+    const staging = classifyGatewayRequest(
+      req('https://agentnative-site-staging.example.workers.dev/about', 'text/html', UA.browser),
+    );
+    expect(new URL(staging.url).hostname).toBe('agentnative-site-staging.example.workers.dev');
+  });
+
+  test('POST /mcp does not smash Accept into the site-surface pair', () => {
+    const post = classifyGatewayRequest(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { accept: 'application/json, text/event-stream' },
+      }),
+    );
+    expect(post.headers.get('accept')).toBe('application/json, text/event-stream');
+  });
+
+  test('/api/score keeps inbound Accept q-values (not smashed to the HTML/markdown pair)', () => {
+    const classified = classifyGatewayRequest(
+      req('https://anc.dev/api/score', 'text/markdown;q=0.1, application/json;q=0.9'),
+    );
+    expect(classified.headers.get('accept')).toBe('text/markdown;q=0.1, application/json;q=0.9');
+  });
+});
+
+describe('gateway dispatch — inner Cached is the fetch target', () => {
+  test('ctx.exports.Cached.fetch receives the classified request', async () => {
+    const seen: Request[] = [];
+    const ctx = {
+      exports: {
+        Cached: {
+          fetch(request: Request) {
+            seen.push(request);
+            return new Response('inner', { headers: { 'content-type': 'text/html' } });
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    const res = await worker.fetch(req('https://anc.dev/about', '*/*', UA.browser), makeEnv(), ctx);
+    expect(await res.text()).toBe('inner');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.headers.get('accept')).toBe('text/html');
+    expect(seen[0]?.headers.get('user-agent')).toBeNull();
+  });
+
+  test('GET /mcp JSON 301 is classified separately from an HTML GET /mcp', async () => {
+    const seen: string[] = [];
+    const ctx = {
+      exports: {
+        Cached: {
+          fetch(request: Request) {
+            seen.push(request.headers.get('accept') ?? '');
+            return new Response('inner');
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    await worker.fetch(req('https://anc.dev/mcp', 'application/json'), makeEnv(), ctx);
+    await worker.fetch(req('https://anc.dev/mcp', 'text/html', UA.browser), makeEnv(), ctx);
+    expect(seen).toEqual(['application/json', 'text/html']);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // isStagingHost — the three-line guard.
 // ---------------------------------------------------------------------------
 
@@ -181,7 +308,7 @@ describe('isStagingHost', () => {
 // ---------------------------------------------------------------------------
 
 describe('applyHeaders — HTML branch', () => {
-  test('/p3 HTML: Link rel=alternate + X-Llms-Txt + short cache', () => {
+  test('/p3 HTML: Link rel=alternate + X-Llms-Txt + HIT-1d browser TTL', () => {
     const res = applyHeaders(new Response('html'), {
       request: req('https://anc.dev/p3'),
       servedMarkdown: false,
@@ -190,25 +317,29 @@ describe('applyHeaders — HTML branch', () => {
     expect(res.headers.get('Link')).toBe('</p3.md>; rel="alternate"; type="text/markdown"');
     expect(res.headers.get('X-Llms-Txt')).toBe('/llms.txt');
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
-    expect(res.headers.get('Cache-Control')).toContain('stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
     expect(res.headers.get('X-Robots-Tag')).toBeNull();
   });
 
-  // Characterization (2026-08-25 production curl): `https://anc.dev/` HTML HIT
-  // carried applyHeaders Link + `s-maxage=86400` but omitted Vary. Cloudflare's
-  // zone cache stores the Worker response and does not preserve Vary except
-  // Accept-Encoding unless a Cache Rule enables it. Negotiated HTML/markdown
-  // therefore MUST NOT invite shared-cache reuse; JSON/SVG still may.
-  test('HTML negotiated responses skip shared-cache TTL so Vary reaches clients', () => {
+  // Negotiated HIT-1d uses CDN max-age=86400 without s-maxage on Cache-Control
+  // so the custom-domain zone cache cannot store a Vary-stripped copy.
+  // Homepage `/` is HIT-min (tested below), not this class.
+  test('negotiated /about HTML is HIT-1d: Vary, no s-maxage, CDN 86400, not no-store', () => {
     const res = applyHeaders(new Response('html'), {
-      request: req('https://anc.dev/'),
+      request: req('https://anc.dev/about'),
       servedMarkdown: false,
-      pathname: '/',
+      pathname: '/about',
     });
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Vary')?.toLowerCase()).not.toContain('accept-encoding');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
     expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
-    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).not.toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
   });
 
   test('/ HTML: Link carries the twin alternate plus the machine-surface discovery rels', () => {
@@ -228,7 +359,7 @@ describe('applyHeaders — HTML branch', () => {
 });
 
 describe('applyHeaders — markdown branch', () => {
-  test('/p3.md: Content-Type + X-Robots-Tag noindex + short cache', () => {
+  test('/p3.md: Content-Type + X-Robots-Tag noindex + no Vary (path-keyed HIT-1d)', () => {
     const res = applyHeaders(new Response('md'), {
       request: req('https://anc.dev/p3.md'),
       servedMarkdown: true,
@@ -236,20 +367,162 @@ describe('applyHeaders — markdown branch', () => {
     });
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('X-Robots-Tag')).toBe('noindex');
-    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Vary')).toBeNull();
     expect(res.headers.get('Link')).toBeNull();
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
   });
 
-  test('markdown negotiated responses skip shared-cache TTL so Vary reaches clients', () => {
+  test('/about.md has no Vary and HIT-1d CDN TTL', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/about.md'),
+      servedMarkdown: true,
+      pathname: '/about.md',
+    });
+    expect(res.headers.get('Vary')).toBeNull();
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('negotiated /about markdown keeps Vary and does not send CDN no-store', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/about'),
+      servedMarkdown: true,
+      pathname: '/about',
+    });
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).not.toBe('no-store');
+  });
+});
+
+describe('applyHeaders — HIT-min live boards', () => {
+  test('/ HTML is HIT-min: home tag, split TTL, Vary', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/'),
+      servedMarkdown: false,
+      pathname: '/',
+    });
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cache-Tag')).toBe('home');
+  });
+
+  test('negotiated / markdown is HIT-min with Vary and the home tag', () => {
     const res = applyHeaders(new Response('md'), {
       request: req('https://anc.dev/'),
       servedMarkdown: true,
       pathname: '/',
     });
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
-    expect(res.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
-    expect(res.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cache-Tag')).toBe('home');
+  });
+
+  test('/index.md has no Vary and HIT-min home tag', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/index.md'),
+      servedMarkdown: true,
+      pathname: '/index.md',
+    });
+    expect(res.headers.get('Vary')).toBeNull();
+    expect(res.headers.get('Cache-Tag')).toBe('home');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+  });
+
+  test('/web.md is no-Vary HIT-min even when Link pathname is HTML-canonical /web', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/web.md'),
+      servedMarkdown: true,
+      pathname: '/web',
+    });
+    expect(res.headers.get('Vary')).toBeNull();
+    expect(res.headers.get('Cache-Tag')).toBe('web');
+    expect(res.headers.get('Link')).toBeNull();
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+  });
+
+  test('/web?view=all and /web?view=curated carry the web tag', () => {
+    for (const url of ['https://anc.dev/web?view=all', 'https://anc.dev/web?view=curated']) {
+      const res = applyHeaders(new Response('html'), {
+        request: req(url),
+        servedMarkdown: false,
+        pathname: '/web',
+      });
+      expect(res.headers.get('Cache-Tag')).toBe('web');
+      expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    }
+  });
+
+  test('/web/<domain> carries only web:{domain}, not web', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/web/example.com'),
+      servedMarkdown: false,
+      pathname: '/web/example.com',
+    });
+    expect(res.headers.get('Cache-Tag')).toBe('web:example.com');
+    expect(res.headers.get('Cache-Tag')).not.toBe('web');
+    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+  });
+
+  test('/web/<domain>.md is no-Vary HIT-min with only web:{domain}', () => {
+    const res = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/web/example.com.md'),
+      servedMarkdown: true,
+      pathname: '/web/example.com',
+    });
+    expect(res.headers.get('Vary')).toBeNull();
+    expect(res.headers.get('Cache-Tag')).toBe('web:example.com');
+  });
+});
+
+describe('applyHeaders — MISS class', () => {
+  test('Worker 404 is no-store and untagged', () => {
+    const res = applyHeaders(new Response('missing', { status: 404 }), {
+      request: req('https://anc.dev/anc-web-audit-no-such-page'),
+      servedMarkdown: false,
+      pathname: '/anc-web-audit-no-such-page',
+    });
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('Worker 5xx is no-store and untagged so it cannot become a skip-Worker HIT', () => {
+    const res = applyHeaders(new Response('boom', { status: 500 }), {
+      request: req('https://anc.dev/about'),
+      servedMarkdown: false,
+      pathname: '/about',
+    });
+    expect(res.status).toBe(500);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('pre-audit /web/<domain> 404 is no-store and untagged so the first audit is visible', () => {
+    const res = applyHeaders(new Response('not audited', { status: 404 }), {
+      request: req('https://anc.dev/web/never-audited.dev'),
+      servedMarkdown: false,
+      pathname: '/web/never-audited.dev',
+    });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('/web/scoring* is MISS even on 200', () => {
+    const res = applyHeaders(new Response('scoring'), {
+      request: req('https://anc.dev/web/scoring/example.com'),
+      servedMarkdown: false,
+      pathname: '/web/scoring/example.com',
+    });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
   });
 });
 
@@ -721,6 +994,8 @@ describe('worker.fetch — agent-friendly 404', () => {
     const res = await worker.fetch(req('https://anc.dev/anc-web-audit-no-such-page'), env, {} as ExecutionContext);
     expect(res.status).toBe(404);
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
     const html = await res.text();
     expect(html).toContain('<h1>Not found</h1>');
     expect(html).toContain('https://anc.dev/sitemap.xml');
@@ -738,6 +1013,8 @@ describe('worker.fetch — agent-friendly 404', () => {
     expect(res.status).toBe(404);
     expect(res.headers.get('Content-Type')).toBe('text/markdown; charset=utf-8');
     expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
     const md = await res.text();
     expect(md).toContain('[Sitemap](https://anc.dev/sitemap.xml)');
     expect(md).toContain('[llms.txt](https://anc.dev/llms.txt)');

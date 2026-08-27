@@ -1,10 +1,10 @@
 // Web leaderboard sort toggle (plan-003 U15, KTD-9). The board ships
-// sorted by GLOBAL; the segmented control re-sorts by RELATIVE and back,
-// persisting the selection in a `?sort=` URL param so a shared or
-// reloaded board keeps the sort. Rows carry data-global / data-relative
-// / data-domain from the build emit.
+// sorted by RELATIVE; the segmented control re-sorts by GLOBAL and back,
+// persisting Global in a `?sort=global` URL param so a shared or reloaded
+// board keeps that order. Relative is the default and omits `?sort=`.
+// Rows carry data-global / data-relative / data-domain from the render.
 //
-// Markup (emitted by buildWebLeaderboardBody in web-leaderboard-render.mjs):
+// Markup (emitted by buildWebLeaderboardBody in leaderboard-render.ts):
 //   <button class="tier-filter" data-web-sort="global|relative">
 //   <table class="leaderboard-table"> <tr data-global data-relative data-domain>
 
@@ -42,7 +42,7 @@ function applySort(key: SortKey, updateUrl: boolean): void {
   }
   if (updateUrl) {
     const url = new URL(window.location.href);
-    if (key === 'global') url.searchParams.delete('sort');
+    if (key === 'relative') url.searchParams.delete('sort');
     else url.searchParams.set('sort', key);
     history.replaceState(null, '', url.toString());
   }
@@ -51,11 +51,9 @@ function applySort(key: SortKey, updateUrl: boolean): void {
 if (table && buttons.length > 0) {
   for (const btn of buttons) {
     btn.addEventListener('click', () => {
-      applySort((btn.dataset.webSort as SortKey) ?? 'global', true);
+      applySort((btn.dataset.webSort as SortKey) ?? 'relative', true);
     });
   }
   const requested = new URL(window.location.href).searchParams.get('sort');
-  if (requested === 'relative') applySort('relative', false);
+  if (requested === 'global') applySort('global', false);
 }
-
-export {};

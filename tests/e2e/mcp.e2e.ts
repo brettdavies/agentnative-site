@@ -2,7 +2,6 @@
 //
 // Opt-in suite (project: staging-mcp). Excluded from the default
 // `bun run test:e2e` run because it hits the real CF staging Worker, the
-// agents@^0.13.3 + @modelcontextprotocol/sdk runtime in workerd, and the
 // real registry-index.json + mcp-catalog.json bundle. Use to validate a
 // staging deploy before promoting to production or to triage a
 // regression that the bun unit suite can't reproduce against workerd.
@@ -23,6 +22,13 @@
 // past the bun unit + raw-JSON-RPC layers.
 
 import { expect, test } from '@playwright/test';
+import {
+  modernToolCallBody,
+  modernToolCallBodyMissingCapabilities,
+  modernToolCallHeaders,
+  modernToolsListBody,
+  modernToolsListHeaders,
+} from '../helpers/mcp-modern';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
@@ -53,18 +59,30 @@ type JsonRpcBody = {
     protocolVersion?: string;
     capabilities?: { resources?: { subscribe?: boolean } };
     instructions?: string;
-    tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+    tools?: Array<{
+      name: string;
+      title?: string;
+      description?: string;
+      inputSchema?: unknown;
+      annotations?: Record<string, unknown>;
+    }>;
     resources?: Array<{ uri: string; name?: string }>;
     resourceTemplates?: Array<{ uriTemplate: string; name?: string }>;
     content?: Array<{ type: string; text: string }>;
     contents?: Array<{ uri: string; mimeType: string; text: string }>;
     isError?: boolean;
+    ttlMs?: number;
+    cacheScope?: string;
   };
   error?: { code: number; message: string };
 };
 
+// The two tools that reach external systems and write cache / leaderboard
+// state; every other tool is annotated read-only.
+const NON_READ_TOOLS = new Set(['score_cli', 'audit_website']);
+
 test.describe('staging /mcp — handshake', () => {
-  test('initialize returns serverInfo.name "anc" and protocolVersion "2025-06-18"', async ({ request }) => {
+  test('initialize returns serverInfo.name "anc" and instructions mention 2026-07-28', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/mcp`, {
       headers: MCP_HEADERS,
       data: JSON.stringify({
@@ -82,7 +100,7 @@ test.describe('staging /mcp — handshake', () => {
     const body = (await res.json()) as JsonRpcBody;
     expect(body.error).toBeUndefined();
     expect(body.result?.serverInfo?.name).toBe('anc');
-    expect(body.result?.protocolVersion).toBe('2025-06-18');
+    expect(body.result?.instructions ?? '').toContain('2026-07-28');
   });
 
   test('initialize advertises stateless capabilities (no resources/subscribe)', async ({ request }) => {
@@ -115,7 +133,7 @@ test.describe('staging /mcp — handshake', () => {
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
-    expect(instructions).toContain('2025-06-18');
+    expect(instructions).toContain('2026-07-28');
     expect(instructions).toContain('https://anc.dev/mcp-skill.md');
   });
 });
@@ -175,6 +193,81 @@ test.describe('staging /mcp — tools/list', () => {
       expect((tool.description ?? '').length).toBeGreaterThan(0);
       expect(tool.inputSchema).toBeDefined();
     }
+  });
+
+  test('every tool carries a non-empty title and annotations pinning its read-only posture', async ({ request }) => {
+    await request.post(`${STAGING_BASE}/mcp`, {
+      headers: MCP_HEADERS,
+      data: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+      }),
+    });
+    const res = await request.post(`${STAGING_BASE}/mcp`, {
+      headers: MCP_HEADERS,
+      data: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    const body = (await res.json()) as JsonRpcBody;
+    const tools = body.result?.tools ?? [];
+    expect(tools.length).toBe(13);
+    for (const tool of tools) {
+      expect(typeof tool.title).toBe('string');
+      expect((tool.title ?? '').length).toBeGreaterThan(0);
+      expect(tool.annotations).toEqual(
+        NON_READ_TOOLS.has(tool.name)
+          ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+          : { readOnlyHint: true },
+      );
+    }
+  });
+});
+
+// The modern lane is stateless: SEP-2243 routes on the MCP-Protocol-Version
+// + Mcp-Method headers and a params._meta envelope, so no initialize
+// handshake precedes these probes.
+test.describe('staging /mcp — modern era (2026-07-28)', () => {
+  test('tools/list serves thirteen tools with public cache hints and no initialize', async ({ request }) => {
+    const res = await request.post(`${STAGING_BASE}/mcp`, {
+      headers: { ...MCP_HEADERS, ...modernToolsListHeaders() },
+      data: JSON.stringify(modernToolsListBody()),
+    });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as JsonRpcBody;
+    expect(body.error).toBeUndefined();
+    expect((body.result?.tools ?? []).length).toBe(13);
+    expect(body.result?.ttlMs).toBe(3_600_000);
+    expect(body.result?.cacheScope).toBe('public');
+  });
+
+  test('tools/call get_scorecard returns the registry hit with no initialize', async ({ request }) => {
+    const res = await request.post(`${STAGING_BASE}/mcp`, {
+      headers: { ...MCP_HEADERS, ...modernToolCallHeaders('get_scorecard') },
+      data: JSON.stringify(modernToolCallBody('get_scorecard', { slug: 'ripgrep' })),
+    });
+    expect(res.status()).toBe(200);
+    const body = (await res.json()) as JsonRpcBody;
+    expect(body.result?.isError).toBeFalsy();
+    const parsed = JSON.parse(body.result?.content?.[0]?.text ?? '{}') as {
+      found: boolean;
+      source: string;
+    };
+    expect(parsed.found).toBe(true);
+    expect(parsed.source).toBe('registry');
+  });
+
+  test('_meta missing clientCapabilities draws -32602 at HTTP 400 (AE7)', async ({ request }) => {
+    const res = await request.post(`${STAGING_BASE}/mcp`, {
+      headers: { ...MCP_HEADERS, ...modernToolCallHeaders('get_scorecard') },
+      data: JSON.stringify(modernToolCallBodyMissingCapabilities('get_scorecard', { slug: 'ripgrep' })),
+    });
+    // The envelope rejection is typed HTTP delivery, unlike the shell's
+    // HTTP 200 legacy reject.
+    expect(res.status()).toBe(400);
+    const body = (await res.json()) as JsonRpcBody;
+    expect(body.error?.code).toBe(-32602);
+    expect(body.error?.message ?? '').toContain('clientCapabilities');
   });
 });
 

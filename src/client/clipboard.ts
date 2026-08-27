@@ -4,8 +4,17 @@
 // no dead controls (docs/DESIGN.md §4.8 C6).
 
 import { carriersFromElements, selectAssemblePrompts } from './assemble-prompt';
+import { attachInstallCmd } from './install-cmd';
 
 const COPIED_MS = 1500;
+
+/** Same clipboard glyph as the header install pill (`shell.mjs`). */
+const COPY_ICON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+function copyIconButtonHtml(visibleLabel = 'Copy'): string {
+  return `<span class="copy-button__icon" aria-hidden="true">${COPY_ICON_SVG}</span><span class="visually-hidden" data-copy-label>${visibleLabel}</span>`;
+}
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -36,8 +45,8 @@ function flashCopied(button: HTMLElement) {
   const label = button.querySelector<HTMLElement>('[data-copy-label]') ?? button;
   // Heading anchors hold an inline SVG icon as their only child — they have
   // no [data-copy-label] span and no text content. Snapshot innerHTML in that
-  // case so the icon DOM is restored after the fade. Pre-block buttons keep
-  // the textContent path because their label is a real text node.
+  // case so the icon DOM is restored after the fade. Code-block / prompt
+  // buttons keep a real [data-copy-label] text node (often visually hidden).
   const isIconLabel = label === button && (label.textContent ?? '').trim() === '';
   const original = isIconLabel ? label.innerHTML : (label.textContent ?? '');
   label.textContent = 'Copied';
@@ -77,7 +86,7 @@ function attachPreButtons() {
     btn.type = 'button';
     btn.className = 'copy-button';
     btn.setAttribute('aria-label', 'Copy code');
-    btn.innerHTML = '<span data-copy-label>Copy</span>';
+    btn.innerHTML = copyIconButtonHtml();
     btn.addEventListener('click', async () => {
       const code = pre.querySelector('code')?.textContent ?? pre.textContent ?? '';
       if (await copyText(code)) flashCopied(btn);
@@ -226,6 +235,7 @@ function init() {
   attachPromptButtons();
   attachDataButtons();
   attachAssemblePrompt();
+  attachInstallCmd();
 }
 
 if (document.readyState === 'loading') {

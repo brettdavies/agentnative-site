@@ -306,6 +306,24 @@ describe('regression #6 — /install (CLI install page) — HTML+MD only, no JSO
     }
   });
 
+  test('header ships install-cmd data attrs sourced from content/install.md', async () => {
+    const html = await readFile(join(DIST, 'index.html'), 'utf8');
+    expect(html).toContain('data-install-cmd');
+    expect(html).toContain('data-brew="brew install brettdavies/tap/agentnative"');
+    expect(html).toContain('data-cargo="cargo install agentnative"');
+    expect(html).toContain('data-binstall="cargo binstall agentnative"');
+    expect(html).toContain('data-install-fallback');
+  });
+
+  test('homepage bakes dual hero proof cards (CLI + web snapshot); no WEB_HERO placeholder', async () => {
+    const html = await readFile(join(DIST, 'index.html'), 'utf8');
+    expect(html).not.toContain('{{WEB_HERO_CARD}}');
+    expect(html).toContain('class="hero__proof"');
+    expect(html).toMatch(/hero__proof[\s\S]*data-s="cli"/);
+    expect(html).toMatch(/hero__proof[\s\S]*data-s="web"[\s\S]*audit_website anc\.dev/);
+    expect(html).toContain('aria-label="Web scorecard for anc.dev"');
+  });
+
   test('inline brew/cargo copy lives only in content/install.md (no source-tree duplicates)', async () => {
     // Build-time guard for the dedup goal of Unit 2. Render-stage HTML
     // duplicates would re-grow if a future edit re-inlines the commands.

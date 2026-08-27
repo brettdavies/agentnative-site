@@ -73,6 +73,22 @@ export function buildMcpCatalog({ registryIndex, principles, coverageRows, specS
     registry,
     principles: principlesOut,
     spec_sections: specOut,
+    registered_tool_names: [
+      'audit_website',
+      'get_principle',
+      'get_scorecard',
+      'get_spec_section',
+      'get_tool',
+      'get_web_remediation',
+      'get_website_audit',
+      'list_principles',
+      'list_spec_sections',
+      'list_tools',
+      'list_website_audits',
+      'score_cli',
+      'search_tools',
+    ],
+    registered_resource_templates: ['registry', 'tool', 'principle', 'spec', 'scorecard'],
   };
 }
 

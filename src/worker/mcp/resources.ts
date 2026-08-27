@@ -15,13 +15,15 @@
 // load-bearing).
 //
 // Per MCP spec 2025-06-18 resources/read semantics, a missing resource
-// surfaces via a JSON-RPC -32002 error envelope rather than the tool
-// surface's isError: false typed-state body. The SDK wraps a thrown
-// error from the resource handler into that shape; throwing the
-// ResourceNotFound-shaped error here is the spec-correct signal.
+// surfaces as a JSON-RPC error envelope rather than the tool surface's
+// isError: false typed-state body, so throwing here is the spec-correct
+// signal. The thrown error is tagged -32002, but that is not the code
+// the client sees: the SDK encode seam rewrites it to -32602 on both
+// lanes. Wire codes and their delivery live in
+// docs/runbooks/mcp-wire-protocol.md.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
+import { ResourceTemplate } from '@modelcontextprotocol/server';
 import type { Catalog } from './catalog';
 
 function jsonText(uri: URL, value: unknown) {
@@ -37,8 +39,8 @@ function jsonText(uri: URL, value: unknown) {
 }
 
 function notFound(uri: URL, kind: string, key: string): never {
-  // SDK maps a thrown Error into a JSON-RPC -32002 Resource not found
-  // envelope per MCP spec 2025-06-18.
+  // The -32002 tag below is the handler's signal to the SDK, not the wire
+  // code: the encode seam rewrites it to -32602 before it reaches a client.
   const message = `${kind} not found: ${key}`;
   const err = new Error(message);
   // Tag for SDK / tests that introspect the error code.
@@ -48,7 +50,7 @@ function notFound(uri: URL, kind: string, key: string): never {
 }
 
 export function registerResources(server: McpServer, catalog: Catalog): void {
-  server.resource(
+  server.registerResource(
     'registry',
     'anc://registry',
     {
@@ -59,7 +61,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     async (uri) => jsonText(uri, catalog.registry),
   );
 
-  server.resource(
+  server.registerResource(
     'tool',
     new ResourceTemplate('anc://tool/{slug}', { list: undefined }),
     {
@@ -75,7 +77,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'principle',
     new ResourceTemplate('anc://principle/{n}', { list: undefined }),
     {
@@ -92,7 +94,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'spec',
     new ResourceTemplate('anc://spec/{section}', { list: undefined }),
     {
@@ -108,7 +110,7 @@ export function registerResources(server: McpServer, catalog: Catalog): void {
     },
   );
 
-  server.resource(
+  server.registerResource(
     'scorecard',
     new ResourceTemplate('anc://scorecard/{binary}', { list: undefined }),
     {

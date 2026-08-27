@@ -1,22 +1,36 @@
 // POST /mcp dispatch tests for U4 — covers detectMcpFormat, the
-// MCP_ENABLED kill switch, the method gate (405 Allow:POST), the
+// MCP_ENABLED kill switch, the method gate (405 Allow: GET, POST), the
 // Accept-header gate (406 text/plain), the MCP_LIMITER -32099
-// envelope, the visitor-log gate_result emission, and the response-
+// envelope, the `mcp.request` rate_limited emission, and the response-
 // shaping invariants (no Access-Control-Allow-Origin, Cache-Control:
 // no-store, bypass applyHeaders).
 //
 // U4 lands the dispatch in src/worker/index.ts above the asset-first
 // branch. Tests go through the full Worker entry so the gate ordering
-// (1: MCP_ENABLED, 2: method, 3: format, 4: limiter+log) is exercised
-// end-to-end. The catalog read is stubbed via env.ASSETS in the same
+// (1: MCP_ENABLED, 2: method, 3: format, 4: legacy gate, 5: limiter+log)
+// is exercised end-to-end. The catalog read is stubbed via env.ASSETS in the same
 // shape as tests/worker-mcp.test.ts so this file does not need a real
 // dist/_internal/mcp-catalog.json on disk.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { detectMcpFormat, detectMcpGetFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
-import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
+import { extractTransportErrorCode } from '../src/worker/mcp/telemetry';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import {
+  legacyToolsListBatchBody,
+  modernElementBatchBody,
+  modernResourcesReadBody,
+  modernResourcesReadHeaders,
+  modernToolCallBody,
+  modernToolCallBodyWithClientName,
+  modernToolCallHeaders,
+  modernToolsListBody,
+  modernToolsListHeaders,
+  toolsListBodyClaimingVersion,
+  toolsListHeadersClaimingVersion,
+} from './helpers/mcp-modern';
+import { parseMcpHttpBody, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -52,6 +66,8 @@ const FIXTURE_CATALOG = {
       body_markdown: '# Scoring\n\nFixture.\n',
     },
   ],
+  registered_tool_names: ['get_scorecard', 'list_principles', 'score_cli'],
+  registered_resource_templates: ['registry', 'tool', 'principle', 'spec', 'scorecard'],
 };
 
 interface RateStub {
@@ -67,7 +83,7 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
   description: 'agent-native CLI standard registry: scorecards, principles, vendored spec',
   documentation: 'https://anc.dev/mcp-skill.md',
   serverInfo: { name: 'anc.dev agent-native CLI standard registry', version: '0.5.0' },
-  protocolVersion: '2025-06-18',
+  protocolVersion: '2026-07-28',
   url: 'https://anc.dev/mcp',
   transport: { type: 'streamable-http', endpoint: 'https://anc.dev/mcp' },
   capabilities: {
@@ -81,9 +97,10 @@ const FIXTURE_WELL_KNOWN_MCP = JSON.stringify({
 const FIXTURE_MCP_HTML = '<!doctype html><html><body><h1>anc.dev MCP server</h1></body></html>';
 const FIXTURE_MCP_MD = '# anc.dev MCP server\n\nFixture body.\n';
 
-function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
+function makeEnv(opts: { enabled?: boolean; limiter?: RateStub; legacyEnabled?: boolean } = {}): Env {
   const enabled = opts.enabled ?? true;
   return {
+    ...(opts.legacyEnabled !== undefined && { MCP_LEGACY_ENABLED: opts.legacyEnabled ? 'true' : 'false' }),
     ASSETS: {
       fetch(req: Request) {
         const path = new URL(req.url).pathname;
@@ -147,11 +164,54 @@ function makeEnv(opts: { enabled?: boolean; limiter?: RateStub } = {}): Env {
   };
 }
 
+async function readMcpJson(res: Response) {
+  const raw = await res.text();
+  return parseMcpHttpBody(raw, res.headers.get('content-type'));
+}
+
+function parseMcpRequestLogs(seen: Array<{ args: unknown[] }>) {
+  return seen
+    .map((s) => {
+      if (typeof s.args[0] !== 'string') return null;
+      try {
+        const parsed = JSON.parse(s.args[0]) as { event?: string };
+        return parsed.event === 'mcp.request' ? parsed : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+async function captureMcpRequestLogs<T>(run: () => Promise<T>) {
+  const seen: Array<{ args: unknown[] }> = [];
+  const originalLog = console.log;
+  console.log = (...args: unknown[]) => {
+    seen.push({ args });
+  };
+  let result: T;
+  try {
+    result = await run();
+  } finally {
+    console.log = originalLog;
+  }
+  return { result, lines: parseMcpRequestLogs(seen) };
+}
+
 async function postMcp(env: Env, accept: string, body: object): Promise<Response> {
+  return postMcpHeaders(env, body, { accept });
+}
+
+// `host` is defaulted rather than inherited from the URL: the Fetch API treats
+// Host as a forbidden header, so a synthesized Request carries none and the
+// SDK's allowlist would answer every case below with its missing-Host 403. A
+// real request always carries one, so supplying it here is what makes the
+// harness resemble the wire.
+async function postMcpHeaders(env: Env, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
   return worker.fetch(
     new Request('https://anc.dev/mcp', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', accept },
+      headers: { 'content-type': 'application/json', accept: 'application/json', host: 'anc.dev', ...headers },
       body: JSON.stringify(body),
     }),
     env,
@@ -173,11 +233,11 @@ function initBody() {
 }
 
 beforeEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
 });
 
 afterEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
 });
 
 describe('detectMcpFormat', () => {
@@ -325,6 +385,20 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(body).toContain('anc.dev MCP server');
   });
 
+  test('curl GET /mcp with */* serves the markdown twin', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'GET',
+        headers: { accept: '*/*', 'user-agent': 'curl/8.7.1' },
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/markdown');
+  });
+
   test('Accept: text/html serves dist/mcp.html', async () => {
     const env = makeEnv();
     const res = await getMcp(env, 'text/html');
@@ -347,6 +421,7 @@ describe('GET /mcp — content-negotiated descriptor', () => {
     expect(res.status).toBe(301);
     expect(res.headers.get('location')).toBe('https://anc.dev/.well-known/mcp/server-card.json');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('vary')).toBe('Accept, User-Agent');
   });
 
   test('the JSON redirect targets the inbound request origin (env-aware)', async () => {
@@ -468,7 +543,7 @@ describe('POST /mcp — Accept gate', () => {
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', host: 'anc.dev' },
         body: JSON.stringify(initBody()),
       }),
       env,
@@ -485,7 +560,7 @@ describe('POST /mcp — MCP_LIMITER gate', () => {
     const res = await postMcp(env, 'application/json', initBody());
     expect(res.status).toBe(200);
     expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
-    const body = (await res.json()) as { jsonrpc: string; error?: { code: number; message: string } };
+    const body = (await readMcpJson(res)) as { jsonrpc: string; error?: { code: number; message: string } };
     expect(body.jsonrpc).toBe('2.0');
     expect(body.error?.code).toBe(-32099);
     expect(body.error?.message.toLowerCase()).toContain('rate limit');
@@ -508,63 +583,170 @@ describe('POST /mcp — MCP_LIMITER gate', () => {
       env,
       {} as ExecutionContext,
     );
-    expect(limiter.lastKey).toBe('198.51.100.42');
+    expect(limiter.lastKey).toBe('legacy:198.51.100.42');
   });
 
   test('falls back to shared anon bucket when cf-connecting-ip is absent', async () => {
     const limiter: RateStub = { calls: 0, shouldSucceed: true };
     const env = makeEnv({ limiter });
     await postMcp(env, 'application/json', initBody());
-    expect(limiter.lastKey).toBe('anon');
+    expect(limiter.lastKey).toBe('legacy:anon');
   });
 
   test('absent MCP_LIMITER binding passes through to the handler', async () => {
     const env = makeEnv();
     const res = await postMcp(env, 'application/json', initBody());
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { result?: { serverInfo?: { name?: string } } };
+    const body = (await readMcpJson(res)) as { result?: { serverInfo?: { name?: string } } };
     expect(body.result?.serverInfo?.name).toBe('anc');
   });
 });
 
-describe('POST /mcp — visitor log fires after the gate decision', () => {
-  test('emits exactly one log line per request with the gate_result field', async () => {
-    const limiter: RateStub = { calls: 0, shouldSucceed: true };
-    const env = makeEnv({ limiter });
-    const seen: Array<{ args: unknown[] }> = [];
-    const originalLog = console.log;
-    console.log = (...args: unknown[]) => {
-      seen.push({ args });
+describe('POST /mcp — Accept negotiation content-type', () => {
+  test('Accept: application/json returns application/json (not SSE) for legacy initialize', async () => {
+    // Regression: agents legacy transport requires dual Accept and defaults
+    // to SSE; dispatch must coerce so smoke/clients that request JSON get JSON.
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).not.toContain('event-stream');
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    expect(res.headers.get('access-control-allow-methods')).toBeNull();
+    const body = (await readMcpJson(res)) as {
+      result?: { serverInfo?: { name?: string }; instructions?: string };
     };
-    try {
-      await postMcp(env, 'application/json', initBody());
-    } finally {
-      console.log = originalLog;
-    }
-    const mcpLines = seen.filter((s) => s.args[0] === '[mcp-call]');
-    expect(mcpLines.length).toBe(1);
-    const payload = mcpLines[0].args[1] as { gate_result?: string; format?: string };
-    expect(payload.gate_result).toBe('passed');
-    expect(payload.format).toBe('json');
+    expect(body.result?.serverInfo?.name).toBe('anc');
+    expect(body.result?.instructions ?? '').toContain('2026-07-28');
   });
 
-  test('log emits gate_result: rate_limited when the limiter denies', async () => {
+  test('Accept dual MIME (json wins) still returns application/json for legacy initialize', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json, text/event-stream', initBody());
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).not.toContain('event-stream');
+  });
+});
+
+describe('POST /mcp — mcp.request telemetry fires after the gate decision', () => {
+  test('emits exactly one mcp.request line per request with era and outcome', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    const { lines: mcpLines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
+    expect(mcpLines.length).toBe(1);
+    const payload = mcpLines[0] as { era?: string; outcome?: string; response_format?: string; ip?: string };
+    expect(payload.era).toBe('legacy');
+    expect(payload.outcome).toBe('ok');
+    expect(payload.response_format).toBe('json');
+    expect(payload.ip).toBeUndefined();
+  });
+
+  test('log emits outcome rate_limited when the limiter denies', async () => {
     const limiter: RateStub = { calls: 0, shouldSucceed: false };
     const env = makeEnv({ limiter });
-    const seen: Array<{ args: unknown[] }> = [];
-    const originalLog = console.log;
-    console.log = (...args: unknown[]) => {
-      seen.push({ args });
-    };
-    try {
-      await postMcp(env, 'application/json', initBody());
-    } finally {
-      console.log = originalLog;
-    }
-    const mcpLines = seen.filter((s) => s.args[0] === '[mcp-call]');
+    const { lines: mcpLines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
     expect(mcpLines.length).toBe(1);
-    const payload = mcpLines[0].args[1] as { gate_result?: string };
-    expect(payload.gate_result).toBe('rate_limited');
+    const payload = mcpLines[0] as { outcome?: string; error_code?: number };
+    expect(payload.outcome).toBe('rate_limited');
+    expect(payload.error_code).toBe(-32099);
+  });
+});
+
+describe('POST /mcp — response_format records the served format', () => {
+  // An Accept that ranks text/event-stream above application/json, so
+  // detectMcpFormat resolves 'sse' and an intent-derived field would log 'sse'
+  // on every lane below regardless of what went on the wire.
+  const SSE_PREFERRING = 'application/json;q=0.5, text/event-stream;q=0.9';
+
+  function formatOf(lines: unknown[]): string | undefined {
+    return (lines[0] as { response_format?: string }).response_format;
+  }
+
+  test('the line keeps its frozen key set and order', async () => {
+    // The sibling meum-sites mcp.request line is queried by the same operator
+    // filter; key count, key order, and the json|sse domain are shared shape.
+    const env = makeEnv();
+    const { lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
+    expect(Object.keys(lines[0] as object)).toEqual([
+      'event',
+      'era',
+      'method',
+      'name',
+      'client_name',
+      'protocol_version',
+      'host',
+      'response_format',
+      'outcome',
+      'error_code',
+      'ms_bucket',
+    ]);
+  });
+
+  test('a modern request answering JSON logs json even when Accept prefers SSE', async () => {
+    // responseMode 'auto' answers a single JSON body because no anc tool emits
+    // a related message before its result; the field must follow the wire.
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postMcpHeaders(env, modernToolsListBody(), { ...modernToolsListHeaders(), accept: SSE_PREFERRING }),
+    );
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).not.toContain('event-stream');
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('a genuinely streaming response logs sse', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'text/event-stream', initBody()));
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/event-stream');
+    expect(await res.text()).toContain('data: ');
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('sse');
+  });
+
+  test('a legacy SSE body coerced to JSON logs json, matching what the client receives', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the MCP_ENABLED kill switch logs json even when Accept prefers SSE', async () => {
+    const env = makeEnv({ enabled: false });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, SSE_PREFERRING, initBody()));
+    expect(res.status).toBe(503);
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the Accept rejection logs json', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'text/csv', initBody()));
+    expect(res.status).toBe(406);
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the legacy reject logs json even when Accept prefers SSE', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, SSE_PREFERRING, initBody()));
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(lines.length).toBe(1);
+    expect((lines[0] as { outcome?: string }).outcome).toBe('legacy_rejected');
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the rate-limit reject logs json even when Accept prefers SSE', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: false };
+    const env = makeEnv({ limiter });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, SSE_PREFERRING, initBody()));
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(lines.length).toBe(1);
+    expect((lines[0] as { outcome?: string }).outcome).toBe('rate_limited');
+    expect(formatOf(lines)).toBe('json');
   });
 });
 
@@ -603,28 +785,387 @@ describe('POST /mcp — response posture', () => {
   });
 });
 
-describe('POST /mcp — malformed JSON-RPC body', () => {
-  test('non-JSON body surfaces a transport-level error (SDK 400 with a parse-error body)', async () => {
-    // The agents SDK owns the JSON-RPC parse step. A non-JSON body
-    // surfaces as an HTTP 400 with a transport-level error body (the
-    // SDK does not wrap pre-parse failures in a JSON-RPC -32700
-    // envelope). This is reasonable behavior: the request never became
-    // a JSON-RPC envelope, so there's no id to echo back. The test
-    // pins the actual transport surface so a future SDK upgrade that
-    // changes the shape (e.g., to a 200 + JSON-RPC envelope) is
-    // visible.
+describe('POST /mcp — Host allowlist', () => {
+  async function postFrom(env: Env, url: string, host: string): Promise<Response> {
+    return worker.fetch(
+      new Request(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', host },
+        body: JSON.stringify(initBody()),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+  }
+
+  test('a rebinding Host is rejected 403 with -32000 and no access-control headers', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postFrom(env, 'https://anc.dev/mcp', 'evil.example'),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { jsonrpc?: string; error?: { code?: number } };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error?.code).toBe(-32000);
+    for (const [name] of res.headers) expect(name.toLowerCase().startsWith('access-control-')).toBe(false);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { outcome?: string; error_code?: number };
+    expect(line.outcome).toBe('error');
+    expect(line.error_code).toBe(-32000);
+  });
+
+  test('a Host carrying a port matches the bare allowlist entry', async () => {
+    // The SDK compares hostnames with the port stripped. Local dev, the
+    // Playwright webServer, and the local preflight script all bind a port,
+    // so a port-sensitive list would lock every one of them out.
+    const env = makeEnv();
+    const res = await postFrom(env, 'http://localhost:8787/mcp', 'localhost:8787');
+    expect(res.status).toBe(200);
+  });
+
+  test('the production and staging hosts are served', async () => {
+    const env = makeEnv();
+    for (const [url, host] of [
+      ['https://anc.dev/mcp', 'anc.dev'],
+      [
+        'https://agentnative-site-staging.brettdavies.workers.dev/mcp',
+        'agentnative-site-staging.brettdavies.workers.dev',
+      ],
+    ] as const) {
+      const res = await postFrom(env, url, host);
+      expect(`${host}:${res.status}`).toBe(`${host}:200`);
+    }
+  });
+
+  test('a browser Origin is rejected with the same -32000 the Host gate uses', async () => {
+    // `allowedOriginHostnames` is left unset, which is a localhost-only Origin
+    // gate rather than no Origin checking. It shares the transport code with
+    // the Host rejection, so telemetry alone cannot tell the two apart.
     const env = makeEnv();
     const res = await worker.fetch(
       new Request('https://anc.dev/mcp', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          host: 'anc.dev',
+          origin: 'https://evil.example',
+        },
+        body: JSON.stringify(initBody()),
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: { code?: number } };
+    expect(body.error?.code).toBe(-32000);
+  });
+});
+
+describe('extractTransportErrorCode', () => {
+  test('reads a JSON-RPC code out of a non-200 body', async () => {
+    const res = Response.json(
+      { jsonrpc: '2.0', error: { code: -32000, message: 'Invalid Host' }, id: null },
+      {
+        status: 403,
+      },
+    );
+    expect(await extractTransportErrorCode(res)).toBe(-32000);
+  });
+
+  test('a non-JSON 500 has no code', async () => {
+    const res = new Response('upstream exploded', { status: 500 });
+    expect(await extractTransportErrorCode(res)).toBeNull();
+  });
+
+  test('a body over the 4 KB cap is not parsed', async () => {
+    const res = Response.json(
+      { jsonrpc: '2.0', error: { code: -32000, message: 'x'.repeat(4096) }, id: null },
+      { status: 403 },
+    );
+    expect(await extractTransportErrorCode(res)).toBeNull();
+  });
+
+  test('the body survives extraction for the response the client receives', async () => {
+    const res = Response.json({ jsonrpc: '2.0', error: { code: -32000 }, id: null }, { status: 403 });
+    expect(await extractTransportErrorCode(res)).toBe(-32000);
+    expect(await res.text()).toContain('-32000');
+  });
+});
+
+describe('POST /mcp — malformed JSON-RPC body', () => {
+  test('non-JSON body answers a -32700 JSON-RPC envelope at HTTP 400 with id null', async () => {
+    // The agents SDK owns the JSON-RPC parse step and wraps parse
+    // failures in a -32700 envelope delivered at HTTP 400; the id is
+    // null because the request never parsed. Pinning the body shape,
+    // not just the status range, keeps the documented contract honest.
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', host: 'anc.dev' },
         body: 'not-json{{',
       }),
       env,
       {} as ExecutionContext,
     );
-    expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.status).toBeLessThan(500);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      jsonrpc?: string;
+      id?: unknown;
+      error?: { code?: number };
+    };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.error?.code).toBe(-32700);
+    expect(body.id).toBeNull();
+  });
+
+  test('malformed JSON under MCP_LEGACY_ENABLED=false still answers -32700 at 400, never the era reject', async () => {
+    // Unparseable bodies classify as legacy-era by default; the sunset
+    // gate requires a parsed body precisely so a corrupted request from
+    // any client keeps its parse-error diagnosis instead of being told
+    // to switch eras.
+    const env = makeEnv({ legacyEnabled: false });
+    const res = await worker.fetch(
+      new Request('https://anc.dev/mcp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', host: 'anc.dev' },
+        body: 'not-json{{',
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: { code?: number } };
+    expect(body.error?.code).toBe(-32700);
+  });
+});
+
+describe('POST /mcp — era-aware rate keys, sunset switch, and telemetry PII posture', () => {
+  test('modern tools/call with a registered Mcp-Name keys modern:{name}:anon', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(
+      env,
+      modernToolCallBody('get_scorecard', { slug: 'curl' }),
+      modernToolCallHeaders('get_scorecard'),
+    );
+    expect(limiter.lastKey).toBe('modern:get_scorecard:anon');
+  });
+
+  test('modern tools/call keys modern:{name}:{ip} when cf-connecting-ip is present', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(env, modernToolCallBody('get_scorecard', { slug: 'curl' }), {
+      ...modernToolCallHeaders('get_scorecard'),
+      'cf-connecting-ip': '198.51.100.42',
+    });
+    expect(limiter.lastKey).toBe('modern:get_scorecard:198.51.100.42');
+  });
+
+  test('a spoofed Mcp-Name outside the registered names falls back to modern:{ip}', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(env, modernToolCallBody('not_a_real_tool', {}), modernToolCallHeaders('not_a_real_tool'));
+    expect(limiter.lastKey).toBe('modern:anon');
+  });
+
+  test('modern tools/list without Mcp-Name keys modern:{ip}', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: true };
+    const env = makeEnv({ limiter });
+    await postMcpHeaders(env, modernToolsListBody(), modernToolsListHeaders());
+    expect(limiter.lastKey).toBe('modern:anon');
+  });
+
+  test('MCP_LEGACY_ENABLED=false rejects legacy initialize with -32022 + data.supported at HTTP 200', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as {
+      id?: unknown;
+      error?: { code: number; message: string; data?: { supported?: string[] } };
+    };
+    expect(body.error?.code).toBe(-32022);
+    expect(body.error?.data?.supported).toEqual(['2026-07-28']);
+    expect(body.error?.message ?? '').toContain('2026-07-28');
+    expect(body.id).toBe(1);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { outcome?: string; era?: string; error_code?: number };
+    expect(line.outcome).toBe('legacy_rejected');
+    expect(line.era).toBe('legacy');
+    expect(line.error_code).toBe(-32022);
+  });
+
+  test('the reject log carries the classified method for a legacy tools/call', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const { lines } = await captureMcpRequestLogs(() =>
+      postMcp(env, 'application/json', {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'get_scorecard', arguments: { slug: 'curl' } },
+      }),
+    );
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { method?: string; outcome?: string };
+    expect(line.method).toBe('tools/call');
+    expect(line.outcome).toBe('legacy_rejected');
+  });
+
+  test('MCP_LEGACY_ENABLED=false still serves modern tools/list', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postMcpHeaders(env, modernToolsListBody(), modernToolsListHeaders()),
+    );
+    expect(res.status).toBe(200);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as { era?: string; outcome?: string };
+    expect(line.era).toBe('modern');
+    expect(line.outcome).toBe('ok');
+  });
+
+  test('MCP_LEGACY_ENABLED=false rejects an all-legacy batch at the shell with a null id', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const res = await postMcp(env, 'application/json', legacyToolsListBatchBody());
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32022);
+    expect(body.id).toBeNull();
+  });
+
+  test('legacy tools/call emits one mcp.request line with no IP, no arguments, null client_name', async () => {
+    const env = makeEnv();
+    const { lines } = await captureMcpRequestLogs(() =>
+      postMcpHeaders(
+        env,
+        {
+          jsonrpc: '2.0',
+          id: 6,
+          method: 'tools/call',
+          params: { name: 'get_scorecard', arguments: { slug: 'ripgrep' } },
+        },
+        { 'cf-connecting-ip': '198.51.100.42' },
+      ),
+    );
+    expect(lines.length).toBe(1);
+    const serialized = JSON.stringify(lines[0]);
+    expect(serialized).not.toContain('cf-connecting-ip');
+    expect(serialized).not.toContain('198.51.100.42');
+    expect(serialized).not.toContain('ripgrep');
+    expect((lines[0] as { client_name?: unknown }).client_name).toBeNull();
+  });
+
+  test('client_name populates from modern _meta clientInfo, truncated to 64 chars', async () => {
+    const env = makeEnv();
+    const { lines } = await captureMcpRequestLogs(() =>
+      postMcpHeaders(
+        env,
+        modernToolCallBodyWithClientName('get_scorecard', { slug: 'curl' }, 'x'.repeat(80)),
+        modernToolCallHeaders('get_scorecard'),
+      ),
+    );
+    expect(lines.length).toBe(1);
+    const clientName = (lines[0] as { client_name?: string }).client_name ?? '';
+    expect(clientName.length).toBe(64);
+    expect(clientName).toBe(`${'x'.repeat(63)}…`);
+  });
+
+  test('the rate-limit envelope keeps -32099 with the request id echoed', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: false };
+    const env = makeEnv({ limiter });
+    const res = await postMcp(env, 'application/json', initBody());
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32099);
+    expect(body.id).toBe(1);
+  });
+
+  test('modern resources/read with a mirroring Mcp-Name answers an unknown resource with -32602', async () => {
+    // The resource handler throws a -32002-tagged error, but the wire code is
+    // -32602: the SDK's era encode seam rewrites -32002 on both lanes.
+    const env = makeEnv();
+    const res = await postMcpHeaders(
+      env,
+      modernResourcesReadBody('anc://tool/does-not-exist'),
+      modernResourcesReadHeaders('anc://tool/does-not-exist'),
+    );
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32602);
+    expect(body.id).toBe(13);
+  });
+
+  test('modern resources/read with a non-mirroring Mcp-Name is rejected -32020 at HTTP 400', async () => {
+    const env = makeEnv();
+    const res = await postMcpHeaders(
+      env,
+      modernResourcesReadBody('anc://tool/does-not-exist', 62),
+      modernResourcesReadHeaders('anc://registry'),
+    );
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32020);
+    expect(body.id).toBe(62);
+  });
+
+  test('an all-legacy batch array is served by the legacy lane, not rejected', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'text/event-stream', legacyToolsListBatchBody([72, 73]));
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(raw).toContain('"id":72');
+    expect(raw).toContain('"id":73');
+    expect(raw).not.toContain('-32600');
+  });
+
+  test('a JSON-negotiated batch is served at HTTP 200, coerced to the first SSE event', async () => {
+    // The legacy transport streams one SSE event per batched response;
+    // coerceMcpJsonResponse keeps only the first data line, so a JSON client
+    // sees a single envelope rather than a JSON array.
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', legacyToolsListBatchBody([72, 73]));
+    expect(res.status).toBe(200);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: unknown; result?: { tools?: unknown[] } };
+    expect(body.error).toBeUndefined();
+    expect(body.id).toBe(72);
+    expect((body.result?.tools ?? []).length).toBeGreaterThan(0);
+  });
+
+  test('a batch carrying a modern-envelope element is rejected -32600', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', modernElementBatchBody());
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as { id?: unknown; error?: { code: number } };
+    expect(body.error?.code).toBe(-32600);
+    expect(body.id).toBeNull();
+  });
+
+  test('an empty batch array is rejected -32600', async () => {
+    const env = makeEnv();
+    const res = await postMcp(env, 'application/json', []);
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as { error?: { code: number } };
+    expect(body.error?.code).toBe(-32600);
+  });
+
+  test('a modern claim of an unsupported protocol version draws the SDK -32022 at HTTP 400', async () => {
+    // Status split: the SDK's version reject is HTTP 400, distinct from the
+    // shell's legacy reject, which stays in-band at HTTP 200.
+    const env = makeEnv();
+    const res = await postMcpHeaders(
+      env,
+      toolsListBodyClaimingVersion('2025-03-26'),
+      toolsListHeadersClaimingVersion('2025-03-26'),
+    );
+    expect(res.status).toBe(400);
+    const body = (await readMcpJson(res)) as {
+      id?: unknown;
+      error?: { code: number; data?: { supported?: string[]; requested?: string } };
+    };
+    expect(body.error?.code).toBe(-32022);
+    expect(body.error?.data?.supported).toEqual(['2026-07-28']);
+    expect(body.error?.data?.requested).toBe('2025-03-26');
+    expect(body.id).toBe(14);
   });
 });
 

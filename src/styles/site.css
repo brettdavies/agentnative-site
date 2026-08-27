@@ -1,8 +1,12 @@
 /* site.css — additive layer on top of foundation.css (docs/DESIGN.md §4). */
 
+/* format("woff2"), not "woff2-variations": Bun's CSS minify unquotes the
+ * hyphenated token to format(woff2-variations), which Chrome treats as
+ * invalid and drops, so the preloaded files never attach. Weight ranges
+ * already mark these as variable fonts. */
 @font-face {
   font-family: "Uncut Sans";
-  src: url("/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+  src: url("/fonts/uncut-sans-variable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -10,7 +14,7 @@
 
 @font-face {
   font-family: "Monaspace Xenon";
-  src: url("/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+  src: url("/fonts/monaspace-xenon-variable.woff2") format("woff2");
   font-weight: 200 800;
   font-style: normal;
   font-display: swap;
@@ -171,10 +175,17 @@ main pre {
  * clipboard.ts). The wrapper is non-scrolling and matches the pre's outer
  * width, so an `position: absolute` copy-button stays pinned to the right
  * edge of the visible block — it does not slide leftward when the pre is
- * horizontally scrolled to read long lines. The wrapper is invisible
- * (default block flow, no chrome) so it has no visual impact on the pre. */
+ * horizontally scrolled to read long lines. Pre margins move onto the wrap
+ * so the wrap's box equals the pre chrome (otherwise top/right insets land
+ * in the margin gutter above the grey fence). */
 main .code-wrap {
   position: relative;
+  margin-block: 1em;
+}
+main .code-wrap > pre {
+  margin: 0;
+  /* Leave room so long lines don't run under the glyph. */
+  padding-right: 2.75rem;
 }
 main :not(pre) > code {
   background: var(--bg-code, #f0f4f7);
@@ -306,9 +317,10 @@ main .anchor-icon {
   top: 0;
 }
 
-/* Header — sticky instrument nav: brand + grouped links + theme button,
- * hamburger, install CTA. Below 900px the links drop into a panel toggled
- * by the hamburger's checkbox. */
+/* Header — sticky instrument nav: brand (left) + grouped links + install
+ * pill + theme + hamburger (right). Below 1024px the links drop into a
+ * panel toggled by the hamburger's checkbox. Keeps full nav through
+ * typical laptop widths once the install pill is present. */
 .site-header {
   position: sticky;
   top: 0;
@@ -321,6 +333,9 @@ main .anchor-icon {
   align-items: center;
   gap: var(--space-6);
   height: 62px;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: site-header;
 }
 .site-brand {
   display: flex;
@@ -328,21 +343,35 @@ main .anchor-icon {
   gap: var(--space-3);
   text-decoration: none;
   color: inherit;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 .site-brand__name {
+  flex: 0 0 auto;
   font-weight: 640;
   letter-spacing: -0.015em;
   color: var(--fg-heading);
   font-size: 1.05rem;
+  white-space: nowrap;
 }
+/* Tagline shows only when the header row has room for it on one line.
+ * Narrower rows hide it entirely rather than wrapping or ellipsizing. */
 .site-brand__tag {
+  display: none;
   color: var(--fg-muted);
   font-size: var(--text-secondary);
+  white-space: nowrap;
+}
+@container site-header (min-width: 1150px) {
+  .site-brand__tag {
+    display: inline;
+  }
 }
 .site-nav {
   display: flex;
   gap: var(--space-5);
   margin-left: auto;
+  min-width: 0;
 }
 .site-nav a {
   font-size: var(--text-secondary);
@@ -358,14 +387,153 @@ main .anchor-icon {
 .site-header__cta {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
+  flex: 0 0 auto;
+  margin-left: var(--space-4);
 }
 .site-header__install {
   font-size: var(--text-secondary);
 }
 
+/* Header install pill — JS-only (C6). Right-anchored in the CTA cluster;
+ * command + copy icon pack left inside a fixed-width shell so brew/cargo/
+ * binstall never shift the header. Below 640px the pill hides and the
+ * Install link returns. */
+.site-header__install-cmd {
+  display: none;
+  align-items: center;
+  flex: 0 0 20rem;
+  width: 20rem;
+  min-width: 20rem;
+}
+:root.js .site-header__install-cmd:not([hidden]) {
+  display: flex;
+}
+/* Hide the Install ▸ fallback only once the pill is live, so a deferred
+ * clipboard.js load does not leave a gap with neither affordance visible. */
+:root.js .site-header__install-cmd:not([hidden]) ~ .site-header__install[data-install-fallback] {
+  display: none;
+}
+.install-cmd {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  width: 100%;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.install-cmd__pm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 0.45rem;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    color 0.15s var(--ease),
+    background 0.15s var(--ease);
+}
+.install-cmd__cycle {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+.install-cmd__pm:hover {
+  color: var(--fg-heading);
+  background: var(--bg);
+}
+.install-cmd__pm:hover .install-cmd__cycle {
+  opacity: 1;
+}
+.install-cmd__copy {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0.5rem 0 0.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+.install-cmd__copy:hover {
+  background: var(--bg);
+}
+.install-cmd__copy:focus-visible,
+.install-cmd__pm:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.install-cmd__prompt {
+  flex: 0 0 auto;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+.install-cmd__text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 450;
+  color: var(--fg-heading);
+  background: none;
+  padding: 0;
+  border: 0;
+}
+.install-cmd__icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--fg-muted);
+}
+.install-cmd__copy[data-copy-state="copied"] .install-cmd__icon {
+  color: var(--accent);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 640px) {
+  :root.js .site-header__install-cmd:not([hidden]) {
+    display: none;
+  }
+  :root.js .site-header__install-cmd:not([hidden]) ~ .site-header__install[data-install-fallback] {
+    display: inline-flex;
+  }
+}
+
 /* Theme button — cycles light / dark / system (theme.ts); hidden when JS
- * is off (C6). */
+ * is off (C6). Sits to the right of the install pill. */
 .theme-cycle {
   display: none;
   color: var(--fg-muted);
@@ -381,10 +549,11 @@ main .anchor-icon {
   justify-content: center;
 }
 
-/* Hamburger — hidden on desktop. The checkbox is visually hidden but
- * focusable and covers the whole 44px target, so pointer taps and
- * keyboard Space both toggle the panel with zero JS; the client
- * enhancement adds Escape-to-close. */
+/* Hamburger — hidden on desktop. Breakpoint sits under the install-pill
+ * + full-nav comfort range (~1100+). The checkbox is visually hidden but
+ * focusable across the full 44px target, so pointer taps and keyboard
+ * Space both toggle the panel with zero JS; the client enhancement adds
+ * Escape-to-close. */
 .nav-burger {
   display: none;
 }
@@ -401,7 +570,7 @@ main .anchor-icon {
   border-radius: 5px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .site-nav {
     display: none;
     position: absolute;
@@ -442,13 +611,11 @@ main .anchor-icon {
     gap: var(--space-2);
   }
 }
-@media (max-width: 640px) {
-  .site-brand__tag {
-    display: none;
-  }
-}
 
 /* Copy buttons — hidden when JS is off (C6).
+ *
+ * Code-block variant: icon glyph inset inside the pre chrome (same
+ * clipboard SVG as the header install pill). Prompt-copy stays text.
  *
  * Elevation: in light mode `--bg` (lightest gray, page bg) sits above the
  * pre's `--bg-code`, so the button reads as a raised pill. In dark mode the
@@ -459,15 +626,28 @@ main .anchor-icon {
 .copy-button {
   display: none;
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 50%;
+  right: 0.65rem;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  margin: 0;
+  align-items: center;
+  justify-content: center;
   background: var(--bg, #fff);
-  color: inherit;
+  color: var(--fg-muted);
   border: 1px solid var(--border, #cfd5db);
   border-radius: 0.3rem;
-  padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
+  line-height: 1;
   cursor: pointer;
+  transform: translateY(-50%);
+}
+.copy-button__icon {
+  display: inline-flex;
+  color: inherit;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .copy-button {
@@ -478,14 +658,18 @@ main .anchor-icon {
   background: var(--border, #2c333d);
 }
 :root.js main .code-wrap .copy-button {
-  display: inline-block;
+  display: inline-flex;
 }
 /* Prompt-copy button is attached in normal flow (no code-wrap anchor), so
- * it overrides the absolute positioning the pre-block variant uses. */
+ * it overrides the absolute positioning / icon sizing the pre-block variant uses. */
 :root.js main .copy-button--prompt {
   display: inline-block;
   position: static;
+  width: auto;
+  height: auto;
   margin-top: 0.5rem;
+  padding: 0.2rem 0.6rem;
+  color: inherit;
 }
 .copy-button[data-copy-state="copied"] {
   background: var(--accent, #0058aa);
@@ -642,6 +826,18 @@ main .anchor-icon {
 }
 .card__cmd .p {
   color: var(--fg-muted);
+}
+.card__pending {
+  margin: 0;
+  padding: var(--space-5) var(--space-4);
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+}
+.card__pending a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
 }
 .card__scores {
   display: grid;
@@ -814,6 +1010,16 @@ main .anchor-icon {
   margin-top: var(--space-4);
   color: var(--fg-secondary);
   font-size: var(--text-secondary);
+  /* Override global `p { text-wrap: pretty }` — rubrics are single-line CTAs;
+   * pretty wraps early to avoid short last lines and leaves empty board width. */
+  text-wrap: wrap;
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.board > .board-rubric {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
 }
 .board-rubric code {
   font-family: var(--font-mono);
@@ -996,6 +1202,9 @@ body:has(.hero__grid) main {
   gap: var(--space-8);
   align-items: center;
 }
+.hero__proof {
+  min-width: 0;
+}
 .hero__title {
   font-size: clamp(2.7rem, 1.7rem + 3.6vw, 4.4rem);
   letter-spacing: -0.038em;
@@ -1024,8 +1233,9 @@ body:has(.hero__grid) main {
 }
 
 /* Toggle plumbing — the hidden radios in .seg drive the CLI/web panes
- * (board, spec index, try form, rubric) together via :has(); CLI is the
- * no-JS default. */
+ * (board, spec index, try form, rubric, hero proof) together via :has();
+ * CLI is the no-JS default. Radios live inside .scope; body:has covers
+ * the hero proof card which sits above .scope. */
 [data-s="web"] {
   display: none;
 }
@@ -1041,6 +1251,36 @@ body:has(.hero__grid) main {
 .scope:has(#s-web:checked) .spec[data-s="web"] {
   display: grid;
 }
+body:has(#s-web:checked) .hero__proof > [data-s="cli"] {
+  display: none;
+}
+body:has(#s-web:checked) .hero__proof > [data-s="web"] {
+  display: block;
+}
+
+/* Header Leaderboards — dual anchors; visibility follows homepage segment or
+ * html[data-surface] off-home. Override global [data-s="web"] { display: none }
+ * inside .site-nav only. */
+.site-nav [data-leaderboards-nav][data-s="web"],
+.site-nav [data-audit-nav][data-s="web"] {
+  display: none;
+}
+body:has(#s-web:checked) .site-nav [data-leaderboards-nav][data-s="cli"],
+body:has(#s-web:checked) .site-nav [data-audit-nav][data-s="cli"] {
+  display: none;
+}
+body:has(#s-web:checked) .site-nav [data-leaderboards-nav][data-s="web"],
+body:has(#s-web:checked) .site-nav [data-audit-nav][data-s="web"] {
+  display: inline;
+}
+html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-leaderboards-nav][data-s="cli"],
+html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-audit-nav][data-s="cli"] {
+  display: none;
+}
+html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-leaderboards-nav][data-s="web"],
+html:not(:has(#s-cli))[data-surface="web"] .site-nav [data-audit-nav][data-s="web"] {
+  display: inline;
+}
 
 @keyframes principle-enter {
   from {
@@ -1054,16 +1294,19 @@ body:has(.hero__grid) main {
 }
 
 /* Use-it outro — the install/skill/MCP pointer paragraph below the spec
- * index. Quiet prose, not a CTA band. */
+ * index. Quiet prose, not a CTA band. Wider than the doc measure and
+ * centered so it reads as a landing coda under the full-width boards,
+ * not a leftover reading-column remnant. */
 .use-note-section {
   padding-block: 0 var(--space-9);
 }
 .use-note {
-  margin: 0;
-  max-width: var(--measure);
+  margin: 0 auto;
+  max-width: 90%;
   font-size: var(--text-secondary);
   line-height: 1.6;
   color: var(--fg-secondary);
+  text-wrap: pretty;
 }
 .use-note a {
   color: var(--accent);
@@ -2096,13 +2339,17 @@ main .remediation__body {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  width: 3.5rem;
+  /* min-width, not width: NONCOMPLIANT is wider than the column the
+     shorter labels align in, and nowrap would overflow a fixed width. */
+  min-width: 3.5rem;
   white-space: nowrap;
 }
 .web-check--pass .web-check__mark,
 .web-check--pass .audit__status {
   color: var(--band-high);
 }
+.web-check--noncompliant .web-check__mark,
+.web-check--noncompliant .audit__status,
 .web-check--absent .web-check__mark,
 .web-check--absent .audit__status {
   color: var(--band-mid);

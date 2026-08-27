@@ -25,6 +25,7 @@ import { SPEC_VERSION } from '../spec-version.gen';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
 import { runWebAudit } from './engine';
+import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
 import { loadWebAuditRegistry } from './registry';
 import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 
@@ -46,6 +47,8 @@ export interface RescoreDeps {
   /** Audits one canonical target to completion and caches it; throws on failure. */
   audit?: (env: WebRescoreEnv, targetUrl: string) => Promise<void>;
   rebuild?: (env: WebRescoreEnv, specVersion: string) => Promise<unknown>;
+  /** One HIT-min purge after a rebuild cycle. Receives the union of tags. */
+  purgeTags?: (tags: string[]) => Promise<void>;
   /** Audits per cycle before a board rebuild; defaults to RESCORE_BATCH_SIZE. */
   batchSize?: number;
   /** Injectable clock for deterministic eligibility tests. */
@@ -210,6 +213,7 @@ export async function runWebRescore(
       selectStaleBatch(env, seed, attempted, batchSize, clock(), eligibleAfterMs),
     );
     if (batch.length === 0) break;
+    const cycleAudited: string[] = [];
     for (const { domain, target } of batch) {
       attempted.add(domain);
       try {
@@ -217,6 +221,7 @@ export async function runWebRescore(
           await audit(env, target);
         });
         audited.push(domain);
+        cycleAudited.push(domain);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.log(JSON.stringify({ scope: 'web-rescore', domain, error: message }));
@@ -226,6 +231,9 @@ export async function runWebRescore(
     await step.do(`rebuild:${cycle}`, async () => {
       await rebuild(env, SPEC_VERSION);
     });
+    if (deps.purgeTags) {
+      await deps.purgeTags([homeTag(), webTag(), ...cycleAudited.map(webDomainTag)]);
+    }
   }
 
   // Nothing eligible (e.g., a redeploy right after a full run): still refresh
@@ -234,6 +242,7 @@ export async function runWebRescore(
     await step.do('rebuild:idle', async () => {
       await rebuild(env, SPEC_VERSION);
     });
+    if (deps.purgeTags) await deps.purgeTags([homeTag(), webTag()]);
   }
 
   // Record the new fingerprint only after the reflow drains, so a run that
@@ -251,6 +260,8 @@ export async function runWebRescore(
 
 export class WebRescoreWorkflow extends WorkflowEntrypoint<WebRescoreEnv> {
   async run(_event: Readonly<WorkflowEvent<unknown>>, step: WorkflowStep): Promise<unknown> {
-    return runWebRescore(this.env, step);
+    return runWebRescore(this.env, step, {
+      purgeTags: (tags) => invokeCachedPurge(this.ctx, tags),
+    });
   }
 }

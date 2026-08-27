@@ -7,7 +7,7 @@
 // otherwise a generic line stands in. Assembly and the per-isolate
 // catalog load live in src/worker/audit-web/remediation.ts.
 
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import {
   assembleRemediation,
@@ -30,18 +30,23 @@ function textContent(value: unknown) {
 }
 
 export function registerWebRemediationTool(server: McpServer, env: WebRemediationEnv): void {
-  server.tool(
+  server.registerTool(
     'get_web_remediation',
-    'Return the canonical remediation for a web-audit check by id (e.g. "llms-txt", "mcp-initialize"). Returns ' +
-      'isError:false for both outcomes: found returns { found:true, remediation: { check_id, title, goal, fix, ' +
-      "skill_url, resources, prompt } }, not-found returns { found:false, message }. Pass the failing check's " +
-      "evidence string to make the prompt's Issue line this run's finding.",
     {
-      check_id: z.string().describe('The check id from the web scorecard results, e.g. "llms-txt".'),
-      evidence: z
-        .string()
-        .optional()
-        .describe("Optional: this run's evidence line for the check; becomes the prompt's Issue line."),
+      title: 'Get web-audit remediation guidance',
+      description:
+        'Return the canonical remediation for a web-audit check by id (e.g. "llms-txt", "mcp-initialize"). Returns ' +
+        'isError:false for both outcomes: found returns { found:true, remediation: { check_id, title, goal, fix, ' +
+        "skill_url, resources, prompt } }, not-found returns { found:false, message }. Pass the failing check's " +
+        "evidence string to make the prompt's Issue line this run's finding.",
+      inputSchema: {
+        check_id: z.string().describe('The check id from the web scorecard results, e.g. "llms-txt".'),
+        evidence: z
+          .string()
+          .optional()
+          .describe("Optional: this run's evidence line for the check; becomes the prompt's Issue line."),
+      },
+      annotations: { readOnlyHint: true },
     },
     async ({ check_id, evidence }) => {
       let catalog: WebRemediationCatalog;

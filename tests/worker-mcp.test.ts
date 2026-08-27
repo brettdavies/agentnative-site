@@ -15,9 +15,26 @@
 // this file pins handshake + tool/resource shape + instructions drift.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
-import { buildMcpHandler, type McpEnv } from '../src/worker/mcp/server';
+import type { McpEnv } from '../src/worker/mcp/server';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import {
+  deepFindFirst,
+  modernResourcesReadBody,
+  modernResourcesReadHeaders,
+  modernToolCallBody,
+  modernToolCallBodyMissingCapabilities,
+  modernToolCallHeaders,
+  modernToolsListBody,
+  modernToolsListHeaders,
+} from './helpers/mcp-modern';
+import {
+  getJsonToolContent,
+  type JsonRpcBody,
+  mcpInitialize,
+  mcpRpc,
+  mcpRpcExpect200,
+  resetMcpTestState,
+} from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -101,6 +118,12 @@ const FIXTURE_CATALOG = {
 };
 
 function makeEnv(): McpEnv {
+  const registryIndex = {
+    by_slug: Object.fromEntries(FIXTURE_CATALOG.registry.map((e) => [e.slug, { ...e, name: e.name }])),
+    by_owner_repo: Object.fromEntries(
+      FIXTURE_CATALOG.registry.filter((e) => e.repo).map((e) => [e.repo as string, { ...e }]),
+    ),
+  };
   return {
     ASSETS: {
       fetch(req: Request) {
@@ -113,73 +136,46 @@ function makeEnv(): McpEnv {
             }),
           );
         }
+        if (path === '/registry-index.json') {
+          return Promise.resolve(
+            new Response(JSON.stringify(registryIndex), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          );
+        }
+        if (path === '/discovery-hints-index.json') {
+          return Promise.resolve(
+            new Response(JSON.stringify({ by_owner_repo: {} }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+          );
+        }
         return Promise.resolve(new Response('not found', { status: 404 }));
       },
     } as unknown as Fetcher,
   } as McpEnv;
 }
 
-type JsonRpcBody = {
-  jsonrpc: '2.0';
-  id: number | string | null;
-  method?: string;
-  params?: unknown;
-  result?: {
-    serverInfo?: { name?: string; version?: string };
-    protocolVersion?: string;
-    capabilities?: { tools?: unknown; resources?: { subscribe?: boolean } };
-    instructions?: string;
-    tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
-    resources?: Array<{ uri: string; name?: string }>;
-    resourceTemplates?: Array<{ uriTemplate: string; name?: string }>;
-    content?: Array<{ type: string; text: string }>;
-    contents?: Array<{ uri: string; mimeType: string; text: string }>;
-    isError?: boolean;
-  };
-  error?: { code: number; message: string };
-};
-
 async function rpc(env: McpEnv, body: JsonRpcBody): Promise<JsonRpcBody> {
-  const handler = await buildMcpHandler(env, { jsonResponse: true });
-  const res = await handler(
-    new Request('https://anc.dev/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-      body: JSON.stringify(body),
-    }),
-    env,
-    {} as ExecutionContext,
-  );
-  expect(res.status).toBe(200);
-  const text = await res.text();
-  return JSON.parse(text) as JsonRpcBody;
+  return mcpRpcExpect200(env, body);
 }
 
 async function initialize(env: McpEnv): Promise<JsonRpcBody> {
-  return rpc(env, {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: '2025-06-18',
-      capabilities: {},
-      clientInfo: { name: 'test', version: '0.0.0' },
-    },
-  });
+  return mcpInitialize(env);
 }
 
 function getJsonContent(body: JsonRpcBody): unknown {
-  const text = body.result?.content?.[0]?.text;
-  if (typeof text !== 'string') throw new Error('expected text content block');
-  return JSON.parse(text);
+  return getJsonToolContent(body);
 }
 
 beforeEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
 });
 
 afterEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
 });
 
 describe('MCP handshake', () => {
@@ -191,10 +187,11 @@ describe('MCP handshake', () => {
     expect(result.result?.serverInfo?.version).toBe('0.1.0');
   });
 
-  test('initialize advertises protocolVersion 2025-06-18', async () => {
+  test('initialize advertises declared spec revision in instructions', async () => {
     const env = makeEnv();
     const result = await initialize(env);
-    expect(result.result?.protocolVersion).toBe('2025-06-18');
+    const instructions = (result.result as { instructions?: string })?.instructions ?? '';
+    expect(instructions).toContain('2026-07-28');
   });
 
   test('initialize advertises stateless capabilities (tools + resources, no subscribe)', async () => {
@@ -217,7 +214,7 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
-    expect(instructions).toContain('2025-06-18');
+    expect(instructions).toContain('2026-07-28');
     expect(instructions).toContain('https://anc.dev/mcp-skill.md');
     expect(instructions).toContain('Connect now at https://anc.dev/mcp');
   });
@@ -244,6 +241,47 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
 });
 
 describe('MCP tools/list', () => {
+  // Mirrors the sibling meum-web MCP server's tool-metadata shape: the
+  // SDK config carries title/description/inputSchema/annotations in that
+  // declaration order, and annotations are pinned exactly so a stray
+  // hint fails the gate rather than passing on a subset match.
+  interface ListedTool {
+    name: string;
+    title?: string;
+    description?: string;
+    annotations?: Record<string, unknown>;
+    inputSchema?: unknown;
+  }
+
+  const READ_ONLY_ANNOTATIONS = { readOnlyHint: true };
+
+  // score_cli and audit_website reach external systems and write cache /
+  // leaderboard state, so readOnlyHint is false and openWorldHint true.
+  const NON_READ_ANNOTATIONS = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  };
+
+  const NON_READ_TOOLS = new Set(['score_cli', 'audit_website']);
+
+  const TOOL_TITLES: Record<string, string> = {
+    list_tools: 'List scored CLI registry entries',
+    get_tool: 'Get a registry entry',
+    search_tools: 'Search the CLI registry',
+    list_principles: 'List agent-native principles',
+    get_principle: 'Get an agent-native principle',
+    list_spec_sections: 'List spec sections',
+    get_spec_section: 'Get a spec section',
+    get_scorecard: 'Get a cached CLI scorecard',
+    score_cli: 'Run a live CLI audit',
+    get_website_audit: 'Get a cached website audit',
+    audit_website: 'Run a live website audit',
+    list_website_audits: 'List cached website audits',
+    get_web_remediation: 'Get web-audit remediation guidance',
+  };
+
   test('returns exactly thirteen tools in the expected order', async () => {
     const env = makeEnv();
     await initialize(env);
@@ -275,6 +313,31 @@ describe('MCP tools/list', () => {
       expect(typeof tool.description).toBe('string');
       expect((tool.description ?? '').length).toBeGreaterThan(0);
       expect(tool.inputSchema).toBeDefined();
+    }
+  });
+
+  test('every tool carries a non-empty title and an annotations object', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const tools = (result.result?.tools ?? []) as ListedTool[];
+    expect(tools.length).toBe(13);
+    for (const tool of tools) {
+      expect(typeof tool.title).toBe('string');
+      expect((tool.title ?? '').length).toBeGreaterThan(0);
+      expect(tool.annotations).toBeDefined();
+      expect(typeof tool.annotations).toBe('object');
+    }
+  });
+
+  test('titles match the catalog and annotations pin each tool read-only posture', async () => {
+    const env = makeEnv();
+    await initialize(env);
+    const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const tools = (result.result?.tools ?? []) as ListedTool[];
+    for (const tool of tools) {
+      expect(tool.title).toBe(TOOL_TITLES[tool.name]);
+      expect(tool.annotations).toEqual(NON_READ_TOOLS.has(tool.name) ? NON_READ_ANNOTATIONS : READ_ONLY_ANNOTATIONS);
     }
   });
 });
@@ -581,7 +644,7 @@ describe('MCP resources/read', () => {
     expect(parsed.slug).toBe('ripgrep');
   });
 
-  test('reading an unknown template URI surfaces a JSON-RPC error envelope', async () => {
+  test('reading an unknown template URI surfaces a JSON-RPC -32602 error envelope', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, {
@@ -591,5 +654,77 @@ describe('MCP resources/read', () => {
       params: { uri: 'anc://tool/does-not-exist' },
     });
     expect(result.error).toBeDefined();
+    // The resource handler throws a -32002-tagged error, but the legacy lane
+    // shares the SDK encode seam that rewrites -32002 to -32602 on the wire.
+    expect(result.error?.code).toBe(-32602);
+  });
+});
+
+describe('MCP JSON-RPC error-code pins', () => {
+  test('unknown method answers -32601', async () => {
+    const env = makeEnv();
+    const result = await rpc(env, { jsonrpc: '2.0', id: 90, method: 'nonexistent/method' });
+    expect(result.error?.code).toBe(-32601);
+  });
+
+  test('tools/call with an unknown tool name answers -32602', async () => {
+    const env = makeEnv();
+    const result = await rpc(env, {
+      jsonrpc: '2.0',
+      id: 91,
+      method: 'tools/call',
+      params: { name: 'not_a_real_tool', arguments: {} },
+    });
+    expect(result.error?.code).toBe(-32602);
+  });
+});
+
+describe('MCP modern-era wire (no initialize)', () => {
+  test('tools/list carries cache hints and thirteen tools', async () => {
+    const env = makeEnv();
+    const { status, body } = await mcpRpc(env, modernToolsListBody(), modernToolsListHeaders());
+    expect(status).toBe(200);
+    expect(body.error).toBeUndefined();
+    const tools = body.result?.tools ?? [];
+    expect(tools.length).toBe(13);
+    expect(deepFindFirst(body, 'ttlMs')).toBe(3_600_000);
+    expect(deepFindFirst(body, 'cacheScope')).toBe('public');
+  });
+
+  test('tools/call get_scorecard hit without initialize', async () => {
+    const env = makeEnv();
+    const { status, body } = await mcpRpc(
+      env,
+      modernToolCallBody('get_scorecard', { slug: 'ripgrep' }),
+      modernToolCallHeaders('get_scorecard'),
+    );
+    expect(status).toBe(200);
+    const parsed = getJsonContent(body) as { found: boolean; source?: string };
+    expect(parsed.found).toBe(true);
+    expect(parsed.source).toBe('registry');
+  });
+
+  test('tools/call missing clientCapabilities returns -32602 (AE7)', async () => {
+    const env = makeEnv();
+    const { body } = await mcpRpc(
+      env,
+      modernToolCallBodyMissingCapabilities('get_scorecard', { slug: 'ripgrep' }),
+      modernToolCallHeaders('get_scorecard'),
+    );
+    expect(body.error?.code).toBe(-32602);
+    expect(body.error?.message ?? '').toContain('clientCapabilities');
+  });
+
+  test('modern resources/read with a non-mirroring Mcp-Name is rejected -32020 (header mismatch)', async () => {
+    const env = makeEnv();
+    const { body } = await mcpRpc(
+      env,
+      modernResourcesReadBody('anc://tool/does-not-exist', 60),
+      modernResourcesReadHeaders('tool'),
+    );
+    // Header validation, not a resource miss: Mcp-Name on modern
+    // resources/read must mirror params.uri. A mirroring header reaches the
+    // resource handler and an unknown URI then answers -32602.
+    expect(body.error?.code).toBe(-32020);
   });
 });

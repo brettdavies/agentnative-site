@@ -26,19 +26,46 @@ The agent-native badge a tool earns when its scorecard clears the credit-weighte
 compliance signal on a tool's scorecard and the mark a project displays to claim agent-native status. The threshold is a
 scoring-policy value, not fixed in this glossary.
 
+## Visitor preference
+
+### Visitor surface preference
+
+The visitor's chosen CLI vs Website leaderboard surface (`cli` | `web`), stored in `localStorage` under `anc-surface`.
+Writers are the homepage CLI|Website segment, the board Probe A segment, and the audit landing Probe A segment; readers
+are the dual header Leaderboards and Audit anchors (CSS visibility flip via homepage `:has` or off-home
+`html[data-surface]`). Preference drives where Leaderboards and Audit point next even when it differs from the board or
+audit page currently displayed; visiting a board or audit URL alone does not write preference. On the homepage, no-JS
+`:has` keeps Leaderboards, Audit, Full board, and segment in sync; board and audit Probe A require JavaScript to
+navigate between peer landing pages.
+
 ## Content surface
 
 ### Markdown twin
 
-The markdown version of every content page, served at the same path with a `.md` suffix or under `Accept:
-text/markdown`. It opens with a short frontmatter block (title, description, canonical URL) followed by the source body
-verbatim, with site-internal links resolved to absolute URLs. The frontmatter-free body is what gets concatenated into
-`llms-full.txt`. It is the agent-facing half of the site's dual-surface contract: one markdown source emits both an HTML
-page for browsers and this twin for agents.
+The markdown version of every content page, served at the same path with a `.md` suffix, under an explicit markdown
+`Accept`, or when Accept is absent/`*/*` and the client is a markdown-eligible agent (for example curl). It opens with a
+short frontmatter block (title, description, canonical URL) followed by the source body verbatim, with site-internal
+links resolved to absolute URLs. The frontmatter-free body is what gets concatenated into `llms-full.txt`. It is the
+agent-facing half of the site's dual-surface contract: one markdown source emits both an HTML page for browsers and this
+twin for agents. HTML smokes must send `Accept: text/html`; bare curl is not a browser.
 
 Because the twin's body is the source verbatim, only prose belongs in the content source. Interactive HTML that renders
 correctly in the HTML page leaks dead controls into the twin, so browser widgets are declared in a build template and
 substituted per surface rather than authored inline.
+
+### Format-class edge cache
+
+The skip-Worker cache in front of this Worker (Cloudflare Workers Caching), keyed on a tiny agent-vs-browser class plus
+`Accept` for negotiated URLs. A HIT on those URLs must still show `Vary: Accept, User-Agent`. Exact User-Agent strings
+are not the class; a gateway normalizes them before the cached entrypoint. Zone Cache Rules are a different cache and do
+not skip this Worker.
+
+### HIT-1d / HIT-min / MISS
+
+Three edge classes for this site. HIT-1d is bake-at-build (about a day of freshness, empty cache on a new Worker
+version). HIT-min is live-board HTML and markdown (`max-age=300`, purge by Cache-Tag when R2 is rewritten). MISS is
+every-request `no-store` (`/web/scoring*`, POST `/mcp`, `/api/score`, `/api/audit-web`). Homepage HTML and homepage
+markdown share HIT-min because they are one object that includes the live web pane.
 
 ## Live scoring
 
@@ -191,6 +218,29 @@ snapshots. Distinct from an on-demand audit of a single domain, which caches its
 The site's Model Context Protocol server at `/mcp`: a streamable-HTTP, JSON-RPC surface that exposes the anc100 registry
 and scoring tools to agents. GET returns the landing page (or, under a JSON `Accept` header, a permanent redirect to the
 MCP server card); POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
+
+### MCP era
+
+Which of two protocol generations a single `POST /mcp` request belongs to, `legacy` or `modern`. The server classifies
+every request on arrival and carries that classification through the rate-limit key, the legacy kill switch, and the
+`mcp.request` log line, so era is the axis operators group by when judging whether the legacy lane can be retired. Era
+is a property of the request, not of the client or the connection: one agent can send both.
+
+### Legacy lane
+
+The era path for clients that open with an `initialize` handshake rather than the modern request headers. The server
+answers statelessly, with no session to resume. `MCP_LEGACY_ENABLED` gates this lane alone: set to `false`, a legacy-era
+request is rejected with JSON-RPC `-32022` naming the served revision under `data.supported`, and the modern lane keeps
+serving. The lane is scheduled for sunset, so its traffic share and its top client names are the evidence that decision
+rests on.
+
+### Modern lane
+
+The era path for clients that skip the handshake and address the server directly, carrying the protocol revision in an
+`MCP-Protocol-Version` header, the operation in `Mcp-Method`, and client capabilities in `_meta` inside JSON-RPC params.
+Two behaviors exist only here: a rate-limit key narrows to the named tool when `Mcp-Name` identifies a registered one,
+and list and read results carry the server's cache hints (`ttlMs`, `cacheScope`). This is the lane the site's declared
+spec revision describes.
 
 ### MCP server card
 

@@ -11,11 +11,11 @@
 // {fetch} chain so getRandom resolves the same way it would in workerd.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
-import { buildMcpHandler, type McpEnv } from '../src/worker/mcp/server';
+import type { McpEnv } from '../src/worker/mcp/server';
 import { _resetHintsIndexCache } from '../src/worker/score/orchestrate';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -229,66 +229,37 @@ type JsonRpcResult = {
 };
 
 async function callScoreCli(env: McpEnv, args: Record<string, unknown>, ip?: string): Promise<JsonRpcResult> {
-  // Per-request McpServer (KTD-1): a module-level singleton throws
-  // "Server is already connected to a transport". buildMcpHandler runs
-  // once per dispatch in production via the Worker entry; tests follow
-  // the same pattern with a fresh handler per request.
+  await mcpInitialize(env);
 
-  const initHandler = await buildMcpHandler(env, { jsonResponse: true });
-  await initHandler(
-    new Request('https://anc.dev/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'initialize',
-        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } },
-      }),
-    }),
-    env,
-    {} as ExecutionContext,
-  );
-
-  const callHandler = await buildMcpHandler(env, { jsonResponse: true });
-  const callHeaders: Record<string, string> = {
-    'content-type': 'application/json',
-    accept: 'application/json, text/event-stream',
-  };
+  const callHeaders: Record<string, string> = {};
   if (ip) callHeaders['cf-connecting-ip'] = ip;
 
-  const res = await callHandler(
-    new Request('https://anc.dev/mcp', {
-      method: 'POST',
-      headers: callHeaders,
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2,
-        method: 'tools/call',
-        params: { name: 'score_cli', arguments: args },
-      }),
-    }),
+  const { status, body } = await mcpRpc(
     env,
-    {} as ExecutionContext,
+    {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'score_cli', arguments: args },
+    },
+    callHeaders,
   );
-  const text = await res.text();
-  return JSON.parse(text) as JsonRpcResult;
+  expect(status).toBe(200);
+  return body as JsonRpcResult;
 }
 
 function getJsonContent(body: JsonRpcResult): unknown {
-  const text = body.result?.content?.[0]?.text;
-  if (typeof text !== 'string') throw new Error('expected text content block');
-  return JSON.parse(text);
+  return getJsonToolContent(body as import('./helpers/mcp-rpc').JsonRpcBody);
 }
 
 beforeEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
 });
 
 afterEach(() => {
-  resetCatalogCacheForTests();
+  resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
 });

@@ -110,8 +110,10 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   ENV_URL=https://anc.dev   # or https://agentnative-site-staging.brettdavies.workers.dev for staging
   # When staging, also: -H "CF-Access-Client-Id: $CFID" -H "CF-Access-Client-Secret: $CFSEC" (from 1Password)
 
-  curl -fSsL "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
-  curl -fSsL "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
+  # Accept: text/html is required — curl's default Accept negotiates markdown on
+  # extensionless URLs (same as the scripted gate_pages() in postflight.sh).
+  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/" | grep -q '<title>' && echo "home: ok"
+  curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
     -d '{"input":"ripgrep","turnstile_token":"x"}' \
@@ -163,8 +165,12 @@ SKIP with a pointer to the manual recipe below. See the deferred-bypass plan at
 The deployed counterpart to PREFLIGHT's
 [Live MCP surface against `wrangler dev --local`](./RELEASES-PREFLIGHT.md#live-mcp-surface-mandatory). What this section
 catches and the preflight could not: deploy-side rate-limiter bindings (`MCP_LIMITER` 60/60s, `MCP_AUDIT_LIMITER` 5/60s
-burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and the live Worker, and any kill-switch
-(`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) flipped at the env's wrangler block.
+burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and the live Worker, and either secret kill
+switch (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) left off in the target environment. Those two are `wrangler secret
+put` values that appear in no wrangler block, and an unset secret reads as off, so absence fails closed. The committed
+var `MCP_LEGACY_ENABLED` is the other shape: it rides the deploy, so drift there is a `wrangler.jsonc` question, not a
+secret one. Shapes and flip verbs:
+[`RELEASES.md` § Bindings added by the MCP endpoint](./RELEASES.md#bindings-added-by-the-mcp-endpoint).
 
 Runs against both envs:
 
@@ -182,27 +188,45 @@ as two sub-gates: cache-miss via `bypass_cache: true` (asserts `source=fresh-aud
 binary without bypass (asserts `source=live-cache`). Both paths must produce their expected outcome. Without the flag
 (prod), the gate runs once and accepts either outcome.
 
-- [ ] **Production `/mcp` transport answers `initialize` and reports the 9-tool surface.** Confirms `MCP_ENABLED=true`
-  at the top-level wrangler env, content negotiation, and that no tool was dropped between releases:
+- [ ] **Production `/mcp` dual-stack smoke passes checks 1–7.** Prefer the scripted suite:
 
   ```bash
+  scripts/release/mcp-smoke.sh https://anc.dev
+  ```
+
+  Manual spot-checks when triaging a single gate:
+
+  ```bash
+  # Legacy initialize — client 2025-06-18; instructions mention server revision 2026-07-28
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"postflight","version":"1"}}}' \
     https://anc.dev/mcp \
-    | jq '{server: .result.serverInfo.name, protocol: .result.protocolVersion}'
-  # expect: server: "anc", protocol: "2025-06-18"
+    | jq '{server: .result.serverInfo.name, instructions: (.result.instructions | contains("2026-07-28"))}'
+  # expect: server: "anc", instructions: true
 
+  # Legacy tools/list — 13 tools
   curl -fsSL -H 'Content-Type: application/json' \
     -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
     https://anc.dev/mcp \
     | jq '.result.tools | length'
-  # expect: 9
+  # expect: 13
+
+  META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"postflight","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}'
+  curl -fsSL -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\",\"params\":{${META}}}" \
+    https://anc.dev/mcp \
+    | jq '{count: (.result.tools | length), ttlMs: .result.ttlMs, cacheScope: .result.cacheScope}'
+  # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
   ```
 
-  A 503 / kill-switch envelope means `MCP_ENABLED` is wrong at the top level (production). A non-9 tool count is a
-  tool-wiring regression that escaped preflight — block and roll back if it cannot be hotfixed quickly.
+  A 503 / kill-switch envelope means the production `MCP_ENABLED` secret is unset or not `"true"`. Fix it with
+  `wrangler secret put MCP_ENABLED` and no `--env` flag, because production is the top-level config and there is no
+  `env.production` block; the value takes effect on the next request to a fresh isolate, with no redeploy. A non-13 tool
+  count is a tool-wiring regression that escaped preflight — block and roll back if it cannot be hotfixed quickly.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Same shape as
   preflight, against prod. Confirms the orchestrator's curated-registry branch composes through the prod bindings

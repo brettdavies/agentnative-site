@@ -4,12 +4,11 @@
 // principles/checks spec index) and the trimmed-to-match dist/index.md twin.
 //
 // The CLI ⇆ Web toggle is CSS-first: hidden radios + `:has()` swap the
-// board, the spec index, and the try-form together with zero JS (CLI is
-// the no-JS default). CLI board rows are threaded in from the
-// already-computed leaderboard; the web board pane emits a
-// {{WEB_BOARD_ROWS}} placeholder the Worker fills server-side from the
-// R2 leaderboard-frontpage aggregate, keeping the page zero-JS while the
-// web scores stay live.
+// board, the spec index, the try-form, and the hero proof card together
+// with zero JS (CLI is the no-JS default). CLI board rows and both hero
+// cards are baked at build time (CLI from the leaderboard; web from
+// src/data/web-audit/hero-anc.dev.json). The web board pane still emits
+// {{WEB_BOARD_ROWS}} for the Worker to fill from R2.
 //
 // The live-scoring form is server-rendered as an inert shell; /js/live-score.js
 // wires submit + Turnstile + redirect on the client side. The Turnstile
@@ -19,6 +18,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
+import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../shared/web-hero-card.mjs';
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
@@ -96,7 +96,7 @@ function buildHeroCard(top, principles) {
     })
     .join('\n');
 
-  return `    <aside class="card ${band}" aria-label="Scorecard for ${name}">
+  return `    <aside class="card ${band}" data-s="cli" aria-label="Scorecard for ${name}">
       <div class="card__bar"><span aria-hidden="true">●●●</span><span class="card__bar-right">anc · scorecard</span></div>
       <div class="card__cmd"><span class="p">$</span> anc audit ${name} --json</div>
       <div class="card__scores">
@@ -120,6 +120,16 @@ function buildCliBoardRows(leaderboard) {
       return `        <a class="lrow ${bandOf(pct)}" href="/score/${name}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
+}
+
+/** Markdown CLI board slice for index.md — baked at build, no form widgets. */
+function buildCliBoardMarkdown(leaderboard) {
+  const rows = leaderboard.slice(0, BOARD_ROWS).map((entry) => {
+    const pct = entry.scorecard.badge.score_pct;
+    const name = entry.tool.name;
+    return `| ${entry.rank} | [${name}](/score/${name}) | ${pct}% |`;
+  });
+  return ['| # | Tool | Score |', '|---|------|-------|', ...rows, ''].join('\n');
 }
 
 function buildSpecRows(principles) {
@@ -152,9 +162,10 @@ export function buildWebCheckRows() {
  * @param {string} useItHtml — pre-rendered <p class="use-note">…</p>
  * @param {Array<{n: number, title: string, shortDesc: string}>} principles
  * @param {Array} leaderboard — from computeLeaderboard()
+ * @param {string} webHeroHtml — baked web proof card (from hero-anc.dev.json)
  * @returns {string}
  */
-function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard) {
+function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webHeroHtml) {
   return `<section class="hero">
   <div class="container hero__grid">
     <div>
@@ -165,7 +176,10 @@ function buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderb
         <a class="btn btn--ghost" href="#board">See the leaderboards</a>
       </div>
     </div>
+    <div class="hero__proof">
 ${buildHeroCard(leaderboard[0], principles)}
+${webHeroHtml}
+    </div>
   </div>
 </section>
 <div class="scope">
@@ -196,8 +210,8 @@ ${buildHeroCard(leaderboard[0], principles)}
             />
             <button type="submit" class="btn btn--primary" data-live-score-submit>Score</button>
           </form>
-          <form class="board-try" data-s="web" method="get" action="/web-audit">
-            <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" aria-label="Website URL to audit" />
+          <form class="board-try" data-s="web" method="get" action="/web-audit" data-web-home-form>
+            <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" aria-label="Website URL to audit" data-web-home-input />
             <button type="submit" class="btn btn--primary">Audit</button>
           </form>
         </div>
@@ -294,7 +308,18 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
   }
   const useItHtml = useRendered.replace(/^<p>/, '<p class="use-note">');
 
-  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard);
+  // Web hero is a deliberate build-time snapshot (not live R2). Lag is honest;
+  // refresh src/data/web-audit/hero-anc.dev.json when the live score drifts.
+  const heroSnapshotPath = join(contentDir, '..', 'src', 'data', 'web-audit', 'hero-anc.dev.json');
+  let webHeroHtml = buildWebHeroCardEmptyState();
+  try {
+    const raw = JSON.parse(await readFile(heroSnapshotPath, 'utf8'));
+    webHeroHtml = buildWebHeroCardFromSnapshot(raw);
+  } catch {
+    webHeroHtml = buildWebHeroCardEmptyState();
+  }
+
+  const indexBody = buildHomepageBody(introTitle, introLede, useItHtml, principles, leaderboard, webHeroHtml);
   await writeFile(
     join(distDir, 'index.html'),
     emitShell({
@@ -323,6 +348,13 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     introLede,
     '',
     useSource.trim(),
+    '',
+    '## CLI leaderboard',
+    '',
+    buildCliBoardMarkdown(leaderboard),
+    '## Web leaderboard',
+    '',
+    '{{WEB_BOARD_ROWS}}',
     '',
     '## Score a binary, live.',
     '',

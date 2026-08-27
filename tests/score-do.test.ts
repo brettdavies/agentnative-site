@@ -838,7 +838,19 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
   // Together they catch a future change that swaps `+%Y-%m-%dT%H:%M:%SZ`
   // for something pip 26+ wouldn't accept.
 
-  test('shell substitution produces an ISO 8601 string pip will accept', async () => {
+  /** Pip gate substitution uses GNU `date -d`; BSD date (macOS) rejects it. */
+  function gnuDateRelativeAvailable(): boolean {
+    const proc = Bun.spawnSync(['bash', '-c', "date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%SZ"], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    if (proc.exitCode !== 0) return false;
+    return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(proc.stdout.toString().trim());
+  }
+
+  const gnuDateRelative = gnuDateRelativeAvailable();
+
+  test.skipIf(!gnuDateRelative)('shell substitution produces an ISO 8601 string pip will accept', async () => {
     // The exact shell substitution embedded in sandbox-exec.ts.
     const proc = Bun.spawn(['bash', '-c', "date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ"], {
       stdout: 'pipe',
@@ -854,7 +866,7 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
-  test('shell substitution computes a timestamp ~7 days in the past', async () => {
+  test.skipIf(!gnuDateRelative)('shell substitution computes a timestamp ~7 days in the past', async () => {
     // Sanity: the substitution must actually produce a 7-days-ago
     // timestamp, not "now" or some other arithmetic. Tolerance is
     // ±10 minutes to absorb test-runtime clock drift and DST quirks.
@@ -871,30 +883,33 @@ describe('sandbox-exec.score() — supply-chain release-delay gate (pip exec-tim
     expect(driftMinutes).toBeLessThan(10);
   });
 
-  test('shell substitution is the EXACT form embedded in the install command (no drift)', async () => {
-    // Defends against a partial refactor that updates the install
-    // command in sandbox-exec.ts but forgets to update the shell
-    // executed at runtime (or vice versa). Re-extract the substitution
-    // from the live install command and run it; assert it succeeds.
-    const { stub, calls } = makeStub();
-    await score(stub, { pm: 'pip', package: 'mypy', binary: 'mypy' });
-    const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
-      | Extract<Call, { kind: 'exec' }>
-      | undefined;
-    expect(installCmd).toBeDefined();
-    // Extract the `$(...)` substitution from the install command.
-    const match = installCmd?.command.match(/^PIP_UPLOADED_PRIOR_TO=\$\(([^)]+)\)/);
-    expect(match).not.toBeNull();
-    const substitution = match?.[1];
-    expect(substitution).toBeTruthy();
-    if (!substitution) return;
-    // Run it.
-    const proc = Bun.spawn(['bash', '-c', substitution], { stdout: 'pipe', stderr: 'pipe' });
-    const out = (await new Response(proc.stdout).text()).trim();
-    const exitCode = await proc.exited;
-    expect(exitCode).toBe(0);
-    expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-  });
+  test.skipIf(!gnuDateRelative)(
+    'shell substitution is the EXACT form embedded in the install command (no drift)',
+    async () => {
+      // Defends against a partial refactor that updates the install
+      // command in sandbox-exec.ts but forgets to update the shell
+      // executed at runtime (or vice versa). Re-extract the substitution
+      // from the live install command and run it; assert it succeeds.
+      const { stub, calls } = makeStub();
+      await score(stub, { pm: 'pip', package: 'mypy', binary: 'mypy' });
+      const installCmd = calls.find((c) => c.kind === 'exec' && c.command.includes(' pip install ')) as
+        | Extract<Call, { kind: 'exec' }>
+        | undefined;
+      expect(installCmd).toBeDefined();
+      // Extract the `$(...)` substitution from the install command.
+      const match = installCmd?.command.match(/^PIP_UPLOADED_PRIOR_TO=\$\(([^)]+)\)/);
+      expect(match).not.toBeNull();
+      const substitution = match?.[1];
+      expect(substitution).toBeTruthy();
+      if (!substitution) return;
+      // Run it.
+      const proc = Bun.spawn(['bash', '-c', substitution], { stdout: 'pipe', stderr: 'pipe' });
+      const out = (await new Response(proc.stdout).text()).trim();
+      const exitCode = await proc.exited;
+      expect(exitCode).toBe(0);
+      expect(out).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

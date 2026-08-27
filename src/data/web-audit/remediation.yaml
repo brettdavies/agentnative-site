@@ -55,6 +55,37 @@ remediation:
       Omit `capabilities.resources` entirely if the server has no resources.
     resources:
       - { label: MCP resources, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/resources" }
+  mcp-modern-tools-list:
+    title: header-routed tools/list (2026-07-28) returns tools without initialize
+    goal: Answer a modern header-routed tools/list without requiring an initialize handshake
+    fix: |
+      Serve the modern MCP era (protocol revision `2026-07-28`): answer a `POST` whose headers
+      carry `MCP-Protocol-Version: 2026-07-28` and `Mcp-Method: tools/list` with a `result.tools`
+      array, with no prior `initialize` or `notifications/initialized`. Modern requests are
+      per-request enveloped: `params._meta` carries `io.modelcontextprotocol/protocolVersion`,
+      `io.modelcontextprotocol/clientInfo`, and `io.modelcontextprotocol/clientCapabilities`.
+      The `clientCapabilities` key is mandatory on every modern request; reject a request that
+      omits it with a well-formed `-32602`. `Mcp-Name` rides only `tools/call` (the tool name)
+      and `resources/read` (the resource URI), never `tools/list`.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+      - { label: MCP tools (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/server/tools" }
+  mcp-server-discover:
+    title: server/discover answers with server identity on the modern lane
+    goal: Answer server/discover with supported versions, capabilities, and server identity
+    fix: |
+      Implement `server/discover` (protocol revision `2026-07-28`): return a result carrying
+      `supportedVersions` (the modern revisions you serve) and your advertised `capabilities`,
+      and identify the server in the result's `_meta` under
+      `io.modelcontextprotocol/serverInfo` (`name` plus `version`). The request arrives
+      header-routed (`MCP-Protocol-Version: 2026-07-28`, `Mcp-Method: server/discover`) with the
+      `params._meta` envelope, whose `io.modelcontextprotocol/clientCapabilities` key is
+      mandatory. No `initialize` precedes it: `server/discover` is how a modern client learns
+      what the server offers before any session state exists. Answering it is also what brings
+      the rest of the modern-lane checks into scoring, so serve the `2026-07-28` revision behind
+      it rather than this one method on its own.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
   mcp-unknown-method:
     title: unknown JSON-RPC method returns -32601
     goal: Reject unknown JSON-RPC methods with error -32601 instead of a hang or 500
@@ -64,6 +95,130 @@ remediation:
       "unsupported" from "failed"; anything else looks like an outage.
     resources:
       - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-malformed-body:
+    title: a non-JSON body draws -32700 (or a typed HTTP 400/415 refusal)
+    goal: Refuse an unparseable request body with a parse-error envelope or a typed HTTP refusal
+    fix: |
+      Answer a `POST` whose body is not valid JSON with the JSON-RPC parse-error envelope
+      (`error.code: -32700`, `id: null`); delivering it at HTTP `400` is fine. A bare HTTP `400`
+      or `415` with no envelope also conforms as a typed refusal. What fails the check: a `200`
+      with garbage, a hang, or any other bare status (a bare `404` reads as a dead endpoint, not
+      a refusal).
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-batch-reject:
+    title: a batch carrying a modern-envelope request is rejected -32600
+    goal: Refuse JSON array batches that carry modern-era envelopes with -32600
+    fix: |
+      Reject a JSON array batch whose element carries the modern `params._meta` envelope
+      (protocol revision `2026-07-28`) with `error.code: -32600` (Invalid Request) and `id: null`.
+      Modern-era requests are single-request only: an envelope-bearing element inside an array is
+      never valid, so serving it (or answering anything other than `-32600`) is non-conforming.
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+      - { label: MCP transports (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports" }
+  mcp-unknown-tool:
+    title: tools/call with an unknown tool name returns -32602
+    goal: Reject an unknown tool name with -32602 instead of a hang, a 500, or a fake result
+    fix: |
+      Answer a `tools/call` whose `params.name` matches no registered tool with
+      `error.code: -32602` (Invalid params). Agents rely on the code to distinguish "no such
+      tool" from a transport failure; a hang, a `500`, or a `200` result for a tool that does
+      not exist all read as a broken server.
+    resources:
+      - { label: MCP tools, url: "https://modelcontextprotocol.io/specification/2025-06-18/server/tools" }
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-modern-unknown-method:
+    title: an unknown method on the modern lane returns -32601
+    goal: Reject unknown header-routed methods with -32601 on the 2026-07-28 lane
+    fix: |
+      Reject a modern request (`MCP-Protocol-Version: 2026-07-28`, `Mcp-Method` naming a method
+      you do not implement) with `error.code: -32601` (Method not found). Delivering the envelope
+      at HTTP `404` conforms; a bare `404` with no envelope does not (it is indistinguishable
+      from a dead endpoint).
+    resources:
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-clientcaps:
+    title: _meta missing clientCapabilities is rejected (-32602 or -32600)
+    goal: Enforce the mandatory clientCapabilities key on every modern request
+    fix: |
+      Reject a modern request whose `params._meta` omits
+      `io.modelcontextprotocol/clientCapabilities` with a well-formed error envelope. The check
+      accepts two codes: `-32602` (Invalid params, the SDK-typed refusal) as the primary, and
+      `-32600` (Invalid Request family) from conforming non-SDK servers. The key is mandatory on
+      every `2026-07-28` request even when the client has no capabilities to declare; an empty
+      object is valid.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-header-mismatch:
+    title: an Mcp-Method header disagreeing with the body method draws -32020
+    goal: Validate the SEP-2243 header mirror between Mcp-Method and the body method
+    fix: |
+      Reject a request whose `Mcp-Method` header names a different method than the JSON-RPC body
+      with `error.code: -32020` (header mismatch). The SEP-2243 headers exist so infrastructure
+      can route without parsing bodies; a disagreeing pair means the routing layer and the
+      handler would act on different methods, so it must be refused rather than silently
+      resolved in either direction.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-version-reject:
+    title: an unsupported protocol version is rejected -32022 with data.supported
+    goal: Refuse unsupported protocol version claims with -32022 and advertise the served revisions
+    fix: |
+      Reject a request claiming an unsupported `MCP-Protocol-Version` with
+      `error.code: -32022` (UnsupportedProtocolVersion) and populate `error.data.supported` with
+      the revisions you serve (for example `["2026-07-28"]`); echoing the claim in
+      `error.data.requested` helps debugging. The `data.supported` array is what lets a typed
+      client fall back to a revision you both speak, so an envelope without it fails the check.
+    resources:
+      - { label: MCP lifecycle (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle" }
+  mcp-modern-resources-miss:
+    title: modern resources/read with an unknown URI returns -32602
+    goal: Answer an unknown resource URI with the typed miss code, not a hang or a fake result
+    fix: |
+      Answer a modern `resources/read` (with `Mcp-Name` mirroring `params.uri`) for a URI that
+      matches no resource with `error.code: -32602`. That is the code current SDK lines put on
+      the wire for a resource miss; `-32002` (the legacy resource-not-found code) is also
+      tolerated from non-SDK servers. A hang, a `500`, or a fabricated `200` result fails. This
+      check only runs when the server advertises resources on either era lane.
+    resources:
+      - { label: MCP resources (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/server/resources" }
+      - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-accept-json:
+    title: a JSON-only Accept is answered without SSE framing
+    goal: Serve a single application/json response to a client whose Accept names only application/json
+    fix: |
+      Read the request `Accept` header and answer within it. Streamable HTTP lets the server reply
+      either with one `application/json` body or with a `text/event-stream`, and the choice is the
+      client's to constrain: a caller that sends `Accept: application/json` alone is telling you its
+      HTTP client cannot read a stream. Answering that caller with `text/event-stream` returns a
+      `200` over a body it cannot parse, and no status code tells it what went wrong.
+      Parse the header with q-value semantics rather than a substring match, buffer the response,
+      and emit `Content-Type: application/json`. Reserve the stream for callers that accept it. If
+      your server genuinely cannot produce a single JSON body, refuse with `406 Not Acceptable`
+      instead: that at least fails the caller immediately and in the open.
+    resources:
+      - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
+      - { label: "RFC 9110 section 12.5.1 (Accept)", url: "https://www.rfc-editor.org/rfc/rfc9110#name-accept" }
+  mcp-accept-unsatisfiable:
+    title: an unsatisfiable Accept draws a 406 rather than an unasked-for type
+    goal: Refuse an Accept you cannot satisfy with 406, never a 200 carrying a type the client did not request
+    fix: |
+      When the request `Accept` allows neither `application/json` nor `text/event-stream`, refuse
+      with `406 Not Acceptable` before any JSON-RPC parsing runs. Those two media types are the
+      whole of what the streamable-HTTP transport is defined over, so an `Accept` naming neither
+      cannot be served, and a `200` is the wrong way to say so.
+      The failure this check looks for is a server that ignores `Accept` entirely and returns its
+      one representation under a success status. The caller then has to sniff the body to discover
+      the negotiation never happened. Worse is a `200` that echoes the requested type back in
+      `Content-Type` while carrying a JSON-RPC body: the caller routes the payload on your label
+      and the parse fails somewhere downstream of the call you told it had succeeded.
+      Do the check at the transport edge and keep the body plain text, so no client mistakes the
+      refusal for a JSON-RPC error envelope.
+    resources:
+      - { label: "RFC 9110 section 15.5.7 (406 Not Acceptable)", url: "https://www.rfc-editor.org/rfc/rfc9110#name-406-not-acceptable" }
+      - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-get-fast-fail:
     title: GET on the MCP endpoint answers fast
     goal: Answer GET on the MCP endpoint fast (a fast-fail status or a documented surface), never a held-open hang
@@ -80,22 +235,28 @@ remediation:
       - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-cors-preflight:
     title: CORS preflight succeeds with Access-Control-Allow-* headers
-    goal: Answer OPTIONS preflights on the MCP endpoint with Access-Control-Allow-* headers
+    goal: Serve one consistent CORS posture on the MCP endpoint, full preflight support or none
     fix: |
-      Answer the `OPTIONS` preflight on your MCP endpoint with `204` (or `200`) and the
+      The audit scores CORS posture, not presence. Omitting `Access-Control-Allow-Origin` from
+      both the `OPTIONS` preflight and the `POST` response is a consistent no-CORS posture (a
+      server-to-agent-only endpoint) and scores `n_a` with no penalty. This check fails only when
+      the posture is partial or misconfigured: the preflight carries `Access-Control-Allow-Origin`
+      on a non-2xx response, or the `POST` carries it while the preflight does not. To support
+      browser-origin agents, answer the preflight with `204` (or `200`) plus
       `Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, and
-      `Access-Control-Allow-Headers` response headers, so a browser-origin agent can call the
-      endpoint. If your MCP surface is deliberately server-to-agent only (no browser clients),
-      this SHOULD is a considered choice, not a defect.
+      `Access-Control-Allow-Headers`, and mirror `Access-Control-Allow-Origin` on the `POST`
+      response. To stay no-CORS, strip the headers from both surfaces.
     resources:
       - { label: MDN CORS preflight, url: "https://developer.mozilla.org/en-US/docs/Glossary/Preflight_request" }
   mcp-cors-actual:
     title: POST response carries Access-Control-Allow-Origin
-    goal: Echo Access-Control-Allow-Origin on the actual MCP POST response
+    goal: Mirror the declared CORS posture on the actual MCP POST response
     fix: |
-      Echo `Access-Control-Allow-Origin` on the actual `POST` response, not only on the preflight.
-      A browser blocks the response body when the header is absent even if the preflight passed.
-      Omit it deliberately only if browser-origin agents are not a supported client.
+      Echo `Access-Control-Allow-Origin` on the actual `POST` response whenever the preflight
+      declares CORS: a browser blocks the response body when the header is absent even though the
+      preflight passed. Omitting the header from both the preflight and the `POST` is a consistent
+      no-CORS posture and scores `n_a` with no penalty; this check fails when the preflight
+      declares CORS but the `POST` omits the header.
     resources:
       - { label: MDN CORS, url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" }
   well-known-mcp-card:

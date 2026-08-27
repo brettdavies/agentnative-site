@@ -174,12 +174,13 @@ describe('normalizeScorecardCategories', () => {
 });
 
 describe('attachInlineRemediation', () => {
-  test('every row gains a result line; broken/absent gain remediation; pass/n_a/skip do not', () => {
+  test('every row gains a result line; broken/noncompliant/absent gain remediation; pass/n_a/skip do not', () => {
     const stored = {
       results: [
         { id: 'openapi', status: 'pass', evidence: 'openapi -> 200' },
         { id: 'json-schemas', status: 'absent', evidence: 'json-schemas -> 404' },
         { id: 'mcp-tools-list', status: 'broken', evidence: 'no tools array' },
+        { id: 'mcp-unknown-method', status: 'noncompliant', evidence: 'expected error code -32601, got -32603' },
         { id: 'dns-aid', status: 'n_a', na_reason: 'optional-absent', evidence: 'no DNS-AID records' },
         { id: 'sitemap', status: 'skip', evidence: null },
       ],
@@ -199,6 +200,12 @@ describe('attachInlineRemediation', () => {
     expect(broken?.result).toContain('Present but broken');
     expect(broken?.remediation?.prompt).toContain('Issue: no tools array');
 
+    // A noncompliant surface works, and the spec detail it violates is
+    // exactly what the fix prompt names, so it must carry one.
+    const noncompliant = byId.get('mcp-unknown-method');
+    expect(noncompliant?.result).toContain('Works but does not conform');
+    expect(noncompliant?.remediation?.prompt).toContain('Issue: expected error code -32601, got -32603');
+
     const na = byId.get('dns-aid');
     expect(na?.result).toContain('Not implemented, optional');
     expect(na?.remediation).toBeUndefined();
@@ -211,6 +218,24 @@ describe('attachInlineRemediation', () => {
   test('a payload without a results array passes through unchanged', () => {
     const minimal = { badge: { score_pct: 88 } };
     expect(attachInlineRemediation(minimal, CATALOG, 'https://anc.dev')).toBe(minimal);
+  });
+
+  test('an unprobed row carries a result line but never a remediation', () => {
+    // The row settled from an antecedent, so a fix prompt would name a
+    // defect nothing observed.
+    const stored = {
+      results: [
+        { id: 'mcp-modern-tools-list', status: 'absent', unprobed: true, evidence: 'no modern lane' },
+        { id: 'json-schemas', status: 'absent', evidence: 'json-schemas -> 404' },
+      ],
+    };
+    const out = attachInlineRemediation(stored, CATALOG, 'https://anc.dev') as {
+      results: Array<{ id: string; result?: string; remediation?: unknown }>;
+    };
+    const unprobed = out.results.find((r) => r.id === 'mcp-modern-tools-list');
+    expect(unprobed?.result).toContain('Not found');
+    expect('remediation' in (unprobed ?? {})).toBe(false);
+    expect('remediation' in (out.results.find((r) => r.id === 'json-schemas') ?? {})).toBe(true);
   });
 
   test('an absent row missing a catalog entry degrades to a generic prompt rather than throwing', () => {

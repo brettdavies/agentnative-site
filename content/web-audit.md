@@ -31,8 +31,14 @@ keyword and belongs to one of six categories:
 - **API** — an OpenAPI description, referenced JSON Schemas, a `.well-known/api-catalog` (RFC 9727), JSON client-error
   bodies (not HTML), and rate-limit headers on a safe GET.
 - **MCP** — the `initialize` handshake, `tools/list` with input schemas, `resources/list` when `capabilities.resources`
-  is advertised, JSON-RPC error codes, a prompt GET answer (no held-open hang), CORS preflight and actual, the
-  `.well-known` server card, a usage doc, and WebMCP.
+  is advertised, the modern era (protocol revision `2026-07-28`) scored as its own lane (a header-routed `tools/list`
+  that needs no `initialize`, and `server/discover` answering with server identity), per-era JSON-RPC error-code
+  conformance (on the legacy lane: a parse-error envelope or typed HTTP refusal for a malformed body, batch rejection,
+  and the unknown-method and unknown-tool codes; on the modern lane: the unknown-method code, the mandatory
+  `clientCapabilities` refusal, the header-mirror mismatch code, the version reject carrying `data.supported`, and the
+  resources-read miss code), a prompt GET answer (no held-open hang), CORS preflight and actual, the `.well-known`
+  server card, a usage doc, and WebMCP. Each protocol era scores independently: a dual-stack server earns both lanes,
+  and a single-era server fails exactly the lane it lacks.
 - **Agent discovery & auth** — the A2A agent card, optional `/.well-known/ai-catalog.json` (ARD), agent-skills index,
   OAuth discovery metadata, and `auth.md`.
 
@@ -41,7 +47,8 @@ declared site type (`content` or `api`) scopes the rest. Anything that does not 
 the site. Two scores come out of one run: the **site score** (the headline) measures the site against the checks that
 apply to it, so a site perfect for its type approaches 100%; the **global score** measures it against a maximally
 agent-ready site, so exposing and nailing more surfaces ranks higher. A present-but-broken surface costs more than an
-absent one — it misleads agents.
+absent one, because it misleads agents. A surface that works while violating a spec detail reads `noncompliant` and
+earns partial credit, so showing an imperfect capability always beats withdrawing it.
 
 The HTML result page can assemble MUST failure prompts into one copy buffer (SHOULD and MAY are opt-in). The markdown
 twin keeps per-check fenced prompts and does not carry that widget.
