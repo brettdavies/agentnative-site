@@ -4,7 +4,8 @@
 // (browser flows) pointing at the same origin.
 //
 // Project matrix:
-//   chromium       — desktop Chrome. Runs every spec EXCEPT skill.e2e.ts.
+//   chromium       — desktop Chrome. Runs every spec except the live
+//                    opt-in ones listed in its testIgnore below.
 //                    Primary project for the default `bun run test:e2e`.
 //   mobile-android — Pixel 7, Android Chrome. Runs flows only.
 //   mobile-ios     — iPhone 13, iOS Safari (WebKit). Runs flows only.
@@ -63,6 +64,10 @@ export default defineConfig({
       // edge-hit) are excluded from the default suite — they hit real
       // network endpoints (github.com clone hosts, the staging Worker)
       // that the deep-check daily schedule shouldn't depend on.
+      //
+      // mcp-card.e2e.ts is deliberately absent from this list. The card
+      // surface needs no JSON-RPC lane, so the local webServer proves it
+      // and it runs on every PR; `mcp\.e2e\.ts` does not match it.
       testIgnore: [
         /skill\.e2e\.ts/,
         /homepage-score-live\.e2e\.ts/,
