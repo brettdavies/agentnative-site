@@ -325,6 +325,33 @@ checks:
     with: { op: modern-resources-miss }
     hint: Answer a modern resources/read whose Mcp-Name mirrors an unknown URI with JSON-RPC -32602 (-32002 tolerated), never a hang or a 200 result.
 
+  # Content-negotiation conformance (single request each). Each varies only
+  # the Accept header of a tools/list the lane has already proven it serves,
+  # so the answer is attributable to the negotiation and to nothing else.
+  - id: mcp-accept-json
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 3
+    title: a JSON-only Accept is answered without SSE framing
+    handler: mcp
+    with: { op: accept-json }
+    hint: Answer a POST whose Accept names only application/json with a single application/json response, never a text/event-stream body a JSON-only client cannot read.
+
+  - id: mcp-accept-unsatisfiable
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 3
+    title: an unsatisfiable Accept draws a 406 rather than an unasked-for type
+    handler: mcp
+    with: { op: accept-unsatisfiable }
+    hint: Refuse a POST whose Accept allows neither application/json nor text/event-stream with HTTP 406 Not Acceptable, never a 200 carrying a type the client did not ask for.
+
   - id: mcp-get-fast-fail
     category: mcp
     tier: recommended
