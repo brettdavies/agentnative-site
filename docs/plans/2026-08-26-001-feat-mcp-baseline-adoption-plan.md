@@ -1000,7 +1000,7 @@ beside the new handler.
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /mcp` wire             | Reject code changes `-32099` → `-32022` + `data.supported` (client-visible; SDK-typed, so reference clients can recognize era rejection; documented in mcp-skill error table) |
 | `mcp.request` consumers      | `error_code` now populated on reject and host-rejection lines; base schema fields unchanged (sibling-consistent)                                                              |
-| Web-audit board              | `universeMax` 116 → 148 deflates stored global scores until re-audit; seeded domains reflow on deploy, unseeded rows age out in ≤30 days                                      |
+| Web-audit board              | `universeMax` 116 → 154 deflates stored global scores until re-audit; seeded domains reflow on deploy, unseeded rows age out in ≤30 days                                      |
 | anc.dev self-audit           | CORS pair flips from `absent` drag to `n_a`; modern checks pass (dual-stack) — self-score rises                                                                               |
 | Production wrangler bindings | One new var; secrets untouched; no behavior change on merge                                                                                                                   |
 | CI wall-clock                | Deep-check gains one staging job; staging deploys gain a bounded smoke step                                                                                                   |
@@ -1012,8 +1012,8 @@ beside the new handler.
 
 - **Wrong host allowlist = total MCP outage.** Mitigation: the U5 test matrix includes every environment's Host form;
   the one-week U5 soak gate before release; widened `error_code` makes the failure filterable.
-- **Score deflation window (KTD8).** Stored global scores drop until re-audit (~22% relative at `universeMax` 116 →
-  148). Mitigation: the fingerprint-triggered seeded reflow in the same deploy; the window is bounded and documented.
+- **Score deflation window (KTD8).** Stored global scores drop until re-audit (~25% relative at `universeMax` 116 →
+  154). Mitigation: the fingerprint-triggered seeded reflow in the same deploy; the window is bounded and documented.
 - **`server/discover` as the era proxy.** The modern rows are scored only against a lane `server/discover` evidenced
   (KTD3), so a lenient legacy server cannot earn the modern check by answering a header-routed `tools/list`. The
   residual runs the other way: a server whose modern `tools/list` works but whose `server/discover` refuses outright
