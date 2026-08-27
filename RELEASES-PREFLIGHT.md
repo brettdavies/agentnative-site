@@ -316,8 +316,8 @@ differences between callers are the base URL and the env-driven auth headers whe
 The curl recipes below show the **staging** shape (with CF Access headers). For the **local** shape, drop the two
 `CF-Access-Client-*` header lines and replace the staging URL with `http://localhost:8787`.
 
-- [ ] **`/mcp` dual-stack smoke passes checks 1–6.** Prefer the scripted suite (legacy initialize + modern list/call,
-  server card `2026-07-28`, cache hints):
+- [ ] **`/mcp` dual-stack smoke passes checks 1–7.** Prefer the scripted suite (legacy initialize + modern list/call,
+  server card `2026-07-28`, cache hints, malformed-body parse error):
 
   ```bash
   scripts/release/mcp-smoke.sh https://agentnative-site-staging.brettdavies.workers.dev
