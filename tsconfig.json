@@ -16,6 +16,6 @@
     "verbatimModuleSyntax": false,
     "allowJs": true
   },
-  "include": ["src/**/*", "demo/src/**/*", "tests/**/*", "scripts/**/*.mjs"],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*.mjs"],
   "exclude": ["node_modules", "dist", ".wrangler"]
 }

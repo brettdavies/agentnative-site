@@ -155,7 +155,7 @@ browser-reachable `/mcp` would let any malicious web page trigger `score_cli` ru
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
 
-**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
+**Request log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
 mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome, and ms
 bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under attack
 while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
@@ -255,11 +255,17 @@ entirely and produce a false preview. Never use them to verify any of those surf
 bun run dev    # http://localhost:8787, staging bindings, local Worker
 ```
 
-`--env staging` is load-bearing: it picks up the staging container image pin, `MCP_ENABLED="true"`, the always-pass
-Turnstile test secret, and the staging R2 / KV / rate-limit namespaces. The top-level (production) env defaults
-`MCP_ENABLED="false"` and may carry a container pin that fails to boot locally. `--local` keeps the rate-limit
+`--env staging` is load-bearing: it picks up the staging container image pin, the always-pass Turnstile test sitekey,
+the staging-only `MCP_CACHE_BYPASS_ALLOWED` / `WEB_AUDIT_ENABLED` vars, and the staging R2 / KV / rate-limit namespaces.
+The top-level (production) env may carry a container pin that fails to boot locally. `--local` keeps the rate-limit
 namespaces, R2, and asset directory in-process; dropping it would route to the deployed staging Worker and bypass the
 local build.
+
+**`MCP_ENABLED` is a secret, so no `--env` picks it up.** It appears in no `vars` block, and the kill-switch check is
+`env.MCP_ENABLED !== 'true'`, so a local run starts with the MCP surface off: `POST /mcp` answers `503` with `mcp is
+currently disabled by the operator`. To exercise `/mcp` locally, write `MCP_ENABLED="true"` into `.dev.vars.staging`,
+the per-environment local-secret file `wrangler dev --env staging` reads. `.dev.vars*` is gitignored, so the file is
+yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when exercising `score_cli`.
 
 Production-mode preview (rare, only when verifying the production block of `wrangler.jsonc`):
 

@@ -291,8 +291,8 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 The MCP transport surface composes the same orchestrator core (`lookupOnly` for the read tier, `runFreshOnly` for the
 run-fresh tier) as the HTTP `/api/score` handler. What this section covers and the HTTP smoke above does not: transport
 wiring, the 13-tool dual-stack surface (legacy + modern SEP-2243), MCP kill switches (`MCP_ENABLED`,
-`MCP_LIVE_SCORING_ENABLED`, `MCP_LEGACY_ENABLED`), and the orchestrator's MCP-side result envelope (`next_tool` bouncing,
-`source: "registry" | "live-cache" | "live"`).
+`MCP_LIVE_SCORING_ENABLED`, `MCP_LEGACY_ENABLED`), and the orchestrator's MCP-side result envelope (`next_tool`
+bouncing, `source: "registry" | "live-cache" | "live"`).
 
 Preflight defaults to the **staging** target (`https://agentnative-site-staging.brettdavies.workers.dev` through CF
 Access), matching the target shape of `do-smoke` and `dist`. This catches MCP regressions on the deployed staging code
@@ -359,8 +359,9 @@ The curl recipes below show the **staging** shape (with CF Access headers). For 
   # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
   ```
 
-  A 503 or `MCP_ENABLED` kill-switch envelope means the staging env block has the switch flipped. A non-13 tool count is
-  a tool-wiring regression — block.
+  A 503 or `MCP_ENABLED` kill-switch envelope means the switch is unset or not `"true"` on the staging Worker. It is a
+  secret and appears in no wrangler env block: read it with `wrangler secret list --env staging` and set it with
+  `wrangler secret put MCP_ENABLED --env staging`. A non-13 tool count is a tool-wiring regression: block.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Exercises the
   curated-registry branch shared by `lookupOnly` and `runFreshOnly`. No cache write, no container invocation, no audit
