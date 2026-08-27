@@ -49,9 +49,9 @@ async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 52 checks', async () => {
+  test('normalizes to exactly 62 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(52);
+    expect(registry.checks.length).toBe(62);
   });
 
   test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
@@ -135,25 +135,25 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 3 / recommended 26 / optional 23', async () => {
+  test('tier counts are exactly required 4 / recommended 35 / optional 23', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 3, recommended: 26, optional: 23 });
+    expect(counts).toEqual({ required: 4, recommended: 35, optional: 23 });
   });
 
-  test('derived keyword counts match must 3 / should 26 / may 23', async () => {
+  test('derived keyword counts match must 4 / should 35 / may 23', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 3, should: 26, may: 23 });
+    expect(counts).toEqual({ must: 4, should: 35, may: 23 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 4, P2: 22, P3: 4, P4: 4, P6: 4, P7: 5, P8: 9 });
+    expect(counts).toEqual({ P1: 4, P2: 24, P3: 4, P4: 12, P6: 4, P7: 5, P8: 9 });
     expect(counts.P5).toBeUndefined();
   });
 
@@ -174,6 +174,59 @@ describe('web-audit registry shape', () => {
     ]) {
       expect(ids.has(id)).toBe(true);
     }
+  });
+
+  test('the modern-era pair is registered with the settled applicability', async () => {
+    const registry = await loadNormalized();
+    const modernTools = registry.checks.find((c) => c.id === 'mcp-modern-tools-list');
+    expect(modernTools).toMatchObject({
+      category: 'mcp',
+      tier: 'required',
+      keyword: 'must',
+      antecedent: 'mcp-present',
+      site_types: ['mcp'],
+      handler: 'mcp',
+      with: { op: 'modern-tools-list' },
+    });
+    const discover = registry.checks.find((c) => c.id === 'mcp-server-discover');
+    expect(discover).toMatchObject({
+      category: 'mcp',
+      tier: 'recommended',
+      keyword: 'should',
+      antecedent: 'mcp-present',
+      site_types: ['mcp'],
+      handler: 'mcp',
+      with: { op: 'server-discover' },
+    });
+  });
+
+  test('the error-code conformance family is registered with the settled applicability', async () => {
+    const registry = await loadNormalized();
+    const family = [
+      'mcp-malformed-body',
+      'mcp-batch-reject',
+      'mcp-unknown-tool',
+      'mcp-modern-unknown-method',
+      'mcp-modern-clientcaps',
+      'mcp-modern-header-mismatch',
+      'mcp-modern-version-reject',
+      'mcp-modern-resources-miss',
+    ];
+    for (const id of family) {
+      const entry = registry.checks.find((c) => c.id === id);
+      expect(entry).toMatchObject({
+        category: 'mcp',
+        tier: 'recommended',
+        keyword: 'should',
+        principle: 'P4',
+        site_types: ['mcp'],
+        antecedent: id === 'mcp-modern-resources-miss' ? 'mcp-resources' : 'mcp-present',
+        handler: 'mcp',
+        with: { op: id.replace(/^mcp-/, '') },
+      });
+    }
+    const legacyErrorOp = registry.checks.find((c) => c.id === 'mcp-unknown-method');
+    expect(legacyErrorOp?.with).toEqual({ op: 'error', method: 'nonexistent/method', expect_code: -32601 });
   });
 
   test('mcp_discovery carries well_known, common_paths, and the pinned protocol version', async () => {
@@ -239,6 +292,17 @@ describe('web-audit registry shape', () => {
     ).toThrow(/site_types entry/);
   });
 
+  test('a cors-preflight check without a valid with.surface aborts normalization', () => {
+    const corsCheck = { ...abortCheck, handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } };
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [corsCheck] })).toThrow(/with\.surface/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...corsCheck, with: { surface: 'preflght' } }] }),
+    ).toThrow(/with\.surface/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...corsCheck, with: { surface: 'actual' } }] }),
+    ).not.toThrow();
+  });
+
   test('the retired applies_to field aborts normalization', () => {
     expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, applies_to: 'any' }] })).toThrow(
       /retired applies_to/,
@@ -257,10 +321,10 @@ describe('web-audit registry shape', () => {
     );
   });
 
-  test('normalized JSON round-trips to 52 entries', async () => {
+  test('normalized JSON round-trips to 62 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(52);
+    expect(roundTripped.checks.length).toBe(62);
   });
 });
 
@@ -294,7 +358,7 @@ describe('buildWebScorecard', () => {
     row({ id: 'dns-aid', principle: 'P8', keyword: 'may', weight: 1, status: 'broken', title: 'dns' }),
   ];
 
-  test('produces the 0.2 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
+  test('produces the 0.3 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
     const sc = buildWebScorecard(rows, {
       targetUrl: 'https://example.com/',
       domain: 'example.com',
@@ -303,7 +367,7 @@ describe('buildWebScorecard', () => {
       specVersion: '0.3.0',
       registry,
     });
-    expect(sc.schema_version).toBe('0.2');
+    expect(sc.schema_version).toBe('0.3');
     expect(sc.spec_version).toBe('0.3.0');
     expect(sc.tool).toEqual({ name: 'example.com', url: 'https://example.com/' });
     expect(sc.target_url).toBe('https://example.com/');
@@ -356,13 +420,13 @@ describe('buildWebScorecard', () => {
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
-  test('the real registry keeps its 3/26/23 tier distribution and universeMax under the split', async () => {
+  test('the real registry keeps its 4/35/23 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
-    // 3 MUST x5 + 26 SHOULD x3 + 23 MAY x1 = 116.
+    // 4 MUST x5 + 35 SHOULD x3 + 23 MAY x1 = 148.
     const universeMax = universeMaxOf(
       registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
     );
-    expect(universeMax).toBe(116);
+    expect(universeMax).toBe(148);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {

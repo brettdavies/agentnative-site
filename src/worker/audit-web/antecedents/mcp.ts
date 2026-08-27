@@ -1,6 +1,7 @@
 // MCP antecedents: whether an MCP endpoint was discovered, and whether it
 // challenges for auth.
 
+import { advertisesResources } from '../handlers/mcp';
 import type { AntecedentToken } from '../registry';
 import { type AntecedentResolver, cardDeclaresAuth, evidenceShowsAuthChallenge, sourceEvidence } from './context';
 
@@ -11,10 +12,15 @@ const mcpAuth: AntecedentResolver = (ctx) => {
   return evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize')) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
 };
 
+// Era-neutral: legacy initialize capabilities evidence and the modern
+// server/discover capability advertisement both satisfy the token, so a
+// single-era server's resources-gated rows probe on the lane it offers.
 const mcpResources: AntecedentResolver = (ctx) => {
   if (ctx.mcpEndpoint === null) return 'n_a';
-  const caps = sourceEvidence(ctx, 'mcp-initialize')[0]?.capabilities;
-  return Array.isArray(caps) && caps.includes('resources') ? 'apply' : 'n_a';
+  return advertisesResources(sourceEvidence(ctx, 'mcp-initialize')) ||
+    advertisesResources(sourceEvidence(ctx, 'mcp-server-discover'))
+    ? 'apply'
+    : 'n_a';
 };
 
 export const mcpResolvers = {
@@ -26,5 +32,5 @@ export const mcpResolvers = {
 export const mcpEvidence = {
   'mcp-present': 'no MCP endpoint discovered',
   'mcp-auth': 'MCP endpoint does not challenge for auth',
-  'mcp-resources': 'initialize does not advertise capabilities.resources',
+  'mcp-resources': 'neither initialize nor server/discover advertises capabilities.resources',
 } satisfies Partial<Record<AntecedentToken, string>>;

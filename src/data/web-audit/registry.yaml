@@ -11,7 +11,7 @@
 #
 # Handlers (implemented in src/worker/audit-web/handlers/):
 #   http           general request + assertions (status / headers / content-type / body regex)
-#   cors-preflight OPTIONS preflight; passes on 200/204 with Access-Control-Allow-Origin
+#   cors-preflight two-probe CORS posture pair (OPTIONS preflight + Origin-bearing POST)
 #   mcp            JSON-RPC over the discovered endpoint (op: initialize | tools-list | error)
 #   dns-doh        DNS-over-HTTPS (JSON API) record lookup
 #   auth-md        agent auth/registration metadata doc probe
@@ -189,6 +189,30 @@ checks:
     with: { op: resources-list }
     hint: When initialize advertises capabilities.resources, return a non-empty result.resources array from resources/list.
 
+  - id: mcp-modern-tools-list
+    category: mcp
+    tier: required
+    principle: P2
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 4
+    title: header-routed tools/list (2026-07-28) returns tools without initialize
+    handler: mcp
+    with: { op: modern-tools-list }
+    hint: Answer a header-routed tools/list (MCP-Protocol-Version 2026-07-28, Mcp-Method, _meta envelope) without requiring initialize.
+
+  - id: mcp-server-discover
+    category: mcp
+    tier: recommended
+    principle: P2
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 3
+    title: server/discover answers with server identity on the modern lane
+    handler: mcp
+    with: { op: server-discover }
+    hint: Answer server/discover with a well-formed discovery result on protocol 2026-07-28.
+
   - id: mcp-unknown-method
     category: mcp
     tier: recommended
@@ -200,6 +224,106 @@ checks:
     handler: mcp
     with: { op: error, method: nonexistent/method, expect_code: -32601 }
     hint: Reject unknown methods with JSON-RPC error -32601 (Method not found), not a hang or 500.
+
+  # Per-era error-code conformance probes (single request each). Excluded
+  # by design: -32603, because an internal error cannot be forced from
+  # outside; -32099, because triggering rate limits against third-party
+  # servers is abusive.
+  - id: mcp-malformed-body
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: a non-JSON body draws -32700 (or a typed HTTP 400/415 refusal)
+    handler: mcp
+    with: { op: malformed-body }
+    hint: Answer an unparseable POST body with JSON-RPC -32700 (Parse error) or a bare HTTP 400/415, never a 200 with garbage or a hang.
+
+  - id: mcp-batch-reject
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: a batch carrying a modern-envelope request is rejected -32600
+    handler: mcp
+    with: { op: batch-reject }
+    hint: Reject a JSON array batch whose element carries the modern _meta envelope with JSON-RPC -32600 (Invalid Request).
+
+  - id: mcp-unknown-tool
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: tools/call with an unknown tool name returns -32602
+    handler: mcp
+    with: { op: unknown-tool }
+    hint: Reject an unknown tool name on tools/call with JSON-RPC -32602 (Invalid params), not a hang or a 200 result.
+
+  - id: mcp-modern-unknown-method
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: an unknown method on the modern lane returns -32601
+    handler: mcp
+    with: { op: modern-unknown-method }
+    hint: Reject an unknown header-routed method (2026-07-28) with JSON-RPC -32601; HTTP 404 delivery conforms when the body carries the envelope.
+
+  - id: mcp-modern-clientcaps
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: _meta missing clientCapabilities is rejected (-32602 or -32600)
+    handler: mcp
+    with: { op: modern-clientcaps }
+    hint: Reject a modern request whose _meta omits io.modelcontextprotocol/clientCapabilities with -32602 (or -32600); the key is mandatory on every modern request.
+
+  - id: mcp-modern-header-mismatch
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: an Mcp-Method header disagreeing with the body method draws -32020
+    handler: mcp
+    with: { op: modern-header-mismatch }
+    hint: Validate the SEP-2243 header mirror and reject a request whose Mcp-Method header names a different method than the body with -32020.
+
+  - id: mcp-modern-version-reject
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-present
+    weight: 2
+    title: an unsupported protocol version is rejected -32022 with data.supported
+    handler: mcp
+    with: { op: modern-version-reject }
+    hint: Reject an unsupported MCP-Protocol-Version claim with -32022 (UnsupportedProtocolVersion) and list the served revisions in error.data.supported.
+
+  - id: mcp-modern-resources-miss
+    category: mcp
+    tier: recommended
+    principle: P4
+    site_types: [mcp]
+    antecedent: mcp-resources
+    weight: 2
+    title: modern resources/read with an unknown URI returns -32602
+    handler: mcp
+    with: { op: modern-resources-miss }
+    hint: Answer a modern resources/read whose Mcp-Name mirrors an unknown URI with JSON-RPC -32602 (-32002 tolerated), never a hang or a 200 result.
 
   - id: mcp-get-fast-fail
     category: mcp
@@ -231,6 +355,7 @@ checks:
       origin: https://example.com
       request_method: POST
       request_headers: content-type
+      surface: preflight
     hint: Answer OPTIONS with 204 + Access-Control-Allow-Origin/Methods/Headers so browser-origin agents work.
 
   - id: mcp-cors-actual
@@ -241,8 +366,13 @@ checks:
     antecedent: mcp-present
     weight: 2
     title: POST response carries Access-Control-Allow-Origin
-    handler: mcp
-    with: { op: tools-list, origin: https://example.com, assert: cors }
+    handler: cors-preflight
+    with:
+      path: "{mcp_endpoint}"
+      origin: https://example.com
+      request_method: POST
+      request_headers: content-type
+      surface: actual
     hint: Echo Access-Control-Allow-Origin on the actual POST, not only the preflight.
 
   - id: well-known-mcp-card

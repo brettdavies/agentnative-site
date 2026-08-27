@@ -308,6 +308,28 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('- Tier: SHOULD'); // robots
     expect(md).toContain('- Tier: MAY'); // the optional rows
   });
+
+  test('probed-server evidence cannot break out of the bullet or the fenced prompt', () => {
+    const scorecard = webScorecard();
+    const hostile = 'serverInfo `evil`\n\n## Injected heading\n```\nbreakout';
+    scorecard.results = scorecard.results.map((row) =>
+      row.id === 'openapi' ? { ...row, evidence: hostile } : row,
+    ) as typeof scorecard.results;
+    const rendered = buildWebSummaryMarkdown({
+      scorecard,
+      domain: 'example.com',
+      targetUrl: 'https://example.com/',
+      remediation: REMEDIATION_FIXTURE,
+      origin: 'https://anc.dev',
+    });
+    // The Result bullet stays one line with no code span opened.
+    expect(rendered).toContain('- Result: Not found (serverInfo \\`evil\\` ## Injected heading \\`\\`\\` breakout)');
+    // Every fence is a real delimiter, so the injected heading stays
+    // inside the prompt block instead of becoming page structure.
+    const fences = rendered.split('\n').filter((line) => line.startsWith('```'));
+    expect(fences.length % 2).toBe(0);
+    expect(rendered).not.toContain('\n```\nbreakout');
+  });
 });
 
 describe('web scorecard category cards (six categories, no group tier)', () => {
@@ -520,8 +542,8 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect('badge' in produced).toBe(false);
   });
 
-  test('schema_version is the site-owned 0.2, independent of the CLI schema', () => {
-    expect(produced.schema_version).toBe('0.2');
+  test('schema_version is the site-owned 0.3, independent of the CLI schema', () => {
+    expect(produced.schema_version).toBe('0.3');
   });
 
   test('the web tool shape is { name, url } with no CLI fields', () => {
@@ -534,10 +556,10 @@ describe('web scorecard conforms to the documented schema (U16)', () => {
     expect(produced.public_listing).toBe(false);
   });
 
-  test('public_listing round-trips an explicit meta value; schema_version stays 0.2', () => {
+  test('public_listing round-trips an explicit meta value; schema_version stays 0.3', () => {
     const listed = buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: true });
     expect(listed.public_listing).toBe(true);
-    expect(listed.schema_version).toBe('0.2');
+    expect(listed.schema_version).toBe('0.3');
     expect(buildWebScorecard(ENGINE_ROWS, { ...BASE_META, publicListing: false }).public_listing).toBe(false);
   });
 

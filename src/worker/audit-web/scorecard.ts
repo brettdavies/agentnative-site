@@ -1,7 +1,7 @@
 // Map engine results into the web scorecard (plan U5, reshaped per
 // plan-003 U4/KTD-8).
 //
-// Schema 0.2: the headline is a top-level `score_pct` (the RELATIVE
+// Schema 0.3: the headline is a top-level `score_pct` (the RELATIVE
 // score) beside a `score { relative, global }` pair and per-category
 // `categories[]` rollups; there is no badge (no embeddable web badge).
 // Each result row carries its visible `category` plus `principle` as a
@@ -9,9 +9,11 @@
 // surfaces). `group` mirrors `principle` for the interim shared-renderer
 // path; the category-grouped web renderer replaces that consumer.
 
-import type { EvidenceItem } from './handlers/types';
+import type { EvidenceItem, NaReason } from './handlers/types';
 import type { WebAuditRegistry, WebCheckKeyword, WebCheckTier, WebSiteType } from './registry';
 import { type CategoryRollup, categoryRollups, type ScoreConfig, scoreWebAudit, universeMaxOf } from './score';
+
+export type { NaReason } from './handlers/types';
 
 /**
  * Web scorecard status vocabulary (tri-state outcome model): `absent`
@@ -19,13 +21,6 @@ import { type CategoryRollup, categoryRollups, type ScoreConfig, scoreWebAudit, 
  * a present-but-invalid surface differently from a missing one.
  */
 export type ScorecardStatus = 'pass' | 'broken' | 'absent' | 'n_a' | 'skip' | 'error';
-
-/**
- * Why a row is n_a: `antecedent-unmet` = the check does not apply to
- * this site (declared type or runtime antecedent); `optional-absent` =
- * it applies, is a MAY, and simply is not implemented.
- */
-export type NaReason = 'antecedent-unmet' | 'optional-absent';
 
 export interface EngineResult {
   id: string;
@@ -88,7 +83,7 @@ export interface WebScorecard {
 
 // Web scorecard schema version, independent of the CLI schema (0.7) and
 // of agentnative-spec. Documented in content/web-scorecard-schema.md.
-export const WEB_SCHEMA_VERSION = '0.2';
+export const WEB_SCHEMA_VERSION = '0.3';
 
 const SCORED_STATUSES = new Set<ScorecardStatus>(['pass', 'broken', 'absent']);
 

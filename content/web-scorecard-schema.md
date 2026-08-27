@@ -5,7 +5,7 @@ MCP server across six visible categories with a fairness-driven two-score model:
 is excluded rather than counted against it, and a present-but-broken surface costs more than an absent one. This page
 documents every field a web scorecard carries.
 
-The web scorecard is site-owned. Its `schema_version` is **0.2**, independent of the CLI scorecard schema (currently
+The web scorecard is site-owned. Its `schema_version` is **0.3**, independent of the CLI scorecard schema (currently
 0.7) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
 [/scorecard-schema](/scorecard-schema).
 
@@ -13,7 +13,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.2**, independent of
 
 ```json
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "spec_version": "...",
   "target_url": "https://example.com/",
   "mcp_endpoint": "https://example.com/mcp",
@@ -144,19 +144,19 @@ One object per check.
 }
 ```
 
-| Field       | Type           | Meaning                                                                                                                                          |
-| ----------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`). The remediation-catalog and fix-skill key.                                   |
-| `label`     | string         | Human-readable check title.                                                                                                                      |
-| `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                    |
-| `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                           |
-| `layer`     | string         | Always `web` for a web scorecard row.                                                                                                            |
-| `keyword`   | string         | `must`, `should`, or `may`, derived from the check's tier.                                                                                       |
-| `tier`      | string         | `required`, `recommended`, or `optional` (the keyword's source).                                                                                 |
-| `principle` | string         | Internal principle tag `P1` through `P8`. Kept as data; web surfaces neither display nor link it.                                                |
-| `status`    | string         | `pass`, `broken`, `absent`, `n_a`, `skip`, or `error`. `broken` = present but invalid; `absent` = not there. See [statuses](#statuses).          |
-| `na_reason` | string         | Present only on `n_a` rows: `antecedent-unmet` (the check does not apply to this site) or `optional-absent` (an applicable MAY not implemented). |
-| `evidence`  | string \| null | A compact human-readable summary of what the probe observed.                                                                                     |
+| Field       | Type           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`        | string         | The check id from the registry (e.g. `llms-txt`, `mcp-initialize`, `mcp-modern-tools-list`). The remediation-catalog and fix-skill key.                                                                                                                                                                                                                                                                             |
+| `label`     | string         | Human-readable check title.                                                                                                                                                                                                                                                                                                                                                                                         |
+| `category`  | string         | The visible category slug (one of the `categories[].id` values). Drives the display grouping.                                                                                                                                                                                                                                                                                                                       |
+| `group`     | string         | Mirrors `principle` for shared-renderer compatibility.                                                                                                                                                                                                                                                                                                                                                              |
+| `layer`     | string         | Always `web` for a web scorecard row.                                                                                                                                                                                                                                                                                                                                                                               |
+| `keyword`   | string         | `must`, `should`, or `may`, derived from the check's tier.                                                                                                                                                                                                                                                                                                                                                          |
+| `tier`      | string         | `required`, `recommended`, or `optional` (the keyword's source).                                                                                                                                                                                                                                                                                                                                                    |
+| `principle` | string         | Internal principle tag `P1` through `P8`. Kept as data; web surfaces neither display nor link it.                                                                                                                                                                                                                                                                                                                   |
+| `status`    | string         | `pass`, `broken`, `absent`, `n_a`, `skip`, or `error`. `broken` = present but invalid; `absent` = not there. See [statuses](#statuses).                                                                                                                                                                                                                                                                             |
+| `na_reason` | string         | Present only on `n_a` rows: `antecedent-unmet` (the check does not apply to this site), `optional-absent` (an applicable MAY not implemented), `posture-consistent` (a deliberate, consistent opt-out of the probed surface pair), or `era-absent` (the protocol era the check probes was never evidenced, so the check was settled without a request). Absent on handler-emitted `n_a` rows with nothing to probe. |
+| `evidence`  | string \| null | A compact human-readable summary of what the probe observed.                                                                                                                                                                                                                                                                                                                                                        |
 
 ### Statuses
 
@@ -164,7 +164,11 @@ One object per check.
 - `broken` — the surface exists but is invalid (malformed body, wrong content-type, an unexpected status where the
   surface clearly exists). Scores below absent.
 - `absent` — the surface is not there (404/410, no DNS records, no CORS headers).
-- `n_a` — excluded from both scores; `na_reason` says why (`antecedent-unmet` vs `optional-absent`).
+- `n_a` — excluded from both scores; `na_reason` says why: `antecedent-unmet` (does not apply to this site),
+  `optional-absent` (an applicable MAY not implemented), `posture-consistent` (the CORS pair's deliberate no-CORS
+  posture, with `Access-Control-Allow-Origin` on neither the preflight nor the POST), or `era-absent` (the MCP protocol
+  era the check probes was never evidenced, so the row was settled without a request and carries no observation to
+  score). A handler with nothing to probe (no discovered MCP endpoint) emits `n_a` with no `na_reason`.
 - `skip` — the per-audit deadline passed before the check ran.
 - `error` — an operational failure (network error, timeout); never credited, never penalized.
 
@@ -194,10 +198,13 @@ structured evidence, which differs by handler:
 
 - **http** — the resolved URL, the HTTP status, whether the assertion passed, and the failing reason when it did not.
   The canonical-redirect rule (the MCP server card) additionally records a per-alias verdict.
-- **cors-preflight** — the URL, status, and the `Access-Control-Allow-Origin` / `-Methods` / `-Headers` values.
+- **cors-preflight** — both probes of the CORS posture pair: a row per probe (tagged `probe: preflight` / `probe: post`)
+  with the URL, status, and the `Access-Control-Allow-Origin` value, plus `-Methods` / `-Headers` on the preflight row.
+  The classified surface's own row leads and carries the verdict's `why`.
 - **mcp** — the endpoint, status, and the op-specific facts: `serverInfo` and `protocolVersion` for `initialize`, the
-  tool names and input-schema count for `tools-list`, the error code for the unknown-method probe, or the
-  `Access-Control-Allow-Origin` for the CORS assertion.
+  tool names and input-schema count for `tools-list` (legacy and modern header-routed alike), the supported protocol
+  versions and `serverInfo` identity for `server/discover`, or the error code for the unknown-method probe or an
+  era-shaped refusal.
 - **dns-doh** — the queried name, the resolver, the DNS status code, and the answer count.
 - **auth-md / webmcp / scoped-llms** — the probed URLs (or root-HTML markers) and per-candidate outcomes.
 

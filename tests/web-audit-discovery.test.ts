@@ -4,6 +4,21 @@ import { describe, expect, test } from 'bun:test';
 import { discoverMcpEndpoint } from '../src/worker/audit-web/discovery';
 import { runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
+import { isModernProbe } from './helpers/mcp-modern';
+
+function modernToolsResponse(): Response {
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'a', inputSchema: {} }] } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function legacyRejectResponse(code = -32022): Response {
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code, message: 'unsupported' } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 function stubFetch(handler: (url: string, init?: RequestInit) => Response): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -75,6 +90,100 @@ describe('discoverMcpEndpoint', () => {
 
   test('returns null when nothing answers', async () => {
     const fetchImpl = stubFetch(() => new Response('not found', { status: 404 }));
+    const { endpoint } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 5000,
+    });
+    expect(endpoint).toBeNull();
+  });
+
+  test('falls back to a modern header-routed tools/list when the legacy initialize pass finds nothing', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      if (url.endsWith('/mcp') && init?.method === 'POST') {
+        return isModernProbe(init) ? modernToolsResponse() : legacyRejectResponse();
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 5000,
+    });
+    expect(endpoint).toBe('https://example.com/mcp');
+    expect(evidence.some((e) => e.probed === 'modern-tools-list' && e.endpoint === 'https://example.com/mcp')).toBe(
+      true,
+    );
+  });
+
+  test('the legacy initialize pass still wins on a dual-stack server; no modern probe is issued', async () => {
+    let modernProbes = 0;
+    const fetchImpl = stubFetch((url, init) => {
+      if (url.endsWith('/mcp') && init?.method === 'POST') {
+        if (isModernProbe(init)) {
+          modernProbes++;
+          return modernToolsResponse();
+        }
+        return initializeResponse();
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 5000,
+    });
+    expect(endpoint).toBe('https://example.com/mcp');
+    expect(evidence.some((e) => e.probed === 'initialize')).toBe(true);
+    expect(modernProbes).toBe(0);
+  });
+
+  test('an off-origin endpoint declared by a card is recorded and never probed', async () => {
+    const probed: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      probed.push(url);
+      if (url.endsWith('/.well-known/mcp.json')) {
+        return new Response(JSON.stringify({ mcp_endpoint: 'https://victim.example/mcp' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 5000,
+    });
+    expect(endpoint).toBeNull();
+    expect(evidence.some((e) => e.blocked === 'off-origin endpoint declaration')).toBe(true);
+    expect(probed.some((url) => url.includes('victim.example'))).toBe(false);
+  });
+
+  test('discovery stops at the per-audit deadline instead of walking every path', async () => {
+    let hops = 0;
+    let clock = 1_000;
+    const fetchImpl = stubFetch(() => {
+      hops += 1;
+      clock += 8_000;
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 8_000,
+      deadlineAt: clock + 25_000,
+      now: () => clock,
+    });
+    expect(endpoint).toBeNull();
+    // Six hops are reachable (2 well-known + 2 legacy + 2 modern); the
+    // 25s budget affords three full 8s slices plus a 1s remainder.
+    expect(hops).toBe(4);
+    expect(evidence.some((e) => e.note === 'per-audit deadline exceeded during discovery')).toBe(true);
+  });
+
+  test('a modern probe answer without a tools result does not win', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      if (url.endsWith('/mcp') && init?.method === 'POST' && isModernProbe(init)) {
+        return legacyRejectResponse(-32603);
+      }
+      return new Response('not found', { status: 404 });
+    });
     const { endpoint } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
       fetchOptions: { fetchImpl },
       timeoutMs: 5000,
@@ -262,5 +371,76 @@ describe('runWebAudit engine', () => {
     expect(sc.tool.url).toBe('https://example.com/');
     expect(sc.target_url).toBe('https://example.com/');
     expect(complete.complete).toBe(true);
+  });
+});
+
+function eraRegistry(): WebAuditRegistry {
+  const registry = tinyRegistry();
+  registry.checks.push({
+    id: 'mcp-modern-tools-list',
+    category: 'mcp',
+    tier: 'required',
+    keyword: 'must',
+    principle: 'P2',
+    site_types: ['mcp'],
+    antecedent: 'mcp-present',
+    weight: 4,
+    title: 'modern tools/list',
+    hint: 'h',
+    handler: 'mcp',
+    with: { op: 'modern-tools-list' },
+  });
+  return registry;
+}
+
+describe('runWebAudit era lanes', () => {
+  test('a modern-only server is discovered via the modern fallback and scored per lane (AE3)', async () => {
+    const fetchImpl = stubFetch((url, init) => {
+      if (url.endsWith('/mcp') && init?.method === 'POST') {
+        return isModernProbe(init) ? modernToolsResponse() : legacyRejectResponse();
+      }
+      if (url.endsWith('/llms.txt') || url.endsWith('/robots.txt')) return new Response('ok', { status: 200 });
+      if (url.includes('dns-query') || url.includes('/resolve')) {
+        return new Response(JSON.stringify({ Status: 3, Answer: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/dns-json' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: eraRegistry(), fetchOptions: { fetchImpl } }),
+    );
+    const discovery = events.find((e) => e.type === 'discovery');
+    if (discovery?.type !== 'discovery') throw new Error('no discovery event');
+    expect(discovery.endpoint).toBe('https://example.com/mcp');
+    expect(discovery.evidence.some((e) => e.probed === 'modern-tools-list')).toBe(true);
+    const complete = events.find((e) => e.type === 'complete');
+    if (complete?.type !== 'complete') throw new Error('no complete event');
+    expect(complete.scorecard.results.find((r) => r.id === 'mcp-initialize')?.status).toBe('absent');
+    expect(complete.scorecard.results.find((r) => r.id === 'mcp-modern-tools-list')?.status).toBe('pass');
+  });
+
+  test('with every MCP probe dead both era lanes stay n_a and are excluded from scoring', async () => {
+    const fetchImpl = stubFetch((url) => {
+      if (url.endsWith('/llms.txt') || url.endsWith('/robots.txt')) return new Response('ok', { status: 200 });
+      if (url.includes('dns-query') || url.includes('/resolve')) {
+        return new Response(JSON.stringify({ Status: 3, Answer: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/dns-json' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const events = await collect(
+      runWebAudit({ url: 'https://example.com/', registry: eraRegistry(), fetchOptions: { fetchImpl } }),
+    );
+    const complete = events.find((e) => e.type === 'complete');
+    if (complete?.type !== 'complete') throw new Error('no complete event');
+    const legacy = complete.scorecard.results.find((r) => r.id === 'mcp-initialize');
+    const modern = complete.scorecard.results.find((r) => r.id === 'mcp-modern-tools-list');
+    expect(legacy?.status).toBe('n_a');
+    expect(modern?.status).toBe('n_a');
+    expect(complete.scorecard.coverage_summary.must.total).toBe(0);
   });
 });
