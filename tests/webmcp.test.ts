@@ -424,6 +424,25 @@ describe('bindModelContext', () => {
       }),
     ).not.toThrow();
   });
+
+  test('does not read navigator.modelContext when document.modelContext exists', () => {
+    let navReads = 0;
+    const mc = {};
+    initWebMcp({
+      document: { modelContext: mc } as unknown as Document,
+      navigator: {
+        get modelContext() {
+          navReads += 1;
+          return {};
+        },
+      } as unknown as Navigator,
+      window: {
+        addEventListener() {},
+        location: { origin: 'https://anc.dev', pathname: '/web-audit' },
+      } as unknown as Window,
+    });
+    expect(navReads).toBe(0);
+  });
 });
 
 describe('iron-rule source', () => {

@@ -152,11 +152,20 @@ function registerWithLifecycle(mc: ModelContext, win: Window, doc: Document | un
 
 function probeModelContext(host: InitWebMcpHost): ModelContext | undefined {
   if (host.document !== undefined || host.navigator !== undefined) {
-    return (host.document as DocMc | undefined)?.modelContext || (host.navigator as NavMc | undefined)?.modelContext;
+    const fromHostDoc = (host.document as DocMc | undefined)?.modelContext;
+    if (fromHostDoc) return fromHostDoc;
+    return (host.navigator as NavMc | undefined)?.modelContext;
   }
-  const fromDocument = typeof document !== 'undefined' ? (document as DocMc).modelContext : undefined;
-  const fromNavigator = typeof navigator !== 'undefined' ? (navigator as NavMc).modelContext : undefined;
-  return fromDocument || fromNavigator;
+  // Read navigator only after document misses. Chrome warns on any access to
+  // the deprecated navigator.modelContext getter.
+  if (typeof document !== 'undefined') {
+    const fromDocument = (document as DocMc).modelContext;
+    if (fromDocument) return fromDocument;
+  }
+  if (typeof navigator !== 'undefined') {
+    return (navigator as NavMc).modelContext;
+  }
+  return undefined;
 }
 
 export function initWebMcp(host: InitWebMcpHost = {}): void {
