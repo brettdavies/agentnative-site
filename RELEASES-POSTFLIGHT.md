@@ -165,8 +165,12 @@ SKIP with a pointer to the manual recipe below. See the deferred-bypass plan at
 The deployed counterpart to PREFLIGHT's
 [Live MCP surface against `wrangler dev --local`](./RELEASES-PREFLIGHT.md#live-mcp-surface-mandatory). What this section
 catches and the preflight could not: deploy-side rate-limiter bindings (`MCP_LIMITER` 60/60s, `MCP_AUDIT_LIMITER` 5/60s
-burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and the live Worker, and any kill-switch
-(`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) flipped at the env's wrangler block.
+burst + 5/60min per-IP KV ceiling), binding drift between `wrangler.jsonc` and the live Worker, and either secret kill
+switch (`MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`) left off in the target environment. Those two are `wrangler secret
+put` values that appear in no wrangler block, and an unset secret reads as off, so absence fails closed. The committed
+var `MCP_LEGACY_ENABLED` is the other shape: it rides the deploy, so drift there is a `wrangler.jsonc` question, not a
+secret one. Shapes and flip verbs:
+[`RELEASES.md` § Bindings added by the MCP endpoint](./RELEASES.md#bindings-added-by-the-mcp-endpoint).
 
 Runs against both envs:
 
@@ -219,8 +223,10 @@ binary without bypass (asserts `source=live-cache`). Both paths must produce the
   # expect: count: 13, ttlMs: 3600000, cacheScope: "public"
   ```
 
-  A 503 / kill-switch envelope means `MCP_ENABLED` is wrong at the top level (production). A non-13 tool count is a
-  tool-wiring regression that escaped preflight — block and roll back if it cannot be hotfixed quickly.
+  A 503 / kill-switch envelope means the production `MCP_ENABLED` secret is unset or not `"true"`. Fix it with
+  `wrangler secret put MCP_ENABLED` and no `--env` flag, because production is the top-level config and there is no
+  `env.production` block; the value takes effect on the next request to a fresh isolate, with no redeploy. A non-13 tool
+  count is a tool-wiring regression that escaped preflight — block and roll back if it cannot be hotfixed quickly.
 
 - [ ] **Symmetry contract: registry tier returns matching envelopes from both scorecard tools.** Same shape as
   preflight, against prod. Confirms the orchestrator's curated-registry branch composes through the prod bindings

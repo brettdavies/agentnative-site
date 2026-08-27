@@ -326,14 +326,15 @@ layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
 roll. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be tuned with
-visitor-log data.
+`mcp.request` log volume.
 
 ## Wire-level reference
 
 For clients that need the protocol details.
 
-**Endpoint.** `POST https://anc.dev/mcp`. Other methods return `405 Method Not Allowed` with `Allow: POST`. No
-authentication.
+**Endpoint.** `POST https://anc.dev/mcp`. `GET` is also serviceable: it returns the human landing page, or a permanent
+redirect to the server card under a JSON `Accept`. Every other method returns `405 Method Not Allowed` advertising
+`Allow: GET, POST`. No authentication.
 
 **Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client
 `protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name`
