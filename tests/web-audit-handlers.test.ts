@@ -13,7 +13,7 @@ import { runDnsDoh } from '../src/worker/audit-web/handlers/dns-doh';
 import { runHttp } from '../src/worker/audit-web/handlers/http';
 import { runLlmsTxtQuality } from '../src/worker/audit-web/handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from '../src/worker/audit-web/handlers/markdown-frontmatter';
-import { runMcp } from '../src/worker/audit-web/handlers/mcp';
+import { modernProbeBody, runMcp } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import { runWebMcp } from '../src/worker/audit-web/handlers/webmcp';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
@@ -21,7 +21,7 @@ import { scoreWebAudit } from '../src/worker/audit-web/score';
 import type { EngineResult } from '../src/worker/audit-web/scorecard';
 import worker, { type Env } from '../src/worker/index';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
-import { isModernProbe, MODERN_PROTOCOL, modernElementBatchBody } from './helpers/mcp-modern';
+import { isModernProbe, MODERN_PROTOCOL } from './helpers/mcp-modern';
 import { resetMcpTestState } from './helpers/mcp-rpc';
 
 function ctx(overrides: Partial<HandlerContext> & { fetchImpl: typeof fetch }): HandlerContext {
@@ -368,14 +368,30 @@ describe('runCorsPreflight posture pair', () => {
     expect(act.na_reason).toBeUndefined();
   });
 
-  test('a transport failure on either probe yields error for both ids', async () => {
-    const failing = (): Response => {
-      throw new Error('connect timeout');
-    };
-    for (const fetchImpl of [pairFetch(failing, postAcao()), pairFetch(preflightAcao(), failing)]) {
-      expect((await classify('preflight', fetchImpl)).status).toBe('error');
-      expect((await classify('actual', fetchImpl)).status).toBe('error');
-    }
+  const failingProbe = (): Response => {
+    throw new Error('connect timeout');
+  };
+
+  test('a transport failure suppresses only the id whose own probe failed', async () => {
+    const preflightDown = pairFetch(failingProbe, postAcao());
+    expect((await classify('preflight', preflightDown)).status).toBe('error');
+    expect((await classify('actual', preflightDown)).status).toBe('pass');
+
+    const postDown = pairFetch(preflightAcao(), failingProbe);
+    expect((await classify('preflight', postDown)).status).toBe('pass');
+    expect((await classify('actual', postDown)).status).toBe('error');
+  });
+
+  test('a no-CORS surface whose sibling probe failed is error, not a declared posture', async () => {
+    const preflightDown = pairFetch(failingProbe, postBare());
+    const act = await classify('actual', preflightDown);
+    expect(act.status).toBe('error');
+    expect(act.na_reason).toBeUndefined();
+
+    const postDown = pairFetch(preflightBare(), failingProbe);
+    const pre = await classify('preflight', postDown);
+    expect(pre.status).toBe('error');
+    expect(pre.na_reason).toBeUndefined();
   });
 
   test('one run issues exactly the OPTIONS preflight and the Origin-bearing POST', async () => {
@@ -916,8 +932,8 @@ describe('runMcp error-code conformance', () => {
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBe(1);
     expect(body[0].method).toBe('tools/list');
-    const helperElement = modernElementBatchBody()[0];
-    expect(Object.keys(body[0].params._meta).sort()).toEqual(Object.keys(helperElement.params._meta).sort());
+    const element = JSON.parse(modernProbeBody('tools/list')) as { params: { _meta: Record<string, unknown> } };
+    expect(body[0].params._meta).toEqual(element.params._meta);
   });
 
   test('unknown-tool sends a legacy tools/call with a name outside any real catalog', async () => {
@@ -1058,6 +1074,40 @@ describe('runMcp error-code conformance', () => {
       stubFetch(() => new Response('not found', { status: 404 })),
     );
     expect(malformed.status).toBe('broken');
+  });
+
+  test('a typed refusal conforms whether or not it carries a non-JSON-RPC explanation body', async () => {
+    const refusals: Array<() => Response> = [
+      () => new Response(null, { status: 400 }),
+      () => new Response('Invalid JSON', { status: 400, headers: { 'content-type': 'text/plain' } }),
+      () => json({ detail: 'Invalid JSON' }, 400),
+      () => json({ error: 'Invalid JSON' }, 415),
+    ];
+    for (const response of refusals) {
+      expect((await run({ op: 'malformed-body' }, stubFetch(response))).status).toBe('pass');
+    }
+    const dead = await run(
+      { op: 'malformed-body' },
+      stubFetch(() => json({ detail: 'gone' }, 404)),
+    );
+    expect(dead.status).toBe('broken');
+  });
+
+  test('a rate-limited refusal is an operational error on every op, never a penalty', async () => {
+    const ops: Array<Record<string, unknown>> = [
+      { op: 'error', method: 'nonexistent/method', expect_code: -32601 },
+      { op: 'tools-list' },
+      { op: 'server-discover' },
+      ...CONFORMANCE_OPS.map((op) => ({ op })),
+    ];
+    for (const w of ops) {
+      const outcome = await run(
+        w,
+        stubFetch(() => rpcError(-32099)),
+      );
+      expect(`${String(w.op)}:${outcome.status}`).toBe(`${String(w.op)}:error`);
+      expect(outcome.evidence[0].error_code).toBe(-32099);
+    }
   });
 
   test('a bare non-200 without an envelope is broken outside the typed-HTTP arm', async () => {
@@ -1265,6 +1315,26 @@ describe('mcp-resources antecedent resolves era-neutrally (engine)', () => {
     const rows = await auditRows(siteStub({ legacyResources: true, modernResources: false, legacyServes: true }));
     expect(rows.find((r) => r.id === 'mcp-modern-resources-miss')?.status).toBe('pass');
   });
+
+  test('a server-discover row reports its supported versions and serverInfo identity', async () => {
+    const rows = await auditRows(siteStub({ legacyResources: false, modernResources: true, legacyServes: false }));
+    const row = rows.find((r) => r.id === 'mcp-server-discover');
+    expect(row?.status).toBe('pass');
+    expect(row?.evidence).toBe(`supports ${MODERN_PROTOCOL}, serverInfo anc`);
+  });
+
+  test('a broken server-discover row renders a different evidence line from a passing one', async () => {
+    const base = siteStub({ legacyResources: false, modernResources: true, legacyServes: false });
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new Headers(init?.headers).get('mcp-method') === 'server/discover') {
+        return json({ jsonrpc: '2.0', id: 1, result: { capabilities: { tools: {} } } });
+      }
+      return base(input, init);
+    }) as typeof fetch;
+    const row = (await auditRows(fetchImpl)).find((r) => r.id === 'mcp-server-discover');
+    expect(row?.status).toBe('broken');
+    expect(row?.evidence).toBe('no supportedVersions in the server/discover result');
+  });
 });
 
 describe('runMcp conformance dogfood against the in-process handler', () => {
@@ -1300,7 +1370,11 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
     registered_resource_templates: ['registry', 'tool', 'principle', 'spec', 'scorecard'],
   };
 
-  function dogfoodEnv(): Env {
+  // Production binds the limiter and serves both eras, and both gates
+  // sit upstream of the SDK on the path this matrix drives, so the stub
+  // env binds them too: an unbound limiter or legacy gate would let the
+  // matrix pass against a shorter pipeline than the one that ships.
+  function dogfoodEnv(opts: { limiterSucceeds?: boolean; legacyEnabled?: boolean } = {}): Env {
     return {
       ASSETS: {
         fetch(req: Request) {
@@ -1318,6 +1392,10 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
       } as unknown as Fetcher,
       MCP_ENABLED: 'true',
       MCP_LIVE_SCORING_ENABLED: 'true',
+      MCP_LEGACY_ENABLED: (opts.legacyEnabled ?? true) ? 'true' : 'false',
+      MCP_LIMITER: {
+        limit: () => Promise.resolve({ success: opts.limiterSucceeds ?? true }),
+      },
     };
   }
 
@@ -1328,8 +1406,7 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
     resetMcpTestState();
   });
 
-  test('the full conformance matrix passes against the in-process worker', async () => {
-    const env = dogfoodEnv();
+  async function runMatrix(env: Env): Promise<Array<{ op: unknown; status: string; code: unknown }>> {
     const inProcess: typeof fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
       worker.fetch(new Request(input as string | URL, init), env, {} as ExecutionContext)) as typeof fetch;
     const probes: Array<Record<string, unknown>> = [
@@ -1350,9 +1427,36 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
     } finally {
       console.log = originalLog;
     }
-    for (const row of matrix) {
+    return matrix;
+  }
+
+  test('the full conformance matrix passes against the in-process worker', async () => {
+    for (const row of await runMatrix(dogfoodEnv())) {
       expect(`${String(row.op)}:${row.status}`).toBe(`${String(row.op)}:pass`);
     }
+  });
+
+  test('a breaching limiter answers -32099 and every row is excluded from scoring', async () => {
+    for (const row of await runMatrix(dogfoodEnv({ limiterSucceeds: false }))) {
+      expect(`${String(row.op)}:${row.status}:${String(row.code)}`).toBe(`${String(row.op)}:error:-32099`);
+    }
+  });
+
+  test('with the legacy lane disabled the modern rows pass and the closed lane reads absent', async () => {
+    const matrix = await runMatrix(dogfoodEnv({ legacyEnabled: false }));
+    const row = (op: string) => matrix.find((r) => r.op === op);
+    for (const op of CONFORMANCE_OPS.filter((o) => o.startsWith('modern-'))) {
+      expect(`${op}:${row(op)?.status}`).toBe(`${op}:pass`);
+    }
+    // The era gate answers a legacy tools/call with -32022, the
+    // lane-unavailability code, so the closed lane costs nothing. The
+    // other two legacy rows never reach the gate: an unparseable body
+    // draws the shell's -32700 first, and a batch carrying a modern
+    // element classifies as modern-era.
+    expect(row('unknown-tool')?.status).toBe('absent');
+    expect(row('unknown-tool')?.code).toBe(-32022);
+    expect(row('malformed-body')?.status).toBe('pass');
+    expect(row('batch-reject')?.status).toBe('pass');
   });
 });
 

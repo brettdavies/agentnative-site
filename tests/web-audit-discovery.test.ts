@@ -135,6 +135,48 @@ describe('discoverMcpEndpoint', () => {
     expect(modernProbes).toBe(0);
   });
 
+  test('an off-origin endpoint declared by a card is recorded and never probed', async () => {
+    const probed: string[] = [];
+    const fetchImpl = stubFetch((url) => {
+      probed.push(url);
+      if (url.endsWith('/.well-known/mcp.json')) {
+        return new Response(JSON.stringify({ mcp_endpoint: 'https://victim.example/mcp' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 5000,
+    });
+    expect(endpoint).toBeNull();
+    expect(evidence.some((e) => e.blocked === 'off-origin endpoint declaration')).toBe(true);
+    expect(probed.some((url) => url.includes('victim.example'))).toBe(false);
+  });
+
+  test('discovery stops at the per-audit deadline instead of walking every path', async () => {
+    let hops = 0;
+    let clock = 1_000;
+    const fetchImpl = stubFetch(() => {
+      hops += 1;
+      clock += 8_000;
+      return new Response('not found', { status: 404 });
+    });
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 8_000,
+      deadlineAt: clock + 25_000,
+      now: () => clock,
+    });
+    expect(endpoint).toBeNull();
+    // Six hops are reachable (2 well-known + 2 legacy + 2 modern); the
+    // 25s budget affords three full 8s slices plus a 1s remainder.
+    expect(hops).toBe(4);
+    expect(evidence.some((e) => e.note === 'per-audit deadline exceeded during discovery')).toBe(true);
+  });
+
   test('a modern probe answer without a tools result does not win', async () => {
     const fetchImpl = stubFetch((url, init) => {
       if (url.endsWith('/mcp') && init?.method === 'POST' && isModernProbe(init)) {

@@ -271,19 +271,20 @@ same model the CLI score uses. Each check maps onto one of P1 through P8, so a w
 scorecard and renders through the same presentation. Web results carry no badge; they live at a shareable
 [`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
 
-### Scoring change (2026-08-26)
+### Era lanes and CORS posture
 
-The web-audit check universe expanded on 2026-08-26, and public board numbers move with it:
+Two rules shape how MCP results score:
 
-- The modern MCP era (protocol revision `2026-07-28`) is scored as its own lane: a required header-routed `tools/list`
-  check and a recommended `server/discover` check. Legacy checks are unchanged. A dual-stack server earns both lanes; a
+- The modern MCP era (protocol revision `2026-07-28`) scores as its own lane alongside the legacy checks: a required
+  header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
   single-era server fails exactly the lane it lacks, and an era-shaped refusal (a well-formed `-32601` or `-32022`
   error) reads `absent`, not `broken`.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
   deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
-- Because the universe grew, global scores read lower until a site re-audits under the new universe. Seeded scorecards
-  reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next stale
-  access and age out of the display within 30 days, so expect board movement to settle inside that window.
+
+Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded
+scorecards reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next
+stale access and age out of the display within 30 days, so board movement settles inside that window.
 
 ## Re-running the same audits locally
 

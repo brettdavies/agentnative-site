@@ -9,7 +9,7 @@
 // resolve (no discovered MCP endpoint).
 
 import type { WebCheck } from '../registry';
-import { guardedFetch } from '../ssrf';
+import { guardedFetch, STATUS_ONLY_BODY_BYTES } from '../ssrf';
 import { LEGACY_TOOLS_LIST_BODY, legacyProbeHeaders } from './mcp';
 import { resolveUrl, substituteEndpoint, timeoutMsFor } from './shared';
 import type { EvidenceItem, HandlerContext, ProbeOutcome, ProbeStatus } from './types';
@@ -43,6 +43,8 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
   const postHeaders: Record<string, string> = { ...legacyProbeHeaders(), Origin: origin };
   if (ctx.mcpSessionId) postHeaders['Mcp-Session-Id'] = ctx.mcpSessionId;
 
+  // Both verdicts read response headers only, so neither probe buffers a
+  // body a hostile target could make arbitrarily large.
   const [pre, post] = await Promise.all([
     guardedFetch(
       url,
@@ -54,12 +56,12 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
           'Access-Control-Request-Headers': w.request_headers ?? 'content-type',
         },
       },
-      { ...ctx.fetchOptions, timeoutMs },
+      { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
     ),
     guardedFetch(
       url,
       { method: 'POST', headers: postHeaders, body: LEGACY_TOOLS_LIST_BODY },
-      { ...ctx.fetchOptions, timeoutMs },
+      { ...ctx.fetchOptions, timeoutMs, maxBodyBytes: STATUS_ONLY_BODY_BYTES },
     ),
   ]);
 
@@ -79,9 +81,20 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
   // evidence line (first row's `why`) always describes this check.
   const evidence = w.surface === 'preflight' ? [preEv, postEv] : [postEv, preEv];
 
-  if (pre.error !== null || post.error !== null) {
+  // Each id owns one surface, so a transport failure on the sibling
+  // probe cannot suppress a check whose own probe answered. The sibling
+  // is still needed to read the pair as a posture, so when it failed the
+  // surface's own answer classifies and an unverifiable no-CORS pair is
+  // an operational unknown, not a declared opt-out.
+  const ownError = w.surface === 'preflight' ? pre.error : post.error;
+  if (ownError !== null) {
     return { status: 'error', evidence };
   }
+  const siblingError = w.surface === 'preflight' ? post.error : pre.error;
+  const siblingUnknown = (label: string): { status: ProbeStatus; why: string } => ({
+    status: 'error',
+    why: `the ${label} probe failed (${siblingError}), so the no-CORS posture cannot be confirmed`,
+  });
 
   const classifyPreflight = (): { status: ProbeStatus; why: string } => {
     if (preAcao !== null) {
@@ -95,6 +108,7 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
         why: 'the POST carries Allow-Origin but the preflight does not: inconsistent posture',
       };
     }
+    if (siblingError !== null) return siblingUnknown('POST');
     return { status: 'na', why: POSTURE_WHY };
   };
   const classifyActual = (): { status: ProbeStatus; why: string } => {
@@ -102,6 +116,7 @@ export async function runCorsPreflight(check: WebCheck, ctx: HandlerContext): Pr
     if (preAcao !== null) {
       return { status: 'broken', why: 'the preflight declares CORS but the POST omits Allow-Origin' };
     }
+    if (siblingError !== null) return siblingUnknown('preflight');
     return { status: 'na', why: POSTURE_WHY };
   };
 

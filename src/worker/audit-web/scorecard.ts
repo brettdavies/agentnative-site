@@ -1,7 +1,7 @@
 // Map engine results into the web scorecard (plan U5, reshaped per
 // plan-003 U4/KTD-8).
 //
-// Schema 0.2: the headline is a top-level `score_pct` (the RELATIVE
+// Schema 0.3: the headline is a top-level `score_pct` (the RELATIVE
 // score) beside a `score { relative, global }` pair and per-category
 // `categories[]` rollups; there is no badge (no embeddable web badge).
 // Each result row carries its visible `category` plus `principle` as a
@@ -83,7 +83,7 @@ export interface WebScorecard {
 
 // Web scorecard schema version, independent of the CLI schema (0.7) and
 // of agentnative-spec. Documented in content/web-scorecard-schema.md.
-export const WEB_SCHEMA_VERSION = '0.2';
+export const WEB_SCHEMA_VERSION = '0.3';
 
 const SCORED_STATUSES = new Set<ScorecardStatus>(['pass', 'broken', 'absent']);
 

@@ -47,8 +47,15 @@ const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo';
 
 // Codes that signal the probed era lane is not offered (-32601 method
 // not found, -32022 UnsupportedProtocolVersion). Any other well-formed
-// error envelope keeps the broken-surface penalty.
+// error envelope keeps the broken-surface penalty, apart from the
+// rate-limit code below.
 const LANE_UNAVAILABLE_CODES = new Set([-32601, -32022]);
+
+// A rate-limit refusal measures the auditor's own request volume, not
+// the probed surface, so it is an operational condition (status
+// `error`, excluded from scoring) rather than a penalty on a target
+// defending itself.
+const RATE_LIMITED_CODE = -32099;
 
 // Single source of a modern op's wire method: the Mcp-Method header and
 // the body method both read this map, so they cannot disagree (the
@@ -291,18 +298,29 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.why = ['request failed'];
     return { status: 'error', evidence: [ev] };
   }
+  // A typed refusal is the status code plus the absence of a JSON-RPC
+  // error envelope, not a parse failure: a 400/415 carrying a
+  // framework's own JSON explanation body is still an envelope-free
+  // refusal in the statuses the row allows. 404 stays out of every arm
+  // so a dead endpoint earns nothing.
+  const typedHttpRefusal =
+    conformance !== undefined && resp.status !== null && (conformance.httpAccept ?? []).includes(resp.status);
+
   // The endpoint exists (discovery found it), so a response that carries
-  // no parseable JSON-RPC is a broken surface, not an absent one. A
-  // conformance row with a typed-HTTP arm accepts a bare refusal in the
-  // listed statuses; 404 stays out of every arm so a dead endpoint earns
-  // nothing.
+  // no parseable JSON-RPC is a broken surface, not an absent one.
   if (rpc === null) {
-    if (conformance && resp.status !== null && (conformance.httpAccept ?? []).includes(resp.status)) {
+    if (typedHttpRefusal) {
       ev.why = ['typed HTTP refusal with no JSON-RPC envelope'];
       return { status: 'pass', evidence: [ev] };
     }
     ev.why = ['no parseable JSON-RPC response'];
     return { status: 'broken', evidence: [ev] };
+  }
+
+  if ((rpc.error as { code?: number } | undefined)?.code === RATE_LIMITED_CODE) {
+    ev.error_code = RATE_LIMITED_CODE;
+    ev.why = ['rate limited by the target'];
+    return { status: 'error', evidence: [ev] };
   }
 
   // Conformance classification: the expected refusal code passes, an
@@ -314,6 +332,10 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     const code = typeof err?.code === 'number' ? err.code : null;
     ev.error_code = code;
     if (code === null) {
+      if (typedHttpRefusal) {
+        ev.why = ['typed HTTP refusal with no JSON-RPC envelope'];
+        return { status: 'pass', evidence: [ev] };
+      }
       ev.why = ['expected a JSON-RPC error envelope, got a result'];
       return { status: 'broken', evidence: [ev] };
     }

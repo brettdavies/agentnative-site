@@ -5,7 +5,7 @@ MCP server across six visible categories with a fairness-driven two-score model:
 is excluded rather than counted against it, and a present-but-broken surface costs more than an absent one. This page
 documents every field a web scorecard carries.
 
-The web scorecard is site-owned. Its `schema_version` is **0.2**, independent of the CLI scorecard schema (currently
+The web scorecard is site-owned. Its `schema_version` is **0.3**, independent of the CLI scorecard schema (currently
 0.7) and of the [agentnative spec](/principles) `spec_version`. The CLI scorecard schema is documented separately at
 [/scorecard-schema](/scorecard-schema).
 
@@ -13,7 +13,7 @@ The web scorecard is site-owned. Its `schema_version` is **0.2**, independent of
 
 ```json
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "spec_version": "...",
   "target_url": "https://example.com/",
   "mcp_endpoint": "https://example.com/mcp",

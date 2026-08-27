@@ -101,11 +101,18 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
 
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
-    if (check.with && (check.with as { op?: string }).op === 'initialize') {
+    const op = check.with ? (check.with as { op?: string }).op : undefined;
+    if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;
       return si?.name
         ? `serverInfo ${si.name}, protocol ${first.protocolVersion}`
         : 'no serverInfo in initialize result';
+    }
+    if (op === 'server-discover' && 'supported_versions' in first) {
+      const versions = first.supported_versions as unknown[] | null;
+      const si = first.serverInfo as { name?: string } | null;
+      if (!Array.isArray(versions)) return 'no supportedVersions in the server/discover result';
+      return `supports ${versions.join(', ')}, serverInfo ${si?.name ?? 'missing'}`;
     }
     if ('tools' in first) {
       const tools = first.tools as unknown[] | null;
@@ -234,7 +241,9 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const deadline = now() + perAuditDeadlineMs;
 
   const discovery = await discoverMcpEndpoint(input.url, input.registry.mcp_discovery, {
-    timeoutMs: Math.min(perCheckTimeoutMs, Math.max(0, deadline - now())),
+    timeoutMs: perCheckTimeoutMs,
+    deadlineAt: deadline,
+    now,
     fetchOptions: input.fetchOptions,
   });
   yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };

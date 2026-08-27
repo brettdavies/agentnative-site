@@ -292,6 +292,17 @@ describe('web-audit registry shape', () => {
     ).toThrow(/site_types entry/);
   });
 
+  test('a cors-preflight check without a valid with.surface aborts normalization', () => {
+    const corsCheck = { ...abortCheck, handler: 'cors-preflight', with: { path: '{mcp_endpoint}' } };
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [corsCheck] })).toThrow(/with\.surface/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...corsCheck, with: { surface: 'preflght' } }] }),
+    ).toThrow(/with\.surface/);
+    expect(() =>
+      normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...corsCheck, with: { surface: 'actual' } }] }),
+    ).not.toThrow();
+  });
+
   test('the retired applies_to field aborts normalization', () => {
     expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [{ ...abortCheck, applies_to: 'any' }] })).toThrow(
       /retired applies_to/,
@@ -347,7 +358,7 @@ describe('buildWebScorecard', () => {
     row({ id: 'dns-aid', principle: 'P8', keyword: 'may', weight: 1, status: 'broken', title: 'dns' }),
   ];
 
-  test('produces the 0.2 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
+  test('produces the 0.3 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
     const sc = buildWebScorecard(rows, {
       targetUrl: 'https://example.com/',
       domain: 'example.com',
@@ -356,7 +367,7 @@ describe('buildWebScorecard', () => {
       specVersion: '0.3.0',
       registry,
     });
-    expect(sc.schema_version).toBe('0.2');
+    expect(sc.schema_version).toBe('0.3');
     expect(sc.spec_version).toBe('0.3.0');
     expect(sc.tool).toEqual({ name: 'example.com', url: 'https://example.com/' });
     expect(sc.target_url).toBe('https://example.com/');
