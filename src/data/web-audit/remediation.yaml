@@ -185,6 +185,40 @@ remediation:
     resources:
       - { label: MCP resources (2026-07-28), url: "https://modelcontextprotocol.io/specification/2026-07-28/server/resources" }
       - { label: JSON-RPC 2.0, url: "https://www.jsonrpc.org/specification#error_object" }
+  mcp-accept-json:
+    title: a JSON-only Accept is answered without SSE framing
+    goal: Serve a single application/json response to a client whose Accept names only application/json
+    fix: |
+      Read the request `Accept` header and answer within it. Streamable HTTP lets the server reply
+      either with one `application/json` body or with a `text/event-stream`, and the choice is the
+      client's to constrain: a caller that sends `Accept: application/json` alone is telling you its
+      HTTP client cannot read a stream. Answering that caller with `text/event-stream` returns a
+      `200` over a body it cannot parse, and no status code tells it what went wrong.
+      Parse the header with q-value semantics rather than a substring match, buffer the response,
+      and emit `Content-Type: application/json`. Reserve the stream for callers that accept it. If
+      your server genuinely cannot produce a single JSON body, refuse with `406 Not Acceptable`
+      instead: that at least fails the caller immediately and in the open.
+    resources:
+      - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
+      - { label: "RFC 9110 section 12.5.1 (Accept)", url: "https://www.rfc-editor.org/rfc/rfc9110#name-accept" }
+  mcp-accept-unsatisfiable:
+    title: an unsatisfiable Accept draws a 406 rather than an unasked-for type
+    goal: Refuse an Accept you cannot satisfy with 406, never a 200 carrying a type the client did not request
+    fix: |
+      When the request `Accept` allows neither `application/json` nor `text/event-stream`, refuse
+      with `406 Not Acceptable` before any JSON-RPC parsing runs. Those two media types are the
+      whole of what the streamable-HTTP transport is defined over, so an `Accept` naming neither
+      cannot be served, and a `200` is the wrong way to say so.
+      The failure this check looks for is a server that ignores `Accept` entirely and returns its
+      one representation under a success status. The caller then has to sniff the body to discover
+      the negotiation never happened. Worse is a `200` that echoes the requested type back in
+      `Content-Type` while carrying a JSON-RPC body: the caller routes the payload on your label
+      and the parse fails somewhere downstream of the call you told it had succeeded.
+      Do the check at the transport edge and keep the body plain text, so no client mistakes the
+      refusal for a JSON-RPC error envelope.
+    resources:
+      - { label: "RFC 9110 section 15.5.7 (406 Not Acceptable)", url: "https://www.rfc-editor.org/rfc/rfc9110#name-406-not-acceptable" }
+      - { label: MCP transports, url: "https://modelcontextprotocol.io/specification/2025-06-18/basic/transports" }
   mcp-get-fast-fail:
     title: GET on the MCP endpoint answers fast
     goal: Answer GET on the MCP endpoint fast (a fast-fail status or a documented surface), never a held-open hang
