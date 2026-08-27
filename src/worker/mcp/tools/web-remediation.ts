@@ -33,6 +33,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
   server.registerTool(
     'get_web_remediation',
     {
+      title: 'Get web-audit remediation guidance',
       description:
         'Return the canonical remediation for a web-audit check by id (e.g. "llms-txt", "mcp-initialize"). Returns ' +
         'isError:false for both outcomes: found returns { found:true, remediation: { check_id, title, goal, fix, ' +
@@ -45,6 +46,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
           .optional()
           .describe("Optional: this run's evidence line for the check; becomes the prompt's Issue line."),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ check_id, evidence }) => {
       let catalog: WebRemediationCatalog;

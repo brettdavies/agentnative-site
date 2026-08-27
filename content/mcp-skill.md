@@ -341,6 +341,12 @@ authentication.
 and call). The server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks the
 build.
 
+**Tool metadata.** Every `tools/list` entry carries a `title` (a short display name) alongside `description` and
+`inputSchema`, plus an `annotations` object describing the tool's posture. The eleven read tools carry `readOnlyHint:
+true`. The two tools that run fresh work, `score_cli` and `audit_website`, carry `readOnlyHint: false` with
+`destructiveHint: false`, `idempotentHint: false`, and `openWorldHint: true`, because they reach external systems and
+write cache and leaderboard state. Annotations are hints for client UX and consent prompts, not a security boundary.
+
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.
 

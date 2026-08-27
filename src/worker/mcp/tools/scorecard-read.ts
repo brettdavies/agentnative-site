@@ -53,6 +53,7 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
   server.registerTool(
     'get_scorecard',
     {
+      title: 'Get a cached CLI scorecard',
       description:
         'Cheap read-only lookup over the agent-native CLI scorecard surface. Composes the shared /api/score orchestrator ' +
         'so the cache semantics match the human form on anc.dev/. Provide ONE of: slug (registry slug), binary (CLI ' +
@@ -67,6 +68,7 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
         install: z.string().optional().describe('Full install command, e.g. "brew install ripgrep".'),
         github_url: z.string().optional().describe('GitHub URL (https://github.com/owner/repo, branch URLs accepted).'),
       },
+      annotations: { readOnlyHint: true },
     },
     async (args) => {
       const choice = rawFromInput(args);

@@ -128,6 +128,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
   server.registerTool(
     'get_website_audit',
     {
+      title: 'Get a cached website audit',
       description:
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
         'both outcomes: a hit returns { found:true, scorecard, share_url }; a miss returns { found:false, ' +
@@ -135,6 +136,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       inputSchema: {
         url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ url }) => {
       const parsed = coerceUrl(url);
@@ -162,6 +164,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
   server.registerTool(
     'audit_website',
     {
+      title: 'Run a live website audit',
       description:
         'Run a fresh website agent-readiness audit and return the complete scorecard. Returns a single terminal scorecard ' +
         '(no progress notifications — the server is stateless per-request). A cached result younger than 5 minutes is ' +
@@ -187,6 +190,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               'first-ever audit.',
           ),
       },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async ({ url, site_type, public_listing }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
@@ -325,6 +329,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
   server.registerTool(
     'list_website_audits',
     {
+      title: 'List cached website audits',
       description:
         'Return the web leaderboard (curated + opted-in): summaries of the websites on anc.dev/web. Each entry carries ' +
         'domain, url, name, score_pct, and share_url. view "curated" (the default) returns only the curated board; ' +
@@ -339,6 +344,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
               'user-submitted domains that opted in to public listing. Mirrors anc.dev/web?view=all.',
           ),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ view }) => {
       const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);

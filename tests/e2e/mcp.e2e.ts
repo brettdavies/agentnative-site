@@ -52,7 +52,13 @@ type JsonRpcBody = {
     protocolVersion?: string;
     capabilities?: { resources?: { subscribe?: boolean } };
     instructions?: string;
-    tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+    tools?: Array<{
+      name: string;
+      title?: string;
+      description?: string;
+      inputSchema?: unknown;
+      annotations?: Record<string, unknown>;
+    }>;
     resources?: Array<{ uri: string; name?: string }>;
     resourceTemplates?: Array<{ uriTemplate: string; name?: string }>;
     content?: Array<{ type: string; text: string }>;
@@ -61,6 +67,10 @@ type JsonRpcBody = {
   };
   error?: { code: number; message: string };
 };
+
+// The two tools that reach external systems and write cache / leaderboard
+// state; every other tool is annotated read-only.
+const NON_READ_TOOLS = new Set(['score_cli', 'audit_website']);
 
 test.describe('staging /mcp — handshake', () => {
   test('initialize returns serverInfo.name "anc" and instructions mention 2026-07-28', async ({ request }) => {
@@ -173,6 +183,34 @@ test.describe('staging /mcp — tools/list', () => {
       expect(typeof tool.description).toBe('string');
       expect((tool.description ?? '').length).toBeGreaterThan(0);
       expect(tool.inputSchema).toBeDefined();
+    }
+  });
+
+  test('every tool carries a non-empty title and annotations pinning its read-only posture', async ({ request }) => {
+    await request.post(`${STAGING_BASE}/mcp`, {
+      headers: MCP_HEADERS,
+      data: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+      }),
+    });
+    const res = await request.post(`${STAGING_BASE}/mcp`, {
+      headers: MCP_HEADERS,
+      data: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    const body = (await res.json()) as JsonRpcBody;
+    const tools = body.result?.tools ?? [];
+    expect(tools.length).toBe(13);
+    for (const tool of tools) {
+      expect(typeof tool.title).toBe('string');
+      expect((tool.title ?? '').length).toBeGreaterThan(0);
+      expect(tool.annotations).toEqual(
+        NON_READ_TOOLS.has(tool.name)
+          ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+          : { readOnlyHint: true },
+      );
     }
   });
 });
