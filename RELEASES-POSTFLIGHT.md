@@ -188,7 +188,7 @@ as two sub-gates: cache-miss via `bypass_cache: true` (asserts `source=fresh-aud
 binary without bypass (asserts `source=live-cache`). Both paths must produce their expected outcome. Without the flag
 (prod), the gate runs once and accepts either outcome.
 
-- [ ] **Production `/mcp` dual-stack smoke passes checks 1–6.** Prefer the scripted suite:
+- [ ] **Production `/mcp` dual-stack smoke passes checks 1–7.** Prefer the scripted suite:
 
   ```bash
   scripts/release/mcp-smoke.sh https://anc.dev
