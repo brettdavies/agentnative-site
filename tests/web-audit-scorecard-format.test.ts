@@ -234,6 +234,12 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(html).toContain('data-web-audit-result');
   });
 
+  test('every .web-check details carries data-id; the body loads /js/webmcp.js', () => {
+    expect(html).toContain('class="web-check web-check--absent" open data-id="openapi"');
+    expect(html).toContain('class="web-check web-check--pass" data-id="mcp-initialize"');
+    expect(html).toContain('<script defer src="/js/webmcp.js"></script>');
+  });
+
   test('no badge-embed markup and no P-principle grouping', () => {
     expect(html).not.toContain('Embed the badge');
     expect(html).not.toContain('badge floor');

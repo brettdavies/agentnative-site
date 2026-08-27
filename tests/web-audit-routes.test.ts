@@ -581,6 +581,7 @@ describe('handleWebScoringPage', () => {
     const html = await resp.text();
     expect(html).toContain('name="turnstile-sitekey" content="1x00000000000000000000AA"');
     expect(html).toContain('src="/js/web-audit-scoring.js"');
+    expect(html).not.toContain('/js/webmcp.js');
     expect(html).toContain('<noscript>');
     expect(html).toContain('data-web-audit-results');
   });
@@ -672,6 +673,7 @@ describe('handleWebResultPage', () => {
     expect(resp.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
     const html = await resp.text();
     expect(html).toContain('82%');
+    expect(html).toContain('/js/webmcp.js');
   });
 
   test('serves the markdown twin for the .md suffix', async () => {
@@ -683,6 +685,7 @@ describe('handleWebResultPage', () => {
     expect(resp.headers.get('cache-tag')).toBe('web:example.com');
     const md = await resp.text();
     expect(md).toContain('82%');
+    expect(md).not.toContain('/js/webmcp.js');
   });
 
   test('honors Accept: text/markdown on the suffix-less path', async () => {

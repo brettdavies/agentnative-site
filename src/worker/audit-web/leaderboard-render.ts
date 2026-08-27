@@ -8,6 +8,7 @@
 // renders a scoring-in-progress empty state rather than failing.
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
+import { renderSurfaceSeg } from '../../shared/surface-seg.mjs';
 import type { WebAggregateEntry } from './cache';
 
 /** Board row: an aggregate entry plus whether it came from the curated seed. */
@@ -89,12 +90,14 @@ function boardCountLine(opts: Omit<WebBoardRenderOpts, 'sort'>): string {
 }
 
 function boardSurfaceSeg(active: 'cli' | 'web'): string {
-  const cliChecked = active === 'cli' ? ' checked' : '';
-  const webChecked = active === 'web' ? ' checked' : '';
-  return `<div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
-    <input type="radio" name="board-surface" id="board-s-cli"${cliChecked} /><label for="board-s-cli">CLI</label>
-    <input type="radio" name="board-surface" id="board-s-web"${webChecked} /><label for="board-s-web">Website</label>
-  </div>`;
+  return renderSurfaceSeg({
+    dataAttr: 'data-surface-board-seg',
+    radioName: 'board-surface',
+    cliId: 'board-s-cli',
+    webId: 'board-s-web',
+    checked: active,
+    ariaLabel: 'Leaderboard surface',
+  });
 }
 
 function boardHero(active: 'cli' | 'web'): string {

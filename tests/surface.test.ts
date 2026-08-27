@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { getSurface, leaderboardsHref, setSurface } from '../src/client/surface';
+import { auditHref, getSurface, leaderboardsHref, setSurface } from '../src/client/surface';
 
 function mockStorage() {
   const store = new Map<string, string>();
@@ -58,6 +58,19 @@ describe('leaderboardsHref', () => {
       expect(leaderboardsHref()).toBe('/scorecards');
       setSurface('web');
       expect(leaderboardsHref()).toBe('/web');
+    } finally {
+      ls.restore();
+    }
+  });
+});
+
+describe('auditHref', () => {
+  test('maps cli to /audit and web to /web-audit', () => {
+    const ls = mockStorage();
+    try {
+      expect(auditHref()).toBe('/audit');
+      setSurface('web');
+      expect(auditHref()).toBe('/web-audit');
     } finally {
       ls.restore();
     }

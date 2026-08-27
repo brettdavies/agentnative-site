@@ -36,15 +36,41 @@ const leaderboardsCliCurrent = (path) => path === '/scorecards' || path.startsWi
 const leaderboardsWebCurrent = (path) =>
   path === '/web' || (path.startsWith('/web/') && !path.startsWith('/web-audit'));
 
-const renderLeaderboardsNav = (path) => {
-  const cliCurrent = leaderboardsCliCurrent(path) ? ' aria-current="page"' : '';
-  const webCurrent = leaderboardsWebCurrent(path) ? ' aria-current="page"' : '';
-  return `          <a href="/scorecards" data-s="cli" data-leaderboards-nav${cliCurrent}>Leaderboards</a>
-          <a href="/web" data-s="web" data-leaderboards-nav${webCurrent}>Leaderboards</a>`;
+const auditCliCurrent = (path) => path === '/audit';
+const auditWebCurrent = (path) => path === '/web-audit' || path.startsWith('/web-audit/');
+
+const renderDualSurfaceNav = ({ label, cliHref, webHref, dataNavAttr, path, cliCurrent, webCurrent }) => {
+  const cliCur = cliCurrent(path) ? ' aria-current="page"' : '';
+  const webCur = webCurrent(path) ? ' aria-current="page"' : '';
+  return `          <a href="${cliHref}" data-s="cli" ${dataNavAttr}${cliCur}>${label}</a>
+          <a href="${webHref}" data-s="web" ${dataNavAttr}${webCur}>${label}</a>`;
 };
+
+const renderLeaderboardsNav = (path) =>
+  renderDualSurfaceNav({
+    label: 'Leaderboards',
+    cliHref: '/scorecards',
+    webHref: '/web',
+    dataNavAttr: 'data-leaderboards-nav',
+    path,
+    cliCurrent: leaderboardsCliCurrent,
+    webCurrent: leaderboardsWebCurrent,
+  });
+
+const renderAuditNav = (path) =>
+  renderDualSurfaceNav({
+    label: 'Audit',
+    cliHref: '/audit',
+    webHref: '/web-audit',
+    dataNavAttr: 'data-audit-nav',
+    path,
+    cliCurrent: auditCliCurrent,
+    webCurrent: auditWebCurrent,
+  });
 
 const renderNavLink = (entry, path) => {
   if (entry.label === 'Leaderboards') return renderLeaderboardsNav(path);
+  if (entry.label === 'Audit') return renderAuditNav(path);
   const current = navCurrent(path, entry.match) ? ' aria-current="page"' : '';
   return `          <a href="${entry.href}"${current}>${entry.label}</a>`;
 };
@@ -138,6 +164,8 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
  * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
+ * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
+ *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
  * @param {string=} args.baseUrl             — absolute base (default prod).
  * @returns {string} full HTML document.
  */
@@ -176,6 +204,7 @@ export function emitShell({
   bodyHtml,
   themeInitJs,
   isIndex = false,
+  turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
 }) {
@@ -281,7 +310,7 @@ export function emitShell({
     <link rel="alternate" type="application/json" href="/skill.json" title="Agent-native skill bundle (canonical JSON)" />
     <link rel="describedby" href="/.well-known/mcp/server-card.json" />
     <link rel="mcp" href="/mcp" />
-${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
+${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
     <meta property="og:title" content="${esc(title)}" />

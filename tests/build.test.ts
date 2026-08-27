@@ -430,6 +430,37 @@ describe('escHtml', () => {
 });
 
 // -------------------------------------------------------------------
+// emitShell — Turnstile sitekey meta (homepage + /web-audit form)
+// -------------------------------------------------------------------
+
+describe('emitShell — turnstile sitekey meta', () => {
+  const base = {
+    title: 'Score a website, live.',
+    description: 'Enter a public URL.',
+    canonicalPath: '/web-audit',
+    bodyHtml: '<article>body</article>',
+    themeInitJs: '/* theme init */',
+    baseUrl: undefined,
+  };
+
+  test('default shell does not emit the sitekey meta', () => {
+    const html = emitShell(base);
+    expect(html).not.toContain('turnstile-sitekey');
+    expect(html).not.toContain('{{TURNSTILE_SITEKEY}}');
+  });
+
+  test('turnstileSitekey: true emits the placeholder meta', () => {
+    const html = emitShell({ ...base, turnstileSitekey: true });
+    expect(html).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+  });
+
+  test('isIndex: true still emits the placeholder (homepage)', () => {
+    const html = emitShell({ ...base, canonicalPath: '/', isIndex: true });
+    expect(html).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+  });
+});
+
+// -------------------------------------------------------------------
 // emitShell — OG image alt-text wiring (R10)
 // -------------------------------------------------------------------
 
@@ -520,6 +551,33 @@ describe('emitShell — Leaderboards dual nav + surface script', () => {
     expect(shell('/scorecards')).toContain('href="/scorecards" data-s="cli" data-leaderboards-nav aria-current="page"');
     expect(shell('/scorecards')).not.toContain('data-s="web" data-leaderboards-nav aria-current');
     expect(shell('/web')).toContain('href="/web" data-s="web" data-leaderboards-nav aria-current="page"');
+  });
+});
+
+describe('emitShell — Audit dual nav', () => {
+  function shell(path = '/about') {
+    return emitShell({
+      title: 'About',
+      description: 'About anc.dev',
+      canonicalPath: path,
+      bodyHtml: '<article>body</article>',
+      themeInitJs: '/* theme init */',
+      baseUrl: undefined,
+    });
+  }
+
+  test('emits two Audit anchors alongside Leaderboards', () => {
+    const html = shell();
+    expect(html).toContain('data-audit-nav');
+    expect(html).toContain('href="/audit" data-s="cli" data-audit-nav');
+    expect(html).toContain('href="/web-audit" data-s="web" data-audit-nav');
+  });
+
+  test('aria-current follows pathname on the matching Audit anchor only', () => {
+    expect(shell('/audit')).toContain('href="/audit" data-s="cli" data-audit-nav aria-current="page"');
+    expect(shell('/audit')).not.toContain('data-s="web" data-audit-nav aria-current');
+    expect(shell('/web-audit')).toContain('href="/web-audit" data-s="web" data-audit-nav aria-current="page"');
+    expect(shell('/web-audit/skill/openapi')).toContain('data-s="web" data-audit-nav aria-current="page"');
   });
 });
 
@@ -2896,6 +2954,9 @@ describe('emitHomepage — index.md twin frontmatter', () => {
     expect(indexHtml).toContain('data-s="web"');
     expect(indexHtml).toContain('audit_website anc.dev');
     expect(indexHtml).toContain('bigscore__n">97');
+    expect(indexHtml).toContain('data-web-home-form');
+    expect(indexHtml).toContain('data-web-home-input');
+    expect(indexHtml).not.toContain('data-web-audit-form');
   });
 });
 
@@ -2926,6 +2987,23 @@ describe('emitSubPages — twin frontmatter', () => {
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
     expect(auditHtml).not.toContain('---\ntitle:');
     expect(auditHtml).not.toMatch(/^url: /m);
+    expect(auditHtml).toContain('data-surface-audit-seg');
+    expect(auditHtml).toContain('id="audit-s-cli" checked');
+    expect(auditMd).not.toContain('data-surface-audit-seg');
+  });
+
+  test('web-audit landing emits audit Probe A with Website checked', async () => {
+    const webAuditHtml = await readFile(join(distDir, 'web-audit.html'), 'utf8');
+    expect(webAuditHtml).toContain('data-surface-audit-seg');
+    expect(webAuditHtml).toContain('id="audit-s-web" checked');
+    expect(webAuditHtml).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+    expect(webAuditHtml).toContain('/js/webmcp.js');
+    expect(webAuditHtml).toContain('/js/web-audit.js');
+  });
+
+  test('CLI /audit HTML does not carry the Turnstile sitekey meta', async () => {
+    const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
+    expect(auditHtml).not.toContain('turnstile-sitekey');
   });
 
   test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
@@ -2934,6 +3012,9 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(webAuditMd).toContain('url: https://anc.dev/web-audit\n');
     expect(webAuditMd).toContain('Enter a public URL at');
     expect(webAuditMd).not.toContain('data-web-audit-form');
+    expect(webAuditMd).not.toContain('turnstile-sitekey');
+    expect(webAuditMd).not.toContain('{{TURNSTILE_SITEKEY}}');
+    expect(webAuditMd).not.toContain('/js/webmcp.js');
   });
 
   test('subPageData still carries the frontmatter-free twin source for llms-full.txt', () => {

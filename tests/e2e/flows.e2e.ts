@@ -277,10 +277,13 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await page.goto('/');
     const nav = page.locator('.site-nav');
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
     await page.locator('label[for="s-web"]').click();
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
     await page.reload();
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
     await expect(page.locator('#s-web')).toBeChecked();
   });
 
@@ -290,8 +293,10 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await page.goto('/');
     const nav = page.locator('.site-nav');
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
+    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
     await page.locator('label[for="s-web"]').click();
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
     await ctx.close();
   });
 });
@@ -302,9 +307,10 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
     await page.goto('/');
     const nav = page.getByRole('navigation', { name: 'Primary' });
     await expect(nav).toBeVisible();
-    await expect(nav.locator('a')).toHaveCount(7);
-    await expect(nav.locator('a:visible')).toHaveCount(6);
+    await expect(nav.locator('a')).toHaveCount(8);
+    await expect(nav.locator('a:visible')).toHaveCount(7);
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
+    await expect(nav.locator('[data-audit-nav]:visible')).toHaveCount(1);
     await expect(page.locator('.nav-burger')).toBeHidden();
     await expect(page.locator('.site-footer__source')).toBeVisible();
     await expect(page.locator('.site-footer__meta')).toBeVisible();
@@ -316,9 +322,10 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       await page.goto('/');
       const nav = page.getByRole('navigation', { name: 'Primary' });
       await expect(nav).toBeVisible();
-      await expect(nav.locator('a')).toHaveCount(7);
-      await expect(nav.locator('a:visible')).toHaveCount(6);
+      await expect(nav.locator('a')).toHaveCount(8);
+      await expect(nav.locator('a:visible')).toHaveCount(7);
       await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
+      await expect(nav.locator('[data-audit-nav]:visible')).toHaveCount(1);
       await expect(page.locator('.nav-burger')).toBeHidden();
 
       const overflow = await page.evaluate(() => {
@@ -348,8 +355,8 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       expect(overflow.burgerDisplay).toBe('none');
       expect(overflow.navDisplay).toBe('flex');
       expect(overflow.links).toBeDefined();
-      expect(overflow.links!.filter((l) => l.visible).length).toBe(6);
-      expect(overflow.links!.filter((l) => !l.visible).length).toBe(1);
+      expect(overflow.links!.filter((l) => l.visible).length).toBe(7);
+      expect(overflow.links!.filter((l) => !l.visible).length).toBe(2);
     });
   }
 
@@ -444,6 +451,40 @@ test.describe('leaderboard surface nav', () => {
     await page.goto('/web');
     await page.locator('label[for="board-s-cli"]').click();
     await expect(page).toHaveURL(/\/scorecards$/);
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
+  });
+});
+
+test.describe('audit surface nav', () => {
+  test('stored web preference flips visible Audit off homepage', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label[for="s-web"]').click();
+    await page.goto('/about');
+    await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
+  });
+
+  test('cold /web-audit visit does not write preference (Audit stays CLI default)', async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem('anc-surface'));
+    await page.goto('/web-audit');
+    await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
+    const stored = await page.evaluate(() => localStorage.getItem('anc-surface'));
+    expect(stored).toBeNull();
+  });
+
+  test('Probe A navigates CLI audit → web audit and writes preference', async ({ page }) => {
+    await page.goto('/audit');
+    await page.locator('label[for="audit-s-web"]').click();
+    await expect(page).toHaveURL(/\/web-audit$/);
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
+    await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
+  });
+
+  test('Probe A navigates web audit → CLI audit and writes preference', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('label[for="s-web"]').click();
+    await page.goto('/web-audit');
+    await page.locator('label[for="audit-s-cli"]').click();
+    await expect(page).toHaveURL(/\/audit$/);
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('cli');
   });
 });
