@@ -2162,8 +2162,16 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
   });
 
   async function runMatrix(env: Env): Promise<Array<{ op: unknown; status: string; code: unknown }>> {
-    const inProcess: typeof fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
-      worker.fetch(new Request(input as string | URL, init), env, {} as ExecutionContext)) as typeof fetch;
+    // Standing in for the network hop the real probe makes: a synthesized
+    // Request carries no Host, because the Fetch API forbids the header, while
+    // an HTTP client derives it from the URL authority. Without that the
+    // Worker's Host allowlist answers every probe with its missing-Host 403.
+    const inProcess: typeof fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input as string | URL, init);
+      const headers = new Headers(req.headers);
+      if (!headers.has('host')) headers.set('host', new URL(req.url).host);
+      return worker.fetch(new Request(req, { headers }), env, {} as ExecutionContext);
+    }) as typeof fetch;
     const probes: Array<Record<string, unknown>> = [
       { op: 'error', method: 'nonexistent/method', expect_code: -32601 },
       ...CONFORMANCE_OPS.map((op) => ({ op })),
