@@ -80,9 +80,11 @@ Approach B, sequenced: video path green, then homepage CLI polish.
 1. Homepage Website **Audit** = GET `/web-audit?url=` (`open_web_audit` when P1 ships). Not transact.
 2. `/web-audit` **Audit** = Turnstile then `/web/scoring/<host>`. Only transact cut. Tools never fire it.
 
-**3-minute sequence:** open `https://anc.dev/web-audit` → `fill_audit_url({url:"https://anc.dev"})` → `set_plan` writes
-`[data-web-audit-status]` (`Agent prepared: audit anc.dev · waiting for you`) → human clicks Audit → `/web/anc.dev` →
-`get_worksheet` → `assemble_fix_prompt({id})` for a named non-CORS check.
+**3-minute sequence:** open `https://anc.dev/web-audit` → `fill_audit_url` with Sounding
+(`https://sounding.brettdavies.workers.dev`) → `set_plan` → human clicks Audit → `/web/<sounding-host>` →
+`get_worksheet` + `get_fix_prompt` for all three MUST ids (never `mcp-cors-*`) → one pass in `demo/` covering `openapi`,
+`mcp-initialize`, and `mcp-tools-list` → redeploy → human Audit again. Two loops, one fix. Record last day. Between
+takes: `scripts/sounding-restore.sh`.
 
 **Script attach:**
 
@@ -116,13 +118,15 @@ false`. Re-validate args. `untrustedContentHint` when output echoes a third-part
 **P1 after video path:** `set_surface`, `fill_cli_target`, `fill_web_target`, `open_web_audit`, `set_public_listing`.
 Wrong-page calls return an error string.
 
-**Dogfood:** `fill_audit_url` with `https://anc.dev`. No extra `prepare_self_audit` unless it wraps that.
+**Dogfood:** `fill_audit_url` with Sounding (`https://sounding.brettdavies.workers.dev`). No extra `prepare_self_audit`
+unless it wraps that.
 
 **Result DOM hook:** `renderCheck` in `src/worker/audit-web/summary-render.ts` must emit `data-id="${escHtml(row.id)}"`
 on `.web-check`. `get_worksheet` and `assemble_fix_prompt` read that attribute. Skill URLs are not the id contract.
 
-**Assemble clip:** never CORS (`mcp-cors-*`). If anc.dev has no MUST fails, use a named SHOULD/content-surface `id`, or
-stop at `get_worksheet`.
+**Assemble clip:** never CORS (`mcp-cors-*`). Target is Sounding (`demo/`), not anc.dev. MUST ids: `openapi`,
+`mcp-initialize`, `mcp-tools-list`. Two WebMCP loops, one fix pass for all three. Restore with
+`scripts/sounding-restore.sh` (tag `sounding-broken`).
 
 **Not this week:** worker `webmcp` handler still greps markers.
 
@@ -130,11 +134,11 @@ stop at `get_worksheet`.
 
 1. **Public URL.** Locked: judges hit **anc.dev** (production). `release/*` → `main` before 3 Sep 1pm PT.
 2. **How much of B before the video.** One PR still includes homepage P1. Cut P1 from the release only if Friday slips.
-3. **Which check `id` the assemble clip uses.** Live `/web/anc.dev` (cached 2026-08-26): 0 broken, 2 absent, both CORS
-   (`mcp-cors-preflight`, `mcp-cors-actual`). Those are the deliberate no-CORS posture, not a defect to “fix” on camera.
-   Default: clip stops at `get_worksheet` (agent reads the two missing rows). `get_fix_prompt` still ships for other
-   sites / later; the video does not call it with `mcp-cors-*`. Revisit only if a non-CORS absent/broken row appears
-   before recording.
+3. **Which check `id` the assemble clip uses.** Not anc.dev (live fails there are only `mcp-cors-*`). Clip target is
+   Sounding (`demo/`, Worker `sounding`, public `sounding.brettdavies.workers.dev`): MUST families we own (`openapi`
+   absent; `mcp-initialize` / `mcp-tools-list` broken). CORS on `/mcp` already passes. Two loops: worksheet + all three
+   `get_fix_prompt`s, one code pass, human Audit again. Between takes: `scripts/sounding-restore.sh` (tag
+   `sounding-broken`, `demo/` only). Record last day. Do not add Sounding to `src/data/web-audit/seed.yaml`.
 4. **Origin trial.** ChatGPT in-app browser is the recording and judge default (WebMCP on, no Chrome flag). Judges who
    use Chrome follow Devpost (`#enable-webmcp-testing`). No origin-trial token on anc.dev this slice unless we later
    want stock Chrome 149+ to get tools without a flag.
@@ -160,8 +164,7 @@ another unauthenticated public Worker. After act tools are live, submit `anc.dev
 1. ~~Confirm the public URL path (assignment below).~~ Locked: judges hit **anc.dev**.
 2. ~~Replace `src/client/webmcp.ts` (`registerTool` first). Concatenate script on `/web-audit`; inject on `/web/<host>`
    result HTML only.~~ [#280](https://github.com/brettdavies/agentnative-site/pull/280)
-3. ~~Video-path tools + orientation + homepage P1.~~ Same PR. Clip on anc.dev still stops at `get_worksheet` (live fails
-   are only `mcp-cors-*`); do not demo-fix CORS.
+3. ~~Video-path tools + orientation + homepage P1.~~ Same PR. Clip target is Sounding (`demo/`); do not demo-fix CORS.
 4. ~~Tests: pathname → names; no scoring navigation/POST; discovery includes `/web-audit`.~~ `tests/webmcp.test.ts` plus
    attach tests. ChatGPT/Chrome `getTools()` is T5, not CI.
 5. Browser-verify light and dark; ChatGPT in-app or Chrome flag (T5).
