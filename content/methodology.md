@@ -277,8 +277,12 @@ Two rules shape how MCP results score:
 
 - The modern MCP era (protocol revision `2026-07-28`) scores as its own lane alongside the legacy checks: a required
   header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
-  single-era server fails exactly the lane it lacks, and an era-shaped refusal (a well-formed `-32601` or `-32022`
-  error) reads `absent`, not `broken`.
+  single-era server reads `absent` on the lane it lacks rather than `broken`, so it is never penalized for an era it
+  never claimed. `server/discover` decides the modern lane, because it is the only method a legacy server cannot answer:
+  when it returns no result, every other modern check reads `absent` without a probe. On the legacy lane, an era-shaped
+  refusal (a well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be
+  missing. The error-code conformance checks are judged strictly: they ask about a request the lane has already proven
+  it accepts, so any code other than the expected one is `broken`.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
   deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
 

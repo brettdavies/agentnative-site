@@ -4,14 +4,15 @@
 // header-routed per SEP-2243; the per-era error-code conformance family),
 // POSTs through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
 // evaluates serverInfo / capabilities / tools / resources / discovery /
-// error-code. Returns n_a when no endpoint was discovered. CORS
+// error-code. Returns n_a when no endpoint was discovered, and absent
+// without a request when wave 1 evidenced no modern lane. CORS
 // classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
 import type { WebCheck } from '../registry';
 import { type GuardedFetchOptions, guardedFetch } from '../ssrf';
 import { timeoutMsFor } from './shared';
-import type { EvidenceItem, HandlerContext, ProbeOutcome } from './types';
+import type { EvidenceItem, HandlerContext, McpModernLane, ProbeOutcome } from './types';
 
 type ConformanceOp =
   | 'malformed-body'
@@ -49,6 +50,15 @@ const SERVER_INFO_META_KEY = 'io.modelcontextprotocol/serverInfo';
 // not found, -32022 UnsupportedProtocolVersion). Any other well-formed
 // error envelope keeps the broken-surface penalty, apart from the
 // rate-limit code below.
+//
+// These read as unavailability only on an op that names a method the
+// lane could be missing. The conformance family names none: an
+// unparseable body and a JSON array carry no method at all, and an
+// unknown tool NAME rides a `tools/call` the lane has already proven it
+// serves. A conformance row answered with an unavailability code is
+// therefore as wrong as any other mismatched code, and an endpoint that
+// answers -32601 to everything must not outscore a server that answers
+// honestly and imperfectly.
 const LANE_UNAVAILABLE_CODES = new Set([-32601, -32022]);
 
 // A rate-limit refusal measures the auditor's own request volume, not
@@ -56,6 +66,31 @@ const LANE_UNAVAILABLE_CODES = new Set([-32601, -32022]);
 // `error`, excluded from scoring) rather than a penalty on a target
 // defending itself.
 const RATE_LIMITED_CODE = -32099;
+
+// `server/discover` is the only modern-only method on the wire, so its
+// answer is the sole sound era signal: every other modern row sends a
+// request a 2025-era server is free to answer without serving the modern
+// revision at all (a lenient one serves the legacy tools/list behind it,
+// a strict one refuses the version claim), which makes its answer
+// evidence about leniency rather than about the era. These rows are
+// therefore scored only against a lane server/discover evidenced.
+const MODERN_LANE_DEPENDENT_OPS: ReadonlySet<McpWith['op']> = new Set([
+  'modern-tools-list',
+  'modern-unknown-method',
+  'modern-clientcaps',
+  'modern-header-mismatch',
+  'modern-version-reject',
+  'modern-resources-miss',
+]);
+
+// A stateful 2025-era server refuses a sessionless POST with -32000
+// before it ever reaches the code these rows probe, which scores its
+// statefulness instead of its error codes. One conditional re-ask with
+// the session legacy initialize issued puts the row back on its own
+// question; a stateless target never issues a session and so stays a
+// single request.
+const LEGACY_CONFORMANCE_OPS: ReadonlySet<McpWith['op']> = new Set(['malformed-body', 'batch-reject', 'unknown-tool']);
+const SESSION_REQUIRED_CODE = -32000;
 
 // Single source of a modern op's wire method: the Mcp-Method header and
 // the body method both read this map, so they cannot disagree (the
@@ -237,6 +272,30 @@ export function mcpSessionIdFrom(outcome: ProbeOutcome | undefined): string | nu
   return typeof raw === 'string' && raw.length > 0 ? raw : null;
 }
 
+/** A `capabilities` evidence row advertising the resources group. */
+export function advertisesResources(items: EvidenceItem[]): boolean {
+  const caps = items[0]?.capabilities;
+  return Array.isArray(caps) && caps.includes('resources');
+}
+
+/**
+ * Modern-lane presence from the wave-1 `server/discover` outcome. Only a
+ * server serving the modern revision can answer `server/discover` with a
+ * JSON-RPC result, and `supported_versions` is written on that result
+ * path alone, so its presence is the era signal. A probe that never got
+ * an answer leaves the lane `unknown`, where the modern rows fall back to
+ * probing rather than take a verdict on no evidence.
+ */
+export function mcpModernLaneFrom(outcome: ProbeOutcome | undefined): McpModernLane {
+  if (outcome === undefined || outcome.status === 'error' || outcome.status === 'na') return 'unknown';
+  return outcome.evidence.some((item) => 'supported_versions' in item) ? 'present' : 'unevidenced';
+}
+
+function jsonRpcErrorCode(rpc: Record<string, unknown> | null): number | null {
+  const code = (rpc?.error as { code?: number } | undefined)?.code;
+  return typeof code === 'number' ? code : null;
+}
+
 const INITIALIZED_BODY = JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} });
 
 /** Best-effort session handshake after initialize; failures do not fail the audit. */
@@ -259,18 +318,38 @@ export async function notifyMcpInitialized(
   );
 }
 
+/**
+ * A lane's own era probe answered with an unavailability code is
+ * reporting an era it does not serve, not a broken surface. The legacy
+ * resources read is excluded once the legacy lane advertised
+ * `capabilities.resources`: refusing a capability you advertise
+ * contradicts your own handshake, and that misconfiguration has to stay
+ * visible on the scorecard.
+ */
+function eraLaneUnavailable(op: McpWith['op'], code: number | null, ctx: HandlerContext): boolean {
+  if (code === null || !LANE_UNAVAILABLE_CODES.has(code)) return false;
+  if (op === 'resources-list' && ctx.mcpLanes?.legacyResources === true) return false;
+  return true;
+}
+
 export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const endpoint = ctx.mcpEndpoint;
   if (!endpoint) {
     return { status: 'na', evidence: [{ why: ['no MCP endpoint discovered'] }] };
   }
   const w = check.with as McpWith;
+  if (MODERN_LANE_DEPENDENT_OPS.has(w.op) && ctx.mcpLanes?.modern === 'unevidenced') {
+    return {
+      status: 'absent',
+      evidence: [{ url: endpoint, why: ['no modern lane: server/discover returned no result'] }],
+    };
+  }
   const conformance = conformanceFor(w.op);
   const modernMethod = MODERN_OP_METHODS[w.op];
   // Modern probes stay sessionless (no Mcp-Session-Id) and carry no
   // Mcp-Name: neither op is a tools/call or resources/read. Conformance
-  // probes are single self-contained requests: fully table-shaped
-  // headers, never a session attach.
+  // probes open fully table-shaped, and only the legacy three re-ask with
+  // a session, when the target's own answer demands one.
   const headers: Record<string, string> = conformance
     ? conformance.headers()
     : modernMethod !== undefined
@@ -279,17 +358,19 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   if (!conformance && modernMethod === undefined && w.op !== 'initialize' && ctx.mcpSessionId) {
     headers['Mcp-Session-Id'] = ctx.mcpSessionId;
   }
+  const body = conformance ? conformance.body() : buildBody(w.op, w.method ?? '', ctx.protocolVersion);
+  const fetchOpts = { ...ctx.fetchOptions, timeoutMs: timeoutMsFor(w.timeout, ctx.defaultTimeoutMs) };
 
-  const resp = await guardedFetch(
-    endpoint,
-    {
-      method: 'POST',
-      headers,
-      body: conformance ? conformance.body() : buildBody(w.op, w.method ?? '', ctx.protocolVersion),
-    },
-    { ...ctx.fetchOptions, timeoutMs: timeoutMsFor(w.timeout, ctx.defaultTimeoutMs) },
-  );
-  const rpc = parseJsonRpc(resp);
+  let resp = await guardedFetch(endpoint, { method: 'POST', headers, body }, fetchOpts);
+  let rpc = parseJsonRpc(resp);
+  if (LEGACY_CONFORMANCE_OPS.has(w.op) && ctx.mcpSessionId && jsonRpcErrorCode(rpc) === SESSION_REQUIRED_CODE) {
+    resp = await guardedFetch(
+      endpoint,
+      { method: 'POST', headers: { ...headers, 'Mcp-Session-Id': ctx.mcpSessionId }, body },
+      fetchOpts,
+    );
+    rpc = parseJsonRpc(resp);
+  }
   const ev: EvidenceItem = { url: endpoint, status: resp.status, error: resp.error };
   const wwwAuthenticate = resp.headers['www-authenticate'];
   if (wwwAuthenticate !== undefined) ev.www_authenticate = wwwAuthenticate;
@@ -317,19 +398,19 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     return { status: 'broken', evidence: [ev] };
   }
 
-  if ((rpc.error as { code?: number } | undefined)?.code === RATE_LIMITED_CODE) {
+  const code = jsonRpcErrorCode(rpc);
+  if (code === RATE_LIMITED_CODE) {
     ev.error_code = RATE_LIMITED_CODE;
     ev.why = ['rate limited by the target'];
     return { status: 'error', evidence: [ev] };
   }
 
-  // Conformance classification: the expected refusal code passes, an
-  // unavailability-coded refusal that is not the expected code means the
-  // era machinery is not offered (absent), anything else well-formed
-  // stays broken.
+  // Conformance classification: the expected refusal code passes and
+  // every other well-formed code is a broken surface. These rows ask a
+  // question the lane has already proven it serves, so no era softening
+  // reaches them.
   if (conformance) {
-    const err = rpc.error as { code?: number; data?: { supported?: unknown } } | undefined;
-    const code = typeof err?.code === 'number' ? err.code : null;
+    const err = rpc.error as { data?: { supported?: unknown } } | undefined;
     ev.error_code = code;
     if (code === null) {
       if (typedHttpRefusal) {
@@ -349,20 +430,23 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
       }
       return { status: 'pass', evidence: [ev] };
     }
-    return { status: LANE_UNAVAILABLE_CODES.has(code) ? 'absent' : 'broken', evidence: [ev] };
+    return { status: 'broken', evidence: [ev] };
   }
 
-  // Era-mismatch classification for the result-expecting ops on both
-  // lanes: an unavailability-coded refusal means the probed era is not
-  // offered (absent), any other error envelope stays broken. The error
-  // op keeps its own expect_code semantics.
-  if (rpc.error !== undefined && w.op !== 'error') {
-    const code = (rpc.error as { code?: number } | undefined)?.code;
-    ev.error_code = typeof code === 'number' ? code : null;
-    return {
-      status: typeof code === 'number' && LANE_UNAVAILABLE_CODES.has(code) ? 'absent' : 'broken',
-      evidence: [ev],
-    };
+  // Era-lane classification for the ops that ask a lane about itself
+  // (initialize, tools-list, resources-list, the unknown-method probe,
+  // modern-tools-list, server-discover). Each names a method the lane
+  // could be missing, so an unavailability-coded refusal answers the
+  // probe truthfully and reads absent. The unknown-method probe reaches
+  // here too: its expected code passes, and a post-sunset lane answering
+  // -32022 lands absent alongside its lane-mates instead of alone in
+  // broken.
+  if (rpc.error !== undefined) {
+    ev.error_code = code;
+    if (w.op === 'error' && code === (w.expect_code ?? -32601)) {
+      return { status: 'pass', evidence: [ev] };
+    }
+    return { status: eraLaneUnavailable(w.op, code, ctx) ? 'absent' : 'broken', evidence: [ev] };
   }
 
   const result = (rpc.result ?? {}) as Record<string, unknown>;
@@ -396,7 +480,6 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.resources = Array.isArray(resources) ? resources.map((r) => r.uri ?? r.name ?? null) : null;
     ok = Array.isArray(resources) && resources.length > 0;
   } else {
-    const code = (rpc.error as { code?: number } | undefined)?.code ?? null;
     ev.error_code = code;
     ok = code === (w.expect_code ?? -32601);
   }

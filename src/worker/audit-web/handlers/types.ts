@@ -31,6 +31,21 @@ export type EvidenceItem = Record<string, unknown>;
  */
 export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent';
 
+/**
+ * Whether the target serves the modern MCP era, read from the wave-1
+ * `server/discover` probe: `present` when it answered with a JSON-RPC
+ * result, `unevidenced` when it answered any other way, and `unknown`
+ * when it never got an answer (transport failure, rate limit, deadline).
+ */
+export type McpModernLane = 'present' | 'unevidenced' | 'unknown';
+
+/** Era-lane facts the wave-1 MCP probes establish for the wave-2 rows. */
+export interface McpLaneEvidence {
+  modern: McpModernLane;
+  /** The legacy `initialize` result advertised `capabilities.resources`. */
+  legacyResources: boolean;
+}
+
 export interface ProbeOutcome {
   status: ProbeStatus;
   evidence: EvidenceItem[];
@@ -78,4 +93,11 @@ export interface HandlerContext {
    * the server is stateless. Wave-2 MCP probes send it when present.
    */
   mcpSessionId?: string | null;
+  /**
+   * Era-lane evidence from the wave-1 MCP probes. Modern-era rows score
+   * only against a lane `server/discover` evidenced, and the legacy
+   * resources read is judged against the legacy lane's own capability
+   * advertisement.
+   */
+  mcpLanes?: McpLaneEvidence;
 }

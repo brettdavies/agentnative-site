@@ -31,9 +31,9 @@ import { runDnsDoh } from './handlers/dns-doh';
 import { runCanonicalRedirect, runHttp } from './handlers/http';
 import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
-import { mcpSessionIdFrom, notifyMcpInitialized, runMcp } from './handlers/mcp';
+import { advertisesResources, mcpModernLaneFrom, mcpSessionIdFrom, notifyMcpInitialized, runMcp } from './handlers/mcp';
 import { enumerateScopedDirs, runScopedLlms } from './handlers/scoped-llms';
-import type { EvidenceItem, HandlerContext, ProbeOutcome } from './handlers/types';
+import type { EvidenceItem, HandlerContext, McpLaneEvidence, ProbeOutcome } from './handlers/types';
 import { runWebMcp } from './handlers/webmcp';
 import type { WebAuditRegistry, WebCheck, WebSiteType } from './registry';
 import { buildWebScorecard, type EngineResult, type ScorecardStatus, type WebScorecard } from './scorecard';
@@ -101,6 +101,8 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
 
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
+    // A row the era gate settled has no response to summarize.
+    if (first.status === undefined && Array.isArray(first.why)) return (first.why as string[]).join('; ');
     const op = check.with ? (check.with as { op?: string }).op : undefined;
     if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;
@@ -262,6 +264,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const scopedDirs: string[] = [];
   const retainedBodies = new Map<string, string>();
   let mcpSessionId: string | null = null;
+  let mcpLanes: McpLaneEvidence = { modern: 'unknown', legacyResources: false };
 
   const handlerCtx = (): HandlerContext => ({
     base,
@@ -274,6 +277,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
     retainedBodies,
     fetchOptions: input.fetchOptions,
     mcpSessionId,
+    mcpLanes,
   });
 
   const probeOne = async (
@@ -321,6 +325,10 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const openapiBody = retainedBody(sources, 'openapi');
   if (openapiBody.length > 0) retainedBodies.set('openapi', openapiBody);
   mcpSessionId = mcpSessionIdFrom(sources.get('mcp-initialize'));
+  mcpLanes = {
+    modern: mcpModernLaneFrom(sources.get('mcp-server-discover')),
+    legacyResources: advertisesResources(sources.get('mcp-initialize')?.evidence ?? []),
+  };
   if (mcpSessionId && discovery.endpoint) {
     await notifyMcpInitialized(discovery.endpoint, mcpSessionId, {
       timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())),

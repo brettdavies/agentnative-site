@@ -1,7 +1,7 @@
 // MCP antecedents: whether an MCP endpoint was discovered, and whether it
 // challenges for auth.
 
-import type { EvidenceItem } from '../handlers/types';
+import { advertisesResources } from '../handlers/mcp';
 import type { AntecedentToken } from '../registry';
 import { type AntecedentResolver, cardDeclaresAuth, evidenceShowsAuthChallenge, sourceEvidence } from './context';
 
@@ -11,11 +11,6 @@ const mcpAuth: AntecedentResolver = (ctx) => {
   if (ctx.mcpEndpoint === null) return 'n_a';
   return evidenceShowsAuthChallenge(sourceEvidence(ctx, 'mcp-initialize')) || cardDeclaresAuth(ctx) ? 'apply' : 'n_a';
 };
-
-function advertisesResources(items: EvidenceItem[]): boolean {
-  const caps = items[0]?.capabilities;
-  return Array.isArray(caps) && caps.includes('resources');
-}
 
 // Era-neutral: legacy initialize capabilities evidence and the modern
 // server/discover capability advertisement both satisfy the token, so a
