@@ -801,8 +801,12 @@ flowchart TB
 - **Dependencies:** none
 - **Files:** `.github/workflows/deploy.yml`, `scripts/release/mcp-smoke.sh`
 - **Approach:**
-  1. Add a core-checks-only mode flag to `mcp-smoke.sh` (checks 1–6; the symmetry and live-audit gates stay
+  1. Add a core-checks-only mode flag to `mcp-smoke.sh` (checks 1–7; the symmetry and live-audit gates stay
      preflight/postflight-only — the live audit spends an audit-budget unit and minutes of wall clock).
+     - Check 7 is a malformed-body probe: both eras answer `-32700` at HTTP 400. It sits at 7 rather than in the middle
+       so every earlier check number keeps pointing at the same probe as the evidence recorded against it. anc does not
+       share meum's workerd clone-throw; six malformed and empty variants across both eras all answer `-32700` with no
+       500. Re-probe before copying an expected answer into a sibling repo's check.
   2. New staging-job step after deploy, before the rescore ping: map the existing `ANC_STAGING_*` secrets to
      `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET` (the names the script reads), run against the staging URL under a
      step `id` with `continue-on-error: true`, teeing output to a log file.
@@ -859,7 +863,7 @@ flowchart TB
 - **Dependencies:** U3 (same PR; shares the fingerprint reflow and count-pin update)
 - **Files:** `src/data/web-audit/registry.yaml`, `src/data/web-audit/remediation.yaml`,
   `src/worker/audit-web/handlers/mcp.ts`, `src/worker/audit-web/antecedents/mcp.ts`, `tests/web-audit-handlers.test.ts`,
-  `tests/web-audit-scoring.test.ts`, `content/web-audit.md`
+  `tests/web-audit-scoring.test.ts`, `tests/web-audit-score-invariants.test.ts`, `content/web-audit.md`
 - **Approach:**
   1. Eight new recommended-tier registry entries per the Appendix probe matrix (ids directional): legacy
      `mcp-malformed-body`, `mcp-batch-reject`, `mcp-unknown-tool`; modern `mcp-modern-unknown-method`,
@@ -874,6 +878,15 @@ flowchart TB
      (the `data.supported` contingency in KTD11 is the expected case), fix within this plan before the checks land.
   5. Count pins to the Phase-B totals (R14).
   6. Extend the MCP bullet in `content/web-audit.md` with the conformance family.
+  7. Two further recommended-tier rows in the same family, judged on response framing rather than on a JSON-RPC code:
+     `mcp-accept-json` (an `Accept` naming only `application/json` must not draw a `text/event-stream` body) and
+     `mcp-accept-unsatisfiable` (an `Accept` no MCP transport can satisfy must draw a 406, not a 200 in a type nobody
+     asked for). Each varies only the `Accept` header of a `tools/list` the lane already serves, so the answer is
+     attributable to the negotiation alone. The framed/coded split is derived from the `MCP_OPS` table via the `framed`
+     marker, so a row cannot land in both probe catalogs or in neither. Framed rows sit out the legacy session re-ask: a
+     refusal is itself an answer that left through the transport carrying the content-type these rows read, so the first
+     request already answers them. An answer counts only when it carries a JSON-RPC envelope, otherwise a framework's
+     JSON 404 page would read as compliance.
 - **Patterns to follow:** the existing `mcp-unknown-method` entry and `op: error` branch; `stubFetch` handler tests.
 - **Test scenarios:**
   - Each probe against a conforming stub → `pass` (nine cases incl. the existing legacy unknown-method).
@@ -893,6 +906,11 @@ flowchart TB
   - Modern-only server advertising resources (discovery evidence, no legacy capabilities) → the resources-miss probe
     runs and classifies (era-neutral antecedent), not `n_a`.
   - Covers AE-level R20: the full matrix against anc's own in-process handler → all `pass`.
+  - JSON-only `Accept` answered with a JSON-RPC envelope in `application/json` → `pass`; answered `text/event-stream` →
+    `broken`; refused 406 by a stream-only server → `noncompliant`, not `broken`, because the refusal is honest and
+    immediate.
+  - JSON-only `Accept` answered 200 with a non-envelope JSON body (a framework 404 page) → `broken`, not `pass`.
+  - Unsatisfiable `Accept` answered 406 → `pass`; answered 200 carrying any representation → the negotiation failed.
 - **Verification:** `bun run build` (remediation 1:1); web-audit suites green; the dogfood matrix result recorded in the
   PR.
 
@@ -934,7 +952,7 @@ flowchart TB
 | `bun run typecheck`                 | U3, U4, U5             | handler unions, `NaReason` extension, SDK option types                                    |
 | `bun run deploy:dryrun`             | U5, U6                 | bindings and options accepted by wrangler                                                 |
 | `--project staging-mcp` vs staging  | U7                     | live modern + legacy wire, Access-authed                                                  |
-| `mcp-smoke.sh` core mode vs staging | U8                     | post-deploy surface, checks 1–6                                                           |
+| `mcp-smoke.sh` core mode vs staging | U8                     | post-deploy surface, checks 1–7                                                           |
 
 Build before test in every sequence. A red gate stops the unit; never proceed past it.
 
@@ -946,8 +964,9 @@ Build before test in every sequence. A red gate stops the unit; never proceed pa
 
 - Legacy-reject and rate-limit are distinct codes on the wire and in logs; no doc binds `-32099` to the reject lane.
 - The operator surface (keys, switch, PII posture) has repeatable coverage that fails on regression.
-- The audit registry scores 62 checks across both eras incl. the conformance matrix; a no-CORS posture costs nothing;
-  cached scorecards re-audit under the new universe; anc.dev passes its own conformance probes.
+- The audit registry scores 64 checks across both eras incl. the conformance matrix and the Accept-negotiation pair; a
+  no-CORS posture costs nothing; cached scorecards re-audit under the new universe; anc.dev passes its own conformance
+  probes.
 - Host validation is live with the allowlist tested, including the local-dev port case.
 - `wrangler.jsonc` declares every MCP flag's shape; runbooks give the matching flip verb per shape.
 - All 13 tools carry titles and accurate annotations, drift-gated.
@@ -981,7 +1000,7 @@ beside the new handler.
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /mcp` wire             | Reject code changes `-32099` → `-32022` + `data.supported` (client-visible; SDK-typed, so reference clients can recognize era rejection; documented in mcp-skill error table) |
 | `mcp.request` consumers      | `error_code` now populated on reject and host-rejection lines; base schema fields unchanged (sibling-consistent)                                                              |
-| Web-audit board              | `universeMax` 116 → 148 deflates stored global scores until re-audit; seeded domains reflow on deploy, unseeded rows age out in ≤30 days                                      |
+| Web-audit board              | `universeMax` 116 → 154 deflates stored global scores until re-audit; seeded domains reflow on deploy, unseeded rows age out in ≤30 days                                      |
 | anc.dev self-audit           | CORS pair flips from `absent` drag to `n_a`; modern checks pass (dual-stack) — self-score rises                                                                               |
 | Production wrangler bindings | One new var; secrets untouched; no behavior change on merge                                                                                                                   |
 | CI wall-clock                | Deep-check gains one staging job; staging deploys gain a bounded smoke step                                                                                                   |
@@ -993,8 +1012,8 @@ beside the new handler.
 
 - **Wrong host allowlist = total MCP outage.** Mitigation: the U5 test matrix includes every environment's Host form;
   the one-week U5 soak gate before release; widened `error_code` makes the failure filterable.
-- **Score deflation window (KTD8).** Stored global scores drop until re-audit (~22% relative at `universeMax` 116 →
-  148). Mitigation: the fingerprint-triggered seeded reflow in the same deploy; the window is bounded and documented.
+- **Score deflation window (KTD8).** Stored global scores drop until re-audit (~25% relative at `universeMax` 116 →
+  154). Mitigation: the fingerprint-triggered seeded reflow in the same deploy; the window is bounded and documented.
 - **`server/discover` as the era proxy.** The modern rows are scored only against a lane `server/discover` evidenced
   (KTD3), so a lenient legacy server cannot earn the modern check by answering a header-routed `tools/list`. The
   residual runs the other way: a server whose modern `tools/list` works but whose `server/discover` refuses outright
@@ -1119,8 +1138,9 @@ the enum per repo; base fields never diverge.
   hint: Answer server/discover with a well-formed discovery result on protocol 2026-07-28.
 ```
 
-Universe arithmetic: 52 → 62 checks (two era-lane checks in U3 + eight conformance checks in U11); tiers required 3 → 4,
-recommended 26 → 35, optional 23; `universeMax` 116 → 148 (4 must checks × 5 + 35 should × 3 + 23 may × 1).
+Universe arithmetic: 52 → 64 checks (two era-lane checks in U3, eight conformance checks in U11, two Accept-negotiation
+checks); tiers required 3 → 4, recommended 26 → 37, optional 23; `universeMax` 116 → 154 (4 must checks × 5 + 37 should
+× 3 + 23 may × 1).
 
 ### Modern probe wire shape (U3/U7 reference)
 

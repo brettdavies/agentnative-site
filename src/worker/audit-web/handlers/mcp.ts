@@ -1,11 +1,12 @@
 // `mcp` probe handler. Builds the JSON-RPC payload per op (legacy
 // initialize / tools-list / resources-list / error with the registry's
 // pinned protocol version; modern-era modern-tools-list / server-discover
-// header-routed per SEP-2243; the per-era error-code conformance family),
-// POSTs through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
+// header-routed per SEP-2243; the per-era error-code conformance family;
+// the Accept-negotiation family, judged on response framing), POSTs
+// through the SSRF guard, parses JSON or SSE via parseJsonRpc, and
 // evaluates serverInfo / capabilities / tools / resources / discovery /
-// error-code. Returns n_a when no endpoint was discovered, and an
-// unprobed `absent` when wave 1 evidenced no modern lane.
+// error-code / content-type. Returns n_a when no endpoint was discovered,
+// and an unprobed `absent` when wave 1 evidenced no modern lane.
 // CORS classification lives in the cors-preflight posture handler.
 
 import { parseJsonRpc } from '../assert';
@@ -46,6 +47,12 @@ type McpOpSpec = {
    * asked for, so such a row separates a taxonomy defect from a trap the
    * way the conformance family does. */
   expectsRefusal?: true;
+  /** The row is judged on how the answer was framed (status plus
+   * content-type) rather than on a JSON-RPC code, because its question is
+   * whether the server honoured the Accept it was sent. Every answer
+   * reveals that on its way out through the transport, a refusal
+   * included, so the row reaches its own question on one request. */
+  framed?: true;
 };
 
 const MCP_OPS = {
@@ -56,6 +63,8 @@ const MCP_OPS = {
   'malformed-body': { family: 'conformance', era: 'legacy' },
   'batch-reject': { family: 'conformance', era: 'legacy' },
   'unknown-tool': { family: 'conformance', era: 'legacy' },
+  'accept-json': { family: 'conformance', era: 'legacy', framed: true },
+  'accept-unsatisfiable': { family: 'conformance', era: 'legacy', framed: true },
   'server-discover': { family: 'era', era: 'modern', method: 'server/discover', discriminates: true },
   'modern-tools-list': { family: 'era', era: 'modern', method: 'tools/list', advertises: 'tools' },
   'modern-unknown-method': { family: 'conformance', era: 'modern' },
@@ -72,6 +81,14 @@ type OpsOfFamily<F extends McpOpSpec['family']> = {
 }[McpOp];
 
 type ConformanceOp = OpsOfFamily<'conformance'>;
+
+// The conformance family splits on HOW the answer is read, and the split
+// is derived from the same table so a row cannot land in both probe
+// catalogs or in neither.
+type FramedOp = {
+  [K in ConformanceOp]: (typeof MCP_OPS)[K] extends { framed: true } ? K : never;
+}[ConformanceOp];
+type CodedOp = Exclude<ConformanceOp, FramedOp>;
 
 const ALL_OPS = Object.keys(MCP_OPS) as McpOp[];
 
@@ -137,10 +154,27 @@ export const MODERN_LANE_DEPENDENT_OPS = opsWhere((spec) => spec.era === 'modern
 // the session legacy initialize issued puts the row back on its own
 // question; a stateless target never issues a session and so stays a
 // single request.
-export const LEGACY_CONFORMANCE_OPS = opsWhere((spec) => spec.family === 'conformance' && spec.era === 'legacy');
+//
+// Framed rows are excluded because the confound does not reach them: a
+// session refusal is itself an answer that left through the transport, so
+// it carries the content-type those rows read. A -32000 delivered as
+// application/json proves the Accept was honoured and one delivered as a
+// stream proves it was not, either way on the first request, so a re-ask
+// would double the row's cost to re-learn what it already knows.
+export const LEGACY_CONFORMANCE_OPS = opsWhere(
+  (spec) => spec.family === 'conformance' && spec.era === 'legacy' && spec.framed !== true,
+);
 
 /** Every row judged by the conformance branch, in registry order. */
 export const CONFORMANCE_OPS = opsWhere((spec) => spec.family === 'conformance');
+
+/**
+ * The conformance rows read on response framing rather than on a JSON-RPC
+ * code. They answer to a different question than their code-judged
+ * siblings, so a case that sweeps the conformance family on an error code
+ * has to say which of the two it means.
+ */
+export const NEGOTIATION_OPS = opsWhere((spec) => spec.framed === true);
 
 /** Every row judged by the era branch, in registry order. */
 export const ERA_OPS = opsWhere((spec) => spec.family === 'era');
@@ -232,7 +266,7 @@ type ConformanceProbe = {
 // Codes -32603 (an internal error cannot be forced from outside) and
 // -32099 (triggering rate limits against third-party servers is abusive)
 // are deliberately not probed.
-const CONFORMANCE_PROBES: Record<ConformanceOp, ConformanceProbe> = {
+const CONFORMANCE_PROBES: Record<CodedOp, ConformanceProbe> = {
   'malformed-body': {
     headers: legacyProbeHeaders,
     body: () => 'not-json{{',
@@ -302,8 +336,127 @@ const CONFORMANCE_PROBES: Record<ConformanceOp, ConformanceProbe> = {
   },
 };
 
+const SSE_MEDIA_TYPE = 'text/event-stream';
+const JSON_MEDIA_TYPE = 'application/json';
+
+// The one status whose meaning is exactly "nothing you listed in Accept
+// is available here". That is what makes it the conformant answer to an
+// unsatisfiable Accept, and the honest one from a stream-only server to a
+// client that can read only JSON.
+const NOT_ACCEPTABLE_STATUS = 406;
+
+// An Accept no MCP transport can satisfy: streamable HTTP is defined over
+// JSON and SSE alone, so a server that answers this one with a
+// representation answered with something nobody asked for.
+const UNSATISFIABLE_ACCEPT = 'application/xml';
+
+/** How the answer was framed, which is all a negotiation row reads. */
+type Framing = {
+  status: number | null;
+  /** Response media type, parameters stripped and lowercased. */
+  mediaType: string;
+  /** The body carries a JSON-RPC envelope, not merely some JSON object. */
+  envelope: boolean;
+};
+
+type NegotiationVerdict = { status: 'pass' | 'noncompliant' | 'broken'; why?: string };
+
+/**
+ * Whether the parsed body is a JSON-RPC envelope rather than any JSON
+ * object. A negotiation row credits an answer only for having arrived in
+ * the media type it asked for, so without this a framework's JSON 404
+ * page would read as the server honouring the Accept: it is JSON, and it
+ * parses, and it answers nothing.
+ */
+function isJsonRpcEnvelope(rpc: Record<string, unknown> | null): boolean {
+  return rpc !== null && rpc.jsonrpc === '2.0' && ('result' in rpc || 'error' in rpc);
+}
+
+/**
+ * A row that varies nothing but the Accept header of a request the lane
+ * has already proven it serves, so whatever comes back is attributable to
+ * the negotiation and to nothing else. The request is fixed here rather
+ * than per row for that reason: a probe that could also vary the body
+ * could not tell a negotiation defect from a method defect.
+ */
+type NegotiationProbe = {
+  accept: string;
+  classify: (framing: Framing) => NegotiationVerdict;
+};
+
+const NEGOTIATION_PROBES: Record<FramedOp, NegotiationProbe> = {
+  'accept-json': {
+    accept: JSON_MEDIA_TYPE,
+    classify: ({ status, mediaType, envelope }) => {
+      // Naming only application/json tells the server the caller's parser
+      // cannot read a stream. Streaming anyway hands it a success line
+      // over a body it declared it cannot consume, and no status says so.
+      if (mediaType === SSE_MEDIA_TYPE) {
+        return { status: 'broken', why: `answered ${SSE_MEDIA_TYPE} to a client that accepts only ${JSON_MEDIA_TYPE}` };
+      }
+      // Judged on the framing alone: whether the envelope carries a result
+      // or an error is another row's question, and charging one defect on
+      // two rows is what makes a scorecard unreadable.
+      if (envelope && mediaType === JSON_MEDIA_TYPE) return { status: 'pass' };
+      // A stream-only server that says so serves no JSON-only caller, but
+      // it misleads none either: the refusal is immediate and typed.
+      if (status === NOT_ACCEPTABLE_STATUS) {
+        return {
+          status: 'noncompliant',
+          why: `refused ${JSON_MEDIA_TYPE} with ${NOT_ACCEPTABLE_STATUS} instead of serving it`,
+        };
+      }
+      return {
+        status: 'broken',
+        why: `no JSON-RPC envelope in ${JSON_MEDIA_TYPE} (served ${mediaType || 'no content-type'})`,
+      };
+    },
+  },
+  'accept-unsatisfiable': {
+    accept: UNSATISFIABLE_ACCEPT,
+    classify: ({ status, mediaType, envelope }) => {
+      if (status === NOT_ACCEPTABLE_STATUS) return { status: 'pass' };
+      if (status !== null && status >= 200 && status < 300) {
+        // Echoing the unservable type back over a JSON-RPC body is the lie
+        // this row exists to catch: the caller routes the payload on the
+        // server's own label, and the parse fails downstream of a call it
+        // was told had succeeded.
+        if (mediaType === UNSATISFIABLE_ACCEPT && envelope) {
+          return { status: 'broken', why: `claimed ${UNSATISFIABLE_ACCEPT} over a JSON-RPC body` };
+        }
+        // Serving an unasked-for type under an honest label ignores the
+        // negotiation without misrepresenting anything, and RFC 9110
+        // permits it, so the caller can still read the label and adapt.
+        return {
+          status: 'noncompliant',
+          why: `served ${mediaType || 'an unlabelled body'} at ${status} where ${NOT_ACCEPTABLE_STATUS} was required`,
+        };
+      }
+      // 404 stays outside this arm, as it does everywhere else in the
+      // file, so a dead endpoint earns nothing on this row.
+      if (status !== null && TYPED_REFUSAL_STATUSES.includes(status)) {
+        return { status: 'noncompliant', why: `refused with ${status} where ${NOT_ACCEPTABLE_STATUS} was required` };
+      }
+      return { status: 'broken', why: `no deliberate answer to an unsatisfiable Accept (HTTP ${status ?? 'none'})` };
+    },
+  },
+};
+
 function conformanceFor(op: McpOp): ConformanceProbe | undefined {
-  return specOf(op).family === 'conformance' ? CONFORMANCE_PROBES[op as ConformanceOp] : undefined;
+  const spec = specOf(op);
+  return spec.family === 'conformance' && spec.framed !== true ? CONFORMANCE_PROBES[op as CodedOp] : undefined;
+}
+
+function negotiationFor(op: McpOp): NegotiationProbe | undefined {
+  return specOf(op).framed === true ? NEGOTIATION_PROBES[op as FramedOp] : undefined;
+}
+
+function framingOf(resp: { status: number | null; headers: Record<string, string> }, envelope: boolean): Framing {
+  return {
+    status: resp.status,
+    mediaType: (resp.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase(),
+    envelope,
+  };
 }
 
 function buildBody(op: McpOp, method: string, protocolVersion: string): string {
@@ -452,21 +605,33 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
       evidence: [{ url: endpoint, why: ['no modern lane: server/discover returned no result'] }],
     };
   }
+  const spec = specOf(w.op);
   const conformance = conformanceFor(w.op);
-  const modernMethod = specOf(w.op).method;
+  const negotiation = negotiationFor(w.op);
+  const modernMethod = spec.method;
   // Modern probes stay sessionless (no Mcp-Session-Id) and carry no
   // Mcp-Name: neither op is a tools/call or resources/read. Conformance
   // probes open fully table-shaped, and only the legacy three re-ask with
-  // a session, when the target's own answer demands one.
-  const headers: Record<string, string> = conformance
-    ? conformance.headers()
-    : modernMethod !== undefined
-      ? modernProbeHeaders(modernMethod)
-      : legacyProbeHeaders();
-  if (!conformance && modernMethod === undefined && w.op !== 'initialize' && ctx.mcpSessionId) {
+  // a session, when the target's own answer demands one. A negotiation
+  // probe sends the lane's proven tools/list under a different Accept, so
+  // the Accept is the only thing separating it from a known-good request.
+  const headers: Record<string, string> = negotiation
+    ? { 'Content-Type': JSON_MEDIA_TYPE, Accept: negotiation.accept }
+    : conformance
+      ? conformance.headers()
+      : modernMethod !== undefined
+        ? modernProbeHeaders(modernMethod)
+        : legacyProbeHeaders();
+  // The session rides the legacy era rows, which are the ones that ask a
+  // lane for a result it may hold behind a session.
+  if (spec.family === 'era' && spec.era === 'legacy' && w.op !== 'initialize' && ctx.mcpSessionId) {
     headers['Mcp-Session-Id'] = ctx.mcpSessionId;
   }
-  const body = conformance ? conformance.body() : buildBody(w.op, w.method ?? '', ctx.protocolVersion);
+  const body = negotiation
+    ? LEGACY_TOOLS_LIST_BODY
+    : conformance
+      ? conformance.body()
+      : buildBody(w.op, w.method ?? '', ctx.protocolVersion);
   // Every MCP probe reads at most a small JSON-RPC envelope, so the
   // shared audit cap bounds what a hostile endpoint can make the auditor
   // buffer.
@@ -509,11 +674,24 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   // Settled ahead of the arms below because a legacy server declines this
   // method both with an envelope and without one, and the arms that would
   // otherwise catch those two answers read them as a broken surface.
-  if (specOf(w.op).discriminates === true && modernLaneRefused(resp.status, code)) {
+  if (spec.discriminates === true && modernLaneRefused(resp.status, code)) {
     const reason = code !== null ? `code ${code}` : `HTTP ${resp.status}`;
     if (code !== null) ev.error_code = code;
     ev.why = [`no modern lane: server/discover refused with ${reason}`];
     return { status: 'absent', evidence: [ev] };
+  }
+
+  // Settled ahead of the envelope arms below: a negotiation row reads the
+  // framing of whatever came back, and the two answers it most needs to
+  // separate (a stream, and a typed refusal carrying no envelope) are both
+  // answers those arms would read as one undifferentiated broken surface.
+  if (negotiation) {
+    const framing = framingOf(resp, isJsonRpcEnvelope(rpc));
+    ev.accept = negotiation.accept;
+    ev.content_type = framing.mediaType;
+    const verdict = negotiation.classify(framing);
+    if (verdict.why !== undefined) ev.why = [verdict.why];
+    return { status: verdict.status, evidence: [ev] };
   }
 
   // A typed refusal is the status code plus the absence of a JSON-RPC
@@ -587,7 +765,7 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
   if (rpc.error !== undefined) {
     ev.error_code = code;
     const expected = w.expect_code ?? -32601;
-    if (specOf(w.op).expectsRefusal === true) {
+    if (spec.expectsRefusal === true) {
       if (code === expected) return { status: 'pass', evidence: [ev] };
       if (eraLaneUnavailable(w.op, code, ctx)) return { status: 'absent', evidence: [ev] };
       ev.why = [`expected error code ${expected}, got ${code}`];
