@@ -1,8 +1,12 @@
 /* site.css — additive layer on top of foundation.css (docs/DESIGN.md §4). */
 
+/* format("woff2"), not "woff2-variations": Bun's CSS minify unquotes the
+ * hyphenated token to format(woff2-variations), which Chrome treats as
+ * invalid and drops, so the preloaded files never attach. Weight ranges
+ * already mark these as variable fonts. */
 @font-face {
   font-family: "Uncut Sans";
-  src: url("/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+  src: url("/fonts/uncut-sans-variable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
@@ -10,7 +14,7 @@
 
 @font-face {
   font-family: "Monaspace Xenon";
-  src: url("/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+  src: url("/fonts/monaspace-xenon-variable.woff2") format("woff2");
   font-weight: 200 800;
   font-style: normal;
   font-display: swap;
