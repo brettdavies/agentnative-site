@@ -92,6 +92,21 @@ const MODERN_LANE_DEPENDENT_OPS: ReadonlySet<McpWith['op']> = new Set([
 const LEGACY_CONFORMANCE_OPS: ReadonlySet<McpWith['op']> = new Set(['malformed-body', 'batch-reject', 'unknown-tool']);
 const SESSION_REQUIRED_CODE = -32000;
 
+// A refusal delivered as an HTTP status with no JSON-RPC envelope: the
+// request was rejected, not mishandled. 404 is deliberately outside the
+// set so a dead endpoint earns nothing on any row that consults it.
+const TYPED_REFUSAL_STATUSES: readonly number[] = [400, 415];
+
+// `server/discover` exists only on the modern lane, so the row that
+// proves a lane is missing must not be penalized for proving it: every
+// answer meaning "this method is not served here" reads as an absent era,
+// the same reading the six rows this outcome gates already take. Beyond
+// the shared unavailability codes, a legacy server declines it two more
+// ways: -32000 when it wants a session the modern lane never issues, and
+// a typed HTTP refusal when it rejects the modern version claim before
+// any handler runs.
+const DISCOVER_UNAVAILABLE_CODES = new Set([...LANE_UNAVAILABLE_CODES, SESSION_REQUIRED_CODE]);
+
 // Single source of a modern op's wire method: the Mcp-Method header and
 // the body method both read this map, so they cannot disagree (the
 // -32020 condition the suite itself probes for).
@@ -181,7 +196,7 @@ const CONFORMANCE_PROBES: Record<ConformanceOp, ConformanceProbe> = {
     headers: legacyProbeHeaders,
     body: () => 'not-json{{',
     accept: [-32700],
-    httpAccept: [400, 415],
+    httpAccept: TYPED_REFUSAL_STATUSES,
   },
   'batch-reject': {
     // A valid all-legacy batch is served on the pinned SDK line; the
@@ -332,6 +347,18 @@ function eraLaneUnavailable(op: McpWith['op'], code: number | null, ctx: Handler
   return true;
 }
 
+/**
+ * Whether a `server/discover` answer reports the modern lane's absence.
+ * An error envelope is judged on its code alone, so an internal error
+ * stays broken however it is delivered; only an envelope-free answer is
+ * judged on its status, so a malformed result and a 5xx both keep the
+ * broken-surface penalty a server that tried and failed has earned.
+ */
+function modernLaneRefused(status: number | null, code: number | null): boolean {
+  if (code !== null) return DISCOVER_UNAVAILABLE_CODES.has(code);
+  return status !== null && TYPED_REFUSAL_STATUSES.includes(status);
+}
+
 export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const endpoint = ctx.mcpEndpoint;
   if (!endpoint) {
@@ -379,6 +406,24 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     ev.why = ['request failed'];
     return { status: 'error', evidence: [ev] };
   }
+
+  const code = jsonRpcErrorCode(rpc);
+  if (code === RATE_LIMITED_CODE) {
+    ev.error_code = RATE_LIMITED_CODE;
+    ev.why = ['rate limited by the target'];
+    return { status: 'error', evidence: [ev] };
+  }
+
+  // Settled ahead of the arms below because a legacy server declines this
+  // method both with an envelope and without one, and the arms that would
+  // otherwise catch those two answers read them as a broken surface.
+  if (w.op === 'server-discover' && modernLaneRefused(resp.status, code)) {
+    const reason = code !== null ? `code ${code}` : `HTTP ${resp.status}`;
+    if (code !== null) ev.error_code = code;
+    ev.why = [`no modern lane: server/discover refused with ${reason}`];
+    return { status: 'absent', evidence: [ev] };
+  }
+
   // A typed refusal is the status code plus the absence of a JSON-RPC
   // error envelope, not a parse failure: a 400/415 carrying a
   // framework's own JSON explanation body is still an envelope-free
@@ -396,13 +441,6 @@ export async function runMcp(check: WebCheck, ctx: HandlerContext): Promise<Prob
     }
     ev.why = ['no parseable JSON-RPC response'];
     return { status: 'broken', evidence: [ev] };
-  }
-
-  const code = jsonRpcErrorCode(rpc);
-  if (code === RATE_LIMITED_CODE) {
-    ev.error_code = RATE_LIMITED_CODE;
-    ev.why = ['rate limited by the target'];
-    return { status: 'error', evidence: [ev] };
   }
 
   // Conformance classification: the expected refusal code passes and

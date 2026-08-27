@@ -101,8 +101,9 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
 
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
-    // A row the era gate settled has no response to summarize.
-    if (first.status === undefined && Array.isArray(first.why)) return (first.why as string[]).join('; ');
+    // An era verdict states its reason in `why`; the response fields
+    // describe the refusal, not the surface the row is scoring.
+    if (outcome.status === 'absent' && Array.isArray(first.why)) return (first.why as string[]).join('; ');
     const op = check.with ? (check.with as { op?: string }).op : undefined;
     if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;

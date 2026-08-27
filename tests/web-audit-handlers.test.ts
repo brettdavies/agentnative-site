@@ -919,6 +919,50 @@ describe('runMcp era-lane classification', () => {
     expect(notAdvertised.status).toBe('absent');
   });
 
+  test('server/discover reads every legacy-only refusal as an absent modern lane', async () => {
+    const refusals: Array<[string, () => Response]> = [
+      ['session-required at 400', () => rpcError(-32000, 400)],
+      ['session-required at 200', () => rpcError(-32000)],
+      ['bare 400', () => new Response('Bad Request', { status: 400 })],
+      ['bare 415', () => new Response(null, { status: 415 })],
+      ['400 carrying a framework JSON body', () => json({ detail: 'unsupported protocol version' }, 400)],
+    ];
+    for (const [label, response] of refusals) {
+      const outcome = await run({ op: 'server-discover' }, stubFetch(response));
+      expect(`${label}:${outcome.status}`).toBe(`${label}:absent`);
+      expect(`${label}:${(outcome.evidence[0].why as string[])[0]}`).toContain('no modern lane');
+    }
+  });
+
+  test('server/discover stays broken when the server tried to serve the method and failed', async () => {
+    const faults: Array<[string, () => Response]> = [
+      ['internal error', () => rpcError(-32603)],
+      ['internal error at 500', () => rpcError(-32603, 500)],
+      ['bare 500', () => new Response('boom', { status: 500 })],
+      ['bare 503', () => new Response('unavailable', { status: 503 })],
+      ['200 with garbage', () => new Response('<html>oops</html>', { status: 200 })],
+      ['200 result missing supportedVersions', () => json({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } })],
+      ['bare 404', () => new Response('not found', { status: 404 })],
+    ];
+    for (const [label, response] of faults) {
+      const outcome = await run({ op: 'server-discover' }, stubFetch(response));
+      expect(`${label}:${outcome.status}`).toBe(`${label}:broken`);
+    }
+  });
+
+  test('the widened discover signals reach no other era probe', async () => {
+    const answers: Array<[string, () => Response]> = [
+      ['session-required', () => rpcError(-32000, 400)],
+      ['bare 400', () => new Response('Bad Request', { status: 400 })],
+    ];
+    for (const [label, response] of answers) {
+      for (const op of ['initialize', 'tools-list', 'resources-list', 'modern-tools-list']) {
+        const outcome = await run({ op }, stubFetch(response));
+        expect(`${op}/${label}:${outcome.status}`).toBe(`${op}/${label}:broken`);
+      }
+    }
+  });
+
   test('resources-list stays broken on a non-unavailability code either way', async () => {
     const fails = stubFetch(() => rpcError(-32603));
     for (const legacyResources of [true, false]) {
@@ -1290,6 +1334,16 @@ describe('runMcp error-code conformance', () => {
     }
   });
 
+  test('a session-required refusal is broken on every conformance row that cannot re-ask', async () => {
+    for (const op of CONFORMANCE_OPS) {
+      const outcome = await run(
+        { op },
+        stubFetch(() => rpcError(-32000, 400)),
+      );
+      expect(`${op}:${outcome.status}`).toBe(`${op}:broken`);
+    }
+  });
+
   test('an endpoint answering -32601 to everything cannot outscore one that answers honestly', async () => {
     const always32601 = stubFetch(() => rpcError(-32601));
     // The three legacy conformance rows carry no method the lane could be
@@ -1645,6 +1699,19 @@ describe('era lanes resolved across a whole audit (engine)', () => {
       expect(`${label}:${modern?.evidence}`).toBe(`${label}:no modern lane: server/discover returned no result`);
       expect(`${label}:${rows.find((r) => r.id === 'mcp-modern-clientcaps')?.status}`).toBe(`${label}:absent`);
       expect(`${label}:${rows.find((r) => r.id === 'mcp-initialize')?.status}`).toBe(`${label}:pass`);
+    }
+  });
+
+  test('the discover row reads absent on every legacy-only shape, so it is not charged for what it proved', async () => {
+    const expected: Record<string, string> = {
+      A: 'no modern lane: server/discover refused with code -32601',
+      B: 'no modern lane: server/discover refused with code -32000',
+      C: 'no modern lane: server/discover refused with HTTP 400',
+    };
+    for (const [label, fetchImpl] of Object.entries(shapes)) {
+      const discover = (await auditRows(fetchImpl)).find((r) => r.id === 'mcp-server-discover');
+      expect(`${label}:${discover?.status}`).toBe(`${label}:absent`);
+      expect(`${label}:${discover?.evidence}`).toBe(`${label}:${expected[label]}`);
     }
   });
 

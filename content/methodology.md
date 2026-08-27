@@ -279,7 +279,8 @@ Two rules shape how MCP results score:
   header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
   single-era server reads `absent` on the lane it lacks rather than `broken`, so it is never penalized for an era it
   never claimed. `server/discover` decides the modern lane, because it is the only method a legacy server cannot answer:
-  when it returns no result, every other modern check reads `absent` without a probe. On the legacy lane, an era-shaped
+  a refusal saying the method is not served here reads `absent` on that check and settles every other modern check
+  `absent` without a probe, while a malformed result or a server error stays `broken`. On the legacy lane, an era-shaped
   refusal (a well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be
   missing. The error-code conformance checks are judged strictly: they ask about a request the lane has already proven
   it accepts, so any code other than the expected one is `broken`.
