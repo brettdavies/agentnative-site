@@ -121,11 +121,14 @@ a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; 
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Four kill switches, surgical.** Three are secret-bound and zero-deploy: `MCP_ENABLED`, `MCP_LIVE_SCORING_ENABLED`, and
-`WEB_AUDIT_ENABLED` default `"false"` in production and `"true"` in staging and flip via `wrangler secret put`.
-`MCP_LEGACY_ENABLED` is a staging `vars` binding: unbound in production (where the legacy lane serves), it flips via a
-deploy with `--var`, never `wrangler secret put` (Cloudflare API 10053 rejects a secret on a var-bound name; see the
-[operator runbook](docs/runbooks/mcp-operator.md)).
+**Four kill switches, surgical.** `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets in both environments, flipped
+with `wrangler secret put` and no deploy; an unset secret reads as off, so absence fails closed. `MCP_LEGACY_ENABLED` is
+a committed var, `"true"` in the top-level and `env.staging` `vars` blocks; its sunset flip is a committed edit through
+a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` is a `vars` binding on staging
+and a `wrangler secret put` value on production. A binding name is a var or a secret, never both: `wrangler secret put`
+against a declared var name is rejected with Cloudflare API 10053. Production commands carry no `--env` flag, because
+production is the top-level config and there is no `env.production` block. Per-flag shapes, flip verbs, and the `--var`
+hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
