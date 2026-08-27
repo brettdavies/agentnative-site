@@ -93,13 +93,22 @@ git log --oneline dev --not origin/main
 git cherry-pick <sha1> <sha2> ...
 
 # 4. Triple-diff verification.
+#
+#    GUARDED is every path guard-main-docs rejects on a PR to main: the reusable's
+#    hardcoded base (docs/architecture, docs/brainstorms, docs/ideation, docs/plans,
+#    docs/research, docs/reviews, docs/solutions) plus this repo's extra_paths in
+#    .github/workflows/guard-main-docs.yml. Keep the two in step: a path the workflow
+#    guards but this pattern omits leaks past the local check and fails in CI, and
+#    diff-B hides a genuinely missed pick behind the same blind spot.
+GUARDED='^(docs/(architecture|brainstorms|ideation|plans|research|reviews|solutions)/|styles/|\.vale\.ini$|scripts/(prose-check|check-banned-fonts)\.sh$|scripts/scoring/|\.context/)'
+
 git diff origin/main..HEAD --stat                                              # A: ship surface
-git diff HEAD..origin/dev --name-only | grep -v '^docs/' || echo "(none)"      # B: no missed picks
+git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" || echo "(none)"   # B: no missed picks
 git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
 
 # Re-confirm no guarded paths leaked.
 git diff origin/main..HEAD --name-only \
-  | grep -E '^(docs/plans|docs/brainstorms|docs/ideation|docs/reviews|docs/solutions|\.context)' \
+  | grep -E "$GUARDED" \
   && echo "LEAKED — reset and redo" || echo "(clean)"
 
 # Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
@@ -114,8 +123,9 @@ gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
 **Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
 kebab-case, 3-6 words.
 
-When the PR merges, `deploy.yml` publishes to staging. Auto-delete removes `release/<slug>` from the remote on merge.
-`dev` is untouched.
+When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on `github.ref ==
+'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on anc.dev. Auto-delete
+removes `release/<slug>` from the remote on merge. `dev` is untouched.
 
 → Rationale + triple-diff false-positive triage:
 [`RELEASES-RATIONALE.md` § Triple-diff verification](./RELEASES-RATIONALE.md#triple-diff-verification).

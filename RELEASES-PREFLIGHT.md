@@ -480,8 +480,12 @@ correctly report guarded planning paths as leaked.
   paths are `dev`-direct per the branching rule):
 
   ```bash
+  # Every path guard-main-docs rejects: the reusable's hardcoded base plus this repo's
+  # extra_paths in .github/workflows/guard-main-docs.yml. Keep the two in step.
+  GUARDED='^(docs/(architecture|brainstorms|ideation|plans|research|reviews|solutions)/|styles/|\.vale\.ini$|scripts/(prose-check|check-banned-fonts)\.sh$|scripts/scoring/|\.context/)'
+
   git diff origin/main..HEAD --name-only \
-    | grep -E '^(docs/plans|docs/brainstorms|docs/ideation|docs/reviews|docs/solutions|\.context)' \
+    | grep -E "$GUARDED" \
     && echo "LEAKED: reset and redo" || echo "(clean)"
   ```
 
@@ -489,7 +493,7 @@ correctly report guarded planning paths as leaked.
 
   ```bash
   git diff origin/main..HEAD --stat                                              # A: ship surface
-  git diff HEAD..origin/dev --name-only | grep -v '^docs/' || echo "(none)"      # B: no missed picks
+  git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" || echo "(none)"   # B: no missed picks
   git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
   ```
 
