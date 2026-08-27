@@ -17,6 +17,7 @@ import {
   CONFORMANCE_OPS,
   MODERN_LANE_DEPENDENT_OPS,
   modernProbeBody,
+  NEGOTIATION_OPS,
   runMcp,
 } from '../src/worker/audit-web/handlers/mcp';
 import type { HandlerContext, McpLaneEvidence } from '../src/worker/audit-web/handlers/types';
@@ -1357,7 +1358,11 @@ describe('runMcp error-code conformance', () => {
 
   test('a bare non-200 without an envelope is broken outside the typed-HTTP arm', async () => {
     for (const op of CONFORMANCE_OPS) {
-      if (op === 'malformed-body') continue;
+      // The two rows that read a bare status as an answer in its own right:
+      // malformed-body accepts 400/415 as a typed refusal, and
+      // accept-unsatisfiable credits one as a refusal under the wrong
+      // status. Both are covered by their own cases.
+      if (op === 'malformed-body' || op === 'accept-unsatisfiable') continue;
       const outcome = await run(
         { op },
         stubFetch(() => new Response('bad request', { status: 400 })),
@@ -1416,12 +1421,44 @@ describe('runMcp error-code conformance', () => {
 
   test('a session-required refusal is noncompliant on every conformance row that cannot re-ask', async () => {
     for (const op of CONFORMANCE_OPS) {
+      if (NEGOTIATION_OPS.includes(op)) continue;
       const outcome = await run(
         { op },
         stubFetch(() => rpcError(-32000, 400)),
       );
       expect(`${op}:${outcome.status}`).toBe(`${op}:noncompliant`);
     }
+  });
+
+  test('a session-required refusal still answers the negotiation rows, so neither re-asks', async () => {
+    // The reason the re-ask stops at the code-judged legacy rows. A
+    // session refusal is an answer that left through the transport, so it
+    // carries the framing these rows read: delivered as application/json
+    // it proves the JSON-only Accept was honoured, and its 400 is a
+    // deliberate refusal under the wrong status for the unsatisfiable one.
+    // Neither verdict would change on a second request.
+    const sessionRefusal = stubFetch(() => rpcError(-32000, 400));
+    expect(`accept-json:${(await run({ op: 'accept-json' }, sessionRefusal)).status}`).toBe('accept-json:pass');
+    expect(`accept-unsatisfiable:${(await run({ op: 'accept-unsatisfiable' }, sessionRefusal)).status}`).toBe(
+      'accept-unsatisfiable:noncompliant',
+    );
+  });
+
+  test('a session refusal streamed at a JSON-only client is still broken', async () => {
+    // The same shape framed the other way: the refusal is delivered as SSE
+    // to a caller that named only application/json, so the row reads the
+    // framing rather than the code and the answer is a trap either way.
+    const outcome = await run(
+      { op: 'accept-json' },
+      stubFetch(
+        () =>
+          new Response('event: message\ndata: {"jsonrpc":"2.0","id":1,"error":{"code":-32000}}\n\n', {
+            status: 400,
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+      ),
+    );
+    expect(outcome.status).toBe('broken');
   });
 
   test('an endpoint answering -32601 to everything cannot outscore one that answers honestly', async () => {
@@ -1892,6 +1929,169 @@ describe('era lanes resolved across a whole audit (engine)', () => {
   });
 });
 
+describe('runMcp Accept negotiation', () => {
+  const run = (w: Record<string, unknown>, fetchImpl: typeof fetch, sessionId?: string) =>
+    runMcp(check({ handler: 'mcp', with: w }), ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: sessionId ?? null }));
+
+  /** A server that reads Accept and answers inside it. */
+  const honouring = (): typeof fetch =>
+    stubFetch((_url, init) => {
+      const accept = new Headers(init?.headers).get('accept') ?? '';
+      if (!accept.includes('application/json') && !accept.includes('text/event-stream')) {
+        return new Response('not acceptable\n', { status: 406, headers: { 'content-type': 'text/plain' } });
+      }
+      return toolsResult();
+    });
+
+  const sse = (payload: object, status = 200): Response =>
+    new Response(`event: message\ndata: ${JSON.stringify(payload)}\n\n`, {
+      status,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+
+  test('both rows pass against a conforming stub', async () => {
+    for (const op of NEGOTIATION_OPS) {
+      expect(`${op}:${(await run({ op }, honouring())).status}`).toBe(`${op}:pass`);
+    }
+  });
+
+  test('each row varies only the Accept of the tools/list the lane already serves', async () => {
+    // The verdict is attributable to the negotiation only while the rest
+    // of the request matches one the lane has already answered.
+    const captured: Array<{ accept: string | null; contentType: string | null; session: string | null; body: string }> =
+      [];
+    const fetchImpl = stubFetch((_url, init) => {
+      const headers = new Headers(init?.headers);
+      captured.push({
+        accept: headers.get('accept'),
+        contentType: headers.get('content-type'),
+        session: headers.get('mcp-session-id'),
+        body: String(init?.body),
+      });
+      return toolsResult();
+    });
+    for (const op of NEGOTIATION_OPS) await run({ op }, fetchImpl, 'sess-1');
+    expect(captured.map((c) => c.accept)).toEqual(['application/json', 'application/xml']);
+    for (const c of captured) {
+      expect((JSON.parse(c.body) as { method: string }).method).toBe('tools/list');
+      expect(c.contentType).toBe('application/json');
+      // Table-shaped like the other conformance rows: no session attach.
+      expect(c.session).toBeNull();
+    }
+  });
+
+  test('each row costs exactly one request, session refusal or not', async () => {
+    for (const op of NEGOTIATION_OPS) {
+      let calls = 0;
+      await run(
+        { op },
+        stubFetch(() => {
+          calls += 1;
+          return rpcError(-32000, 400);
+        }),
+        'sess-1',
+      );
+      expect(`${op}:${calls}`).toBe(`${op}:1`);
+    }
+  });
+
+  test('accept-json: a stream answered to a JSON-only client is broken', async () => {
+    // The highest-harm case in the family. The caller named one media type
+    // its parser can read, and the server returned a success over another.
+    const outcome = await run(
+      { op: 'accept-json' },
+      stubFetch(() => sse({ jsonrpc: '2.0', id: 1, result: { tools: [] } })),
+    );
+    expect(outcome.status).toBe('broken');
+    expect(outcome.evidence[0].content_type).toBe('text/event-stream');
+  });
+
+  test('accept-json: a 406 refusal is noncompliant, not a trap', async () => {
+    // A stream-only server that says so serves no JSON-only caller, but it
+    // fails that caller immediately rather than handing it an unreadable
+    // success.
+    const outcome = await run(
+      { op: 'accept-json' },
+      stubFetch(() => new Response('not acceptable\n', { status: 406, headers: { 'content-type': 'text/plain' } })),
+    );
+    expect(outcome.status).toBe('noncompliant');
+  });
+
+  test('accept-json: a JSON envelope passes whatever the envelope says', async () => {
+    // Whether the lane answered with a result or an error is another row's
+    // question; charging one defect twice makes a scorecard unreadable.
+    for (const response of [toolsResult, () => rpcError(-32601), () => rpcError(-32602, 400)]) {
+      expect((await run({ op: 'accept-json' }, stubFetch(response))).status).toBe('pass');
+    }
+  });
+
+  test('accept-unsatisfiable: 406 passes and a 200 with an unasked-for type does not', async () => {
+    const conformant = await run(
+      { op: 'accept-unsatisfiable' },
+      stubFetch(() => new Response('nope\n', { status: 406, headers: { 'content-type': 'text/plain' } })),
+    );
+    expect(conformant.status).toBe('pass');
+    // Ignoring the negotiation under an honest label: usable, not a lie.
+    const ignored = await run(
+      { op: 'accept-unsatisfiable' },
+      stubFetch(() => toolsResult()),
+    );
+    expect(ignored.status).toBe('noncompliant');
+    expect(ignored.evidence[0].content_type).toBe('application/json');
+  });
+
+  test('accept-unsatisfiable: echoing the unservable type over a JSON body is broken', async () => {
+    // The silent content-type lie. The caller routes the payload on the
+    // server's own label, and the parse fails downstream of a call it was
+    // told had succeeded.
+    const outcome = await run(
+      { op: 'accept-unsatisfiable' },
+      stubFetch(
+        () =>
+          new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [] } }), {
+            status: 200,
+            headers: { 'content-type': 'application/xml' },
+          }),
+      ),
+    );
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('accept-unsatisfiable: a refusal under the wrong status is noncompliant', async () => {
+    for (const status of [400, 415]) {
+      const outcome = await run(
+        { op: 'accept-unsatisfiable' },
+        stubFetch(() => new Response('nope\n', { status, headers: { 'content-type': 'text/plain' } })),
+      );
+      expect(`${status}:${outcome.status}`).toBe(`${status}:noncompliant`);
+    }
+  });
+
+  test('a dead endpoint lands outside the credited arm of both rows', async () => {
+    // 404 stays out of every typed-refusal set in this file so a discovered
+    // endpoint that answers nothing earns nothing here.
+    for (const op of NEGOTIATION_OPS) {
+      for (const response of [
+        () => new Response('not found', { status: 404 }),
+        () => new Response('<html>gone</html>', { status: 404, headers: { 'content-type': 'text/html' } }),
+        () => json({ detail: 'gone' }, 404),
+      ]) {
+        expect(`${op}:${(await run({ op }, stubFetch(response))).status}`).toBe(`${op}:broken`);
+      }
+    }
+  });
+
+  test('a rate-limited refusal stays an operational error on both rows', async () => {
+    for (const op of NEGOTIATION_OPS) {
+      const outcome = await run(
+        { op },
+        stubFetch(() => rpcError(-32099)),
+      );
+      expect(`${op}:${outcome.status}`).toBe(`${op}:error`);
+    }
+  });
+});
+
 describe('runMcp conformance dogfood against the in-process handler', () => {
   const DOGFOOD_CATALOG = {
     generated_at: '2026-06-05T18:00:00.000Z',
@@ -2001,6 +2201,14 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
 
   test('a breaching limiter answers -32099 and every row is excluded from scoring', async () => {
     for (const row of await runMatrix(dogfoodEnv({ limiterSucceeds: false }))) {
+      // The unsatisfiable Accept is refused at the transport edge, above
+      // the limiter, so that row never reaches the rate-limit path and
+      // still gets its true answer. Refusing a media type the transport
+      // cannot produce needs no quota to decide.
+      if (row.op === 'accept-unsatisfiable') {
+        expect(`${String(row.op)}:${row.status}`).toBe('accept-unsatisfiable:pass');
+        continue;
+      }
       expect(`${String(row.op)}:${row.status}:${String(row.code)}`).toBe(`${String(row.op)}:error:-32099`);
     }
   });

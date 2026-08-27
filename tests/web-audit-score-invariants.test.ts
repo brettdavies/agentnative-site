@@ -37,6 +37,7 @@ import {
   ERA_OPS,
   LEGACY_CONFORMANCE_OPS,
   MODERN_LANE_DEPENDENT_OPS,
+  NEGOTIATION_OPS,
 } from '../src/worker/audit-web/handlers/mcp';
 import type { WebAuditRegistry } from '../src/worker/audit-web/registry';
 import { scoreWebAudit, universeMaxOf, type WebScore } from '../src/worker/audit-web/score';
@@ -63,8 +64,43 @@ const resourcesResult = (): Response =>
 
 type McpHandler = (headers: Headers, body: string) => Response;
 
+/**
+ * How a shape's transport treats the request Accept. `honour` is the
+ * conforming default; the other two each name one defect.
+ */
+type Negotiation = 'honour' | 'ignore' | 'stream';
+
+/** The media types the streamable-HTTP transport is defined over. */
+const SERVABLE_TYPES = ['application/json', 'text/event-stream', '*/*'];
+
+async function asSse(response: Response): Promise<Response> {
+  return new Response(`event: message\ndata: ${await response.text()}\n\n`, {
+    status: response.status,
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
+/**
+ * Content negotiation wrapped OUTSIDE a shape's application logic, the way
+ * a real server layers it: a media type the transport cannot produce is
+ * refused before any session or method handling runs. Keeping it out here
+ * is what lets a stateful shape and a stateless one still differ in only
+ * their statefulness, rather than in where each happens to check Accept.
+ */
+function negotiating(handler: McpHandler, mode: Negotiation) {
+  return (headers: Headers, body: string): Response | Promise<Response> => {
+    const accept = headers.get('accept') ?? '';
+    if (mode !== 'ignore' && !SERVABLE_TYPES.some((type) => accept.includes(type))) {
+      return new Response('not acceptable\n', { status: 406, headers: { 'content-type': 'text/plain' } });
+    }
+    const answer = handler(headers, body);
+    return mode === 'stream' && !accept.includes('text/event-stream') ? asSse(answer) : answer;
+  };
+}
+
 /** Wrap an MCP-endpoint POST handler with the card + root a discovery pass needs. */
-function site(mcp: McpHandler): typeof fetch {
+function site(mcp: McpHandler, mode: Negotiation = 'honour'): typeof fetch {
+  const negotiated = negotiating(mcp, mode);
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     if (url === `${BASE}.well-known/mcp.json`) return json({ mcp_endpoint: `${BASE}mcp` });
@@ -75,7 +111,7 @@ function site(mcp: McpHandler): typeof fetch {
       });
     }
     if (url !== `${BASE}mcp`) return new Response('not found', { status: 404 });
-    return mcp(new Headers(init?.headers), init?.body === undefined ? '' : String(init.body));
+    return negotiated(new Headers(init?.headers), init?.body === undefined ? '' : String(init.body));
   }) as typeof fetch;
 }
 
@@ -292,6 +328,11 @@ const SHAPES: Record<string, typeof fetch> = {
   // Advertise tools on discovery, then refuse the method with two codes.
   'advertises tools then refuses modern tools/list -32601': dualStack(advertiseThenRefuse(-32601)),
   'advertises tools then refuses modern tools/list -32603': dualStack(advertiseThenRefuse(-32603)),
+  // The same legacy-only server, each with one negotiation defect: it
+  // ignores an Accept it cannot satisfy, or it streams at a client that
+  // said it can read only JSON.
+  'legacy-only ignoring an unsatisfiable Accept': site(legacyLane, 'ignore'),
+  'legacy-only streaming at a JSON-only client': site(legacyLane, 'stream'),
   // Operational conditions on the discovery probe.
   'server/discover answers -32000 at HTTP 500': dualStack(withDiscover(modernConforming, () => rpcError(-32000, 500))),
   'server/discover answers -32000 at HTTP 429': dualStack(withDiscover(modernConforming, () => rpcError(-32000, 429))),
@@ -523,7 +564,13 @@ describe('the scorer prices the four scored statuses in one order, for every che
     // the relative axis even though it earned less, which is the residual
     // the half-weight rule leaves and the reason global is the tiebreak.
     expect(`${noncompliant.relative}/${absent.relative}`).toBe('63/67');
-    expect(noncompliant.global > absent.global).toBe(true);
+    // The tiebreak is asserted on `earned`, which global is a rescaling
+    // of by one constant denominator. Two rows differ by 0.75 points here,
+    // which is under half a display point against any registry-sized
+    // universe, so the rounded global axis can tie where the ordering it
+    // reports is strict.
+    expect(`${noncompliant.earned} > ${absent.earned}`).toBe('3.8 > 3');
+    expect(noncompliant.global >= absent.global).toBe(true);
   });
 
   test('withdrawing a trap raises a score, which is the scorer and not the MCP handler', async () => {
@@ -546,6 +593,66 @@ describe('the scorer prices the four scored statuses in one order, for every che
     const broken = await scoreFor('dual-stack with a lenient modern lane');
     const hidden = await scoreFor('dual-stack with a lenient modern lane, server/discover withheld');
     expect(hidden.score.relative > broken.score.relative).toBe(true);
+  });
+});
+
+describe('honouring the request Accept never scores below ignoring it', () => {
+  // The auditable analogue of a server telling you one thing and doing
+  // another. Each pair below is byte-identical on the wire except for how
+  // the transport treats the Accept it was sent, so any score gap is
+  // attributable to the negotiation and to nothing else.
+
+  test('a server that refuses an Accept it cannot satisfy outscores one that ignores it', async () => {
+    const honoured = await scoreFor('legacy-only stateless');
+    const ignored = await scoreFor('legacy-only ignoring an unsatisfiable Accept');
+    expect(statusOf(honoured, 'mcp-accept-unsatisfiable')).toBe('pass');
+    // Serving an unasked-for type under an honest label ignores the
+    // negotiation without misrepresenting what it sent, so the caller can
+    // still read the label and adapt: a spec violation, not a trap.
+    expect(statusOf(ignored, 'mcp-accept-unsatisfiable')).toBe('noncompliant');
+    await expectNotBelow('legacy-only stateless', 'legacy-only ignoring an unsatisfiable Accept');
+    expect(honoured.score.earned > ignored.score.earned).toBe(true);
+  });
+
+  test('a server that streams at a JSON-only client scores below one that answers in JSON', async () => {
+    const honoured = await scoreFor('legacy-only stateless');
+    const streamed = await scoreFor('legacy-only streaming at a JSON-only client');
+    expect(statusOf(honoured, 'mcp-accept-json')).toBe('pass');
+    // The caller named the one media type its parser can read and got a
+    // success over another, with no status saying so: a trap, and the
+    // highest-harm case in this family.
+    expect(statusOf(streamed, 'mcp-accept-json')).toBe('broken');
+    await expectNotBelow('legacy-only stateless', 'legacy-only streaming at a JSON-only client');
+    expect(honoured.score.earned > streamed.score.earned).toBe(true);
+  });
+
+  test('each negotiation defect moves exactly one row', async () => {
+    // Both probes send a request the lane has already answered and vary
+    // only the Accept, so a defect in one must not disturb the other rows.
+    // A wrapper that leaked into the rest of the audit would show up here.
+    const base = await scoreFor('legacy-only stateless');
+    for (const [label, moved] of [
+      ['legacy-only ignoring an unsatisfiable Accept', 'mcp-accept-unsatisfiable'],
+      ['legacy-only streaming at a JSON-only client', 'mcp-accept-json'],
+    ] as const) {
+      const audit = await scoreFor(label);
+      const differing = audit.rows
+        .filter((r) => statusOf(base, r.id) !== r.status)
+        .map((r) => r.id)
+        .sort()
+        .join(',');
+      expect(`${label}: ${differing}`).toBe(`${label}: ${moved}`);
+    }
+  });
+
+  test('the negotiation rows score on a legacy-only server, never softened by the modern gate', async () => {
+    // They are conformance rows on the lane discovery already proved, so a
+    // server with no modern lane still answers for its Accept handling.
+    const audit = await scoreFor('legacy-only stateless');
+    for (const id of ['mcp-accept-json', 'mcp-accept-unsatisfiable']) {
+      const row = audit.rows.find((r) => r.id === id);
+      expect(`${id}:${String(row?.status)}/${String(row?.unprobed)}`).toBe(`${id}:pass/undefined`);
+    }
   });
 });
 
@@ -595,5 +702,16 @@ describe('row families are declared once and cover the registry', () => {
   test('the session re-ask covers the legacy conformance rows and nothing else', () => {
     expect([...LEGACY_CONFORMANCE_OPS].sort().join(',')).toBe('batch-reject,malformed-body,unknown-tool');
     expect([...LEGACY_CONFORMANCE_OPS].every((op) => CONFORMANCE_OPS.includes(op))).toBe(true);
+  });
+
+  test('the negotiation rows are conformance rows that neither re-ask nor gate on the modern lane', () => {
+    expect([...NEGOTIATION_OPS].sort().join(',')).toBe('accept-json,accept-unsatisfiable');
+    expect([...NEGOTIATION_OPS].every((op) => CONFORMANCE_OPS.includes(op))).toBe(true);
+    // A session refusal carries the framing these rows read, so a second
+    // request would only re-learn the verdict the first one already gave.
+    expect([...NEGOTIATION_OPS].some((op) => LEGACY_CONFORMANCE_OPS.includes(op))).toBe(false);
+    // They ask about the transport, which every lane has, so the modern
+    // gate must not suppress them on a legacy-only server.
+    expect([...NEGOTIATION_OPS].some((op) => MODERN_LANE_DEPENDENT_OPS.includes(op))).toBe(false);
   });
 });
