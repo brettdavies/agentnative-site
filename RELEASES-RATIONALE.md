@@ -310,8 +310,8 @@ single-writer latency on every audit; the cost / correctness tradeoff favors lea
 data shows it matters.
 
 The "5 per 60 minutes" and "60 per 60 seconds" numbers are both pre-data placeholders sized from streamsgrp parity.
-Review at 14 days of visitor-log data. The structure (binding floor + KV hourly window for audits; simple binding for
-reads) survives any retuning; only the ceilings move.
+Review at 14 days of `mcp.request` log volume. The structure (binding floor + KV hourly window for audits; simple
+binding for reads) survives any retuning; only the ceilings move.
 
 ### Why two kill switches instead of one
 
@@ -329,18 +329,6 @@ there. Read tools (`list_tools`, `get_principle`, etc.) keep serving.
 
 Collapsing the two into a single switch would force the operator to choose between losing the catalog and losing the
 audits. The split lets the cost emergency cost the operator nothing visible on the read surface.
-
-### Visitor log fires AFTER the gate, not before
-
-The structured `[mcp-call]` log line runs after `MCP_LIMITER` resolves, not before. The reason is Workers Logs volume
-under attack: pre-gate logging would amplify any flood directly into the logging budget. Post-gate logging still records
-the denial (the `gate_result: rate_limited` line carries the IP and `User-Agent` for forensic triage) but trades one
-extra log line per denied request for a bounded ceiling on logged volume.
-
-The post-gate position has a small observability gap: a flood that hits the rate-limit ceiling logs only the count of
-denials, not the unique request shapes within the denied set. If visitor data later shows we need that detail (abuse
-investigation, pattern recognition), the fix is a sampled pre-gate log line (e.g., 1-in-100 of denied requests), not
-full pre-gate logging.
 
 ## Wrangler env inheritance traps
 

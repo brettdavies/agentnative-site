@@ -458,8 +458,10 @@ lives in [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-
 ## MCP endpoint release procedure
 
 `POST /mcp` (the Model Context Protocol server) reuses the live-scoring stack's `Sandbox` DO, R2 cache, and `SCORE_KV`.
-The MCP-specific additions to a release are two rate-limit bindings, three kill switches, and a per-call visitor log.
-Operational characteristics differ from `/api/score` and merit explicit verification at each release.
+The MCP-specific additions to a release are two rate-limit bindings, three kill switches, and one structured
+`mcp.request` log line per POST
+([field table and query recipes](docs/runbooks/mcp-operator.md#structured-logging-mcprequest)). Operational
+characteristics differ from `/api/score` and merit explicit verification at each release.
 
 ### Bindings added by the MCP endpoint
 
@@ -524,14 +526,6 @@ break the cost model; the regression guard is `tests/worker-mcp-audit.test.ts`, 
 
 → Rationale and limiter-pair design:
 [`RELEASES-RATIONALE.md` § MCP endpoint rate limits and cost gates](./RELEASES-RATIONALE.md#mcp-endpoint-rate-limits-and-cost-gates).
-
-### Visitor log
-
-Every `POST /mcp` emits one `[mcp-call]` structured log line AFTER the rate-limit gate decision, carrying `Origin`,
-`User-Agent`, Cloudflare-injected IP and country, the chosen response format, and a `gate_result` of `passed` or
-`rate_limited`. Volume is bounded under attack because rate-limited requests are logged but not processed past the gate.
-Pre-data placeholders for both rate-limit ceilings are sized from streamsgrp parity; review at 14 days of visitor-log
-data.
 
 ### Kill-switch flip procedure
 

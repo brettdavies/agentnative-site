@@ -219,6 +219,29 @@ The site's Model Context Protocol server at `/mcp`: a streamable-HTTP, JSON-RPC 
 and scoring tools to agents. GET returns the landing page (or, under a JSON `Accept` header, a permanent redirect to the
 MCP server card); POST carries JSON-RPC. Unauthenticated by design, because the catalog is public.
 
+### MCP era
+
+Which of two protocol generations a single `POST /mcp` request belongs to, `legacy` or `modern`. The server classifies
+every request on arrival and carries that classification through the rate-limit key, the legacy kill switch, and the
+`mcp.request` log line, so era is the axis operators group by when judging whether the legacy lane can be retired. Era
+is a property of the request, not of the client or the connection: one agent can send both.
+
+### Legacy lane
+
+The era path for clients that open with an `initialize` handshake rather than the modern request headers. The server
+answers statelessly, with no session to resume. `MCP_LEGACY_ENABLED` gates this lane alone: set to `false`, a legacy-era
+request is rejected with JSON-RPC `-32022` naming the served revision under `data.supported`, and the modern lane keeps
+serving. The lane is scheduled for sunset, so its traffic share and its top client names are the evidence that decision
+rests on.
+
+### Modern lane
+
+The era path for clients that skip the handshake and address the server directly, carrying the protocol revision in an
+`MCP-Protocol-Version` header, the operation in `Mcp-Method`, and client capabilities in `_meta` inside JSON-RPC params.
+Two behaviors exist only here: a rate-limit key narrows to the named tool when `Mcp-Name` identifies a registered one,
+and list and read results carry the server's cache hints (`ttlMs`, `cacheScope`). This is the lane the site's declared
+spec revision describes.
+
 ### MCP server card
 
 The machine-readable descriptor of the MCP endpoint, following the SEP-1649 server-card shape: it declares the endpoint

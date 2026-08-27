@@ -534,9 +534,9 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   //      error envelope (data.supported names the served protocol
   //      revision) at HTTP 200 with the request id echoed.
   //   5. MCP_LIMITER gate — breach returns the -32099 JSON-RPC error
-  //      envelope at HTTP 200. The visitor-inventory log fires AFTER
-  //      this gate with `gate_result` so Workers Logs volume stays
-  //      bounded under attack while still recording the denial.
+  //      envelope at HTTP 200. The `mcp.request` line fires AFTER this
+  //      gate, recording the denial as `outcome: rate_limited`, so
+  //      Workers Logs volume stays bounded under attack.
   //   6. SDK Accept-rewrite shim — the agents SDK's WorkerTransport
   //      strictly requires `Accept: application/json, text/event-
   //      stream`; we rewrite the outgoing Accept to that exact value
