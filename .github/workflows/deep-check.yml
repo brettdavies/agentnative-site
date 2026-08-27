@@ -1,6 +1,7 @@
 # Deep regression check. Full Playwright matrix (Chromium + WebKit across
 # desktop + mobile-android + mobile-ios + tablet) + Lighthouse CI
-# resource-size regression gate. Two jobs run in parallel.
+# resource-size regression gate + the live staging MCP sweep. Three jobs
+# run in parallel.
 #
 # Triggers:
 #   schedule           — 06:00 UTC daily (~23:00 / 01:00 PT overnight).
@@ -16,7 +17,8 @@
 #   The scheduled trigger fires every day at 06:00 UTC regardless of
 #   activity. Without a gate, we pay CI minutes even when dev is quiet
 #   or when the same red state is already on file. The `preflight` job
-#   decides whether the work jobs (`e2e`, `lhci`) actually run:
+#   decides whether the work jobs (`e2e`, `lhci`, `staging-mcp`)
+#   actually run:
 #
 #     should_run = true IFF
 #       • no prior deep-check run exists (first-ever run), OR
@@ -45,16 +47,23 @@
 #     registry in PR #84 (U3-followup); the LHCI step uses the default
 #     GITHUB_TOKEN to post a commit status (requires statuses:write,
 #     granted below).
+#   ANC_STAGING_ACCESS_CLIENT_ID / ANC_STAGING_ACCESS_CLIENT_SECRET:
+#     Cloudflare Access service-token pair for the Access-gated staging
+#     Worker, read by the `staging-mcp` job. Repository-scoped (the
+#     `staging` environment declares no secrets of its own), so the
+#     environment declaration on that job is a deployment-surface label
+#     and a review seam, not what makes the secrets resolve. The same
+#     pair `deploy.yml` already uses, so no new provisioning.
 
 name: deep-check
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Ref to check (branch, tag, or SHA). Defaults to the default branch HEAD.'
+        description: "Ref to check (branch, tag, or SHA). Defaults to the default branch HEAD."
         required: false
         type: string
 
@@ -195,6 +204,83 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
+  staging-mcp:
+    name: staging-mcp · live MCP + discoverability
+    needs: preflight
+    if: needs.preflight.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+
+    steps:
+      # Pinned to `dev`, not `inputs.ref` or the default branch: staging
+      # deploys from `dev`, so any other ref would assert specs against a
+      # deployment they do not describe. The sibling jobs boot their own
+      # local Worker and keep the default checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache bun install cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The staging-mcp project is Desktop Chrome only, so this installs
+      # chromium alone. The cache key carries a `-chromium` segment so it
+      # cannot collide with the e2e job's chromium+webkit entry. Sharing
+      # one key would let a chromium-only save satisfy that job's cache
+      # hit and leave it without webkit.
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
+      - name: Install Playwright chromium (cache miss)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: bun x playwright install --with-deps chromium
+
+      - name: Install browser system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: bun x playwright install-deps chromium
+
+      # No `bun run build` step: ANC_STAGING_BASE_URL makes
+      # playwright.config.ts skip the local wrangler-dev webServer, and
+      # neither spec in this project reads from dist/.
+      #
+      # ANC_STAGING_BASE_URL is set here rather than at workflow level on
+      # purpose: a workflow-global value would repoint every Playwright
+      # project at staging and disable the local webServer for the e2e
+      # job. It stays scoped to the one step that needs it.
+      - name: MCP + discoverability e2e (live staging)
+        env:
+          ANC_STAGING_BASE_URL: https://agentnative-site-staging.brettdavies.workers.dev
+          ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: bun x playwright test --project=staging-mcp
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-staging-mcp
           path: |
             playwright-report/
             test-results/
