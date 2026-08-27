@@ -647,6 +647,103 @@ describe('POST /mcp — mcp.request telemetry fires after the gate decision', ()
   });
 });
 
+describe('POST /mcp — response_format records the served format', () => {
+  // An Accept that ranks text/event-stream above application/json, so
+  // detectMcpFormat resolves 'sse' and an intent-derived field would log 'sse'
+  // on every lane below regardless of what went on the wire.
+  const SSE_PREFERRING = 'application/json;q=0.5, text/event-stream;q=0.9';
+
+  function formatOf(lines: unknown[]): string | undefined {
+    return (lines[0] as { response_format?: string }).response_format;
+  }
+
+  test('the line keeps its frozen key set and order', async () => {
+    // The sibling meum-sites mcp.request line is queried by the same operator
+    // filter; key count, key order, and the json|sse domain are shared shape.
+    const env = makeEnv();
+    const { lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
+    expect(Object.keys(lines[0] as object)).toEqual([
+      'event',
+      'era',
+      'method',
+      'name',
+      'client_name',
+      'protocol_version',
+      'host',
+      'response_format',
+      'outcome',
+      'error_code',
+      'ms_bucket',
+    ]);
+  });
+
+  test('a modern request answering JSON logs json even when Accept prefers SSE', async () => {
+    // responseMode 'auto' answers a single JSON body because no anc tool emits
+    // a related message before its result; the field must follow the wire.
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() =>
+      postMcpHeaders(env, modernToolsListBody(), { ...modernToolsListHeaders(), accept: SSE_PREFERRING }),
+    );
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).not.toContain('event-stream');
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('a genuinely streaming response logs sse', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'text/event-stream', initBody()));
+    expect(res.status).toBe(200);
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('text/event-stream');
+    expect(await res.text()).toContain('data: ');
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('sse');
+  });
+
+  test('a legacy SSE body coerced to JSON logs json, matching what the client receives', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'application/json', initBody()));
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the MCP_ENABLED kill switch logs json even when Accept prefers SSE', async () => {
+    const env = makeEnv({ enabled: false });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, SSE_PREFERRING, initBody()));
+    expect(res.status).toBe(503);
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the Accept rejection logs json', async () => {
+    const env = makeEnv();
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, 'text/csv', initBody()));
+    expect(res.status).toBe(406);
+    expect(lines.length).toBe(1);
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the legacy reject logs json even when Accept prefers SSE', async () => {
+    const env = makeEnv({ legacyEnabled: false });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, SSE_PREFERRING, initBody()));
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(lines.length).toBe(1);
+    expect((lines[0] as { outcome?: string }).outcome).toBe('legacy_rejected');
+    expect(formatOf(lines)).toBe('json');
+  });
+
+  test('the rate-limit reject logs json even when Accept prefers SSE', async () => {
+    const limiter: RateStub = { calls: 0, shouldSucceed: false };
+    const env = makeEnv({ limiter });
+    const { result: res, lines } = await captureMcpRequestLogs(() => postMcp(env, SSE_PREFERRING, initBody()));
+    expect((res.headers.get('content-type') ?? '').toLowerCase()).toContain('application/json');
+    expect(lines.length).toBe(1);
+    expect((lines[0] as { outcome?: string }).outcome).toBe('rate_limited');
+    expect(formatOf(lines)).toBe('json');
+  });
+});
+
 describe('POST /mcp — response posture', () => {
   test('response carries Cache-Control: no-store and bypasses applyHeaders', async () => {
     const env = makeEnv();
