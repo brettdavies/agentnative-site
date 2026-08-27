@@ -47,7 +47,8 @@ declared site type (`content` or `api`) scopes the rest. Anything that does not 
 the site. Two scores come out of one run: the **site score** (the headline) measures the site against the checks that
 apply to it, so a site perfect for its type approaches 100%; the **global score** measures it against a maximally
 agent-ready site, so exposing and nailing more surfaces ranks higher. A present-but-broken surface costs more than an
-absent one — it misleads agents.
+absent one, because it misleads agents. A surface that works while violating a spec detail reads `noncompliant` and
+earns partial credit, so showing an imperfect capability always beats withdrawing it.
 
 The HTML result page can assemble MUST failure prompts into one copy buffer (SHOULD and MAY are opt-in). The markdown
 twin keeps per-check fenced prompts and does not carry that widget.

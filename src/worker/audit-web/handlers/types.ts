@@ -8,14 +8,17 @@ import type { ProbeResponse } from '../assert';
 import type { GuardedFetchOptions } from '../ssrf';
 
 /**
- * Internal probe status (tri-state outcome model, KTD-1): `absent` means
- * the surface is not there (404/410, NXDOMAIN, missing card); `broken`
- * means it is there but invalid (malformed body, wrong content-type, an
- * unexpected status where the surface clearly exists). `error` is an
- * operational failure (network error, timeout) that excludes the check
- * from scoring rather than crediting or penalizing it.
+ * Internal probe status: `absent` means the surface is not there
+ * (404/410, NXDOMAIN, missing card); `broken` means it is there but
+ * invalid (malformed body, wrong content-type, an unexpected status where
+ * the surface clearly exists), so an agent that finds it is misled;
+ * `noncompliant` means an agent can use it and get the outcome it asked
+ * for while a spec detail is violated, which is a smaller harm than
+ * either a trap or an absence. `error` is an operational failure (network
+ * error, timeout) that excludes the check from scoring rather than
+ * crediting or penalizing it.
  */
-export type ProbeStatus = 'pass' | 'broken' | 'absent' | 'na' | 'error';
+export type ProbeStatus = 'pass' | 'noncompliant' | 'broken' | 'absent' | 'na' | 'error';
 
 /** Handler-specific evidence rows, kept structurally open like the extracted JSON. */
 export type EvidenceItem = Record<string, unknown>;
@@ -26,16 +29,10 @@ export type EvidenceItem = Record<string, unknown>;
  * it applies, is a MAY, and simply is not implemented;
  * `posture-consistent` = the probed surfaces show a deliberate,
  * consistent opt-out (the CORS pair with Allow-Origin on neither
- * surface); `era-absent` = the protocol era the row probes was never
- * evidenced, so the row was settled without a request. A handler with
- * nothing to probe (no discovered MCP endpoint) emits n_a with no reason.
- *
- * `era-absent` is n_a rather than absent because a row settled without a
- * request carries no observation: scoring it as absent would let a
- * server suppress a whole family of scored rows by withholding the one
- * method that evidences the era.
+ * surface). A handler with nothing to probe (no discovered MCP endpoint)
+ * emits n_a with no reason.
  */
-export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent' | 'era-absent';
+export type NaReason = 'antecedent-unmet' | 'optional-absent' | 'posture-consistent';
 
 /**
  * Whether the target serves the modern MCP era, read from the wave-1
@@ -59,6 +56,15 @@ export interface ProbeOutcome {
   evidence: EvidenceItem[];
   /** Handler-stated reason for an `na` status; the engine passes it through to the result row. */
   na_reason?: NaReason;
+  /**
+   * The row settled without issuing a request, because an antecedent the
+   * audit did observe rules the surface out. It still scores (an absence
+   * an agent would hit is an absence), but it carries no observation of
+   * the surface itself, so no remediation is attached: a fix prompt
+   * derived from an unmade request names work the audit never established
+   * was needed.
+   */
+  unprobed?: true;
   /**
    * When true, the handler exhausted the remaining per-audit budget mid-probe.
    * The engine treats the run as incomplete and the route must not cache it.

@@ -13,7 +13,7 @@
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
-import { assembleRemediation, resultLine, type WebRemediationCatalog } from './remediation';
+import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
 type WebScorecardRow = {
@@ -23,6 +23,7 @@ type WebScorecardRow = {
   keyword?: string;
   status: ScorecardStatus;
   na_reason?: NaReason;
+  unprobed?: true;
   evidence: string | null;
 };
 
@@ -57,6 +58,7 @@ const GLOBAL_LABEL = 'of a maximally agent-ready site';
 
 const STATUS_LABELS: Record<ScorecardStatus, string> = {
   pass: 'PASS',
+  noncompliant: 'NONCOMPLIANT',
   broken: 'BROKEN',
   absent: 'MISSING',
   n_a: 'N/A',
@@ -68,11 +70,13 @@ function statusLabel(status: ScorecardStatus): string {
   return STATUS_LABELS[status] ?? String(status).toUpperCase();
 }
 
-// Check-row marks: pass ✓, absent (missing) !, broken/error ✕, n_a/skip –.
-// Broken outranks absent in severity — a present-but-broken surface
-// misleads agents — so it carries the fail mark.
+// Check-row marks: pass ✓, noncompliant ~, absent (missing) !,
+// broken/error ✕, n_a/skip –. Broken outranks absent in severity (a
+// present-but-broken surface misleads agents) so it carries the fail
+// mark, while a noncompliant surface works and reads as a partial.
 const STATUS_MARKS: Record<ScorecardStatus, string> = {
   pass: '✓',
+  noncompliant: '~',
   broken: '✕',
   absent: '!',
   n_a: '–',
@@ -95,8 +99,9 @@ function tierChip(keyword: string | undefined): string {
   return `<span class="tier tier-${keyword}">${TIER_LABELS[keyword]}</span> `;
 }
 
-function isFixable(status: ScorecardStatus): boolean {
-  return status === 'broken' || status === 'absent';
+/** A row earns a fix prompt only when the run actually observed the surface. */
+function isFixable(row: Pick<WebScorecardRow, 'status' | 'unprobed'>): boolean {
+  return row.unprobed !== true && isFixableStatus(row.status);
 }
 
 function scoresOf(scorecard: WebScorecardShape): { relative: number; global: number } {
@@ -132,6 +137,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   for (const row of sc.results ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
   const chips: string[] = [];
   if (counts.pass) chips.push(`<span class="chip chip--ok">${counts.pass} pass</span>`);
+  if (counts.noncompliant) chips.push(`<span class="chip chip--warn">${counts.noncompliant} noncompliant</span>`);
   if (counts.absent) chips.push(`<span class="chip chip--warn">${counts.absent} missing</span>`);
   if (counts.broken) chips.push(`<span class="chip chip--fail">${counts.broken} broken</span>`);
   if (counts.error)
@@ -190,7 +196,7 @@ ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''} 
 function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origin: string): string {
   const entry = catalog[row.id];
   const result = resultLine(row.status, row.evidence, row.na_reason);
-  const fixable = isFixable(row.status);
+  const fixable = isFixable(row);
   const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
   const goal = entry?.goal ?? assembled.goal;
 
@@ -262,7 +268,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     for (const row of rows) {
       const entry = catalog[row.id];
       const result = resultLine(row.status, row.evidence, row.na_reason);
-      const fixable = isFixable(row.status);
+      const fixable = isFixable(row);
       const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
       lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
       if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);

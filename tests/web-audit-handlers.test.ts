@@ -902,11 +902,24 @@ describe('runMcp era-lane classification', () => {
     );
     expect(sunset.status).toBe('absent');
     expect(sunset.evidence[0].error_code).toBe(-32022);
+    // The row asks for a refusal and got one under the wrong code, which
+    // an agent can act on, so it is a taxonomy defect and not a trap.
     const other = await run(
       w,
       stubFetch(() => rpcError(-32603)),
     );
-    expect(other.status).toBe('broken');
+    expect(other.status).toBe('noncompliant');
+    expect(other.evidence[0].why).toEqual(['expected error code -32601, got -32603']);
+  });
+
+  test('the unknown-method probe answered with a result is broken, not noncompliant', async () => {
+    // A result to a method that does not exist tells the caller the call
+    // succeeded, which is the harm `broken` prices.
+    const outcome = await run(
+      { op: 'error', method: 'nonexistent/method', expect_code: -32601 },
+      stubFetch(() => json({ jsonrpc: '2.0', id: 1, result: {} })),
+    );
+    expect(outcome.status).toBe('broken');
   });
 
   test('a sunset legacy lane reports one status across every one of its era probes', async () => {
@@ -1054,7 +1067,7 @@ describe('runMcp era-lane classification', () => {
 describe('runMcp modern-lane gate', () => {
   const MODERN_DEPENDENT = [...MODERN_LANE_DEPENDENT_OPS];
 
-  test('an unevidenced modern lane settles every dependent row n_a without a request', async () => {
+  test('an unevidenced modern lane settles every dependent row absent and unprobed', async () => {
     let calls = 0;
     const fetchImpl = stubFetch(() => {
       calls++;
@@ -1065,8 +1078,10 @@ describe('runMcp modern-lane gate', () => {
         check({ handler: 'mcp', with: { op } }),
         ctx({ fetchImpl, mcpEndpoint: MCP, mcpLanes: lanes({ modern: 'unevidenced' }) }),
       );
-      expect(`${op}:${outcome.status}`).toBe(`${op}:na`);
-      expect(`${op}:${String(outcome.na_reason)}`).toBe(`${op}:era-absent`);
+      expect(`${op}:${outcome.status}`).toBe(`${op}:absent`);
+      // The unprobed marker is what keeps the six remediation prompts for
+      // a lane no request reached off the scorecard.
+      expect(`${op}:${String(outcome.unprobed)}`).toBe(`${op}:true`);
       expect(outcome.evidence[0].why).toEqual(['no modern lane: server/discover returned no result']);
     }
     expect(calls).toBe(0);
@@ -1360,20 +1375,23 @@ describe('runMcp error-code conformance', () => {
     expect(outcome.evidence[0].error_code).toBe(-32600);
   });
 
-  test('modern-version-reject is broken when the envelope omits data.supported', async () => {
+  test('modern-version-reject is noncompliant when the envelope omits data.supported', async () => {
+    // The refusal itself is correct and well-formed, so the caller learns
+    // the version was rejected; only the renegotiation hint is missing.
     const noData = await run(
       { op: 'modern-version-reject' },
       stubFetch(() => rpcError(-32022, 400)),
     );
-    expect(noData.status).toBe('broken');
+    expect(noData.status).toBe('noncompliant');
+    expect(noData.evidence[0].why).toEqual(['error.data.supported missing from the version-reject envelope']);
     const wrongData = await run(
       { op: 'modern-version-reject' },
       stubFetch(() => rpcError(-32022, 400, { requested: '2025-03-26' })),
     );
-    expect(wrongData.status).toBe('broken');
+    expect(wrongData.status).toBe('noncompliant');
   });
 
-  test('an unavailability-coded refusal is broken on a conformance row, never softened to absent', async () => {
+  test('an unavailability-coded refusal is noncompliant on a conformance row, never softened to absent', async () => {
     const cases: Array<[string, number]> = [
       ['malformed-body', -32601],
       ['malformed-body', -32022],
@@ -1391,27 +1409,28 @@ describe('runMcp error-code conformance', () => {
         { op },
         stubFetch(() => rpcError(code)),
       );
-      expect(`${op}/${code}:${outcome.status}`).toBe(`${op}/${code}:broken`);
+      expect(`${op}/${code}:${outcome.status}`).toBe(`${op}/${code}:noncompliant`);
       expect(outcome.evidence[0].error_code).toBe(code);
     }
   });
 
-  test('a session-required refusal is broken on every conformance row that cannot re-ask', async () => {
+  test('a session-required refusal is noncompliant on every conformance row that cannot re-ask', async () => {
     for (const op of CONFORMANCE_OPS) {
       const outcome = await run(
         { op },
         stubFetch(() => rpcError(-32000, 400)),
       );
-      expect(`${op}:${outcome.status}`).toBe(`${op}:broken`);
+      expect(`${op}:${outcome.status}`).toBe(`${op}:noncompliant`);
     }
   });
 
   test('an endpoint answering -32601 to everything cannot outscore one that answers honestly', async () => {
     const always32601 = stubFetch(() => rpcError(-32601));
     // The three legacy conformance rows carry no method the lane could be
-    // missing, so -32601 is as wrong there as any other mismatched code.
+    // missing, so -32601 is as wrong there as any other mismatched code
+    // and lands in the same bucket, never softened to an absent lane.
     for (const op of ['malformed-body', 'batch-reject', 'unknown-tool']) {
-      expect(`${op}:${(await run({ op }, always32601)).status}`).toBe(`${op}:broken`);
+      expect(`${op}:${(await run({ op }, always32601)).status}`).toBe(`${op}:noncompliant`);
     }
     // The era probes do name one, so the same code reads as an absent lane.
     for (const op of ['initialize', 'tools-list', 'modern-tools-list', 'server-discover']) {
@@ -1455,7 +1474,7 @@ describe('runMcp error-code conformance', () => {
       });
       const outcome = await run({ op }, modern, 'sess-1');
       expect(`${op}:${calls}`).toBe(`${op}:1`);
-      expect(`${op}:${outcome.status}`).toBe(`${op}:broken`);
+      expect(`${op}:${outcome.status}`).toBe(`${op}:noncompliant`);
     }
   });
 
@@ -1489,7 +1508,7 @@ describe('runMcp error-code conformance', () => {
       ctx({ fetchImpl, mcpEndpoint: MCP, mcpSessionId: 'sess-1', defaultTimeoutMs: 0 }),
     );
     expect(calls).toBe(1);
-    expect(outcome.status).toBe('broken');
+    expect(outcome.status).toBe('noncompliant');
   });
 
   test('a malformed error envelope is reported as malformed, not as a result', async () => {
@@ -1520,28 +1539,34 @@ describe('runMcp error-code conformance', () => {
     }
   });
 
-  test('any other well-formed error code stays broken', async () => {
-    const cases: Array<[string, number]> = [
-      ['malformed-body', -32600],
-      ['modern-unknown-method', -32602],
-      ['modern-clientcaps', -32603],
-      ['modern-resources-miss', -32020],
+  test('any other well-formed error code is noncompliant, and names the code it expected', async () => {
+    const cases: Array<[string, number, string]> = [
+      ['malformed-body', -32600, 'expected error code -32700, got -32600'],
+      ['modern-unknown-method', -32602, 'expected error code -32601, got -32602'],
+      ['modern-clientcaps', -32603, 'expected error code -32602 or -32600, got -32603'],
+      ['modern-resources-miss', -32020, 'expected error code -32602 or -32002, got -32020'],
     ];
-    for (const [op, code] of cases) {
+    for (const [op, code, why] of cases) {
       const outcome = await run(
         { op },
         stubFetch(() => rpcError(code)),
       );
-      expect(outcome.status).toBe('broken');
+      expect(`${op}:${outcome.status}`).toBe(`${op}:noncompliant`);
+      expect(outcome.evidence[0].why).toEqual([why]);
     }
   });
 
   test('a result envelope answering a conformance probe is broken (the request should have been refused)', async () => {
-    const outcome = await run(
-      { op: 'unknown-tool' },
-      stubFetch(() => json({ jsonrpc: '2.0', id: 1, result: { content: [] } })),
-    );
-    expect(outcome.status).toBe('broken');
+    // A result where a refusal was required tells the caller the call
+    // succeeded, so it keeps the full misleading-surface penalty rather
+    // than the partial credit a wrongly-coded refusal earns.
+    for (const op of ['unknown-tool', 'batch-reject', 'modern-unknown-method', 'modern-resources-miss']) {
+      const outcome = await run(
+        { op },
+        stubFetch(() => json({ jsonrpc: '2.0', id: 1, result: { content: [] } })),
+      );
+      expect(`${op}:${outcome.status}`).toBe(`${op}:broken`);
+    }
   });
 
   test('modern-resources-miss tolerates the legacy-compat -32002 miss code', async () => {
@@ -1802,14 +1827,15 @@ describe('era lanes resolved across a whole audit (engine)', () => {
     return rows;
   }
 
-  test('every legacy-only shape lands the modern MUST out of scoring, never a free pass or a penalty', async () => {
+  test('every legacy-only shape lands the modern MUST absent and unprobed, never a free pass', async () => {
     for (const [label, fetchImpl] of Object.entries(shapes)) {
       const rows = await auditRows(fetchImpl);
       const modern = rows.find((r) => r.id === 'mcp-modern-tools-list');
-      expect(`${label}:${modern?.status}`).toBe(`${label}:n_a`);
-      expect(`${label}:${modern?.na_reason}`).toBe(`${label}:era-absent`);
+      expect(`${label}:${modern?.status}`).toBe(`${label}:absent`);
+      expect(`${label}:${String(modern?.unprobed)}`).toBe(`${label}:true`);
       expect(`${label}:${modern?.evidence}`).toBe(`${label}:no modern lane: server/discover returned no result`);
-      expect(`${label}:${rows.find((r) => r.id === 'mcp-modern-clientcaps')?.status}`).toBe(`${label}:n_a`);
+      const clientcaps = rows.find((r) => r.id === 'mcp-modern-clientcaps');
+      expect(`${label}:${clientcaps?.status}/${String(clientcaps?.unprobed)}`).toBe(`${label}:absent/true`);
       expect(`${label}:${rows.find((r) => r.id === 'mcp-initialize')?.status}`).toBe(`${label}:pass`);
     }
   });
@@ -1979,12 +2005,13 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
     }
     // The unknown-method probe is the legacy lane's own era probe, so the
     // closed lane's -32022 reads absent there, matching what its
-    // lane-mates report. The conformance rows are judged strictly: a
-    // tools/call answered -32022 is the wrong code for the question that
-    // row asks, whatever the reason.
+    // lane-mates report. On the conformance rows no era softening applies:
+    // a tools/call answered -32022 is the wrong code for the question that
+    // row asks, whatever the reason, and a well-formed refusal under the
+    // wrong code is a taxonomy defect rather than a trap.
     expect(row('error')?.status).toBe('absent');
     expect(row('error')?.code).toBe(-32022);
-    expect(row('unknown-tool')?.status).toBe('broken');
+    expect(row('unknown-tool')?.status).toBe('noncompliant');
     expect(row('unknown-tool')?.code).toBe(-32022);
     // The other two legacy rows never reach the gate: an unparseable body
     // draws the shell's -32700 first, and a batch carrying a modern

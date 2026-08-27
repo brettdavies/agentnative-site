@@ -285,8 +285,13 @@ Two rules shape how MCP results score:
   status it reports load rather than an era, and stays `broken`. On the legacy lane, an era-shaped refusal (a
   well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
   the lane's own handshake advertised the capability it is refusing, which contradicts the handshake and stays `broken`.
-  The error-code conformance checks are judged strictly: they ask about a request the lane has already proven it
-  accepts, so any code other than the expected one is `broken`.
+  The error-code conformance checks ask about a request the lane has already proven it accepts, so no era softening
+  reaches them. How a wrong answer scores turns on whether an agent can still use the surface: a well-formed refusal
+  carrying a code the taxonomy does not name, or a correct refusal missing a required payload field, reads
+  `noncompliant` and earns partial credit, because the caller learns the call failed and can move on. A result where a
+  refusal was required, an envelope with no numeric code, a malformed body, and a server error all read `broken`,
+  because each leaves the caller believing something untrue. The same split governs the unknown-method check on either
+  lane.
 - The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
   deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
 

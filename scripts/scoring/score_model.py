@@ -14,8 +14,10 @@ scoring" vault reflection):
     over a maximally-agent-ready site's max, so a bigger/harder routine
     ranks higher (4/5 MUSTs > 2/2 MUSTs).
   - Outcome scale: n_a = null (excluded); absent = 0; pass = +value;
-    broken = -BROKEN_FACTOR * value (a present-but-invalid surface misleads
-    agents, so it is worse than absent). No partial/warn credit.
+    noncompliant = +NONCOMPLIANT_CREDIT * value (an agent can use the
+    surface and gets the outcome it asked for, but a spec detail is
+    violated); broken = -BROKEN_FACTOR * value (a present-but-invalid
+    surface misleads agents, so it is worse than absent).
   - Difficulty weights per tier are deliberately UNLOCKED pending real
     anc100 data (n=1 today). Override with --weights must,should,may.
 
@@ -23,6 +25,7 @@ Usage:
     score_model.py                      # run the built-in scenarios
     score_model.py --weights 10,4,1     # try steeper difficulty
     score_model.py --broken 0.75        # broken penalty factor
+    score_model.py --noncompliant 0.25  # noncompliant credit factor
     score_model.py --scorecard /path/to/web-scorecard.json   # score real data (fetch one via get_website_audit)
 """
 
@@ -54,6 +57,9 @@ UNIVERSE: dict[str, str] = {
 
 TIERS = ("must", "should", "may")
 
+# Statuses that occupy a slot in either score; everything else is excluded.
+SCORED_STATUSES = ("pass", "noncompliant", "broken", "absent")
+
 
 def round_half_up(x: float) -> int:
     """Half-up rounding, mirroring the engine's Math.round (Python's
@@ -68,21 +74,27 @@ def round_half_up(x: float) -> int:
 class Model:
     weight: dict[str, float]
     broken_factor: float
+    noncompliant_credit: float = 0.25
     universe: dict[str, str] = field(default_factory=lambda: dict(UNIVERSE))
 
     def universe_max(self) -> float:
         return sum(self.weight[t] for t in self.universe.values())
 
 
-def credit(outcome: str, broken_factor: float) -> float | None:
+def credit(outcome: str, broken_factor: float, noncompliant_credit: float) -> float | None:
     """Per-check credit multiplier. None means excluded (n_a)."""
-    return {"pass": 1.0, "absent": 0.0, "broken": -broken_factor}.get(outcome, None)
+    return {
+        "pass": 1.0,
+        "noncompliant": noncompliant_credit,
+        "absent": 0.0,
+        "broken": -broken_factor,
+    }.get(outcome, None)
 
 
 @dataclass
 class Rows:
     """A site's per-check outcomes as (tier, outcome) pairs. outcome in
-    {pass, absent, broken, n_a}."""
+    {pass, noncompliant, absent, broken, n_a}."""
 
     items: list[tuple[str, str]]
 
@@ -90,12 +102,14 @@ class Rows:
         earned = 0.0
         applicable_max = 0.0  # the RELATIVE denominator (site-specific)
         for tier, outcome in self.items:
-            c = credit(outcome, m.broken_factor)
+            c = credit(outcome, m.broken_factor, m.noncompliant_credit)
             if c is None:  # n_a excluded from both scores
                 continue
             earned += m.weight[tier] * c
             # An absent SHOULD hurts less than an absent MUST: it occupies only
             # HALF its weight in the relative denominator (0 numerator either way).
+            # The discount is keyed on absence alone; a noncompliant row carries a
+            # real observation and occupies its full weight.
             if outcome == "absent" and tier == "should":
                 applicable_max += 0.5 * m.weight[tier]
             else:
@@ -117,7 +131,7 @@ def from_buckets(**buckets: int) -> Rows:
     MUST/SHOULD absence counts as a 0. Present-but-broken counts at every tier."""
     items: list[tuple[str, str]] = []
     for tier in TIERS:
-        for outcome in ("pass", "absent", "broken"):
+        for outcome in SCORED_STATUSES:
             if tier == "may" and outcome == "absent":
                 continue  # MAY absent -> n_a, excluded
             items += [(tier, outcome)] * buckets.get(f"{tier}_{outcome}", 0)
@@ -125,14 +139,14 @@ def from_buckets(**buckets: int) -> Rows:
 
 
 def from_scorecard(path: str) -> Rows:
-    """Map a web scorecard's results[] (tri-state statuses) to outcomes.
-    Anything that is not pass/broken/absent (n_a, skip, error) is excluded."""
+    """Map a web scorecard's results[] statuses to outcomes. Anything that is
+    not a scored status (n_a, skip, error) is excluded."""
     data = json.load(open(path))
     items = []
     for row in data.get("results", []):
         tier = row.get("keyword") or UNIVERSE.get(row.get("id"), "may")
         status = row.get("status")
-        outcome = status if status in ("pass", "broken", "absent") else "n_a"
+        outcome = status if status in SCORED_STATUSES else "n_a"
         items.append((tier, outcome))
     return Rows(items)
 
@@ -140,10 +154,15 @@ def from_scorecard(path: str) -> Rows:
 def from_fixture(path: str) -> tuple[Model, Rows]:
     """Load the committed parity fixture shared with the engine's scorer
     (tests/web-audit-two-score.test.ts). The fixture pins weights, the
-    broken factor, an explicit universe_max, and (tier, outcome) rows."""
+    broken factor, the noncompliant credit, an explicit universe_max, and
+    (tier, outcome) rows."""
     data = json.load(open(path))
     weights = {t: float(data["weights"][t]) for t in TIERS}
-    model = Model(weight=weights, broken_factor=float(data["broken_factor"]))
+    model = Model(
+        weight=weights,
+        broken_factor=float(data["broken_factor"]),
+        noncompliant_credit=float(data["noncompliant_credit"]),
+    )
     # Pin the universe to the fixture's explicit denominator.
     model.universe = {f"u{i}": tier for i, tier in enumerate(data["universe_tiers"])}
     rows = Rows([(tier, outcome) for tier, outcome in data["rows"]])
@@ -156,6 +175,8 @@ SCENARIOS: dict[str, Rows] = {
     "perfect content blog": from_buckets(should_pass=9, may_pass=4, may_absent=12),
     "perfect maximal platform": from_buckets(must_pass=3, should_pass=15, may_pass=16),
     "expansive but sloppy (8 broken MAY)": from_buckets(must_pass=3, should_pass=15, may_pass=6, may_broken=8),
+    "early adopter (5 noncompliant SHOULD)": from_buckets(must_pass=3, should_pass=10, should_noncompliant=5, may_pass=10),
+    "same lane withdrawn (5 absent SHOULD)": from_buckets(must_pass=3, should_pass=10, should_absent=5, may_pass=10),
     "required-only, zero optionals": from_buckets(must_pass=3, should_pass=15, may_absent=16),
 }
 
@@ -164,6 +185,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--weights", default="5,3,1", help="must,should,may difficulty (default 5,3,1; UNLOCKED)")
     ap.add_argument("--broken", type=float, default=0.75, help="broken penalty factor (default 0.75)")
+    ap.add_argument("--noncompliant", type=float, default=0.25, help="noncompliant credit factor (default 0.25)")
     ap.add_argument("--scorecard", help="score a committed web scorecard JSON instead of the scenarios")
     ap.add_argument("--fixture", help="score the shared engine-parity fixture and print JSON")
     args = ap.parse_args()
@@ -174,10 +196,14 @@ def main() -> int:
         return 0
 
     wm, ws, wy = (float(x) for x in args.weights.split(","))
-    model = Model(weight={"must": wm, "should": ws, "may": wy}, broken_factor=args.broken)
+    model = Model(
+        weight={"must": wm, "should": ws, "may": wy},
+        broken_factor=args.broken,
+        noncompliant_credit=args.noncompliant,
+    )
 
     print(f"weights must/should/may = {wm}/{ws}/{wy} | broken = -{args.broken}x | "
-          f"universe_max = {model.universe_max():g}\n")
+          f"noncompliant = +{args.noncompliant}x | universe_max = {model.universe_max():g}\n")
 
     if args.scorecard:
         rows = from_scorecard(args.scorecard)

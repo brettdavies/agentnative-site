@@ -4,11 +4,12 @@
 // (the WAVE1_CHECK_IDS set); wave 2 runs the dependent checks with
 // antecedents resolved from wave-1 results and the root fetch reused —
 // no duplicate `/` fetch. Each check finalizes to
-// pass / broken / absent / n_a / skip / error; an applicable MAY that
-// comes back absent is re-tagged n_a with na_reason 'optional-absent',
-// an unmet antecedent yields na_reason 'antecedent-unmet', and a
-// handler-stated na_reason (the CORS pair's 'posture-consistent', the
-// MCP modern-lane gate's 'era-absent') passes through to the result row.
+// pass / noncompliant / broken / absent / n_a / skip / error; an
+// applicable MAY that comes back absent is re-tagged n_a with na_reason
+// 'optional-absent', an unmet antecedent yields na_reason
+// 'antecedent-unmet', and a handler-stated na_reason (the CORS pair's
+// 'posture-consistent') passes through to the result row alongside the
+// handler's `unprobed` marker.
 //
 // The engine yields each result as it finalizes (KTD-6: streaming
 // transport is the route's concern) and a terminal `complete` event
@@ -107,9 +108,13 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
 
   if (check.handler === 'mcp') {
     if (first.error) return `${first.url}: ${first.error}`;
-    // An era verdict states its reason in `why`; the response fields
-    // describe the refusal, not the surface the row is scoring.
-    if (outcome.status === 'absent' && Array.isArray(first.why)) return (first.why as string[]).join('; ');
+    // An era verdict and a conformance defect each state their reason in
+    // `why`; the response fields describe the refusal, not the surface
+    // the row is scoring. A bare `error code -32022` would read as the
+    // wrong code on a row whose code was right and whose payload was not.
+    if ((outcome.status === 'absent' || outcome.status === 'noncompliant') && Array.isArray(first.why)) {
+      return (first.why as string[]).join('; ');
+    }
     const op = check.with ? (check.with as { op?: string }).op : undefined;
     if (op === 'initialize') {
       const si = first.serverInfo as { name?: string } | null;
@@ -177,6 +182,7 @@ function toResult(check: WebCheck, outcome: ProbeOutcome): EngineResult {
     ...baseFields(check),
     status: probeStatusToScorecard(outcome.status),
     ...(outcome.na_reason !== undefined ? { na_reason: outcome.na_reason } : {}),
+    ...(outcome.unprobed === true ? { unprobed: true as const } : {}),
     evidence: summarizeEvidence(check, outcome),
     raw_evidence: outcome.evidence,
   };

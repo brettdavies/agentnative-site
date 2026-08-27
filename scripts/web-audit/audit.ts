@@ -25,7 +25,15 @@ const STAGING_HOST_MARK = 'agentnative-site-staging';
 
 // Exit code by status so `--check <id>` can gate CI/agents: 0 pass, 1 the
 // surface exists but fails, 3 the check could not be evaluated.
-const STATUS_EXIT: Record<string, number> = { pass: 0, broken: 1, absent: 1, error: 1, skip: 1, n_a: 3 };
+const STATUS_EXIT: Record<string, number> = {
+  pass: 0,
+  noncompliant: 1,
+  broken: 1,
+  absent: 1,
+  error: 1,
+  skip: 1,
+  n_a: 3,
+};
 
 interface Args {
   target: string;

@@ -2339,13 +2339,17 @@ main .remediation__body {
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  width: 3.5rem;
+  /* min-width, not width: NONCOMPLIANT is wider than the column the
+     shorter labels align in, and nowrap would overflow a fixed width. */
+  min-width: 3.5rem;
   white-space: nowrap;
 }
 .web-check--pass .web-check__mark,
 .web-check--pass .audit__status {
   color: var(--band-high);
 }
+.web-check--noncompliant .web-check__mark,
+.web-check--noncompliant .audit__status,
 .web-check--absent .web-check__mark,
 .web-check--absent .audit__status {
   color: var(--band-mid);

@@ -16,7 +16,7 @@
 // through unchanged, and a row whose id is absent from the registry keeps
 // its stored category.
 
-import { assembleRemediation, resultLine, type WebRemediationCatalog } from './remediation';
+import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import { categoryRollups } from './score';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
@@ -33,6 +33,7 @@ type EnrichableRow = {
   category?: string;
   evidence?: string | null;
   na_reason?: NaReason;
+  unprobed?: true;
 };
 
 /**
@@ -80,8 +81,10 @@ export function normalizeScorecardCategories(stored: unknown, registry: DisplayR
 
 /**
  * Add a derived result line to every row and an inline remediation object
- * to each non-passing (broken / absent) row. Passing and n_a / skip rows
- * carry a result line but no remediation. `origin` targets the skill link.
+ * to each non-passing (broken / noncompliant / absent) row. Passing,
+ * n_a / skip, and unprobed rows carry a result line but no remediation: a
+ * fix prompt derived from a request the run never sent names work the
+ * audit never established was needed. `origin` targets the skill link.
  */
 export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediationCatalog, origin: string): unknown {
   if (!hasResults(scorecard)) return scorecard;
@@ -89,7 +92,7 @@ export function attachInlineRemediation(scorecard: unknown, catalog: WebRemediat
     ...scorecard,
     results: scorecard.results.map((row) => {
       const result = resultLine(row.status, row.evidence ?? null, row.na_reason);
-      if (row.status === 'broken' || row.status === 'absent') {
+      if (row.unprobed !== true && isFixableStatus(row.status)) {
         const remediation = assembleRemediation(catalog[row.id], {
           checkId: row.id,
           origin,

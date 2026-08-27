@@ -1,7 +1,7 @@
 // Assemble failed-check prompts by RFC-2119 tier. Pure selection so the
 // result-page widget and its tests share one join rule: MUST failures
-// (broken ∪ absent) by default; SHOULD and MAY are opt-in independently.
-// Pass / n_a / skip / error rows never join.
+// (broken ∪ noncompliant ∪ absent) by default; SHOULD and MAY are opt-in
+// independently. Pass / n_a / skip / error rows never join.
 
 export type AssembleCarrier = {
   keyword: string;
@@ -14,7 +14,7 @@ export type AssembleOpts = {
   includeMay: boolean;
 };
 
-const FIXABLE = new Set(['broken', 'absent']);
+const FIXABLE = new Set(['broken', 'noncompliant', 'absent']);
 
 export function selectAssemblePrompts(rows: readonly AssembleCarrier[], opts: AssembleOpts): string {
   const allowed = new Set<string>(['must']);

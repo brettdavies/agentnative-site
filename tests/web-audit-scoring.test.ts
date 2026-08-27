@@ -358,7 +358,7 @@ describe('buildWebScorecard', () => {
     row({ id: 'dns-aid', principle: 'P8', keyword: 'may', weight: 1, status: 'broken', title: 'dns' }),
   ];
 
-  test('produces the 0.3 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
+  test('produces the 0.4 shape: score_pct + score pair, results[], coverage_summary, tool', () => {
     const sc = buildWebScorecard(rows, {
       targetUrl: 'https://example.com/',
       domain: 'example.com',
@@ -367,7 +367,7 @@ describe('buildWebScorecard', () => {
       specVersion: '0.3.0',
       registry,
     });
-    expect(sc.schema_version).toBe('0.3');
+    expect(sc.schema_version).toBe('0.4');
     expect(sc.spec_version).toBe('0.3.0');
     expect(sc.tool).toEqual({ name: 'example.com', url: 'https://example.com/' });
     expect(sc.target_url).toBe('https://example.com/');
