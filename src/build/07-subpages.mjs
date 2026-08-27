@@ -102,7 +102,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     {
       name: 'web-audit',
       path: join(contentDir, 'web-audit.md'),
-      extraScripts: ['/js/web-audit.js'],
+      extraScripts: ['/js/web-audit.js', WEBMCP_SCRIPT],
       widget: WEB_AUDIT_WIDGET,
     },
     { name: 'install', path: join(contentDir, 'install.md') },
