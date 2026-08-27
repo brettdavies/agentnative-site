@@ -152,6 +152,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         bodyHtml: `<article class="container doc">${html}</article>`,
         themeInitJs: themeInit,
         extraScripts: extraScripts ?? (name === 'mcp' ? [WEBMCP_SCRIPT] : []),
+        turnstileSitekey: name === 'web-audit',
       }),
     );
     await writeFile(

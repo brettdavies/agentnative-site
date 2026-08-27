@@ -164,6 +164,8 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
  * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
+ * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
+ *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
  * @param {string=} args.baseUrl             — absolute base (default prod).
  * @returns {string} full HTML document.
  */
@@ -202,6 +204,7 @@ export function emitShell({
   bodyHtml,
   themeInitJs,
   isIndex = false,
+  turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
 }) {
@@ -307,7 +310,7 @@ export function emitShell({
     <link rel="alternate" type="application/json" href="/skill.json" title="Agent-native skill bundle (canonical JSON)" />
     <link rel="describedby" href="/.well-known/mcp/server-card.json" />
     <link rel="mcp" href="/mcp" />
-${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
+${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
     <meta property="og:title" content="${esc(title)}" />

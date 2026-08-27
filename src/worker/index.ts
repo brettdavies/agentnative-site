@@ -122,10 +122,10 @@ export interface Env {
   SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
-  // is a public var the homepage form bakes into the widget render — set
-  // in env.staging only while production stays gated. Absent on
-  // production means the homepage form refuses to render Turnstile,
-  // which is the deliberate fail-loud posture pre-promotion.
+  // is a public var the Worker substitutes into <meta name="turnstile-sitekey">
+  // on `/` and `/web-audit`. Absent on production means those forms refuse
+  // to render Turnstile (fail-loud pre-promotion). `/web/scoring` bakes the
+  // same var into the in-progress page body.
   TURNSTILE_SECRET?: string;
   TURNSTILE_SITEKEY?: string;
   SESSION_HMAC_SECRET?: string;
@@ -874,6 +874,18 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
+  // /web-audit form: same sitekey placeholder as the homepage, no board
+  // inject. Markdown twin and Accept: text/markdown skip this so the
+  // token never reaches the agent surface.
+  const isWebAuditForm = pathname === '/web-audit' || pathname === '/web-audit.html';
+  if (isWebAuditForm && upstream.ok) {
+    const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    const wantsMarkdown = servedMarkdown || contentType.includes('text/markdown');
+    if (!wantsMarkdown && contentType.includes('text/html')) {
+      return injectTurnstileSitekey(upstream, env, { request, servedMarkdown, pathname });
+    }
+  }
+
   if (
     upstream.status === 404 &&
     !pathIsJson &&
@@ -902,6 +914,29 @@ function frontpageBoardSlice(markdown: boolean, entries: WebAggregateEntry[]): s
   return entries.length > 0 ? buildFrontpageBoardRows(entries) : buildFrontpageBoardEmptyState();
 }
 
+function substituteTurnstileSitekey(html: string, env: Env): string {
+  return html.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
+}
+
+async function injectTurnstileSitekey(
+  upstream: Response,
+  env: Env,
+  opts: { request: Request; servedMarkdown: boolean; pathname: string },
+): Promise<Response> {
+  const body = await upstream.text();
+  const headers = new Headers(upstream.headers);
+  headers.delete('etag');
+  headers.delete('last-modified');
+  return applyHeaders(
+    new Response(substituteTurnstileSitekey(body, env), {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    }),
+    { request: opts.request, servedMarkdown: opts.servedMarkdown, pathname: opts.pathname },
+  );
+}
+
 async function injectHomepageBoards(
   upstream: Response,
   env: Env,
@@ -912,7 +947,7 @@ async function injectHomepageBoards(
     getAggregate(env as WebCacheEnv, 'leaderboard-frontpage', SPEC_VERSION),
   ]);
   const entries = aggregate?.entries ?? [];
-  let substituted = opts.markdown ? body : body.replaceAll('{{TURNSTILE_SITEKEY}}', env.TURNSTILE_SITEKEY ?? '');
+  let substituted = opts.markdown ? body : substituteTurnstileSitekey(body, env);
   substituted = substituted.replaceAll('{{WEB_BOARD_ROWS}}', frontpageBoardSlice(opts.markdown, entries));
   const headers = new Headers(upstream.headers);
   headers.delete('etag');
