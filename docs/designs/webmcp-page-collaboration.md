@@ -157,16 +157,16 @@ another unauthenticated public Worker. After act tools are live, submit `anc.dev
 
 ## Next Steps
 
-1. Confirm the public URL path (assignment below).
-2. Replace `src/client/webmcp.ts` (`registerTool` first). Concatenate script on `/web-audit`; inject on `/web/<host>`
-   result HTML only.
-3. Video-path tools: `fill_audit_url`, `set_plan`, `get_worksheet`, `get_fix_prompt` (ships; clip on anc.dev stops at
-   `get_worksheet` — live fails are only `mcp-cors-*`), plus orientation tools.
-4. Tests: pathname → names; no scoring navigation/POST; discovery test still expects `/p1` and `/mcp` if those pages
-   keep the script.
-5. Browser-verify light and dark; ChatGPT in-app or Chrome flag.
-6. Then P1 homepage acts if time; `/install` last.
-7. Demo video + Devpost blurb. Do not claim the `webmcp` check is a live probe.
+1. ~~Confirm the public URL path (assignment below).~~ Locked: judges hit **anc.dev**.
+2. ~~Replace `src/client/webmcp.ts` (`registerTool` first). Concatenate script on `/web-audit`; inject on `/web/<host>`
+   result HTML only.~~ [#280](https://github.com/brettdavies/agentnative-site/pull/280)
+3. ~~Video-path tools + orientation + homepage P1.~~ Same PR. Clip on anc.dev still stops at `get_worksheet` (live fails
+   are only `mcp-cors-*`); do not demo-fix CORS.
+4. ~~Tests: pathname → names; no scoring navigation/POST; discovery includes `/web-audit`.~~ `tests/webmcp.test.ts` plus
+   attach tests. ChatGPT/Chrome `getTools()` is T5, not CI.
+5. Browser-verify light and dark; ChatGPT in-app or Chrome flag (T5).
+6. Demo video + Devpost blurb. Do not claim the `webmcp` check is a live probe.
+7. Ship to **anc.dev** via `release/*` → `main` (T6).
 
 ## The Assignment
 
@@ -211,6 +211,10 @@ Supersedes sequencing notes in Next Steps where they conflict. Product premises 
 14. **Pre-unit 0:** shipped in [#279](https://github.com/brettdavies/agentnative-site/pull/279) (`f635a7c` on `dev`).
     `/web-audit` emits and the Worker substitutes `turnstile-sitekey`. Tools still never call Turnstile or
     `/web/scoring`.
+15. **T1–T4:** shipped in [#280](https://github.com/brettdavies/agentnative-site/pull/280) (`20c6b2a` on `dev`). One
+    `/js/webmcp.js`; `toolsFor(pathname)`; `registerTool` first; DOMString `execute`. Attach on `/web-audit` and
+    `/web/<host>`; `data-id` on `.web-check`; homepage `data-web-home-*` + P1 tools. T5 (ChatGPT/Chrome `getTools`) and
+    T6 (`release/*` → `anc.dev`) remain.
 
 ### P1 tool contracts (homepage unless noted)
 
@@ -306,13 +310,13 @@ Sequential after pre-unit 0. One client bundle; do not split WebMCP across workt
 | Step                                      | Modules                                          | Depends on                       |
 | ----------------------------------------- | ------------------------------------------------ | -------------------------------- |
 | Pre-unit 0 Turnstile meta on `/web-audit` | `src/build/`, Worker inject                      | **done** #279 on `dev`           |
-| Shared lib + page modules + attach        | `src/client/`, `src/build/`, `summary-render.ts` | Pre-unit 0 merged                |
-| Video-path tools + bun:test               | `src/client/`                                    | lib + `data-id`                  |
+| Shared lib + page modules + attach        | `src/client/`, `src/build/`, `summary-render.ts` | **done** #280 on `dev`           |
+| Video-path tools + bun:test               | `src/client/`                                    | **done** #280 (ChatGPT is T5)    |
+| Homepage P1                               | `src/client/`, `06-homepage.mjs`                 | **done** #280 on `dev`           |
 | ChatGPT/Chrome getTools                   | —                                                | video path on a URL you can open |
-| Homepage P1                               | `src/client/`, `06-homepage.mjs`                 | lib                              |
-| Production URL                            | `release/*`                                      | PR on `dev`                      |
+| Production URL                            | `release/*`                                      | T5 on staging or a public URL    |
 
-Lane A: pre-unit 0. **Merged** (#279). Lane B: WebMCP (sequential; one client bundle).
+Lane A: pre-unit 0. **Merged** (#279). Lane B: WebMCP T1–T4. **Merged** (#280). T5–T6 remain.
 
 ### Implementation Tasks
 
@@ -320,27 +324,25 @@ Lane A: pre-unit 0. **Merged** (#279). Lane B: WebMCP (sequential; one client bu
   - Shipped: [#279](https://github.com/brettdavies/agentnative-site/pull/279) (`f635a7c` on `dev`, 2026-08-27)
   - Files: `src/build/shell.mjs` (`turnstileSitekey`), `07-subpages.mjs`, Worker inject on `/web-audit`
   - Verify: `dist/web-audit.html` has the placeholder; Worker substitutes; `/web-audit.md` silent
-- [ ] **T1 (P1, human: ~2h / CC: ~25min)** — `webmcp-lib` + `toolsFor(pathname)` + registerTool-first + DOMString
-  execute
-  - Surfaced by: D7 / D7.1 / current `webmcp.ts` MCP content-array bug
-  - Files: `src/client/webmcp*.ts`, `src/build/01-assets.mjs`
-  - Verify: `bun test` toolsFor + bundle grep `registerTool`
-- [ ] **T2 (P1, human: ~1h / CC: ~15min)** — Attach: concat on `/web-audit`; script in `buildWebSummaryBody`; `data-id`
-  on `.web-check`
-  - Surfaced by: D4 / design Result DOM hook
+- [x] **T1 (P1)** — `webmcp-lib` + `toolsFor(pathname)` + registerTool-first + DOMString execute
+  - Shipped: [#280](https://github.com/brettdavies/agentnative-site/pull/280) (`20c6b2a` on `dev`, 2026-08-27)
+  - Files: `src/client/webmcp.ts` (entry), `webmcp-lib.ts`, page modules. `01-assets.mjs` unchanged (still bundles
+    `webmcp.ts` → `/js/webmcp.js`)
+  - Verify: `tests/webmcp.test.ts` toolsFor + bundle grep `registerTool` before `provideContext`
+- [x] **T2 (P1)** — Attach: concat on `/web-audit`; script in `buildWebSummaryBody`; `data-id` on `.web-check`
+  - Shipped: #280. Scoring HTML (`scoringBody`) has no `webmcp.js`. `/about` and CLI scorecards unchanged
   - Files: `07-subpages.mjs`, `summary-render.ts`, discovery + routes + format tests
-  - Verify: iron-rule tests
-- [ ] **T3 (P1, human: ~3h / CC: ~40min)** — Video-path tools + stub execute (no fetch/scoring)
-  - Surfaced by: D10.1 / D9 / D15 / D16
-  - Files: `webmcp-audit.ts`, `webmcp-result.ts`, `tests/webmcp.test.ts`
-  - Verify: bun:test + ChatGPT/Chrome `getTools()`
-- [ ] **T4 (P1, human: ~3h / CC: ~40min)** — Homepage P1 + `data-web-home-*`
-  - Surfaced by: D1 / D3 / D8 / D12
+- [x] **T3 (P1)** — Video-path tools + stub execute (no fetch/scoring)
+  - Shipped: #280. `fill_audit_url`, `set_plan`, `set_public_listing`, `get_worksheet`, `get_fix_prompt`, orientation
+  - Files: `webmcp-audit.ts`, `webmcp-result.ts`, `webmcp-orientation.ts`, `tests/webmcp.test.ts`
+  - Verify: bun:test (no `fetch`, no `/web/scoring`). ChatGPT/Chrome `getTools()` is T5
+- [x] **T4 (P1)** — Homepage P1 + `data-web-home-*`
+  - Shipped: #280 (same PR as the video path, per lock 1)
   - Files: `06-homepage.mjs`, `webmcp-home.ts`
-  - Verify: stub execute; wrong-page errors on `/p1`
+  - Verify: stub execute; wrong-page errors when the homepage nodes are absent
 - [ ] **T5 (P1, human: ~30min)** — ChatGPT desktop or Chrome flag acceptance on public or local URL
   - Surfaced by: D10.1
-  - Verify: numbered 3-minute sequence; `executeTool` strings ≤1.5k
+  - Verify: numbered 3-minute sequence; `executeTool` strings ≤1.5k. Staging is behind Access; production is T6
 - [ ] **T6 (P1, human: ops)** — Ship this slice to **anc.dev** via `release/*` → `main` before 3 Sep 1pm PT
   - Surfaced by: design Assignment; user locked production as the judge URL
   - Verify: ChatGPT in-app browser opens `https://anc.dev/web-audit` without Access
@@ -349,18 +351,19 @@ Lane A: pre-unit 0. **Merged** (#279). Lane B: WebMCP (sequential; one client bu
 
 ## GSTACK REVIEW REPORT
 
-| Review        | Trigger               | Why                             | Runs | Status      | Findings                                                                                |
-| ------------- | --------------------- | ------------------------------- | ---- | ----------- | --------------------------------------------------------------------------------------- |
-| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —           | —                                                                                       |
-| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —           | Codex CLI not installed; Claude subagent used                                           |
-| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 1    | issues_open | 14 issues decided, 0 critical gaps, 1 unresolved (fill-focus fallback); T0 shipped #279 |
-| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —           | —                                                                                       |
-| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | —           | —                                                                                       |
+| Review        | Trigger               | Why                             | Runs | Status      | Findings                                                                                    |
+| ------------- | --------------------- | ------------------------------- | ---- | ----------- | ------------------------------------------------------------------------------------------- |
+| CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —           | —                                                                                           |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —           | Codex CLI not installed; Claude subagent used                                               |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 1    | issues_open | 14 issues decided, 0 critical gaps, 1 unresolved (fill-focus fallback); T0 #279, T1–T4 #280 |
+| Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —           | —                                                                                           |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | —           | —                                                                                           |
 
 - **CROSS-MODEL:** Claude outside voice vs locked D1: user kept one PR (B). Listing guard: user kept full check/uncheck
   (C). `untrustedContentHint`: skipped. Module split: kept. Rename: `get_fix_prompt`. Truncation: broken-first.
   Turnstile-on-`/web-audit`: real bug → pre-unit 0 PR.
-- **VERDICT:** T0 merged (#279). WebMCP T1–T5 remain; fill-focus fallback still deferred to ChatGPT testing.
+- **VERDICT:** T0–T4 merged (#279, #280). T5 (ChatGPT/Chrome `getTools`) and T6 (production `anc.dev`) remain;
+  fill-focus fallback still deferred to ChatGPT testing.
 
 **UNRESOLVED DECISIONS:**
 

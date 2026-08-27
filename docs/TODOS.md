@@ -1,14 +1,17 @@
 # TODOS
 
-Deferred work. Challenge-week WebMCP client work is not listed here (see `docs/designs/webmcp-page-collaboration.md`).
-The scoring-funnel item below is **after T0** and **not** part of that plan.
+Deferred work. Challenge-week WebMCP **code** (T1–T4) merged in
+[#280](https://github.com/brettdavies/agentnative-site/pull/280). Remaining WebMCP work is T5 (ChatGPT/Chrome
+`getTools`) and T6 (`release/*` → `anc.dev`); see `docs/designs/webmcp-page-collaboration.md`. The scoring-funnel item
+below is **after T0** and **not** part of that plan.
 
 ## Scoring funnel
 
 ### Align CLI and web live-scoring on one prepare → transact → result machine
 
-**What:** After T0 (`turnstile-sitekey` on `/web-audit`, its own PR), write a short scoring-funnel design and extract
-the shared middle. Do not fold this into the WebMCP PR or expand T0 into unification.
+**What:** After T0 (`turnstile-sitekey` on `/web-audit`, #279) and the WebMCP client (#280), write a short
+scoring-funnel design and extract the shared middle. Do not fold this into a WebMCP follow-up or expand T0 into
+unification.
 
 **Why:** CLI and web are the same three phases that grew into two page graphs and two Turnstile stacks. T0 only makes
 the *intended* web transact click work (gate on `/web-audit`, WIP spends a stash). Unifying the machine is real
@@ -79,8 +82,9 @@ status line vs streaming table). Overlap to extract:
 **Second slice:** optional CLI prepare URL / optional in-place web stream — only if a design says the page counts should
 match. They do not have to.
 
-**Effort:** M (first slice) / L (full page-graph alignment) **Priority:** P3 **Depends on:** T0 merged; WebMCP clip
-shipped (challenge deadline 3 Sep 2026). **Out of scope for:** `docs/designs/webmcp-page-collaboration.md`
+**Effort:** M (first slice) / L (full page-graph alignment) **Priority:** P3 **Depends on:** T0 merged (#279); WebMCP
+T1–T4 merged (#280); clip on production still T5+T6 (deadline 3 Sep 2026). **Out of scope for:**
+`docs/designs/webmcp-page-collaboration.md`
 
 ## Web audit
 
