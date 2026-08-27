@@ -156,10 +156,13 @@ items are hardening (Host validation, declared bindings) and delivery hygiene (C
 - R8. A new required-tier check id probes header-routed `tools/list` per KD3's wire shape and passes on a JSON-RPC
   result carrying a `tools` array.
 - R9. A new recommended-tier check id probes `server/discover` with modern headers and `_meta`, passing on a well-formed
-  discovery result.
-- R10. Era independence: the legacy registry entries are unchanged; an era-shaped miss (a well-formed JSON-RPC error
-  envelope whose code signals lane unavailability, per KTD3) scores `absent`, not `broken`; other well-formed error
-  envelopes, malformed, and non-JSON-RPC responses score `broken`.
+  discovery result and reading a refusal that means the method is not served here as `absent` rather than `broken`. It
+  doubles as the modern lane's discriminator (KTD3).
+- R10. Era independence: the legacy registry entries are unchanged; the modern lane's presence is read from
+  `server/discover`, the one modern-only method on the wire, and every modern row scores `absent` when no modern lane
+  was evidenced; on an era probe an era-shaped miss (a well-formed JSON-RPC error envelope whose code signals lane
+  unavailability, per KTD3) scores `absent`, not `broken`; other well-formed error envelopes, malformed, and
+  non-JSON-RPC responses score `broken`.
 - R11. The CORS pair classifies from both probes: consistent no-CORS posture on OPTIONS and POST yields `n_a` with a
   posture-specific reason; ACAO present on one surface but not the other, or ACAO on a failing preflight, scores
   `broken`; full CORS scores `pass`.
@@ -190,9 +193,10 @@ items are hardening (Host validation, declared bindings) and delivery hygiene (C
 - R19. The registry gains recommended-tier per-era error-code conformance checks per the Appendix probe matrix — three
   new legacy ids (malformed body, batch array, unknown tool; the existing `mcp-unknown-method` check already covers the
   legacy unknown-method probe) and five new modern ids (unknown method, missing `clientCapabilities`, header mismatch,
-  version reject, resources-read miss) — each a single-request probe with its own remediation entry. `-32603` (cannot be
-  forced from outside) and `-32099` (triggering rate limits against third-party servers is abusive) are documented as
-  excluded, in the registry comments and the reference doc.
+  version reject, resources-read miss) — each with its own remediation entry, one request against a stateless target and
+  one conditional session re-ask against a target that demands one (KTD11). `-32603` (cannot be forced from outside) and
+  `-32099` (triggering rate limits against third-party servers is abusive) are documented as excluded, in the registry
+  comments and the reference doc.
 - R20. anc.dev passes every conformance probe in its own audit; each probe's expected behavior is verified against the
   in-process handler at implementation. Divergence rule: the pinned SDK's observed behavior is the conformance authority
   — matrix expectations, remediation prose, and the U12 reference update to match observation; shell shims are reserved
@@ -231,7 +235,9 @@ items are hardening (Host validation, declared bindings) and delivery hygiene (C
 - AE2. **When** a modern request carries `Mcp-Name: not_a_real_tool` **then** the rate-limit key is `modern:{ip}`, not a
   spoofed bucket. **Covers R3.**
 - AE3. **When** the audit probes a modern-only server **then** `mcp-initialize` scores `absent` and the modern
-  `tools/list` check scores `pass`; a legacy-only server mirrors this. **Covers R8, R10, R13.**
+  `tools/list` check scores `pass`; **when** it probes a legacy-only server **then** `server/discover` evidences no
+  modern lane and every modern row scores `absent` without a request, whatever that server would have answered. **Covers
+  R8, R10, R13.**
 - AE4. **When** the audit probes an endpoint with no ACAO on OPTIONS or POST **then** both CORS rows are `n_a` and the
   relative score is unaffected; **when** only one surface carries ACAO **then** the inconsistent row is `broken`.
   **Covers R11.**
@@ -317,10 +323,9 @@ anc-relevant joint follow-up is carried into R1–R18, the settled waits, or Def
 Unconfirmed planning bets made on this headless run — each owned by the cited KTD or unit; reviewers should scrutinize
 these first:
 
-- Era-shaped misses score `absent` only on unavailability codes (`-32601`, `-32022`); other error envelopes keep the
-  `broken` penalty (KTD3). "Fail exactly the lane they lack" is read as no-credit-for-the-missing-lane without punishing
-  a conformant single-era choice; review narrowed the original envelope-shape-only mapping, which would have softened
-  `-32603` internal errors to `absent`.
+- The unavailability softening reaches only the era probes, and only on the unavailability codes (`-32601`, `-32022`);
+  the conformance rows and every other error envelope keep the `broken` penalty (KTD3). "Fail exactly the lane they
+  lack" is read as no-credit-for-the-missing-lane without punishing a conformant single-era choice.
 - `MCP_ENABLED` / `MCP_LIVE_SCORING_ENABLED` stay secrets (KTD7). The triage leaned committed vars; the repo-family
   convention doc, the in-config KTD-11 rationale, and the loss of the zero-deploy emergency flip decide the other way
   under the triage's own documented-exception clause.
@@ -356,18 +361,41 @@ these first:
   with a handler-local modern-protocol constant (`2026-07-28`), header injection (`MCP-Protocol-Version`, `Mcp-Method`),
   and `_meta` in params carrying the three `io.modelcontextprotocol/*` keys (`clientCapabilities` is mandatory —
   omitting it draws `-32602`). The registry's global `mcp_discovery.protocol_version` stays `"2025-06-18"` (test-pinned;
-  legacy discovery unchanged). Era-mismatch classification is code-sensitive: a well-formed JSON-RPC error envelope
-  whose code signals lane unavailability (`-32601` method-not-found, or the SDK's `-32022` UnsupportedProtocolVersion)
-  maps to `absent`; any other well-formed error envelope (e.g. `-32603`) and any malformed or non-JSON-RPC response
-  stays `broken`, preserving the broken-surface penalty. The mapping applies to both lanes' handler ops while the legacy
-  registry entries stay unchanged. The new modern ops skip the existing `Mcp-Session-Id` attach in `runMcp` (today
-  conditional on `op !== 'initialize'`) so modern probes stay sessionless per the Appendix wire shape; neither op
-  carries `Mcp-Name` (neither is a `tools/call` or `resources/read` — a future modern resources probe must mirror the
-  resource URI in `Mcp-Name` or it draws `-32020` header mismatch). A post-sunset anc answers legacy probes with
-  `-32022`, landing in the unavailability set — its own legacy lane then scores `absent`, not `broken`; the era-neutral
-  `mcp-resources` antecedent (KTD11) stays met via modern discovery evidence, so resources-gated rows probe and land
-  `absent` with the rest of the lane rather than gating `n_a`. The `http` handler is not used (it cannot carry a body).
-  Instantiates KD3 (R8, R9, R10).
+  legacy discovery unchanged). **The modern lane is discriminated by `server/discover`, the only modern-only method on
+  the wire.** Every other modern row sends a request a 2025-era server is free to answer — leniently, by serving the
+  legacy handler behind it, or strictly, by refusing the version claim — so its answer is evidence about leniency, not
+  about the era. Wave 1 derives an `McpModernLane` from the `mcp-server-discover` outcome: `present` when the row
+  carries `supported_versions` (written on the JSON-RPC result path alone), `unevidenced` when the server answered any
+  other way, `unknown` when the probe never got an answer. On `unevidenced` the six modern rows (`modern-tools-list`
+  plus KTD11's five modern conformance rows) settle `absent` without issuing a request, so a legacy-only server lands
+  `absent` on the modern lane rather than a free MUST pass or a penalty; on `unknown` they probe as usual, so an
+  operational failure never converts into a verdict; `server-discover` is never gated on its own answer. Era-mismatch
+  classification is code-sensitive and scoped to the era probes — the ops naming a method the lane could be missing
+  (`initialize`, `tools-list`, `resources-list`, `error`, `modern-tools-list`, `server-discover`). On those, a
+  well-formed JSON-RPC error envelope whose code signals lane unavailability (`-32601` method-not-found, or the SDK's
+  `-32022` UnsupportedProtocolVersion) maps to `absent`; any other well-formed error envelope (e.g. `-32603`) and any
+  malformed or non-JSON-RPC response stays `broken`, preserving the broken-surface penalty. KTD11's conformance rows
+  name no such method and take no softening. One carve-out on the legacy resources read: once `mcp-initialize` observed
+  the legacy lane advertising `capabilities.resources`, a `-32601` on `resources-list` is `broken`, because refusing a
+  capability you advertise contradicts your own handshake and that misconfiguration has to stay visible; conditioning
+  the carve-out on the legacy advertisement is what stops a modern-only server being charged for lacking a legacy lane.
+  The `server/discover` row reads its own refusals as an absent lane, so the check that proves the lane is missing is
+  not the one row penalized for proving it: an error envelope is judged on its code alone (`-32601`, `-32022`, and
+  `-32000` — a session-required refusal is a stateful legacy server answering on its own terms, and the modern lane is
+  sessionless by construction), and only an envelope-free answer is judged on its status (400 and 415, the typed-refusal
+  statuses). `-32603` therefore stays `broken` however it is delivered, and a malformed 200 result or a 5xx keeps the
+  penalty a server that tried to serve the method and failed has earned; 404 stays outside every arm so a dead endpoint
+  earns nothing; 429, 408, and 503 mean "not now" rather than "not here" and are no era signal (the `-32099` rate-limit
+  arm resolves to `error` ahead of every scoring read). All of this is handler classification: the legacy registry
+  entries stay byte-stable throughout. The modern ops skip the existing `Mcp-Session-Id` attach in `runMcp` (conditional
+  on `op !== 'initialize'`) so modern probes stay sessionless per the Appendix wire shape; neither op carries `Mcp-Name`
+  (neither is a `tools/call` or `resources/read` — a future modern resources probe must mirror the resource URI in
+  `Mcp-Name` or it draws `-32020` header mismatch). A post-sunset anc answers its legacy probes with `-32022`, landing
+  in the unavailability set — all four legacy era probes then score `absent`, not `broken`, while its legacy conformance
+  rows are judged on their own codes, so a `-32022` answering a `tools/call` reads `broken`. The era-neutral
+  `mcp-resources` antecedent (KTD11) stays met via modern discovery evidence, so the legacy resources row probes and
+  lands `absent` with the rest of its lane rather than gating `n_a`, and the modern resources row is scored on the lane
+  still serving. The `http` handler is not used (it cannot carry a body). Instantiates KD3 (R8, R9, R10).
 - KTD4. **CORS posture pair: one two-probe handler, both ids kept.** Each of `mcp-cors-preflight` and `mcp-cors-actual`
   invokes a posture-aware handler that issues both the OPTIONS preflight and an Origin-bearing POST, then classifies its
   own id from the pair (matrix in U4). This avoids cross-check engine state (the two checks run concurrently with no
@@ -420,19 +448,29 @@ these first:
 - KTD11. **Conformance-probe mechanics.** The probes extend `runMcp`'s error-op family: a raw-body override for the
   malformed and batch probes, era-shaped headers per probe, and per-probe accept sets (Appendix matrix) — a conforming
   refusal may arrive as a JSON-RPC envelope or as typed HTTP delivery, bounded so a dead or MCP-less endpoint earns
-  nothing: the legacy malformed-body probe accepts a bare HTTP 400/415 (never 404), the modern unknown-method probe
-  accepts HTTP 404 only when the body carries the `-32601` envelope, and rows with no typed-HTTP arm classify a bare
-  non-200 without an envelope as `broken`; the check otherwise fails on 200-with-garbage, a wrong code, or a hang.
-  Classification extends KTD3: expected code → `pass`; an unavailability-coded refusal that is not the expected code →
-  `absent` (era machinery not offered); anything else well-formed → `broken`. The modern resources-read miss probe
-  carries the `mcp-resources` antecedent, which resolves era-neutrally (ratified 2026-08-26): legacy `mcp-initialize`
-  capabilities evidence or modern resource advertisement (`mcp-server-discover` result evidence; U3 lands that check in
-  the same PR) both satisfy it — extend the resolver in `src/worker/audit-web/antecedents/mcp.ts`, which today reads
-  only legacy initialize capabilities. Known coherence contingency for R20: if the SDK's modern version-reject envelope
-  omits `data.supported`, the shell post-processes that response to add it (verify at implementation before building the
-  shim; plan-time SDK dist evidence shows the branch is not expected to fire — the modern version-reject is a plain JSON
-  400 with `data.supported` populated — and any shim is scoped to JSON-format responses per the `coerceMcpJsonResponse`
-  precedent). Instantiates KD9 (R19, R20).
+  nothing: the legacy malformed-body probe accepts an HTTP 400/415 carrying no JSON-RPC error envelope (never 404 — a
+  typed refusal is the status plus the absence of an envelope, so a framework's own JSON explanation body still
+  qualifies), the modern unknown-method probe accepts HTTP 404 only when the body carries the `-32601` envelope, and
+  rows with no typed-HTTP arm classify an envelope-free non-200 as `broken`; the check otherwise fails on
+  200-with-garbage, a wrong code, or a hang. Classification is strict: the expected code → `pass`, every other
+  well-formed code → `broken`. KTD3's unavailability softening does not reach these rows, because they name no method
+  the lane could be missing — an unparseable body and a JSON array carry no method at all, and an unknown tool NAME
+  rides a `tools/call` the lane has already proven it serves — so an unavailability code is as wrong here as any other
+  mismatched code, and an endpoint answering `-32601` to everything cannot outscore a server that answers honestly and
+  imperfectly. The five modern conformance rows ride KTD3's modern-lane read and settle `absent` without a request when
+  `server/discover` evidenced no modern lane. Request shape: one request per probe against a stateless target, plus one
+  conditional re-ask against a target that demands a session — when a legacy conformance row draws `-32000` and wave-1
+  `initialize` issued a session id, the probe re-asks once with `Mcp-Session-Id` and byte-identical body bytes, then
+  classifies the second answer, so the row scores the server's error codes rather than its statefulness. A stateless
+  server issues no session id, so the re-ask is unreachable for it, and the modern rows stay sessionless per the
+  SEP-2243 wire shape. The modern resources-read miss probe carries the `mcp-resources` antecedent, which resolves
+  era-neutrally (ratified 2026-08-26): legacy `mcp-initialize` capabilities evidence or modern resource advertisement
+  (`mcp-server-discover` result evidence; U3 lands that check in the same PR) both satisfy it — extend the resolver in
+  `src/worker/audit-web/antecedents/mcp.ts`, which today reads only legacy initialize capabilities. Known coherence
+  contingency for R20: if the SDK's modern version-reject envelope omits `data.supported`, the shell post-processes that
+  response to add it (verify at implementation before building the shim; plan-time SDK dist evidence shows the branch is
+  not expected to fire — the modern version-reject is a plain JSON 400 with `data.supported` populated — and any shim is
+  scoped to JSON-format responses per the `coerceMcpJsonResponse` precedent). Instantiates KD9 (R19, R20).
 
 ### High-Level Technical Design
 
@@ -446,12 +484,12 @@ flowchart TB
   L -->|nothing| M[modern tools/list fallback *new*]
   M -->|found| P
   W -->|found| P
-  P --> W1[wave 1: mcp-initialize]
+  P --> W1[wave 1: mcp-initialize, mcp-server-discover SHOULD *new*]
   W1 --> W2[wave 2 checks]
   W2 --> LG[legacy lane: initialize, capabilities, tools-list, resources-list]
-  W2 --> MD[modern lane *new*: modern-tools-list MUST, server-discover SHOULD]
+  W2 --> MD[modern lane *new*: modern-tools-list MUST, gated on the wave-1 discover read]
   W2 --> C[CORS pair: two-probe posture handler *reworked*]
-  LG & MD & C --> S[scoreWebAudit: unavailability-coded miss = absent, posture n_a excluded]
+  LG & MD & C --> S[scoreWebAudit: era-probe unavailability = absent, posture n_a excluded]
 ```
 
 CORS posture classification (each check id runs both probes; O = OPTIONS preflight, P = Origin-bearing POST):
@@ -605,9 +643,12 @@ flowchart TB
      registry fingerprint once and the shipped fingerprint gate reflows seeded scorecards on deploy (KTD8 — no manual
      cache-version rotation exists).
   6. Content pages: extend the MCP check enumeration in `content/web-audit.md`, the probe-type list in
-     `content/methodology.md`, and `content/web-scorecard-schema.md` where check examples appear; add a dated
-     scoring-change note to `content/methodology.md` (new modern-era checks, posture-aware CORS `n_a`, universe
-     expansion, expected re-audit window) so public board movement is explained rather than silent.
+     `content/methodology.md`, and `content/web-scorecard-schema.md` where check examples appear;
+     `content/methodology.md` carries an era-lane and CORS-posture section stating the scoring rules in force (a
+     single-era server reads `absent` on the lane it lacks, `server/discover` decides the modern lane and settles the
+     other modern checks without a probe, the error-code conformance checks are judged strictly, a consistent no-CORS
+     posture is `n_a`) plus the standing reflow and 30-day staleness mechanic that applies whenever the check universe
+     grows, so public board movement is explained rather than silent.
 - **Patterns to follow:** existing `mcp.ts` op branches and `stubFetch` handler tests; `MINIMAL_REGISTRY` fixture for
   engine-level tests; `tests/helpers/mcp-modern.ts` for the wire shape.
 - **Test scenarios:**
@@ -615,6 +656,11 @@ flowchart TB
     `mcp-initialize` `absent`, `mcp-modern-tools-list` `pass`.
   - Legacy-only stub (tools via initialize flow, JSON-RPC error to modern probe) → modern check `absent`, legacy checks
     unchanged `pass`.
+  - Engine level, every legacy-only shape end to end (lenient stateless, session-required stateful, and a 2025-06-18
+    server that answers an unsupported version claim with a bare 400) → all six modern rows `absent`, never a free MUST
+    pass and never a penalty; the legacy lane scored on its own answers.
+  - An `unevidenced` modern lane settles all six modern rows `absent` with no request issued; an `unknown` lane
+    (discover never answered) falls back to probing; `server-discover` classifies from its own probe either way.
   - Dual-stack stub → both lanes `pass`.
   - Handler sends `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, and `_meta` with the three keys; no `initialize`
     precedes the modern probe (assert on captured request).
@@ -622,7 +668,11 @@ flowchart TB
   - `-32603` (or another non-unavailability code) answering either era's probe → `broken` (penalty preserved, per KTD3).
   - Dual-stack sessionful stub (legacy initialize issues a session id) → the captured modern-probe request carries no
     `Mcp-Session-Id`.
-  - `server/discover` well-formed result → `pass`; JSON-RPC error → `absent`.
+  - `server/discover` well-formed result → `pass`; a refusal meaning the method is not served here (`-32601`, `-32022`,
+    `-32000`, or an envelope-free 400/415) → `absent`; `-32603` at any status, a 200 result missing `supportedVersions`,
+    a bare 5xx, and a bare 404 → `broken`. The widened signals reach no other era probe.
+  - Legacy `initialize` advertising `capabilities.resources` and then answering `resources/list` with `-32601` →
+    `broken`; without that advertisement → `absent`; `-32603` → `broken` either way.
   - Discovery: card absent + initialize dead + modern probe answers → endpoint found, `mcp-present` met; all probes dead
     → `n_a` lane unchanged.
   - Scoring: new universe totals; `n_a` rows still excluded from the relative denominator.
@@ -644,7 +694,9 @@ flowchart TB
   3. `na_reason` plumbing per KTD4 (`ProbeOutcome` optional field → engine pass-through → `NaReason` +
      `posture-consistent` → `resultLine` copy).
   4. `content/web-scorecard-schema.md` documents the third `na_reason` value and the pre-existing
-     handler-emitted-`n_a`-without-reason case.
+     handler-emitted-`n_a`-without-reason case; the widened union carries `WEB_SCHEMA_VERSION` to `0.3` (the repo's
+     precedent bumps whenever fields or field values are added, removed, or renamed), with the doc prose, the JSON
+     example, the emitted envelope, and the format pins moving together.
   5. Remediation prose for both ids rewritten around posture (the existing "considered choice" hedge becomes the actual
      scoring rule).
 - **Patterns to follow:** `handlers/content-without-js.ts` (handler-emitted softening precedent); existing
@@ -657,7 +709,10 @@ flowchart TB
   - POST ACAO but OPTIONS bare → preflight `broken` (inconsistent), actual `pass`.
   - ACAO on a 500 preflight → preflight `broken`; the actual id still classifies from its own POST probe (ACAO → `pass`,
     bare → `broken`, never `n_a` — the declared preflight breaks posture-consistency).
-  - Transport failure on either probe → `error` (excluded from scoring).
+  - A transport failure suppresses only the id whose own probe failed (`error`, excluded from scoring); the sibling id
+    still classifies from its own probe.
+  - A surface with no ACAO whose sibling probe failed → `error`, not a declared posture: an opt-out that cannot be
+    verified is an operational unknown.
   - `resultLine` renders the posture reason distinctly from `antecedent-unmet`.
 - **Verification:** handler suite green; anc.dev's own next self-audit shows the pair as `n_a` (dogfood check recorded
   in the PR).
@@ -810,7 +865,8 @@ flowchart TB
      `mcp-malformed-body`, `mcp-batch-reject`, `mcp-unknown-tool`; modern `mcp-modern-unknown-method`,
      `mcp-modern-clientcaps`, `mcp-modern-header-mismatch`, `mcp-modern-version-reject`, `mcp-modern-resources-miss`.
      The legacy unknown-method probe stays on the existing `mcp-unknown-method` entry unchanged.
-  2. `runMcp` error-op family and accept-set classification per KTD11; single-request probes only.
+  2. `runMcp` error-op family and accept-set classification per KTD11; one request per probe, plus the conditional
+     session re-ask on the three legacy rows.
   3. Remediation entries for all eight ids; registry comments document the deliberate exclusions (`-32603`, `-32099`);
      the clientcaps remediation prose names both accepted codes (`-32602` primary, `-32600` accepted — ratified
      2026-08-26).
@@ -821,12 +877,18 @@ flowchart TB
 - **Patterns to follow:** the existing `mcp-unknown-method` entry and `op: error` branch; `stubFetch` handler tests.
 - **Test scenarios:**
   - Each probe against a conforming stub → `pass` (nine cases incl. the existing legacy unknown-method).
-  - Legacy malformed body answered with HTTP 400 and no envelope → `pass`; answered 200 with garbage → `broken`.
+  - Legacy malformed body answered with HTTP 400/415 and no JSON-RPC envelope → `pass`, whether the body is empty, plain
+    text, or a framework's own JSON explanation; answered 200 with garbage → `broken`.
   - Modern unknown method delivered as HTTP 404 with a `-32601` envelope → `pass`.
   - Bare HTTP 404 with no envelope to any probe → `broken` (dead-endpoint guard).
   - Modern clientcaps probe answered `-32600` (invalid-request family) → `pass` (widened accept set).
   - Modern version-reject envelope missing `data.supported` → `broken` (drives the R20 contingency).
-  - An unavailability-coded refusal (`-32601`/`-32022`) where a different code was expected → `absent`.
+  - An unavailability-coded refusal (`-32601`/`-32022`) where a different code was expected → `broken`, on every
+    conformance row.
+  - A stateful target answering `-32000` to a legacy conformance row → re-asked once with the session id wave-1
+    `initialize` issued, then scored on the second answer; a stateless target keeps every probe to a single request; the
+    re-ask never fires on a modern row.
+  - `-32000` with no session id available → `broken` on every conformance row.
   - Resources-miss probe skips to `n_a` via `antecedent-unmet` when the server advertises resources on neither lane.
   - Modern-only server advertising resources (discovery evidence, no legacy capabilities) → the resources-miss probe
     runs and classifies (era-neutral antecedent), not `n_a`.
@@ -933,9 +995,11 @@ beside the new handler.
   the one-week U5 soak gate before release; widened `error_code` makes the failure filterable.
 - **Score deflation window (KTD8).** Stored global scores drop until re-audit (~22% relative at `universeMax` 116 →
   148). Mitigation: the fingerprint-triggered seeded reflow in the same deploy; the window is bounded and documented.
-- **Modern probe leniency.** A stateless legacy server that answers a header-routed `tools/list` earns the modern check
-  without full `2026-07-28` support. Accepted: the settled probe shape governs; tightening (e.g., requiring modern
-  envelope artifacts in the response) is a follow-up if the leaderboard shows gaming.
+- **`server/discover` as the era proxy.** The modern rows are scored only against a lane `server/discover` evidenced
+  (KTD3), so a lenient legacy server cannot earn the modern check by answering a header-routed `tools/list`. The
+  residual runs the other way: a server whose modern `tools/list` works but whose `server/discover` refuses outright
+  reads `absent` on the modern MUST. Accepted: `server/discover` is mandatory on the modern lane, so its refusal is a
+  sound proxy for the era's absence, and both shapes are non-conforming modern servers.
 - **Reject-code change is client-visible.** Any external client matching on `-32099` for reject sees a new code.
   Accepted: the transition period is exactly when the code must become distinct, and `-32022` is the SDK-typed code
   reference clients can already recognize; `content/mcp-skill.md` documents it.
@@ -1071,9 +1135,9 @@ implementation).
 
 ### Error-code conformance probe matrix (U11, ids directional)
 
-| Check id                        | Era    | Probe (single request)                          | Pass on                                              | Also conforming                                                          |
+| Check id                        | Era    | Probe                                           | Pass on                                              | Also conforming                                                          |
 | ------------------------------- | ------ | ----------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------ |
-| `mcp-malformed-body`            | legacy | non-JSON body                                   | `-32700` envelope                                    | bare HTTP 400/415 typed refusal (SDK v2 shape; 404 excluded)             |
+| `mcp-malformed-body`            | legacy | non-JSON body                                   | `-32700` envelope                                    | envelope-free HTTP 400/415 typed refusal (SDK v2 shape; 404 excluded)    |
 | `mcp-batch-reject`              | legacy | JSON array batch (body per U2's observation)    | `-32600` (verify at implementation)                  | — (pinned SDK serves all-legacy arrays; derive a body the stack rejects) |
 | `mcp-unknown-method` (existing) | legacy | unknown method                                  | `-32601`                                             | —                                                                        |
 | `mcp-unknown-tool`              | legacy | `tools/call` with unknown tool name             | `-32602`                                             | —                                                                        |
@@ -1084,6 +1148,7 @@ implementation).
 | `mcp-modern-resources-miss`     | modern | `resources/read` unknown URI, `Mcp-Name` mirror | `-32602` (SDK encode seam; verify at implementation) | `-32002` receive-tolerated; gated on the `mcp-resources` antecedent      |
 
 Excluded by design: `-32603` (an internal error cannot be forced from outside) and `-32099` (triggering rate limits
-against third-party servers is abusive). Fail conditions per KTD11: 200-with-garbage, a wrong code, a bare non-200
-outside a row's typed-HTTP arm, or a hang. This accept-set matrix is the authority surface for the sibling meum plan's
-pre-release reconciliation diff (its pinned codes diff against these rows).
+against third-party servers is abusive). Fail conditions per KTD11: 200-with-garbage, a wrong code (an unavailability
+code included, since no era softening reaches these rows), an envelope-free non-200 outside a row's typed-HTTP arm, or a
+hang. This accept-set matrix is the authority surface for the sibling meum plan's pre-release reconciliation diff (its
+pinned codes diff against these rows).
