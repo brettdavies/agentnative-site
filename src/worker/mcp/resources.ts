@@ -15,10 +15,12 @@
 // load-bearing).
 //
 // Per MCP spec 2025-06-18 resources/read semantics, a missing resource
-// surfaces via a JSON-RPC -32002 error envelope rather than the tool
-// surface's isError: false typed-state body. The SDK wraps a thrown
-// error from the resource handler into that shape; throwing the
-// ResourceNotFound-shaped error here is the spec-correct signal.
+// surfaces as a JSON-RPC error envelope rather than the tool surface's
+// isError: false typed-state body, so throwing here is the spec-correct
+// signal. The thrown error is tagged -32002, but that is not the code
+// the client sees: the SDK encode seam rewrites it to -32602 on both
+// lanes. Wire codes and their delivery live in
+// docs/runbooks/mcp-wire-protocol.md.
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { ResourceTemplate } from '@modelcontextprotocol/server';
@@ -37,8 +39,8 @@ function jsonText(uri: URL, value: unknown) {
 }
 
 function notFound(uri: URL, kind: string, key: string): never {
-  // SDK maps a thrown Error into a JSON-RPC -32002 Resource not found
-  // envelope per MCP spec 2025-06-18.
+  // The -32002 tag below is the handler's signal to the SDK, not the wire
+  // code: the encode seam rewrites it to -32602 before it reaches a client.
   const message = `${kind} not found: ${key}`;
   const err = new Error(message);
   // Tag for SDK / tests that introspect the error code.
