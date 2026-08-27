@@ -2954,6 +2954,9 @@ describe('emitHomepage — index.md twin frontmatter', () => {
     expect(indexHtml).toContain('data-s="web"');
     expect(indexHtml).toContain('audit_website anc.dev');
     expect(indexHtml).toContain('bigscore__n">97');
+    expect(indexHtml).toContain('data-web-home-form');
+    expect(indexHtml).toContain('data-web-home-input');
+    expect(indexHtml).not.toContain('data-web-audit-form');
   });
 });
 
@@ -2994,6 +2997,8 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(webAuditHtml).toContain('data-surface-audit-seg');
     expect(webAuditHtml).toContain('id="audit-s-web" checked');
     expect(webAuditHtml).toContain('<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />');
+    expect(webAuditHtml).toContain('/js/webmcp.js');
+    expect(webAuditHtml).toContain('/js/web-audit.js');
   });
 
   test('CLI /audit HTML does not carry the Turnstile sitekey meta', async () => {
@@ -3009,6 +3014,7 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(webAuditMd).not.toContain('data-web-audit-form');
     expect(webAuditMd).not.toContain('turnstile-sitekey');
     expect(webAuditMd).not.toContain('{{TURNSTILE_SITEKEY}}');
+    expect(webAuditMd).not.toContain('/js/webmcp.js');
   });
 
   test('subPageData still carries the frontmatter-free twin source for llms-full.txt', () => {

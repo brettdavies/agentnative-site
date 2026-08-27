@@ -210,8 +210,8 @@ ${webHeroHtml}
             />
             <button type="submit" class="btn btn--primary" data-live-score-submit>Score</button>
           </form>
-          <form class="board-try" data-s="web" method="get" action="/web-audit">
-            <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" aria-label="Website URL to audit" />
+          <form class="board-try" data-s="web" method="get" action="/web-audit" data-web-home-form>
+            <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" aria-label="Website URL to audit" data-web-home-input />
             <button type="submit" class="btn btn--primary">Audit</button>
           </form>
         </div>

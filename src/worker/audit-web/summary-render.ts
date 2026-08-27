@@ -181,7 +181,9 @@ ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''} 
   html += `</section>
 <section class="scorecard-cta">
   <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
-</section></article>`;
+</section>
+<script defer src="/js/webmcp.js"></script>
+</article>`;
   return html;
 }
 
@@ -212,7 +214,7 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
     body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
   }
 
-  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''}>
+  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''} data-id="${escHtml(row.id)}">
       <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;
