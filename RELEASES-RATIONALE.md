@@ -310,8 +310,8 @@ single-writer latency on every audit; the cost / correctness tradeoff favors lea
 data shows it matters.
 
 The "5 per 60 minutes" and "60 per 60 seconds" numbers are both pre-data placeholders sized from streamsgrp parity.
-Review at 14 days of visitor-log data. The structure (binding floor + KV hourly window for audits; simple binding for
-reads) survives any retuning; only the ceilings move.
+Review at 14 days of `mcp.request` log volume. The structure (binding floor + KV hourly window for audits; simple
+binding for reads) survives any retuning; only the ceilings move.
 
 ### Why two kill switches instead of one
 

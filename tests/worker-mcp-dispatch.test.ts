@@ -1,7 +1,7 @@
 // POST /mcp dispatch tests for U4 — covers detectMcpFormat, the
-// MCP_ENABLED kill switch, the method gate (405 Allow:POST), the
+// MCP_ENABLED kill switch, the method gate (405 Allow: GET, POST), the
 // Accept-header gate (406 text/plain), the MCP_LIMITER -32099
-// envelope, the visitor-log gate_result emission, and the response-
+// envelope, the `mcp.request` rate_limited emission, and the response-
 // shaping invariants (no Access-Control-Allow-Origin, Cache-Control:
 // no-store, bypass applyHeaders).
 //

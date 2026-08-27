@@ -155,7 +155,7 @@ browser-reachable `/mcp` would let any malicious web page trigger `score_cli` ru
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
 
-**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
+**Request log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
 mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome, and ms
 bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under attack
 while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
