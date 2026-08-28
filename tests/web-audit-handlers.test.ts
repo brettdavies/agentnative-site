@@ -2405,6 +2405,67 @@ describe('runWebMcp', () => {
     const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: undefined }));
     expect(outcome.status).toBe('error');
   });
+
+  test('detects a declarative application/webmcp script block', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script type="application/webmcp+json">{"tools":[]}</script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('detects document.modelContext, not just the navigator alias', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script>document.modelContext.registerTool(t);</script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+  });
+
+  // Regression: the marker set once matched the bare substrings `modelcontext`
+  // and `webmcp` anywhere in the body, so any page merely naming the Model
+  // Context Protocol scored a pass. The fixture is the shape that produced a
+  // live false positive: an MCP logo's SVG title inside an RSC payload.
+  test('a Model Context Protocol mention in an SVG title is not WebMCP exposure', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({
+        fetchImpl,
+        root: htmlRoot(
+          '<script>self.__next_f.push([1,"[\\"$\\",\\"title\\",null,{\\"children\\":\\"ModelContextProtocol\\"}]"])</script>',
+        ),
+      }),
+    );
+    expect(outcome.status).toBe('absent');
+  });
+
+  test('prose and links about MCP or WebMCP are not WebMCP exposure', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    for (const body of [
+      '<p>We support the Model Context Protocol.</p>',
+      '<a href="https://modelcontextprotocol.io/">Model Context Protocol</a>',
+      '<h2>Our WebMCP integration ships next quarter</h2>',
+      '<div class="webmcp-banner">Read the WebMCP explainer</div>',
+    ]) {
+      const outcome = await runWebMcp(webmcpCheck, ctx({ fetchImpl, root: htmlRoot(body) }));
+      expect(outcome.status).toBe('absent');
+    }
+  });
+
+  test('a pass names which marker matched, without echoing target-controlled text', async () => {
+    const fetchImpl = stubFetch(() => new Response(''));
+    const outcome = await runWebMcp(
+      webmcpCheck,
+      ctx({ fetchImpl, root: htmlRoot('<script defer src="/vendor/tracker-webmcp-9f3a.js"></script>') }),
+    );
+    expect(outcome.status).toBe('pass');
+    // A stable site-owned label, not the matched span: the raw span is the
+    // target's own markup and is unbounded in length.
+    expect(outcome.evidence[0]?.marker).toBe('webmcp script asset');
+  });
 });
 
 describe('runMarkdownFrontmatter', () => {
@@ -2620,5 +2681,114 @@ describe('runApiHygiene', () => {
       ctx({ fetchImpl, retainedBodies: new Map([['openapi', spec]]) }),
     );
     expect(outcome.status).toBe('pass');
+  });
+});
+
+// The evidence line is the only part of a probe an operator reads on the
+// result page. Both cases here shipped a verdict whose evidence named a
+// healthy URL, so a wrong pass and a correct fail were equally undiagnosable.
+describe('evidence lines name the fact that decided the verdict', () => {
+  const BASE = 'https://example.com/';
+  const CARD = '/.well-known/mcp/server-card.json';
+
+  function registryOf(checks: WebCheck[]): WebAuditRegistry {
+    return {
+      version: 1,
+      mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+      category_order: ['mcp'],
+      categories: { mcp: 'MCP' },
+      checks,
+    };
+  }
+
+  async function rowsFor(checks: WebCheck[], fetchImpl: typeof fetch): Promise<EngineResult[]> {
+    const rows: EngineResult[] = [];
+    for await (const event of runWebAudit({
+      url: BASE,
+      registry: registryOf(checks),
+      fetchOptions: { fetchImpl },
+    }) as AsyncGenerator<AuditEvent>) {
+      if (event.type === 'result') rows.push(event.result);
+    }
+    return rows;
+  }
+
+  const html = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'text/html' } });
+
+  test('a webmcp pass names the marker that matched, not just the root status', async () => {
+    const rows = await rowsFor(
+      [check({ id: 'webmcp', handler: 'webmcp', antecedent: 'html-root', with: {} })],
+      stubFetch(() => html('<script defer src="/js/webmcp.js"></script>')),
+    );
+    const row = rows.find((r) => r.id === 'webmcp');
+    expect(row?.status).toBe('pass');
+    expect(row?.evidence).toContain('webmcp script asset');
+  });
+
+  // The live shape that prompted this: the canonical card is correct, and the
+  // row is broken only because a legacy alias serves an inline duplicate.
+  test('an alias-downgraded row names the offending alias, not the healthy canonical', async () => {
+    const rows = await rowsFor(
+      [
+        check({
+          id: 'well-known-mcp-card',
+          handler: 'http',
+          antecedent: 'none',
+          eval: 'canonical-redirect',
+          with: {
+            path: CARD,
+            aliases: ['/.well-known/mcp.json'],
+            expect: { status: [200], content_type: 'json', body_regex: 'serverInfo' },
+          },
+        }),
+      ],
+      stubFetch((url) => {
+        if (url.endsWith(CARD)) {
+          return new Response(JSON.stringify({ serverInfo: { name: 'x' } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/.well-known/mcp.json')) {
+          return new Response(JSON.stringify({ url: 'https://x/mcp' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return html('<html></html>');
+      }),
+    );
+    const row = rows.find((r) => r.id === 'well-known-mcp-card');
+    expect(row?.status).toBe('broken');
+    expect(row?.evidence).toContain('/.well-known/mcp.json');
+    expect(row?.evidence).toContain('inline');
+    // The canonical passed, so the line must say so rather than implying it failed.
+    expect(row?.evidence).toContain('ok');
+  });
+
+  test('a genuinely broken canonical still reports the canonical, not an alias', async () => {
+    const rows = await rowsFor(
+      [
+        check({
+          id: 'well-known-mcp-card',
+          handler: 'http',
+          antecedent: 'none',
+          eval: 'canonical-redirect',
+          with: {
+            path: CARD,
+            aliases: ['/.well-known/mcp.json'],
+            expect: { status: [200], content_type: 'json', body_regex: 'serverInfo' },
+          },
+        }),
+      ],
+      stubFetch((url) => {
+        if (url.endsWith(CARD))
+          return new Response('<html>nope</html>', { status: 200, headers: { 'content-type': 'text/html' } });
+        return new Response('', { status: 404 });
+      }),
+    );
+    const row = rows.find((r) => r.id === 'well-known-mcp-card');
+    expect(row?.status).toBe('broken');
+    expect(row?.evidence).toContain(CARD);
   });
 });

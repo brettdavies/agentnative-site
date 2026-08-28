@@ -155,6 +155,27 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     return 'no DNS-AID records';
   }
 
+  if (check.handler === 'webmcp') {
+    // Which marker matched is the whole finding: without it a pass reads as
+    // a bare 200 and a bad match cannot be told from a real one.
+    const hit = outcome.evidence.find((e) => typeof e.marker === 'string');
+    if (hit) return `${hit.url} -> ${hit.status} (${hit.marker})`;
+  }
+
+  // An alias-downgraded row passed its own canonical probe, so the generic
+  // line below would name a healthy URL beside a broken verdict and read as
+  // a contradiction. Name the alias that caused the downgrade instead.
+  if (outcome.status === 'broken') {
+    const canonical = outcome.evidence.find((e) => e.role === 'canonical');
+    const badAlias = outcome.evidence.find((e) => e.role === 'alias' && e.alias_verdict === 'broken');
+    if (canonical?.ok === true && badAlias) {
+      const note = (badAlias.why as string[] | undefined)?.[0];
+      return `canonical ${canonical.url} -> ${canonical.status} ok; alias ${badAlias.url} -> ${badAlias.status}${
+        note ? ` (${note})` : ''
+      }`;
+    }
+  }
+
   // http
   const evidenceItem = outcome.status === 'pass' ? (outcome.evidence.find((e) => e.ok) ?? first) : first;
   if (evidenceItem.error) return `${evidenceItem.url}: ${evidenceItem.error}`;
