@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
-import { type CachedWebAudit, keyFor } from '../src/worker/audit-web/cache';
+import { type CachedWebAudit, keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { decidePublicListingWrite } from '../src/worker/audit-web/public-listing';
 import {
   handleWebAudit,
@@ -918,6 +918,203 @@ describe('cache-first gate ordering', () => {
     expect(body.cached).toBe(true);
     expect(body.scorecard.score_pct).toBe(70);
     expect(budgetReads).toBe(0);
+  });
+});
+
+// R10-R14: the response-envelope freshness contract. Every successful
+// per-target result carries `cached`, `scored_at`, and `refresh_after`
+// beside the scorecard; interim events, gate rejections, and the
+// disabled miss carry none.
+describe('handleWebAudit freshness envelope', () => {
+  const URL_UNDER_TEST = 'https://example.com/';
+
+  type FreshnessBody = {
+    cached?: unknown;
+    scored_at?: string | null;
+    refresh_after?: string | null;
+    scorecard?: { score_pct?: number };
+    share_url?: string;
+  };
+
+  // Derived from the shared window constant, not a literal: the cache test
+  // owns the one assertion that pins the window's value.
+  const refreshAfter = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
+
+  const throwingProbe = (() => {
+    throw new Error('engine must not run on a cached read');
+  }) as unknown as typeof fetch;
+
+  async function prefill(opts: { scoredAt?: string; stored?: boolean } = {}) {
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: URL_UNDER_TEST,
+      tool: { name: 'example.com', url: URL_UNDER_TEST },
+      score_pct: 64,
+      results: [],
+    };
+    if (opts.stored !== undefined) scorecard.public_listing = opts.stored;
+    const entry: Record<string, unknown> = {
+      spec_version: SPEC_VERSION,
+      target_url: URL_UNDER_TEST,
+      scorecard,
+    };
+    if (opts.scoredAt !== undefined) entry.scored_at = opts.scoredAt;
+    return { [key]: entry };
+  }
+
+  test('a fresh cache hit reports cached:true, the stored instant, and a refresh one stale window later', async () => {
+    const scoredAt = new Date().toISOString();
+    const env = makeEnv({ SCORE_CACHE: makeR2(await prefill({ scoredAt })).bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as FreshnessBody;
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(scoredAt);
+    expect(body.refresh_after).toBe(refreshAfter(scoredAt));
+    expect(Date.parse(body.refresh_after as string) - Date.parse(body.scored_at as string)).toBe(
+      WEB_AUDIT_STALE_AFTER_MS,
+    );
+    // The pre-existing envelope fields survive alongside freshness.
+    expect(body.scorecard?.score_pct).toBe(64);
+    expect(body.share_url).toBe('/web/example.com');
+  });
+
+  // AE7.
+  test('a stale hit served while auditing is disabled reports cached:true with a refresh_after in the past', async () => {
+    const scoredAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const env = makeEnv({
+      WEB_AUDIT_ENABLED: undefined,
+      SCORE_CACHE: makeR2(await prefill({ scoredAt })).bucket,
+    });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as FreshnessBody;
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(scoredAt);
+    expect(body.refresh_after).toBe(refreshAfter(scoredAt));
+    expect(Date.parse(body.refresh_after as string)).toBeLessThan(Date.now());
+  });
+
+  // AE8.
+  test('a legacy entry with a missing, empty, or unparseable instant reports both instants as null', async () => {
+    for (const scoredAt of [undefined, '', 'not-a-date']) {
+      const env = makeEnv({
+        WEB_AUDIT_ENABLED: undefined,
+        SCORE_CACHE: makeR2(await prefill({ scoredAt })).bucket,
+      });
+      const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+      const body = (await resp.json()) as FreshnessBody;
+      expect(body.cached).toBe(true);
+      expect(body.scored_at).toBeNull();
+      expect(body.refresh_after).toBeNull();
+    }
+  });
+
+  test('a public_listing patch reports cached:true and does not restamp the stored instant', async () => {
+    const scoredAt = new Date().toISOString();
+    const { bucket, store } = makeR2(await prefill({ scoredAt, stored: false }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as FreshnessBody & { scorecard?: { public_listing?: boolean } };
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(scoredAt);
+    expect(body.refresh_after).toBe(refreshAfter(scoredAt));
+    expect(body.scorecard?.public_listing).toBe(true);
+    const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as { scored_at: string };
+    expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  // AE6: storage and the terminal response spend one scoring instant, and the
+  // cache read that follows reports that same instant as cached.
+  test('the fresh terminal event reports cached:false and the exact instant persisted to R2', async () => {
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST), env, ctx, { probeFetch: stubProbeFetch() });
+    const events = await readNdjson(resp);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const terminal = events.at(-1) as FreshnessBody & { type?: string };
+    expect(terminal.type).toBe('complete');
+    expect(terminal.cached).toBe(false);
+    const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as { scored_at: string };
+    expect(terminal.scored_at).toBe(stored.scored_at);
+    expect(terminal.refresh_after).toBe(refreshAfter(stored.scored_at));
+
+    // The immediately following read serves the same instant as a cache hit.
+    const second = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    const body = (await second.json()) as FreshnessBody;
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(terminal.scored_at);
+    expect(body.refresh_after).toBe(terminal.refresh_after);
+  });
+
+  test('interim discovery and check events carry no freshness fields', async () => {
+    const env = makeEnv();
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST), env, makeCtx(), { probeFetch: stubProbeFetch() });
+    const events = await readNdjson(resp);
+    const interim = events.slice(0, -1);
+    expect(interim.length).toBeGreaterThan(0);
+    for (const event of interim) {
+      expect(event.type === 'discovery' || event.type === 'check').toBe(true);
+      expect(event).not.toHaveProperty('cached');
+      expect(event).not.toHaveProperty('scored_at');
+      expect(event).not.toHaveProperty('refresh_after');
+    }
+  });
+
+  test('gate rejections and the disabled miss carry no freshness fields', async () => {
+    // 400 — SSRF pre-flight.
+    const ssrf = await runAudit(auditRequest('http://169.254.169.254/'), makeEnv(), makeCtx());
+    expect(ssrf.status).toBe(400);
+    expect(await ssrf.json()).not.toHaveProperty('refresh_after');
+
+    // 429 — a stale hit still behind the burst limiter.
+    const limited = await runAudit(
+      auditRequest(URL_UNDER_TEST),
+      makeEnv({
+        SCORE_CACHE: makeR2(await prefill({ scoredAt: new Date(Date.now() - 10 * 60_000).toISOString() })).bucket,
+        WEB_AUDIT_LIMITER: { limit: async () => ({ success: false }) },
+      }),
+      makeCtx(),
+    );
+    expect(limited.status).toBe(429);
+    const limitedBody = (await limited.json()) as Record<string, unknown>;
+    expect(limitedBody).not.toHaveProperty('cached');
+    expect(limitedBody).not.toHaveProperty('scored_at');
+    expect(limitedBody).not.toHaveProperty('refresh_after');
+
+    // 503 — kill switch on a true miss.
+    const disabled = await runAudit(auditRequest(URL_UNDER_TEST), makeEnv({ WEB_AUDIT_ENABLED: undefined }), makeCtx());
+    expect(disabled.status).toBe(503);
+    expect(await disabled.text()).not.toContain('refresh_after');
+
+    // 500 — a patch write that never landed reports no freshness for a
+    // result it did not produce.
+    const { bucket } = makeR2(await prefill({ scoredAt: new Date().toISOString(), stored: false }));
+    const failingWrites = {
+      get: bucket.get.bind(bucket),
+      async put() {
+        throw new Error('r2 unavailable');
+      },
+      async delete() {},
+    } as unknown as R2Bucket;
+    const patchFailed = await runAudit(
+      auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }),
+      makeEnv({ SCORE_CACHE: failingWrites }),
+      makeCtx(),
+      { probeFetch: throwingProbe },
+    );
+    expect(patchFailed.status).toBe(500);
+    const patchBody = (await patchFailed.json()) as Record<string, unknown>;
+    expect(patchBody.error).toBe('patch_failed');
+    expect(patchBody).not.toHaveProperty('cached');
+    expect(patchBody).not.toHaveProperty('scored_at');
+    expect(patchBody).not.toHaveProperty('refresh_after');
   });
 });
 

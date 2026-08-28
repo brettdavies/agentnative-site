@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
-import { keyFor } from '../src/worker/audit-web/cache';
+import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
@@ -72,6 +72,16 @@ function makeBucket(store: Map<string, string>): R2Bucket {
   } as unknown as R2Bucket;
 }
 
+// Zero checks and no discovery paths: the real engine completes after the
+// single (stubbed) root fetch, so the fresh audit_website path runs offline.
+const MINIMAL_REGISTRY = {
+  version: 1,
+  mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+  category_order: [],
+  categories: {},
+  checks: [],
+};
+
 interface WebEnvOpts {
   webEnabled?: boolean;
   mcpEnabled?: boolean;
@@ -82,6 +92,8 @@ interface WebEnvOpts {
   listPages?: ListedObject[][];
   limiterOk?: boolean;
   failRegistry?: boolean;
+  // Serve the zero-check registry so a fresh audit finishes without probing.
+  minimalRegistry?: boolean;
 }
 
 async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
@@ -98,7 +110,8 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
           new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
         if (path === '/_internal/mcp-catalog.json') return ok(JSON.stringify(FIXTURE_CATALOG));
         if (path === '/_internal/web-audit-registry.json') {
-          return opts.failRegistry ? new Response('boom', { status: 500 }) : ok(registry);
+          if (opts.failRegistry) return new Response('boom', { status: 500 });
+          return ok(opts.minimalRegistry ? JSON.stringify(MINIMAL_REGISTRY) : registry);
         }
         if (path === '/_internal/web-remediation.json') return ok(remediation);
         if (path === '/_internal/web-seed.json') {
@@ -982,6 +995,199 @@ describe('audit_website public_listing', () => {
     const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
     expect((readBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
     expect((auditBody.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+  });
+});
+
+// R10-R14 on the regular MCP surface. Every scorecard-bearing result carries
+// `cached`, `scored_at`, and `refresh_after` beside the scorecard, byte-identical
+// to what the browser API returns for the same stored state; misses,
+// disabled-without-cache, and gate errors carry none.
+describe('web-audit MCP freshness envelope', () => {
+  const TARGET = 'https://example.com/';
+  const IP = '203.0.113.21';
+
+  // Derived from the shared window constant, not a literal: the cache test
+  // owns the one assertion that pins the window's value.
+  const refreshAfter = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
+
+  type Freshness = { cached: unknown; scored_at: unknown; refresh_after: unknown };
+  const freshnessOf = (body: Record<string, unknown>): Freshness => ({
+    cached: body.cached,
+    scored_at: body.scored_at,
+    refresh_after: body.refresh_after,
+  });
+
+  function storedEntry(opts: { scoredAt?: string; stored?: boolean } = {}): string {
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: TARGET,
+      score_pct: 64,
+      results: [],
+    };
+    if (opts.stored !== undefined) scorecard.public_listing = opts.stored;
+    const entry: Record<string, unknown> = { spec_version: SPEC_VERSION, target_url: TARGET, scorecard };
+    if (opts.scoredAt !== undefined) entry.scored_at = opts.scoredAt;
+    return JSON.stringify(entry);
+  }
+
+  async function envWith(opts: { scoredAt?: string; stored?: boolean } & WebEnvOpts = {}) {
+    const { scoredAt, stored, ...envOpts } = opts;
+    const store = new Map<string, string>();
+    const key = await keyFor(TARGET, SPEC_VERSION);
+    store.set(key, storedEntry({ scoredAt, stored }));
+    const env = await makeEnv(envOpts);
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    return { env, store, key };
+  }
+
+  test('get_website_audit reports cached:true with the stored instant and a refresh one stale window later', async () => {
+    const scoredAt = new Date().toISOString();
+    const { env } = await envWith({ scoredAt });
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    expect(body.found).toBe(true);
+    expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
+  });
+
+  // AE8.
+  test('get_website_audit reports null instants for a legacy entry', async () => {
+    for (const scoredAt of [undefined, '', 'not-a-date']) {
+      const { env } = await envWith({ scoredAt });
+      const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+      expect(body.found).toBe(true);
+      expect(freshnessOf(body)).toEqual({ cached: true, scored_at: null, refresh_after: null });
+    }
+  });
+
+  test('get_website_audit misses carry no freshness fields', async () => {
+    const env = await makeEnv();
+    const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'never-seen.dev' }));
+    expect(body.found).toBe(false);
+    expect(body).not.toHaveProperty('cached');
+    expect(body).not.toHaveProperty('scored_at');
+    expect(body).not.toHaveProperty('refresh_after');
+  });
+
+  test('audit_website serve-cached reports cached:true with the stored instant', async () => {
+    const scoredAt = new Date().toISOString();
+    const { env } = await envWith({ scoredAt });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
+    expect(body.source).toBe('cache');
+    expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
+  });
+
+  // AE7.
+  test('audit_website serves a stale hit while disabled with a refresh_after in the past', async () => {
+    const scoredAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const { env } = await envWith({ scoredAt, webEnabled: false });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
+    expect(body.source).toBe('cache');
+    expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
+    expect(Date.parse(body.refresh_after as string)).toBeLessThan(Date.now());
+  });
+
+  test('an audit_website listing patch reports cached:true and does not restamp the stored instant', async () => {
+    const scoredAt = new Date().toISOString();
+    const { env, store, key } = await envWith({ scoredAt, stored: false });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
+    expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
+    expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
+    const stored = JSON.parse(store.get(key) as string) as { scored_at: string };
+    expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  // AE6 on the MCP surface: one scoring instant reaches both R2 and the response.
+  test('a fresh audit_website completion reports cached:false and the exact instant persisted to R2', async () => {
+    const store = new Map<string, string>();
+    const env = await makeEnv({ minimalRegistry: true });
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('not found', { status: 404 })) as unknown as typeof fetch;
+    let body: Record<string, unknown>;
+    try {
+      body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(body.audited).toBe(true);
+    expect(body.source).toBe('fresh-audit');
+    const stored = JSON.parse(store.get(await keyFor(TARGET, SPEC_VERSION)) as string) as { scored_at: string };
+    expect(freshnessOf(body)).toEqual({
+      cached: false,
+      scored_at: stored.scored_at,
+      refresh_after: refreshAfter(stored.scored_at),
+    });
+  });
+
+  test('the disabled-without-cache message carries no freshness fields', async () => {
+    const env = await makeEnv({ webEnabled: false });
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'never-seen.dev' }, IP));
+    expect(body.audited).toBe(false);
+    expect(body).not.toHaveProperty('cached');
+    expect(body).not.toHaveProperty('scored_at');
+    expect(body).not.toHaveProperty('refresh_after');
+  });
+
+  test('list_website_audits carries no freshness fields', async () => {
+    const env = await makeEnv({ cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['first.dev']) } });
+    const body = jsonContent(await callTool(env, 'list_website_audits', {}));
+    expect(body).not.toHaveProperty('cached');
+    expect(body).not.toHaveProperty('scored_at');
+    expect(body).not.toHaveProperty('refresh_after');
+  });
+
+  // AE5 across surfaces: one stored entry, three read paths, identical values.
+  test('the browser API and both MCP read tools report byte-identical freshness for one stored entry', async () => {
+    const scoredAt = new Date().toISOString();
+    const store = new Map<string, string>();
+    store.set(await keyFor(TARGET, SPEC_VERSION), storedEntry({ scoredAt, stored: true }));
+    const env = await makeEnv();
+    (env as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(store);
+
+    const getBody = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
+    const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
+
+    // The web route's serve-cached branch precedes every metered gate, so it
+    // needs only R2 to answer.
+    const webEnv = {
+      ASSETS: {
+        async fetch() {
+          return new Response('not found', { status: 404 });
+        },
+      } as unknown as Fetcher,
+      SCORE_CACHE: makeBucket(store),
+      WEB_AUDIT_ENABLED: 'true',
+      TURNSTILE_SECRET: 'test-turnstile-secret',
+      SESSION_HMAC_SECRET: 'test-session-secret',
+    } as unknown as WebAuditRouteEnv;
+    const resp = await handleWebAudit(
+      new Request('https://anc.dev/api/audit-web', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'example.com' }),
+      }),
+      webEnv,
+      { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext,
+    );
+    expect(resp.status).toBe(200);
+    const webBody = (await resp.json()) as Record<string, unknown>;
+
+    const expected = { cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) };
+    expect(freshnessOf(getBody)).toEqual(expected);
+    expect(freshnessOf(auditBody)).toEqual(expected);
+    expect(freshnessOf(webBody)).toEqual(expected);
+  });
+
+  test('both read-tool descriptions document the fields and the eligibility caveat', async () => {
+    const env = await makeEnv();
+    const { body } = await mcpRpc(env, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
+    const tools = (body.result?.tools as Array<{ name: string; description: string }>) ?? [];
+    for (const name of ['get_website_audit', 'audit_website']) {
+      const description = tools.find((t) => t.name === name)?.description ?? '';
+      expect(description).toContain('cached');
+      expect(description).toContain('scored_at');
+      expect(description).toContain('refresh_after');
+      expect(description).toContain('not a promise');
+    }
   });
 });
 

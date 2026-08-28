@@ -9,10 +9,12 @@
 // Event contract (one JSON object per NDJSON line):
 //   { type: "discovery", mcp_endpoint }
 //   { type: "check", id, principle, keyword, status, evidence }
-//   { type: "complete",   scorecard, share_url }
+//   { type: "complete",   ...freshness, scorecard, share_url }
 //   { type: "incomplete", scorecard, share_url: null }
 //   { type: "error", message }
-// A cache hit returns a single application/json body { cached, scorecard, share_url }.
+// A cache hit returns a single application/json body { ...freshness, scorecard, share_url }.
+// Freshness is the three-field envelope every result-bearing web-audit
+// response carries beside the scorecard.
 
 import { getTurnstileToken, readSitekey, takeTurnstileToken } from './turnstile';
 import { buildAuditWebBody, takePublicListing } from './web-audit-listing';
@@ -25,10 +27,24 @@ interface CheckEvent {
   status: string;
   evidence: string;
 }
+
+/**
+ * Response-envelope freshness, mirroring the server's `WebAuditFreshness`.
+ * Declared here rather than imported because the client typechecks against
+ * DOM lib types only and the server module pulls in Workers globals.
+ * `cached` is response provenance; `refresh_after` is the earliest
+ * cache-expiry eligibility time, not a guarantee a fresh audit can run.
+ */
+interface AuditFreshness {
+  cached: boolean;
+  scored_at: string | null;
+  refresh_after: string | null;
+}
+
 type StreamEvent =
   | { type: 'discovery'; mcp_endpoint: string | null }
   | CheckEvent
-  | { type: 'complete'; scorecard: { score_pct?: number }; share_url: string }
+  | ({ type: 'complete'; scorecard: { score_pct?: number }; share_url: string } & AuditFreshness)
   | { type: 'incomplete'; scorecard: { score_pct?: number }; share_url: null }
   | { type: 'error'; message: string };
 
@@ -185,8 +201,9 @@ async function run(args: RunArgs): Promise<void> {
 
   const contentType = resp.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {
-    const body = (await resp.json().catch(() => ({}))) as {
-      cached?: boolean;
+    // Partial freshness: a result-bearing cache hit carries all three fields,
+    // while the error bodies that share this branch carry none.
+    const body = (await resp.json().catch(() => ({}))) as Partial<AuditFreshness> & {
       scorecard?: { score_pct?: number };
       share_url?: string;
       error?: string;
