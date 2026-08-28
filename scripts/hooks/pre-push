@@ -54,6 +54,18 @@ cd "$(git rev-parse --show-toplevel)"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 
+# The dev-only prose stack (styles/, .vale.ini, scripts/prose-check.sh) is
+# absent on main and on release/* branches cut from it, so the stages that
+# consume it skip there. `[ -d styles ]` is the wrong presence test: any
+# ignored stray inside the directory, a Finder .DS_Store being the one that
+# actually happened, recreates it on a branch that tracks none of the tree, and
+# the stage then runs against a pack that is not there and fails a release
+# push. Test for the file the stage actually reads.
+#
+# Called with an unquoted glob: a pattern that matches nothing expands to
+# itself, and that literal path does not exist.
+have_glob() { [ -e "$1" ]; }
+
 bold '==> bun run lint'
 bun run lint
 
@@ -73,18 +85,17 @@ bold '==> bun x wrangler deploy --dry-run (staging env)'
 bun x wrangler deploy --dry-run --env staging
 
 bold '==> Pack-README drift check'
-# Pack-README + banned-fonts both consume styles/<pack>/*.yml. The
-# styles/ tree is dev-only tooling (see prose-check guard below); when
-# absent (e.g., main or release/* branches), skip rather than fail.
-if [ ! -d styles ]; then
-  echo "    WARN: styles/ absent; skipping pack-README drift check (dev-only tooling)."
+# Reads styles/site/*.yml, so that glob is the presence test.
+if ! have_glob styles/site/*.yml; then
+  echo "    WARN: styles/site/*.yml absent; skipping pack-README drift check (dev-only tooling)."
 else
   bun scripts/generate-pack-readme.mjs site --check </dev/null
 fi
 
 bold '==> Banned-font deployment scan'
-if [ ! -d styles ] || [ ! -x scripts/check-banned-fonts.sh ]; then
-  echo "    WARN: styles/ or scripts/check-banned-fonts.sh absent; skipping (dev-only tooling)."
+# Reads styles/site/BannedFonts.yml — the token list is that file.
+if [ ! -f styles/site/BannedFonts.yml ] || [ ! -x scripts/check-banned-fonts.sh ]; then
+  echo "    WARN: styles/site/BannedFonts.yml or scripts/check-banned-fonts.sh absent; skipping (dev-only tooling)."
 else
   bash scripts/check-banned-fonts.sh </dev/null
 fi
@@ -107,13 +118,11 @@ else
 fi
 
 bold '==> prose-check (Vale + LanguageTool)'
-# The prose-check stack (styles/, .vale.ini, scripts/prose-check.sh) is
-# dev-only tooling — present on `dev`, absent on `main` (and on release/*
-# branches cut from main). When the hook runs against a branch missing
-# any of those, warn and skip rather than fail; contributor work happens
-# on `dev` where the stack is present.
-if [ ! -d styles ] || [ ! -f .vale.ini ] || [ ! -x scripts/prose-check.sh ]; then
-  echo "    WARN: prose-check stack absent (styles/, .vale.ini, scripts/prose-check.sh)."
+# Vale resolves its rules through `StylesPath = styles` in .vale.ini, and the
+# packs under styles/site/*.yml are what this repo adds on top. Contributor
+# work happens on `dev`, where the whole stack is present.
+if ! have_glob styles/site/*.yml || [ ! -f .vale.ini ] || [ ! -x scripts/prose-check.sh ]; then
+  echo "    WARN: prose-check stack absent (styles/site/*.yml, .vale.ini, scripts/prose-check.sh)."
   echo "          This is normal on main and release/* branches; the stack is dev-only tooling. Skipping."
 else
   # Scope to files changed vs PROSE_CHECK_BASE (default origin/dev) so untracked
