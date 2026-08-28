@@ -44,9 +44,13 @@ gh pr create --base dev --title "feat(scope): what changed"
 Paths that live only on `dev` and never ship to `main` can be committed directly to `dev` without a feature branch or
 PR. The `guard-main-docs` workflow blocks them from `main` PRs regardless. The exception applies to:
 
-- Engineering docs: `docs/brainstorms/`, `docs/ideation/`, `docs/plans/`, `docs/research/`, `docs/reviews/`,
-  `docs/solutions/`, and anything under `.context/`.
-- Prose-check stack: `styles/`, `.vale.ini`, `scripts/prose-check.sh`.
+- Engineering docs: `docs/architecture/`, `docs/brainstorms/`, `docs/designs/`, `docs/ideation/`, `docs/plans/`,
+  `docs/research/`, `docs/reviews/`, `docs/solutions/`, `docs/TODOS.md`, and anything under `.context/`.
+- Prose-check stack: `styles/`, `.vale.ini`, `scripts/prose-check.sh`, `scripts/check-banned-fonts.sh`,
+  `scripts/scoring/`.
+
+`scripts/release/guarded-paths.sh` prints the authoritative set, resolved from the workflow. Run it rather than trusting
+this list, which is a reading aid.
 
 The standard feature → PR → squash-merge flow remains required for everything else, including consumer-facing markdown
 (README, AGENTS, CONTRIBUTING, the release runbook).
@@ -94,13 +98,11 @@ git cherry-pick <sha1> <sha2> ...
 
 # 4. Triple-diff verification.
 #
-#    GUARDED is every path guard-main-docs rejects on a PR to main: the reusable's
-#    hardcoded base (docs/architecture, docs/brainstorms, docs/ideation, docs/plans,
-#    docs/research, docs/reviews, docs/solutions) plus this repo's extra_paths in
-#    .github/workflows/guard-main-docs.yml. Keep the two in step: a path the workflow
-#    guards but this pattern omits leaks past the local check and fails in CI, and
-#    diff-B hides a genuinely missed pick behind the same blind spot.
-GUARDED='^(docs/(architecture|brainstorms|designs|ideation|plans|research|reviews|solutions)/|docs/TODOS\.md$|styles/|\.vale\.ini$|scripts/(prose-check|check-banned-fonts)\.sh$|scripts/scoring/|\.context/)'
+#    GUARDED resolves the reusable's hardcoded base plus this repo's extra_paths
+#    straight out of .github/workflows/guard-main-docs.yml. Do not restate the
+#    pattern here or anywhere else: every hand-kept copy drifted from the workflow,
+#    and a copy that omits a guarded path reports a real leak as clean.
+GUARDED="$(scripts/release/guarded-paths.sh)"
 
 git diff origin/main..HEAD --stat                                              # A: ship surface
 git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" || echo "(none)"   # B: no missed picks
@@ -110,6 +112,13 @@ git diff origin/dev..origin/main --stat | tail -5                              #
 git diff origin/main..HEAD --name-only \
   | grep -E "$GUARDED" \
   && echo "LEAKED — reset and redo" || echo "(clean)"
+
+# D: what this release ADDS to main. The leak check screens against the registered
+#    set, so it is blind to a category nobody registered yet; that blind spot is how
+#    docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
+#    Read this list. Every docs/ entry needs a reason to ship, or it needs registering
+#    in the workflow's extra_paths and removing from the branch.
+git diff origin/main..HEAD --diff-filter=A --name-only | grep '^docs/' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
 git cherry HEAD origin/dev | grep '^+' || echo "(none)"
