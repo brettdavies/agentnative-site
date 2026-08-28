@@ -13,15 +13,11 @@ const OPENAPI_ENTRY: WebRemediationEntry = {
 };
 
 describe('assembleRemediation', () => {
-  test('assembles the Goal/Issue/Fix/Skill/Docs prompt with the live evidence as Issue', () => {
-    const assembled = assembleRemediation(OPENAPI_ENTRY, {
-      checkId: 'openapi',
-      origin: 'https://anc.dev',
-      evidence: 'https://example.com/openapi.json -> 404 (status 404 not in [200])',
-    });
+  test('assembles the Goal/Issue/Fix/Skill/Docs prompt from catalog text alone', () => {
+    const assembled = assembleRemediation(OPENAPI_ENTRY, { checkId: 'openapi', origin: 'https://anc.dev' });
     expect(assembled.prompt.split('\n')).toEqual([
       'Goal: Publish an OpenAPI description so non-MCP agents can call your API',
-      'Issue: https://example.com/openapi.json -> 404 (status 404 not in [200])',
+      'Issue: the check did not pass in the latest audit',
       'Fix: Publish an OpenAPI 3.1 description at /openapi.json covering your REST surface (endpoints, params, schemas).',
       'Skill: https://anc.dev/web-audit/skill/openapi',
       'Docs: https://spec.openapis.org/oas/latest.html',
@@ -30,28 +26,28 @@ describe('assembleRemediation', () => {
     expect(assembled.resources).toEqual(OPENAPI_ENTRY.resources);
   });
 
-  test('a missing evidence arg yields a generic Issue line', () => {
-    const assembled = assembleRemediation(OPENAPI_ENTRY, { checkId: 'openapi', origin: 'https://anc.dev' });
-    expect(assembled.prompt).toContain('Issue: the check did not pass in the latest audit');
+  test('the prompt for a check id is the same string on every run (R19)', () => {
+    // The audited site controls its evidence, so no per-run text reaches
+    // the prompt: the Result line is where a finding is reported.
+    const first = assembleRemediation(OPENAPI_ENTRY, { checkId: 'openapi', origin: 'https://anc.dev' });
+    const second = assembleRemediation(OPENAPI_ENTRY, { checkId: 'openapi', origin: 'https://anc.dev' });
+    expect(first.prompt).toBe(second.prompt);
+    expect(first.prompt).not.toContain('404');
   });
 
   test('the Docs line is omitted when an entry has no resources', () => {
     const assembled = assembleRemediation(
       { ...OPENAPI_ENTRY, resources: [] },
-      { checkId: 'openapi', origin: 'https://anc.dev', evidence: 'x' },
+      { checkId: 'openapi', origin: 'https://anc.dev' },
     );
     expect(assembled.prompt).not.toContain('Docs:');
   });
 
   test('a check missing a catalog entry degrades to a generic prompt (no crash)', () => {
-    const assembled = assembleRemediation(undefined, {
-      checkId: 'mystery-check',
-      origin: 'https://anc.dev',
-      evidence: 'boom',
-    });
+    const assembled = assembleRemediation(undefined, { checkId: 'mystery-check', origin: 'https://anc.dev' });
     expect(assembled.goal).toContain('mystery-check');
     expect(assembled.skill_url).toBe('https://anc.dev/web-audit/skill/mystery-check');
-    expect(assembled.prompt).toContain('Issue: boom');
+    expect(assembled.prompt).toContain('Issue: the check did not pass in the latest audit');
   });
 });
 

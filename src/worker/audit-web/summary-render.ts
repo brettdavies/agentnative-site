@@ -300,7 +300,7 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
   const entry = catalog[row.id];
   const result = resultLine(row.status, row.evidence, row.na_reason);
   const fixable = isFixable(row);
-  const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
+  const assembled = assembleRemediation(entry, { checkId: row.id, origin });
   const goal = entry?.goal ?? assembled.goal;
 
   const resourceLinks = [
@@ -380,7 +380,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
       const entry = catalog[row.id];
       const result = resultLine(row.status, row.evidence, row.na_reason);
       const fixable = isFixable(row);
-      const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
+      const assembled = assembleRemediation(entry, { checkId: row.id, origin });
       lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
       if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
       lines.push(`- Goal: ${entry?.goal ?? assembled.goal}.`);

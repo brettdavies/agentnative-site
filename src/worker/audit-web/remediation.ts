@@ -2,10 +2,11 @@
 // catalog (dist/_internal/web-remediation.json, projected from
 // remediation.yaml) carries title/goal/fix/resources per check; this
 // module assembles the audit-time artifacts: the copy-paste prompt
-// (Goal / Issue / Fix / Skill / Docs) with the run's evidence as the
-// uniform Issue line, and the always-shown Result line derived from
-// status + evidence.
+// (Goal / Issue / Fix / Skill / Docs), which is site-owned catalog text
+// and therefore identical for every run of a given check, and the
+// always-shown Result line derived from status + evidence.
 
+import { isRemediableStatus } from '../../shared/web-audit-findings';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
 export interface WebRemediationResource {
@@ -56,19 +57,24 @@ function oneLine(text: string): string {
   return text.replace(/\s*\n\s*/g, ' ').trim();
 }
 
-const GENERIC_ISSUE = 'the check did not pass in the latest audit';
+// The audited site controls its own evidence strings (serverInfo names,
+// response headers, error bodies), so they stay on the escaped Result
+// surface and never reach instruction-bearing prompt text (R19). The
+// Issue line is therefore one site-owned sentence for every row.
+const ISSUE_LINE = 'the check did not pass in the latest audit';
 
 export interface AssembleInput {
   checkId: string;
   /** Site origin the Skill link targets, e.g. https://anc.dev */
   origin: string;
-  /** The run's evidence line; omitted = a generic Issue line. */
-  evidence?: string | null;
 }
 
 /**
  * Assemble the remediation object for a check. A check missing a catalog
- * entry degrades to a generic prompt rather than crashing (R10).
+ * entry degrades to a generic prompt rather than crashing (R10). The
+ * result depends only on the check id and the catalog, so a check's
+ * prompt is a fixed string whose length can be proven against the
+ * WebMCP output cap before it ships.
  */
 export function assembleRemediation(
   entry: WebRemediationEntry | undefined,
@@ -80,8 +86,7 @@ export function assembleRemediation(
     ? oneLine(entry.fix)
     : `Implement the surface the ${input.checkId} check probes; see the skill page.`;
   const resources = entry?.resources ?? [];
-  const issue = input.evidence && input.evidence.length > 0 ? input.evidence : GENERIC_ISSUE;
-  const lines = [`Goal: ${goal}`, `Issue: ${issue}`, `Fix: ${fix}`, `Skill: ${skillUrl}`];
+  const lines = [`Goal: ${goal}`, `Issue: ${ISSUE_LINE}`, `Fix: ${fix}`, `Skill: ${skillUrl}`];
   if (resources.length > 0) {
     lines.push(`Docs: ${resources.map((r) => r.url).join(', ')}`);
   }
@@ -95,13 +100,14 @@ export function assembleRemediation(
 }
 
 /**
- * Whether a status warrants a fix prompt. `noncompliant` joins `broken`
- * and `absent`: the surface works, and the spec detail it violates is
- * precisely what the fix addresses. A row's `unprobed` flag overrides
- * this at the call site, because the run holds no observation to fix.
+ * Whether a status warrants a fix prompt. The set lives in the shared
+ * finding module so the Worker, the result-page widget, and the WebMCP
+ * tools cannot drift apart on eligibility. A row's `unprobed` flag
+ * overrides this at the call site, because the run holds no observation
+ * to fix.
  */
 export function isFixableStatus(status: ScorecardStatus): boolean {
-  return status === 'broken' || status === 'noncompliant' || status === 'absent';
+  return isRemediableStatus(status);
 }
 
 /**

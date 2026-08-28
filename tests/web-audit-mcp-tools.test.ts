@@ -672,13 +672,14 @@ describe('get_web_remediation (reshaped, U13)', () => {
     expect(String(remediation.prompt)).toContain('Issue: the check did not pass in the latest audit');
   });
 
-  test('an evidence arg becomes the prompt Issue line', async () => {
+  test('the prompt is fixed per check id and never carries caller-supplied text', async () => {
     const env = await makeEnv();
     const body = jsonContent(
       await callTool(env, 'get_web_remediation', { check_id: 'openapi', evidence: 'x.dev/openapi.json -> 404' }),
     );
     const remediation = body.remediation as { prompt: string };
-    expect(remediation.prompt).toContain('Issue: x.dev/openapi.json -> 404');
+    expect(remediation.prompt).toContain('Issue: the check did not pass in the latest audit');
+    expect(remediation.prompt).not.toContain('x.dev/openapi.json');
   });
 
   test('an unknown check id returns found:false', async () => {
@@ -728,13 +729,16 @@ describe('audit_website inline remediation (U13)', () => {
     expect(pass?.remediation).toBeUndefined();
 
     const absent = byId.get('openapi');
-    expect(absent?.result).toContain('Not found');
+    // The evidence rides the result line; the prompt is site-owned
+    // catalog text and carries no target-controlled string (R19).
+    expect(absent?.result).toContain('Not found (https://example.com/openapi.json -> 404)');
     expect(absent?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
-    expect(absent?.remediation?.prompt).toContain('Issue: https://example.com/openapi.json -> 404');
+    expect(absent?.remediation?.prompt).toContain('Issue: the check did not pass in the latest audit');
+    expect(absent?.remediation?.prompt).not.toContain('openapi.json -> 404');
 
     const broken = byId.get('mcp-tools-list');
-    expect(broken?.result).toContain('Present but broken');
-    expect(broken?.remediation?.prompt).toContain('Issue: no tools array');
+    expect(broken?.result).toContain('Present but broken (no tools array)');
+    expect(broken?.remediation?.prompt).not.toContain('no tools array');
 
     const na = byId.get('dns-aid');
     expect(na?.result).toContain('Not implemented, optional');

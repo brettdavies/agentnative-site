@@ -2,9 +2,9 @@
 // Mirrors get_spec_section: a reader that returns the static remediation
 // for any check id with a typed found/not-found envelope (both
 // isError:false). The response carries the CF-style remediation object
-// (goal / fix / skill_url / resources / prompt); when the caller passes
-// this run's evidence string it becomes the prompt's Issue line,
-// otherwise a generic line stands in. Assembly and the per-isolate
+// (goal / fix / skill_url / resources / prompt), which is site-owned
+// catalog text: a run's evidence stays on the scorecard's Result surface
+// and never enters prompt text (R19). Assembly and the per-isolate
 // catalog load live in src/worker/audit-web/remediation.ts.
 
 import type { McpServer } from '@modelcontextprotocol/server';
@@ -37,18 +37,14 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
       description:
         'Return the canonical remediation for a web-audit check by id (e.g. "llms-txt", "mcp-initialize"). Returns ' +
         'isError:false for both outcomes: found returns { found:true, remediation: { check_id, title, goal, fix, ' +
-        "skill_url, resources, prompt } }, not-found returns { found:false, message }. Pass the failing check's " +
-        "evidence string to make the prompt's Issue line this run's finding.",
+        'skill_url, resources, prompt } }, not-found returns { found:false, message }. The prompt is fixed per ' +
+        "check id; read the scorecard row's result line for what this run observed.",
       inputSchema: {
         check_id: z.string().describe('The check id from the web scorecard results, e.g. "llms-txt".'),
-        evidence: z
-          .string()
-          .optional()
-          .describe("Optional: this run's evidence line for the check; becomes the prompt's Issue line."),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ check_id, evidence }) => {
+    async ({ check_id }) => {
       let catalog: WebRemediationCatalog;
       try {
         catalog = await loadWebRemediationCatalog(env);
@@ -62,7 +58,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
       if (!entry) {
         return textContent({ found: false, message: `no remediation for check id: ${check_id}` });
       }
-      const assembled = assembleRemediation(entry, { checkId: check_id, origin: SITE_URL, evidence });
+      const assembled = assembleRemediation(entry, { checkId: check_id, origin: SITE_URL });
       return textContent({
         found: true,
         remediation: { check_id, title: entry.title, ...assembled },

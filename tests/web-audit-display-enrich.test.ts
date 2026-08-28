@@ -262,14 +262,17 @@ describe('attachInlineRemediation', () => {
     expect(byId.get('json-schemas')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/json-schemas');
 
     const broken = byId.get('mcp-tools-list');
-    expect(broken?.result).toContain('Present but broken');
-    expect(broken?.remediation?.prompt).toContain('Issue: no tools array');
+    // The evidence is reported on the result line; the prompt stays
+    // site-owned catalog text (R19).
+    expect(broken?.result).toContain('Present but broken (no tools array)');
+    expect(broken?.remediation?.prompt).toContain('Issue: the check did not pass in the latest audit');
+    expect(broken?.remediation?.prompt).not.toContain('no tools array');
 
     // A noncompliant surface works, and the spec detail it violates is
     // exactly what the fix prompt names, so it must carry one.
     const noncompliant = byId.get('mcp-unknown-method');
-    expect(noncompliant?.result).toContain('Works but does not conform');
-    expect(noncompliant?.remediation?.prompt).toContain('Issue: expected error code -32601, got -32603');
+    expect(noncompliant?.result).toContain('Works but does not conform (expected error code -32601, got -32603)');
+    expect(noncompliant?.remediation?.prompt).not.toContain('-32603');
 
     const na = byId.get('dns-aid');
     expect(na?.result).toContain('Not implemented, optional');
@@ -309,6 +312,6 @@ describe('attachInlineRemediation', () => {
       results: Array<{ remediation?: { skill_url: string; prompt: string } }>;
     };
     expect(out.results[0].remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/no-catalog-entry');
-    expect(out.results[0].remediation?.prompt).toContain('Issue: missing');
+    expect(out.results[0].remediation?.prompt).toContain('Issue: the check did not pass in the latest audit');
   });
 });

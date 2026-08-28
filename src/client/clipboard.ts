@@ -3,7 +3,7 @@
 // Buttons are added client-side so the no-JS case is a clean render with
 // no dead controls (docs/DESIGN.md §4.8 C6).
 
-import { carriersFromElements, selectAssemblePrompts } from './assemble-prompt';
+import { findingRowsFromElements, selectAssemblePrompts } from './assemble-prompt';
 import { attachInstallCmd } from './install-cmd';
 
 const COPIED_MS = 1500;
@@ -155,8 +155,10 @@ function attachAssemblePrompt() {
   const hero = page?.querySelector('.scorecard-hero');
   if (!page || !hero || page.querySelector('[data-assemble-prompt]')) return;
 
-  const carriers = carriersFromElements(page.querySelectorAll('[data-copy-text][data-keyword]'));
-  if (carriers.length === 0) return;
+  const rows = findingRowsFromElements(page.querySelectorAll('.web-check[data-id]'));
+  // No row carries a prompt means nothing is assemblable, so the widget
+  // stays off the page rather than rendering a permanently empty control.
+  if (!rows.some((row) => row.prompt)) return;
   const section = document.createElement('section');
   section.className = 'assemble-prompt';
   section.setAttribute('data-assemble-prompt', '');
@@ -201,11 +203,11 @@ function attachAssemblePrompt() {
 
   let assembled = '';
   const refresh = () => {
-    assembled = selectAssemblePrompts(carriers, {
+    assembled = selectAssemblePrompts(rows, {
       includeShould: shouldBox.checked,
       includeMay: mayBox.checked,
     });
-    const emptyMust = selectAssemblePrompts(carriers, { includeShould: false, includeMay: false }).length === 0;
+    const emptyMust = selectAssemblePrompts(rows, { includeShould: false, includeMay: false }).length === 0;
     if (assembled.length === 0) {
       status.textContent = emptyMust
         ? 'No MUST failures. Enable SHOULD or MAY to include those tiers.'

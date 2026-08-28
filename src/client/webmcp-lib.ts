@@ -2,6 +2,7 @@
 // ≤1.5k. Probe document.modelContext then navigator.modelContext; no-op if
 // both are absent. See https://webmachinelearning.github.io/webmcp/
 
+import { pageMeta } from '../shared/web-audit-findings';
 import { auditTools } from './webmcp-audit';
 import { homeTools } from './webmcp-home';
 import { orientationTools } from './webmcp-orientation';
@@ -64,16 +65,40 @@ export function capExecute(text: string): string {
   return `${text.slice(0, EXECUTE_MAX - 1)}…`;
 }
 
-export function formatWorksheet(rows: Array<{ id: string; keyword: string; status: string }>): string {
-  let keep = rows.length;
-  while (keep >= 0) {
-    const omitted = rows.length - keep;
-    const body = JSON.stringify(rows.slice(0, keep));
-    const text = omitted === 0 ? body : `${body} … +${omitted} more`;
+export type PagedResult = {
+  /** Fields that precede the pagination metadata, e.g. freshness. */
+  head: Record<string, unknown>;
+  offset: number;
+  total: number;
+  items: readonly unknown[];
+  /** JSON key the items are published under. */
+  key?: string;
+};
+
+/**
+ * Serialize one page of whole items under EXECUTE_MAX. Slicing a
+ * serialized envelope would hand the reader broken JSON, so items are
+ * dropped from the end until the page fits and `pageMeta` reports the
+ * shortfall — the continuation cursor then carries the reader forward
+ * without a gap.
+ */
+export function packPage(page: PagedResult): string {
+  const key = page.key ?? 'items';
+  const render = (keep: number): string => {
+    const items = page.items.slice(0, keep);
+    return JSON.stringify({
+      ok: true,
+      ...page.head,
+      total: page.total,
+      ...pageMeta(page.offset, page.total, items.length),
+      [key]: items,
+    });
+  };
+  for (let keep = page.items.length; keep > 0; keep -= 1) {
+    const text = render(keep);
     if (text.length <= EXECUTE_MAX) return text;
-    keep -= 1;
   }
-  return capExecute(` … +${rows.length} more`);
+  return render(0);
 }
 
 export function emptyObjectSchema(): Record<string, unknown> {

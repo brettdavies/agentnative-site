@@ -201,7 +201,10 @@ describe('buildWebSummaryBody (U14)', () => {
     // The prompt is carried in a data attribute, never rendered as a <pre>.
     expect(html).not.toContain('<pre>');
     expect(html).toContain('data-copy-text="Goal: Publish an OpenAPI description');
-    expect(html).toContain('Issue: https://example.com/openapi.json -&gt; 404');
+    // The run's evidence is reported on the Result line and nowhere in
+    // the prompt: the audited site writes that string (R19).
+    expect(html).toContain('Issue: the check did not pass in the latest audit');
+    expect(html).not.toContain('Issue: https://example.com/openapi.json');
   });
 
   test('the carrier prompt equals assembleRemediation(...).prompt byte-for-byte (single source)', () => {
@@ -211,7 +214,6 @@ describe('buildWebSummaryBody (U14)', () => {
     const expected = assembleRemediation(REMEDIATION_FIXTURE.openapi, {
       checkId: 'openapi',
       origin: 'https://anc.dev',
-      evidence: 'https://example.com/openapi.json -> 404',
     }).prompt;
     expect(recovered).toBe(expected);
   });
