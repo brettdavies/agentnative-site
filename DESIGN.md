@@ -219,10 +219,11 @@ resolves to markdown or plain text (proper RFC 7231 q-value parsing via the
 `q=0` rejections and comma-separated media ranges), or, when the client states no content-type preference (`Accept`
 absent or `*/*`), when its `User-Agent` is on a strict allowlist of CLI tools and AI on-demand user-fetchers (`curl`,
 `wget`, `ChatGPT-User`, `Claude-User`, `Perplexity-User`, and peers). An explicit `Accept` wins over the User-Agent
-path, so browsers, Googlebot, and AI training/search-index crawlers stay on HTML. HTML and markdown responses carry
-`Vary: Accept, User-Agent` because the twin is negotiated on the same URL; every HTML response carries `Link` and
-`X-Llms-Txt` (the Mintlify pattern); the markdown variant carries `X-Robots-Tag: noindex` so search engines do not
-double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
+path, so browsers, Googlebot, and AI training/search-index crawlers stay on HTML. Extensionless HTML and markdown
+responses carry `Vary: Accept, User-Agent` because the twin is negotiated on the same URL; explicit `.md` is one
+representation and omits `Vary`. Every HTML response carries `Link` and `X-Llms-Txt` (the Mintlify pattern); the
+markdown variant carries `X-Robots-Tag: noindex` so search engines do not double-index. Deploy is `wrangler deploy`.
+Rollback is `wrangler rollback`.
 
 **Static-asset binding (A12).** `env.ASSETS` is the
 [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/) binding, configured in
@@ -235,9 +236,25 @@ double-index. Deploy is `wrangler deploy`. Rollback is `wrangler rollback`.
 - **HTML responses** carry `Link: </p<n>.md>; rel="alternate"; type="text/markdown"` and `X-Llms-Txt: /llms.txt`.
 - **Markdown responses** carry `Content-Type: text/markdown; charset=utf-8` and `X-Robots-Tag: noindex`.
 
-**Cache strategy (P4).** HTML and `.md` responses carry `Cache-Control: public, max-age=300, s-maxage=86400,
-stale-while-revalidate=60` (short browser cache, long edge cache, SWR for the deploy-between-fetches window). Hashed
-immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry `Cache-Control: public,
+**Cache strategy (P4).** Three classes, written only by `applyHeaders` (`src/worker/headers.ts`):
+
+- **HIT-1d** — bake-at-build HTML/markdown (`/about`, `/p1`–`/p8`, `/scorecards`, `/score/<tool>`, `/mcp-skill`, GET
+  `/mcp` as a page, other spec/docs pages without a live board). Browser: `Cache-Control: public, max-age=300,
+  stale-while-revalidate=60` (no `s-maxage`; that re-arms the custom-domain zone HIT that stored the Worker response and
+  dropped `Vary`). Edge: `Cloudflare-CDN-Cache-Control: public, max-age=86400`. Extensionless URLs keep `Vary: Accept,
+  User-Agent`. Explicit `.md` is one representation (no `Vary`). A new Worker version starts with an empty cache
+  (`cache.cross_version_cache` stays off). Path-keyed `/llms.txt`, `.json`, and `.svg` keep `Cache-Control: public,
+  max-age=300, s-maxage=86400, stale-while-revalidate=60` with no `Vary`.
+- **HIT-min** — live-board HTML and markdown: `/`, `/index.md`, `/web`, `/web.md`, `/web/<domain>`, `/web/<domain>.md`,
+  `/web?view=curated`, `/web?view=all`. Browser: `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is
+  visible on the next navigation. Edge: `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`
+  and `/index.md`; `web` on `/web`, `/web.md`, and every `/web?view=*`; only `web:{domain}` on `/web/<domain>` and its
+  `.md` twin. Same tag on every HTML/markdown variant. Explicit `.md` twins still have no `Vary`.
+- **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
+  `/web/scoring*`, `POST /mcp`, `/api/score`, `/api/audit-web`, and every Worker 4xx/5xx (including a pre-audit
+  `/web/<domain>` and `/score/live/<missing>`). A stored 5xx would otherwise become a skip-Worker HIT.
+
+Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry `Cache-Control: public,
 max-age=31536000, immutable`.
 
 **404 handling (A10).** Uses the Workers Static Assets default 404 body; no custom 404 page in v0.
@@ -459,8 +476,8 @@ documentation surface pattern at
 ### 3.9 Skill distribution — `/skill` and `/skill.json`
 
 Two surfaces, one source. Agents fetch `/skill.json` (canonical, machine-primary). Humans fetch `/skill` (HTML render,
-identical commands). Both derive from `src/data/skill/skill.json` at build time, so drift is structurally impossible because
-there's only one source.
+identical commands). Both derive from `src/data/skill/skill.json` at build time, so drift is structurally impossible
+because there's only one source.
 
 **Architecture: agent-primary.** The JSON is the contract; the HTML is a templated render. v1 ships singular `/skill`
 for the single advertised skill (`agent-native-cli`); per-skill `/skill/<name>` URLs remain deferred until N>1. When a
@@ -517,17 +534,17 @@ twin.
 
 **Build-step outputs (added to the §3.4.1 table):**
 
-| Source                | Emitted as                                            | Notes                                                              |
-| --------------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
+| Source                      | Emitted as                                            | Notes                                                              |
+| --------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
 | `src/data/skill/skill.json` | `dist/skill.json`, `dist/skill.html`, `dist/skill.md` | Canonical JSON + HTML render + markdown twin, all from one source. |
 
 `/skill` enters `sitemap.xml` and `llms.txt` (under a `## Skill` section); `/skill.json` enters `llms.txt` but NOT the
 sitemap because `X-Robots-Tag: noindex` keeps it out of search engines.
 
 **Release runbook entry.** The skill-release procedure lives in `RELEASES.md`. Each skill release bumps `version` in
-`src/data/skill/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and `/skill.md`
-against the Cloudflare cache-purge API after deploy). Update detection at install sites is handled by the skill bundle's
-`bin/check-update`, not by a manifest field.
+`src/data/skill/skill.json` if the manifest's user-facing fields changed (cache-purge `/skill`, `/skill.json`, and
+`/skill.md` against the Cloudflare cache-purge API after deploy). Update detection at install sites is handled by the
+skill bundle's `bin/check-update`, not by a manifest field.
 
 ### 3.10 CLI install — `/install`
 
@@ -585,31 +602,31 @@ courting developer adoption.
 
 **Emitted token summary** (full table with OKLCH, hex, and contrast in `docs/research/design/color-analysis.md`):
 
-| Role             | Light (hex) | Dark (hex) | Notes                                                                                                                                         |
-| ---------------- | ----------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--bg`           | `#fafbfd`   | `#060a0e`  | Page background.                                                                                                                              |
-| `--bg-code`      | `#f0f4f7`   | `#0d1218`  | Inline + block code background.                                                                                                               |
-| `--border`       | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.                                                                                                         |
-| `--fg-muted`     | `#626a72`   | `#818a94`  | Muted captions/meta. Clears WCAG AA small-text in both modes (5.3:1 light, 5.7:1 dark).                                                       |
-| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1.                                |
-| `--fg-body`      | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.                                                                                                      |
-| `--fg-heading`   | `#070c11`   | `#f3f2ed`  | Headings.                                                                                                                                     |
-| `--accent`       | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.                                                                                                         |
-| `--must`         | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                                                                                                                            |
-| `--should`       | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                                                                                                                          |
-| `--may`          | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                                                                                                                             |
-| `--band-low`     | `#b63230`   | `#f9776e`  | Score-band text, <50. Grading axis (fail/warn/pass), distinct from the obligation tiers.                                                      |
-| `--band-mid`     | `#a46400`   | `#f3ae58`  | Score-band text, 50–79.                                                                                                                       |
-| `--band-high`    | `#00792f`   | `#5ac576`  | Score-band text, ≥80. The pass green has no obligation-tier counterpart, keeping the two axes readable as different systems.                  |
-| `--band-*-bar`   | (vivid)     | (vivid)    | Meter fills. Decoupled from the text shades and brighter; the adjacent numeral always restates the value (non-text UI).                       |
-| `--meter-track`  | `#d9dfe5`   | `#1d252d`  | Empty-meter substrate; darkened (light) / raised (dark) so partial fills read.                                                                |
+| Role             | Light (hex) | Dark (hex) | Notes                                                                                                                        |
+| ---------------- | ----------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--bg`           | `#fafbfd`   | `#060a0e`  | Page background.                                                                                                             |
+| `--bg-code`      | `#f0f4f7`   | `#0d1218`  | Inline + block code background.                                                                                              |
+| `--border`       | `#cfd5db`   | `#222a32`  | Hairline dividers, code-block border.                                                                                        |
+| `--fg-muted`     | `#626a72`   | `#818a94`  | Muted captions/meta. Clears WCAG AA small-text in both modes (5.3:1 light, 5.7:1 dark).                                      |
+| `--fg-secondary` | `#6a7278`   | `#a3a9af`  | Readable secondary text: site tagline, eyebrow labels, footer meta, captions under 18px. Passes WCAG AA 4.5:1.               |
+| `--fg-body`      | `#1a2026`   | `#dfded8`  | Body prose. Warm off-white in dark mode.                                                                                     |
+| `--fg-heading`   | `#070c11`   | `#f3f2ed`  | Headings.                                                                                                                    |
+| `--accent`       | `#0058aa`   | `#6dbdff`  | Links, focus ring, copy-button hover.                                                                                        |
+| `--must`         | `#af2b25`   | `#ff9c8d`  | RFC keyword: MUST.                                                                                                           |
+| `--should`       | `#a16100`   | `#f6b669`  | RFC keyword: SHOULD.                                                                                                         |
+| `--may`          | `#007980`   | `#64d1d7`  | RFC keyword: MAY.                                                                                                            |
+| `--band-low`     | `#b63230`   | `#f9776e`  | Score-band text, <50. Grading axis (fail/warn/pass), distinct from the obligation tiers.                                     |
+| `--band-mid`     | `#a46400`   | `#f3ae58`  | Score-band text, 50–79.                                                                                                      |
+| `--band-high`    | `#00792f`   | `#5ac576`  | Score-band text, ≥80. The pass green has no obligation-tier counterpart, keeping the two axes readable as different systems. |
+| `--band-*-bar`   | (vivid)     | (vivid)    | Meter fills. Decoupled from the text shades and brighter; the adjacent numeral always restates the value (non-text UI).      |
+| `--meter-track`  | `#d9dfe5`   | `#1d252d`  | Empty-meter substrate; darkened (light) / raised (dark) so partial fills read.                                               |
 
 All body pairs (`--fg-body`, `--fg-secondary`, `--fg-heading`, `--accent`) pass WCAG AA (≥4.5:1) **and** APCA body
 minimum (|Lc| ≥ 60) in both modes. Headings exceed AAA. `--fg-muted` clears WCAG AA small-text in both modes; its
 dark-mode APCA sits below the 60 body floor (a known WCAG/APCA divergence on light-on-dark), so the generator pins it
 with a per-token assertion rather than letting it regress. The band text shades clear AA on the page background; the
-`--band-*-bar` fills and `--meter-track` are exempt as non-text UI. The generator fails the whole run (no files
-written) when any text-bearing token drops below its WCAG or APCA floor.
+`--band-*-bar` fills and `--meter-track` are exempt as non-text UI. The generator fails the whole run (no files written)
+when any text-bearing token drops below its WCAG or APCA floor.
 
 ### 4.2 Dark mode is deliberately designed (not inverted)
 
@@ -1059,8 +1076,8 @@ Accessibility: the toggle is a `<button>` group with `aria-pressed`, keyboard-na
   Space toggle it with zero JS; the nav bundle adds Escape-to-close. Routes without a nav entry (methodology, coverage,
   contribute, the web board) stay reachable from the footer meta row and in-page cross-links.
 - **Footer**: three centered rows inside a `.container` — the "Ask an AI" provider icons in 42px circles (every inline
-  SVG carries explicit width/height; iOS Safari renders viewBox-only inline SVG at 0×0), the mono
-  `Source spec · cli · site · skill` row, and the version/doc/machine-surface meta row.
+  SVG carries explicit width/height; iOS Safari renders viewBox-only inline SVG at 0×0), the mono `Source spec · cli ·
+  site · skill` row, and the version/doc/machine-surface meta row.
 - **Page columns**: each archetype owns its measure. The homepage composes full-bleed sections with an inner
   `.container` (72rem). Reading pages (`/p{N}` and every content subpage) render inside `.doc` (52rem). Scorecard pages
   (CLI, live, and web) render inside `.scorecard-page` (64rem). Boards use the leaderboard table width (92ch).

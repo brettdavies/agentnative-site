@@ -44,9 +44,13 @@ gh pr create --base dev --title "feat(scope): what changed"
 Paths that live only on `dev` and never ship to `main` can be committed directly to `dev` without a feature branch or
 PR. The `guard-main-docs` workflow blocks them from `main` PRs regardless. The exception applies to:
 
-- Engineering docs: `docs/brainstorms/`, `docs/ideation/`, `docs/plans/`, `docs/research/`, `docs/reviews/`,
-  `docs/solutions/`, and anything under `.context/`.
-- Prose-check stack: `styles/`, `.vale.ini`, `scripts/prose-check.sh`.
+- Engineering docs: `docs/architecture/`, `docs/brainstorms/`, `docs/designs/`, `docs/ideation/`, `docs/plans/`,
+  `docs/research/`, `docs/reviews/`, `docs/solutions/`, `docs/TODOS.md`, and anything under `.context/`.
+- Prose-check stack: `styles/`, `.vale.ini`, `scripts/prose-check.sh`, `scripts/check-banned-fonts.sh`,
+  `scripts/scoring/`.
+
+`scripts/release/guarded-paths.sh` prints the authoritative set, resolved from the workflow. Run it rather than trusting
+this list, which is a reading aid.
 
 The standard feature → PR → squash-merge flow remains required for everything else, including consumer-facing markdown
 (README, AGENTS, CONTRIBUTING, the release runbook).
@@ -93,14 +97,28 @@ git log --oneline dev --not origin/main
 git cherry-pick <sha1> <sha2> ...
 
 # 4. Triple-diff verification.
+#
+#    GUARDED resolves the reusable's hardcoded base plus this repo's extra_paths
+#    straight out of .github/workflows/guard-main-docs.yml. Do not restate the
+#    pattern here or anywhere else: every hand-kept copy drifted from the workflow,
+#    and a copy that omits a guarded path reports a real leak as clean.
+GUARDED="$(scripts/release/guarded-paths.sh)"
+
 git diff origin/main..HEAD --stat                                              # A: ship surface
-git diff HEAD..origin/dev --name-only | grep -v '^docs/' || echo "(none)"      # B: no missed picks
+git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" || echo "(none)"   # B: no missed picks
 git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
 
 # Re-confirm no guarded paths leaked.
 git diff origin/main..HEAD --name-only \
-  | grep -E '^(docs/plans|docs/brainstorms|docs/ideation|docs/reviews|docs/solutions|\.context)' \
+  | grep -E "$GUARDED" \
   && echo "LEAKED — reset and redo" || echo "(clean)"
+
+# D: what this release ADDS to main. The leak check screens against the registered
+#    set, so it is blind to a category nobody registered yet; that blind spot is how
+#    docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
+#    Read this list. Every docs/ entry needs a reason to ship, or it needs registering
+#    in the workflow's extra_paths and removing from the branch.
+git diff origin/main..HEAD --diff-filter=A --name-only | grep '^docs/' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
 git cherry HEAD origin/dev | grep '^+' || echo "(none)"
@@ -114,8 +132,9 @@ gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
 **Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
 kebab-case, 3-6 words.
 
-When the PR merges, `deploy.yml` publishes to staging. Auto-delete removes `release/<slug>` from the remote on merge.
-`dev` is untouched.
+When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on `github.ref ==
+'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on anc.dev. Auto-delete
+removes `release/<slug>` from the remote on merge. `dev` is untouched.
 
 → Rationale + triple-diff false-positive triage:
 [`RELEASES-RATIONALE.md` § Triple-diff verification](./RELEASES-RATIONALE.md#triple-diff-verification).
@@ -458,27 +477,37 @@ lives in [`docs/runbooks/live-scoring-analytics.md`](docs/runbooks/live-scoring-
 ## MCP endpoint release procedure
 
 `POST /mcp` (the Model Context Protocol server) reuses the live-scoring stack's `Sandbox` DO, R2 cache, and `SCORE_KV`.
-The MCP-specific additions to a release are two rate-limit bindings, two env-var kill switches, and a per-call visitor
-log. Operational characteristics differ from `/api/score` and merit explicit verification at each release.
+The MCP-specific additions to a release are two rate-limit bindings, three kill switches, and one structured
+`mcp.request` log line per POST
+([field table and query recipes](docs/runbooks/mcp-operator.md#structured-logging-mcprequest)). Operational
+characteristics differ from `/api/score` and merit explicit verification at each release.
 
 ### Bindings added by the MCP endpoint
 
-| Binding                    | Type       | Production limits   | Staging defaults | Purpose                                                                                                                            |
-| -------------------------- | ---------- | ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_LIMITER`              | Rate Limit | 60 req / 60s per IP | same             | Gates every `POST /mcp`. Anon fallback on missing `cf-connecting-ip`.                                                              |
-| `MCP_AUDIT_LIMITER`        | Rate Limit | 5 req / 60s per IP  | same             | Gates `score_cli` cache-miss audits. **No anon fallback.** Binding floor only; hourly window enforced in `SCORE_KV` (see below).   |
-| `MCP_ENABLED`              | `vars`     | `"false"`           | `"true"`         | Kill switch for the whole `/mcp` branch. Falsy returns 503 with `Retry-After: 3600` and plain text body (no JSON-RPC envelope).    |
-| `MCP_LIVE_SCORING_ENABLED` | `vars`     | `"false"`           | `"true"`         | Kill switch for `score_cli` only. Falsy returns `isError: false` with `audited: false, next_tool: get_scorecard`. Reads stay live. |
+| Binding                    | Type       | Production            | Staging                             | Purpose                                                                                                                            |
+| -------------------------- | ---------- | --------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_LIMITER`              | Rate Limit | 60 req / 60s per IP   | same                                | Gates every `POST /mcp`. Anon fallback on missing `cf-connecting-ip`.                                                              |
+| `MCP_AUDIT_LIMITER`        | Rate Limit | 5 req / 60s per IP    | same                                | Gates `score_cli` cache-miss audits. **No anon fallback.** Binding floor only; hourly window enforced in `SCORE_KV` (see below).   |
+| `MCP_ENABLED`              | secret     | `wrangler secret put` | `wrangler secret put --env staging` | Kill switch for the whole `/mcp` branch. Falsy returns 503 with `Retry-After: 3600` and plain text body (no JSON-RPC envelope).    |
+| `MCP_LIVE_SCORING_ENABLED` | secret     | `wrangler secret put` | `wrangler secret put --env staging` | Kill switch for `score_cli` only. Falsy returns `isError: false` with `audited: false, next_tool: get_scorecard`. Reads stay live. |
+| `MCP_LEGACY_ENABLED`       | `vars`     | `"true"` (top-level)  | `"true"` (`env.staging`)            | Kill switch for the legacy `initialize` lane only. Falsy returns JSON-RPC `-32022` with `data.supported`. Modern lane stays live.  |
 
 Both rate-limit bindings carry `namespace_id` values pinned in `wrangler.jsonc`. The CF Rate Limiting platform only
 accepts `period: 10 | 60`, so `MCP_AUDIT_LIMITER` enforces a 5-per-60-seconds burst floor; the per-hour ceiling lives in
 an application-side KV-backed window in `SCORE_KV` keyed `mcp_audit:<ip>:<hour_bucket>` with a 2-hour TTL.
 
+The two kill-switch shapes are not interchangeable. Secrets are set out of band and survive every deploy, which is what
+makes them usable mid-incident; an unset secret reads as off, so absence fails closed. The var is part of the deploy
+contract, re-asserted on every deploy, which is what makes the legacy sunset reviewable. A name is one shape or the
+other: `wrangler secret put` against a declared var name is rejected with Cloudflare API 10053.
+`tests/wrangler-config.test.ts` pins the split.
+
 ### Promotion checklist (first MCP release to main)
 
-1. **Flip both kill switches to live on production.** Production defaults `"false"`. Promotion requires `wrangler secret
-   put MCP_ENABLED true` and `wrangler secret put MCP_LIVE_SCORING_ENABLED true` against the production Worker. Secrets
-   are env-scoped, not migration-scoped; no deploy needed once set.
+1. **Flip both secret kill switches to live on production.** An unset secret reads as off, so promotion requires
+   `wrangler secret put MCP_ENABLED true` and `wrangler secret put MCP_LIVE_SCORING_ENABLED true` against the production
+   Worker. Secrets are env-scoped, not migration-scoped; no deploy needed once set. `MCP_LEGACY_ENABLED` needs no
+   promotion step: it is committed `"true"` and the deploy binds it.
 2. **Confirm both rate-limit bindings exist in `wrangler.jsonc` for the production env.** Production inherits from the
    top-level block by default; verify `MCP_LIMITER` and `MCP_AUDIT_LIMITER` both appear with the expected `namespace_id`
    and `simple` values.
@@ -517,14 +546,6 @@ break the cost model; the regression guard is `tests/worker-mcp-audit.test.ts`, 
 → Rationale and limiter-pair design:
 [`RELEASES-RATIONALE.md` § MCP endpoint rate limits and cost gates](./RELEASES-RATIONALE.md#mcp-endpoint-rate-limits-and-cost-gates).
 
-### Visitor log
-
-Every `POST /mcp` emits one `[mcp-call]` structured log line AFTER the rate-limit gate decision, carrying `Origin`,
-`User-Agent`, Cloudflare-injected IP and country, the chosen response format, and a `gate_result` of `passed` or
-`rate_limited`. Volume is bounded under attack because rate-limited requests are logged but not processed past the gate.
-Pre-data placeholders for both rate-limit ceilings are sized from streamsgrp parity; review at 14 days of visitor-log
-data.
-
 ### Kill-switch flip procedure
 
 ```bash
@@ -538,10 +559,16 @@ wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `false`
 wrangler secret put MCP_LIVE_SCORING_ENABLED     # enter `true` to restore
 ```
 
-Both are env-scoped: pass `--env staging` to flip staging only. Propagation is bounded by the secret-read TTL on the
-next request to a fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery
-from a surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED`
-and keeps the read tier serving cached scorecards.
+Both are env-scoped: pass `--env staging` to flip staging only, and omit `--env` entirely for production, which is the
+top-level config with no `env.production` block. Propagation is bounded by the secret-read TTL on the next request to a
+fresh isolate; warm isolates pick up the new value when the underlying env mapping refreshes. Recovery from a
+surface-level emergency uses `MCP_ENABLED`; recovery from a cost-level emergency uses `MCP_LIVE_SCORING_ENABLED` and
+keeps the read tier serving cached scorecards.
+
+`MCP_LEGACY_ENABLED` is a var, so `wrangler secret put` on that name fails with Cloudflare API 10053. Flip it by editing
+the committed `"true"` to `"false"` in the target environment's `wrangler.jsonc` block and shipping that through a PR;
+`wrangler deploy --var MCP_LEGACY_ENABLED:false` is the transient drill override, and the next plain deploy reverts it.
+Hazards and the full procedure: [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md).
 
 ## Staging access (Cloudflare Access)
 

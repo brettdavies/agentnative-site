@@ -126,7 +126,11 @@ const JSON_HEADERS_CACHE_HIT = {
   'Content-Type': 'application/json; charset=utf-8',
   'Access-Control-Allow-Origin': '*',
   'X-Robots-Tag': 'noindex',
+  // Browser may reuse the JSON for 300s. Workers Caching must not: /api/score
+  // is the MISS class, and the body still varies by Accept.
   'Cache-Control': 'public, max-age=300',
+  'Cloudflare-CDN-Cache-Control': 'no-store',
+  Vary: 'Accept',
 } as const;
 
 export type ResponseFreshness = 'live' | 'cache-hit';

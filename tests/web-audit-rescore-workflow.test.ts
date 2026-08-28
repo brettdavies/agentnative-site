@@ -261,6 +261,21 @@ describe('runWebRescore', () => {
     expect(names).toEqual(['load-seed', 'select:0', 'audit:a.dev', 'audit:b.dev', 'rebuild:0', 'select:1']);
   });
 
+  test('a rescore cycle issues one purge with batched tags, not one call per domain', async () => {
+    const { env } = makeEnv([seedEntry('a.dev'), seedEntry('b.dev')]);
+    const { step } = makeStep();
+    const purges: string[][] = [];
+    await runWebRescore(env, step, {
+      audit: stubAudit({ 'a.dev': 70, 'b.dev': 80 }),
+      purgeTags: async (tags) => {
+        purges.push(tags);
+      },
+    });
+    expect(purges).toHaveLength(1);
+    expect(purges[0]).toEqual(['home', 'web', 'web:a.dev', 'web:b.dev']);
+    expect(purges[0]?.some((t) => t === '/web' || t.startsWith('/'))).toBe(false);
+  });
+
   test('skips a domain audited within the eligibility window; audits the stale one', async () => {
     const { env, store } = makeEnv([seedEntry('fresh.dev'), seedEntry('stale.dev')]);
     await primeCache(store, 'fresh.dev', 60_000, 40); // audited 1 minute ago
@@ -415,7 +430,7 @@ describe('rebuildWebAggregates', () => {
     const { env } = makeEnv([seedEntry('a.dev'), seedEntry('never-scored.dev')]);
     await cachePut(env, 'https://a.dev/', scorecardFor('a.dev', 70), SPEC_VERSION);
     const result = await rebuildWebAggregates(env, SPEC_VERSION);
-    expect(result).toEqual({ seeded: 2, scored: 1 });
+    expect(result).toEqual({ seeded: 2, scored: 1, wrote: true });
     const board = await getAggregate(env, 'leaderboard', SPEC_VERSION);
     expect(board?.entries.map((e) => e.domain)).toEqual(['a.dev']);
   });

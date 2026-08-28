@@ -402,7 +402,7 @@ describe('handleWebAudit streaming', () => {
     expect(resp.status).toBe(200);
     const events = await readNdjson(resp);
     const checks = events.filter((e) => e.type === 'check');
-    expect(checks.length).toBe(52);
+    expect(checks.length).toBe(64);
     const terminal = events.at(-1) as Record<string, unknown>;
     expect(terminal.type).toBe('complete');
     expect(terminal.share_url).toBe('/web/example.com');
@@ -577,9 +577,11 @@ describe('handleWebScoringPage', () => {
     expect(resp.headers.get('cache-control')).toBe('no-store');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
     expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
+    expect(resp.headers.get('cache-tag')).toBeNull();
     const html = await resp.text();
     expect(html).toContain('name="turnstile-sitekey" content="1x00000000000000000000AA"');
     expect(html).toContain('src="/js/web-audit-scoring.js"');
+    expect(html).not.toContain('/js/webmcp.js');
     expect(html).toContain('<noscript>');
     expect(html).toContain('data-web-audit-results');
   });
@@ -623,6 +625,7 @@ describe('handleWebScoringPage', () => {
     expect(resp.headers.get('cache-control')).toBe('no-store');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
     expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
+    expect(resp.headers.get('cache-tag')).toBeNull();
     const md = await resp.text();
     expect(md).toContain('/web/example.com.md');
     expect(md).toContain('audit_website');
@@ -666,8 +669,11 @@ describe('handleWebResultPage', () => {
     expect(resp.headers.get('content-type')).toContain('text/html');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
     expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
+    expect(resp.headers.get('cache-tag')).toBe('web:example.com');
+    expect(resp.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
     const html = await resp.text();
     expect(html).toContain('82%');
+    expect(html).toContain('/js/webmcp.js');
   });
 
   test('serves the markdown twin for the .md suffix', async () => {
@@ -675,9 +681,11 @@ describe('handleWebResultPage', () => {
     const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env);
     expect(resp.status).toBe(200);
     expect(resp.headers.get('content-type')).toContain('text/markdown');
-    expect(resp.headers.get('vary')).toBe('Accept, User-Agent');
+    expect(resp.headers.get('vary')).toBeNull();
+    expect(resp.headers.get('cache-tag')).toBe('web:example.com');
     const md = await resp.text();
     expect(md).toContain('82%');
+    expect(md).not.toContain('/js/webmcp.js');
   });
 
   test('honors Accept: text/markdown on the suffix-less path', async () => {
@@ -693,6 +701,8 @@ describe('handleWebResultPage', () => {
     const env = resultEnv();
     const resp = await handleWebResultPage(new Request('https://anc.dev/web/never-audited.dev'), env);
     expect(resp.status).toBe(404);
+    expect(resp.headers.get('cache-control')).toBe('no-store');
+    expect(resp.headers.get('cache-tag')).toBeNull();
     expect(await resp.text()).toContain('not audited');
   });
 
@@ -1113,6 +1123,33 @@ describe('handleWebAudit public_listing', () => {
     };
     expect(stored.scorecard.public_listing).toBe(true);
     expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  test('a listing patch purges the web tag once, never a /web path prefix', async () => {
+    const scoredAt = freshStamp();
+    const { bucket } = makeR2(await prefill({ scoredAt, stored: false }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const calls: Array<{ tags?: string[]; pathPrefixes?: string[] }> = [];
+    const ctx = {
+      waitUntil() {},
+      passThroughOnException() {},
+      props: {},
+      exports: {
+        Cached: {
+          async purgeHitMinTags(tags: string[]) {
+            calls.push({ tags });
+            return { success: true, errors: [] };
+          },
+        },
+      },
+    } as unknown as ExecutionContext;
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, ctx, {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.tags).toEqual(['web']);
+    expect(calls[0]?.pathPrefixes).toBeUndefined();
   });
 
   test('fresh hit + stored true + explicit true serves cached (redundant, no write)', async () => {

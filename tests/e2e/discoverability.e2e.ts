@@ -72,7 +72,7 @@ test.describe('staging MCP descriptor aliases', () => {
     };
     expect(body.mcp_endpoint).toBe(`${STAGING_BASE}/mcp`);
     expect(body.version).toBe('1.0');
-    expect(body.protocolVersion).toBe('2025-06-18');
+    expect(body.protocolVersion).toBe('2026-07-28');
     expect(body.transport.type).toBe('streamable-http');
     expect(body.documentation).toBe(`${STAGING_BASE}/mcp-skill.md`);
     expect((body as { authentication?: { required: boolean } }).authentication?.required).toBe(false);

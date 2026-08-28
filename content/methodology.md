@@ -255,17 +255,49 @@ four probe types:
   a body pattern. Covers `llms.txt`, OpenAPI, JSON Schemas, root-HTML affordances (meta description, `<link rel>`,
   `<noscript>`, JSON-LD, semantic landmarks), `robots.txt` rules, and the `.well-known` discovery documents.
 - **MCP** — a JSON-RPC handshake over streamable-HTTP: `initialize` for `serverInfo` and capabilities, `tools/list` for
-  the tool array and input schemas, an unknown-method probe for the `-32601` error code, and the actual-request CORS
-  header.
-- **CORS preflight** — an `OPTIONS` request that checks the MCP endpoint answers browser-origin agents.
+  the tool array and input schemas, a modern-era pair on protocol `2026-07-28` (a header-routed `tools/list` carrying
+  the per-request `_meta` envelope with no `initialize`, and `server/discover` for supported versions and server
+  identity), and an unknown-method probe for the `-32601` error code.
+- **CORS posture** — each of the two CORS checks issues both an `OPTIONS` preflight and an Origin-bearing `POST`, then
+  classifies its own surface from the pair: a consistent no-CORS posture on both reads `n_a`, while partial or
+  misconfigured CORS fails.
 - **DNS-over-HTTPS** — SVCB lookups for DNS-AID records under the `_agents` namespace.
 
 The audit first discovers the MCP endpoint from the site's well-known cards, then falls back to probing common paths
-with `initialize`. MCP-shape checks apply only when an endpoint is found; on a site without one they are marked `n_a`
-and excluded from the score. The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY
-checks informational, the same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard
-is isomorphic with a CLI scorecard and renders through the same presentation. Web results carry no badge; they live at a
-shareable [`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+with `initialize`, then with a modern header-routed `tools/list`, so a modern-only server is still discovered. MCP-shape
+checks apply only when an endpoint is found; on a site without one they are marked `n_a` and excluded from the score.
+The headline score is credit-weighted over the MUST and SHOULD checks that apply, with MAY checks informational, the
+same model the CLI score uses. Each check maps onto one of P1 through P8, so a web scorecard is isomorphic with a CLI
+scorecard and renders through the same presentation. Web results carry no badge; they live at a shareable
+[`/web/<domain>`](/web) page. The [web scorecard JSON schema](/web-scorecard-schema) documents the shape.
+
+### Era lanes and CORS posture
+
+Two rules shape how MCP results score:
+
+- The modern MCP era (protocol revision `2026-07-28`) scores as its own lane alongside the legacy checks: a required
+  header-routed `tools/list` check and a recommended `server/discover` check. A dual-stack server earns both lanes; a
+  single-era server reads `absent` on the lane it lacks rather than `broken`, so it is never penalized for an era it
+  never claimed. `server/discover` decides the modern lane, because it is the only method a legacy server cannot answer:
+  a refusal saying the method is not served here reads `absent` on that check and leaves every other modern check `n_a`,
+  excluded from both scores because no probe ever reached it, while a malformed result or a server error stays `broken`.
+  A `-32000` refusal counts as that signal only at a status able to carry one; delivered with a 5xx or a rate-limit
+  status it reports load rather than an era, and stays `broken`. On the legacy lane, an era-shaped refusal (a
+  well-formed `-32601` or `-32022`) reads `absent` on the checks that name a method the lane could be missing, unless
+  the lane's own handshake advertised the capability it is refusing, which contradicts the handshake and stays `broken`.
+  The error-code conformance checks ask about a request the lane has already proven it accepts, so no era softening
+  reaches them. How a wrong answer scores turns on whether an agent can still use the surface: a well-formed refusal
+  carrying a code the taxonomy does not name, or a correct refusal missing a required payload field, reads
+  `noncompliant` and earns partial credit, because the caller learns the call failed and can move on. A result where a
+  refusal was required, an envelope with no numeric code, a malformed body, and a server error all read `broken`,
+  because each leaves the caller believing something untrue. The same split governs the unknown-method check on either
+  lane.
+- The two CORS checks are posture-aware: a consistent no-CORS posture on both the preflight and the actual POST is a
+  deliberate choice and reads `n_a` (excluded from the score); only partial or misconfigured CORS is penalized.
+
+Whenever the check universe grows, global scores read lower until a site re-audits under the wider universe. Seeded
+scorecards reflow automatically on the deploy that ships a registry change; other cached results re-audit on their next
+stale access and age out of the display within 30 days, so board movement settles inside that window.
 
 ## Re-running the same audits locally
 

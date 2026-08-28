@@ -5,7 +5,13 @@
 // Inputs are plain data (no filesystem). assets.mjs reads the inline
 // theme-init script from disk and passes it in.
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { loadInstallCommands } from './install-commands.mjs';
 import { escHtml, resolveBaseUrl, SITE_SPEC_VERSION } from './util.mjs';
+
+const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../content');
+const INSTALL_COMMANDS = loadInstallCommands(CONTENT_DIR);
 
 const SITE_NAME = 'anc.dev';
 const SITE_TAGLINE = 'the agent-native standard';
@@ -25,6 +31,49 @@ const NAV_LINKS = [
 
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
+
+const leaderboardsCliCurrent = (path) => path === '/scorecards' || path.startsWith('/score/');
+const leaderboardsWebCurrent = (path) =>
+  path === '/web' || (path.startsWith('/web/') && !path.startsWith('/web-audit'));
+
+const auditCliCurrent = (path) => path === '/audit';
+const auditWebCurrent = (path) => path === '/web-audit' || path.startsWith('/web-audit/');
+
+const renderDualSurfaceNav = ({ label, cliHref, webHref, dataNavAttr, path, cliCurrent, webCurrent }) => {
+  const cliCur = cliCurrent(path) ? ' aria-current="page"' : '';
+  const webCur = webCurrent(path) ? ' aria-current="page"' : '';
+  return `          <a href="${cliHref}" data-s="cli" ${dataNavAttr}${cliCur}>${label}</a>
+          <a href="${webHref}" data-s="web" ${dataNavAttr}${webCur}>${label}</a>`;
+};
+
+const renderLeaderboardsNav = (path) =>
+  renderDualSurfaceNav({
+    label: 'Leaderboards',
+    cliHref: '/scorecards',
+    webHref: '/web',
+    dataNavAttr: 'data-leaderboards-nav',
+    path,
+    cliCurrent: leaderboardsCliCurrent,
+    webCurrent: leaderboardsWebCurrent,
+  });
+
+const renderAuditNav = (path) =>
+  renderDualSurfaceNav({
+    label: 'Audit',
+    cliHref: '/audit',
+    webHref: '/web-audit',
+    dataNavAttr: 'data-audit-nav',
+    path,
+    cliCurrent: auditCliCurrent,
+    webCurrent: auditWebCurrent,
+  });
+
+const renderNavLink = (entry, path) => {
+  if (entry.label === 'Leaderboards') return renderLeaderboardsNav(path);
+  if (entry.label === 'Audit') return renderAuditNav(path);
+  const current = navCurrent(path, entry.match) ? ' aria-current="page"' : '';
+  return `          <a href="${entry.href}"${current}>${entry.label}</a>`;
+};
 
 // Alt text for the OG card. Single source-of-truth: applies to every
 // page's og:image:alt + twitter:image:alt because the site uses one
@@ -115,6 +164,8 @@ export const WEBMCP_SCRIPT = '/js/webmcp.js';
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
  * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
+ * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
+ *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
  * @param {string=} args.baseUrl             — absolute base (default prod).
  * @returns {string} full HTML document.
  */
@@ -153,6 +204,7 @@ export function emitShell({
   bodyHtml,
   themeInitJs,
   isIndex = false,
+  turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
 }) {
@@ -258,7 +310,7 @@ export function emitShell({
     <link rel="alternate" type="application/json" href="/skill.json" title="Agent-native skill bundle (canonical JSON)" />
     <link rel="describedby" href="/.well-known/mcp/server-card.json" />
     <link rel="mcp" href="/mcp" />
-${isIndex ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
+${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />\n` : ''}
 
     <meta property="og:type" content="article" />
     <meta property="og:title" content="${esc(title)}" />
@@ -305,18 +357,38 @@ ${MACHINE_ENTRY_POINTS.map((e) => `          <li><a href="${e.href}">${e.href}</
           <span class="site-brand__tag">${SITE_TAGLINE}</span>
         </a>
         <nav class="site-nav" aria-label="Primary">
-${NAV_LINKS.map(
-  (l) =>
-    `          <a href="${l.href}"${navCurrent(canonicalPath, l.match) ? ' aria-current="page"' : ''}>${l.label}</a>`,
-).join('\n')}
+${NAV_LINKS.map((l) => renderNavLink(l, canonicalPath)).join('\n')}
         </nav>
         <div class="site-header__cta">
-          <button type="button" class="theme-cycle" data-theme-cycle aria-label="Theme: system">◐</button>
+          <div
+            class="site-header__install-cmd"
+            data-install-cmd
+            data-brew="${escHtml(INSTALL_COMMANDS.brew)}"
+            data-cargo="${escHtml(INSTALL_COMMANDS.cargo)}"
+            data-binstall="${escHtml(INSTALL_COMMANDS.binstall)}"
+            hidden
+          >
+            <div class="install-cmd" role="group" aria-label="Install anc">
+              <button type="button" class="install-cmd__pm" data-install-pm>
+                <span data-install-pm-label>brew</span>
+                <span class="install-cmd__cycle" aria-hidden="true">↻</span>
+              </button>
+              <button type="button" class="install-cmd__copy" data-install-copy>
+                <span class="install-cmd__prompt" aria-hidden="true">$</span>
+                <code class="install-cmd__text" data-install-text></code>
+                <span class="install-cmd__icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </span>
+                <span class="visually-hidden" data-copy-label>Copy</span>
+              </button>
+            </div>
+          </div>
+          <a class="btn btn--primary site-header__install" href="/install" data-install-fallback>Install&nbsp;▸</a>
+          <button type="button" class="theme-cycle" data-theme-cycle aria-label="Toggle theme">◐</button>
           <label class="nav-burger">
             <input type="checkbox" id="nav-open" class="nav-burger__cb" aria-label="Menu" />
             <span aria-hidden="true">☰</span>
           </label>
-          <a class="btn btn--primary site-header__install" href="/install">Install&nbsp;▸</a>
         </div>
       </div>
     </header>
@@ -358,6 +430,7 @@ ${SOURCE_REPOS.map(
       </div>
     </footer>
     <script src="/js/theme.js" defer></script>
+    <script src="/js/surface.js" defer></script>
     <script src="/js/nav.js" defer></script>
     <script src="/js/clipboard.js" defer></script>
 ${extraScripts.map((s) => `    <script src="${s}" defer></script>`).join('\n')}

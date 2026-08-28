@@ -176,6 +176,8 @@ describe('handleLiveScorePage — happy path', () => {
     expect(html).toContain('subcommands listed'); // top issue
     expect(html).toContain('href="/install"'); // canonical install link (dedup with content/install.md)
     expect(html).toContain('https://anc.dev/score/live/ripgrep'); // canonical
+    expect(res.headers.get('vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('cache-control') ?? '').toContain('max-age=300');
   });
 
   test('top-issues block surfaces FAIL before WARN', async () => {
@@ -297,6 +299,8 @@ describe('handleLiveScorePage — 404 + edge cases', () => {
     const res = await handleLiveScorePage(get('/score/live/ripgrep'), env);
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/html');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('cache-tag')).toBeNull();
     const html = await res.text();
     expect(html).toContain('No live score for');
     expect(html).toContain('ripgrep');
@@ -480,6 +484,7 @@ describe('handleLiveScorePage — markdown twin', () => {
     const res = await handleLiveScorePage(get('/score/live/ripgrep.md'), env);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect(res.headers.get('vary')).toBeNull();
     const md = await res.text();
     expect(md).toContain('# ripgrep');
     expect(md).toContain('**Score:** 92% pass rate');
@@ -503,6 +508,7 @@ describe('handleLiveScorePage — markdown twin', () => {
     const res = await handleLiveScorePage(req, env);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect(res.headers.get('vary')).toBe('Accept, User-Agent');
     const md = await res.text();
     expect(md).toContain('# ripgrep');
   });
@@ -522,6 +528,8 @@ describe('handleLiveScorePage — markdown twin', () => {
     const res = await handleLiveScorePage(get('/score/live/ripgrep.md'), env);
     expect(res.status).toBe(404);
     expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('cache-tag')).toBeNull();
     const md = await res.text();
     expect(md).toContain('# No live score for `ripgrep` yet');
     expect(md).toContain('homepage');

@@ -12,6 +12,7 @@ import {
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   renderAudienceBanner as sharedRenderAudienceBanner,
 } from '../shared/scorecard-format.mjs';
+import { renderSurfaceSeg } from '../shared/surface-seg.mjs';
 
 const BADGE_FLOOR_DISPLAY_PCT = BADGE_ELIGIBILITY_FLOOR_PCT;
 
@@ -73,7 +74,17 @@ export function buildLeaderboardBody(leaderboard, methodology) {
   const eligibleCount = leaderboard.filter((e) => e.scorecard.badge.eligible).length;
   const floorPct = BADGE_FLOOR_DISPLAY_PCT;
 
+  const boardSurfaceSeg = renderSurfaceSeg({
+    dataAttr: 'data-surface-board-seg',
+    radioName: 'board-surface',
+    cliId: 'board-s-cli',
+    webId: 'board-s-web',
+    checked: 'cli',
+    ariaLabel: 'Leaderboard surface',
+  });
+
   return `<section class="leaderboard-hero">
+  ${boardSurfaceSeg}
   <h1>ANC 100 — Agent-Native CLI Leaderboard</h1>
   <p class="leaderboard-hero__lede">Automated agent-readiness scores for real CLI tools, scored against the <a href="/">eight principles</a>. See the <a href="/methodology">methodology</a> for how scores, audience signals, and audit profiles work.</p>
   <p class="leaderboard-hero__meta">${leaderboard.length} audited tools in the corpus.</p>

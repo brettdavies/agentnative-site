@@ -64,11 +64,15 @@ describe('resultLine', () => {
     );
   });
 
-  test('the two n_a wordings are distinct (antecedent-unmet vs optional-absent)', () => {
+  test('the three n_a wordings are distinct (antecedent-unmet vs optional-absent vs posture-consistent)', () => {
     expect(resultLine('n_a', 'no MCP endpoint discovered', 'antecedent-unmet')).toBe(
       'Not applicable (no MCP endpoint discovered)',
     );
     expect(resultLine('n_a', 'x -> 404', 'optional-absent')).toBe('Not implemented, optional (x -> 404)');
+    expect(resultLine('n_a', 'no allow-origin on preflight or POST', 'posture-consistent')).toBe(
+      'Deliberate posture, not scored (no allow-origin on preflight or POST)',
+    );
+    expect(resultLine('n_a', 'x', 'posture-consistent')).not.toBe(resultLine('n_a', 'x', 'antecedent-unmet'));
   });
 
   test('skip and error read as not-evaluated', () => {

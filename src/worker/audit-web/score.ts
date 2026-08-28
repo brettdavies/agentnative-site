@@ -6,11 +6,12 @@
 // the max achievable for THIS site's applicable set. GLOBAL is context:
 // earned over a maximally agent-ready site's max, so a bigger correct
 // routine outranks a small perfect one. Outcome scale: pass = +weight;
-// broken = -brokenFactor x weight at every tier (a present-but-invalid
-// surface misleads agents, so it costs more than absence); MUST absent
-// is a full-weight zero; SHOULD absent is a zero occupying half its
-// weight in the relative denominator; MAY absent arrives as n_a and is
-// excluded. Both scores floor at 0.
+// noncompliant = +noncompliantCredit x weight (a surface an agent can
+// use that violates a spec detail); broken = -brokenFactor x weight at
+// every tier (a present-but-invalid surface misleads agents, so it costs
+// more than absence); MUST absent is a full-weight zero; SHOULD absent is
+// a zero occupying half its weight in the relative denominator; MAY
+// absent arrives as n_a and is excluded. Both scores floor at 0.
 //
 // Per-tier point values are deliberately UNLOCKED config pending real
 // anc100 audit data (n=1 today); the registry's per-check `weight` field
@@ -27,9 +28,26 @@ export interface ScoreWeights {
 export const DEFAULT_SCORE_WEIGHTS: ScoreWeights = { must: 5, should: 3, may: 1 };
 export const DEFAULT_BROKEN_FACTOR = 0.75;
 
+/**
+ * Credit for a surface that serves an agent while violating a spec
+ * detail. It is positive so that showing an imperfect capability beats
+ * withdrawing it: a withheld surface and an absent one emit identical
+ * bytes, so the auditor cannot tell them apart and the only lever against
+ * withdrawal is to stop paying for it. It stays well below `pass` so
+ * conformance still buys the difference.
+ */
+export const NONCOMPLIANT_CREDIT = 0.25;
+
+/**
+ * Statuses that occupy a slot in either score. Everything else (n_a,
+ * skip, error) carries no observation and is excluded from both.
+ */
+export const SCORED_STATUSES: ReadonlySet<string> = new Set(['pass', 'noncompliant', 'broken', 'absent']);
+
 export interface ScoreConfig {
   weights?: ScoreWeights;
   brokenFactor?: number;
+  noncompliantCredit?: number;
 }
 
 export interface WebScore {
@@ -55,6 +73,12 @@ export function universeMaxOf(
 
 const CREDIT: Record<string, number | null> = { pass: 1, absent: 0 };
 
+function creditFor(status: string, brokenFactor: number, noncompliantCredit: number): number | null | undefined {
+  if (status === 'broken') return -brokenFactor;
+  if (status === 'noncompliant') return noncompliantCredit;
+  return CREDIT[status];
+}
+
 export function scoreWebAudit(
   results: ReadonlyArray<Pick<EngineResult, 'keyword' | 'status'>>,
   universeMax: number,
@@ -62,16 +86,20 @@ export function scoreWebAudit(
 ): WebScore {
   const weights = config.weights ?? DEFAULT_SCORE_WEIGHTS;
   const brokenFactor = config.brokenFactor ?? DEFAULT_BROKEN_FACTOR;
+  const noncompliantCredit = config.noncompliantCredit ?? NONCOMPLIANT_CREDIT;
 
   let earned = 0;
   let applicableMax = 0;
   for (const r of results) {
-    const credit = r.status === 'broken' ? -brokenFactor : CREDIT[r.status];
+    const credit = creditFor(r.status, brokenFactor, noncompliantCredit);
     if (credit === null || credit === undefined) continue; // n_a / skip / error excluded from both scores
     const w = weights[r.keyword];
     earned += w * credit;
     // An absent SHOULD hurts less than an absent MUST: it occupies only
     // half its weight in the relative denominator (0 numerator either way).
+    // The discount is keyed on absence alone: a noncompliant row carries a
+    // real observation, so it occupies its full weight like any other
+    // surface the audit actually reached.
     applicableMax += r.status === 'absent' && r.keyword === 'should' ? 0.5 * w : w;
   }
 
@@ -89,8 +117,8 @@ export interface CategoryRollup {
 
 /**
  * Per-category `passed/counted` rollups in category_order. `counted`
- * excludes n_a / skip / error rows (R12: a category of only-n_a rows
- * reports 0/0).
+ * counts the scored statuses, so it excludes n_a / skip / error rows
+ * (R12: a category of only-n_a rows reports 0/0).
  */
 export function categoryRollups(
   results: ReadonlyArray<Pick<EngineResult, 'category' | 'status'>>,
@@ -102,7 +130,7 @@ export function categoryRollups(
     let counted = 0;
     for (const r of results) {
       if (r.category !== id) continue;
-      if (r.status === 'pass' || r.status === 'broken' || r.status === 'absent') {
+      if (SCORED_STATUSES.has(r.status)) {
         counted += 1;
         if (r.status === 'pass') passed += 1;
       }

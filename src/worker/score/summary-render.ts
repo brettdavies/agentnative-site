@@ -20,6 +20,7 @@ import {
   escHtml as sharedEscHtml,
 } from '../../shared/scorecard-format.mjs';
 import { detectPreference } from '../accept';
+import { applyHeaders } from '../headers';
 import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { get as cacheGet, keyFor as cacheKeyFor } from './cache';
@@ -186,6 +187,14 @@ const MARKDOWN_HEADERS = {
   'X-Robots-Tag': 'noindex',
 } as const;
 
+function liveScoreHeaders(base: Record<string, string>, pathname: string): Headers {
+  const headers = new Headers(base);
+  if (!pathname.endsWith('.md')) {
+    headers.set('Vary', 'Accept, User-Agent');
+  }
+  return headers;
+}
+
 function substituteShell(
   template: string,
   fields: { title: string; description: string; canonicalPath: string; body: string },
@@ -269,7 +278,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   const url = new URL(request.url);
   const match = parseLiveScorePathMatch(url.pathname);
   if (!match) {
-    return renderNotFound(env, '(invalid)', false);
+    return renderNotFound(request, env, '(invalid)', false);
   }
 
   const { binary } = match;
@@ -306,7 +315,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
 
   const cached = await cacheGet(env, cacheKeyFor(binary, SPEC_VERSION));
   if (!cached) {
-    return renderNotFound(env, binary, wantMarkdown);
+    return renderNotFound(request, env, binary, wantMarkdown);
   }
 
   const renderInput: SummaryRenderInput = {
@@ -319,7 +328,10 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
 
   if (wantMarkdown) {
     const md = buildScoreSummaryMarkdown(renderInput);
-    return new Response(md, { status: 200, headers: MARKDOWN_HEADERS });
+    return new Response(md, {
+      status: 200,
+      headers: liveScoreHeaders(MARKDOWN_HEADERS, new URL(request.url).pathname),
+    });
   }
 
   const body = buildScoreSummaryBody(renderInput);
@@ -334,17 +346,29 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
   try {
     template = await loadShellTemplate(env);
   } catch (err) {
-    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain' },
-    });
+    return applyHeaders(
+      new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
+        status: 500,
+        headers: { 'content-type': 'text/plain' },
+      }),
+      { request, servedMarkdown: false, pathname: new URL(request.url).pathname },
+    );
   }
 
   const html = substituteShell(template, { title, description, canonicalPath, body });
-  return new Response(html, { status: 200, headers: HTML_HEADERS });
+  return new Response(html, {
+    status: 200,
+    headers: liveScoreHeaders(HTML_HEADERS, new URL(request.url).pathname),
+  });
 }
 
-async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: boolean): Promise<Response> {
+async function renderNotFound(
+  request: Request,
+  env: LiveScoreEnv,
+  binary: string,
+  wantMarkdown: boolean,
+): Promise<Response> {
+  const pathname = new URL(request.url).pathname;
   if (wantMarkdown) {
     const lines = [
       `# No live score for \`${binary}\` yet`,
@@ -358,7 +382,11 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
       `Or [install \`anc\`](https://anc.dev/install) and run \`anc audit ${binary}\` locally.`,
       '',
     ];
-    return new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS });
+    return applyHeaders(new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS }), {
+      request,
+      servedMarkdown: true,
+      pathname,
+    });
   }
 
   const body = `<header class="live-score-summary__header">
@@ -386,7 +414,11 @@ async function renderNotFound(env: LiveScoreEnv, binary: string, wantMarkdown: b
   }
 
   const html = substituteShell(template, { title, description, canonicalPath, body });
-  return new Response(html, { status: 404, headers: HTML_HEADERS });
+  return applyHeaders(new Response(html, { status: 404, headers: HTML_HEADERS }), {
+    request,
+    servedMarkdown: false,
+    pathname,
+  });
 }
 
 // Statically referenced so unused-export linters keep these alive.

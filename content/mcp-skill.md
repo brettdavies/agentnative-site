@@ -6,8 +6,12 @@ lookup. The catalog is public: no authentication, no API key.
 
 ## Quick reference
 
-The server speaks streamable HTTP per MCP spec revision `2025-06-18`. Drive it from any MCP-aware client (Claude Code,
-Codex, Cursor) or raw JSON-RPC:
+The server speaks streamable HTTP per MCP spec revision `2026-07-28`. The endpoint serves **dual-stack** clients: legacy
+(`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no `initialize`).
+
+### Legacy quick start
+
+Drive it from any MCP-aware client (Claude Code, Codex, Cursor) or raw JSON-RPC:
 
 ```bash
 # 1. initialize the session (returns InitializeResult with instructions)
@@ -30,6 +34,24 @@ curl -sS https://anc.dev/mcp -H 'Content-Type: application/json' -d '{
   "jsonrpc": "2.0", "id": 3, "method": "tools/call",
   "params": {"name": "get_scorecard", "arguments": {"slug": "ripgrep"}}
 }'
+```
+
+### Modern quick start (no initialize)
+
+```bash
+META='"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"demo","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}'
+
+# tools/list — Mcp-Name header omitted
+curl -sS https://anc.dev/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/list' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/list\",\"params\":{$META}}"
+
+# tools/call — Mcp-Name required
+curl -sS https://anc.dev/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: tools/call' -H 'Mcp-Name: get_scorecard' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\",\"params\":{\"name\":\"get_scorecard\",\"arguments\":{\"slug\":\"ripgrep\"},$META}}"
 ```
 
 All examples below show the `arguments` object passed to `tools/call`; the JSON-RPC envelope around it is the same shape
@@ -252,13 +274,19 @@ concrete resource (`anc://registry`).
 
 Two error layers. The discriminator is whether the JSON-RPC envelope itself succeeded.
 
-| Symptom                                           | Layer        | Recovery                                                                                                   |
-| ------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
-| `CallToolResult` with `isError: true`             | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).    |
-| JSON-RPC envelope with `error.code: -32700`       | Transport    | Malformed JSON body. Fix the request and resend.                                                           |
-| JSON-RPC envelope with `error.code: -32099`       | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                   |
-| HTTP `406 Not Acceptable` (plain-text body)       | Pre-JSON-RPC | Your `Accept` header doesn't include `application/json` or `text/event-stream`. Send one or both.          |
-| HTTP `503 Service Unavailable` with `Retry-After` | Pre-JSON-RPC | Operator kill switch. Honor `Retry-After`. The read tier may still be available even if `score_cli` isn't. |
+| Symptom                                                | Layer        | Recovery                                                                                                                       |
+| ------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `CallToolResult` with `isError: true`                  | Tool-level   | Read the text content; the message names the failure (validator rejection, infrastructure, rate-limit).                        |
+| `error.code: -32700` at HTTP 400                       | Transport    | Malformed JSON body; the envelope's `id` is `null` because the request never parsed. Fix the request and resend.               |
+| JSON-RPC envelope with `error.code: -32099`            | Transport    | Rate limit. Back off per the policy below; either limiter can trip this.                                                       |
+| `error.code: -32022` at HTTP 200, no `data.requested`  | Transport    | The legacy lane is disabled. `error.data.supported` lists the served revision (`2026-07-28`); resend as a modern request.      |
+| `error.code: -32022` at HTTP 400 with `data.requested` | Transport    | Your claimed protocol version is unsupported. Resend claiming a version from `error.data.supported`.                           |
+| JSON-RPC envelope with `error.code: -32020`            | Transport    | Header mismatch. `Mcp-Method` and `Mcp-Name` must mirror the JSON-RPC body (`Mcp-Name` mirrors the tool name or resource URI). |
+| JSON-RPC envelope with `error.code: -32600`            | Transport    | Invalid request at HTTP 400: an empty batch, a non-JSON-RPC object, or a batch mixing modern-envelope elements.                |
+| JSON-RPC envelope with `error.code: -32601`            | Transport    | Unknown method. Check the method name against the wire reference below.                                                        |
+| JSON-RPC envelope with `error.code: -32602`            | Transport    | Invalid params; also the miss code for an unknown tool or resource (the legacy `-32002` resource-miss code is never emitted).  |
+| HTTP `406 Not Acceptable` (plain-text body)            | Pre-JSON-RPC | Your `Accept` header doesn't include `application/json` or `text/event-stream`. Send one or both.                              |
+| HTTP `503 Service Unavailable` with `Retry-After`      | Pre-JSON-RPC | Operator kill switch. Honor `Retry-After`. The read tier may still be available even if `score_cli` isn't.                     |
 
 ### Common tool-level error shapes
 
@@ -298,17 +326,27 @@ layers (CF binding burst gate + KV-backed per-hour window); both surface as `-32
 
 Read-tier breach is recoverable by waiting out the 60-second window. Audit-tier breach needs an hour-bucket window to
 roll. Both ceilings are pre-data placeholders sized from parity with sister deployments and will be tuned with
-visitor-log data.
+`mcp.request` log volume.
 
 ## Wire-level reference
 
 For clients that need the protocol details.
 
-**Endpoint.** `POST https://anc.dev/mcp`. Other methods return `405 Method Not Allowed` with `Allow: POST`. No
-authentication.
+**Endpoint.** `POST https://anc.dev/mcp`. `GET` is also serviceable: it returns the human landing page, or a permanent
+redirect to the server card under a JSON `Accept`. Every other method returns `405 Method Not Allowed` advertising
+`Allow: GET, POST`. No authentication.
 
-**Transport.** Streamable HTTP per MCP spec revision `2025-06-18`. The handshake's `protocolVersion` and the server
-card's `protocolVersion` / `version` are pinned in lockstep; tests assert each literal so drift breaks the build.
+**Transport.** Streamable HTTP per MCP spec revision `2026-07-28`. Legacy clients send `initialize` with client
+`protocolVersion=2025-06-18`; modern clients use `MCP-Protocol-Version: 2026-07-28`, `Mcp-Method`, optional `Mcp-Name`
+(call only), and `_meta` inside JSON-RPC **params** (including `io.modelcontextprotocol/clientCapabilities` on both list
+and call). The server card's `protocolVersion` is pinned in lockstep; tests assert each literal so drift breaks the
+build.
+
+**Tool metadata.** Every `tools/list` entry carries a `title` (a short display name) alongside `description` and
+`inputSchema`, plus an `annotations` object describing the tool's posture. The eleven read tools carry `readOnlyHint:
+true`. The two tools that run fresh work, `score_cli` and `audit_website`, carry `readOnlyHint: false` with
+`destructiveHint: false`, `idempotentHint: false`, and `openWorldHint: true`, because they reach external systems and
+write cache and leaderboard state. Annotations are hints for client UX and consent prompts, not a security boundary.
 
 **Accept-header negotiation.** Server picks between `application/json` and `text/event-stream`. JSON wins ties; q-values
 resolve unequal preferences. Absent or `*/*` Accept → JSON. Only a request that accepts neither MIME type returns `406`.

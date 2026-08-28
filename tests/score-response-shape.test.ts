@@ -106,9 +106,11 @@ describe('shapeScoreError — wire shape + headers', () => {
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
   });
 
-  test('cache-hit freshness sets Cache-Control: public, max-age=300', () => {
+  test('cache-hit freshness sets browser max-age=300 but CDN no-store and Vary: Accept', () => {
     const res = shapeScoreError({ code: 'unrecognized_input', cta_text: '...' }, 'cache-hit');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Vary')).toBe('Accept');
   });
 });
 
@@ -133,6 +135,8 @@ describe('shapeScoreSuccess — R11 triad enforcement', () => {
   test('cache-hit freshness uses cached cache-control', () => {
     const res = shapeScoreSuccess({}, '0.3.0', 'cache-hit');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Vary')).toBe('Accept');
   });
 
   test('live freshness uses no-store', () => {

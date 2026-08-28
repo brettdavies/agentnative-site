@@ -45,7 +45,8 @@ async function walk(dir) {
   return files;
 }
 
-async function minifyCssFile(filePath) {
+/** Minify one CSS file with the same Bun.build options the dist pipeline uses. */
+export async function minifyCssFile(filePath) {
   const result = await Bun.build({
     entrypoints: [filePath],
     minify: true,

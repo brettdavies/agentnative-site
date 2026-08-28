@@ -79,11 +79,15 @@ render step. Deploy via `wrangler`.
 
 ## MCP server
 
-`POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server pinned to spec revision `2025-06-18`.
-The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md) (served at `/mcp-skill.md` and
-`/mcp-skill/`); operator-facing material lives in [`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and
-is not published. This section is the agent-onboarding summary: enough to know what the surface is, what it costs, and
-how it fails.
+`POST https://anc.dev/mcp` exposes the catalog over a streamable HTTP MCP server on spec revision `2026-07-28`, with SDK
+v2 dual-stack support for legacy (`initialize` → `tools/call`) and modern (SEP-2243 headers + `_meta` in params, no
+`initialize`) clients on one endpoint. The client integration guide is [`content/mcp-skill.md`](content/mcp-skill.md)
+(served at `/mcp-skill.md` and `/mcp-skill/`); operator-facing material lives in
+[`docs/runbooks/mcp-operator.md`](docs/runbooks/mcp-operator.md) and is not published. This section is the
+agent-onboarding summary: enough to know what the surface is, what it costs, and how it fails.
+[`docs/runbooks/mcp-wire-protocol.md`](docs/runbooks/mcp-wire-protocol.md) is the wire-level reference behind it: the
+per-lane error-code table with the producing layer and delivery for each code, the SEP-2243 header mirror, the `_meta`
+envelope, cache-hint scope, and the GET posture. Read it before changing anything on the wire or bumping the revision.
 
 **Discovery siblings.** `/.well-known/mcp/server-card.json` (SEP-1649 canonical server card; legacy aliases
 `/.well-known/mcp`, `/mcp.json`, `/.well-known/mcp.json`), `/.well-known/ai.txt` (`Programmatic-API` declaration),
@@ -120,22 +124,32 @@ a fresh audit on an already-cached binary. `get_scorecard` is the cheap signal; 
 tools compose the same `/api/score` orchestration core, so cache semantics never drift between MCP and the human form on
 `/`.
 
-**Three kill switches, surgical and zero-deploy.** Default `"false"` in production and `"true"` in staging. Flip via
-`wrangler secret put`.
+**Four kill switches, surgical.** `MCP_ENABLED` and `MCP_LIVE_SCORING_ENABLED` are secrets in both environments, flipped
+with `wrangler secret put` and no deploy; an unset secret reads as off, so absence fails closed. `MCP_LEGACY_ENABLED` is
+a committed var, `"true"` in the top-level and `env.staging` `vars` blocks; its sunset flip is a committed edit through
+a PR, with `wrangler deploy --var` as the transient drill override. `WEB_AUDIT_ENABLED` is a `vars` binding on staging
+and a `wrangler secret put` value on production. A binding name is a var or a secret, never both: `wrangler secret put`
+against a declared var name is rejected with Cloudflare API 10053. Production commands carry no `--env` flag, because
+production is the top-level config and there is no `env.production` block. Per-flag shapes, flip verbs, and the `--var`
+hazards: the [operator runbook](docs/runbooks/mcp-operator.md).
 
 - `MCP_ENABLED`: gates the whole `/mcp` branch. Falsy returns `503 Service Unavailable` with `Retry-After: 3600` and a
   one-line plain-text body. No JSON-RPC envelope, because the surface is off, not in-error.
 - `MCP_LIVE_SCORING_ENABLED`: gates only `score_cli`. Falsy returns `isError: false` with `audited: false` and a typed
   `next_tool: get_scorecard` redirect; the read tier stays alive.
+- `MCP_LEGACY_ENABLED`: gates the legacy lane only. Falsy returns JSON-RPC `-32022` (`data.supported: ["2026-07-28"]`)
+  at the shell before the SDK handles legacy `initialize` / stateless legacy calls; modern SEP-2243 requests stay live.
 - `WEB_AUDIT_ENABLED`: gates the website audit (`audit_website` and the `/api/audit-web` route). Falsy returns `audited:
   false` with a disabled message; `get_website_audit` still serves cached web scorecards.
 
 **Errors carry on two layers.** Tool-level failures return `CallToolResult` with `isError: true` plus a textual message;
-the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200:
-`-32700` for malformed JSON, `-32099` for rate-limit breach at either limiter. The `406 Not Acceptable` Accept-header
-rejection is the one transport error that bypasses the JSON-RPC envelope (the rejection is pre-parse, so there is no
-`id` to echo back). **Cache state is data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false,
-next_tool`, and a `score_cli` hit is `isError: false` with `audited: false, next_tool`.
+the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error envelopes at HTTP 200
+(`-32099` for rate-limit breach at either limiter; `-32022` with `data.supported: ["2026-07-28"]` when the disabled
+legacy lane rejects a request) or at HTTP 400 (`-32700` for malformed JSON with `id: null`; `-32600` for an invalid
+batch; `-32020` for a header mismatch; `-32022` with `data.requested` for an unsupported version claim). The `406 Not
+Acceptable` Accept-header rejection is the one transport error that bypasses the JSON-RPC envelope. **Cache state is
+data, not failure**: a `get_scorecard` miss is `isError: false` with `found: false, next_tool`, and a `score_cli` hit is
+`isError: false` with `audited: false, next_tool`.
 
 **Origin posture: server-to-agent, no CORS.** `POST /mcp` returns no `Access-Control-Allow-Origin` header. MCP clients
 are agent runtimes (Claude Code, Codex, Cursor, custom CLIs) that do not issue CORS preflights. Browser-origin POSTs
@@ -144,16 +158,17 @@ browser-reachable `/mcp` would let any malicious web page trigger `score_cli` ru
 `cf-connecting-ip`. A future use case needing browser access gets its own KTD revision, an explicit allow-list, and a
 rate-limit policy designed for browser traffic.
 
-**Visitor log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `[mcp-call]`
-log line carrying `Origin`, `User-Agent`, Cloudflare-injected client IP and country, the chosen response format, and a
-`gate_result` of `passed` or `rate_limited`. Firing after the rate-limit gate keeps Workers Logs volume bounded under
-attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
+**Request log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
+mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome, and ms
+bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under attack
+while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
 inventory is published.
 
 **Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json` `protocolVersion`,
 `content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
-carry the same `2025-06-18` literal. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each
-occurrence so a single-source bump breaks the build.
+carry the same `2026-07-28` literal. Legacy clients may still send `2025-06-18` in `initialize`; the server answers per
+SDK dual-stack behavior. `tests/worker-mcp.test.ts` and `tests/e2e/discoverability.e2e.ts` assert each occurrence so a
+single-source bump breaks the build.
 
 ## Voice
 
@@ -243,11 +258,17 @@ entirely and produce a false preview. Never use them to verify any of those surf
 bun run dev    # http://localhost:8787, staging bindings, local Worker
 ```
 
-`--env staging` is load-bearing: it picks up the staging container image pin, `MCP_ENABLED="true"`, the always-pass
-Turnstile test secret, and the staging R2 / KV / rate-limit namespaces. The top-level (production) env defaults
-`MCP_ENABLED="false"` and may carry a container pin that fails to boot locally. `--local` keeps the rate-limit
+`--env staging` is load-bearing: it picks up the staging container image pin, the always-pass Turnstile test sitekey,
+the staging-only `MCP_CACHE_BYPASS_ALLOWED` / `WEB_AUDIT_ENABLED` vars, and the staging R2 / KV / rate-limit namespaces.
+The top-level (production) env may carry a container pin that fails to boot locally. `--local` keeps the rate-limit
 namespaces, R2, and asset directory in-process; dropping it would route to the deployed staging Worker and bypass the
 local build.
+
+**`MCP_ENABLED` is a secret, so no `--env` picks it up.** It appears in no `vars` block, and the kill-switch check is
+`env.MCP_ENABLED !== 'true'`, so a local run starts with the MCP surface off: `POST /mcp` answers `503` with `mcp is
+currently disabled by the operator`. To exercise `/mcp` locally, write `MCP_ENABLED="true"` into `.dev.vars.staging`,
+the per-environment local-secret file `wrangler dev --env staging` reads. `.dev.vars*` is gitignored, so the file is
+yours alone and never reaches a deploy. Same shape for `MCP_LIVE_SCORING_ENABLED` when exercising `score_cli`.
 
 Production-mode preview (rare, only when verifying the production block of `wrangler.jsonc`):
 

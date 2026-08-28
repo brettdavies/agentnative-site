@@ -18,17 +18,21 @@
  *
  * font-display: block — the renderer asserts document.fonts.size >= 2
  * after document.fonts.ready before screenshotting, so we'd rather
- * block on the actual font than ship a fallback render. */
+ * block on the actual font than ship a fallback render.
+ *
+ * format("woff2") matches the live site (site.css). Do not use
+ * "woff2-variations": Chrome drops the unquoted ident form, and the
+ * weight range already marks the file as variable. */
 @font-face {
   font-family: "Uncut Sans";
-  src: url("../../public/fonts/uncut-sans-variable.woff2") format("woff2-variations");
+  src: url("../../public/fonts/uncut-sans-variable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: block;
 }
 @font-face {
   font-family: "Monaspace Xenon";
-  src: url("../../public/fonts/monaspace-xenon-variable.woff2") format("woff2-variations");
+  src: url("../../public/fonts/monaspace-xenon-variable.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: block;
