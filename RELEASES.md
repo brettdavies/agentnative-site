@@ -100,7 +100,7 @@ git cherry-pick <sha1> <sha2> ...
 #    .github/workflows/guard-main-docs.yml. Keep the two in step: a path the workflow
 #    guards but this pattern omits leaks past the local check and fails in CI, and
 #    diff-B hides a genuinely missed pick behind the same blind spot.
-GUARDED='^(docs/(architecture|brainstorms|ideation|plans|research|reviews|solutions)/|styles/|\.vale\.ini$|scripts/(prose-check|check-banned-fonts)\.sh$|scripts/scoring/|\.context/)'
+GUARDED='^(docs/(architecture|brainstorms|designs|ideation|plans|research|reviews|solutions)/|docs/TODOS\.md$|styles/|\.vale\.ini$|scripts/(prose-check|check-banned-fonts)\.sh$|scripts/scoring/|\.context/)'
 
 git diff origin/main..HEAD --stat                                              # A: ship surface
 git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" || echo "(none)"   # B: no missed picks
