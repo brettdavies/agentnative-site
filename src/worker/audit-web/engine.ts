@@ -29,7 +29,7 @@ import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
-import { runCanonicalRedirect, runHttp } from './handlers/http';
+import { runHttp, runLegacyAliasRedirects } from './handlers/http';
 import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import {
@@ -153,6 +153,23 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     const hit = outcome.evidence.find((e) => typeof e.answers === 'number' && (e.answers as number) > 0);
     if (hit) return `${hit.name}: ${hit.answers} record(s) via ${hit.resolver}`;
     return 'no DNS-AID records';
+  }
+
+  if (check.handler === 'webmcp') {
+    // Which marker matched is the whole finding: without it a pass reads as
+    // a bare 200 and a bad match cannot be told from a real one.
+    const hit = outcome.evidence.find((e) => typeof e.marker === 'string');
+    if (hit) return `${hit.url} -> ${hit.status} (${hit.marker})`;
+  }
+
+  // Every alias is probed, so most evidence items are unpublished paths the
+  // row does not turn on. Name the one that decided the verdict, or the
+  // generic line would report a 404 on a path the site never served.
+  if (check.eval === 'legacy-alias-redirects') {
+    const wanted = outcome.status === 'pass' ? 'pass' : 'broken';
+    const decisive = outcome.evidence.find((e) => e.alias_verdict === wanted) ?? first;
+    const note = (decisive.why as string[] | undefined)?.[0];
+    return `${decisive.url ?? check.id} -> ${decisive.status ?? 'error'}${note ? ` (${note})` : ''}`;
   }
 
   // http
@@ -301,7 +318,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
       return { check, outcome: null, result: skipResult(check) };
     }
     try {
-      const handler = check.eval === 'canonical-redirect' ? runCanonicalRedirect : HANDLERS[check.handler];
+      const handler = check.eval === 'legacy-alias-redirects' ? runLegacyAliasRedirects : HANDLERS[check.handler];
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
       if (outcome.incomplete || deadline - now() <= 0) incomplete = true;

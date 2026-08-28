@@ -49,9 +49,9 @@ async function loadNormalized(): Promise<NormalizedWebAuditRegistry> {
 }
 
 describe('web-audit registry shape', () => {
-  test('normalizes to exactly 64 checks', async () => {
+  test('normalizes to exactly 65 checks', async () => {
     const registry = await loadNormalized();
-    expect(registry.checks.length).toBe(64);
+    expect(registry.checks.length).toBe(65);
   });
 
   test('every check carries id/category/tier/principle/keyword/site_types/antecedent/handler/weight/title/hint', async () => {
@@ -121,11 +121,21 @@ describe('web-audit registry shape', () => {
     });
   });
 
-  test('well-known-mcp-card carries the canonical-redirect eval rule', async () => {
+  // Publishing the card and retiring its legacy aliases are separate rows:
+  // the card requirement carries no eval rule, and alias hygiene is its own
+  // MAY row, so a correct card is never downgraded by a legacy path.
+  test('the card requirement and its legacy-alias row are separate checks', async () => {
     const registry = await loadNormalized();
     const card = registry.checks.find((c) => c.id === 'well-known-mcp-card');
-    expect(card?.eval).toBe('canonical-redirect');
+    expect(card?.eval).toBeUndefined();
     expect(card?.antecedent).toBe('mcp-present');
+    expect(card?.keyword).toBe('should');
+
+    const aliases = registry.checks.find((c) => c.id === 'mcp-card-legacy-aliases');
+    expect(aliases?.eval).toBe('legacy-alias-redirects');
+    expect(aliases?.antecedent).toBe('mcp-present');
+    expect(aliases?.keyword).toBe('may');
+    expect(aliases?.weight).toBe(1);
   });
 
   test('keyword is derived mechanically from tier for every check', async () => {
@@ -135,25 +145,25 @@ describe('web-audit registry shape', () => {
     }
   });
 
-  test('tier counts are exactly required 4 / recommended 37 / optional 23', async () => {
+  test('tier counts are exactly required 4 / recommended 37 / optional 24', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.tier] = (counts[check.tier] ?? 0) + 1;
-    expect(counts).toEqual({ required: 4, recommended: 37, optional: 23 });
+    expect(counts).toEqual({ required: 4, recommended: 37, optional: 24 });
   });
 
-  test('derived keyword counts match must 4 / should 37 / may 23', async () => {
+  test('derived keyword counts match must 4 / should 37 / may 24', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.keyword] = (counts[check.keyword] ?? 0) + 1;
-    expect(counts).toEqual({ must: 4, should: 37, may: 23 });
+    expect(counts).toEqual({ must: 4, should: 37, may: 24 });
   });
 
   test('principle distribution matches the plan mapping (P5 has zero web checks)', async () => {
     const registry = await loadNormalized();
     const counts: Record<string, number> = {};
     for (const check of registry.checks) counts[check.principle] = (counts[check.principle] ?? 0) + 1;
-    expect(counts).toEqual({ P1: 4, P2: 24, P3: 4, P4: 14, P6: 4, P7: 5, P8: 9 });
+    expect(counts).toEqual({ P1: 4, P2: 24, P3: 4, P4: 14, P6: 4, P7: 5, P8: 10 });
     expect(counts.P5).toBeUndefined();
   });
 
@@ -321,10 +331,10 @@ describe('web-audit registry shape', () => {
     );
   });
 
-  test('normalized JSON round-trips to 64 entries', async () => {
+  test('normalized JSON round-trips to 65 entries', async () => {
     const registry = await loadNormalized();
     const roundTripped = JSON.parse(JSON.stringify(registry));
-    expect(roundTripped.checks.length).toBe(64);
+    expect(roundTripped.checks.length).toBe(65);
   });
 });
 
@@ -420,13 +430,13 @@ describe('buildWebScorecard', () => {
 // status only, so a future edit that entangles a tier/weight change with a
 // re-categorization is caught here.
 describe('scoring invariance under the API/MCP category split', () => {
-  test('the real registry keeps its 4/37/23 tier distribution and universeMax under the split', async () => {
+  test('the real registry keeps its 4/37/24 tier distribution and universeMax under the split', async () => {
     const registry = await loadNormalized();
-    // 4 MUST x5 + 37 SHOULD x3 + 23 MAY x1 = 154.
+    // 4 MUST x5 + 37 SHOULD x3 + 24 MAY x1 = 155.
     const universeMax = universeMaxOf(
       registry.checks.map((c) => ({ keyword: c.keyword as 'must' | 'should' | 'may' })),
     );
-    expect(universeMax).toBe(154);
+    expect(universeMax).toBe(155);
   });
 
   test('the same outcomes score identically whether labeled mcp-api or split into api/mcp', () => {
