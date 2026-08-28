@@ -446,7 +446,7 @@ function renderEligibleEmbed(tool, scorecard, opts) {
   return `<section class="scorecard-embed scorecard-embed--eligible">
   <h2>Embed the badge</h2>
   <p>This score (${pct}%) clears the <a href="/badge">badge floor</a> (${BADGE_ELIGIBILITY_FLOOR_PCT}%). Copy this into your README:</p>
-  <pre><code>${escHtml(embedMd)}</code></pre>${preview}
+  <pre tabindex="0"><code>${escHtml(embedMd)}</code></pre>${preview}
 </section>
 `;
 }
@@ -677,7 +677,7 @@ ${renderAuditRows(bonusChecks)}
   <a href="https://github.com/brettdavies/agentnative-site/tree/main/scorecards"><code>scorecards/</code></a>.`;
   html += `<section class="scorecard-cta">
   <p>${ctaText}</p>
-  <pre><code>${reproCommand}</code></pre>
+  <pre tabindex="0"><code>${reproCommand}</code></pre>
   <p class="scorecard-cta__note">${ctaNote}</p>
 </section>`;
 
