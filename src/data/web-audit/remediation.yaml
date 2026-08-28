@@ -274,7 +274,7 @@ remediation:
     fix: |
       Serve whichever legacy pointer paths you publish (`/.well-known/mcp`, `/.well-known/mcp.json`,
       `/mcp.json`) as `301` redirects to `/.well-known/mcp/server-card.json`. A legacy path that
-      answers with its own JSON body is a second source of truth that drifts from the canonical
+      answers with its own JSON body is a second source of truth that may drift from the canonical
       card, and a `302`/`307` or a redirect to any other location sends agents somewhere else.
       Paths you never published need no redirect.
     resources:
