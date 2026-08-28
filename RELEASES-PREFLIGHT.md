@@ -41,7 +41,7 @@ Sub-commands let you re-run one section in isolation:
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
 | `dist`      | `/check` → `/audit` redirect and served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode       | `curl`                                                                       |
-| `mechanics` | Leak check vs `origin/main`, diff-B sanity vs `origin/dev`                                                                                            | `git`                                                                        |
+| `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B sanity vs `origin/dev`                                                            | `git`, `scripts/release/guarded-paths.sh`                                    |
 | `all`       | every above sequentially                                                                                                                              |                                                                              |
 
 Flags:
@@ -480,14 +480,24 @@ correctly report guarded planning paths as leaked.
   paths are `dev`-direct per the branching rule):
 
   ```bash
-  # Every path guard-main-docs rejects: the reusable's hardcoded base plus this repo's
-  # extra_paths in .github/workflows/guard-main-docs.yml. Keep the two in step.
-  GUARDED='^(docs/(architecture|brainstorms|ideation|plans|research|reviews|solutions)/|styles/|\.vale\.ini$|scripts/(prose-check|check-banned-fonts)\.sh$|scripts/scoring/|\.context/)'
+  # Resolved from .github/workflows/guard-main-docs.yml, so it cannot drift from
+  # what CI enforces. Never restate the pattern inline.
+  GUARDED="$(scripts/release/guarded-paths.sh)"
 
   git diff origin/main..HEAD --name-only \
     | grep -E "$GUARDED" \
     && echo "LEAKED: reset and redo" || echo "(clean)"
   ```
+
+- [ ] **Every doc this release adds to `main` is meant to ship.** The leak check screens against the registered set, so
+  it cannot flag a category nobody registered yet. Enumerate the additions and read them:
+
+  ```bash
+  git diff origin/main..HEAD --diff-filter=A --name-only | grep '^docs/' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+  ```
+
+  An entry that should not ship needs both: registering in the workflow's `extra_paths`, and removing from the release
+  branch.
 
 - [ ] **Triple-diff verification clean.** Per `RELEASES.md` § Releasing dev to main:
 

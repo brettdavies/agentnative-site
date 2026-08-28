@@ -117,4 +117,25 @@ Chromium (or equivalent) in the worker pipeline. Blocked by: no headless browser
 **Effort:** L **Priority:** P3 **Depends on:** First-party page tools shipping so there is something to grade **Blocked
 by:** Headless browser runtime in the web-audit engine
 
+## CI
+
+### Diagnose the `wrangler dev` death during the deep-check matrix
+
+**What:** Find out why the Playwright `webServer` (`bun run build && bun x wrangler dev --local --env staging`) exits
+partway through a `deep-check` run, and stop it.
+
+**Why:** Every test after the exit fails with `ERR_CONNECTION_REFUSED` or `ECONNREFUSED ::1:8787`, so one crash reads as
+a wall of product failures. Run 33107538749 lost roughly 145 cases that way; run 33196624930 lost the tail of the
+`tablet` project plus the `skill` project. Triage burns on deciding which failures are real, and a genuine regression
+hiding inside a cascade is easy to miss.
+
+**Context:** Not reproducible locally: `wrangler dev --local` needs Docker for the Sandbox container image, which is not
+installed on the dev machine. The retained CI log carries no message beyond a bare `[WebServer] ✘ [ERROR]` because
+`playwright.config.ts` sets `stdout: 'ignore'` on the webServer and only pipes stderr. Wrangler writes its own log to
+`~/.config/.wrangler/logs/wrangler-<timestamp>.log`, which nothing uploads. First step is an artifact upload of that
+file plus `stdout: 'pipe'`, then read an actual failure. Separately: this is distinct from the startup failure on
+`main`, where wrangler 4.81.0 cannot load `@cloudflare/sandbox` 0.12.7's `tracing` import from `cloudflare:workers`.
+
+**Effort:** M **Priority:** P2 **Depends on:** nothing
+
 ## Completed
