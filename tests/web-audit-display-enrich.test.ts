@@ -27,6 +27,18 @@ const SPLIT_REGISTRY: DisplayRegistry = {
   ],
 };
 
+// The live registry is the read-time authority for a row's normative
+// keyword and tier as well as its category, so a cached row that predates
+// either field still renders the current obligation.
+const HYDRATING_REGISTRY: DisplayRegistry = {
+  category_order: ['mcp'],
+  categories: { mcp: 'MCP' },
+  checks: [
+    { id: 'mcp-modern-tools-list', category: 'mcp', keyword: 'must', tier: 'required' },
+    { id: 'mcp-tools-list', category: 'mcp', keyword: 'should', tier: 'recommended' },
+  ],
+};
+
 const CATALOG: WebRemediationCatalog = {
   openapi: { title: 'OpenAPI', goal: 'Publish an OpenAPI description', fix: 'Add /openapi.json', resources: [] },
   'json-schemas': { title: 'Schemas', goal: 'Publish JSON Schemas', fix: 'Reference schemas', resources: [] },
@@ -161,6 +173,59 @@ describe('normalizeScorecardCategories', () => {
   test('a payload without a results array passes through unchanged', () => {
     const minimal = { score_pct: 88 };
     expect(normalizeScorecardCategories(minimal, SPLIT_REGISTRY)).toBe(minimal);
+  });
+
+  test('a cached row missing keyword and tier receives both from the live registry', () => {
+    const stored = {
+      results: [
+        { id: 'mcp-modern-tools-list', category: 'mcp-api', status: 'noncompliant', evidence: 'legacy tools/list' },
+      ],
+    };
+    const out = normalizeScorecardCategories(stored, HYDRATING_REGISTRY) as {
+      results: Array<{ id: string; category: string; keyword?: string; tier?: string }>;
+    };
+    expect(out.results[0]).toMatchObject({ category: 'mcp', keyword: 'must', tier: 'required' });
+  });
+
+  test('the live registry overrides a stale stored keyword and tier', () => {
+    const stored = {
+      results: [
+        {
+          id: 'mcp-modern-tools-list',
+          category: 'mcp',
+          keyword: 'should',
+          tier: 'recommended',
+          status: 'noncompliant',
+          evidence: 'legacy tools/list',
+        },
+      ],
+    };
+    const out = normalizeScorecardCategories(stored, HYDRATING_REGISTRY) as {
+      results: Array<{ keyword?: string; tier?: string }>;
+    };
+    expect(out.results[0].keyword).toBe('must');
+    expect(out.results[0].tier).toBe('required');
+  });
+
+  test('a row absent from the registry keeps its stored keyword and tier', () => {
+    const stored = {
+      results: [
+        { id: 'retired-check', category: 'legacy', keyword: 'may', tier: 'optional', status: 'pass', evidence: null },
+      ],
+    };
+    const out = normalizeScorecardCategories(stored, HYDRATING_REGISTRY) as {
+      results: Array<{ category: string; keyword?: string; tier?: string }>;
+    };
+    expect(out.results[0]).toMatchObject({ category: 'legacy', keyword: 'may', tier: 'optional' });
+  });
+
+  test('a registry entry without keyword or tier leaves the stored values alone', () => {
+    const stored = oldShapeStored();
+    const out = normalizeScorecardCategories(stored, SPLIT_REGISTRY) as {
+      results: Array<{ id: string; keyword?: string }>;
+    };
+    expect(out.results.find((r) => r.id === 'openapi')?.keyword).toBe('must');
+    expect(out.results.find((r) => r.id === 'json-schemas')?.keyword).toBe('should');
   });
 
   test('a registry that lacks every row id leaves stored categories intact without throwing', () => {

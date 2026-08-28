@@ -6,15 +6,17 @@
 //
 // Two enrichments compose here and are the single source of truth the
 // full-result surfaces share:
-//   - normalizeScorecardCategories re-derives each row's display category
-//     from the current registry (by check id) and rebuilds categories[],
-//     without recomputing the stored score — a category split earns no
-//     points, so re-grouping cannot desync display from the stored score.
+//   - normalizeScorecardCategories re-derives each row's display category,
+//     normative keyword, and tier from the current registry (by check id)
+//     and rebuilds categories[], without recomputing the stored score — a
+//     category split earns no points, so re-grouping cannot desync display
+//     from the stored score, and keyword/tier are presentation facts the
+//     registry owns rather than values the run computed.
 //   - attachInlineRemediation adds a derived result line to every row and
 //     an inline remediation object to every non-passing row.
 // Both degrade gracefully: a payload without a results[] array passes
 // through unchanged, and a row whose id is absent from the registry keeps
-// its stored category.
+// its stored category, keyword, and tier.
 
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import { categoryRollups } from './score';
@@ -24,13 +26,15 @@ import type { NaReason, ScorecardStatus } from './scorecard';
 export interface DisplayRegistry {
   category_order: readonly string[];
   categories: Record<string, string>;
-  checks: ReadonlyArray<{ id: string; category: string }>;
+  checks: ReadonlyArray<{ id: string; category: string; keyword?: string; tier?: string }>;
 }
 
 type EnrichableRow = {
   id: string;
   status: ScorecardStatus;
   category?: string;
+  keyword?: string;
+  tier?: string;
   evidence?: string | null;
   na_reason?: NaReason;
   unprobed?: true;
@@ -63,15 +67,22 @@ function displayCategoryOrder(rows: ReadonlyArray<{ category: string }>, registr
 }
 
 /**
- * Re-derive each row's display category from the current registry and
- * rebuild categories[]; the stored score and summaries are untouched.
+ * Re-derive each row's display category, normative keyword, and tier from
+ * the current registry and rebuild categories[]; the stored score and
+ * summaries are untouched. A registry entry that omits keyword or tier
+ * (a partial projection) leaves the stored value in place rather than
+ * blanking it.
  */
 export function normalizeScorecardCategories(stored: unknown, registry: DisplayRegistry): unknown {
   if (!hasResults(stored)) return stored;
-  const categoryById = new Map(registry.checks.map((check) => [check.id, check.category]));
+  const checkById = new Map(registry.checks.map((check) => [check.id, check]));
   const rows = stored.results.map((row) => {
-    const category = categoryById.get(row.id) ?? row.category;
-    return { ...row, category };
+    const check = checkById.get(row.id);
+    if (!check) return { ...row };
+    const next: EnrichableRow = { ...row, category: check.category };
+    if (check.keyword) next.keyword = check.keyword;
+    if (check.tier) next.tier = check.tier;
+    return next;
   });
   const rollupInput = rows.map((row) => ({ category: row.category ?? '', status: row.status }));
   const order = displayCategoryOrder(rollupInput, registry.category_order);

@@ -613,16 +613,18 @@ function esc(s: string): string {
  * Resolve a domain's audit for the result page from per-domain R2 only
  * (a miss renders the not-yet-scored state; there is no committed
  * fallback). Tries https then http for the R2 key since the cache is
- * scheme-specific.
+ * scheme-specific. The stored scoring instant rides along so the page can
+ * report the same freshness the API and MCP surfaces report; a legacy
+ * entry without one resolves to null rather than a synthesized time.
  */
 async function lookupByDomain(
   env: WebAuditRouteEnv,
   domain: string,
-): Promise<{ scorecard: unknown; targetUrl: string } | null> {
+): Promise<{ scorecard: unknown; targetUrl: string; scoredAt: string | null } | null> {
   for (const scheme of ['https', 'http']) {
     const targetUrl = normalizeTargetUrl(`${scheme}://${domain}/`);
     const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
-    if (cached) return { scorecard: cached.scorecard, targetUrl };
+    if (cached) return { scorecard: cached.scorecard, targetUrl, scoredAt: cached.scored_at ?? null };
   }
   return null;
 }
@@ -676,6 +678,8 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     targetUrl: scorecard.tool?.url ?? hit.targetUrl,
     remediation,
     origin: new URL(request.url).origin,
+    // A result page is always a cache read, so provenance is never fresh.
+    freshness: webAuditFreshness(true, hit.scoredAt),
   };
 
   if (wantMarkdown) {
