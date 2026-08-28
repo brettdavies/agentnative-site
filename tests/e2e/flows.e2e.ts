@@ -2,8 +2,46 @@
 // Exercises interactions: theme toggle persistence, copy-to-clipboard,
 // anchor navigation, skip-link, keyboard-only nav, mobile layout.
 
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
+
+// A bare overflow delta names no culprit, and these assertions have failed on
+// the Linux CI runner against layouts that measure clean on a developer
+// machine. Collect the elements whose right edge clears the client box and
+// that no ancestor clips: those are the ones actually widening the document,
+// and their identity is what the failure message has to carry.
+async function measureOverflow(page: Page) {
+  return page.evaluate(() => {
+    const de = document.documentElement;
+    const clientWidth = de.clientWidth;
+    const offenders: string[] = [];
+    for (const el of document.querySelectorAll('*')) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue;
+      if (rect.right <= clientWidth + 0.5) continue;
+      let clipped = false;
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (getComputedStyle(p).overflowX !== 'visible') {
+          clipped = true;
+          break;
+        }
+      }
+      if (clipped) continue;
+      const name =
+        typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).join('.')}` : '';
+      offenders.push(`${el.tagName.toLowerCase()}${name}@${Math.round(rect.right)}`);
+    }
+    return {
+      overflow: de.scrollWidth - clientWidth,
+      clientWidth,
+      scrollWidth: de.scrollWidth,
+      offenders: offenders.slice(0, 6),
+    };
+  });
+}
+
+const overflowDetail = (m: Awaited<ReturnType<typeof measureOverflow>>) =>
+  `client=${m.clientWidth} scroll=${m.scrollWidth} unclipped=[${m.offenders.join(', ') || 'none'}]`;
 
 test.describe('cold HN land → browse principles → theme dark → reload still dark', () => {
   test('landing on / shows hero + spec index with 8 principle rows', async ({ page }) => {
@@ -116,10 +154,8 @@ test.describe('keyboard + a11y', () => {
       for (const width of [390, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto(path);
-        const overflow = await page.evaluate(
-          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        );
-        expect(overflow, `overflow on ${path} at ${width}px`).toBeLessThanOrEqual(0);
+        const m = await measureOverflow(page);
+        expect(m.overflow, `overflow on ${path} at ${width}px — ${overflowDetail(m)}`).toBeLessThanOrEqual(0);
       }
     }
   });
@@ -196,6 +232,14 @@ test.describe('code-copy + anchor-copy', () => {
   });
 });
 
+// Below the shell's desktop breakpoint the inline .site-nav collapses behind
+// the hamburger, so every `[data-*-nav]:visible` assertion resolves to zero
+// elements. The mobile and tablet projects otherwise inherit a device viewport
+// on the wrong side of that breakpoint, so tests asserting which surface twin
+// is displayed pin a width where the links are laid out inline. What they are
+// checking is the stored surface preference, not the responsive layout.
+const DESKTOP_NAV_VIEWPORT = { width: 1280, height: 900 };
+
 test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
   test('default (CLI) shows the CLI board, 8 principles, and the Score form', async ({ page }) => {
     await page.goto('/');
@@ -266,14 +310,13 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto('/');
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow, `overflow at ${width}px`).toBeLessThanOrEqual(0);
+      const m = await measureOverflow(page);
+      expect(m.overflow, `overflow at ${width}px — ${overflowDetail(m)}`).toBeLessThanOrEqual(0);
     }
   });
 
   test('selecting Website updates visible Leaderboards href in header', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/');
     const nav = page.locator('.site-nav');
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
@@ -288,7 +331,7 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
   });
 
   test('no-JS: visible Leaderboards href follows homepage segment', async ({ browser }) => {
-    const ctx = await browser.newContext({ javaScriptEnabled: false });
+    const ctx = await browser.newContext({ javaScriptEnabled: false, viewport: DESKTOP_NAV_VIEWPORT });
     const page = await ctx.newPage();
     await page.goto('/');
     const nav = page.locator('.site-nav');
@@ -432,6 +475,7 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
 
 test.describe('leaderboard surface nav', () => {
   test('stored web preference flips visible Leaderboards off homepage', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
     await page.goto('/about');
@@ -439,6 +483,7 @@ test.describe('leaderboard surface nav', () => {
   });
 
   test('cold /web visit does not write preference (Leaderboards stays CLI default)', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.addInitScript(() => localStorage.removeItem('anc-surface'));
     await page.goto('/web');
     await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
@@ -447,6 +492,7 @@ test.describe('leaderboard surface nav', () => {
   });
 
   test('Probe A navigates CLI → Website and writes preference', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/scorecards');
     await page.locator('label[for="board-s-web"]').click();
     await expect(page).toHaveURL(/\/web$/);
@@ -466,6 +512,7 @@ test.describe('leaderboard surface nav', () => {
 
 test.describe('audit surface nav', () => {
   test('stored web preference flips visible Audit off homepage', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
     await page.goto('/about');
@@ -473,6 +520,7 @@ test.describe('audit surface nav', () => {
   });
 
   test('cold /web-audit visit does not write preference (Audit stays CLI default)', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.addInitScript(() => localStorage.removeItem('anc-surface'));
     await page.goto('/web-audit');
     await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
@@ -481,6 +529,7 @@ test.describe('audit surface nav', () => {
   });
 
   test('Probe A navigates CLI audit → web audit and writes preference', async ({ page }) => {
+    await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/audit');
     await page.locator('label[for="audit-s-web"]').click();
     await expect(page).toHaveURL(/\/web-audit$/);
