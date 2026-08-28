@@ -2714,6 +2714,16 @@ describe('evidence lines name the fact that decided the verdict', () => {
   }
 
   const html = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'text/html' } });
+  const card = () =>
+    new Response(JSON.stringify({ serverInfo: { name: 'x' } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  const inlineDuplicate = () =>
+    new Response(JSON.stringify({ url: 'https://x/mcp' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
 
   test('a webmcp pass names the marker that matched, not just the root status', async () => {
     const rows = await rowsFor(
@@ -2727,58 +2737,35 @@ describe('evidence lines name the fact that decided the verdict', () => {
 
   // The live shape that prompted this: the canonical card is correct, and the
   // row is broken only because a legacy alias serves an inline duplicate.
-  test('an alias-downgraded row names the offending alias, not the healthy canonical', async () => {
+  // A correctly published card is no longer downgraded by a legacy alias:
+  // the two facts are separate rows with separate fixes.
+  test('a healthy canonical card passes regardless of how its legacy aliases behave', async () => {
     const rows = await rowsFor(
       [
         check({
           id: 'well-known-mcp-card',
           handler: 'http',
           antecedent: 'none',
-          eval: 'canonical-redirect',
-          with: {
-            path: CARD,
-            aliases: ['/.well-known/mcp.json'],
-            expect: { status: [200], content_type: 'json', body_regex: 'serverInfo' },
-          },
+          with: { path: CARD, expect: { status: [200], content_type: 'json', body_regex: 'serverInfo' } },
         }),
       ],
       stubFetch((url) => {
-        if (url.endsWith(CARD)) {
-          return new Response(JSON.stringify({ serverInfo: { name: 'x' } }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-        if (url.endsWith('/.well-known/mcp.json')) {
-          return new Response(JSON.stringify({ url: 'https://x/mcp' }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-        return html('<html></html>');
+        if (url.endsWith(CARD)) return card();
+        return inlineDuplicate();
       }),
     );
     const row = rows.find((r) => r.id === 'well-known-mcp-card');
-    expect(row?.status).toBe('broken');
-    expect(row?.evidence).toContain('/.well-known/mcp.json');
-    expect(row?.evidence).toContain('inline');
-    // The canonical passed, so the line must say so rather than implying it failed.
-    expect(row?.evidence).toContain('ok');
+    expect(row?.status).toBe('pass');
   });
 
-  test('a genuinely broken canonical still reports the canonical, not an alias', async () => {
+  test('a genuinely broken canonical still reports the canonical', async () => {
     const rows = await rowsFor(
       [
         check({
           id: 'well-known-mcp-card',
           handler: 'http',
           antecedent: 'none',
-          eval: 'canonical-redirect',
-          with: {
-            path: CARD,
-            aliases: ['/.well-known/mcp.json'],
-            expect: { status: [200], content_type: 'json', body_regex: 'serverInfo' },
-          },
+          with: { path: CARD, expect: { status: [200], content_type: 'json', body_regex: 'serverInfo' } },
         }),
       ],
       stubFetch((url) => {
@@ -2790,5 +2777,106 @@ describe('evidence lines name the fact that decided the verdict', () => {
     const row = rows.find((r) => r.id === 'well-known-mcp-card');
     expect(row?.status).toBe('broken');
     expect(row?.evidence).toContain(CARD);
+  });
+});
+
+describe('mcp-card-legacy-aliases (MAY, one correct redirect is enough)', () => {
+  const BASE = 'https://example.com/';
+  const CARD = '/.well-known/mcp/server-card.json';
+  const ALIASES = ['/.well-known/mcp', '/.well-known/mcp.json', '/mcp.json'];
+
+  const aliasCheck = check({
+    id: 'mcp-card-legacy-aliases',
+    handler: 'http',
+    tier: 'optional',
+    keyword: 'may',
+    antecedent: 'none',
+    eval: 'legacy-alias-redirects',
+    with: { canonical: CARD, aliases: ALIASES },
+  });
+
+  async function rowFor(fetchImpl: typeof fetch): Promise<EngineResult | undefined> {
+    const rows: EngineResult[] = [];
+    for await (const event of runWebAudit({
+      url: BASE,
+      registry: {
+        version: 1,
+        mcp_discovery: { well_known: [], common_paths: [], protocol_version: '2025-06-18' },
+        category_order: ['mcp'],
+        categories: { mcp: 'MCP' },
+        checks: [aliasCheck],
+      },
+      fetchOptions: { fetchImpl },
+    }) as AsyncGenerator<AuditEvent>) {
+      if (event.type === 'result') rows.push(event.result);
+    }
+    return rows.find((r) => r.id === 'mcp-card-legacy-aliases');
+  }
+
+  const redirect = (to = `${BASE.slice(0, -1)}${CARD}`) => new Response('', { status: 301, headers: { location: to } });
+  const notFound = () => new Response('', { status: 404 });
+  const inline = () =>
+    new Response(JSON.stringify({ url: 'https://x/mcp' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+
+  test('one correct 301 passes even when the other legacy paths are unpublished', async () => {
+    const row = await rowFor(stubFetch((url) => (url.endsWith('/.well-known/mcp.json') ? redirect() : notFound())));
+    expect(row?.status).toBe('pass');
+  });
+
+  test('an inline duplicate with no correct redirect is noncompliant, not broken', async () => {
+    const row = await rowFor(stubFetch((url) => (url.endsWith('/.well-known/mcp.json') ? inline() : notFound())));
+    expect(row?.status).toBe('noncompliant');
+    expect(row?.evidence).toContain('/.well-known/mcp.json');
+  });
+
+  test('a redirect away from the canonical is broken', async () => {
+    const row = await rowFor(
+      stubFetch((url) => (url.endsWith('/mcp.json') ? redirect('https://example.com/somewhere-else') : notFound())),
+    );
+    expect(row?.status).toBe('broken');
+  });
+
+  test('a non-permanent redirect is broken', async () => {
+    const row = await rowFor(
+      stubFetch((url) =>
+        url.endsWith('/mcp.json')
+          ? new Response('', { status: 302, headers: { location: `${BASE.slice(0, -1)}${CARD}` } })
+          : notFound(),
+      ),
+    );
+    expect(row?.status).toBe('broken');
+  });
+
+  test('a correct redirect outranks an inline duplicate on another path', async () => {
+    const row = await rowFor(
+      stubFetch((url) => {
+        if (url.endsWith('/.well-known/mcp.json')) return redirect();
+        if (url.endsWith('/.well-known/mcp')) return inline();
+        return notFound();
+      }),
+    );
+    expect(row?.status).toBe('pass');
+  });
+
+  test('no legacy path published at all is optional-absent, never a penalty', async () => {
+    const row = await rowFor(stubFetch(() => notFound()));
+    expect(row?.status).toBe('n_a');
+    expect(row?.na_reason).toBe('optional-absent');
+  });
+
+  test('the canonical card itself is never fetched by this check', async () => {
+    const seen: string[] = [];
+    await rowFor(
+      stubFetch((url) => {
+        seen.push(url);
+        return notFound();
+      }),
+    );
+    expect(seen.some((u) => u.endsWith(CARD))).toBe(false);
+    // The engine's own root probe is the only other fetch in play.
+    for (const alias of ALIASES) expect(seen.some((u) => u.endsWith(alias))).toBe(true);
   });
 });

@@ -1,8 +1,9 @@
-// canonical-plus-redirect-aliases eval rule tests (plan-003 U5, R8).
+// legacy-alias-redirects eval rule tests: the MAY row covering whether a
+// site's legacy MCP card paths point at the canonical card.
 
 import { describe, expect, test } from 'bun:test';
 import { classifyAliasProbe, type ProbeResponse } from '../src/worker/audit-web/assert';
-import { runCanonicalRedirect } from '../src/worker/audit-web/handlers/http';
+import { runLegacyAliasRedirects } from '../src/worker/audit-web/handlers/http';
 import type { HandlerContext } from '../src/worker/audit-web/handlers/types';
 import type { WebCheck } from '../src/worker/audit-web/registry';
 
@@ -49,35 +50,27 @@ describe('classifyAliasProbe', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runCanonicalRedirect orchestration
+// runLegacyAliasRedirects orchestration
 // ---------------------------------------------------------------------------
 
 const CARD_BODY = '{"mcp_endpoint":"https://example.com/mcp","serverInfo":{"name":"x"}}';
+const ALIASES = ['/.well-known/mcp', '/.well-known/mcp.json', '/mcp.json'];
 
-function cardCheck(): WebCheck {
+function aliasCheck(aliases: unknown[] = ALIASES): WebCheck {
   return {
-    id: 'well-known-mcp-card',
+    id: 'mcp-card-legacy-aliases',
     category: 'mcp',
-    tier: 'recommended',
-    keyword: 'should',
+    tier: 'optional',
+    keyword: 'may',
     principle: 'P8',
     site_types: ['mcp'],
     antecedent: 'mcp-present',
-    eval: 'canonical-redirect',
-    weight: 3,
-    title: 'card',
+    eval: 'legacy-alias-redirects',
+    weight: 1,
+    title: 'legacy aliases',
     hint: 'h',
     handler: 'http',
-    with: {
-      path: '/.well-known/mcp/server-card.json',
-      aliases: [
-        '/.well-known/mcp',
-        '/.well-known/mcp.json',
-        '/mcp.json',
-        { path: '/mcp', headers: { Accept: 'application/json' } },
-      ],
-      expect: { status: [200], content_type: 'json', body_regex: 'mcp_endpoint|serverInfo' },
-    },
+    with: { canonical: '/.well-known/mcp/server-card.json', aliases },
   };
 }
 
@@ -115,66 +108,93 @@ function card(): Response {
   return new Response(CARD_BODY, { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-describe('runCanonicalRedirect', () => {
-  test('valid canonical + all aliases 301 to it = pass', async () => {
+describe('runLegacyAliasRedirects', () => {
+  test('every legacy path 301ing to the canonical passes', async () => {
     const { fetchImpl } = siteFetch({
-      '/.well-known/mcp/server-card.json': card,
       '/.well-known/mcp': redirectTo('/.well-known/mcp/server-card.json'),
       '/.well-known/mcp.json': redirectTo('/.well-known/mcp/server-card.json'),
       '/mcp.json': redirectTo('/.well-known/mcp/server-card.json', 308),
-      '/mcp': redirectTo('/.well-known/mcp/server-card.json'),
     });
-    const outcome = await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
     expect(outcome.status).toBe('pass');
     const aliasRows = outcome.evidence.filter((e) => e.role === 'alias');
-    expect(aliasRows.length).toBe(4);
+    expect(aliasRows.length).toBe(3);
     expect(aliasRows.every((e) => e.alias_verdict === 'pass')).toBe(true);
   });
 
-  test('valid canonical + absent aliases = pass (absent aliases carry no penalty)', async () => {
-    const { fetchImpl } = siteFetch({ '/.well-known/mcp/server-card.json': card });
-    const outcome = await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
+  // One correct redirect is the bar: a site serves whichever legacy paths it
+  // historically published, so the rest carry no penalty.
+  test('a single correct redirect passes while the other legacy paths 404', async () => {
+    const { fetchImpl } = siteFetch({ '/mcp.json': redirectTo('/.well-known/mcp/server-card.json') });
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
     expect(outcome.status).toBe('pass');
-    expect(outcome.evidence.filter((e) => e.alias_verdict === 'n_a').length).toBe(4);
+    expect(outcome.evidence.filter((e) => e.alias_verdict === 'n_a').length).toBe(2);
   });
 
-  test('an alias serving the card inline downgrades a valid canonical to broken', async () => {
+  test('a correct redirect outranks an inline copy on another legacy path', async () => {
     const { fetchImpl } = siteFetch({
-      '/.well-known/mcp/server-card.json': card,
-      '/mcp.json': card,
+      '/mcp.json': redirectTo('/.well-known/mcp/server-card.json'),
+      '/.well-known/mcp': card,
     });
-    const outcome = await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
+    expect(outcome.status).toBe('pass');
+  });
+
+  test('an inline copy with no correct redirect is noncompliant, not broken', async () => {
+    const { fetchImpl } = siteFetch({ '/mcp.json': card });
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
+    expect(outcome.status).toBe('noncompliant');
+  });
+
+  test('a redirect away from the canonical is broken', async () => {
+    const { fetchImpl } = siteFetch({ '/mcp.json': redirectTo('/somewhere-else.json') });
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
     expect(outcome.status).toBe('broken');
   });
 
-  test('a missing canonical is absent on the canonical check', async () => {
+  test('a non-permanent redirect is broken even when it lands on the canonical', async () => {
+    const { fetchImpl } = siteFetch({ '/mcp.json': redirectTo('/.well-known/mcp/server-card.json', 302) });
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('a misdirecting alias outranks an inline copy', async () => {
     const { fetchImpl } = siteFetch({
-      '/mcp.json': redirectTo('/.well-known/mcp/server-card.json'),
+      '/.well-known/mcp': card,
+      '/mcp.json': redirectTo('/somewhere-else.json'),
     });
-    const outcome = await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
+    expect(outcome.status).toBe('broken');
+  });
+
+  test('no legacy path published at all is absent, which a MAY row resolves to n_a upstream', async () => {
+    const { fetchImpl } = siteFetch({});
+    const outcome = await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
     expect(outcome.status).toBe('absent');
   });
 
-  test('aliases are probed without following the redirect (the 301 itself is the evidence)', async () => {
+  test('the canonical card is never fetched: it is a comparison target, not a probe', async () => {
     const { fetchImpl, seen } = siteFetch({
       '/.well-known/mcp/server-card.json': card,
       '/mcp.json': redirectTo('/.well-known/mcp/server-card.json'),
     });
-    await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
-    // canonical fetched once; the /mcp.json 301 is never followed back to it.
-    expect(seen.filter((u) => u.endsWith('/server-card.json')).length).toBe(1);
+    await runLegacyAliasRedirects(aliasCheck(), ctx(fetchImpl));
+    // Neither probed directly nor reached by following the alias 301.
+    expect(seen.filter((u) => u.endsWith('/server-card.json')).length).toBe(0);
   });
 
-  test('the /mcp alias is probed with Accept: application/json', async () => {
+  test('an alias spec carrying headers sends them', async () => {
     const seen: { accept: string | null } = { accept: null };
     const { fetchImpl } = siteFetch({
-      '/.well-known/mcp/server-card.json': card,
-      '/mcp': (init) => {
+      '/mcp.json': (init) => {
         seen.accept = new Headers(init?.headers).get('accept');
         return new Response(null, { status: 301, headers: { location: '/.well-known/mcp/server-card.json' } });
       },
     });
-    await runCanonicalRedirect(cardCheck(), ctx(fetchImpl));
+    await runLegacyAliasRedirects(
+      aliasCheck([{ path: '/mcp.json', headers: { Accept: 'application/json' } }]),
+      ctx(fetchImpl),
+    );
     expect(seen.accept).toBe('application/json');
   });
 });

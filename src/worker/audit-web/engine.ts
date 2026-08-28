@@ -29,7 +29,7 @@ import { runAuthMd } from './handlers/auth-md';
 import { runContentWithoutJs } from './handlers/content-without-js';
 import { runCorsPreflight } from './handlers/cors-preflight';
 import { runDnsDoh } from './handlers/dns-doh';
-import { runCanonicalRedirect, runHttp } from './handlers/http';
+import { runHttp, runLegacyAliasRedirects } from './handlers/http';
 import { runLlmsTxtQuality } from './handlers/llms-txt-quality';
 import { runMarkdownFrontmatter } from './handlers/markdown-frontmatter';
 import {
@@ -162,18 +162,14 @@ function summarizeEvidence(check: WebCheck, outcome: ProbeOutcome): string {
     if (hit) return `${hit.url} -> ${hit.status} (${hit.marker})`;
   }
 
-  // An alias-downgraded row passed its own canonical probe, so the generic
-  // line below would name a healthy URL beside a broken verdict and read as
-  // a contradiction. Name the alias that caused the downgrade instead.
-  if (outcome.status === 'broken') {
-    const canonical = outcome.evidence.find((e) => e.role === 'canonical');
-    const badAlias = outcome.evidence.find((e) => e.role === 'alias' && e.alias_verdict === 'broken');
-    if (canonical?.ok === true && badAlias) {
-      const note = (badAlias.why as string[] | undefined)?.[0];
-      return `canonical ${canonical.url} -> ${canonical.status} ok; alias ${badAlias.url} -> ${badAlias.status}${
-        note ? ` (${note})` : ''
-      }`;
-    }
+  // Every alias is probed, so most evidence items are unpublished paths the
+  // row does not turn on. Name the one that decided the verdict, or the
+  // generic line would report a 404 on a path the site never served.
+  if (check.eval === 'legacy-alias-redirects') {
+    const wanted = outcome.status === 'pass' ? 'pass' : 'broken';
+    const decisive = outcome.evidence.find((e) => e.alias_verdict === wanted) ?? first;
+    const note = (decisive.why as string[] | undefined)?.[0];
+    return `${decisive.url ?? check.id} -> ${decisive.status ?? 'error'}${note ? ` (${note})` : ''}`;
   }
 
   // http
@@ -322,7 +318,7 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
       return { check, outcome: null, result: skipResult(check) };
     }
     try {
-      const handler = check.eval === 'canonical-redirect' ? runCanonicalRedirect : HANDLERS[check.handler];
+      const handler = check.eval === 'legacy-alias-redirects' ? runLegacyAliasRedirects : HANDLERS[check.handler];
       if (!handler) throw new Error(`no handler registered for "${check.handler}"`);
       const outcome = await handler(check, handlerCtx());
       if (outcome.incomplete || deadline - now() <= 0) incomplete = true;
