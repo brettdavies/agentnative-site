@@ -854,6 +854,12 @@ describe('catalog prompts fit the WebMCP output cap (R21, KTD4)', () => {
     expect(item.prompt_truncated).toBe(true);
     expect(prompt).toContain('… full fix at ');
     expect(prompt).toContain('/web-audit/skill/');
+    // The recovery route is structured, so a reader never has to parse it
+    // back out of the prompt's trailing marker.
+    const pointer = item.full_fix as { tool: string; args: Record<string, string>; url: string };
+    expect(pointer.tool).toBe('get_web_remediation');
+    expect(pointer.args.check_id).toBe(item.id as string);
+    expect(pointer.url.endsWith(`/web-audit/skill/${item.id as string}.md`)).toBe(true);
     // The per-run facts survive the trim; only the catalog prose is cut.
     expect(prompt.startsWith('Goal: ')).toBe(true);
     expect(prompt).toContain('--- begin evidence ---');
@@ -1078,5 +1084,21 @@ describe('webmcp.js bundle (built dist/)', () => {
     }
     expect(js).not.toContain('fetch(');
     expect(js).not.toContain('XMLHttpRequest');
+  });
+});
+
+// A prompt that fits whole pays nothing for the recovery pointer: it is the
+// affordance for a truncation, not a field on every response.
+describe('the full-fix pointer appears only on a trimmed prompt', () => {
+  test('an ordinary prompt carries neither the marker nor the pointer', () => {
+    const doc = resultDoc([
+      { id: 'openapi', keyword: 'must', status: 'absent', prompt: 'Goal: g\nFix: short\nSkill: s' },
+    ]);
+    const direct = JSON.parse(getFixPrompt(doc, { id: 'openapi' }));
+    expect(direct.prompt_truncated).toBeUndefined();
+    expect(direct.full_fix).toBeUndefined();
+    const batch = JSON.parse(getFixPrompts(doc, {}));
+    expect(batch.items[0].prompt_truncated).toBeUndefined();
+    expect(batch.items[0].full_fix).toBeUndefined();
   });
 });

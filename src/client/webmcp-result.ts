@@ -107,10 +107,29 @@ function batchPromptBudget(): number {
   return EXECUTE_MAX - 420;
 }
 
+/** Room the recovery pointer needs on an item that had to be trimmed. */
+const POINTER_RESERVE = 180;
+
 /** The pointer the trimmed prompt sends a reader to for the untruncated fix. */
 function skillUrlFor(id: string): string {
   const origin = typeof location !== 'undefined' && location.origin ? location.origin : 'https://anc.dev';
   return `${origin}/web-audit/skill/${id}`;
+}
+
+/**
+ * Where to get the untruncated fix, named structurally so a reader does not
+ * have to parse it out of the prompt's trailing marker. Two routes because
+ * the callers differ: an agent already speaking this site's MCP gets the
+ * whole object from one more tool call, while the markdown page is the
+ * universal fallback for anything that only has HTTP. Every browser-tool
+ * response is capped, so pointing back at these tools would not help.
+ */
+function fullFixPointer(id: string): Record<string, unknown> {
+  return {
+    tool: 'get_web_remediation',
+    args: { check_id: id },
+    url: `${skillUrlFor(id)}.md`,
+  };
 }
 
 export function getFixPrompt(doc: Document, input: Record<string, unknown>): string {
@@ -159,12 +178,24 @@ export function getFixPrompt(doc: Document, input: Record<string, unknown>): str
     // Serialization inflates the prompt (every newline and quote escapes to
     // two characters), so the budget is converged on rather than computed:
     // fit, measure the real envelope, and give back what it overran.
-    const shell = JSON.stringify({ ...head, remediable: true, prompt: '', prompt_truncated: true }).length;
+    const shell = JSON.stringify({
+      ...head,
+      remediable: true,
+      prompt: '',
+      prompt_truncated: true,
+      full_fix: fullFixPointer(row.id),
+    }).length;
     let budget = EXECUTE_MAX - shell;
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const fitted = fitPromptToBudget(row.prompt, budget, skillUrlFor(row.id));
       if (!fitted) break;
-      const trimmed = JSON.stringify({ ...head, remediable: true, prompt: fitted, prompt_truncated: true });
+      const trimmed = JSON.stringify({
+        ...head,
+        remediable: true,
+        prompt: fitted,
+        prompt_truncated: true,
+        full_fix: fullFixPointer(row.id),
+      });
       if (trimmed.length <= EXECUTE_MAX) return trimmed;
       budget -= trimmed.length - EXECUTE_MAX;
     }
@@ -187,11 +218,20 @@ export function getFixPrompts(doc: Document, input: Record<string, unknown>): st
       // block; a skipped one has no prompt, so it carries the result line.
       if (isRemediable(row) && row.prompt !== null) {
         // Trim to a per-item ceiling so one oversized prompt can still be
-        // returned, rather than packing to zero items and stranding it.
-        const fitted = fitPromptToBudget(row.prompt, batchPromptBudget(), skillUrlFor(row.id));
+        // returned, rather than packing to zero items and stranding it. A
+        // prompt that fits whole pays nothing for the recovery pointer.
+        const budget = batchPromptBudget();
+        const whole = fitPromptToBudget(row.prompt, budget, skillUrlFor(row.id));
+        if (whole === row.prompt) return { ...base, remediable: true, prompt: whole };
+        const fitted = fitPromptToBudget(row.prompt, budget - POINTER_RESERVE, skillUrlFor(row.id));
         if (fitted === null) return { ...base, remediable: false, reason: 'prompt exceeds the output cap' };
-        if (fitted !== row.prompt) return { ...base, remediable: true, prompt: fitted, prompt_truncated: true };
-        return { ...base, remediable: true, prompt: fitted };
+        return {
+          ...base,
+          remediable: true,
+          prompt: fitted,
+          prompt_truncated: true,
+          full_fix: fullFixPointer(row.id),
+        };
       }
       return { ...base, remediable: false, reason: skipReason(row), result: row.result };
     }),
