@@ -1034,6 +1034,11 @@ main .anchor-icon {
 .board-try {
   display: flex;
   gap: var(--space-2);
+  /* The submit button cannot shrink below its label, and that label's width
+   * follows the platform's font metrics, so a row pinned to one line pushes
+   * the whole document into horizontal scroll on whichever platform renders
+   * it widest. Wrapping costs nothing while the pair fits. */
+  flex-wrap: wrap;
 }
 .board-try input {
   font-family: var(--font-mono);
