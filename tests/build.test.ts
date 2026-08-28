@@ -2521,7 +2521,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
 
   test('reproduce CTA renders run.invocation verbatim for command-mode runs', () => {
     const html = buildScorecardBody(tool('rg'), sc(), [], { met: 7, total: 7, details: [] }, '15.1.0', v04Meta());
-    expect(html).toContain('<pre><code>anc audit --command rg --output json</code></pre>');
+    expect(html).toContain('<pre tabindex="0"><code>anc audit --command rg --output json</code></pre>');
   });
 
   test('reproduce CTA falls back to synthesized form for project-mode runs', () => {
@@ -2538,7 +2538,7 @@ describe('buildScorecardBody — v0.4 metadata rendering', () => {
         run: { ...v04Meta().run!, invocation: 'anc audit /home/secret/repo' },
       }),
     );
-    expect(html).toContain('<pre><code>anc audit --command rg</code></pre>');
+    expect(html).toContain('<pre tabindex="0"><code>anc audit --command rg</code></pre>');
     expect(html).not.toContain('/home/secret/repo');
   });
 
