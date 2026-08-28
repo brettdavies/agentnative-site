@@ -51,7 +51,7 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
   'robots-present',
   'auth-present',
 ]);
-export const WEB_AUDIT_EVAL_RULES = new Set(['canonical-redirect', 'scoped-discovery']);
+export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery']);
 export const CORS_SURFACES = new Set(['preflight', 'actual']);
 
 const PRINCIPLE_RE = /^P[1-8]$/;

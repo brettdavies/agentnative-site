@@ -408,19 +408,31 @@ checks:
     principle: P8
     site_types: [mcp]
     antecedent: mcp-present
-    eval: canonical-redirect
     weight: 3
     title: A .well-known MCP server card is published (SEP-1649)
     handler: http
     with:
       path: /.well-known/mcp/server-card.json
+      expect: { status: [200], content_type: "json", body_regex: "mcp_endpoint|serverInfo|transport|\"name\"" }
+    hint: Publish /.well-known/mcp/server-card.json (SEP-1649).
+
+  - id: mcp-card-legacy-aliases
+    category: mcp
+    tier: optional
+    principle: P8
+    site_types: [mcp]
+    antecedent: mcp-present
+    eval: legacy-alias-redirects
+    weight: 1
+    title: Legacy MCP card paths redirect to the canonical card
+    handler: http
+    with:
+      canonical: /.well-known/mcp/server-card.json
       aliases:
         - /.well-known/mcp
         - /.well-known/mcp.json
         - /mcp.json
-        - { path: /mcp, headers: { Accept: application/json } }
-      expect: { status: [200], content_type: "json", body_regex: "mcp_endpoint|serverInfo|transport|\"name\"" }
-    hint: Publish /.well-known/mcp/server-card.json (SEP-1649); 301 the legacy aliases to it.
+    hint: 301 whichever legacy card paths you serve to /.well-known/mcp/server-card.json rather than answering with a copy.
 
   - id: mcp-usage-doc
     category: mcp
