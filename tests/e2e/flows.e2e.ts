@@ -301,14 +301,23 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
   });
 });
 
+// Every NAV_LINKS entry in src/build/shell.mjs renders one anchor, except
+// the dual-surface entries (Leaderboards, Audit), which each emit a CLI and
+// a Website twin and display only the one matching the active surface. So a
+// new dual-surface entry raises the anchor total without raising the visible
+// count — the two numbers move independently and must not be bumped together.
+const NAV_ENTRIES = 6;
+const DUAL_SURFACE_NAV_ENTRIES = 2;
+const NAV_ANCHORS = NAV_ENTRIES + DUAL_SURFACE_NAV_ENTRIES;
+
 test.describe('shell — grouped nav, hamburger, footer rows', () => {
   test('desktop (1440): grouped nav links inline, hamburger hidden, footer rows present', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');
     const nav = page.getByRole('navigation', { name: 'Primary' });
     await expect(nav).toBeVisible();
-    await expect(nav.locator('a')).toHaveCount(8);
-    await expect(nav.locator('a:visible')).toHaveCount(7);
+    await expect(nav.locator('a')).toHaveCount(NAV_ANCHORS);
+    await expect(nav.locator('a:visible')).toHaveCount(NAV_ENTRIES);
     await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
     await expect(nav.locator('[data-audit-nav]:visible')).toHaveCount(1);
     await expect(page.locator('.nav-burger')).toBeHidden();
@@ -322,8 +331,8 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       await page.goto('/');
       const nav = page.getByRole('navigation', { name: 'Primary' });
       await expect(nav).toBeVisible();
-      await expect(nav.locator('a')).toHaveCount(8);
-      await expect(nav.locator('a:visible')).toHaveCount(7);
+      await expect(nav.locator('a')).toHaveCount(NAV_ANCHORS);
+      await expect(nav.locator('a:visible')).toHaveCount(NAV_ENTRIES);
       await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveCount(1);
       await expect(nav.locator('[data-audit-nav]:visible')).toHaveCount(1);
       await expect(page.locator('.nav-burger')).toBeHidden();
@@ -355,8 +364,8 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       expect(overflow.burgerDisplay).toBe('none');
       expect(overflow.navDisplay).toBe('flex');
       expect(overflow.links).toBeDefined();
-      expect(overflow.links!.filter((l) => l.visible).length).toBe(7);
-      expect(overflow.links!.filter((l) => !l.visible).length).toBe(2);
+      expect(overflow.links!.filter((l) => l.visible).length).toBe(NAV_ENTRIES);
+      expect(overflow.links!.filter((l) => !l.visible).length).toBe(DUAL_SURFACE_NAV_ENTRIES);
     });
   }
 
