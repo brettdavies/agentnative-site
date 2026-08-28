@@ -31,6 +31,12 @@ export type FindingRow = {
   status: string;
   /** The run never observed the surface, so it holds nothing to fix. */
   unprobed: boolean;
+  /**
+   * The row's rendered result line, the same sentence the page shows. It
+   * carries the run's untruncated evidence, so a tool reader and a human
+   * reader see one finding rather than two versions of it.
+   */
+  result: string | null;
   prompt: string | null;
   /** Rendered document order, the last ordering tie-break. */
   order: number;
@@ -256,4 +262,35 @@ export function selectFindings(rows: readonly FindingRow[], input: Record<string
     total: matched.length,
     items: matched.slice(query.offset, query.offset + query.limit),
   };
+}
+
+/**
+ * Shrink a prompt to `budget` characters by trimming only its `Fix:` line,
+ * leaving a pointer to the untruncated text.
+ *
+ * The capped browser tools are the one surface that cannot always carry the
+ * canonical prompt whole. What gets cut is chosen by what is recoverable:
+ * the evidence block holds this run's finding and exists nowhere else in
+ * the response, and `Goal:`/`Skill:` are both short and the means of
+ * recovering everything else, so `Fix:` absorbs the pressure. The marker
+ * makes the truncation visible instead of leaving a reader with prose that
+ * simply stops.
+ *
+ * Returns the prompt unchanged when it already fits, and `null` when even a
+ * fully-trimmed prompt would not, so the caller reports a cap failure
+ * rather than emitting something misleading.
+ */
+export function fitPromptToBudget(prompt: string, budget: number, skillUrl: string): string | null {
+  if (prompt.length <= budget) return prompt;
+  const lines = prompt.split('\n');
+  const fixAt = lines.findIndex((line) => line.startsWith('Fix: '));
+  if (fixAt === -1) return null;
+  const marker = ` … full fix at ${skillUrl}`;
+  const others = lines.filter((_, i) => i !== fixAt).join('\n').length + lines.length - 1;
+  const room = budget - others - marker.length - 'Fix: '.length;
+  if (room < 40) return null;
+  const body = lines[fixAt].slice('Fix: '.length);
+  if (body.length <= room) return prompt;
+  lines[fixAt] = `Fix: ${body.slice(0, room).trimEnd()}${marker}`;
+  return lines.join('\n');
 }

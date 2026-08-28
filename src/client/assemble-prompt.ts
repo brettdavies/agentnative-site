@@ -31,6 +31,13 @@ export function selectAssemblePrompts(rows: readonly FindingRow[], opts: Assembl
  * every row, while the prompt carrier is a child only actionable rows
  * emit.
  */
+/** The visible "Result: ..." sentence, without its label. */
+function resultLineOf(el: Element): string | null {
+  const text = el.querySelector('.web-check__result')?.textContent?.trim();
+  if (!text) return null;
+  return text.replace(/^Result:\s*/, '') || null;
+}
+
 export function findingRowsFromElements(nodes: Iterable<Element>): FindingRow[] {
   const out: FindingRow[] = [];
   for (const el of nodes) {
@@ -42,6 +49,9 @@ export function findingRowsFromElements(nodes: Iterable<Element>): FindingRow[] 
       tier: el.getAttribute('data-tier') ?? '',
       status: el.getAttribute('data-status') ?? '',
       unprobed: el.getAttribute('data-unprobed') === 'true',
+      // Read from the rendered paragraph rather than a duplicate attribute,
+      // so the evidence exists once in the DOM.
+      result: resultLineOf(el),
       prompt: el.querySelector('[data-copy-text]')?.getAttribute('data-copy-text') || null,
       order: out.length,
     });

@@ -12,6 +12,7 @@ import {
   FINDING_VALUE_MAX,
   type FindingRow,
   type FindingStatus,
+  fitPromptToBudget,
   isRemediable,
   normalizeFindingQuery,
   orderFindings,
@@ -90,9 +91,26 @@ export function getWorksheet(doc: Document, input: Record<string, unknown>): str
       tier: row.tier,
       status: row.status,
       unprobed: row.unprobed,
+      result: row.result,
       remediable: isRemediable(row) && row.prompt !== null,
     })),
   });
+}
+
+/**
+ * Room one batch item's prompt may occupy: the cap less the page metadata,
+ * freshness envelope, and the item's own keys. Read through a function
+ * because webmcp-lib imports this module back, so a module-scope constant
+ * would evaluate before EXECUTE_MAX is initialized.
+ */
+function batchPromptBudget(): number {
+  return EXECUTE_MAX - 420;
+}
+
+/** The pointer the trimmed prompt sends a reader to for the untruncated fix. */
+function skillUrlFor(id: string): string {
+  const origin = typeof location !== 'undefined' && location.origin ? location.origin : 'https://anc.dev';
+  return `${origin}/web-audit/skill/${id}`;
 }
 
 export function getFixPrompt(doc: Document, input: Record<string, unknown>): string {
@@ -127,13 +145,30 @@ export function getFixPrompt(doc: Document, input: Record<string, unknown>): str
     status: row.status,
     unprobed: row.unprobed,
   };
+  // The finding appears once per item: inside the prompt's evidence block
+  // when there is a prompt, on the result line when there is not.
   const remediable = isRemediable(row) && row.prompt !== null;
-  const body = remediable ? { remediable, prompt: row.prompt } : { remediable, reason: skipReason(row) };
+  const body = remediable
+    ? { remediable, prompt: row.prompt }
+    : { remediable, reason: skipReason(row), result: row.result };
   const text = JSON.stringify({ ...head, ...body });
   if (text.length <= EXECUTE_MAX) return text;
-  // Prompts are static catalog text proven to fit before shipping, so
-  // this is a catalog regression, not a runtime condition to paper over
-  // with a sliced prompt.
+  // Over budget: trim the prompt's Fix line to what is left, keeping the
+  // evidence block and the pointer whole, rather than dropping the item.
+  if (remediable && row.prompt) {
+    // Serialization inflates the prompt (every newline and quote escapes to
+    // two characters), so the budget is converged on rather than computed:
+    // fit, measure the real envelope, and give back what it overran.
+    const shell = JSON.stringify({ ...head, remediable: true, prompt: '', prompt_truncated: true }).length;
+    let budget = EXECUTE_MAX - shell;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const fitted = fitPromptToBudget(row.prompt, budget, skillUrlFor(row.id));
+      if (!fitted) break;
+      const trimmed = JSON.stringify({ ...head, remediable: true, prompt: fitted, prompt_truncated: true });
+      if (trimmed.length <= EXECUTE_MAX) return trimmed;
+      budget -= trimmed.length - EXECUTE_MAX;
+    }
+  }
   return errorResult('too_large', 'id', `the prompt for ${row.id} exceeds the ${EXECUTE_MAX}-character output cap`);
 }
 
@@ -148,8 +183,17 @@ export function getFixPrompts(doc: Document, input: Record<string, unknown>): st
     total: selection.total,
     items: selection.items.map((row) => {
       const base = { id: row.id, status: row.status };
-      if (isRemediable(row) && row.prompt !== null) return { ...base, remediable: true, prompt: row.prompt };
-      return { ...base, remediable: false, reason: skipReason(row) };
+      // A remediable item carries its finding inside the prompt's evidence
+      // block; a skipped one has no prompt, so it carries the result line.
+      if (isRemediable(row) && row.prompt !== null) {
+        // Trim to a per-item ceiling so one oversized prompt can still be
+        // returned, rather than packing to zero items and stranding it.
+        const fitted = fitPromptToBudget(row.prompt, batchPromptBudget(), skillUrlFor(row.id));
+        if (fitted === null) return { ...base, remediable: false, reason: 'prompt exceeds the output cap' };
+        if (fitted !== row.prompt) return { ...base, remediable: true, prompt: fitted, prompt_truncated: true };
+        return { ...base, remediable: true, prompt: fitted };
+      }
+      return { ...base, remediable: false, reason: skipReason(row), result: row.result };
     }),
   });
 }
@@ -184,6 +228,7 @@ export function getAuditSummary(doc: Document, input: Record<string, unknown>): 
       keyword: row.keyword,
       tier: row.tier,
       status: row.status,
+      result: row.result,
       remediable: isRemediable(row) && row.prompt !== null,
     })),
   });
