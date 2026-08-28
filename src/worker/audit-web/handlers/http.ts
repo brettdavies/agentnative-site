@@ -90,36 +90,43 @@ export async function runHttp(check: WebCheck, ctx: HandlerContext): Promise<Pro
 type AliasSpec = string | { path: string; headers?: Record<string, string> };
 
 /**
- * canonical-plus-redirect-aliases eval rule (plan-003 U5, R8). The
- * canonical path is the requirement, evaluated with the standard
- * following fetch + assertions; each alias is probed WITHOUT following
- * redirects (the default handler reports only the final hop, so it can
- * never see the 301). A broken alias (inline duplicate, non-permanent or
- * off-canonical redirect) downgrades an otherwise-passing check to
- * broken; absent aliases carry no penalty.
+ * legacy-alias-redirects eval rule: whether the legacy MCP card paths point
+ * at the canonical card instead of serving their own copy. This is its own
+ * MAY row rather than a modifier on the canonical-card requirement, because
+ * publishing the card and retiring its legacy aliases are separate pieces of
+ * work with separate fixes, and a row carries one status and one prompt.
+ *
+ * Only the aliases are fetched. The canonical URL is resolved from
+ * `with.canonical` for target comparison and never probed, so this row adds
+ * no subrequest beyond the aliases themselves. Each alias is fetched WITHOUT
+ * following redirects, because the default handler reports only the final
+ * hop and could never see the 301.
+ *
+ * One correct redirect is enough to pass: a site serves whichever legacy
+ * paths it historically published, so requiring all of them would fail a
+ * site for paths it never had. An unpublished alias carries no penalty, and
+ * a MAY row with nothing published at all resolves to n_a upstream.
+ *
+ * Without a correct redirect, the worst observed defect decides the row. An
+ * inline copy is `noncompliant`: the surface answers, but it is a second
+ * source of truth that can drift from the canonical card. A non-permanent or
+ * off-canonical redirect is `broken`, because it actively sends agents
+ * somewhere else.
  */
-export async function runCanonicalRedirect(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
+export async function runLegacyAliasRedirects(check: WebCheck, ctx: HandlerContext): Promise<ProbeOutcome> {
   const w = check.with as {
-    path: string;
+    canonical: string;
     aliases?: AliasSpec[];
-    expect?: ExpectBlock;
     timeout?: number;
   };
   const timeoutMs = timeoutMsFor(w.timeout, ctx.defaultTimeoutMs);
-  const expect = w.expect ?? {};
-  const canonicalUrl = resolveUrl(ctx.base, w.path);
+  const canonicalUrl = resolveUrl(ctx.base, w.canonical);
   if (!canonicalUrl) return { status: 'na', evidence: [{ why: ['no resolvable canonical URL'] }] };
 
   const evidence: ProbeOutcome['evidence'] = [];
-  const canonicalResp = await guardedFetch(canonicalUrl, {}, { ...ctx.fetchOptions, timeoutMs });
-  const { ok, reasons } = assertHttp(expect, canonicalResp);
-  evidence.push({ url: canonicalUrl, role: 'canonical', status: canonicalResp.status, ok, why: reasons });
-
-  let canonicalStatus: ProbeStatus;
-  if (ok) canonicalStatus = 'pass';
-  else canonicalStatus = classifyMiss(canonicalResp, expect, w.timeout !== undefined);
-
-  let aliasBroken = false;
+  let redirected = false;
+  let misdirected = false;
+  let inlineCopy = false;
   for (const alias of w.aliases ?? []) {
     const spec = typeof alias === 'string' ? { path: alias } : alias;
     const aliasUrl = resolveUrl(ctx.base, substituteEndpoint(spec.path, ctx.mcpEndpoint));
@@ -131,9 +138,19 @@ export async function runCanonicalRedirect(check: WebCheck, ctx: HandlerContext)
     );
     const { verdict, note } = classifyAliasProbe(resp, aliasUrl, canonicalUrl);
     evidence.push({ url: aliasUrl, role: 'alias', status: resp.status, alias_verdict: verdict, why: [note] });
-    if (verdict === 'broken') aliasBroken = true;
+    if (verdict === 'pass') redirected = true;
+    else if (verdict === 'broken') {
+      // A 2xx alias answered with a body of its own; every other verdict in
+      // the broken bucket is a redirect that misses the canonical card.
+      const status = resp.status ?? 0;
+      if (status >= 200 && status < 300) inlineCopy = true;
+      else misdirected = true;
+    }
   }
 
-  const status = canonicalStatus === 'pass' && aliasBroken ? 'broken' : canonicalStatus;
-  return { status, evidence };
+  if (evidence.length === 0) return { status: 'na', evidence: [{ why: ['no resolvable alias URL'] }] };
+  if (redirected) return { status: 'pass', evidence };
+  if (misdirected) return { status: 'broken', evidence };
+  if (inlineCopy) return { status: 'noncompliant', evidence };
+  return { status: 'absent', evidence };
 }
