@@ -49,6 +49,7 @@ import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { requestHeader } from '../request-header';
+import { siteOrigin } from '../site-origin';
 
 export interface WebAuditToolsEnv {
   ASSETS: Fetcher;
@@ -58,8 +59,6 @@ export interface WebAuditToolsEnv {
   MCP_ENABLED?: string;
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
 }
-
-const SITE_URL = 'https://anc.dev';
 
 // Upper bound on opted-in user rows returned under view=all. The /web board
 // renders every opted-in row, but an MCP response is a single unpaginated JSON
@@ -112,7 +111,7 @@ async function registryOrNull(env: WebAuditToolsEnv): Promise<WebAuditRegistry |
 async function enrichForRead(env: WebAuditToolsEnv, scorecard: unknown): Promise<unknown> {
   const catalog = await catalogOrEmpty(env);
   const registry = await registryOrNull(env);
-  return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: SITE_URL });
+  return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: siteOrigin() });
 }
 
 /**
@@ -158,7 +157,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           found: true,
           ...webAuditFreshness(true, hit.scored_at),
           scorecard: await enrichForRead(env, hit.scorecard),
-          share_url: `${SITE_URL}/web/${domain}`,
+          share_url: `${siteOrigin()}/web/${domain}`,
           spec_version: SPEC_VERSION,
         });
       }
@@ -214,7 +213,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const validation = validatePublicUrl(canonicalTarget);
       if (!validation.ok) return isError(validation.reason);
       const domain = parsed.host;
-      const shareUrl = `${SITE_URL}/web/${domain}`;
+      const shareUrl = `${siteOrigin()}/web/${domain}`;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
       // data, so a cached scorecard is served even when the audit is off.
@@ -375,7 +374,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         url: e.url,
         name: e.name,
         score_pct: e.score_pct,
-        share_url: `${SITE_URL}/web/${e.domain}`,
+        share_url: `${siteOrigin()}/web/${e.domain}`,
       }));
       if ((view ?? 'curated') !== 'all') {
         return textContent({ count: curated.length, entries: curated });
@@ -396,7 +395,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           url: `https://${l.domain}/`,
           name: l.name,
           score_pct: l.score_pct,
-          share_url: `${SITE_URL}/web/${l.domain}`,
+          share_url: `${siteOrigin()}/web/${l.domain}`,
         }));
       const entries = curated.concat(userRows);
       return textContent({ count: entries.length, entries });

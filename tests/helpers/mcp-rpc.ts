@@ -52,6 +52,8 @@ export async function mcpRpc(
   env: McpEnv,
   body: JsonRpcBody,
   headers: Record<string, string> = {},
+  /** Origin the request arrives on; links in tool results are built from it. */
+  origin = 'https://anc.dev',
 ): Promise<{
   status: number;
   body: JsonRpcBody;
@@ -61,12 +63,12 @@ export async function mcpRpc(
   await loadCatalog(env);
   const handler = getMcpHandler({ jsonResponse: true, legacy: resolveLegacyMode(env) });
   const res = await runWithMcpRequest(
-    new Request('https://anc.dev/mcp', {
+    new Request(`${origin}/mcp`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
-        host: 'anc.dev',
+        host: new URL(origin).host,
         ...headers,
       },
       body: JSON.stringify(body),

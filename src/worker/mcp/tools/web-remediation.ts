@@ -17,10 +17,9 @@ import {
   type WebRemediationCatalog,
   type WebRemediationCatalogEnv,
 } from '../../audit-web/remediation';
+import { siteOrigin } from '../site-origin';
 
 export type WebRemediationEnv = WebRemediationCatalogEnv;
-
-const SITE_URL = 'https://anc.dev';
 
 export function resetWebRemediationCacheForTests(): void {
   resetWebRemediationCatalogCacheForTests();
@@ -67,7 +66,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
       if (!entry) {
         return textContent({ found: false, message: `no remediation for check id: ${check_id}` });
       }
-      const assembled = assembleRemediation(entry, { checkId: check_id, origin: SITE_URL, evidence });
+      const assembled = assembleRemediation(entry, { checkId: check_id, origin: siteOrigin(), evidence });
       return textContent({
         found: true,
         remediation: { check_id, title: entry.title, ...assembled },
