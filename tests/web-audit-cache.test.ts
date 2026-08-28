@@ -241,31 +241,34 @@ describe('cache.put / get', () => {
     expect(got).not.toBeNull();
     expect(got?.scored_at).toBeUndefined();
     expect(deletedKeys).toHaveLength(0);
-    expect(isStale(got?.scored_at, 5 * 60_000)).toBe(true);
+    expect(isStale(got?.scored_at, WEB_AUDIT_STALE_AFTER_MS)).toBe(true);
   });
 });
 
 describe('isStale', () => {
-  const FIVE_MIN = 5 * 60_000;
+  const THRESHOLD_MS = 5 * 60_000;
 
   test('false within the threshold, true past it', () => {
     const now = Date.now();
-    expect(isStale(new Date(now - FIVE_MIN + 10_000).toISOString(), FIVE_MIN, now)).toBe(false);
-    expect(isStale(new Date(now - FIVE_MIN - 10_000).toISOString(), FIVE_MIN, now)).toBe(true);
+    expect(isStale(new Date(now - THRESHOLD_MS + 10_000).toISOString(), THRESHOLD_MS, now)).toBe(false);
+    expect(isStale(new Date(now - THRESHOLD_MS - 10_000).toISOString(), THRESHOLD_MS, now)).toBe(true);
   });
 
   test('true when scored_at is absent or unparseable', () => {
-    expect(isStale(undefined, FIVE_MIN)).toBe(true);
-    expect(isStale('not-a-date', FIVE_MIN)).toBe(true);
+    expect(isStale(undefined, THRESHOLD_MS)).toBe(true);
+    expect(isStale('not-a-date', THRESHOLD_MS)).toBe(true);
   });
 });
 
 describe('webAuditFreshness', () => {
   const SCORED_AT = '2026-08-27T13:33:00.000Z';
-  const REFRESH_AFTER = '2026-08-27T13:38:00.000Z';
+  const REFRESH_AFTER = '2026-08-27T13:34:00.000Z';
 
+  // The one place the window's literal value is pinned. Every other surface
+  // derives its expected instant from the constant, so retuning the window
+  // is a one-line change here plus the constant itself.
   test('derives refresh_after exactly WEB_AUDIT_STALE_AFTER_MS after the scoring instant', () => {
-    expect(WEB_AUDIT_STALE_AFTER_MS).toBe(300_000);
+    expect(WEB_AUDIT_STALE_AFTER_MS).toBe(60_000);
     expect(webAuditFreshness(true, SCORED_AT)).toEqual({
       cached: true,
       scored_at: SCORED_AT,

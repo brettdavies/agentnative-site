@@ -51,8 +51,10 @@ const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
 
 // Staleness threshold for the on-demand paths: a hit younger than this
 // serves cached; an older hit falls through to a fresh audit (still
-// behind the kill-switch/limiter/Turnstile gates).
-export const WEB_AUDIT_STALE_AFTER_MS = 5 * 60_000;
+// behind the kill-switch/limiter/Turnstile gates). Also the interval
+// `refresh_after` adds to a scoring instant, so retuning it here moves
+// every surface's advertised cache-expiry eligibility with it.
+export const WEB_AUDIT_STALE_AFTER_MS = 1 * 60_000;
 
 // Logical display expiry for user-submitted rows on the /web all view:
 // an unseeded entry older than this drops off the board even though the

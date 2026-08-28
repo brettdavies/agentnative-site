@@ -112,8 +112,10 @@ lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy h
 both places; there is no fallback window.
 
 **On-demand freshness.** An on-demand audit (`audit_website` or `POST /api/audit-web`) of a seeded domain rebuilds the
-aggregates immediately, so a board entry refreshes without waiting for the batch. A cached entry younger than 5 minutes
-serves as-is; older entries re-run on demand.
+aggregates immediately, so a board entry refreshes without waiting for the batch. A cached entry younger than 1 minute
+serves as-is; older entries re-run on demand. Every per-target result surface reports that boundary as `refresh_after`,
+the earliest instant a re-audit leaves the cache-reuse window; the kill switch, rate limits, and service failures can
+still block a fresh audit after it passes.
 
 **Cold start / empty board.** After a fresh deploy or a `SPEC_VERSION` bump, the board and homepage pane render a
 "scoring in progress" empty state until the deploy hook's batch lands. If the empty state persists, check the Workflow:
