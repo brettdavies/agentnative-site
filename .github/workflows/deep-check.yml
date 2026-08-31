@@ -250,19 +250,20 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The staging-mcp project is Desktop Chrome only, so this installs
-      # chromium alone. The cache key carries a `-chromium` segment so it
-      # cannot collide with the e2e job's chromium+webkit entry. Sharing
-      # one key would let a chromium-only save satisfy that job's cache
-      # hit and leave it without webkit.
+      # The key names the browser set, not just the lockfile, because the
+      # install step below is skipped on a hit. A key that outlives a change
+      # to that set restores a cache missing the new browser and the run
+      # fails at launch, which is what happened when webkit was added while
+      # the key still said `-chromium`. Renaming the segment busts it once.
+      # It also keeps this job's entry from colliding with the e2e job's.
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          key: playwright-chromium-webkit-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
-      - name: Install Playwright chromium (cache miss)
+      - name: Install Playwright browsers (cache miss)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: bun x playwright install --with-deps chromium webkit
 
