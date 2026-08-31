@@ -20,7 +20,7 @@ import {
   selectFindings,
 } from '../shared/web-audit-findings';
 import { findingRowsFromElements } from './assemble-prompt';
-import { capExecute, EXECUTE_MAX, packPage, pageDoc, type ToolsForOpts, type WebMcpTool } from './webmcp-lib';
+import { capExecute, packPage, pageDoc, type ToolsForOpts, WEBMCP_EXECUTE_MAX, type WebMcpTool } from './webmcp-lib';
 
 type Freshness = { cached: boolean; scored_at: string | null; refresh_after: string | null };
 
@@ -102,10 +102,10 @@ export function getWorksheet(doc: Document, input: Record<string, unknown>): str
  * Room one batch item's prompt may occupy: the cap less the page metadata,
  * freshness envelope, and the item's own keys. Read through a function
  * because webmcp-lib imports this module back, so a module-scope constant
- * would evaluate before EXECUTE_MAX is initialized.
+ * would evaluate before WEBMCP_EXECUTE_MAX is initialized.
  */
 function batchPromptBudget(): number {
-  return EXECUTE_MAX - 420;
+  return WEBMCP_EXECUTE_MAX - 420;
 }
 
 /** Room the recovery pointer needs on an item that had to be trimmed. */
@@ -172,7 +172,7 @@ export function getFixPrompt(doc: Document, input: Record<string, unknown>): str
     ? { remediable, prompt: row.prompt }
     : { remediable, reason: skipReason(row), result: row.result };
   const text = JSON.stringify({ ...head, ...body });
-  if (text.length <= EXECUTE_MAX) return text;
+  if (text.length <= WEBMCP_EXECUTE_MAX) return text;
   // Over budget: trim the prompt's Fix line to what is left, keeping the
   // evidence block and the pointer whole, rather than dropping the item.
   if (remediable && row.prompt) {
@@ -186,7 +186,7 @@ export function getFixPrompt(doc: Document, input: Record<string, unknown>): str
       prompt_truncated: true,
       full_fix: fullFixPointer(row.id),
     }).length;
-    let budget = EXECUTE_MAX - shell;
+    let budget = WEBMCP_EXECUTE_MAX - shell;
     for (let attempt = 0; attempt < 4; attempt += 1) {
       const fitted = fitPromptToBudget(row.prompt, budget, skillUrlFor(row.id));
       if (!fitted) break;
@@ -197,11 +197,15 @@ export function getFixPrompt(doc: Document, input: Record<string, unknown>): str
         prompt_truncated: true,
         full_fix: fullFixPointer(row.id),
       });
-      if (trimmed.length <= EXECUTE_MAX) return trimmed;
-      budget -= trimmed.length - EXECUTE_MAX;
+      if (trimmed.length <= WEBMCP_EXECUTE_MAX) return trimmed;
+      budget -= trimmed.length - WEBMCP_EXECUTE_MAX;
     }
   }
-  return errorResult('too_large', 'id', `the prompt for ${row.id} exceeds the ${EXECUTE_MAX}-character output cap`);
+  return errorResult(
+    'too_large',
+    'id',
+    `the prompt for ${row.id} exceeds the ${WEBMCP_EXECUTE_MAX}-character output cap`,
+  );
 }
 
 export function getFixPrompts(doc: Document, input: Record<string, unknown>): string {

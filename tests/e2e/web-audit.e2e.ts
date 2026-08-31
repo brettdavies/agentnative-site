@@ -423,9 +423,10 @@ test.describe('web audit — result-page context and WebMCP tools', () => {
     'fill_web_target',
     'audit_website',
   ];
-  // The browser tools answer within a DOMString cap; EXECUTE_MAX in
+  // The browser tools answer within a DOMString cap that binds WebMCP only,
+  // not the regular MCP server. WEBMCP_EXECUTE_MAX in
   // src/client/webmcp-lib.ts is the source of truth.
-  const EXECUTE_MAX = 1500;
+  const WEBMCP_EXECUTE_MAX = 1500;
 
   type ToolMeta = {
     name: string;
@@ -559,7 +560,7 @@ test.describe('web audit — result-page context and WebMCP tools', () => {
       .evaluate((el) => ({ scoredAt: el.getAttribute('data-scored-at'), cached: el.getAttribute('data-cached') }));
 
     const worksheetText = await callTool(page, 'get_worksheet', { keywords: ['must'], limit: 5 });
-    expect(worksheetText.length).toBeLessThanOrEqual(EXECUTE_MAX);
+    expect(worksheetText.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
     const worksheet = JSON.parse(worksheetText) as {
       ok: boolean;
       cached: boolean;
@@ -581,7 +582,7 @@ test.describe('web audit — result-page context and WebMCP tools', () => {
     expect(worksheet.next_offset).toBe(worksheet.omitted > 0 && worksheet.returned > 0 ? worksheet.returned : null);
 
     const summaryText = await callTool(page, 'get_audit_summary', {});
-    expect(summaryText.length).toBeLessThanOrEqual(EXECUTE_MAX);
+    expect(summaryText.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
     const summary = JSON.parse(summaryText) as {
       ok: boolean;
       scored_at: string | null;
