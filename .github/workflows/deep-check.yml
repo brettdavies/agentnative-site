@@ -147,6 +147,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    outputs:
+      upstream_crash: ${{ steps.wrangler-crash.outputs.upstream }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -215,6 +218,34 @@ jobs:
           cp -r "$HOME/.config/.wrangler/logs/." wrangler-logs/ 2>/dev/null || echo "no wrangler logs written"
           ls -la wrangler-logs/
 
+      # workers-sdk#15317: wrangler's ProxyController treats a dropped
+      # connection to the runtime as fatal and kills the dev server, and
+      # prints it with no message because castErrorCause builds `new Error()`
+      # from the plain object ProxyWorker posts. The failure is wrangler's,
+      # not the suite's, and reporters have ruled out the mitigations that
+      # would otherwise be ours to make: halving Playwright workers, running
+      # a single dev server, and upgrading all leave it in place, and it
+      # reproduces with one sequential request and no browser at all.
+      #
+      # All four strings below name wrangler's own proxy plumbing, so none
+      # can appear when the Worker or a test is what broke. Requiring every
+      # one of them is what stops a real failure that happens to share the
+      # surface symptom from claiming a free retry.
+      - name: Detect the upstream wrangler crash
+        id: wrangler-crash
+        if: failure()
+        run: |
+          if grep -qs 'Network connection lost' wrangler-logs/*.log \
+            && grep -qs 'castErrorCause' wrangler-logs/*.log \
+            && grep -qs 'ProxyController' wrangler-logs/*.log \
+            && grep -qs 'handleLoopback' wrangler-logs/*.log; then
+            echo "upstream=true" >> "$GITHUB_OUTPUT"
+            echo "matched the workers-sdk#15317 signature — a retry is warranted"
+          else
+            echo "upstream=false" >> "$GITHUB_OUTPUT"
+            echo "no upstream signature — reporting this as a real failure"
+          fi
+
       # `.context/test-results/`, not `test-results/`: that is where
       # playwright.config.ts points `outputDir`, and the traces, screenshots,
       # and error-context files a failure writes land there. `if-no-files-found:
@@ -232,6 +263,45 @@ jobs:
             wrangler-logs/
           if-no-files-found: error
           retention-days: 14
+
+  # Buys exactly one more draw at a runner, and only for a crash that is
+  # provably wrangler's. Re-running the job allocates a fresh VM, which is
+  # the part that matters: the fault tracks the machine rather than the
+  # moment, so a runner tends to be either healthy or fatal for the life of
+  # the job. Restarting the dev server in place plateaus at roughly one run
+  # in twenty; landing on a different runner drops it under one in a hundred.
+  #
+  # `run_attempt` caps it at a single retry, so a persistently affected
+  # runner fails the run instead of looping. A rerun replays the existing
+  # run rather than creating a new one, so GITHUB_TOKEN drives it without
+  # tripping the recursion block that stops tokens from starting workflows.
+  e2e-retry:
+    name: e2e · retry once on the upstream wrangler crash
+    needs: e2e
+    if: failure() && needs.e2e.outputs.upstream_crash == 'true' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+
+    steps:
+      - name: Re-run the e2e job on a fresh runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          job_id=$(gh api \
+            "repos/$GH_REPO/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" \
+            --jq '.jobs[] | select(.name | startswith("e2e · playwright")) | .id')
+
+          if [ -z "$job_id" ]; then
+            echo "could not resolve the e2e job id — leaving the failure as reported" >&2
+            exit 1
+          fi
+
+          echo "workers-sdk#15317 signature matched; re-running job $job_id"
+          gh run rerun --job "$job_id"
 
   staging-mcp:
     name: staging-mcp · live MCP, discoverability, and web-audit result page
