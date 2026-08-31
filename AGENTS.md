@@ -160,9 +160,9 @@ rate-limit policy designed for browser traffic.
 
 **Request log: one structured line per call, AFTER the gate decision.** Every `POST /mcp` request emits one `event:
 mcp.request` JSON log line carrying era, method, client name, protocol version, host, response format, outcome, and ms
-bucket — no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded under attack
-while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open, the
-inventory is published.
+bucket. It carries no IP, slug, or tool results. Firing after the rate-limit gate keeps Workers Logs volume bounded
+under attack while still recording the denial. The log is the public posture for a no-auth catalog: the surface is open,
+the inventory is published.
 
 **Spec revision drift gate.** The handshake's `protocolVersion`, `/.well-known/mcp/server-card.json` `protocolVersion`,
 `content/mcp-skill.md`'s wire-level reference block, and `src/worker/mcp/instructions.ts`'s `SPEC_REVISION` constant all
@@ -348,7 +348,7 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   is missing" are indistinguishable until you confirm which document you got. Send an explicit `Accept:
   text/html,application/xhtml+xml` when checking HTML, `Accept: text/markdown` (or the `.md` suffix) when checking the
   twin, and check a marker unique to that representation before trusting a negative result.
-- **Playwright browsers:** system-provided on the dev host — dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
+- **Playwright browsers:** system-provided on the dev host: dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
   never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
   `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
   what's provisioned; bump it in dotfiles first. CI runners install their own browsers.
