@@ -324,8 +324,10 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 
 - **Branches:** `main` (production) and `dev` (integration) are both forever branches. Feature work lands via `feat/*` /
   `fix/*` / `chore/*` → PR to `dev` (squash merge). Dev ships to main via a short-lived `release/*` branch cherry-picked
-  from `origin/main`, PR'd to main. Direct commits to `dev` or `main` are not permitted. See
-  [`RELEASES.md`](./RELEASES.md) for the full workflow.
+  from `origin/main`, PR'd to main. `main` blocks direct commits through its ruleset. `dev` accepts them, and the
+  dev-only doc paths listed under [`RELEASES.md` § Dev-direct exception](./RELEASES.md#dev-direct-exception) are
+  committed that way on purpose: they never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR.
+  See [`RELEASES.md`](./RELEASES.md) for the full workflow.
 - **Commits:** Conventional Commits. Short, specific messages.
 - **PRs:** Squash merge. PR title becomes commit title; PR body becomes commit body (repo setting:
   `squashMergeCommitMessage: PR_BODY`).
