@@ -218,13 +218,22 @@ jobs:
     environment: staging
 
     steps:
-      # Pinned to `dev`, not `inputs.ref` or the default branch: staging
-      # deploys from `dev`, so any other ref would assert specs against a
-      # deployment they do not describe. The sibling jobs boot their own
-      # local Worker and keep the default checkout.
+      # Defaults to `dev`, not the default branch: staging deploys from
+      # `dev`, so a scheduled run on any other ref would assert specs
+      # against a deployment they do not describe. The sibling jobs boot
+      # their own local Worker and keep the default checkout.
+      #
+      # An explicit dispatch ref overrides it, which is how a change to
+      # these specs or to the Playwright projects gets verified before it
+      # merges: without the override the job would run the dispatched
+      # workflow file against `dev`'s config and fail on projects that do
+      # not exist there yet. The override is for test-side changes. A
+      # branch that changes Worker behaviour still needs deploying to
+      # staging first, because the specs assert against the deployment,
+      # not against the checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: dev
+          ref: ${{ inputs.ref || 'dev' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
