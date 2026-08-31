@@ -60,10 +60,15 @@ function assembleSkill(check, remediation, categories, baseUrl) {
     '',
     ...resourcesSection,
   ];
-  const promptIntro = `Paste this into your coding agent, replacing the Issue line with the Result line from [your audit](${baseUrl}/web-audit):`;
+  // These lines must stay byte-identical to assembleRemediation() in
+  // src/worker/audit-web/remediation.ts assembled without evidence, because
+  // this page and the audit result page are the same prompt reached two ways.
+  // A skill page describes a check in general, so it has no run to quote: the
+  // audit's own finding rides the delimited evidence block that the result
+  // page appends. tests/web-audit-skills.test.ts pins the two together.
+  const promptIntro = `Paste this into your coding agent. [Your audit](${baseUrl}/web-audit) adds what it observed for this check:`;
   const promptLines = [
     `Goal: ${oneLine(remediation.goal)}`,
-    "Issue: <the audit's finding for this check>",
     `Fix: ${oneLine(remediation.fix)}`,
     `Skill: ${baseUrl}/web-audit/skill/${check.id}`,
     ...docsLine,
