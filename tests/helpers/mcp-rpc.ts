@@ -48,10 +48,26 @@ export function parseMcpHttpBody(raw: string, contentType?: string | null): Json
   return JSON.parse(raw) as JsonRpcBody;
 }
 
+/** The production host. Tool results served from here can't prove much. */
+export const CANONICAL_TEST_ORIGIN = 'https://anc.dev';
+
+/**
+ * A real, non-canonical deployment host. Must be in `MCP_ALLOWED_HOSTNAMES`
+ * (src/worker/mcp/server.ts) or the SDK's DNS-rebinding guard rejects the
+ * request before any tool runs.
+ */
+export const STAGING_TEST_ORIGIN = 'https://agentnative-site-staging.brettdavies.workers.dev';
+
+export type McpRpcOptions = {
+  /** Origin the request arrives on. Defaults to the canonical host. */
+  origin?: string;
+};
+
 export async function mcpRpc(
   env: McpEnv,
   body: JsonRpcBody,
   headers: Record<string, string> = {},
+  opts: McpRpcOptions = {},
 ): Promise<{
   status: number;
   body: JsonRpcBody;
@@ -60,33 +76,19 @@ export async function mcpRpc(
 }> {
   await loadCatalog(env);
   const handler = getMcpHandler({ jsonResponse: true, legacy: resolveLegacyMode(env) });
-  const res = await runWithMcpRequest(
-    new Request('https://anc.dev/mcp', {
+  const origin = opts.origin ?? CANONICAL_TEST_ORIGIN;
+  const makeRequest = () =>
+    new Request(`${origin}/mcp`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
-        host: 'anc.dev',
+        host: new URL(origin).host,
         ...headers,
       },
       body: JSON.stringify(body),
-    }),
-    () =>
-      runWithMcpEnv(env, () =>
-        handler.fetch(
-          new Request('https://anc.dev/mcp', {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              accept: 'application/json, text/event-stream',
-              host: 'anc.dev',
-              ...headers,
-            },
-            body: JSON.stringify(body),
-          }),
-        ),
-      ),
-  );
+    });
+  const res = await runWithMcpRequest(makeRequest(), () => runWithMcpEnv(env, () => handler.fetch(makeRequest())));
   const raw = await res.text();
   let parsed: JsonRpcBody = { jsonrpc: '2.0', id: null };
   try {
@@ -101,25 +103,31 @@ export async function mcpRpcExpect200(
   env: McpEnv,
   body: JsonRpcBody,
   headers?: Record<string, string>,
+  opts?: McpRpcOptions,
 ): Promise<JsonRpcBody> {
-  const { status, body: parsed, raw } = await mcpRpc(env, body, headers);
+  const { status, body: parsed, raw } = await mcpRpc(env, body, headers, opts);
   if (status !== 200) {
     throw new Error(`expected HTTP 200, got ${status}: ${raw}`);
   }
   return parsed;
 }
 
-export async function mcpInitialize(env: McpEnv): Promise<JsonRpcBody> {
-  return mcpRpcExpect200(env, {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: '2025-06-18',
-      capabilities: {},
-      clientInfo: { name: 'test', version: '0.0.0' },
+export async function mcpInitialize(env: McpEnv, opts?: McpRpcOptions): Promise<JsonRpcBody> {
+  return mcpRpcExpect200(
+    env,
+    {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0.0.0' },
+      },
     },
-  });
+    undefined,
+    opts,
+  );
 }
 
 export function resetMcpTestState(): void {
