@@ -341,6 +341,13 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   asserts against whatever the *previous* checkout left in `dist/` and fails with output that reads exactly like a
   content regression, when the actual cause is a stale build artifact. `ci.yml` already encodes the correct order (lint
   · build · test); mirror it locally.
+- **Assert against the representation you actually received.** Every `/web/<domain>`, `/score/<name>`, and content page
+  serves an HTML page and a markdown twin from one URL, chosen by `Accept`. `curl` sends `Accept: */*` and resolves to
+  the twin, so grepping a bare `curl` response for HTML markers (`data-web-audit-context`, `class="web-check"`, a
+  `<time>` element) finds nothing on a page that renders them correctly. "The assertion found nothing" and "the feature
+  is missing" are indistinguishable until you confirm which document you got. Send an explicit `Accept:
+  text/html,application/xhtml+xml` when checking HTML, `Accept: text/markdown` (or the `.md` suffix) when checking the
+  twin, and check a marker unique to that representation before trusting a negative result.
 - **Playwright browsers:** system-provided on the dev host — dotfiles provisions them into `$PLAYWRIGHT_BROWSERS_PATH`;
   never run `playwright install` locally (the node extractor deadlocks on that kernel). This repo exact-pins
   `@playwright/test` (see `package.json`) to the dotfiles-canonical version so the resolved browser revisions match
