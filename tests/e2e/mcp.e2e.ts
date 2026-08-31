@@ -134,7 +134,9 @@ test.describe('staging /mcp — handshake', () => {
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
     expect(instructions).toContain('2026-07-28');
-    expect(instructions).toContain('https://anc.dev/mcp-skill.md');
+    // The session instructions point at the deployment answering the
+    // handshake, so a client that follows them stays on this Worker.
+    expect(instructions).toContain(`${STAGING_BASE}/mcp-skill.md`);
   });
 });
 
@@ -328,7 +330,7 @@ test.describe('staging /mcp — registry surface', () => {
     };
     expect(parsed.found).toBe(true);
     expect(parsed.source).toBe('registry');
-    expect(parsed.scorecard_url).toBe('https://anc.dev/score/ripgrep');
+    expect(parsed.scorecard_url).toBe(`${STAGING_BASE}/score/ripgrep`);
   });
 });
 
