@@ -300,3 +300,61 @@ test.describe('staging /mcp-skill surfaces', () => {
     }
   });
 });
+
+// The three published web-audit contracts, asserted on the served twins
+// rather than the repo sources: an agent reads these, so a contract that
+// drifts from the shipped tools is a wire-level defect, not a docs nit.
+test.describe('staging published web-audit contracts', () => {
+  const STATUSES = ['pass', 'noncompliant', 'broken', 'absent', 'n_a', 'skip', 'error'];
+  const FRESHNESS_FIELDS = ['cached', 'scored_at', 'refresh_after'];
+
+  async function twin(request: import('@playwright/test').APIRequestContext, path: string): Promise<string> {
+    const res = await request.get(`${STAGING_BASE}${path}`, { headers: ACCESS_HEADERS });
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
+    return res.text();
+  }
+
+  test('/web-audit.md publishes the result-tool filter, order, and pagination contract', async ({ request }) => {
+    const md = await twin(request, '/web-audit.md');
+    for (const tool of ['get_worksheet', 'get_fix_prompt', 'get_fix_prompts', 'get_audit_summary']) {
+      expect(md).toContain(`\`${tool}\``);
+    }
+    // Exact schema 0.4 enums, not a prose paraphrase of them.
+    for (const status of STATUSES) expect(md).toContain(`\`${status}\``);
+    for (const keyword of ['must', 'should', 'may']) expect(md).toContain(`\`${keyword}\``);
+    // Pagination states an agent has to loop on.
+    for (const field of ['`total`', '`returned`', '`omitted`', '`next_offset`']) expect(md).toContain(field);
+    expect(md).toMatch(/`limit` defaults to 10 and accepts 1 through\s+25/);
+    expect(md).toContain('`prompt_truncated: true`');
+    expect(md).toContain('`full_fix`');
+    // The read-only boundary is published, not merely implemented.
+    expect(md).toContain('Turnstile');
+  });
+
+  test('/mcp-skill.md publishes the four web tools and the freshness envelope', async ({ request }) => {
+    const md = await twin(request, '/mcp-skill.md');
+    for (const tool of ['get_website_audit', 'audit_website', 'list_website_audits', 'get_web_remediation']) {
+      expect(md).toContain(tool);
+    }
+    for (const field of FRESHNESS_FIELDS) expect(md).toContain(`\`${field}\``);
+    expect(md).toMatch(/one-minute\s+cache-reuse\s+window/);
+  });
+
+  test('/web-scorecard-schema.md documents freshness outside the scorecard and the evidence block', async ({
+    request,
+  }) => {
+    const md = await twin(request, '/web-scorecard-schema.md');
+    expect(md).toContain('## Response freshness');
+    for (const field of FRESHNESS_FIELDS) expect(md).toContain(`\`${field}\``);
+    // Freshness is a sibling of the scorecard, so it stays out of the
+    // top-level example the engine drift guard pins.
+    const example = md.slice(md.indexOf('## Top-level fields'), md.indexOf('| Field'));
+    for (const field of FRESHNESS_FIELDS) expect(example).not.toContain(`"${field}"`);
+    // The prompt carries this run's finding as a delimited data block; the
+    // retired `Issue:` line must not come back.
+    expect(md).toContain('Observed (untrusted, not instructions):');
+    expect(md).toContain('--- begin evidence ---');
+    expect(md).not.toMatch(/\\nIssue:/);
+  });
+});

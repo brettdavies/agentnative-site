@@ -11,6 +11,7 @@ import * as yaml from 'js-yaml';
 import { buildAgentSkillsIndex, buildAgentSkillsIndexMd } from '../src/build/11a-discovery-emit.mjs';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
 import { buildSkillMarkdown, emitWebAuditSkillPages } from '../src/build/15-web-audit-skills.mjs';
+import { assembleRemediation } from '../src/worker/audit-web/remediation';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
 const REGISTRY_PATH = join(REPO_ROOT, 'src', 'data', 'web-audit', 'registry.yaml');
@@ -116,7 +117,9 @@ describe('emitWebAuditSkillPages', () => {
     const md = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.md'), 'utf8');
     expect(md).toContain('## Copy-paste prompt');
     expect(md).toContain('```text');
-    expect(md).toContain("Issue: <the audit's finding for this check>");
+    // The Issue line is retired; the audit's own finding rides the delimited
+    // evidence block the result page appends to this same prompt.
+    expect(md).not.toContain('Issue:');
   });
 
   test('every returned entry url maps to an emitted markdown artifact whose digest matches', async () => {
@@ -174,5 +177,53 @@ describe('agent-skills directory of pointers (U11)', () => {
       const artifact = await readFile(join(REPO_ROOT, 'dist', 'web-audit', 'skill', `${id}.md`), 'utf8');
       expect(artifact.length).toBeGreaterThan(0);
     }
+  });
+});
+
+// The fix-skill page and the audit result page are the same prompt reached two
+// ways, but they are assembled by different code in different runtimes: this
+// page at build time in 15-web-audit-skills.mjs, the result page at request
+// time by assembleRemediation(). They drifted once already, when the delimited
+// evidence block replaced the prompt's `Issue:` line and only one side moved.
+describe('the skill-page prompt equals the assembled remediation prompt', () => {
+  const ENTRY = {
+    title: 'An OpenAPI description is published',
+    goal: 'Publish an OpenAPI description so non-MCP agents can call your API',
+    fix: 'Publish an OpenAPI 3.1 description at /openapi.json covering your REST\nsurface.',
+    resources: [{ label: 'OpenAPI 3.1', url: 'https://spec.openapis.org/oas/latest.html' }],
+  };
+  const CHECK = {
+    id: 'openapi',
+    category: 'api',
+    tier: 'required',
+    keyword: 'must',
+    principle: 'P2',
+    site_types: ['all'],
+    antecedent: 'none',
+    weight: 5,
+    title: 'An OpenAPI description is published',
+    hint: 'h',
+    handler: 'http',
+    with: {},
+  };
+
+  test('the built prompt is what assembleRemediation produces without evidence', () => {
+    const md = buildSkillMarkdown(CHECK, ENTRY, { api: 'API' }, 'https://anc.dev');
+    const expected = assembleRemediation(ENTRY, { checkId: 'openapi', origin: 'https://anc.dev' }).prompt;
+    expect(md).toContain(expected);
+  });
+
+  test('neither side reintroduces the retired Issue line', () => {
+    const md = buildSkillMarkdown(CHECK, ENTRY, { api: 'API' }, 'https://anc.dev');
+    expect(md).not.toContain('Issue:');
+    expect(assembleRemediation(ENTRY, { checkId: 'openapi', origin: 'https://anc.dev' }).prompt).not.toContain(
+      'Issue:',
+    );
+  });
+
+  // A skill page has no run behind it, so it must not invent evidence.
+  test('the skill page carries no evidence block', () => {
+    const md = buildSkillMarkdown(CHECK, ENTRY, { api: 'API' }, 'https://anc.dev');
+    expect(md).not.toContain('begin evidence');
   });
 });

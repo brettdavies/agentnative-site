@@ -151,22 +151,33 @@ Four tools score a website and its MCP server against the same eight principles 
 surface above. The web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
 DNS-over-HTTPS): no container, nothing crawled.
 
-- `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, scorecard, share_url }` on a cache hit or `{
-  found: false, next_tool: "audit_website" }` on a miss.
+- `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, cached, scored_at, refresh_after, scorecard,
+  share_url, spec_version }` on a cache hit or `{ found: false, next_tool: "audit_website" }` on a miss.
 - `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal scorecard plus its
-  `share_url`. There are no progress notifications: the server runs stateless per-request. On an existing cache it
-  returns the cached result. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon
-  fallback).
-- `list_website_audits`: the curated web leaderboard (`anc.dev/web`).
-- `get_web_remediation`: the static canonical fix for a web-audit `check_id`; MCP-shape checks accept an `evidence`
-  string that is injected into the fix template.
+  `share_url`. There are no progress notifications: the server runs stateless per-request. A cached result younger than
+  one minute is returned without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP,
+  no anon fallback).
+- `list_website_audits`: the web leaderboard (`anc.dev/web`), curated by default; `view: "all"` adds the user-submitted
+  domains that opted in to public listing.
+- `get_web_remediation`: the canonical fix for a web-audit `check_id`. Pass the failing row's `evidence` and it is
+  appended to the prompt as a delimited, length-bounded data block; omit it for the catalog text alone.
 
 ```jsonc
 // tools/call audit_website { "url": "anc.dev" }
 ```
 
-Web scorecards share the `badge` / `results` / `coverage_summary` shape documented at
-[/web-scorecard-schema](/web-scorecard-schema); each result page is at `anc.dev/web/<domain>`.
+**Freshness.** Every result that carries a scorecard carries `cached`, `scored_at`, and `refresh_after` beside it,
+outside the scorecard itself. `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a
+result the call produced; `scored_at` is when the audit ran (`null` on a legacy entry with no stamp); `refresh_after` is
+`scored_at` plus the one-minute cache-reuse window. Past `refresh_after` a repeat call stops reusing the cached entry
+and tries a fresh audit, which is eligibility rather than a promise: the kill switch, the rate limits, and probe
+failures still apply, and the cached scorecard is served as data when they refuse.
+
+Web scorecards use the `score` / `results` / `coverage_summary` shape documented at
+[/web-scorecard-schema](/web-scorecard-schema); each result page is at `anc.dev/web/<domain>`. That page publishes four
+further read-only tools over WebMCP for a browser agent already on it (`get_worksheet`, `get_fix_prompt`,
+`get_fix_prompts`, `get_audit_summary`); they read the rendered page only and cannot start an audit. Their filter,
+ordering, and pagination contract is at [/web-audit](/web-audit#from-the-result-page).
 
 ## Browse the catalog
 

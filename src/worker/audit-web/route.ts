@@ -35,6 +35,7 @@ import {
   scorecardWithPublicListing,
   sha256Hex,
   WEB_AUDIT_STALE_AFTER_MS,
+  webAuditFreshness,
 } from './cache';
 import {
   flushHitMinPurge,
@@ -208,6 +209,9 @@ export async function handleWebAudit(
   // Turnstile, and consumes no budget (the audit_website MCP tool orders
   // its gates the same way). A hit older than the staleness threshold
   // falls through to the fresh path so a re-run refreshes the board.
+  // Every result-bearing response spreads the shared freshness envelope
+  // beside the scorecard, so `cached`, `scored_at`, and `refresh_after`
+  // always travel together and outside schema 0.4.
   const shareUrl = `/web/${shareDomain}`;
   const cached = await cacheGet(env, await keyFor(canonicalTarget, SPEC_VERSION));
   const listingWrite = decidePublicListingWrite({ explicit: publicListing, cached });
@@ -216,7 +220,10 @@ export async function handleWebAudit(
     // public_listing asks for a flag-only patch — that falls through the
     // full gate stack (kill switch, Turnstile, limiters) like a fresh audit.
     if (listingWrite.path === 'serve-cached') {
-      return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+      return jsonResponse(
+        { ...webAuditFreshness(true, cached.scored_at), scorecard: cached.scorecard, share_url: shareUrl },
+        200,
+      );
     }
   }
 
@@ -224,7 +231,10 @@ export async function handleWebAudit(
   // so only a true miss surfaces the 503.
   if (env.WEB_AUDIT_ENABLED !== 'true') {
     if (cached) {
-      return jsonResponse({ cached: true, scorecard: cached.scorecard, share_url: shareUrl }, 200);
+      return jsonResponse(
+        { ...webAuditFreshness(true, cached.scored_at), scorecard: cached.scorecard, share_url: shareUrl },
+        200,
+      );
     }
     return new Response('web audit is currently disabled by the operator\n', {
       status: 503,
@@ -329,7 +339,11 @@ export async function handleWebAudit(
     await invokeCachedPurge(ctx, [webTag()]);
     const patchedScorecard = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
     return jsonResponse(
-      { cached: true, scorecard: patchedScorecard, share_url: shareUrl },
+      {
+        ...webAuditFreshness(true, listingWrite.cached.scored_at),
+        scorecard: patchedScorecard,
+        share_url: shareUrl,
+      },
       200,
       cookieHeader(setCookie),
     );
@@ -368,13 +382,19 @@ export async function handleWebAudit(
             complete = event.complete;
           }
         }
-        if (scorecard && complete) {
-          const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION);
+        // One scoring instant per run, spent on both persistence and the
+        // terminal envelope, so the cache read that follows this response
+        // can never report a different clock for the same audit. The
+        // envelope reports `cached: false` on the strength of having
+        // produced the result, not on the write landing.
+        const scoredAt = complete && scorecard ? new Date().toISOString() : null;
+        if (scorecard && scoredAt) {
+          const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION, scoredAt);
           if (wrote) queueHitMinPurge([webTag(), webDomainTag(shareDomain)]);
           await rebuildAggregatesIfSeeded(env, shareDomain, SPEC_VERSION);
         }
         const terminal = complete
-          ? { type: 'complete', scorecard, share_url: shareUrl }
+          ? { type: 'complete', ...webAuditFreshness(false, scoredAt), scorecard, share_url: shareUrl }
           : { type: 'incomplete', scorecard, share_url: null };
         await writer.write(encoder.encode(`${JSON.stringify(terminal)}\n`)).catch(() => {});
       } catch (err) {
@@ -593,16 +613,18 @@ function esc(s: string): string {
  * Resolve a domain's audit for the result page from per-domain R2 only
  * (a miss renders the not-yet-scored state; there is no committed
  * fallback). Tries https then http for the R2 key since the cache is
- * scheme-specific.
+ * scheme-specific. The stored scoring instant rides along so the page can
+ * report the same freshness the API and MCP surfaces report; a legacy
+ * entry without one resolves to null rather than a synthesized time.
  */
 async function lookupByDomain(
   env: WebAuditRouteEnv,
   domain: string,
-): Promise<{ scorecard: unknown; targetUrl: string } | null> {
+): Promise<{ scorecard: unknown; targetUrl: string; scoredAt: string | null } | null> {
   for (const scheme of ['https', 'http']) {
     const targetUrl = normalizeTargetUrl(`${scheme}://${domain}/`);
     const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
-    if (cached) return { scorecard: cached.scorecard, targetUrl };
+    if (cached) return { scorecard: cached.scorecard, targetUrl, scoredAt: cached.scored_at ?? null };
   }
   return null;
 }
@@ -656,6 +678,8 @@ export async function handleWebResultPage(request: Request, env: WebAuditRouteEn
     targetUrl: scorecard.tool?.url ?? hit.targetUrl,
     remediation,
     origin: new URL(request.url).origin,
+    // A result page is always a cache read, so provenance is never fresh.
+    freshness: webAuditFreshness(true, hit.scoredAt),
   };
 
   if (wantMarkdown) {
