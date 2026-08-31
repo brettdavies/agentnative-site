@@ -63,7 +63,8 @@ import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remedia
 import type { EngineResult } from './scorecard';
 import { boardExcludeDomains, loadWebSeed } from './seed';
 import { validatePublicUrl } from './ssrf';
-import { buildWebSummaryBody, buildWebSummaryMarkdown } from './summary-render';
+import { buildWebSummaryMarkdown } from './summary-markdown';
+import { buildWebSummaryBody } from './summary-render';
 
 type RateLimit = { limit(o: { key: string }): Promise<{ success: boolean }> };
 
