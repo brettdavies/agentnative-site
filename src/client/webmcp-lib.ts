@@ -9,7 +9,17 @@ import { homeTools } from './webmcp-home';
 import { orientationTools } from './webmcp-orientation';
 import { resultTools } from './webmcp-result';
 
-export const EXECUTE_MAX = 1500;
+/**
+ * Longest DOMString a WebMCP tool's `execute()` may return.
+ *
+ * This bounds the browser-side WebMCP surface only. It is not a limit on the
+ * regular MCP server at `/mcp`, whose tool results are ordinary JSON-RPC
+ * payloads with no such ceiling, and not a site-wide response cap. A reader
+ * who mistakes it for either will shorten payloads that were never
+ * constrained: `get_web_remediation` returns the same remediation object this
+ * page's tools have to trim.
+ */
+export const WEBMCP_EXECUTE_MAX = 1500;
 
 export type WebMcpTool = {
   name: string;
@@ -62,8 +72,8 @@ export function isOrientationPath(pathname: string): boolean {
 }
 
 export function capExecute(text: string): string {
-  if (text.length <= EXECUTE_MAX) return text;
-  return `${text.slice(0, EXECUTE_MAX - 1)}…`;
+  if (text.length <= WEBMCP_EXECUTE_MAX) return text;
+  return `${text.slice(0, WEBMCP_EXECUTE_MAX - 1)}…`;
 }
 
 export type PagedResult = {
@@ -77,7 +87,7 @@ export type PagedResult = {
 };
 
 /**
- * Serialize one page of whole items under EXECUTE_MAX. Slicing a
+ * Serialize one page of whole items under WEBMCP_EXECUTE_MAX. Slicing a
  * serialized envelope would hand the reader broken JSON, so items are
  * dropped from the end until the page fits and `pageMeta` reports the
  * shortfall — the continuation cursor then carries the reader forward
@@ -97,7 +107,7 @@ export function packPage(page: PagedResult): string {
   };
   for (let keep = page.items.length; keep > 0; keep -= 1) {
     const text = render(keep);
-    if (text.length <= EXECUTE_MAX) return text;
+    if (text.length <= WEBMCP_EXECUTE_MAX) return text;
   }
   return render(0);
 }

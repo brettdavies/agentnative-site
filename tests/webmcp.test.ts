@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { findingRowsFromElements, selectAssemblePrompts } from '../src/client/assemble-prompt';
 import { fillAuditUrl, setPlan, setPublicListing } from '../src/client/webmcp-audit';
 import { fillCliTarget, fillWebTarget, openWebAudit, setSurface } from '../src/client/webmcp-home';
-import { bindModelContext, EXECUTE_MAX, initWebMcp, toolsFor } from '../src/client/webmcp-lib';
+import { bindModelContext, initWebMcp, toolsFor, WEBMCP_EXECUTE_MAX } from '../src/client/webmcp-lib';
 import { getAuditSummary, getFixPrompt, getFixPrompts, getWorksheet } from '../src/client/webmcp-result';
 import {
   assembleRemediation,
@@ -623,7 +623,7 @@ describe('execute helpers (Document stub)', () => {
       expect(home.form.submits).toBe(1);
       for (const out of outputs) {
         expect(typeof out).toBe('string');
-        expect(out.length).toBeLessThanOrEqual(EXECUTE_MAX);
+        expect(out.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
         expect(out).not.toContain('/web/scoring');
         expect(out).not.toContain('/api/score');
       }
@@ -775,7 +775,7 @@ describe('target-controlled evidence is delimited, bounded, and never instructio
     expect(direct.prompt).toBe(prompt);
     expect(batch.items[0].prompt).toBe(prompt);
     for (const text of [getFixPrompt(doc, { id: 'openapi' }), getFixPrompts(doc, {}), getWorksheet(doc, {})]) {
-      expect(text.length).toBeLessThanOrEqual(EXECUTE_MAX);
+      expect(text.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
     }
   });
 
@@ -786,7 +786,7 @@ describe('target-controlled evidence is delimited, bounded, and never instructio
       getWorksheet(doc, { statuses: [HOSTILE] }),
       getFixPrompts(doc, { ids: ['openapi'], keywords: [HOSTILE] }),
     ]) {
-      expect(text.length).toBeLessThanOrEqual(EXECUTE_MAX);
+      expect(text.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
       const body = JSON.parse(text);
       expect(body.ok).toBe(false);
       expect(body.error.message.length).toBeLessThan(200);
@@ -832,11 +832,11 @@ describe('catalog prompts fit the WebMCP output cap (R21, KTD4)', () => {
     const doc = resultDoc([{ id: largest.id, keyword: 'must', status: 'absent', prompt: largest.prompt }]);
 
     const direct = getFixPrompt(doc, { id: largest.id });
-    expect({ id: largest.id, over: direct.length > EXECUTE_MAX }).toEqual({ id: largest.id, over: false });
+    expect({ id: largest.id, over: direct.length > WEBMCP_EXECUTE_MAX }).toEqual({ id: largest.id, over: false });
     assertPromptPayload(JSON.parse(direct), largest.prompt);
 
     const batch = getFixPrompts(doc, {});
-    expect({ id: largest.id, over: batch.length > EXECUTE_MAX }).toEqual({ id: largest.id, over: false });
+    expect({ id: largest.id, over: batch.length > WEBMCP_EXECUTE_MAX }).toEqual({ id: largest.id, over: false });
     const page = JSON.parse(batch);
     expect(page.returned).toBe(1);
     assertPromptPayload(page.items[0], largest.prompt);
@@ -905,7 +905,7 @@ describe('status-by-keyword matrix and cap boundaries (AE4, AE10, R20, R21)', ()
     );
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.length).toBe(matrixRows().length);
-    for (const text of pages) expect(text.length).toBeLessThanOrEqual(EXECUTE_MAX);
+    for (const text of pages) expect(text.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
     // Keyword outranks status; observed outranks unprobed inside a pair.
     expect(ids.slice(0, 4)).toEqual([
       'must-broken-observed',
@@ -929,7 +929,7 @@ describe('status-by-keyword matrix and cap boundaries (AE4, AE10, R20, R21)', ()
     const { ids, pages } = drain((offset) => getWorksheet(doc, { offset, limit: 25 }));
     expect(pages.length).toBeGreaterThan(1);
     for (const text of pages) {
-      expect(text.length).toBeLessThanOrEqual(EXECUTE_MAX);
+      expect(text.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
       expect(() => JSON.parse(text)).not.toThrow();
     }
     expect(new Set(ids).size).toBe(rows.length);
@@ -952,7 +952,7 @@ describe('status-by-keyword matrix and cap boundaries (AE4, AE10, R20, R21)', ()
     expect(ids).toEqual(rows.map((row) => row.id));
     expect(pages.length).toBeGreaterThan(1);
     for (const text of pages) {
-      expect(text.length).toBeLessThanOrEqual(EXECUTE_MAX);
+      expect(text.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
       for (const item of JSON.parse(text).items as Array<{ id: string; prompt: string }>) {
         const source = rows.find((row) => row.id === item.id);
         expect({ id: item.id, prompt: item.prompt }).toEqual({ id: item.id, prompt: source?.prompt ?? '' });
