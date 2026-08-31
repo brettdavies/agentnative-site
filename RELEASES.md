@@ -10,8 +10,10 @@ feature branch → PR to dev (squash merge)
               → deploy.yml publishes to production (anc.dev)
 ```
 
-Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message. The
-[dev-direct exception](#dev-direct-exception) below names the path categories that may be committed directly to `dev`.
+Code reaches `dev` and `main` only through a PR, so every shipped change carries a PR number in its squash commit
+message. `main` enforces this in its ruleset. `dev` does not, because the [dev-direct exception](#dev-direct-exception)
+below names path categories that are committed straight to `dev` by design: they never ship to `main`, so a PR adds
+review ceremony to something no release will ever carry.
 
 ## Branches
 
@@ -622,6 +624,13 @@ Rulesets committed under `.github/rulesets/`, applied to the repo via the GitHub
   `guard-docs`, `guard-release-branch`), creation/deletion blocked, non-fast-forward blocked.
 - `protect-dev.json`: required signatures, deletion blocked, non-fast-forward blocked. PR-only norm is convention +
   `guard-release-branch` on the main side.
+
+Both sets grant the repository admin role `bypass_mode: always`, so every rule above describes what the rules stop
+*other* actors doing. An admin can delete either branch, and "deletion blocked" will not intervene. That bypass is
+deliberate: it is also what makes the branch recoverable, since restoring a deleted forever-branch means pushing it back
+from a local clone. Recover `dev` with `git push origin dev:refs/heads/dev` from a checkout that still holds the tip;
+the merge commit GitHub recorded for the last merged PR (`gh pr view <n> --json merge_commit_sha`) confirms which commit
+the branch should land on.
 
 ### Applying changes
 
