@@ -215,6 +215,12 @@ jobs:
           cp -r "$HOME/.config/.wrangler/logs/." wrangler-logs/ 2>/dev/null || echo "no wrangler logs written"
           ls -la wrangler-logs/
 
+      # `.context/test-results/`, not `test-results/`: that is where
+      # playwright.config.ts points `outputDir`, and the traces, screenshots,
+      # and error-context files a failure writes land there. `if-no-files-found:
+      # error` turns an empty capture into a failing step, because the previous
+      # spelling uploaded nothing while reporting success and cost four rounds
+      # of triage that had no evidence to work from.
       - name: Upload Playwright artifacts on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -222,8 +228,9 @@ jobs:
           name: playwright-report
           path: |
             playwright-report/
-            test-results/
+            .context/test-results/
             wrangler-logs/
+          if-no-files-found: error
           retention-days: 14
 
   staging-mcp:
@@ -323,7 +330,8 @@ jobs:
           name: playwright-report-staging-mcp
           path: |
             playwright-report/
-            test-results/
+            .context/test-results/
+          if-no-files-found: error
           retention-days: 14
 
   lhci:

@@ -46,7 +46,13 @@ export default defineConfig({
   workers: process.env.CI ? 3 : undefined,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['github'], ['list']] : 'list',
+  // The HTML report is what makes a CI failure triageable: it bundles the
+  // traces and screenshots `outputDir` writes into something openable. Without
+  // it `playwright-report/` never exists, and a workflow uploading that path
+  // succeeds while capturing nothing.
+  reporter: process.env.CI
+    ? [['github'], ['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]]
+    : 'list',
   use: {
     baseURL: BASE_URL,
     trace: 'retain-on-failure',
