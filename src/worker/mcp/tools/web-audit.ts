@@ -48,6 +48,7 @@ import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { requestHeader } from '../request-header';
+import { siteOrigin } from '../site-origin';
 
 export interface WebAuditToolsEnv {
   ASSETS: Fetcher;
@@ -57,8 +58,6 @@ export interface WebAuditToolsEnv {
   MCP_ENABLED?: string;
   WEB_AUDIT_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
 }
-
-const SITE_URL = 'https://anc.dev';
 
 // Upper bound on opted-in user rows returned under view=all. The /web board
 // renders every opted-in row, but an MCP response is a single unpaginated JSON
@@ -111,7 +110,7 @@ async function registryOrNull(env: WebAuditToolsEnv): Promise<WebAuditRegistry |
 async function enrichForRead(env: WebAuditToolsEnv, scorecard: unknown): Promise<unknown> {
   const catalog = await catalogOrEmpty(env);
   const registry = await registryOrNull(env);
-  return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: SITE_URL });
+  return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: siteOrigin() });
 }
 
 /** Resolve a domain's scorecard from per-domain R2 (https then http); null on a miss. */
@@ -139,6 +138,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       annotations: { readOnlyHint: true },
     },
     async ({ url }) => {
+      const siteUrl = siteOrigin();
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
       const validation = validatePublicUrl(canonicalTargetOf(parsed));
@@ -149,7 +149,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         return textContent({
           found: true,
           scorecard: await enrichForRead(env, scorecard),
-          share_url: `${SITE_URL}/web/${domain}`,
+          share_url: `${siteUrl}/web/${domain}`,
           spec_version: SPEC_VERSION,
         });
       }
@@ -195,13 +195,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     async ({ url, site_type, public_listing }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
       // the cache read and the kill switch).
+      const siteUrl = siteOrigin();
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
       const canonicalTarget = canonicalTargetOf(parsed);
       const validation = validatePublicUrl(canonicalTarget);
       if (!validation.ok) return isError(validation.reason);
       const domain = parsed.host;
-      const shareUrl = `${SITE_URL}/web/${domain}`;
+      const shareUrl = `${siteUrl}/web/${domain}`;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
       // data, so a cached scorecard is served even when the audit is off.
@@ -347,13 +348,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       annotations: { readOnlyHint: true },
     },
     async ({ view }) => {
+      const siteUrl = siteOrigin();
       const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
       const curated = (aggregate?.entries ?? []).map((e) => ({
         domain: e.domain,
         url: e.url,
         name: e.name,
         score_pct: e.score_pct,
-        share_url: `${SITE_URL}/web/${e.domain}`,
+        share_url: `${siteUrl}/web/${e.domain}`,
       }));
       if ((view ?? 'curated') !== 'all') {
         return textContent({ count: curated.length, entries: curated });
@@ -374,7 +376,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           url: `https://${l.domain}/`,
           name: l.name,
           score_pct: l.score_pct,
-          share_url: `${SITE_URL}/web/${l.domain}`,
+          share_url: `${siteUrl}/web/${l.domain}`,
         }));
       const entries = curated.concat(userRows);
       return textContent({ count: entries.length, entries });

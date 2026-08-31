@@ -73,6 +73,15 @@ jobs:
       cancel-in-progress: true
     environment:
       name: staging
+    # The host this deployment answers on. `src/build/util.mjs`
+    # resolveBaseUrl() reads PUBLIC_BASE_URL, so every navigational link the
+    # build bakes (llms.txt, markdown twins, skill pointers, the endpoint
+    # directories under /.well-known) points back at staging instead of
+    # production. Canonical/SEO metadata deliberately ignores it and stays
+    # on the canonical host — see canonicalBaseUrl() in the same file.
+    # Production leaves it unset and falls through to the canonical default.
+    env:
+      PUBLIC_BASE_URL: https://agentnative-site-staging.brettdavies.workers.dev
 
     steps:
       - name: Checkout
@@ -102,7 +111,7 @@ jobs:
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
-        run: scripts/smoke-api-score.sh https://agentnative-site-staging.brettdavies.workers.dev
+        run: scripts/smoke-api-score.sh "$PUBLIC_BASE_URL"
 
       # Settle the MCP route before smoking it. Edge propagation lags
       # `wrangler deploy`, and a stale isolate 404s the new route; curl
@@ -117,7 +126,7 @@ jobs:
           curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -o /dev/null \
             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-            https://agentnative-site-staging.brettdavies.workers.dev/.well-known/mcp/server-card.json || true
+            "$PUBLIC_BASE_URL/.well-known/mcp/server-card.json" || true
 
       # Core checks only: the script's symmetry and live-audit gates each
       # spend a unit of the per-IP audit budget and minutes of wall clock,
@@ -137,8 +146,7 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: |
-          scripts/release/mcp-smoke.sh --core-only \
-            https://agentnative-site-staging.brettdavies.workers.dev 2>&1 \
+          scripts/release/mcp-smoke.sh --core-only "$PUBLIC_BASE_URL" 2>&1 \
             | tee "$RUNNER_TEMP/mcp-smoke.log"
 
       # `if: failure()` never fires for a `continue-on-error` step — its
@@ -171,7 +179,56 @@ jobs:
             -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
             -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
             -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
-            https://agentnative-site-staging.brettdavies.workers.dev/api/web-rescore
+            "$PUBLIC_BASE_URL/api/web-rescore"
+
+      # The bun test suite proves the CODE resolves each surface's origin
+      # from its own request. It would still pass if someone deleted
+      # PUBLIC_BASE_URL from this job, because that env var is not code.
+      # This step checks the DEPLOYMENT: ask staging for a link and see
+      # which host comes back.
+      #
+      # Two surfaces, both minted at request time from the origin the
+      # request arrived on: the MCP handshake instructions and a
+      # get_scorecard result (the exact field that shipped a production
+      # link from staging). Each is asserted twice — the production host
+      # must be absent AND the staging host present, so a 503 or an empty
+      # body cannot pass by saying nothing at all.
+      - name: Smoke deployment-relative links
+        shell: bash
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          host="${PUBLIC_BASE_URL#https://}"
+
+          mcp_call() {
+            curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -m 20 \
+              -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+              -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+              -H 'Content-Type: application/json' -H 'Accept: application/json' \
+              -d "$1" "$PUBLIC_BASE_URL/mcp"
+          }
+
+          assert_self_hosted() {
+            local label=$1 body=$2
+            if grep -qF 'https://anc.dev' <<<"$body"; then
+              echo "::error::$label on staging handed out a production URL"
+              grep -oF -m5 'https://anc.dev' <<<"$body" || true
+              exit 1
+            fi
+            if ! grep -qF "$host" <<<"$body"; then
+              echo "::error::$label emitted no staging URL at all; the check proves nothing"
+              exit 1
+            fi
+            echo "$label: links resolve to $host"
+          }
+
+          init=$(mcp_call '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"anc-origin-smoke","version":"0"}}}')
+          assert_self_hosted "MCP instructions" "$init"
+
+          card=$(mcp_call '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_scorecard","arguments":{"slug":"ripgrep"}}}')
+          assert_self_hosted "get_scorecard result" "$card"
 
   production:
     name: build + deploy production

@@ -136,7 +136,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
   const pages = [];
   for (const check of registry.checks) {
     const markdown = buildSkillMarkdown(check, remediation[check.id], registry.categories, base);
-    const served = absolutifyMarkdownLinks(markdown);
+    const served = absolutifyMarkdownLinks(markdown, baseUrl);
     await writeFile(join(skillDir, `${check.id}.md`), served);
     const description = `Fix the "${check.title}" web-audit check.`;
     await writeFile(

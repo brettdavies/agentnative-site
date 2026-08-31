@@ -699,12 +699,12 @@ async function renderNotFound(
   domain: string,
   wantMarkdown: boolean,
 ): Promise<Response> {
-  const pathname = new URL(request.url).pathname;
+  const { origin, pathname } = new URL(request.url);
   if (wantMarkdown) {
     const lines = [
       `# ${domain} is not audited yet`,
       '',
-      'No cached agent-readiness audit exists for this domain. Run one at [anc.dev/web-audit](https://anc.dev/web-audit) or call the `audit_website` MCP tool.',
+      `No cached agent-readiness audit exists for this domain. Run one at [${origin}/web-audit](${origin}/web-audit) or call the \`audit_website\` MCP tool.`,
       '',
     ];
     return withNegotiatedHeaders(
@@ -772,7 +772,7 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
   if (wantMarkdown) {
     return withNegotiatedHeaders(
       request,
-      new Response(scoringMarkdown(match.domain), { status: 200, headers: SCORING_MARKDOWN_HEADERS }),
+      new Response(scoringMarkdown(match.domain, url.origin), { status: 200, headers: SCORING_MARKDOWN_HEADERS }),
       true,
       url.pathname,
       { noStore: true },
@@ -841,12 +841,12 @@ function scoringPointerBody(): string {
 </article>`;
 }
 
-function scoringMarkdown(domain: string | null): string {
+function scoringMarkdown(domain: string | null, origin: string): string {
   if (!domain) {
     return [
       '# Audit a website',
       '',
-      'This is the in-progress page for a running audit. Start one at [anc.dev/web-audit](https://anc.dev/web-audit) or call the `audit_website` MCP tool.',
+      `This is the in-progress page for a running audit. Start one at [${origin}/web-audit](${origin}/web-audit) or call the \`audit_website\` MCP tool.`,
       '',
     ].join('\n');
   }
