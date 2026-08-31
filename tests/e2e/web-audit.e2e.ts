@@ -340,7 +340,9 @@ test.describe('web audit — MCP fresh path', () => {
     const body = (await res.json()) as { result?: { content?: Array<{ text: string }>; isError?: boolean } };
     expect(body.result?.isError).toBeFalsy();
     const content = firstJsonContent(body);
-    expect(content.share_url).toBe(`https://anc.dev/web/${TARGET_DOMAIN}`);
+    // Links follow the deployment that served them, so this is the staging
+    // host even though the audited target happens to be anc.dev.
+    expect(content.share_url).toBe(`${STAGING_BASE}/web/${TARGET_DOMAIN}`);
     const scorecard = content.scorecard as {
       score_pct?: number;
       score?: { relative: number; global: number };
@@ -375,7 +377,7 @@ test.describe('web audit — MCP fresh path', () => {
     expect(content.found).toBe(true);
     const remediation = content.remediation as { goal?: string; fix?: string; prompt?: string; skill_url?: string };
     expect(remediation.fix).toContain('OpenAPI');
-    expect(remediation.prompt).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(remediation.prompt).toContain(`Skill: ${STAGING_BASE}/web-audit/skill/openapi`);
   });
 
   test('get_web_remediation appends caller evidence as a delimited untrusted block', async ({ request }) => {

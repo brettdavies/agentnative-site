@@ -210,7 +210,7 @@ jobs:
           retention-days: 14
 
   staging-mcp:
-    name: staging-mcp · live MCP + discoverability
+    name: staging-mcp · live MCP, discoverability, and web-audit result page
     needs: preflight
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
@@ -255,11 +255,11 @@ jobs:
 
       - name: Install Playwright chromium (cache miss)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: bun x playwright install --with-deps chromium
+        run: bun x playwright install --with-deps chromium webkit
 
       - name: Install browser system deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: bun x playwright install-deps chromium
+        run: bun x playwright install-deps chromium webkit
 
       # No `bun run build` step: ANC_STAGING_BASE_URL makes
       # playwright.config.ts skip the local wrangler-dev webServer, and
@@ -275,6 +275,19 @@ jobs:
           ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: bun x playwright test --project=staging-mcp
+
+      # The result-page suite reaches staging the same way: the spec pins its
+      # own baseURL and Access headers, so it needs this step's env and not a
+      # project of its own. It runs here rather than in the `e2e` job because
+      # that job deliberately leaves ANC_STAGING_BASE_URL unset, which makes
+      # the spec skip its whole body. Both engines run: see web-audit-webkit
+      # in playwright.config.ts for what WebKit adds over Chromium.
+      - name: Web-audit result page e2e (live staging, chromium + webkit)
+        env:
+          ANC_STAGING_BASE_URL: https://agentnative-site-staging.brettdavies.workers.dev
+          ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: bun x playwright test --project=web-audit --project=web-audit-webkit
 
       - name: Upload Playwright artifacts on failure
         if: failure()
