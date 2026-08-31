@@ -25,10 +25,9 @@ import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from 
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import type { Catalog } from '../catalog';
+import { siteOrigin } from '../site-origin';
 
 export interface ScorecardReadEnv extends OrchestrateEnv {}
-
-const SITE_URL = 'https://anc.dev';
 
 function textContent(value: unknown) {
   return {
@@ -71,6 +70,7 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
       annotations: { readOnlyHint: true },
     },
     async (args) => {
+      const siteUrl = siteOrigin();
       const choice = rawFromInput(args);
       if ('error' in choice) {
         return {
@@ -112,7 +112,7 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
 
       if (result.kind === 'curated') {
         const scorecardUrlPath = result.scorecard_url ?? `/score/${result.entry.name}`;
-        const scorecard_url = scorecardUrlPath.startsWith('http') ? scorecardUrlPath : `${SITE_URL}${scorecardUrlPath}`;
+        const scorecard_url = scorecardUrlPath.startsWith('http') ? scorecardUrlPath : `${siteUrl}${scorecardUrlPath}`;
         return textContent({
           found: true,
           source: 'registry',
@@ -125,7 +125,7 @@ export function registerScorecardReadTool(server: McpServer, _catalog: Catalog, 
       if (result.kind === 'cached') {
         const scorecard = result.scorecard as { tool?: { binary?: string | null } } | null;
         const binary = scorecard?.tool?.binary ?? null;
-        const scorecard_url = binary ? `${SITE_URL}/score/live/${binary}` : null;
+        const scorecard_url = binary ? `${siteUrl}/score/live/${binary}` : null;
         return textContent({
           found: true,
           source: 'live-cache',
