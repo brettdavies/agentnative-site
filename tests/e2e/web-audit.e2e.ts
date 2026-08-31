@@ -133,7 +133,7 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
     expect(body).toMatch(/## MCP \(\d+\/\d+\)/);
   });
 
-  test('the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {
+  test('@render the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {
     await page.goto(`/web/${TARGET_DOMAIN}`);
     await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
     await expect(page.locator('.scorecard-hero .bigscore__l').first()).toContainText('site score');
@@ -411,7 +411,7 @@ test.describe('web audit — MCP fresh path', () => {
 // unit fixture: the machine-readable audit context, the per-row canonical
 // metadata every row carries whether or not it has a prompt, and the
 // read-only tool surface.
-test.describe('web audit — result-page context and WebMCP tools', () => {
+test.describe('@render web audit — result-page context and WebMCP tools', () => {
   const STATUSES = ['pass', 'noncompliant', 'broken', 'absent', 'n_a', 'skip', 'error'] as const;
   const RESULT_TOOLS = ['get_worksheet', 'get_fix_prompt', 'get_fix_prompts', 'get_audit_summary'] as const;
   // Tools that fill or submit the audit form. They belong to /web-audit and

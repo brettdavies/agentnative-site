@@ -152,6 +152,12 @@ export default defineConfig({
       // engine behaviour rather than iOS fidelity.
       use: { ...devices['Desktop Safari'] },
       testMatch: /web-audit\.e2e\.ts/,
+      // Only the `@render` tests. The rest of this spec drives metered
+      // fresh audits or asserts JSON over `request`, which does not touch a
+      // browser engine at all: running those twice would spend the audit
+      // budget a second time and race the first project for it, without
+      // telling us anything about WebKit.
+      grep: /@render/,
       timeout: 90_000,
     },
   ],
