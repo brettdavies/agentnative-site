@@ -34,10 +34,12 @@ import {
   escHtml,
   parseFilename,
   renderFrontmatter,
+  resolveBaseUrl,
   SITE_SPEC_VERSION,
   SPEC_VERSION,
   sortedGlob,
 } from '../src/build/util.mjs';
+import { CANONICAL_SITE_URL } from '../src/shared/site-url';
 
 // Shape of one registry.yaml entry as loaded by loadRegistry — narrows the
 // loosely-typed (object) return for property access in assertions below.
@@ -2849,12 +2851,14 @@ describe('composeTwin — frontmatter + absolutified body', () => {
     expect(twin).toContain('](https://anc.dev/p1)');
   });
 
-  test('an explicit baseUrl override moves the frontmatter url and body links together', () => {
+  test('a baseUrl override moves the body links but leaves the frontmatter url canonical', () => {
     const staging = 'https://staging.example';
     const twin = composeTwin(meta, body, staging);
-    expect(twin).toContain('url: https://staging.example/p3\n');
+    // Body cross-links follow the deployment so a staging reader stays on staging.
     expect(twin).toContain('](https://staging.example/p1)');
-    expect(twin).not.toContain('anc.dev');
+    // The frontmatter url is the twin's canonical declaration, so it does not move.
+    expect(twin).toContain(`url: ${CANONICAL_SITE_URL}/p3\n`);
+    expect(twin).not.toContain(`](${CANONICAL_SITE_URL}/p1)`);
   });
 
   test('absolutifies site-relative links inside the description so the twin self-resolves', () => {
@@ -3009,8 +3013,11 @@ describe('emitSubPages — twin frontmatter', () => {
   test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
     const webAuditMd = await readFile(join(distDir, 'web-audit.md'), 'utf8');
     expect(webAuditMd.startsWith('---\n')).toBe(true);
-    expect(webAuditMd).toContain('url: https://anc.dev/web-audit\n');
-    expect(webAuditMd).toContain('Enter a public URL at');
+    expect(webAuditMd).toContain(`url: ${CANONICAL_SITE_URL}/web-audit\n`);
+    // The widget's stand-in is a prose pointer whose target absolutifies,
+    // so the twin's only actionable link resolves on whatever host built it.
+    expect(webAuditMd).toContain('Enter a public URL on the');
+    expect(webAuditMd).toContain(`[web audit page](${resolveBaseUrl()}/web-audit)`);
     expect(webAuditMd).not.toContain('data-web-audit-form');
     expect(webAuditMd).not.toContain('turnstile-sitekey');
     expect(webAuditMd).not.toContain('{{TURNSTILE_SITEKEY}}');
