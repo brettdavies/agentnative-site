@@ -1,20 +1,22 @@
 // Emit dist/sitemap.xml. One entry per canonical, extension-less URL. No
-// trailing slashes (docs/DESIGN.md §3.4.1 "Asset resolution"). The production
-// base URL lives here; override via PUBLIC_BASE_URL env during build if
-// staging needs a different origin.
+// trailing slashes (docs/DESIGN.md §3.4.1 "Asset resolution").
+//
+// <loc> is a canonical declaration, so it pins to the canonical host and
+// ignores PUBLIC_BASE_URL. A staging sitemap advertising staging URLs
+// would invite crawlers to index the staging deployment.
 
-import { resolveBaseUrl } from './util.mjs';
+import { canonicalBaseUrl } from './util.mjs';
 
 /**
  * @param {object} args
  * @param {number[]} args.principleNumbers e.g. [1, 2, 3, 4, 5, 6, 7]
  * @param {string[]=} args.extraPaths additional canonical paths to include
- * @param {string=} args.baseUrl defaults to process.env.PUBLIC_BASE_URL or https://anc.dev
+ * @param {string=} args.baseUrl explicit override; defaults to the canonical host
  * @param {string=} args.lastmod ISO-8601 date string; defaults to today UTC.
  * @returns {string} XML body.
  */
 export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastmod }) {
-  const base = resolveBaseUrl(baseUrl);
+  const base = canonicalBaseUrl(baseUrl);
   const today = lastmod ?? new Date().toISOString().slice(0, 10);
 
   const paths = [

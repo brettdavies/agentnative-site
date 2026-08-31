@@ -6,6 +6,7 @@ import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as yaml from 'js-yaml';
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 
 const PRINCIPLE_FILENAME_RE = /^p(\d+)-([a-z0-9-]+)\.md$/;
 
@@ -122,17 +123,34 @@ export const ANC_VERSION = readVersionFile(
   'Run ./scripts/sync-cli-version.sh to vendor the latest agentnative-cli release version, then retry.',
 );
 
-const DEFAULT_BASE = 'https://anc.dev';
-
 /**
- * Resolve the site base URL from an explicit value, env, or fallback.
- * Always strips trailing slashes.
+ * Resolve the base URL for links a reader or agent NAVIGATES — llms.txt
+ * entries, markdown cross-links, endpoint directories, skill pointers.
+ * These follow the host the build targets, so a staging visitor who
+ * follows one stays on staging.
+ *
+ * `PUBLIC_BASE_URL` is what the staging deploy job sets; production
+ * leaves it unset and lands on the canonical host.
  *
  * @param {string=} baseUrl — explicit override (optional)
  * @returns {string}
  */
 export function resolveBaseUrl(baseUrl) {
-  return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '');
+  return (baseUrl ?? process.env.PUBLIC_BASE_URL ?? CANONICAL_SITE_URL).replace(/\/$/, '');
+}
+
+/**
+ * Resolve the base URL for CANONICAL/SEO metadata — `<link
+ * rel="canonical">`, `og:url`, sitemap `<loc>`, markdown-twin frontmatter
+ * `url`. Deliberately ignores `PUBLIC_BASE_URL`: "canonical" names where
+ * the real thing lives, and a staging build that declares itself
+ * canonical tells crawlers staging is the authority.
+ *
+ * @param {string=} baseUrl — explicit override, for tests
+ * @returns {string}
+ */
+export function canonicalBaseUrl(baseUrl) {
+  return (baseUrl ?? CANONICAL_SITE_URL).replace(/\/$/, '');
 }
 
 /**
@@ -196,14 +214,17 @@ export function renderFrontmatter({ title, description, url }) {
  * Compose a complete markdown-twin string: frontmatter block followed by
  * the link-absolutified body. Emitters and the principle byte-equivalence
  * invariant both call this, so there is exactly one definition of a
- * twin's bytes. Taking the site-relative `canonicalPath` (the same value
- * callers pass to emitShell) and deriving the absolute `url` here keeps
- * the frontmatter url and the absolutified links on the same base by
- * construction.
+ * twin's bytes.
+ *
+ * The two halves resolve against different bases on purpose. Frontmatter
+ * `url` is the twin's canonical declaration, so it pins to the canonical
+ * host; the body's cross-links are navigation within this deployment, so
+ * they follow the build's target host. On a production build the two
+ * coincide; on a staging build they must not.
  *
  * @param {{ title: string, description: string, canonicalPath: string }} meta
  * @param {string} bodyMarkdown
- * @param {string=} baseUrl — explicit override; defaults via resolveBaseUrl
+ * @param {string=} baseUrl — explicit override for the navigational half
  * @returns {string}
  */
 export function composeTwin({ title, description, canonicalPath }, bodyMarkdown, baseUrl) {
@@ -214,7 +235,7 @@ export function composeTwin({ title, description, canonicalPath }, bodyMarkdown,
     renderFrontmatter({
       title,
       description: absolutifyMarkdownLinks(description, baseUrl),
-      url: `${resolveBaseUrl(baseUrl)}${canonicalPath}`,
+      url: `${canonicalBaseUrl()}${canonicalPath}`,
     }) + absolutifyMarkdownLinks(bodyMarkdown, baseUrl)
   );
 }

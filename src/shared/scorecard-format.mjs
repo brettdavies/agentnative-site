@@ -14,6 +14,8 @@
 // `src/shared/` so the dependency direction is obvious: build code and worker
 // code both depend on `shared/`, never the other way around.
 
+import { CANONICAL_SITE_URL } from './site-url';
+
 /**
  * Escape HTML special characters. Used at every server→client boundary that
  * embeds scorecard fields (some of which come from CLI evidence strings the
@@ -409,7 +411,10 @@ function renderPrincipleRows(tool, results, principleScore) {
     let remediation = '';
     if (nonPass.length > 0) {
       const promptLines = nonPass.map((c) => `- ${c.label}${c.evidence ? ` (${c.evidence})` : ''}`).join('\n');
-      const prompt = `Make ${tool.name} satisfy ${group} (${PRINCIPLE_NAMES[group]}) from the agent-native CLI standard. Address:\n${promptLines}\nRequirements: https://anc.dev/p${n}`;
+      // Pinned to the canonical host, not the serving one: this prompt is
+      // copied out of the page into some other agent's context, where a
+      // staging URL (behind Cloudflare Access) would be unfetchable.
+      const prompt = `Make ${tool.name} satisfy ${group} (${PRINCIPLE_NAMES[group]}) from the agent-native CLI standard. Address:\n${promptLines}\nRequirements: ${CANONICAL_SITE_URL}/p${n}`;
       remediation = `
         <div class="remediation">
           <div class="remediation__hd"><span>Remediation · ${group}</span><button type="button" class="copy-prompt" data-copy-prompt aria-label="Copy remediation prompt for ${group}">⧉ copy prompt</button></div>

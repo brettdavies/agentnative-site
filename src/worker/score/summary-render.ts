@@ -19,6 +19,7 @@ import {
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   escHtml as sharedEscHtml,
 } from '../../shared/scorecard-format.mjs';
+import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { detectPreference } from '../accept';
 import { applyHeaders } from '../headers';
 import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
@@ -81,6 +82,11 @@ export type SummaryRenderInput = {
   toolVersion: string;
   // 'cache-hit' shows a quiet "(cached)" marker; 'live' does not.
   freshness: 'cache-hit' | 'live';
+  // Origin of the request being served. The markdown twin is fetched
+  // cross-origin, so its links must be absolute — and absolute against
+  // the deployment the agent is already talking to. Absent only on
+  // direct unit calls, which fall back to the canonical host.
+  origin?: string;
 };
 
 function buildFreshnessMarker(freshness: SummaryRenderInput['freshness']): string {
@@ -126,8 +132,8 @@ export function buildScoreSummaryBody(input: SummaryRenderInput): string {
 /**
  * Build the markdown body for `/score/live/<binary>.md`. Thin wrapper
  * over the shared `buildScorecardMarkdown` — same single source of truth
- * as the HTML body above. `baseUrl: 'https://anc.dev'` makes principle
- * links absolute because this surface is fetched cross-origin via
+ * as the HTML body above. An absolute `baseUrl` makes principle links
+ * self-resolving because this surface is fetched cross-origin via
  * `Accept: text/markdown` (no `absolutifyMarkdownLinks` post-pass like
  * the static twin gets at build time).
  */
@@ -142,7 +148,7 @@ export function buildScoreSummaryMarkdown(input: SummaryRenderInput): string {
   const provenance = `Binary \`${binary}\` · scored by anc ${ancVersion} · spec ${specVersion} · ${freshness === 'cache-hit' ? 'cached' : 'just scored'}`;
   return sharedBuildScorecardMarkdown(tool, scorecard, {
     version: toolVersion,
-    baseUrl: 'https://anc.dev',
+    baseUrl: input.origin ?? CANONICAL_SITE_URL,
     header: `${headerLine}\n\n${provenance}`,
   });
 }
@@ -324,6 +330,7 @@ export async function handleLiveScorePage(request: Request, env: LiveScoreEnv): 
     ancVersion: cached.anc_version,
     toolVersion: cached.tool_version,
     freshness: 'cache-hit',
+    origin: new URL(request.url).origin,
   };
 
   if (wantMarkdown) {
@@ -368,7 +375,7 @@ async function renderNotFound(
   binary: string,
   wantMarkdown: boolean,
 ): Promise<Response> {
-  const pathname = new URL(request.url).pathname;
+  const { origin, pathname } = new URL(request.url);
   if (wantMarkdown) {
     const lines = [
       `# No live score for \`${binary}\` yet`,
@@ -377,9 +384,9 @@ async function renderNotFound(
       '',
       '## Score it now',
       '',
-      'Paste the tool name, install command, or GitHub URL on the [homepage](https://anc.dev/) to score it. Once it scores, the share URL works.',
+      `Paste the tool name, install command, or GitHub URL on the [homepage](${origin}/) to score it. Once it scores, the share URL works.`,
       '',
-      `Or [install \`anc\`](https://anc.dev/install) and run \`anc audit ${binary}\` locally.`,
+      `Or [install \`anc\`](${origin}/install) and run \`anc audit ${binary}\` locally.`,
       '',
     ];
     return applyHeaders(new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS }), {

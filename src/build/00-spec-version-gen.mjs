@@ -18,6 +18,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const SPEC_VERSION_PATH = join(REPO_ROOT, 'src', 'data', 'spec', 'VERSION');
@@ -25,11 +26,11 @@ const SITE_VERSION_PATH = join(REPO_ROOT, 'content', 'principles', 'VERSION');
 const ANC_VERSION_PATH = join(REPO_ROOT, 'src', 'data', 'anc', 'VERSION');
 const GEN_PATH = join(REPO_ROOT, 'src', 'worker', 'spec-version.gen.ts');
 
-// AUDITOR_URL is intentionally not a file: anc.dev is the only live-scoring
-// surface. If a future fork wants to point at a different host, override
-// here. Not a token-fetched value because we want the literal embedded in
-// the bundle, not a runtime lookup.
-const AUDITOR_URL = 'https://anc.dev/score';
+// AUDITOR_URL is intentionally not a file: the canonical host is the only
+// publicly reachable live-scoring surface, and this value is quoted back to
+// API clients that may not be able to reach a staging deployment. Embedded
+// as a literal in the bundle rather than fetched at runtime.
+const AUDITOR_URL = `${CANONICAL_SITE_URL}/score`;
 
 /**
  * Read a VERSION file and strip trailing newlines. Throws if the file
@@ -64,7 +65,7 @@ export function renderSpecVersionModule({ specVersion, siteSpecVersion, ancVersi
 // ANC_VERSION        — from src/data/anc/VERSION (the currently-published
 //                      anc binary release; vendored from agentnative-cli's
 //                      Cargo.toml).
-// AUDITOR_URL        — production live-scoring surface; moves with anc.dev.
+// AUDITOR_URL        — the canonical live-scoring surface.
 
 export const SPEC_VERSION = '${specVersion}';
 export const SITE_SPEC_VERSION = '${siteSpecVersion}';

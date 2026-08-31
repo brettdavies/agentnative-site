@@ -2,6 +2,7 @@
 // ≤1.5k. Probe document.modelContext then navigator.modelContext; no-op if
 // both are absent. See https://webmachinelearning.github.io/webmcp/
 
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { auditTools } from './webmcp-audit';
 import { homeTools } from './webmcp-home';
 import { orientationTools } from './webmcp-orientation';
@@ -80,10 +81,13 @@ export function emptyObjectSchema(): Record<string, unknown> {
   return { type: 'object', properties: {}, additionalProperties: false };
 }
 
+// The page's own origin, so a tool result points at the deployment the
+// agent is already on. Falls back to the canonical host only when there
+// is no document to read an origin from (non-browser test harness).
 function resolveOrigin(opts: ToolsForOpts): string {
   if (opts.origin) return opts.origin;
   if (typeof location !== 'undefined' && location.origin) return location.origin;
-  return '';
+  return CANONICAL_SITE_URL;
 }
 
 export function pageDoc(opts: ToolsForOpts): Document {
@@ -144,7 +148,7 @@ export async function bindModelContext(mc: ModelContext, tools: WebMcpTool[], si
 
 function registerWithLifecycle(mc: ModelContext, win: Window, doc: Document | undefined): void {
   const controller = new AbortController();
-  const origin = win.location?.origin ?? '';
+  const origin = win.location?.origin ?? CANONICAL_SITE_URL;
   const pathname = win.location?.pathname ?? '/';
   void bindModelContext(mc, toolsFor(pathname, { doc, origin }), controller.signal);
   win.addEventListener('pagehide', () => controller.abort(), { once: true });

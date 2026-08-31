@@ -60,7 +60,7 @@ const GENERIC_ISSUE = 'the check did not pass in the latest audit';
 
 export interface AssembleInput {
   checkId: string;
-  /** Site origin the Skill link targets, e.g. https://anc.dev */
+  /** Origin the Skill link targets — the origin this response is being served from. */
   origin: string;
   /** The run's evidence line; omitted = a generic Issue line. */
   evidence?: string | null;
