@@ -48,6 +48,15 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
     await expect(page.locator('[data-web-audit-form]')).toBeVisible();
 
     await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
+    // Opt in, matching the value the round-trip test below stores. The two are
+    // the only tests here that let a flag-changing write reach the Worker, and
+    // a write that changes the stored flag spends one of the five per-hour
+    // listing flips this domain gets across every run and developer at once.
+    // Disagreeing on the value made them flip it back and forth twice a run,
+    // so a third run in the same hour was refused and this flow timed out
+    // waiting on a redirect the Worker had declined. Agreeing costs one flip
+    // the first time and nothing after.
+    await page.check('[data-web-audit-listing]');
     await page.click('[data-web-audit-submit]');
 
     // Submit navigates to the dedicated in-progress page.
@@ -227,6 +236,38 @@ test.describe('web audit — public_listing opt-in transport', () => {
     return r.method() === 'POST' && r.url().includes('/api/audit-web');
   }
 
+  /**
+   * Answer the audit POST locally with a cache-hit envelope.
+   *
+   * These three tests assert what the client puts on the wire, so the server
+   * round-trip is a side effect they never look at. Letting it through spends
+   * a fresh audit and, when the flag actually changes, one of the five
+   * per-hour `public_listing` flips available for this domain across every
+   * run, worker, and developer at once. Four of those five went to this file,
+   * which starved the end-to-end flow test above: its 429 renders a status
+   * message and, by design, never redirects, so it timed out waiting for a
+   * navigation the server had already refused.
+   *
+   * The shape mirrors the real cache-hit branch in `handleWebAudit`, so the
+   * client forwards exactly as it would against staging.
+   */
+  async function stubAuditPost(page: import('@playwright/test').Page): Promise<void> {
+    await page.route('**/api/audit-web', async (route) => {
+      const scoredAt = new Date().toISOString();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          cached: true,
+          scored_at: scoredAt,
+          refresh_after: new Date(Date.parse(scoredAt) + 60_000).toISOString(),
+          scorecard: {},
+          share_url: `/web/${TARGET_DOMAIN}`,
+        }),
+      });
+    });
+  }
+
   /** The page's audit flow has settled: forwarded to the saved result, or ended on the retry state. */
   async function settled(page: import('@playwright/test').Page): Promise<void> {
     await Promise.race([
@@ -236,6 +277,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
   }
 
   test('a checked box sends public_listing: true in the POST body', async ({ page }) => {
+    await stubAuditPost(page);
     await page.goto('/web-audit');
     await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
     await page.check('[data-web-audit-listing]');
@@ -247,6 +289,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
   });
 
   test('an unchecked box (the default) sends an explicit public_listing: false', async ({ page }) => {
+    await stubAuditPost(page);
     await page.goto('/web-audit');
     await page.fill('[data-web-audit-input]', TARGET_DOMAIN);
     await expect(page.locator('[data-web-audit-listing]')).not.toBeChecked();
@@ -261,6 +304,7 @@ test.describe('web audit — public_listing opt-in transport', () => {
     // No preceding form submit means no stashed choice: the POST must omit
     // the field (never send false) so a shared-link re-audit preserves the
     // stored choice.
+    await stubAuditPost(page);
     const posted = page.waitForRequest(isAuditPost, { timeout: 60_000 });
     await page.goto(`/web/scoring/${TARGET_DOMAIN}`);
     const body = (await posted).postDataJSON() as Record<string, unknown>;
