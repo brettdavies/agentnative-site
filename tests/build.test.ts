@@ -2851,6 +2851,15 @@ describe('composeTwin — frontmatter + absolutified body', () => {
     expect(twin).toContain('](https://anc.dev/p1)');
   });
 
+  // This test's intent was deliberately inverted. It previously asserted that
+  // the frontmatter url and the body links move together under a baseUrl
+  // override, which is exactly the coupling the canonical/navigational split
+  // had to break: a staging build that rewrites its frontmatter url declares
+  // staging canonical. Rewriting a test to match new behavior is normally a
+  // smell worth challenging, since it can paper over a regression, so the
+  // reasoning is recorded here rather than left to the diff. If you are
+  // changing this test again, the question to answer first is whether the
+  // frontmatter url is a canonical declaration; while it is, it does not move.
   test('a baseUrl override moves the body links but leaves the frontmatter url canonical', () => {
     const staging = 'https://staging.example';
     const twin = composeTwin(meta, body, staging);
