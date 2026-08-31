@@ -88,31 +88,19 @@ T1–T4 merged (#280); clip on production still T5+T6 (deadline 3 Sep 2026). **O
 
 ## Web audit
 
-### Neutralize Issue evidence in assembleRemediation
-
-**What:** Escape or collapse instruction-like third-party evidence when building the `Issue:` line in
-`src/worker/audit-web/remediation.ts`.
-
-**Why:** `get_fix_prompt`, the Copy-prompt widget, and `/web/<host>.md` all return that string. A hostile audited site
-can plant adversarial text in headers/robots/llms.txt. We skipped `untrustedContentHint` because it would only mark the
-WebMCP path.
-
-**Context:** `assembleRemediation` interpolates `input.evidence` into `Issue: ${issue}` (`remediation.ts` ~83). Do not
-special-case WebMCP. Preserve useful URLs and header names; do not over-strip. Start with a golden-file test of a
-payload that contains “ignore previous instructions”.
-
-**Effort:** M **Priority:** P2 **Depends on:** WebMCP clip shipped (or can land independently)
-
 ### Live getTools() for the webmcp check
 
 **What:** Replace the static HTML-marker grep in `src/worker/audit-web/handlers/webmcp.ts` with a real `getTools()`
 probe that grades answer/act/transact.
 
-**Why:** After 3 Sep the MAY `webmcp` check should measure the collaboration surface, not the word `webmcp` in HTML. The
+**Why:** After 3 Sep the MAY `webmcp` check should measure the collaboration surface, not markup that declares one. The
 challenge video must not claim this check already flipped.
 
-**Context:** Today `runWebMcp` only regexes `ctx.root.body`. There is no browser in the audit engine. This needs
-Chromium (or equivalent) in the worker pipeline. Blocked by: no headless browser in `src/worker/audit-web`.
+**Context:** `runWebMcp` regexes `ctx.root.body` against `WEBMCP_MARKERS`: an `application/webmcp` script type, a
+`navigator`/`document`/`window.modelContext` reference, and a `webmcp` script `src`. Those are structural rather than a
+bare `webmcp` substring, so a site that merely writes the word no longer passes, but a site that ships the markup and
+registers nothing still does. Grading answer/act/transact needs Chromium (or equivalent) in the worker pipeline. Blocked
+by: no headless browser in `src/worker/audit-web`.
 
 **Effort:** L **Priority:** P3 **Depends on:** First-party page tools shipping so there is something to grade **Blocked
 by:** Headless browser runtime in the web-audit engine
