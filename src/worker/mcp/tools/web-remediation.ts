@@ -13,6 +13,7 @@ import { z } from 'zod';
 import {
   assembleRemediation,
   loadWebRemediationCatalog,
+  PROMPT_EVIDENCE_MAX,
   resetWebRemediationCatalogCacheForTests,
   type WebRemediationCatalog,
   type WebRemediationCatalogEnv,
@@ -47,7 +48,7 @@ export function registerWebRemediationTool(server: McpServer, env: WebRemediatio
           .optional()
           .describe(
             "Optional: this run's evidence line for the check. It is embedded as untrusted data in a delimited " +
-              'block, flattened to one line and truncated past 200 characters.',
+              `block, flattened to one line and truncated past ${PROMPT_EVIDENCE_MAX} characters.`,
           ),
       },
       annotations: { readOnlyHint: true },
