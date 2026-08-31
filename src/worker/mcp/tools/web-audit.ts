@@ -146,6 +146,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       annotations: { readOnlyHint: true },
     },
     async ({ url }) => {
+      const siteUrl = siteOrigin();
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
       const validation = validatePublicUrl(canonicalTargetOf(parsed));
@@ -157,7 +158,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           found: true,
           ...webAuditFreshness(true, hit.scored_at),
           scorecard: await enrichForRead(env, hit.scorecard),
-          share_url: `${siteOrigin()}/web/${domain}`,
+          share_url: `${siteUrl}/web/${domain}`,
           spec_version: SPEC_VERSION,
         });
       }
@@ -207,13 +208,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     async ({ url, site_type, public_listing }, extra) => {
       // URL validation + SSRF (the cache key needs the URL, so these precede
       // the cache read and the kill switch).
+      const siteUrl = siteOrigin();
       const parsed = coerceUrl(url);
       if (!parsed) return isError('invalid url');
       const canonicalTarget = canonicalTargetOf(parsed);
       const validation = validatePublicUrl(canonicalTarget);
       if (!validation.ok) return isError(validation.reason);
       const domain = parsed.host;
-      const shareUrl = `${siteOrigin()}/web/${domain}`;
+      const shareUrl = `${siteUrl}/web/${domain}`;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
       // data, so a cached scorecard is served even when the audit is off.
@@ -368,13 +370,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       annotations: { readOnlyHint: true },
     },
     async ({ view }) => {
+      const siteUrl = siteOrigin();
       const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
       const curated = (aggregate?.entries ?? []).map((e) => ({
         domain: e.domain,
         url: e.url,
         name: e.name,
         score_pct: e.score_pct,
-        share_url: `${siteOrigin()}/web/${e.domain}`,
+        share_url: `${siteUrl}/web/${e.domain}`,
       }));
       if ((view ?? 'curated') !== 'all') {
         return textContent({ count: curated.length, entries: curated });
@@ -395,7 +398,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           url: `https://${l.domain}/`,
           name: l.name,
           score_pct: l.score_pct,
-          share_url: `${siteOrigin()}/web/${l.domain}`,
+          share_url: `${siteUrl}/web/${l.domain}`,
         }));
       const entries = curated.concat(userRows);
       return textContent({ count: entries.length, entries });

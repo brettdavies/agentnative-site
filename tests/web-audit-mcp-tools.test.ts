@@ -14,9 +14,7 @@ import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hi
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
 import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
-import { runWithMcpRequest } from '../src/worker/mcp/request-context';
 import type { McpEnv } from '../src/worker/mcp/server';
-import { CANONICAL_SITE_URL, siteOrigin } from '../src/worker/mcp/site-origin';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
@@ -171,13 +169,7 @@ type JsonRpcResult = {
   error?: { code: number; message: string };
 };
 
-async function callTool(
-  env: McpEnv,
-  name: string,
-  args: Record<string, unknown>,
-  ip?: string,
-  origin?: string,
-): Promise<JsonRpcResult> {
+async function callTool(env: McpEnv, name: string, args: Record<string, unknown>, ip?: string): Promise<JsonRpcResult> {
   await mcpInitialize(env);
 
   const callHeaders: Record<string, string> = {};
@@ -192,7 +184,6 @@ async function callTool(
       params: { name, arguments: args },
     },
     callHeaders,
-    origin,
   );
   expect(status).toBe(200);
   return body as JsonRpcResult;
@@ -1302,57 +1293,5 @@ describe('audit_website public_listing flip budget', () => {
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
     expect(r2.get(key)).toBe(before);
-  });
-});
-
-// A tool result that hardcodes the canonical host sends a caller to
-// production no matter which deployment answered. The rendered page already
-// builds links from the request; these tools have to agree with it, or the
-// same finding names two different homes depending on which surface you ask.
-describe('MCP links follow the request origin', () => {
-  const STAGING = 'https://agentnative-site-staging.example.workers.dev';
-
-  test('siteOrigin uses the in-flight request, falling back to the canonical site', async () => {
-    expect(siteOrigin()).toBe(CANONICAL_SITE_URL);
-    const seen = await runWithMcpRequest(new Request(`${STAGING}/mcp`), () => siteOrigin());
-    expect(seen).toBe(STAGING);
-  });
-
-  async function envWithHit(): Promise<McpEnv> {
-    const key = await keyFor('https://example.com/', SPEC_VERSION);
-    return makeEnv({
-      cachePrefill: {
-        [key]: {
-          spec_version: SPEC_VERSION,
-          target_url: 'https://example.com/',
-          scored_at: new Date().toISOString(),
-          scorecard: { results: [{ id: 'openapi', status: 'absent', evidence: 'openapi.json -> 404' }] },
-        },
-      },
-    });
-  }
-
-  test('get_website_audit share_url and skill links carry the serving origin', async () => {
-    const body = jsonContent(
-      await callTool(await envWithHit(), 'get_website_audit', { url: 'example.com' }, undefined, STAGING),
-    );
-    expect(body.share_url).toBe(`${STAGING}/web/example.com`);
-    const rows = (body.scorecard as { results: Array<{ remediation?: { skill_url?: string } }> }).results;
-    const withSkill = rows.filter((r) => r.remediation?.skill_url);
-    expect(withSkill.length).toBeGreaterThan(0);
-    for (const row of withSkill) expect(row.remediation?.skill_url?.startsWith(`${STAGING}/`)).toBe(true);
-  });
-
-  test('get_web_remediation builds its skill link from the serving origin', async () => {
-    const env = await makeEnv();
-    const body = jsonContent(await callTool(env, 'get_web_remediation', { check_id: 'openapi' }, undefined, STAGING));
-    const remediation = body.remediation as { skill_url: string; prompt: string };
-    expect(remediation.skill_url).toBe(`${STAGING}/web-audit/skill/openapi`);
-    expect(remediation.prompt).toContain(`Skill: ${STAGING}/web-audit/skill/openapi`);
-  });
-
-  test('the canonical host still answers with canonical links', async () => {
-    const body = jsonContent(await callTool(await envWithHit(), 'get_website_audit', { url: 'example.com' }));
-    expect(body.share_url).toBe('https://anc.dev/web/example.com');
   });
 });

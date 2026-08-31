@@ -39,7 +39,7 @@
 // across the DO request boundary now is a typed, narrowed InstallSpec
 // rather than a raw `ValidatedInput`.
 
-import { discoverBinary, type InstallSpec, type ResolvedStep } from './discover-binary';
+import { discoverBinary, type InstallSpec, type ResolvedStep, USER_AGENT } from './discover-binary';
 import type { DiscoveryHintsIndex } from './registry-lookup';
 import { type ValidatedInput, validBranchName } from './validate';
 
@@ -250,7 +250,7 @@ async function fetchBrewFormula(pkg: string, fetcher: typeof fetch): Promise<Bre
   try {
     const res = await fetcher(url, {
       signal: ctrl.signal,
-      headers: { 'User-Agent': 'anc-discovery/1.0 (+https://anc.dev)' },
+      headers: { 'User-Agent': USER_AGENT },
     });
     if (!res.ok) return null;
     const data = (await res.json()) as BrewFormulaShape;

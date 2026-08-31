@@ -12,6 +12,7 @@
 // fenced prompt so fetch-only agents lose nothing.
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
+import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { type WebAuditFreshness, webAuditFreshness } from './cache';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
@@ -225,7 +226,7 @@ function rowsByCategory(scorecard: WebScorecardShape): Map<string, WebScorecardR
 /** HTML body for /web/<domain>. */
 export function buildWebSummaryBody(input: WebSummaryInput): string {
   const sc = input.scorecard;
-  const origin = input.origin ?? 'https://anc.dev';
+  const origin = input.origin ?? CANONICAL_SITE_URL;
   const catalog = input.remediation ?? {};
   const { relative, global: globalScore } = scoresOf(sc);
   const name = input.name ?? sc.tool?.name ?? input.domain;
@@ -351,7 +352,7 @@ function mdFenced(text: string): string {
 /** Markdown twin for /web/<domain>.md. Absolute links for cross-origin fetch. */
 export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   const sc = input.scorecard;
-  const origin = input.origin ?? 'https://anc.dev';
+  const origin = input.origin ?? CANONICAL_SITE_URL;
   const catalog = input.remediation ?? {};
   const { relative, global: globalScore } = scoresOf(sc);
   const name = input.name ?? sc.tool?.name ?? input.domain;
@@ -401,7 +402,7 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
   lines.push(
     '## Re-run this audit',
     '',
-    'Re-run from [anc.dev/web-audit](https://anc.dev/web-audit), or call the `audit_website` MCP tool.',
+    `Re-run from [${origin}/web-audit](${origin}/web-audit), or call the \`audit_website\` MCP tool.`,
     '',
   );
   return lines.join('\n');

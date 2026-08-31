@@ -6,6 +6,7 @@
 // freshness, and pages carry whole items — a page never slices its own
 // JSON to fit the output cap.
 
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 import {
   FINDING_KEYWORDS,
   FINDING_STATUSES,
@@ -112,7 +113,7 @@ const POINTER_RESERVE = 180;
 
 /** The pointer the trimmed prompt sends a reader to for the untruncated fix. */
 function skillUrlFor(id: string): string {
-  const origin = typeof location !== 'undefined' && location.origin ? location.origin : 'https://anc.dev';
+  const origin = typeof location !== 'undefined' && location.origin ? location.origin : CANONICAL_SITE_URL;
   return `${origin}/web-audit/skill/${id}`;
 }
 
