@@ -202,49 +202,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: bun run test:e2e
 
-      # `wrangler dev` can die mid-run reporting a bare `✘ [ERROR]` with no
-      # message, which turns every remaining test into a connection-refused
-      # failure and leaves nothing to diagnose from: one run lost 425 tests
-      # to a single crash whose cause was only in a log file the job threw
-      # away. Wrangler writes the detail there, so keep it.
-      # Copied into the workspace first: upload-artifact globs its paths and
-      # expands neither `~` nor `$HOME`, so a tilde path matches nothing and
-      # the artifact still uploads, looking healthy while carrying none of
-      # the detail it exists for.
-      - name: Collect wrangler logs on failure
+      # Keeps the wrangler log this job's failures are diagnosed from, and
+      # reports whether the dev server died from the upstream crash. Both
+      # this job and lhci run `wrangler dev`, so the signature lives in one
+      # place rather than drifting between two copies.
+      - name: Probe for the upstream wrangler crash
         if: failure()
-        run: |
-          mkdir -p wrangler-logs
-          cp -r "$HOME/.config/.wrangler/logs/." wrangler-logs/ 2>/dev/null || echo "no wrangler logs written"
-          ls -la wrangler-logs/
-
-      # workers-sdk#15317: wrangler's ProxyController treats a dropped
-      # connection to the runtime as fatal and kills the dev server, and
-      # prints it with no message because castErrorCause builds `new Error()`
-      # from the plain object ProxyWorker posts. The failure is wrangler's,
-      # not the suite's, and reporters have ruled out the mitigations that
-      # would otherwise be ours to make: halving Playwright workers, running
-      # a single dev server, and upgrading all leave it in place, and it
-      # reproduces with one sequential request and no browser at all.
-      #
-      # All four strings below name wrangler's own proxy plumbing, so none
-      # can appear when the Worker or a test is what broke. Requiring every
-      # one of them is what stops a real failure that happens to share the
-      # surface symptom from claiming a free retry.
-      - name: Detect the upstream wrangler crash
         id: wrangler-crash
-        if: failure()
-        run: |
-          if grep -qs 'Network connection lost' wrangler-logs/*.log \
-            && grep -qs 'castErrorCause' wrangler-logs/*.log \
-            && grep -qs 'ProxyController' wrangler-logs/*.log \
-            && grep -qs 'handleLoopback' wrangler-logs/*.log; then
-            echo "upstream=true" >> "$GITHUB_OUTPUT"
-            echo "matched the workers-sdk#15317 signature — a retry is warranted"
-          else
-            echo "upstream=false" >> "$GITHUB_OUTPUT"
-            echo "no upstream signature — reporting this as a real failure"
-          fi
+        uses: ./.github/actions/wrangler-crash-probe
 
       # `.context/test-results/`, not `test-results/`: that is where
       # playwright.config.ts points `outputDir`, and the traces, screenshots,
@@ -275,33 +240,50 @@ jobs:
   # runner fails the run instead of looping. A rerun replays the existing
   # run rather than creating a new one, so GITHUB_TOKEN drives it without
   # tripping the recursion block that stops tokens from starting workflows.
-  e2e-retry:
-    name: e2e · retry once on the upstream wrangler crash
-    needs: e2e
-    if: failure() && needs.e2e.outputs.upstream_crash == 'true' && github.run_attempt == 1
+  wrangler-crash-retry:
+    name: retry once on the upstream wrangler crash
+    needs: [e2e, lhci]
+    # `failure()` alone would fire for any failure in either job; the output
+    # gates narrow it to the one crash a retry can do anything about. A job
+    # the preflight gate skipped reports an empty output and never matches.
+    if: >-
+      failure() && github.run_attempt == 1
+      && (needs.e2e.outputs.upstream_crash == 'true' || needs.lhci.outputs.upstream_crash == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: write
 
     steps:
-      - name: Re-run the e2e job on a fresh runner
+      - name: Re-run the affected jobs on fresh runners
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          E2E_CRASHED: ${{ needs.e2e.outputs.upstream_crash }}
+          LHCI_CRASHED: ${{ needs.lhci.outputs.upstream_crash }}
         run: |
           set -euo pipefail
-          job_id=$(gh api \
+
+          targets=()
+          [ "$E2E_CRASHED" = "true" ] && targets+=("e2e · playwright")
+          [ "$LHCI_CRASHED" = "true" ] && targets+=("lhci · lighthouse")
+
+          # Names are matched against the current attempt's job list rather
+          # than hardcoded ids, which change every run. Read once: a rerun
+          # mutates the list underneath a second call.
+          gh api --paginate \
             "repos/$GH_REPO/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" \
-            --jq '.jobs[] | select(.name | startswith("e2e · playwright")) | .id')
+            --jq '.jobs[] | "\(.id)\t\(.name)"' > jobs.tsv
 
-          if [ -z "$job_id" ]; then
-            echo "could not resolve the e2e job id — leaving the failure as reported" >&2
-            exit 1
-          fi
-
-          echo "workers-sdk#15317 signature matched; re-running job $job_id"
-          gh run rerun --job "$job_id"
+          for prefix in "${targets[@]}"; do
+            job_id=$(awk -F'\t' -v p="$prefix" 'index($2, p) == 1 { print $1; exit }' jobs.tsv)
+            if [ -z "$job_id" ]; then
+              echo "could not resolve a job id for '$prefix' — leaving that failure as reported" >&2
+              exit 1
+            fi
+            echo "workers-sdk#15317 signature matched for '$prefix'; re-running job $job_id"
+            gh run rerun --job "$job_id"
+          done
 
   staging-mcp:
     name: staging-mcp · live MCP, discoverability, and web-audit result page
@@ -411,6 +393,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    outputs:
+      upstream_crash: ${{ steps.wrangler-crash.outputs.upstream }}
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -444,3 +429,20 @@ jobs:
           # CF managed registry, same as the e2e job above.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      # lighthouserc starts its own `wrangler dev`, so this job is open to
+      # the same crash the e2e job is. Without the probe a dead dev server
+      # here reports as a Lighthouse assertion failure with no log to read.
+      - name: Probe for the upstream wrangler crash
+        if: failure()
+        id: wrangler-crash
+        uses: ./.github/actions/wrangler-crash-probe
+
+      - name: Upload wrangler logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lhci-wrangler-logs
+          path: wrangler-logs/
+          if-no-files-found: warn
+          retention-days: 14

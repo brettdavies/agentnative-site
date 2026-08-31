@@ -1,0 +1,62 @@
+name: Wrangler crash probe
+description: >
+  Copy wrangler's debug logs into the workspace and report whether the job died
+  from the upstream ProxyController crash rather than from a real failure.
+
+outputs:
+  upstream:
+    description: >
+      "true" when the collected logs carry the workers-sdk#15317 signature, so
+      the caller may spend its one retry; "false" for every other failure.
+    value: ${{ steps.probe.outputs.upstream }}
+  log-dir:
+    description: Directory the logs were copied into, for an artifact upload.
+    value: wrangler-logs
+
+runs:
+  using: composite
+  steps:
+    # `wrangler dev` can die mid-run reporting a bare `✘ [ERROR]` with no
+    # message, which turns every remaining request into a connection refusal
+    # and leaves nothing to diagnose from: one run lost 425 tests to a single
+    # crash whose cause was only in a log file the job threw away. Wrangler
+    # writes the detail there, so keep it.
+    #
+    # Copied into the workspace first: upload-artifact globs its paths and
+    # expands neither `~` nor `$HOME`, so a tilde path matches nothing and the
+    # artifact still uploads, looking healthy while carrying none of the detail
+    # it exists for.
+    - name: Collect wrangler logs
+      shell: bash
+      run: |
+        mkdir -p wrangler-logs
+        cp -r "$HOME/.config/.wrangler/logs/." wrangler-logs/ 2>/dev/null || echo "no wrangler logs written"
+        ls -la wrangler-logs/
+
+    # workers-sdk#15317: wrangler's ProxyController treats a dropped connection
+    # to the runtime as fatal and kills the dev server, and prints it with no
+    # message because castErrorCause builds `new Error()` from the plain object
+    # ProxyWorker posts. The failure is wrangler's, not ours, and reporters
+    # have ruled out the mitigations that would otherwise be ours to make:
+    # halving Playwright workers, running a single dev server, and upgrading
+    # all leave it in place, and it reproduces with one sequential request and
+    # no browser at all.
+    #
+    # All four strings name wrangler's own proxy plumbing, so none can appear
+    # when the Worker or a test is what broke. Requiring every one of them is
+    # what stops a real failure that happens to share the surface symptom from
+    # claiming a free retry.
+    - name: Detect the upstream wrangler crash
+      id: probe
+      shell: bash
+      run: |
+        if grep -qs 'Network connection lost' wrangler-logs/*.log \
+          && grep -qs 'castErrorCause' wrangler-logs/*.log \
+          && grep -qs 'ProxyController' wrangler-logs/*.log \
+          && grep -qs 'handleLoopback' wrangler-logs/*.log; then
+          echo "upstream=true" >> "$GITHUB_OUTPUT"
+          echo "matched the workers-sdk#15317 signature — a retry is warranted"
+        else
+          echo "upstream=false" >> "$GITHUB_OUTPUT"
+          echo "no upstream signature — reporting this as a real failure"
+        fi
