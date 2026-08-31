@@ -136,6 +136,30 @@ export default defineConfig({
       // 32 probes + discovery + a DNS fan-out against a live target.
       timeout: 90_000,
     },
+    {
+      name: 'web-audit-webkit',
+      // The same spec under WebKit. A Playwright project is one browser
+      // against one spec set, so engine coverage is a sibling project
+      // rather than an option on the one above.
+      //
+      // The result page is server-rendered, so what this catches is
+      // rendering and client-side divergence Chromium cannot show: CSS the
+      // page leans on (oklch colours, `<details>` styling) and the WebMCP
+      // client's feature probe, which reads `document.modelContext` before
+      // `navigator.modelContext` and must no-op cleanly where neither
+      // exists. It is Playwright's WebKit, not Apple's Safari: the same
+      // core engine with a different graphics and font stack, so it proves
+      // engine behaviour rather than iOS fidelity.
+      use: { ...devices['Desktop Safari'] },
+      testMatch: /web-audit\.e2e\.ts/,
+      // Only the `@render` tests. The rest of this spec drives metered
+      // fresh audits or asserts JSON over `request`, which does not touch a
+      // browser engine at all: running those twice would spend the audit
+      // budget a second time and race the first project for it, without
+      // telling us anything about WebKit.
+      grep: /@render/,
+      timeout: 90_000,
+    },
   ],
   // Skipped entirely for remote-targeting runs (ANC_STAGING_BASE_URL set): those
   // hit a deployed Worker and must not drag in a Docker-backed local boot.

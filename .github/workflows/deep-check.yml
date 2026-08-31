@@ -199,6 +199,22 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
         run: bun run test:e2e
 
+      # `wrangler dev` can die mid-run reporting a bare `✘ [ERROR]` with no
+      # message, which turns every remaining test into a connection-refused
+      # failure and leaves nothing to diagnose from: one run lost 425 tests
+      # to a single crash whose cause was only in a log file the job threw
+      # away. Wrangler writes the detail there, so keep it.
+      # Copied into the workspace first: upload-artifact globs its paths and
+      # expands neither `~` nor `$HOME`, so a tilde path matches nothing and
+      # the artifact still uploads, looking healthy while carrying none of
+      # the detail it exists for.
+      - name: Collect wrangler logs on failure
+        if: failure()
+        run: |
+          mkdir -p wrangler-logs
+          cp -r "$HOME/.config/.wrangler/logs/." wrangler-logs/ 2>/dev/null || echo "no wrangler logs written"
+          ls -la wrangler-logs/
+
       - name: Upload Playwright artifacts on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -207,10 +223,11 @@ jobs:
           path: |
             playwright-report/
             test-results/
+            wrangler-logs/
           retention-days: 14
 
   staging-mcp:
-    name: staging-mcp · live MCP + discoverability
+    name: staging-mcp · live MCP, discoverability, and web-audit result page
     needs: preflight
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
@@ -218,13 +235,22 @@ jobs:
     environment: staging
 
     steps:
-      # Pinned to `dev`, not `inputs.ref` or the default branch: staging
-      # deploys from `dev`, so any other ref would assert specs against a
-      # deployment they do not describe. The sibling jobs boot their own
-      # local Worker and keep the default checkout.
+      # Defaults to `dev`, not the default branch: staging deploys from
+      # `dev`, so a scheduled run on any other ref would assert specs
+      # against a deployment they do not describe. The sibling jobs boot
+      # their own local Worker and keep the default checkout.
+      #
+      # An explicit dispatch ref overrides it, which is how a change to
+      # these specs or to the Playwright projects gets verified before it
+      # merges: without the override the job would run the dispatched
+      # workflow file against `dev`'s config and fail on projects that do
+      # not exist there yet. The override is for test-side changes. A
+      # branch that changes Worker behaviour still needs deploying to
+      # staging first, because the specs assert against the deployment,
+      # not against the checkout.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: dev
+          ref: ${{ inputs.ref || 'dev' }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -241,25 +267,26 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # The staging-mcp project is Desktop Chrome only, so this installs
-      # chromium alone. The cache key carries a `-chromium` segment so it
-      # cannot collide with the e2e job's chromium+webkit entry. Sharing
-      # one key would let a chromium-only save satisfy that job's cache
-      # hit and leave it without webkit.
+      # The key names the browser set, not just the lockfile, because the
+      # install step below is skipped on a hit. A key that outlives a change
+      # to that set restores a cache missing the new browser and the run
+      # fails at launch, which is what happened when webkit was added while
+      # the key still said `-chromium`. Renaming the segment busts it once.
+      # It also keeps this job's entry from colliding with the e2e job's.
       - name: Cache Playwright browsers
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          key: playwright-chromium-webkit-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
-      - name: Install Playwright chromium (cache miss)
+      - name: Install Playwright browsers (cache miss)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: bun x playwright install --with-deps chromium
+        run: bun x playwright install --with-deps chromium webkit
 
       - name: Install browser system deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: bun x playwright install-deps chromium
+        run: bun x playwright install-deps chromium webkit
 
       # No `bun run build` step: ANC_STAGING_BASE_URL makes
       # playwright.config.ts skip the local wrangler-dev webServer, and
@@ -275,6 +302,19 @@ jobs:
           ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: bun x playwright test --project=staging-mcp
+
+      # The result-page suite reaches staging the same way: the spec pins its
+      # own baseURL and Access headers, so it needs this step's env and not a
+      # project of its own. It runs here rather than in the `e2e` job because
+      # that job deliberately leaves ANC_STAGING_BASE_URL unset, which makes
+      # the spec skip its whole body. Both engines run: see web-audit-webkit
+      # in playwright.config.ts for what WebKit adds over Chromium.
+      - name: Web-audit result page e2e (live staging, chromium + webkit)
+        env:
+          ANC_STAGING_BASE_URL: https://agentnative-site-staging.brettdavies.workers.dev
+          ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: bun x playwright test --project=web-audit --project=web-audit-webkit
 
       - name: Upload Playwright artifacts on failure
         if: failure()

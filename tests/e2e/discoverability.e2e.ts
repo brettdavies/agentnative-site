@@ -106,7 +106,9 @@ test.describe('staging /.well-known/ai.txt', () => {
     const res = await request.get(`${STAGING_BASE}/.well-known/ai.txt`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     const text = await res.text();
-    expect(text).toContain('Programmatic-API: https://anc.dev/mcp');
+    // Navigational: the endpoint declaration names the deployment serving
+    // this document, so on staging it is the staging host.
+    expect(text).toContain(`Programmatic-API: ${STAGING_BASE}/mcp`);
     expect(text).toContain('Contact: mailto:97-boss-beetle@icloud.com');
     expect(text).toContain('Allow-AI-Training: yes');
     expect(text).toContain('Allow-Inference: yes');
@@ -124,9 +126,11 @@ test.describe('staging /llms.txt', () => {
     const princIdx = text.indexOf('## Principles');
     expect(progIdx).toBeGreaterThan(0);
     expect(princIdx).toBeGreaterThan(progIdx);
-    expect(text).toContain('https://anc.dev/mcp');
-    expect(text).toContain('https://anc.dev/.well-known/mcp/server-card.json');
-    expect(text).toContain('https://anc.dev/mcp-skill.md');
+    // Navigational links follow the deployment, so a staging reader stays
+    // on staging rather than being sent to production mid-corpus.
+    expect(text).toContain(`${STAGING_BASE}/mcp`);
+    expect(text).toContain(`${STAGING_BASE}/.well-known/mcp/server-card.json`);
+    expect(text).toContain(`${STAGING_BASE}/mcp-skill.md`);
   });
 });
 
@@ -202,7 +206,7 @@ test.describe('staging agent-readiness well-known surfaces', () => {
     expect(res.status()).toBe(200);
     const body = (await res.json()) as { skills: Array<{ url: string; digest: string }> };
     expect(body.skills.length).toBeGreaterThanOrEqual(1);
-    expect(body.skills[0].url).toBe('https://anc.dev/mcp-skill.md');
+    expect(body.skills[0].url).toBe(`${STAGING_BASE}/mcp-skill.md`);
     expect(body.skills[0].digest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
