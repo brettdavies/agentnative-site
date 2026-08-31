@@ -13,6 +13,7 @@
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
+import { type WebAuditFreshness, webAuditFreshness } from './cache';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
 import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
 import type { NaReason, ScorecardStatus } from './scorecard';
@@ -22,6 +23,7 @@ type WebScorecardRow = {
   label: string;
   category?: string;
   keyword?: string;
+  tier?: string;
   status: ScorecardStatus;
   na_reason?: NaReason;
   unprobed?: true;
@@ -48,6 +50,16 @@ export interface WebSummaryInput {
   remediation?: WebRemediationCatalog;
   /** Origin for skill links in prompts; defaults to the canonical site. */
   origin?: string;
+  /**
+   * Response-envelope freshness for this render. Omitted degrades to the
+   * unknown-instant state rather than synthesizing a scoring time.
+   */
+  freshness?: WebAuditFreshness;
+  /**
+   * Clock for the refresh-eligibility decision. Injectable so the three
+   * R23 states are reproducible; the emitted instants never depend on it.
+   */
+  now?: number;
 }
 
 // Locked label strings for the two scores (U14 open question): the
@@ -112,6 +124,94 @@ function scoresOf(scorecard: WebScorecardShape): { relative: number; global: num
   };
 }
 
+// The seven schema 0.4 statuses in documented order. STATUS_LABELS is the
+// one place they are enumerated, so a status added there reaches the
+// machine context without a second list to keep in sync.
+const STATUS_ORDER = Object.keys(STATUS_LABELS) as ScorecardStatus[];
+
+function statusCounts(scorecard: WebScorecardShape): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const status of STATUS_ORDER) counts[status] = 0;
+  for (const row of scorecard.results ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
+  return counts;
+}
+
+/**
+ * One hidden page-level record of what the page renders: both scores, the
+ * complete per-status counts, and the freshness envelope. The counts are
+ * taken from the same rows the page emits, so a machine summary and the
+ * visible page cannot disagree. A null instant omits its attribute rather
+ * than emitting an empty string, so a reader gets null instead of "".
+ */
+function auditContextEl(scorecard: WebScorecardShape, freshness: WebAuditFreshness): string {
+  const { relative, global: globalScore } = scoresOf(scorecard);
+  const counts = statusCounts(scorecard);
+  const attrs = [
+    'data-web-audit-context',
+    `data-site-score="${relative}"`,
+    `data-global-score="${globalScore}"`,
+    `data-cached="${freshness.cached ? 'true' : 'false'}"`,
+  ];
+  if (freshness.scored_at) attrs.push(`data-scored-at="${escHtml(freshness.scored_at)}"`);
+  if (freshness.refresh_after) attrs.push(`data-refresh-after="${escHtml(freshness.refresh_after)}"`);
+  for (const status of STATUS_ORDER) attrs.push(`data-count-${status}="${counts[status]}"`);
+  return `<div ${attrs.join(' ')} hidden></div>`;
+}
+
+// Refresh eligibility is the moment the entry leaves the cache-reuse
+// window, never a promise that a fresh audit will run: the kill switch,
+// the limiters, and Turnstile still apply, so the copy says so.
+const FRESHNESS_UNKNOWN = 'Scoring time unavailable; a fresh audit may still be subject to service limits.';
+const FRESHNESS_QUALIFIER = 'This is cache-reuse eligibility; a fresh audit is still subject to service limits.';
+
+type FreshnessState = { state: 'unknown' } | { state: 'future' | 'expired'; scoredAt: string; refreshAfter: string };
+
+function freshnessState(freshness: WebAuditFreshness, now: number): FreshnessState {
+  if (!freshness.scored_at || !freshness.refresh_after) return { state: 'unknown' };
+  const at = Date.parse(freshness.refresh_after);
+  if (Number.isNaN(at)) return { state: 'unknown' };
+  return {
+    state: at > now ? 'future' : 'expired',
+    scoredAt: freshness.scored_at,
+    refreshAfter: freshness.refresh_after,
+  };
+}
+
+/** Minute-precision UTC, so the visible text reads aloud while `datetime` stays exact. */
+function humanInstant(iso: string): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return iso;
+  return `${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+function timeEl(iso: string): string {
+  return `<time datetime="${escHtml(iso)}">${escHtml(humanInstant(iso))}</time>`;
+}
+
+function freshnessHtml(state: FreshnessState): string {
+  if (state.state === 'unknown') return escHtml(FRESHNESS_UNKNOWN);
+  const refresh =
+    state.state === 'future' ? `Refresh available after ${timeEl(state.refreshAfter)}.` : 'Refresh available now.';
+  return `Scored ${timeEl(state.scoredAt)}. ${refresh} ${escHtml(FRESHNESS_QUALIFIER)}`;
+}
+
+function freshnessMarkdown(state: FreshnessState): string {
+  if (state.state === 'unknown') return FRESHNESS_UNKNOWN;
+  const refresh =
+    state.state === 'future' ? `Refresh available after ${state.refreshAfter}.` : 'Refresh available now.';
+  return `Scored ${state.scoredAt}. ${refresh} ${FRESHNESS_QUALIFIER}`;
+}
+
+/** A render without freshness reports an unknown instant, never a fabricated one. */
+function resolveFreshness(input: WebSummaryInput): WebAuditFreshness {
+  return input.freshness ?? webAuditFreshness(true, null);
+}
+
+/** The eligibility decision both renderers phrase, resolved against one clock. */
+function freshnessViewOf(input: WebSummaryInput): FreshnessState {
+  return freshnessState(resolveFreshness(input), input.now ?? Date.now());
+}
+
 function rowsByCategory(scorecard: WebScorecardShape): Map<string, WebScorecardRow[]> {
   const byCategory = new Map<string, WebScorecardRow[]>();
   for (const row of scorecard.results ?? []) {
@@ -132,6 +232,7 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
   const name = input.name ?? sc.tool?.name ?? input.domain;
   const targetUrl = sc.tool?.url ?? input.targetUrl;
   const byCategory = rowsByCategory(sc);
+  const freshness = resolveFreshness(input);
 
   // Status-count chips for the hero.
   const counts: Record<string, number> = {};
@@ -154,12 +255,14 @@ export function buildWebSummaryBody(input: WebSummaryInput): string {
     <h1>${escHtml(name)}</h1>
     <p class="live-score-summary__meta">Website <a href="${escHtml(targetUrl)}">${escHtml(targetUrl)}</a> · agent-readiness audit</p>
 ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''}    <p class="scorecard-hero__note">${escHtml(RELATIVE_SUBLABEL)}; global measures it against a maximally agent-ready site.</p>
+    <p class="scorecard-hero__note" data-web-audit-freshness>${freshnessHtml(freshnessViewOf(input))}</p>
   </div>
   <div class="scorecard-hero__scores">
     <div class="scorecell ${bandOf(relative)}"><span class="bigscore__n">${relative}</span><span class="bigscore__l">${escHtml(RELATIVE_LABEL)}</span>${renderMeter(relative, { num: null })}</div>
     <div class="scorecell ${bandOf(globalScore)}"><span class="bigscore__n">${globalScore}</span><span class="bigscore__l">global-ready</span>${renderMeter(globalScore, { num: null })}</div>
   </div>
 </header>
+${auditContextEl(sc, freshness)}
 <section class="scorecard-audits" aria-label="Checks by category">
 `;
 
@@ -221,7 +324,13 @@ function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origi
     body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
   }
 
-  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''} data-id="${escHtml(row.id)}">
+  // The row root is the canonical record (KTD2): keyword, tier, status,
+  // and unprobed ride here on every row, including the ones that carry no
+  // prompt, so a reader never has to infer priority from a conditional
+  // child that only actionable rows emit.
+  const rootMeta = ` data-keyword="${escHtml(row.keyword ?? '')}" data-tier="${escHtml(row.tier ?? '')}" data-status="${escHtml(row.status)}" data-unprobed="${row.unprobed === true ? 'true' : 'false'}"`;
+
+  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''} data-id="${escHtml(row.id)}"${rootMeta}>
       <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;
@@ -257,6 +366,8 @@ export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
     '',
     `**Score:** ${relative}% (${RELATIVE_SUBLABEL})`,
     `**Global:** ${globalScore}% ${GLOBAL_LABEL}`,
+    '',
+    freshnessMarkdown(freshnessViewOf(input)),
     '',
   ];
 

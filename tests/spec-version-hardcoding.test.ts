@@ -84,6 +84,7 @@ describe('spec-version-hardcoding red-team', () => {
         if (isCommentLine(line)) continue;
         // Skip lines that already use a template literal or keyFor —
         // those are the canonical patterns.
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the needle this scanner searches source for, not an unrendered template
         if (line.includes('${SPEC_VERSION}') || line.includes('keyFor(')) continue;
         offenders.push({ file: relative(REPO_ROOT, file), line: i + 1, text: line.trim() });
       }
@@ -206,7 +207,9 @@ describe('spec-version-hardcoding red-team', () => {
     // in the main test, but also exercised here so a regression that
     // drops the skip surfaces in self-test before it surfaces by
     // letting real offenders through.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a quoted fixture of the compliant source line
     const canonical = 'const KEY = `scores/foo/${SPEC_VERSION}.json`;';
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the needle under test, mirroring the scanner above
     const isAllowed = canonical.includes('${SPEC_VERSION}') || canonical.includes('keyFor(');
     expect(isAllowed).toBe(true);
   });
@@ -242,6 +245,7 @@ describe('spec-version-hardcoding red-team', () => {
   });
 
   test('self-test: anc-stdout regex does NOT flag a template literal', () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a quoted fixture of the compliant source line
     const canonical = 'return { stdout: `anc ${ANC_VERSION}\\n` };';
     const stdoutRe = new RegExp(`['"]anc\\s+${escapeRegex(ANC_VERSION)}\\\\n['"]`);
     expect(stdoutRe.test(canonical)).toBe(false);

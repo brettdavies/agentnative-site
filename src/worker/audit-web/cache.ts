@@ -51,8 +51,10 @@ const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
 
 // Staleness threshold for the on-demand paths: a hit younger than this
 // serves cached; an older hit falls through to a fresh audit (still
-// behind the kill-switch/limiter/Turnstile gates).
-export const WEB_AUDIT_STALE_AFTER_MS = 5 * 60_000;
+// behind the kill-switch/limiter/Turnstile gates). Also the interval
+// `refresh_after` adds to a scoring instant, so retuning it here moves
+// every surface's advertised cache-expiry eligibility with it.
+export const WEB_AUDIT_STALE_AFTER_MS = 1 * 60_000;
 
 // Logical display expiry for user-submitted rows on the /web all view:
 // an unseeded entry older than this drops off the board even though the
@@ -132,6 +134,35 @@ export function isStale(scoredAt: string | undefined, thresholdMs: number, now: 
   return now - t > thresholdMs;
 }
 
+/**
+ * Response-envelope freshness for one per-target audit result. Lives
+ * outside the scorecard so schema 0.4 stays untouched: `cached` is
+ * response provenance (an existing-cache read or a listing-only patch,
+ * versus a result the current run produced), and the two instants are the
+ * authoritative scoring time and the earliest moment the entry leaves the
+ * cache-reuse window.
+ */
+export type WebAuditFreshness = {
+  cached: boolean;
+  scored_at: string | null;
+  refresh_after: string | null;
+};
+
+/**
+ * Build the freshness envelope from one scoring instant. `refresh_after`
+ * is always derived here, never stored, so a stored stamp and a served
+ * refresh time cannot drift; it means cache-expiry eligibility only, not
+ * that a fresh audit will be available (the kill switch, limiters, and
+ * Turnstile still apply). A missing or unparseable legacy stamp reports
+ * both instants as null rather than synthesizing a recent scoring time.
+ */
+export function webAuditFreshness(cached: boolean, scoredAt: string | null | undefined): WebAuditFreshness {
+  if (!scoredAt) return { cached, scored_at: null, refresh_after: null };
+  const t = Date.parse(scoredAt);
+  if (Number.isNaN(t)) return { cached, scored_at: null, refresh_after: null };
+  return { cached, scored_at: scoredAt, refresh_after: new Date(t + WEB_AUDIT_STALE_AFTER_MS).toISOString() };
+}
+
 export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
   let obj: R2ObjectBody | null;
   try {
@@ -163,8 +194,19 @@ export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit
  * Write a complete web scorecard. Refuses a half-state (empty
  * spec_version or a scorecard without a target_url). Best-effort: a write
  * failure logs but never throws to the caller.
+ *
+ * `scoredAt` lets the fresh-audit path capture one scoring instant and
+ * spend it on both persistence and its own response envelope, so a
+ * terminal result and the cache read that follows it can never report
+ * two different clocks for the same audit.
  */
-export async function put(env: WebCacheEnv, url: string, scorecard: unknown, specVersion: string): Promise<boolean> {
+export async function put(
+  env: WebCacheEnv,
+  url: string,
+  scorecard: unknown,
+  specVersion: string,
+  scoredAt: string = new Date().toISOString(),
+): Promise<boolean> {
   if (!specVersion) throw new Error('web-cache.put: specVersion required (refusal-to-cache-half-state)');
   const targetUrl = (scorecard as { target_url?: unknown } | null)?.target_url;
   if (typeof targetUrl !== 'string' || targetUrl.length === 0) {
@@ -175,7 +217,7 @@ export async function put(env: WebCacheEnv, url: string, scorecard: unknown, spe
     spec_version: specVersion,
     target_url: normalizeTargetUrl(url),
     scorecard,
-    scored_at: new Date().toISOString(),
+    scored_at: scoredAt,
   };
   return writeAuditObject(env, await keyFor(url, specVersion), payload, 'web-cache.put');
 }

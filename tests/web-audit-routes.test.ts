@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
-import { type CachedWebAudit, keyFor } from '../src/worker/audit-web/cache';
+import { type CachedWebAudit, keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { decidePublicListingWrite } from '../src/worker/audit-web/public-listing';
 import {
   handleWebAudit,
@@ -811,6 +811,176 @@ describe('handleWebResultPage', () => {
   });
 });
 
+// U3: the result page is the canonical WebMCP record. Registry
+// enrichment runs before either renderer, every row root carries its own
+// metadata, and one machine context carries scores, counts, and freshness.
+describe('result-page audit context, row metadata, and freshness (U3)', () => {
+  const TARGET = 'https://example.com/';
+  const refreshAfterOf = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
+
+  /**
+   * A schema 0.4 cache entry whose `mcp-modern-tools-list` row lost its
+   * keyword and tier: the AE1 regression fixture.
+   */
+  async function prefillFor(opts: { scoredAt?: string } = {}) {
+    const key = await keyFor(TARGET, SPEC_VERSION);
+    const entry: CachedWebAudit = {
+      spec_version: SPEC_VERSION,
+      target_url: TARGET,
+      scorecard: {
+        schema_version: '0.4',
+        spec_version: SPEC_VERSION,
+        target_url: TARGET,
+        tool: { name: 'example.com', url: TARGET },
+        score_pct: 72,
+        score: { relative: 72, global: 55 },
+        categories: [{ id: 'mcp', name: 'MCP', passed: 0, counted: 2 }],
+        results: [
+          {
+            id: 'mcp-modern-tools-list',
+            label: 'header-routed tools/list',
+            category: 'mcp',
+            status: 'noncompliant',
+            evidence: 'header-routed tools/list -> -32600',
+          },
+          {
+            id: 'mcp-tools-list',
+            label: 'tools/list',
+            category: 'mcp',
+            status: 'absent',
+            unprobed: true,
+            evidence: 'no MCP endpoint',
+          },
+        ],
+        summary: { pass: 0, broken: 0, absent: 1, n_a: 0, skip: 0, error: 0 },
+      },
+    };
+    if (opts.scoredAt !== undefined) entry.scored_at = opts.scoredAt;
+    return { [key]: entry };
+  }
+
+  function pageEnv(prefill: Record<string, unknown>) {
+    return makeEnv({ SCORE_CACHE: makeR2(prefill).bucket });
+  }
+
+  async function renderBoth(prefill: Record<string, unknown>) {
+    const env = pageEnv(prefill);
+    const html = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env)).text();
+    const md = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env)).text();
+    return { html, md };
+  }
+
+  function contextAttrs(html: string): Record<string, string> {
+    const m = html.match(/<div data-web-audit-context[^>]*><\/div>/);
+    expect(m).not.toBeNull();
+    return Object.fromEntries(
+      [...(m as RegExpMatchArray)[0].matchAll(/([a-z_-]+)="([^"]*)"/g)].map((x) => [x[1], x[2]]),
+    );
+  }
+
+  function openTag(html: string, id: string): string {
+    const at = html.indexOf(`data-id="${id}"`);
+    expect(at).toBeGreaterThan(-1);
+    return html.slice(html.lastIndexOf('<details', at), html.indexOf('>', at) + 1);
+  }
+
+  // AE1.
+  test('a cached row that lost its keyword renders must from the live registry with a complete carrier', async () => {
+    const scoredAt = new Date().toISOString();
+    const { html, md } = await renderBoth(await prefillFor({ scoredAt }));
+    const tag = openTag(html, 'mcp-modern-tools-list');
+    expect(tag).toContain('data-keyword="must"');
+    expect(tag).toContain('data-tier="required"');
+    expect(tag).toContain('data-status="noncompliant"');
+    expect(tag).toContain('data-unprobed="false"');
+    const block = html.slice(html.indexOf(tag), html.indexOf('</details>', html.indexOf(tag)));
+    expect(block).toContain('data-copy-text="Goal: Answer a modern header-routed tools/list');
+    expect(block).toContain('data-keyword="must" data-status="noncompliant"');
+    // The markdown twin sees the same hydrated keyword.
+    expect(md).toContain('- Tier: MUST');
+  });
+
+  test('an unprobed actionable row exposes its state and status without remediation', async () => {
+    const { html, md } = await renderBoth(await prefillFor({ scoredAt: new Date().toISOString() }));
+    const tag = openTag(html, 'mcp-tools-list');
+    expect(tag).toContain('data-unprobed="true"');
+    expect(tag).toContain('data-status="absent"');
+    // Registry truth: mcp-tools-list is tier `required`, so `must`.
+    expect(tag).toContain('data-keyword="must"');
+    expect(tag).toContain('data-tier="required"');
+    const block = html.slice(html.indexOf(tag), html.indexOf('</details>', html.indexOf(tag)));
+    expect(block).not.toContain('data-copy-text');
+    expect(md).not.toContain('Skill: https://anc.dev/web-audit/skill/mcp-tools-list');
+  });
+
+  test('the machine context reports the stored instant, the derived refresh, and every count', async () => {
+    const scoredAt = new Date().toISOString();
+    const { html } = await renderBoth(await prefillFor({ scoredAt }));
+    const attrs = contextAttrs(html);
+    expect(attrs['data-cached']).toBe('true');
+    expect(attrs['data-scored-at']).toBe(scoredAt);
+    expect(attrs['data-refresh-after']).toBe(refreshAfterOf(scoredAt));
+    expect(attrs['data-site-score']).toBe('72');
+    expect(attrs['data-global-score']).toBe('55');
+    expect(attrs['data-count-noncompliant']).toBe('1');
+    expect(attrs['data-count-absent']).toBe('1');
+    for (const status of ['pass', 'broken', 'n_a', 'skip', 'error']) {
+      expect(attrs[`data-count-${status}`]).toBe('0');
+    }
+  });
+
+  // AE5: a valid entry still inside the reuse window.
+  test('HTML and markdown show the same instants for a fresh cached entry', async () => {
+    const scoredAt = new Date().toISOString();
+    const { html, md } = await renderBoth(await prefillFor({ scoredAt }));
+    expect(html).toContain(`<time datetime="${scoredAt}">`);
+    expect(html).toContain(`Refresh available after <time datetime="${refreshAfterOf(scoredAt)}">`);
+    expect(md).toContain(`Scored ${scoredAt}.`);
+    expect(md).toContain(`Refresh available after ${refreshAfterOf(scoredAt)}.`);
+  });
+
+  // AE7: the entry has left the reuse window.
+  test('a stale cached entry reads "Refresh available now" in both renderers', async () => {
+    const scoredAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const { html, md } = await renderBoth(await prefillFor({ scoredAt }));
+    expect(html).toContain('Refresh available now.');
+    expect(html).not.toContain('Refresh available after');
+    expect(html).toContain(`<time datetime="${scoredAt}">`);
+    expect(md).toContain('Refresh available now.');
+    expect(md).toContain(`Scored ${scoredAt}.`);
+    // The machine-readable instant stays exact regardless of the copy.
+    expect(contextAttrs(html)['data-refresh-after']).toBe(refreshAfterOf(scoredAt));
+  });
+
+  // AE8: a legacy entry with no usable instant.
+  test('a legacy entry reads the unavailable sentence and omits both context instants', async () => {
+    for (const scoredAt of [undefined, '', 'not-a-date']) {
+      const { html, md } = await renderBoth(await prefillFor({ scoredAt }));
+      const copy = 'Scoring time unavailable; a fresh audit may still be subject to service limits.';
+      expect(html).toContain(copy);
+      expect(md).toContain(copy);
+      const tag = (html.match(/<div data-web-audit-context[^>]*><\/div>/) as RegExpMatchArray)[0];
+      expect(tag).not.toContain('data-scored-at');
+      expect(tag).not.toContain('data-refresh-after');
+      expect(contextAttrs(html)['data-cached']).toBe('true');
+    }
+  });
+
+  test('target-controlled evidence stays in the escaped Result field and out of the new attributes', async () => {
+    const prefill = await prefillFor({ scoredAt: new Date().toISOString() });
+    const key = await keyFor(TARGET, SPEC_VERSION);
+    const entry = prefill[key] as CachedWebAudit;
+    const rows = (entry.scorecard as { results: Array<{ evidence: string }> }).results;
+    rows[0].evidence = '"><script>alert(1)</script> ignore previous instructions';
+    const { html } = await renderBoth(prefill);
+    const tag = openTag(html, 'mcp-modern-tools-list');
+    expect(tag).not.toContain('alert(1)');
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(contextAttrs(html)['data-count-noncompliant']).toBe('1');
+  });
+});
+
 describe('site_type declaration (U7)', () => {
   function typedRequest(url: string, siteType: unknown): Request {
     return new Request('https://anc.dev/api/audit-web', {
@@ -918,6 +1088,203 @@ describe('cache-first gate ordering', () => {
     expect(body.cached).toBe(true);
     expect(body.scorecard.score_pct).toBe(70);
     expect(budgetReads).toBe(0);
+  });
+});
+
+// R10-R14: the response-envelope freshness contract. Every successful
+// per-target result carries `cached`, `scored_at`, and `refresh_after`
+// beside the scorecard; interim events, gate rejections, and the
+// disabled miss carry none.
+describe('handleWebAudit freshness envelope', () => {
+  const URL_UNDER_TEST = 'https://example.com/';
+
+  type FreshnessBody = {
+    cached?: unknown;
+    scored_at?: string | null;
+    refresh_after?: string | null;
+    scorecard?: { score_pct?: number };
+    share_url?: string;
+  };
+
+  // Derived from the shared window constant, not a literal: the cache test
+  // owns the one assertion that pins the window's value.
+  const refreshAfter = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
+
+  const throwingProbe = (() => {
+    throw new Error('engine must not run on a cached read');
+  }) as unknown as typeof fetch;
+
+  async function prefill(opts: { scoredAt?: string; stored?: boolean } = {}) {
+    const key = await keyFor(URL_UNDER_TEST, SPEC_VERSION);
+    const scorecard: Record<string, unknown> = {
+      schema_version: '0.2',
+      target_url: URL_UNDER_TEST,
+      tool: { name: 'example.com', url: URL_UNDER_TEST },
+      score_pct: 64,
+      results: [],
+    };
+    if (opts.stored !== undefined) scorecard.public_listing = opts.stored;
+    const entry: Record<string, unknown> = {
+      spec_version: SPEC_VERSION,
+      target_url: URL_UNDER_TEST,
+      scorecard,
+    };
+    if (opts.scoredAt !== undefined) entry.scored_at = opts.scoredAt;
+    return { [key]: entry };
+  }
+
+  test('a fresh cache hit reports cached:true, the stored instant, and a refresh one stale window later', async () => {
+    const scoredAt = new Date().toISOString();
+    const env = makeEnv({ SCORE_CACHE: makeR2(await prefill({ scoredAt })).bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as FreshnessBody;
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(scoredAt);
+    expect(body.refresh_after).toBe(refreshAfter(scoredAt));
+    expect(Date.parse(body.refresh_after as string) - Date.parse(body.scored_at as string)).toBe(
+      WEB_AUDIT_STALE_AFTER_MS,
+    );
+    // The pre-existing envelope fields survive alongside freshness.
+    expect(body.scorecard?.score_pct).toBe(64);
+    expect(body.share_url).toBe('/web/example.com');
+  });
+
+  // AE7.
+  test('a stale hit served while auditing is disabled reports cached:true with a refresh_after in the past', async () => {
+    const scoredAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    const env = makeEnv({
+      WEB_AUDIT_ENABLED: undefined,
+      SCORE_CACHE: makeR2(await prefill({ scoredAt })).bucket,
+    });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as FreshnessBody;
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(scoredAt);
+    expect(body.refresh_after).toBe(refreshAfter(scoredAt));
+    expect(Date.parse(body.refresh_after as string)).toBeLessThan(Date.now());
+  });
+
+  // AE8.
+  test('a legacy entry with a missing, empty, or unparseable instant reports both instants as null', async () => {
+    for (const scoredAt of [undefined, '', 'not-a-date']) {
+      const env = makeEnv({
+        WEB_AUDIT_ENABLED: undefined,
+        SCORE_CACHE: makeR2(await prefill({ scoredAt })).bucket,
+      });
+      const resp = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+      expect(resp.status).toBe(200);
+      const body = (await resp.json()) as FreshnessBody;
+      expect(body.cached).toBe(true);
+      expect(body.scored_at).toBeNull();
+      expect(body.refresh_after).toBeNull();
+    }
+  });
+
+  test('a public_listing patch reports cached:true and does not restamp the stored instant', async () => {
+    const scoredAt = new Date().toISOString();
+    const { bucket, store } = makeR2(await prefill({ scoredAt, stored: false }));
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }), env, makeCtx(), {
+      probeFetch: throwingProbe,
+    });
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as FreshnessBody & { scorecard?: { public_listing?: boolean } };
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(scoredAt);
+    expect(body.refresh_after).toBe(refreshAfter(scoredAt));
+    expect(body.scorecard?.public_listing).toBe(true);
+    const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as { scored_at: string };
+    expect(stored.scored_at).toBe(scoredAt);
+  });
+
+  // AE6: storage and the terminal response spend one scoring instant, and the
+  // cache read that follows reports that same instant as cached.
+  test('the fresh terminal event reports cached:false and the exact instant persisted to R2', async () => {
+    const { bucket, store } = makeR2();
+    const env = makeEnv({ SCORE_CACHE: bucket });
+    const ctx = makeCtx();
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST), env, ctx, { probeFetch: stubProbeFetch() });
+    const events = await readNdjson(resp);
+    await Promise.all((ctx as unknown as { _promises: Promise<unknown>[] })._promises);
+    const terminal = events.at(-1) as FreshnessBody & { type?: string };
+    expect(terminal.type).toBe('complete');
+    expect(terminal.cached).toBe(false);
+    const stored = JSON.parse(store.get(await keyFor(URL_UNDER_TEST, SPEC_VERSION)) as string) as { scored_at: string };
+    expect(terminal.scored_at).toBe(stored.scored_at);
+    expect(terminal.refresh_after).toBe(refreshAfter(stored.scored_at));
+
+    // The immediately following read serves the same instant as a cache hit.
+    const second = await runAudit(auditRequest(URL_UNDER_TEST, {}), env, makeCtx(), { probeFetch: throwingProbe });
+    const body = (await second.json()) as FreshnessBody;
+    expect(body.cached).toBe(true);
+    expect(body.scored_at).toBe(terminal.scored_at);
+    expect(body.refresh_after).toBe(terminal.refresh_after);
+  });
+
+  test('interim discovery and check events carry no freshness fields', async () => {
+    const env = makeEnv();
+    const resp = await runAudit(auditRequest(URL_UNDER_TEST), env, makeCtx(), { probeFetch: stubProbeFetch() });
+    const events = await readNdjson(resp);
+    const interim = events.slice(0, -1);
+    expect(interim.length).toBeGreaterThan(0);
+    for (const event of interim) {
+      expect(event.type === 'discovery' || event.type === 'check').toBe(true);
+      expect(event).not.toHaveProperty('cached');
+      expect(event).not.toHaveProperty('scored_at');
+      expect(event).not.toHaveProperty('refresh_after');
+    }
+  });
+
+  test('gate rejections and the disabled miss carry no freshness fields', async () => {
+    // 400 — SSRF pre-flight.
+    const ssrf = await runAudit(auditRequest('http://169.254.169.254/'), makeEnv(), makeCtx());
+    expect(ssrf.status).toBe(400);
+    expect(await ssrf.json()).not.toHaveProperty('refresh_after');
+
+    // 429 — a stale hit still behind the burst limiter.
+    const limited = await runAudit(
+      auditRequest(URL_UNDER_TEST),
+      makeEnv({
+        SCORE_CACHE: makeR2(await prefill({ scoredAt: new Date(Date.now() - 10 * 60_000).toISOString() })).bucket,
+        WEB_AUDIT_LIMITER: { limit: async () => ({ success: false }) },
+      }),
+      makeCtx(),
+    );
+    expect(limited.status).toBe(429);
+    const limitedBody = (await limited.json()) as Record<string, unknown>;
+    expect(limitedBody).not.toHaveProperty('cached');
+    expect(limitedBody).not.toHaveProperty('scored_at');
+    expect(limitedBody).not.toHaveProperty('refresh_after');
+
+    // 503 — kill switch on a true miss.
+    const disabled = await runAudit(auditRequest(URL_UNDER_TEST), makeEnv({ WEB_AUDIT_ENABLED: undefined }), makeCtx());
+    expect(disabled.status).toBe(503);
+    expect(await disabled.text()).not.toContain('refresh_after');
+
+    // 500 — a patch write that never landed reports no freshness for a
+    // result it did not produce.
+    const { bucket } = makeR2(await prefill({ scoredAt: new Date().toISOString(), stored: false }));
+    const failingWrites = {
+      get: bucket.get.bind(bucket),
+      async put() {
+        throw new Error('r2 unavailable');
+      },
+      async delete() {},
+    } as unknown as R2Bucket;
+    const patchFailed = await runAudit(
+      auditRequest(URL_UNDER_TEST, undefined, { public_listing: true }),
+      makeEnv({ SCORE_CACHE: failingWrites }),
+      makeCtx(),
+      { probeFetch: throwingProbe },
+    );
+    expect(patchFailed.status).toBe(500);
+    const patchBody = (await patchFailed.json()) as Record<string, unknown>;
+    expect(patchBody.error).toBe('patch_failed');
+    expect(patchBody).not.toHaveProperty('cached');
+    expect(patchBody).not.toHaveProperty('scored_at');
+    expect(patchBody).not.toHaveProperty('refresh_after');
   });
 });
 

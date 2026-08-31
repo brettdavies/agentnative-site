@@ -27,6 +27,18 @@ const SPLIT_REGISTRY: DisplayRegistry = {
   ],
 };
 
+// The live registry is the read-time authority for a row's normative
+// keyword and tier as well as its category, so a cached row that predates
+// either field still renders the current obligation.
+const HYDRATING_REGISTRY: DisplayRegistry = {
+  category_order: ['mcp'],
+  categories: { mcp: 'MCP' },
+  checks: [
+    { id: 'mcp-modern-tools-list', category: 'mcp', keyword: 'must', tier: 'required' },
+    { id: 'mcp-tools-list', category: 'mcp', keyword: 'should', tier: 'recommended' },
+  ],
+};
+
 const CATALOG: WebRemediationCatalog = {
   openapi: { title: 'OpenAPI', goal: 'Publish an OpenAPI description', fix: 'Add /openapi.json', resources: [] },
   'json-schemas': { title: 'Schemas', goal: 'Publish JSON Schemas', fix: 'Reference schemas', resources: [] },
@@ -163,6 +175,59 @@ describe('normalizeScorecardCategories', () => {
     expect(normalizeScorecardCategories(minimal, SPLIT_REGISTRY)).toBe(minimal);
   });
 
+  test('a cached row missing keyword and tier receives both from the live registry', () => {
+    const stored = {
+      results: [
+        { id: 'mcp-modern-tools-list', category: 'mcp-api', status: 'noncompliant', evidence: 'legacy tools/list' },
+      ],
+    };
+    const out = normalizeScorecardCategories(stored, HYDRATING_REGISTRY) as {
+      results: Array<{ id: string; category: string; keyword?: string; tier?: string }>;
+    };
+    expect(out.results[0]).toMatchObject({ category: 'mcp', keyword: 'must', tier: 'required' });
+  });
+
+  test('the live registry overrides a stale stored keyword and tier', () => {
+    const stored = {
+      results: [
+        {
+          id: 'mcp-modern-tools-list',
+          category: 'mcp',
+          keyword: 'should',
+          tier: 'recommended',
+          status: 'noncompliant',
+          evidence: 'legacy tools/list',
+        },
+      ],
+    };
+    const out = normalizeScorecardCategories(stored, HYDRATING_REGISTRY) as {
+      results: Array<{ keyword?: string; tier?: string }>;
+    };
+    expect(out.results[0].keyword).toBe('must');
+    expect(out.results[0].tier).toBe('required');
+  });
+
+  test('a row absent from the registry keeps its stored keyword and tier', () => {
+    const stored = {
+      results: [
+        { id: 'retired-check', category: 'legacy', keyword: 'may', tier: 'optional', status: 'pass', evidence: null },
+      ],
+    };
+    const out = normalizeScorecardCategories(stored, HYDRATING_REGISTRY) as {
+      results: Array<{ category: string; keyword?: string; tier?: string }>;
+    };
+    expect(out.results[0]).toMatchObject({ category: 'legacy', keyword: 'may', tier: 'optional' });
+  });
+
+  test('a registry entry without keyword or tier leaves the stored values alone', () => {
+    const stored = oldShapeStored();
+    const out = normalizeScorecardCategories(stored, SPLIT_REGISTRY) as {
+      results: Array<{ id: string; keyword?: string }>;
+    };
+    expect(out.results.find((r) => r.id === 'openapi')?.keyword).toBe('must');
+    expect(out.results.find((r) => r.id === 'json-schemas')?.keyword).toBe('should');
+  });
+
   test('a registry that lacks every row id leaves stored categories intact without throwing', () => {
     const empty: DisplayRegistry = { category_order: [], categories: {}, checks: [] };
     const stored = oldShapeStored();
@@ -197,14 +262,18 @@ describe('attachInlineRemediation', () => {
     expect(byId.get('json-schemas')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/json-schemas');
 
     const broken = byId.get('mcp-tools-list');
-    expect(broken?.result).toContain('Present but broken');
-    expect(broken?.remediation?.prompt).toContain('Issue: no tools array');
+    // The finding reaches both surfaces: the result line reports it, and
+    // the prompt carries it inside the delimited data block (R19).
+    expect(broken?.result).toContain('Present but broken (no tools array)');
+    expect(broken?.remediation?.prompt).toContain('--- begin evidence ---\nno tools array\n--- end evidence ---');
+    // It never appears as instruction prose outside the block.
+    expect(broken?.remediation?.prompt.split('Observed (')[0]).not.toContain('no tools array');
 
     // A noncompliant surface works, and the spec detail it violates is
     // exactly what the fix prompt names, so it must carry one.
     const noncompliant = byId.get('mcp-unknown-method');
-    expect(noncompliant?.result).toContain('Works but does not conform');
-    expect(noncompliant?.remediation?.prompt).toContain('Issue: expected error code -32601, got -32603');
+    expect(noncompliant?.result).toContain('Works but does not conform (expected error code -32601, got -32603)');
+    expect(noncompliant?.remediation?.prompt?.split('Observed (')[0]).not.toContain('-32603');
 
     const na = byId.get('dns-aid');
     expect(na?.result).toContain('Not implemented, optional');
@@ -244,6 +313,6 @@ describe('attachInlineRemediation', () => {
       results: Array<{ remediation?: { skill_url: string; prompt: string } }>;
     };
     expect(out.results[0].remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/no-catalog-entry');
-    expect(out.results[0].remediation?.prompt).toContain('Issue: missing');
+    expect(out.results[0].remediation?.prompt).toContain('--- begin evidence ---\nmissing\n--- end evidence ---');
   });
 });

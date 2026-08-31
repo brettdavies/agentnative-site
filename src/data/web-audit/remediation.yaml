@@ -208,12 +208,12 @@ remediation:
       When the request `Accept` allows neither `application/json` nor `text/event-stream`, refuse
       with `406 Not Acceptable` before any JSON-RPC parsing runs. Those two media types are the
       whole of what the streamable-HTTP transport is defined over, so an `Accept` naming neither
-      cannot be served, and a `200` is the wrong way to say so.
-      The failure this check looks for is a server that ignores `Accept` entirely and returns its
-      one representation under a success status. The caller then has to sniff the body to discover
-      the negotiation never happened. Worse is a `200` that echoes the requested type back in
-      `Content-Type` while carrying a JSON-RPC body: the caller routes the payload on your label
-      and the parse fails somewhere downstream of the call you told it had succeeded.
+      cannot be served.
+      The failure this check looks for is a server that ignores `Accept` and answers with its one
+      representation under a success status, leaving the caller to sniff the body to find out the
+      negotiation never happened. Worse is a `200` that echoes the requested type back in
+      `Content-Type` while carrying a JSON-RPC body: the caller routes on your label and the parse
+      fails downstream.
       Do the check at the transport edge and keep the body plain text, so no client mistakes the
       refusal for a JSON-RPC error envelope.
     resources:

@@ -1,15 +1,33 @@
 import { describe, expect, test } from 'bun:test';
-import { carriersFromElements, selectAssemblePrompts } from '../src/client/assemble-prompt';
+import { findingRowsFromElements, selectAssemblePrompts } from '../src/client/assemble-prompt';
+import type { FindingRow } from '../src/shared/web-audit-findings';
 
-const MUST_A = { keyword: 'must', status: 'absent', prompt: 'fix must a' };
-const MUST_B = { keyword: 'must', status: 'broken', prompt: 'fix must b' };
-const SHOULD = { keyword: 'should', status: 'absent', prompt: 'fix should' };
-const MAY = { keyword: 'may', status: 'broken', prompt: 'fix may' };
-const PASS = { keyword: 'must', status: 'pass', prompt: 'should never copy' };
-const NA = { keyword: 'must', status: 'n_a', prompt: 'also never' };
+let order = 0;
+function row(over: Partial<FindingRow>): FindingRow {
+  order += 1;
+  return {
+    id: `check-${order}`,
+    keyword: 'must',
+    tier: 'required',
+    status: 'absent',
+    unprobed: false,
+    result: null,
+    prompt: 'fix it',
+    order,
+    ...over,
+  };
+}
+
+const MUST_A = row({ keyword: 'must', status: 'absent', prompt: 'fix must a' });
+const SHOULD = row({ keyword: 'should', status: 'absent', prompt: 'fix should' });
+const PASS = row({ keyword: 'must', status: 'pass', prompt: 'should never copy' });
+const NA = row({ keyword: 'must', status: 'n_a', prompt: 'also never' });
+const MUST_B = row({ keyword: 'must', status: 'broken', prompt: 'fix must b' });
+const MAY = row({ keyword: 'may', status: 'broken', prompt: 'fix may' });
+const UNPROBED = row({ keyword: 'must', status: 'absent', unprobed: true, prompt: 'never observed' });
 
 describe('selectAssemblePrompts', () => {
-  const rows = [MUST_A, SHOULD, PASS, NA, MUST_B, MAY];
+  const rows = [MUST_A, SHOULD, PASS, NA, MUST_B, MAY, UNPROBED];
 
   test('default assembly is MUST failures in display order', () => {
     expect(selectAssemblePrompts(rows, { includeShould: false, includeMay: false })).toBe('fix must a\n\nfix must b');
@@ -30,23 +48,61 @@ describe('selectAssemblePrompts', () => {
     expect(selectAssemblePrompts(onlyShould, { includeShould: true, includeMay: false })).toBe('fix should');
   });
 
-  test('pass and n_a rows are never included', () => {
-    expect(selectAssemblePrompts([PASS, NA], { includeShould: true, includeMay: true })).toBe('');
+  test('pass, n_a, and unprobed rows are never included', () => {
+    expect(selectAssemblePrompts([PASS, NA, UNPROBED], { includeShould: true, includeMay: true })).toBe('');
   });
 });
 
-describe('carriersFromElements', () => {
-  test('reads keyword, status, and prompt in node order', () => {
-    const el = (attrs: Record<string, string>): Element =>
-      ({ getAttribute: (name: string) => attrs[name] ?? null }) as unknown as Element;
+describe('findingRowsFromElements', () => {
+  test('reads the canonical row root and its conditional prompt carrier', () => {
+    const el = (attrs: Record<string, string>, child?: Record<string, string>): Element =>
+      ({
+        getAttribute: (name: string) => attrs[name] ?? null,
+        querySelector: () => (child ? { getAttribute: (name: string) => child[name] ?? null } : null),
+      }) as unknown as Element;
     expect(
-      carriersFromElements([
-        el({ 'data-copy-text': 'p1', 'data-keyword': 'must', 'data-status': 'absent' }),
-        el({ 'data-copy-text': 'p2', 'data-keyword': 'should', 'data-status': 'broken' }),
+      findingRowsFromElements([
+        el(
+          {
+            'data-id': 'openapi',
+            'data-keyword': 'must',
+            'data-tier': 'required',
+            'data-status': 'absent',
+            'data-unprobed': 'false',
+          },
+          { 'data-copy-text': 'p1' },
+        ),
+        el({
+          'data-id': 'llms-txt',
+          'data-keyword': 'should',
+          'data-tier': 'recommended',
+          'data-status': 'pass',
+          'data-unprobed': 'false',
+        }),
+        // A root without an id is not a finding.
+        el({ 'data-keyword': 'may' }),
       ]),
     ).toEqual([
-      { keyword: 'must', status: 'absent', prompt: 'p1' },
-      { keyword: 'should', status: 'broken', prompt: 'p2' },
+      {
+        id: 'openapi',
+        keyword: 'must',
+        tier: 'required',
+        status: 'absent',
+        unprobed: false,
+        result: null,
+        prompt: 'p1',
+        order: 0,
+      },
+      {
+        id: 'llms-txt',
+        keyword: 'should',
+        tier: 'recommended',
+        status: 'pass',
+        unprobed: false,
+        result: null,
+        prompt: null,
+        order: 1,
+      },
     ]);
   });
 });
