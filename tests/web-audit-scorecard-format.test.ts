@@ -23,7 +23,8 @@ import {
   WEB_SCHEMA_VERSION,
   type WebScorecardMeta,
 } from '../src/worker/audit-web/scorecard';
-import { buildWebSummaryBody, buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-render';
+import { buildWebSummaryMarkdown } from '../src/worker/audit-web/summary-markdown';
+import { buildWebSummaryBody } from '../src/worker/audit-web/summary-render';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 /** Reverse the escHtml entity set to recover the raw prompt from a carrier. */
