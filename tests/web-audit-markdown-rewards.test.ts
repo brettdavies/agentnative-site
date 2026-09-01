@@ -120,7 +120,10 @@ function siteFetch(rootFor: (accept: string | undefined, ua: string | undefined)
   const seen: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    seen.push(`${init?.method ?? 'GET'} ${url} ${init?.headers ? 'H' : 'noH'}`);
+    // The guard adds a default user-agent to every probe, so "plain" means
+    // no headers beyond that default.
+    const distinguishing = init?.headers && Object.keys(init.headers).some((k) => k.toLowerCase() !== 'user-agent');
+    seen.push(`${init?.method ?? 'GET'} ${url} ${distinguishing ? 'H' : 'noH'}`);
     const pathname = new URL(url).pathname;
     if (pathname === '/') {
       return rootFor(headerOf(init?.headers, 'accept'), headerOf(init?.headers, 'user-agent'));

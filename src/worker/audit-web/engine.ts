@@ -49,6 +49,12 @@ import { type GuardedFetchOptions, guardedFetch } from './ssrf';
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
 const DEFAULT_PER_AUDIT_DEADLINE_MS = 25_000;
+// Per-probe timeout once the root fetch has already failed at the network
+// level. A target that tarpits automated clients (accepts the connection,
+// never answers) makes every probe wait out its full timeout; shrinking the
+// slice keeps the whole audit inside the deadline with a genuine attempt
+// per check instead of a half-run of skips.
+const DEGRADED_PER_CHECK_TIMEOUT_MS = 2_000;
 
 export interface RunWebAuditInput {
   url: string;
@@ -67,7 +73,13 @@ export interface RunWebAuditInput {
 export type AuditEvent =
   | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[] }
   | { type: 'result'; result: EngineResult }
-  | { type: 'complete'; scorecard: WebScorecard; complete: boolean };
+  | { type: 'complete'; scorecard: WebScorecard; complete: boolean }
+  // Terminal for a target that answered nothing at the network level: no
+  // HTTP status from the root fetch or any discovery probe. Scoring such a
+  // run would publish a misleading 0% for what is actually "the auditor
+  // cannot reach this site" (a block of datacenter egress, a dead host, a
+  // tarpit), so the run ends here and nothing is cached.
+  | { type: 'unreachable'; reason: string };
 
 const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>>> =
   {
@@ -268,9 +280,19 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const { base, host, domain } = normalizeBase(input.url);
   const now = input.now ?? Date.now;
   const concurrency = input.concurrency ?? DEFAULT_CONCURRENCY;
-  const perCheckTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
+  const configuredTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
   const perAuditDeadlineMs = input.perAuditDeadlineMs ?? DEFAULT_PER_AUDIT_DEADLINE_MS;
   const deadline = now() + perAuditDeadlineMs;
+
+  // The single canonical root fetch every root-HTML check and several
+  // antecedents read. null = failed at the network level. It runs before
+  // discovery because it doubles as the reachability probe: a network-dead
+  // root drops every later probe to the degraded timeout so a tarpitting
+  // target cannot spend the whole deadline on a handful of fetches.
+  const rootResp = await guardedFetch(base, {}, { ...input.fetchOptions, timeoutMs: configuredTimeoutMs });
+  const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
+  const perCheckTimeoutMs =
+    root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
   const discovery = await discoverMcpEndpoint(input.url, input.registry.mcp_discovery, {
     timeoutMs: perCheckTimeoutMs,
@@ -280,14 +302,20 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   });
   yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };
 
-  // The single canonical root fetch every root-HTML check and several
-  // antecedents read. null = failed at the network level.
-  const rootResp = await guardedFetch(
-    base,
-    {},
-    { ...input.fetchOptions, timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())) },
-  );
-  const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
+  // Nothing anywhere returned an HTTP status: the target is unreachable
+  // from the auditor's vantage point. Any real response, even a 401 or 404,
+  // is auditable evidence and keeps the run going; total network silence is
+  // not, so end the run without a scorecard.
+  const anyHttpResponse = discovery.evidence.some((e) => typeof e.status === 'number');
+  if (root === null && discovery.endpoint === null && !anyHttpResponse) {
+    yield {
+      type: 'unreachable',
+      reason:
+        `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
+        'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.',
+    };
+    return;
+  }
 
   let incomplete = false;
   const results: EngineResult[] = [];

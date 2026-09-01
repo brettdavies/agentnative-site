@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   AUDIT_PROBE_MAX_BODY_BYTES,
+  AUDIT_USER_AGENT,
   guardedFetch,
   STATUS_ONLY_BODY_BYTES,
   validatePublicUrl,
@@ -183,5 +184,38 @@ describe('guardedFetch', () => {
     );
     expect(capped.status).toBe(200);
     expect(capped.body.length).toBe(AUDIT_PROBE_MAX_BODY_BYTES);
+  });
+});
+
+describe('guardedFetch user-agent', () => {
+  test('sends the audit user-agent when the caller sets none', async () => {
+    let seen: Record<string, string> | undefined;
+    await guardedFetch(
+      'https://example.com/',
+      {},
+      {
+        fetchImpl: stubFetch((_url, init) => {
+          seen = init?.headers as Record<string, string> | undefined;
+          return new Response('ok');
+        }),
+      },
+    );
+    expect(seen?.['user-agent']).toBe(AUDIT_USER_AGENT);
+  });
+
+  test('a caller-supplied user-agent wins, regardless of header casing', async () => {
+    let seen: Record<string, string> | undefined;
+    await guardedFetch(
+      'https://example.com/',
+      { headers: { 'User-Agent': 'custom-probe/1' } },
+      {
+        fetchImpl: stubFetch((_url, init) => {
+          seen = init?.headers as Record<string, string> | undefined;
+          return new Response('ok');
+        }),
+      },
+    );
+    expect(seen?.['User-Agent']).toBe('custom-probe/1');
+    expect(seen?.['user-agent']).toBeUndefined();
   });
 });

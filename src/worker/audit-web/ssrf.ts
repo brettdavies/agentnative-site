@@ -21,6 +21,7 @@
 // canonicalization above closes the encoding-bypass gap but not the
 // rebinding gap.
 
+import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import type { ProbeResponse } from './assert';
 
 export type UrlValidation = { ok: true; url: URL } | { ok: false; reason: string };
@@ -53,6 +54,21 @@ export type GuardedFetchOptions = {
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_REDIRECTS = 4;
+
+// Sent on every probe that does not set its own User-Agent. A request with
+// no UA at all is the strongest bot-block signal for CDN WAFs (Akamai
+// tarpits or 401s them wholesale), and the audit should identify itself
+// honestly rather than impersonate a browser: sites remain free to make an
+// informed decision about the auditor, and the UA-sensitive checks
+// (markdown-cli-ua, markdown-agent-ua) still control their own header.
+export const AUDIT_USER_AGENT = `anc-web-audit/1.0 (+${CANONICAL_SITE_URL}/web-audit)`;
+
+/** Case-insensitive presence check for a caller-supplied header. */
+function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {
+  if (!headers) return false;
+  const wanted = name.toLowerCase();
+  return Object.keys(headers).some((k) => k.toLowerCase() === wanted);
+}
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 // Blocked IPv4 ranges as [base, prefixBits]. The metadata IP
@@ -249,6 +265,10 @@ export async function guardedFetch(
     elapsed_ms: Date.now() - started,
   });
 
+  const requestHeaders = hasHeader(init.headers, 'user-agent')
+    ? init.headers
+    : { ...init.headers, 'user-agent': AUDIT_USER_AGENT };
+
   try {
     let current = validatePublicUrl(rawUrl);
     if (!current.ok) return fail(current.reason.startsWith('blocked') ? current.reason : `blocked: ${current.reason}`);
@@ -258,7 +278,7 @@ export async function guardedFetch(
       try {
         response = await fetchImpl(current.url.toString(), {
           method: init.method ?? 'GET',
-          headers: init.headers,
+          headers: requestHeaders,
           body: init.body,
           redirect: 'manual',
           signal: controller.signal,
