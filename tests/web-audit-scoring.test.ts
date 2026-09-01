@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { KEYWORD_BY_TIER, normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
+import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
 import { universeMaxOf } from '../src/worker/audit-web/score';
 import { buildWebScorecard, type EngineResult } from '../src/worker/audit-web/scorecard';
 
@@ -500,5 +501,43 @@ describe('scoring invariance under the API/MCP category split', () => {
     expect(legacy.categories.map((c) => c.id)).toContain('mcp-api');
     expect(split.categories.map((c) => c.id)).toEqual(['discoverability', 'api', 'mcp']);
     expect(split.categories.map((c) => c.id)).not.toContain('mcp-api');
+  });
+});
+
+describe('probe user-agent single source of truth', () => {
+  function uaOf(check: NormalizedWebAuditCheck): string | undefined {
+    const headers = (check.with as { headers?: Record<string, string> }).headers ?? {};
+    const key = Object.keys(headers).find((k) => k.toLowerCase() === 'user-agent');
+    return key === undefined ? undefined : headers[key];
+  }
+
+  test('the build expands the registry UA tokens to the shared constants', async () => {
+    const registry = await loadNormalized();
+    const byId = new Map(registry.checks.map((c) => [c.id, c]));
+    expect(uaOf(byId.get('markdown-agent-ua') as NormalizedWebAuditCheck)).toBe(AI_USER_FETCHER_PROBE_UA);
+    expect(uaOf(byId.get('agent-ua-reachable') as NormalizedWebAuditCheck)).toBe(AI_USER_FETCHER_PROBE_UA);
+    expect(uaOf(byId.get('markdown-cli-ua') as NormalizedWebAuditCheck)).toBe(CLI_PROBE_UA);
+  });
+
+  test('no unexpanded {ua:...} token survives normalization', async () => {
+    const registry = await loadNormalized();
+    expect(JSON.stringify(registry)).not.toContain('{ua:');
+  });
+
+  test('a literal User-Agent in the YAML is a build error', async () => {
+    const raw = await readFile(REGISTRY_PATH, 'utf8');
+    const doc = yaml.load(raw) as { checks: Array<{ id: string; with: { headers?: Record<string, string> } }> };
+    const target = doc.checks.find((c) => c.id === 'markdown-agent-ua');
+    (target as { with: { headers: Record<string, string> } }).with.headers['User-Agent'] =
+      'ChatGPT-User/1.0 (+https://openai.com/bot)';
+    expect(() => normalizeWebAuditRegistry(doc)).toThrow(/must be a \{ua:\.\.\.\} token/);
+  });
+
+  test('an unknown {ua:...} token is a build error naming the known tokens', async () => {
+    const raw = await readFile(REGISTRY_PATH, 'utf8');
+    const doc = yaml.load(raw) as { checks: Array<{ id: string; with: { headers?: Record<string, string> } }> };
+    const target = doc.checks.find((c) => c.id === 'markdown-cli-ua');
+    (target as { with: { headers: Record<string, string> } }).with.headers['User-Agent'] = '{ua:nonexistent}';
+    expect(() => normalizeWebAuditRegistry(doc)).toThrow(/\{ua:ai-user-fetcher\}/);
   });
 });

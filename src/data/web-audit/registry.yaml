@@ -578,7 +578,7 @@ checks:
     handler: http
     with:
       path: /
-      headers: { User-Agent: "curl/8.7.1", Accept: "*/*" }
+      headers: { User-Agent: "{ua:cli}", Accept: "*/*" }
       expect: { content_type: "markdown|text/plain" }
     hint: 'Serve the markdown twin to shell HTTP clients (curl/wget/library UAs) that state no content-type preference, so scripted fetches get source, not HTML chrome.'
 
@@ -593,7 +593,7 @@ checks:
     handler: http
     with:
       path: /
-      headers: { User-Agent: "ChatGPT-User/1.0 (+https://openai.com/bot)", Accept: "*/*" }
+      headers: { User-Agent: "{ua:ai-user-fetcher}", Accept: "*/*" }
       expect: { content_type: "markdown|text/plain" }
     hint: 'Serve the markdown twin to AI on-demand user-fetchers (ChatGPT-User, Claude-User, Perplexity-User) that state no content-type preference.'
 
@@ -608,7 +608,7 @@ checks:
     handler: http
     with:
       path: /
-      headers: { User-Agent: "ChatGPT-User/1.0 (+https://openai.com/bot)", Accept: "*/*" }
+      headers: { User-Agent: "{ua:ai-user-fetcher}", Accept: "*/*" }
       expect:
         status_below: 300
         body_not_regex: "just a moment|attention required|cf-challenge|enable javascript and cookies|captcha"

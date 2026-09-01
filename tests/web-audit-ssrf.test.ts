@@ -5,9 +5,9 @@
 // public happy path must still succeed.
 
 import { describe, expect, test } from 'bun:test';
+import { AUDIT_USER_AGENT } from '../src/shared/user-agents';
 import {
   AUDIT_PROBE_MAX_BODY_BYTES,
-  AUDIT_USER_AGENT,
   guardedFetch,
   STATUS_ONLY_BODY_BYTES,
   validatePublicUrl,
