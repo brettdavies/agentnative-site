@@ -23,6 +23,7 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
+import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
 import { runWebAudit } from './engine';
 import { homeTag, invokeCachedPurge, webDomainTag, webTag } from './hit-min-purge';
@@ -32,7 +33,7 @@ import { isSeededDomain, loadWebSeed, type WebSeedEntry } from './seed';
 // The Workflow shares the Worker's bindings; SCORE_KV is optional so the
 // registry-change gate degrades to plain staleness batching when it is
 // absent (e.g. a minimal test env).
-export type WebRescoreEnv = WebAggregateEnv & { SCORE_KV?: KVNamespace };
+export type WebRescoreEnv = WebAggregateEnv & AuditLogEnv & { SCORE_KV?: KVNamespace };
 
 // Narrow structural view of the Workflow binding (mirrors the RateLimit
 // pattern): enough surface for the trigger helper and its tests.
@@ -117,14 +118,18 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
   const publicListing = await isSeededDomain(env, new URL(targetUrl).host);
   let scorecard: unknown = null;
   let complete = false;
-  for await (const event of runWebAudit({
-    url: targetUrl,
-    registry,
-    siteType: null,
-    publicListing,
-    specVersion: SPEC_VERSION,
-    perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
-  })) {
+  for await (const event of instrumentAuditEvents(
+    runWebAudit({
+      url: targetUrl,
+      registry,
+      siteType: null,
+      publicListing,
+      specVersion: SPEC_VERSION,
+      perAuditDeadlineMs: RESCORE_AUDIT_DEADLINE_MS,
+    }),
+    env,
+    { target: targetUrl, surface: 'rescore' },
+  )) {
     if (event.type === 'complete') {
       scorecard = event.scorecard;
       complete = event.complete;
