@@ -21,7 +21,7 @@
 // canonicalization above closes the encoding-bypass gap but not the
 // rebinding gap.
 
-import { CANONICAL_SITE_URL } from '../../shared/site-url';
+import { AUDIT_USER_AGENT } from '../../shared/user-agents';
 import type { ProbeResponse } from './assert';
 
 export type UrlValidation = { ok: true; url: URL } | { ok: false; reason: string };
@@ -55,13 +55,13 @@ export type GuardedFetchOptions = {
 const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_REDIRECTS = 4;
 
-// Sent on every probe that does not set its own User-Agent. A request with
-// no UA at all is the strongest bot-block signal for CDN WAFs (Akamai
-// tarpits or 401s them wholesale), and the audit should identify itself
-// honestly rather than impersonate a browser: sites remain free to make an
-// informed decision about the auditor, and the UA-sensitive checks
-// (markdown-cli-ua, markdown-agent-ua) still control their own header.
-export const AUDIT_USER_AGENT = `anc-web-audit/1.0 (+${CANONICAL_SITE_URL}/web-audit)`;
+// AUDIT_USER_AGENT is sent on every probe that does not set its own
+// User-Agent. A request with no UA at all is the strongest bot-block signal
+// for CDN WAFs (Akamai tarpits or 401s them wholesale), and the audit
+// should identify itself honestly rather than impersonate a browser: sites
+// remain free to make an informed decision about the auditor, and the
+// UA-sensitive checks (markdown-cli-ua, markdown-agent-ua) still control
+// their own header.
 
 /** Case-insensitive presence check for a caller-supplied header. */
 function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {

@@ -6,6 +6,7 @@
 // text/plain, or emits Vary (applicable but absent -> no penalty).
 
 import { describe, expect, test } from 'bun:test';
+import { AI_USER_FETCHER_PROBE_UA, CLI_PROBE_UA } from '../src/shared/user-agents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 
@@ -40,7 +41,7 @@ const MARKDOWN_CHECKS: WebCheck[] = [
     antecedent: 'markdown-twin',
     with: {
       path: '/',
-      headers: { 'User-Agent': 'curl/8.7.1', Accept: '*/*' },
+      headers: { 'User-Agent': CLI_PROBE_UA, Accept: '*/*' },
       expect: { content_type: 'markdown|text/plain' },
     },
   }),
@@ -51,7 +52,7 @@ const MARKDOWN_CHECKS: WebCheck[] = [
     antecedent: 'markdown-twin',
     with: {
       path: '/',
-      headers: { 'User-Agent': 'ChatGPT-User/1.0 (+https://openai.com/bot)', Accept: '*/*' },
+      headers: { 'User-Agent': AI_USER_FETCHER_PROBE_UA, Accept: '*/*' },
       expect: { content_type: 'markdown|text/plain' },
     },
   }),
