@@ -14,6 +14,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
+import { PROBE_UA_TOKENS } from '../shared/user-agents.ts';
 
 export const KEYWORD_BY_TIER = Object.freeze({
   required: 'must',
@@ -53,6 +54,29 @@ export const WEB_AUDIT_ANTECEDENTS = new Set([
 ]);
 export const WEB_AUDIT_EVAL_RULES = new Set(['legacy-alias-redirects', 'scoped-discovery']);
 export const CORS_SURFACES = new Set(['preflight', 'actual']);
+
+/**
+ * Expand `{ua:...}` tokens in a check's `with.headers` User-Agent from the
+ * shared probe-UA map. A User-Agent value that is not a known token is a
+ * build error: probe identity strings are behavioral test inputs with one
+ * definition point (src/shared/user-agents.ts), and a literal here would be
+ * a second, drift-prone copy.
+ */
+function expandProbeUserAgent(id, withParams) {
+  const headers = withParams?.headers;
+  if (!headers || typeof headers !== 'object') return withParams;
+  const uaKey = Object.keys(headers).find((k) => k.toLowerCase() === 'user-agent');
+  if (uaKey === undefined) return withParams;
+  const value = headers[uaKey];
+  const expanded = PROBE_UA_TOKENS[value];
+  if (expanded === undefined) {
+    throw new Error(
+      `web-audit registry: check "${id}" User-Agent ${JSON.stringify(value)} must be a {ua:...} token from ` +
+        `src/shared/user-agents.ts (known: ${Object.keys(PROBE_UA_TOKENS).join(', ')})`,
+    );
+  }
+  return { ...withParams, headers: { ...headers, [uaKey]: expanded } };
+}
 
 const PRINCIPLE_RE = /^P[1-8]$/;
 const CHECK_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -186,7 +210,7 @@ export function normalizeWebAuditRegistry(doc) {
       title: check.title,
       hint: check.hint,
       handler: check.handler,
-      with: check.with,
+      with: expandProbeUserAgent(id, check.with),
     };
   });
 
