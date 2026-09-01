@@ -128,6 +128,8 @@ export async function auditDomainToCache(env: WebRescoreEnv, targetUrl: string):
     if (event.type === 'complete') {
       scorecard = event.scorecard;
       complete = event.complete;
+    } else if (event.type === 'unreachable') {
+      throw new Error(`target unreachable for ${targetUrl}: ${event.reason}`);
     }
   }
   if (!complete || !scorecard) {

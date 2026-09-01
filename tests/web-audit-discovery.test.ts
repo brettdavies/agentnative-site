@@ -156,7 +156,7 @@ describe('discoverMcpEndpoint', () => {
     expect(probed.some((url) => url.includes('victim.example'))).toBe(false);
   });
 
-  test('discovery stops at the per-audit deadline instead of walking every path', async () => {
+  test('discovery stops at its budget instead of walking every pass', async () => {
     let hops = 0;
     let clock = 1_000;
     const fetchImpl = stubFetch(() => {
@@ -171,10 +171,34 @@ describe('discoverMcpEndpoint', () => {
       now: () => clock,
     });
     expect(endpoint).toBeNull();
-    // Six hops are reachable (2 well-known + 2 legacy + 2 modern); the
-    // 25s budget affords three full 8s slices plus a 1s remainder.
-    expect(hops).toBe(4);
+    // The 12s discovery budget affords the concurrent well-known pass (two
+    // hops, whose stubbed clock advances past the budget); the legacy and
+    // modern passes never launch.
+    expect(hops).toBe(2);
     expect(evidence.some((e) => e.note === 'per-audit deadline exceeded during discovery')).toBe(true);
+  });
+
+  test('a tarpitting target is bounded by the pass timeout, not one timeout per path', async () => {
+    let launched = 0;
+    const fetchImpl = ((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        launched += 1;
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError')),
+        );
+      })) as typeof fetch;
+    const started = Date.now();
+    const { endpoint, evidence } = await discoverMcpEndpoint('https://example.com/', DISCOVERY, {
+      fetchOptions: { fetchImpl },
+      timeoutMs: 100,
+    });
+    const elapsed = Date.now() - started;
+    expect(endpoint).toBeNull();
+    // Three sequential passes of concurrent probes: ~3 pass timeouts, not
+    // 6 per-path timeouts. Generous ceiling to keep CI unflaky.
+    expect(elapsed).toBeLessThan(2_000);
+    expect(launched).toBe(6);
+    expect(evidence.every((e) => typeof e.status !== 'number')).toBe(true);
   });
 
   test('a modern probe answer without a tools result does not win', async () => {
@@ -371,6 +395,86 @@ describe('runWebAudit engine', () => {
     expect(sc.tool.url).toBe('https://example.com/');
     expect(sc.target_url).toBe('https://example.com/');
     expect(complete.complete).toBe(true);
+  });
+});
+
+function tarpitFetch(matcher?: (url: string) => boolean): typeof fetch {
+  return ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    if (matcher && !matcher(url)) {
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () =>
+        reject(new DOMException('The operation was aborted.', 'AbortError')),
+      );
+    });
+  }) as typeof fetch;
+}
+
+describe('runWebAudit reachability', () => {
+  test('total network silence ends in an unreachable terminal, not a scored run', async () => {
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl: tarpitFetch() },
+        perCheckTimeoutMs: 100,
+      }),
+    );
+    const terminal = events.at(-1);
+    expect(terminal?.type).toBe('unreachable');
+    if (terminal?.type === 'unreachable') {
+      expect(terminal.reason).toContain('did not answer any probe');
+    }
+    expect(events.some((e) => e.type === 'complete')).toBe(false);
+    expect(events.some((e) => e.type === 'result')).toBe(false);
+  });
+
+  test('a tarpitted root with a live MCP endpoint still audits to completion', async () => {
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === 'https://example.com/') {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('The operation was aborted.', 'AbortError')),
+          );
+        });
+      }
+      if (url.endsWith('/mcp') && init?.method === 'POST') return Promise.resolve(initializeResponse());
+      if (url.endsWith('/llms.txt') || url.endsWith('/robots.txt')) {
+        return Promise.resolve(new Response('ok', { status: 200 }));
+      }
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+      }),
+    );
+    expect(events.some((e) => e.type === 'unreachable')).toBe(false);
+    const complete = events.find((e) => e.type === 'complete');
+    expect(complete?.type).toBe('complete');
+  });
+
+  test('a target that answers 401 everywhere is scored, not classified unreachable', async () => {
+    const fetchImpl = stubFetch(() => new Response('denied', { status: 401 }));
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+      }),
+    );
+    expect(events.some((e) => e.type === 'unreachable')).toBe(false);
+    const complete = events.find((e) => e.type === 'complete');
+    if (complete?.type !== 'complete') throw new Error('no complete event');
+    expect(complete.complete).toBe(true);
+    expect(typeof complete.scorecard.score_pct).toBe('number');
   });
 });
 

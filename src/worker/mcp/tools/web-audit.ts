@@ -325,6 +325,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         if (event.type === 'complete') {
           scorecard = event.scorecard;
           complete = event.complete;
+        } else if (event.type === 'unreachable') {
+          return isError(`target unreachable; nothing was cached. ${event.reason}`);
         }
       }
       if (!complete || !scorecard) {

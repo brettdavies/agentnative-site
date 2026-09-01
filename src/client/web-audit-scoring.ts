@@ -176,7 +176,7 @@ async function run(args: RunArgs): Promise<void> {
     try {
       token = await getTurnstileToken(sitekey, scope);
     } catch {
-      setStatus('Verification challenge failed to load. Reload to try again.');
+      setStatus('Verification challenge did not complete. Reload to try again.');
       return;
     }
   }
