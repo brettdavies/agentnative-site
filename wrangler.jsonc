@@ -431,7 +431,12 @@
         "TURNSTILE_SITEKEY": "1x00000000000000000000AA",
         "MCP_CACHE_BYPASS_ALLOWED": "true",
         "WEB_AUDIT_ENABLED": "true",
-        "MCP_LEGACY_ENABLED": "true"
+        "MCP_LEGACY_ENABLED": "true",
+        // Verbose web-audit logging (per-check + discovery-evidence lines
+        // in Workers Logs) is always on for staging. Production stays at
+        // summary-only; flip transiently with `wrangler deploy --var` per
+        // docs/runbooks/web-audit-operations.md § Debug logging.
+        "WEB_AUDIT_DEBUG": "true"
       }
     }
   }
