@@ -16,10 +16,12 @@
 
 import { detectPreference } from '../accept';
 import { applyHeaders } from '../headers';
+import { type NotifyEnv, notifyFailure } from '../notify';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { rebuildAggregatesIfSeeded } from './aggregate';
+import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from './audit-log';
 import {
   type CachedWebAudit,
   get as cacheGet,
@@ -68,7 +70,7 @@ import { buildWebSummaryBody } from './summary-render';
 
 type RateLimit = { limit(o: { key: string }): Promise<{ success: boolean }> };
 
-export interface WebAuditRouteEnv extends TurnstileEnv, SessionEnv {
+export interface WebAuditRouteEnv extends TurnstileEnv, SessionEnv, AuditLogEnv, NotifyEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -364,14 +366,18 @@ export async function handleWebAudit(
       let scorecard: unknown = null;
       let complete = false;
       try {
-        for await (const event of runWebAudit({
-          url: canonicalTarget,
-          registry,
-          siteType,
-          publicListing: auditListing,
-          specVersion: SPEC_VERSION,
-          fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
-        })) {
+        for await (const event of instrumentAuditEvents(
+          runWebAudit({
+            url: canonicalTarget,
+            registry,
+            siteType,
+            publicListing: auditListing,
+            specVersion: SPEC_VERSION,
+            fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
+          }),
+          env,
+          { target: canonicalTarget, surface: 'stream' },
+        )) {
           if (event.type === 'discovery') {
             await writer
               .write(encoder.encode(`${JSON.stringify({ type: 'discovery', mcp_endpoint: event.endpoint })}\n`))
@@ -405,7 +411,13 @@ export async function handleWebAudit(
         await writer.write(encoder.encode(`${JSON.stringify(terminal)}\n`)).catch(() => {});
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        logAuditError(canonicalTarget, 'stream', err);
         await writer.write(encoder.encode(`${JSON.stringify({ type: 'error', message })}\n`)).catch(() => {});
+        await notifyFailure(env, {
+          key: 'web-audit-stream',
+          subject: 'web-audit stream task failed',
+          text: `The streaming audit task threw for ${canonicalTarget}: ${message}`,
+        });
       } finally {
         await writer.close().catch(() => {});
         await flushHitMinPurge();
