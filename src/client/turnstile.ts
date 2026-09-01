@@ -44,6 +44,14 @@ export function readSitekey(): string | null {
 let turnstilePromise: Promise<TurnstileApi> | null = null;
 let widget: { id: string; container: HTMLDivElement } | null = null;
 let pending: { resolve: (token: string) => void; reject: (err: Error) => void } | null = null;
+let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Invisible Turnstile can settle with neither callback nor error-callback
+// (an interactive challenge with nowhere to render, a silently dropped
+// clearance): without a timeout the acquire promise never resolves and the
+// page hangs with no console output. The cap converts that into a visible,
+// retryable failure.
+const ACQUIRE_TIMEOUT_MS = 20_000;
 
 export function ensureTurnstileLoaded(): Promise<TurnstileApi> {
   if (turnstilePromise) return turnstilePromise;
@@ -66,6 +74,10 @@ export function ensureTurnstileLoaded(): Promise<TurnstileApi> {
 }
 
 function settle(result: { token: string } | { error: Error }): void {
+  if (pendingTimer !== null) {
+    clearTimeout(pendingTimer);
+    pendingTimer = null;
+  }
   const p = pending;
   pending = null;
   if (!p) return;
@@ -80,6 +92,7 @@ export function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountH
       return;
     }
     pending = { resolve, reject };
+    pendingTimer = setTimeout(() => settle({ error: new Error('turnstile_timeout') }), ACQUIRE_TIMEOUT_MS);
     const container = document.createElement('div');
     container.setAttribute('data-turnstile-mount', '');
     container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
@@ -99,6 +112,10 @@ export function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountH
 export function teardownTurnstile(): void {
   if (widget && window.turnstile) {
     window.turnstile.remove(widget.id);
+  }
+  if (pendingTimer !== null) {
+    clearTimeout(pendingTimer);
+    pendingTimer = null;
   }
   widget = null;
   pending = null;

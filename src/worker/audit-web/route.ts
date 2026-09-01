@@ -378,7 +378,12 @@ export async function handleWebAudit(
               .catch(() => {});
           } else if (event.type === 'result') {
             await writer.write(encoder.encode(checkEvent(event.result))).catch(() => {});
-          } else {
+          } else if (event.type === 'unreachable') {
+            await writer
+              .write(encoder.encode(`${JSON.stringify({ type: 'error', message: event.reason })}\n`))
+              .catch(() => {});
+            return;
+          } else if (event.type === 'complete') {
             scorecard = event.scorecard;
             complete = event.complete;
           }
