@@ -479,3 +479,31 @@ describe('regression #8 — /api/score response triad + spec-version exports + n
     expect(mod.AUDITOR_URL.length).toBeGreaterThan(0);
   });
 });
+
+describe('regression #9 — Shiki code blocks keep their keyboard tab stop', () => {
+  // Fenced code blocks scroll horizontally (pre { overflow-x: auto }), so
+  // WCAG 2.1.1 requires a tab stop or keyboard users cannot scroll them.
+  // Shiki emits tabindex="0" on every <pre> it renders by default; nothing
+  // in this repo writes the attribute for these blocks, so a highlighter
+  // upgrade could silently drop the keyboard path. This pins it in built
+  // output.
+  test('every Shiki <pre> in dist HTML carries tabindex="0"', async () => {
+    const { readdir } = await import('node:fs/promises');
+    const entries = await readdir(DIST, { recursive: true });
+    const htmlFiles = entries.filter((f) => f.endsWith('.html'));
+    const offenders: { file: string; tag: string }[] = [];
+    let shikiPreCount = 0;
+    for (const file of htmlFiles) {
+      const html = await readFile(join(DIST, file), 'utf8');
+      const tags = html.match(/<pre\b[^>]*\bclass="[^"]*\bshiki\b[^"]*"[^>]*>/g) ?? [];
+      for (const tag of tags) {
+        shikiPreCount += 1;
+        if (!tag.includes('tabindex="0"')) offenders.push({ file, tag });
+      }
+    }
+    // A restructure that drops every highlighted block from dist would
+    // otherwise pass vacuously.
+    expect(shikiPreCount).toBeGreaterThanOrEqual(10);
+    expect(offenders).toEqual([]);
+  });
+});
