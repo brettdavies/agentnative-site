@@ -92,9 +92,10 @@
 //
 // Other methods → 405.
 
-import { detectScorePreference } from '../accept';
+import { isRepresentationPinned } from '../headers';
 import { AUDITOR_URL, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
+import { preferenceFor } from './content-negotiation';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
@@ -280,7 +281,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   const start = Date.now();
   let response: Response | undefined;
   try {
-    response = await handleScoreInner(request, env, telemetry);
+    response = withScoreVary(await handleScoreInner(request, env, telemetry), new URL(request.url).pathname);
     return response;
   } finally {
     const totalMs = Date.now() - start;
@@ -296,7 +297,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
 async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Telemetry): Promise<Response> {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
-  const preference = preferenceForResponse(url.pathname, request);
+  const preference = preferenceFor(url.pathname, request);
 
   if (method !== 'GET' && method !== 'POST') {
     telemetry.tier = 'error_unrecognized_input';
@@ -694,10 +695,18 @@ async function parsePostBody(request: Request): Promise<PostBody> {
   return { ok: true, input, turnstile_token: token };
 }
 
-function preferenceForResponse(pathname: string, request: Request): 'json' | 'markdown' {
-  if (pathname.endsWith('.json')) return 'json';
-  if (pathname.endsWith('.md')) return 'markdown';
-  return detectScorePreference(request);
+// Vary is derived from the request path, not from freshness: the
+// extensionless endpoint negotiates JSON vs markdown by Accept alone
+// (detectScorePreference never reads User-Agent), while the suffix-pinned
+// twins are one representation each. Stamped once at the handler boundary
+// so no per-branch header set can drift from the shared predicate.
+function withScoreVary(response: Response, pathname: string): Response {
+  if (isRepresentationPinned(pathname)) {
+    response.headers.delete('Vary');
+  } else {
+    response.headers.set('Vary', 'Accept');
+  }
+  return response;
 }
 
 function shapeWithPreference(
