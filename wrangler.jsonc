@@ -46,6 +46,13 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
+  // Script-level Logpush opt-in. Without it the workers-trace-events
+  // dataset receives nothing from this script and the telemetry-lake
+  // export chain (Logpush → Pipelines → Iceberg on R2) has no input, with
+  // no error anywhere. Inheritable key — env.staging restates it
+  // explicitly per this repo's convention (see RELEASES-RATIONALE.md §
+  // Wrangler env inheritance traps).
+  "logpush": true,
   // Live-scoring stateful bindings: DO + Container + R2 + rate-limit.
   // The migrations entry below is a one-way gate: `new_sqlite_classes`
   // MUST be used (not `new_classes`) so the DO is created with SQLite-
@@ -87,6 +94,16 @@
     {
       "binding": "SCORE_CACHE",
       "bucket_name": "anc-score-cache"
+    },
+    // TELEMETRY_LAKE — permanent Iceberg telemetry lake (the Logpush →
+    // Pipelines sink target). Dedicated bucket pair so the lake's
+    // lifecycle and credentials stay isolated from anc-score-cache, whose
+    // prefix-scoped expiry rules must never touch lake data. Catalog +
+    // Logpush setup: RELEASES.md § R2 telemetry-lake catalog and
+    // docs/runbooks/sitewide-analytics.md.
+    {
+      "binding": "TELEMETRY_LAKE",
+      "bucket_name": "anc-telemetry-lake"
     }
   ],
   // Weekly web-board rescore. The scheduled() handler starts the
@@ -267,6 +284,10 @@
       // `agentnative-site-sandbox`.
       "name": "agentnative-site-staging",
       "workers_dev": true,
+      // Explicit restatement: `logpush` is an inheritable key, and without
+      // the opt-in the workers-trace-events dataset receives nothing from
+      // the staging script — the lake export chain goes dark silently.
+      "logpush": true,
       // Staging is the skip-Worker proof surface (KTD6). `cache` / `exports`
       // inherit like `routes`; state the map explicitly so a top-level edit
       // cannot silently leave staging uncached.
@@ -346,6 +367,10 @@
         {
           "binding": "SCORE_CACHE",
           "bucket_name": "anc-score-cache-staging"
+        },
+        {
+          "binding": "TELEMETRY_LAKE",
+          "bucket_name": "anc-telemetry-lake-staging"
         }
       ],
       "ratelimits": [
