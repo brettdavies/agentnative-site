@@ -78,6 +78,21 @@ joins the allowlist. Not yet recorded.
 Records the object layout the Pipelines sink writes (prefix, file naming) and whether catalog compaction writes into the
 same listed prefix — the lake-freshness check depends on this answer. Not yet recorded.
 
+## Lake freshness check
+
+`src/worker/telemetry/lake-freshness.ts`, dispatched from the Worker's `scheduled()` handler on the daily `0 6 * * *`
+cron (both env blocks declare it beside the weekly rescore cron; `tests/wrangler-config.test.ts` pins the pair). The
+check lists the lake bucket through the `TELEMETRY_LAKE` binding under `LAKE_INGEST_PREFIX` and compares the newest
+object's upload age to a 24-hour threshold; an empty listing counts as stale (a sink that never delivered is a stall).
+On breach it calls the KV-deduped email path with key `telemetry-lake-stale`, naming the environment in the subject and
+the stale age in the text. `TELEMETRY_ENVIRONMENT` gates sending: only `production` emails; staging logs the breach and
+stops, because its lake is legitimately quiet most days and routine staging alerts would train the operator to ignore
+the production key. Every run emits one `telemetry.lake-freshness` status line.
+
+`LAKE_INGEST_PREFIX` must scope to ingest-written objects: catalog compaction rewrites old data into new objects with
+fresh timestamps, so a whole-bucket signal reads young during a real stall. The [Sink layout](#sink-layout) record
+governs the constant's value; update it there first, then in the module.
+
 ## Credentials
 
 Records every credential minted for the pipeline: name, permission set, scope. All credentials are least-privilege,

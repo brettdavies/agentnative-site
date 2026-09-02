@@ -51,18 +51,18 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
     expect((staging.routes as unknown[]).length).toBe(0);
   });
 
-  test('env.staging.triggers.crons is an explicit override that matches the top-level weekly rescore', () => {
+  test('env.staging.triggers.crons is an explicit override that matches the top-level schedules', () => {
     // `triggers` is inheritable, so staging must state its crons
-    // deliberately. Both envs run the same weekly web-rescore schedule;
-    // a staging block that silently drops the override would re-inherit
-    // whatever top level says, and a divergent schedule would mean soak
-    // no longer exercises the production path.
+    // deliberately. Both envs run the same weekly web-rescore + daily
+    // lake-freshness schedules; a staging block that silently drops the
+    // override would re-inherit whatever top level says, and a divergent
+    // schedule would mean soak no longer exercises the production path.
     expect(staging.triggers).toBeDefined();
     const stagingCrons = (staging.triggers as Record<string, unknown>).crons;
     const topCrons = (config.triggers as Record<string, unknown>).crons;
     expect(Array.isArray(stagingCrons)).toBe(true);
-    expect(stagingCrons).toEqual(['0 9 * * SUN']);
-    expect(topCrons).toEqual(['0 9 * * SUN']);
+    expect(stagingCrons).toEqual(['0 9 * * SUN', '0 6 * * *']);
+    expect(topCrons).toEqual(['0 9 * * SUN', '0 6 * * *']);
   });
 
   test('both envs declare the WEB_RESCORE_WORKFLOW binding with distinct account-scoped names', () => {
@@ -439,6 +439,36 @@ describe('wrangler.jsonc — Workers Caching per-entrypoint map (edge HIT restor
 // `MCP_LIVE_SCORING_ENABLED` are secret-bound, which is what buys the
 // zero-deploy flip that no redeploy can clobber. These guards pin the shape in
 // config so the drift is caught here rather than mid-incident.
+
+// ---------------------------------------------------------------------------
+// TELEMETRY_ENVIRONMENT var (telemetry plan U3)
+// ---------------------------------------------------------------------------
+
+// The daily lake-freshness check names its environment from this var and
+// emails the operator only when it reads "production"; every other value is
+// log-only, because the staging lake is legitimately quiet most days and
+// routine staging alerts would train the operator to ignore the production
+// key. env vars are REPLACE-not-merge, so both blocks must pin their value —
+// a dropped staging entry would inherit nothing and silence the environment
+// name in the status line, and a swapped value either mutes the production
+// alert or floods from staging.
+
+describe('wrangler.jsonc — TELEMETRY_ENVIRONMENT var (telemetry plan U3)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level vars declares TELEMETRY_ENVIRONMENT as the string "production"', () => {
+    const vars = config.vars as Record<string, unknown> | undefined;
+    expect(vars, 'top-level vars block').toBeDefined();
+    expect(vars?.TELEMETRY_ENVIRONMENT).toBe('production');
+  });
+
+  test('env.staging.vars declares TELEMETRY_ENVIRONMENT as the string "staging"', () => {
+    const vars = staging.vars as Record<string, unknown> | undefined;
+    expect(vars, 'env.staging vars block').toBeDefined();
+    expect(vars?.TELEMETRY_ENVIRONMENT).toBe('staging');
+  });
+});
 
 const SECRET_BOUND_MCP_FLAGS = ['MCP_ENABLED', 'MCP_LIVE_SCORING_ENABLED'] as const;
 
