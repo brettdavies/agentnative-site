@@ -242,9 +242,13 @@ export function makeEnv(overrides: StubOverrides = {}): ScoreEnv {
   return env;
 }
 
-export function postScore(input: string, opts: { token?: string; cookie?: string; pathSuffix?: string } = {}): Request {
+export function postScore(
+  input: string,
+  opts: { token?: string; cookie?: string; pathSuffix?: string; accept?: string } = {},
+): Request {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (opts.cookie) headers.cookie = opts.cookie;
+  if (opts.accept) headers.accept = opts.accept;
   return new Request(`https://anc.dev/api/score${opts.pathSuffix ?? ''}`, {
     method: 'POST',
     headers,

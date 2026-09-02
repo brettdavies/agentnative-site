@@ -172,12 +172,20 @@ function isUntwinnedSource(pathname: string): boolean {
 }
 
 /** True when the path is one representation: never rewritten to a `.md` twin. */
-export function isSingleRepresentation(pathname: string): boolean {
+function isSingleRepresentation(pathname: string): boolean {
   return isJson(pathname) || isSvg(pathname) || isHashedAsset(pathname) || isUntwinnedSource(pathname);
 }
 
-function isPathKeyedMarkdown(pathname: string): boolean {
-  return pathname.endsWith('.md');
+/**
+ * True when the path is pinned to one representation and never negotiates:
+ * explicit `.md` twins plus every single-representation file class. Every
+ * layer that selects a representation or stamps Vary (the CN rewrite, this
+ * module's Vary branches, the live-score headers, the /api/score suffix
+ * dispatch) consumes this predicate so the negotiable path set cannot
+ * drift between layers.
+ */
+export function isRepresentationPinned(pathname: string): boolean {
+  return pathname.endsWith('.md') || isSingleRepresentation(pathname);
 }
 
 function isAlwaysMissPath(pathname: string): boolean {
@@ -268,14 +276,13 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   const headers = new Headers(response.headers);
   const url = new URL(opts.request.url);
   const requestPathname = url.pathname;
-  const pathKeyedMarkdown = isPathKeyedMarkdown(requestPathname);
 
   headers.delete('Cache-Tag');
 
   if (opts.servedMarkdown) {
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
     headers.set('X-Robots-Tag', 'noindex');
-    if (pathKeyedMarkdown) {
+    if (isRepresentationPinned(requestPathname)) {
       headers.delete('Vary');
     } else {
       headers.set('Vary', 'Accept, User-Agent');
