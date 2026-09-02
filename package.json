@@ -27,6 +27,7 @@
     "axe-playwright": "^2.2.2",
     "bun-types": "^1.4.0",
     "html-minifier-terser": "^7.2.0",
+    "knip": "^6.32.3",
     "markdownlint-cli2": "^0.23.1",
     "sharp": "^0.35.3",
     "typescript": "^6.0.2",
