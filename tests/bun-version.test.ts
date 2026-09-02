@@ -8,20 +8,12 @@
 // compares the runtime actually executing this suite against the pin.
 
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-const REPO_ROOT = new URL('..', import.meta.url).pathname;
-const WORKFLOWS_DIR = join(REPO_ROOT, '.github/workflows');
+import { listWorkflows, REPO_ROOT, workflowText } from './helpers/workflows';
 
 const pinned = readFileSync(join(REPO_ROOT, '.bun-version'), 'utf8').trim();
-const workflows = readdirSync(WORKFLOWS_DIR)
-  .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
-  .sort();
-
-function workflowText(file: string): string {
-  return readFileSync(join(WORKFLOWS_DIR, file), 'utf8');
-}
+const workflows = listWorkflows();
 
 describe('the Bun version is declared once, in the tree', () => {
   test('.bun-version holds a bare semver', () => {
