@@ -1,0 +1,164 @@
+# Daily live-surface sweep for the staging and production Workers.
+#
+# Why: deploys and deep-check only probe when code changes, but the live
+# surfaces can rot on their own — CF Access service tokens expire, the
+# MCP kill switch gets flipped, an edge config drifts. The sweep probes
+# both deployments every day regardless of repo activity: the core MCP
+# checks (scripts/release/mcp-smoke.sh --core-only) plus one homepage
+# HTML probe per leg. Heavy suites (Playwright, Lighthouse, the metered
+# audit gates) stay commit-gated in deep-check and the release scripts.
+#
+# The legs are separate jobs so each surface reds independently — a
+# staging credential failure must not mask a production outage or vice
+# versa. Neither leg declares an `environment:`: no environment-scoped
+# secrets are needed (the ANC_STAGING_ACCESS_* pair is repository-scoped)
+# and protection rules on an environment would queue scheduled runs
+# behind manual approvals.
+#
+# Triggers:
+#   schedule           — 13:37 UTC daily (≈ 09:37 ET / 06:37 PT), so
+#                        failures surface during US waking hours. Offset
+#                        from skill-availability.yml's 13:00 to keep the
+#                        two daily probes out of the same burst window.
+#   workflow_dispatch  — manual run, for seeding green runs and ad-hoc
+#                        verification. Scheduled runs execute main's copy
+#                        of this file only; see
+#                        docs/runbooks/live-surface-sweep.md.
+#
+# Hard rule: no `continue-on-error: true` anywhere in this file. The
+# sweep gates nothing downstream, so a red leg simply shows red; a
+# soft-fail probe silently reverts the gate — fix the cause or remove
+# the check.
+
+name: mcp-sweep
+
+on:
+  schedule:
+    - cron: '37 13 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-sweep
+  cancel-in-progress: false
+
+# Opt into Node.js 24 runtime for JS actions before June 2nd, 2026 when
+# GitHub forces the switch anyway. Kills the Node 20 deprecation warnings
+# and catches any incompatibilities now instead of the day of the cutover.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sweep-staging:
+    name: sweep-staging · MCP core + homepage on the staging Worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SWEEP_BASE_URL: https://agentnative-site-staging.brettdavies.workers.dev
+      CF_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+
+    steps:
+      # Checks out `dev`, not the default branch: staging deploys from
+      # `dev`, so the smoke script must be the one that describes the
+      # deployment it probes. Scheduled runs execute main's copy of this
+      # WORKFLOW, but the assertions come from the checkout.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+
+      # Credential rot is the one failure mode that says nothing about
+      # the surface: an expired or unadmitted service token makes every
+      # downstream probe red for the wrong reason. CF Access rejects a
+      # bad token with a 302 to *.cloudflareaccess.com (or an early
+      # 401/403) before the Worker ever runs, so probe for that
+      # signature first and fail with a credentials diagnosis instead
+      # of letting the MCP checks report a broken deployment.
+      - name: Preflight CF Access credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          probe=$(curl -sS -m 15 -o /dev/null -w '%{http_code} %{redirect_url}' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "$SWEEP_BASE_URL/.well-known/mcp/server-card.json")
+          status=${probe%% *}
+          redirect=${probe#* }
+          if [[ ("$status" == "302" && "$redirect" == *cloudflareaccess.com*) \
+            || "$status" == "401" || "$status" == "403" ]]; then
+            echo "::error::CF Access rejected the staging service token (HTTP $status${redirect:+, redirect to $redirect}). This is credential rot, not a broken surface: rotate or re-admit the ANC_STAGING_ACCESS_* repo secrets, then re-run."
+            exit 1
+          fi
+          echo "credentials admitted (HTTP $status); surface probes below are trustworthy"
+
+      # Core checks only (1–7): the symmetry and live-audit gates each
+      # spend a unit of the per-IP audit budget and minutes of wall
+      # clock, which belongs to the release preflight/postflight, not
+      # to a daily probe.
+      - name: Smoke live MCP surface (core checks)
+        run: scripts/release/mcp-smoke.sh --core-only "$SWEEP_BASE_URL"
+
+      # Explicit Accept: text/html — curl's default Accept negotiates
+      # the markdown twin on extensionless URLs (agent-native content
+      # negotiation), and YAML frontmatter has no HTML markers. Capture
+      # the body before grepping: under `set -o pipefail`,
+      # `curl | grep -q` false-fails when the marker appears early
+      # (grep closes the pipe, curl exits 23 on SIGPIPE).
+      - name: Probe homepage HTML
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -m 15 -o "$RUNNER_TEMP/home.html" -w '%{http_code}' \
+            -H 'Accept: text/html' \
+            -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+            -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+            "$SWEEP_BASE_URL/")
+          if [[ "$status" != "200" ]]; then
+            echo "::error::staging homepage answered HTTP $status (expected 200)"
+            exit 1
+          fi
+          if ! grep -q 'hero__title' "$RUNNER_TEMP/home.html"; then
+            echo "::error::staging homepage HTML lacks the hero__title marker — the host is serving something other than the built homepage"
+            exit 1
+          fi
+          echo "staging homepage OK (HTTP 200 + hero__title)"
+
+  sweep-production:
+    name: sweep-production · MCP core + homepage on anc.dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SWEEP_BASE_URL: https://anc.dev
+
+    steps:
+      # Default checkout: production deploys from `main`, which is also
+      # the default branch, so the default ref's smoke script matches
+      # the deployment it probes.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # anc.dev is public — no Access headers on this leg.
+      - name: Smoke live MCP surface (core checks)
+        run: scripts/release/mcp-smoke.sh --core-only "$SWEEP_BASE_URL"
+
+      # Same Accept + capture-then-grep contract as the staging leg;
+      # see that step's comment for why both halves are load-bearing.
+      - name: Probe homepage HTML
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -m 15 -o "$RUNNER_TEMP/home.html" -w '%{http_code}' \
+            -H 'Accept: text/html' \
+            "$SWEEP_BASE_URL/")
+          if [[ "$status" != "200" ]]; then
+            echo "::error::production homepage answered HTTP $status (expected 200)"
+            exit 1
+          fi
+          if ! grep -q 'hero__title' "$RUNNER_TEMP/home.html"; then
+            echo "::error::production homepage HTML lacks the hero__title marker — the host is serving something other than the built homepage"
+            exit 1
+          fi
+          echo "production homepage OK (HTTP 200 + hero__title)"
