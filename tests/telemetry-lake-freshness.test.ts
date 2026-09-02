@@ -1,7 +1,8 @@
 // Lake-freshness tests: the daily stall check over the TELEMETRY_LAKE
 // binding — threshold verdicts, the single status line per run, the
-// KV-deduped alert path, staging log-only, and the scheduled() cron
-// dispatch through the Worker default export.
+// KV-deduped alert path, staging log-only, the unscoped-prefix fail-closed
+// guard, and the scheduled() cron dispatch through the Worker default
+// export.
 
 import { describe, expect, spyOn, test } from 'bun:test';
 import worker, { type Env } from '../src/worker/index';
@@ -68,7 +69,7 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'production',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       expect(sent).toEqual([]);
       const lines = statusLines(logSpy);
       expect(lines).toHaveLength(1);
@@ -93,7 +94,7 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'production',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       expect(sent).toHaveLength(1);
       expect(sent[0].subject).toContain('production');
       expect(sent[0].text).toContain('production');
@@ -121,7 +122,7 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'production',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       expect(sent).toHaveLength(1);
       expect(sent[0].subject).toContain('production');
       expect(sent[0].text).toContain('no objects');
@@ -146,7 +147,7 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_LAKE: lakeBucket([[{ key: 'ingest/a', uploaded: new Date(NOW - 30 * HOUR_MS) }]]),
         TELEMETRY_ENVIRONMENT: 'production',
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       const lines = statusLines(logSpy);
       expect(lines).toHaveLength(1);
       expect(lines[0]).toEqual({
@@ -170,7 +171,7 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'staging',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       expect(sent).toEqual([]);
       const lines = statusLines(logSpy);
       expect(lines).toHaveLength(1);
@@ -186,6 +187,37 @@ describe('runLakeFreshnessCheck', () => {
     }
   });
 
+  test('an unscoped ingest prefix renders no verdict and never alerts (fail closed)', async () => {
+    // The deployed default is the unscoped state until the runbook's Sink
+    // layout record pins the ingest-write prefix.
+    expect(LAKE_INGEST_PREFIX).toBe('');
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const sent: SentMessage[] = [];
+      const listCalls: ListCall[] = [];
+      const env: LakeFreshnessEnv = {
+        TELEMETRY_LAKE: lakeBucket([[]], listCalls),
+        TELEMETRY_ENVIRONMENT: 'production',
+        ...alertEnv(sent),
+      };
+      await runLakeFreshnessCheck(env, NOW);
+      expect(sent).toEqual([]);
+      expect(listCalls).toEqual([]);
+      const lines = statusLines(logSpy);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toEqual({
+        scope: 'telemetry.lake-freshness',
+        environment: 'production',
+        error: 'ingest_prefix_unrecorded',
+        newest_age_ms: null,
+        stale: null,
+        notify: 'skipped',
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   test('a missing TELEMETRY_LAKE binding logs and returns (best-effort, no alert)', async () => {
     const logSpy = spyOn(console, 'log').mockImplementation(() => {});
     try {
@@ -194,7 +226,7 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'production',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       expect(sent).toEqual([]);
       const lines = statusLines(logSpy);
       expect(lines).toHaveLength(1);
@@ -211,7 +243,7 @@ describe('runLakeFreshnessCheck', () => {
     }
   });
 
-  test('an R2 list failure folds into the status line and never alerts', async () => {
+  test('a production R2 list failure alerts once through the check-failed key', async () => {
     const logSpy = spyOn(console, 'log').mockImplementation(() => {});
     try {
       const sent: SentMessage[] = [];
@@ -224,8 +256,10 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'production',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
-      expect(sent).toEqual([]);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
+      expect(sent).toHaveLength(1);
+      expect(sent[0].subject).toContain('production');
+      expect(sent[0].text).toContain('r2 unavailable');
       const lines = statusLines(logSpy);
       expect(lines).toHaveLength(1);
       expect(lines[0]).toEqual({
@@ -234,7 +268,37 @@ describe('runLakeFreshnessCheck', () => {
         error: 'r2 unavailable',
         newest_age_ms: null,
         stale: null,
-        notify: 'skipped',
+        notify: 'sent',
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  test('a staging R2 list failure is log-only', async () => {
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const sent: SentMessage[] = [];
+      const env: LakeFreshnessEnv = {
+        TELEMETRY_LAKE: {
+          list: async () => {
+            throw new Error('r2 unavailable');
+          },
+        } as unknown as R2Bucket,
+        TELEMETRY_ENVIRONMENT: 'staging',
+        ...alertEnv(sent),
+      };
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
+      expect(sent).toEqual([]);
+      const lines = statusLines(logSpy);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toEqual({
+        scope: 'telemetry.lake-freshness',
+        environment: 'staging',
+        error: 'r2 unavailable',
+        newest_age_ms: null,
+        stale: null,
+        notify: 'log-only',
       });
     } finally {
       logSpy.mockRestore();
@@ -257,12 +321,12 @@ describe('runLakeFreshnessCheck', () => {
         TELEMETRY_ENVIRONMENT: 'production',
         ...alertEnv(sent),
       };
-      await runLakeFreshnessCheck(env, NOW);
+      await runLakeFreshnessCheck(env, NOW, 'ingest/');
       expect(sent).toEqual([]);
       expect(listCalls).toHaveLength(2);
       expect(listCalls[1].cursor).toBe('1');
       for (const call of listCalls) {
-        expect(call.prefix).toBe(LAKE_INGEST_PREFIX);
+        expect(call.prefix).toBe('ingest/');
       }
       const lines = statusLines(logSpy);
       expect(lines).toHaveLength(1);
@@ -299,8 +363,13 @@ describe('scheduled() cron dispatch', () => {
         env,
         {} as ExecutionContext,
       );
-      expect(listCalls).toHaveLength(1);
-      expect(statusLines(logSpy)).toHaveLength(1);
+      // The deployed call site uses the module default prefix, which stays
+      // unscoped until the sink layout is recorded — so the routed check
+      // emits its fail-closed line without listing.
+      expect(listCalls).toHaveLength(0);
+      const lines = statusLines(logSpy);
+      expect(lines).toHaveLength(1);
+      expect(lines[0].error).toBe('ingest_prefix_unrecorded');
     } finally {
       logSpy.mockRestore();
     }

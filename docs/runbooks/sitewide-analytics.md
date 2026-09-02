@@ -91,7 +91,10 @@ the production key. Every run emits one `telemetry.lake-freshness` status line.
 
 `LAKE_INGEST_PREFIX` must scope to ingest-written objects: catalog compaction rewrites old data into new objects with
 fresh timestamps, so a whole-bucket signal reads young during a real stall. The [Sink layout](#sink-layout) record
-governs the constant's value; update it there first, then in the module.
+governs the constant's value; update it there first, then in the module. While the constant is empty (layout
+unrecorded), the check fails closed: it emits `ingest_prefix_unrecorded` and renders no verdict — arming it is the
+one-line prefix change after the layout is recorded. A listing failure in production alerts through the same email path
+with key `telemetry-lake-check-failed`; off production it is log-only.
 
 ## Credentials
 

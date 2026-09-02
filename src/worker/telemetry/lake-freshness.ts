@@ -24,8 +24,9 @@ export const LAKE_STALE_THRESHOLD_MS = 24 * HOUR_MS;
 // compaction rewrites old data into new objects with fresh timestamps, so
 // a signal over compaction-managed keys reads young during a real stall.
 // The recorded sink layout (docs/runbooks/sitewide-analytics.md § Sink
-// layout) governs this value; until it records a dedicated compaction
-// prefix, the whole bucket is the ingest surface.
+// layout) governs this value. Empty means the layout is unrecorded, and
+// the check fails closed: it renders no verdict rather than trusting a
+// whole-bucket listing that compaction can make read fresh.
 export const LAKE_INGEST_PREFIX = '';
 
 const SCOPE = 'telemetry.lake-freshness';
@@ -44,7 +45,11 @@ async function newestUploadedMs(bucket: R2Bucket, prefix: string): Promise<numbe
   return newest;
 }
 
-export async function runLakeFreshnessCheck(env: LakeFreshnessEnv, now = Date.now()): Promise<void> {
+export async function runLakeFreshnessCheck(
+  env: LakeFreshnessEnv,
+  now = Date.now(),
+  prefix = LAKE_INGEST_PREFIX,
+): Promise<void> {
   const environment = env.TELEMETRY_ENVIRONMENT ?? 'unset';
   const emit = (fields: Record<string, unknown>): void => {
     console.log(JSON.stringify({ scope: SCOPE, environment, ...fields }));
@@ -55,16 +60,28 @@ export async function runLakeFreshnessCheck(env: LakeFreshnessEnv, now = Date.no
     return;
   }
 
+  if (prefix === '') {
+    emit({ error: 'ingest_prefix_unrecorded', newest_age_ms: null, stale: null, notify: 'skipped' });
+    return;
+  }
+
   let newest: number | null;
   try {
-    newest = await newestUploadedMs(env.TELEMETRY_LAKE, LAKE_INGEST_PREFIX);
+    newest = await newestUploadedMs(env.TELEMETRY_LAKE, prefix);
   } catch (err) {
-    emit({
-      error: err instanceof Error ? err.message : String(err),
-      newest_age_ms: null,
-      stale: null,
-      notify: 'skipped',
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    // A check that cannot list the lake is itself an operational failure:
+    // silently skipping would hide a stall behind the very error that may
+    // accompany it, so production alerts on the broken check too.
+    let notify = 'log-only';
+    if (environment === 'production') {
+      notify = await notifyFailure(env, {
+        key: 'telemetry-lake-check-failed',
+        subject: `telemetry lake freshness check failing (${environment})`,
+        text: `The ${environment} telemetry-lake freshness check cannot list the lake bucket: ${message}.`,
+      });
+    }
+    emit({ error: message, newest_age_ms: null, stale: null, notify });
     return;
   }
 
