@@ -4,14 +4,17 @@
 // fonts. Both surfaces that declare these faces must keep a token Chrome
 // accepts after minify: format("woff2") or format(woff2).
 
-import { describe, expect, test } from 'bun:test';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { beforeAll, describe, expect, test } from 'bun:test';
+import { readdir, readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { minifyCssFile } from '../src/build/12-minify-dist.mjs';
+import { distStylesheets, requireDistBuild } from './helpers/dist';
 
 const ROOT = join(import.meta.dir, '..');
 const SITE_CSS = join(ROOT, 'src/styles/site.css');
 const OG_CSS = join(ROOT, 'scripts/og/og.css');
+const SHELL_MJS = join(ROOT, 'src/build/shell.mjs');
+const DIST = join(ROOT, 'dist');
 
 const FACE_BLOCK = /@font-face\s*\{[^}]*\}/g;
 const UNQUOTED_VARIATIONS = /format\(\s*woff2-variations\s*\)/;
@@ -41,6 +44,16 @@ function assertBothFaces(css: string, files: { sans: string; mono: string }): vo
   assertChromeKeepsSrc(blockFor(css, 'Monaspace Xenon'), files.mono);
 }
 
+function fontUrlRefs(css: string): string[] {
+  return [...css.matchAll(/url\(\s*["']?(\/fonts\/[^"')\s]+)["']?\s*\)/g)].map((m) => m[1]);
+}
+
+async function distCssBundle(): Promise<string> {
+  const sheets = await distStylesheets(DIST);
+  expect(sheets.length).toBeGreaterThanOrEqual(1);
+  return sheets.map((s) => s.css).join('\n');
+}
+
 describe('site.css @font-face (live pages)', () => {
   const files = {
     sans: 'uncut-sans-variable.woff2',
@@ -67,5 +80,43 @@ describe('og.css @font-face (OG PNG renderer)', () => {
   test('source keeps a Chrome-valid format("woff2") on both faces', async () => {
     const css = await readFile(OG_CSS, 'utf8');
     assertBothFaces(css, files);
+  });
+});
+
+describe('dist CSS @font-face (shipped bytes; run `bun run build` first)', () => {
+  beforeAll(() => {
+    requireDistBuild(DIST);
+  });
+
+  test('shipped stylesheets keep both faces with src and a Chrome-valid format', async () => {
+    const css = await distCssBundle();
+    assertBothFaces(css, {
+      sans: 'uncut-sans-variable.woff2',
+      mono: 'monaspace-xenon-variable.woff2',
+    });
+  });
+
+  test('every url(/fonts/...) in shipped CSS resolves to a file in dist/fonts/', async () => {
+    const refs = fontUrlRefs(await distCssBundle());
+    expect(refs.length).toBeGreaterThanOrEqual(2);
+    const shippedFonts = new Set(await readdir(join(DIST, 'fonts')));
+    for (const ref of refs) {
+      expect({ ref, shipped: shippedFonts.has(basename(ref)) }).toEqual({ ref, shipped: true });
+    }
+  });
+
+  test('every shell.mjs preload href names a file in dist/fonts/ that a shipped face declares', async () => {
+    const shell = await readFile(SHELL_MJS, 'utf8');
+    const hrefs = [...shell.matchAll(/rel="preload"\s+href="(\/fonts\/[^"]+)"/g)].map((m) => m[1]);
+    expect(hrefs.length).toBeGreaterThanOrEqual(2);
+    const shippedFonts = new Set(await readdir(join(DIST, 'fonts')));
+    const declared = new Set(fontUrlRefs(await distCssBundle()));
+    for (const href of hrefs) {
+      expect({
+        href,
+        shipped: shippedFonts.has(basename(href)),
+        declared: declared.has(href),
+      }).toEqual({ href, shipped: true, declared: true });
+    }
   });
 });
