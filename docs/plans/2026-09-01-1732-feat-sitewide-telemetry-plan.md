@@ -576,3 +576,22 @@ built output and CLI object reads are not evidence.
 | U4   | Page and twin emitted, registered in all three build locations, reachable from the footer, verified over HTTP.                        |
 | U5   | Beacon observed on both cache states of the served response; Web Analytics and the R3 Custom Dashboard populated; retention recorded. |
 | U6   | Runbook alone suffices to re-create every dashboard-side artifact; lint green.                                                        |
+
+---
+
+## Shipped state (2026-09-02)
+
+PR [#322](https://github.com/brettdavies/agentnative-site/pull/322), squash-merged to `dev` as `8e4d3fe`, carries the
+repo-side implementation. Per unit:
+
+| Unit | State                                                                                                                                     |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| U1   | Config half shipped in #322: binding pair, logpush opt-in, guards, `RELEASES.md` catalog records, runbook with the field-selection audit. Buckets created 2026-09-02. Open: catalog enablement (token lacks the R2 Data Catalog permission), staging Logpush job, export audit, sink-layout record. |
+| U2   | Not started. Blocked on U1's gates and the emitter plan's production page-record deploy.                                                   |
+| U3   | Code shipped in #322, including review hardening: the check fails closed while `LAKE_INGEST_PREFIX` is unscoped, and a production listing failure alerts via `telemetry-lake-check-failed`. Open: the forced-stale staging observation (needs the staging lake live). |
+| U4   | Shipped in #322: page, twin, three registrations, footer link, build and e2e tests; browser-verified light and dark. Follow-up commits on the same PR ground the closing note in the code and add the controller/lawful-basis/processor section. |
+| U5   | Not started. Dashboard-only; U4 reaches production with the next production deploy.                                                        |
+| U6   | Runbook created in #322 (`docs/runbooks/sitewide-analytics.md`); accretes as the dashboard-side records land.                              |
+
+The operator steps above are recorded with their commands and reserved slots in the runbook; the freshness check arms
+via the one-line prefix change after the sink layout is recorded.
