@@ -172,7 +172,7 @@ function isUntwinnedSource(pathname: string): boolean {
 }
 
 /** True when the path is one representation: never rewritten to a `.md` twin. */
-export function isSingleRepresentation(pathname: string): boolean {
+function isSingleRepresentation(pathname: string): boolean {
   return isJson(pathname) || isSvg(pathname) || isHashedAsset(pathname) || isUntwinnedSource(pathname);
 }
 

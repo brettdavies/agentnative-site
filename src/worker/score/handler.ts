@@ -279,9 +279,10 @@ const CTA_INSTALL_ANC = CTA.installAnc;
 export async function handleScore(request: Request, env: ScoreEnv): Promise<Response> {
   const telemetry = newTelemetry();
   const start = Date.now();
+  const url = new URL(request.url);
   let response: Response | undefined;
   try {
-    response = withScoreVary(await handleScoreInner(request, env, telemetry), new URL(request.url).pathname);
+    response = withScoreVary(await handleScoreInner(url, request, env, telemetry), url.pathname);
     return response;
   } finally {
     const totalMs = Date.now() - start;
@@ -294,8 +295,7 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
   }
 }
 
-async function handleScoreInner(request: Request, env: ScoreEnv, telemetry: Telemetry): Promise<Response> {
-  const url = new URL(request.url);
+async function handleScoreInner(url: URL, request: Request, env: ScoreEnv, telemetry: Telemetry): Promise<Response> {
   const method = request.method.toUpperCase();
   const preference = preferenceFor(url.pathname, request);
 
