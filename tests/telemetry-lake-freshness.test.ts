@@ -12,13 +12,13 @@ import {
   type LakeFreshnessEnv,
   runLakeFreshnessCheck,
 } from '../src/worker/telemetry/lake-freshness';
+import { fakeKv, type SentMessage } from './helpers/notify-fakes';
 
 const NOW = Date.parse('2026-09-02T06:00:00Z');
 const HOUR_MS = 3_600_000;
 
 type LakeObject = { key: string; uploaded: Date };
 type ListCall = { prefix?: string; cursor?: string };
-type SentMessage = { from: string; to: string; subject: string; text: string };
 
 function lakeBucket(pages: LakeObject[][], listCalls: ListCall[] = []): R2Bucket {
   return {
@@ -30,16 +30,6 @@ function lakeBucket(pages: LakeObject[][], listCalls: ListCall[] = []): R2Bucket
       return truncated ? { objects, truncated, cursor: String(index + 1) } : { objects, truncated: false };
     },
   } as unknown as R2Bucket;
-}
-
-function fakeKv(): KVNamespace {
-  const store = new Map<string, string>();
-  return {
-    get: async (key: string) => store.get(key) ?? null,
-    put: async (key: string, value: string) => {
-      store.set(key, value);
-    },
-  } as unknown as KVNamespace;
 }
 
 function alertEnv(

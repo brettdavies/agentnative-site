@@ -14,9 +14,11 @@ export interface LakeFreshnessEnv extends NotifyEnv {
 
 export const LAKE_FRESHNESS_CRON = '0 6 * * *';
 
+const HOUR_MS = 3_600_000;
+
 // A full day with no delivery is a stall; the daily cron bounds detection
 // at under 48 hours against the live layer's 7-day loss window.
-export const LAKE_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+export const LAKE_STALE_THRESHOLD_MS = 24 * HOUR_MS;
 
 // Freshness must be measured over ingest-written objects only: catalog
 // compaction rewrites old data into new objects with fresh timestamps, so
@@ -27,7 +29,6 @@ export const LAKE_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 export const LAKE_INGEST_PREFIX = '';
 
 const SCOPE = 'telemetry.lake-freshness';
-const HOUR_MS = 3_600_000;
 
 async function newestUploadedMs(bucket: R2Bucket, prefix: string): Promise<number | null> {
   let newest: number | null = null;
