@@ -282,3 +282,51 @@ jobs:
           curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -X POST \
             -H "x-web-rescore-secret: $WEB_RESCORE_SECRET" \
             https://anc.dev/api/web-rescore
+
+  production-smoke:
+    name: smoke production surface
+    needs: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Shares the deploy's group so a second merge to main cannot swap the
+    # deployment out from under a running smoke: the next production deploy
+    # queues until this job releases the group.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    # Burn-in: a red smoke marks this job failed while the run (and the
+    # deploy) stays green. The flip to blocking is deleting this one line;
+    # its criterion, the red-run policy, the canned diagnoses, and the
+    # job-level verification habit live in
+    # docs/runbooks/live-surface-sweep.md. Run-level green says nothing
+    # about this job — check its own conclusion via `gh run view --json jobs`.
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Settle the surface before hard assertions. Edge propagation lags
+      # `wrangler deploy`, and a stale isolate 404s the new route; curl
+      # does not retry 4xx without --retry-all-errors. `|| true` keeps a
+      # never-settling route out of this step's pass/fail decision — the
+      # smokes below report that state.
+      - name: Await route propagation
+        run: |
+          curl -sSf --retry 5 --retry-delay 10 --retry-all-errors -o /dev/null \
+            https://anc.dev/.well-known/mcp/server-card.json || true
+
+      # Core checks only (1–7): the symmetry and live-audit gates each
+      # spend a unit of the per-IP audit budget and minutes of wall clock,
+      # which belongs to the release preflight/postflight, not to every
+      # production deploy.
+      - name: Smoke live MCP surface
+        run: scripts/release/mcp-smoke.sh --core-only https://anc.dev
+
+      # Registry fast-path only. anc.dev is public (no Access headers),
+      # and a curated slug answers before the Turnstile gate, so the
+      # script's default token works unchanged against production.
+      - name: Smoke /api/score (registry-fast-path)
+        run: scripts/smoke-api-score.sh https://anc.dev
