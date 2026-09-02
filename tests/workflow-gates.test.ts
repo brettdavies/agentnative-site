@@ -8,14 +8,7 @@
 // docs/runbooks/live-surface-sweep.md.
 
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-const REPO_ROOT = new URL('..', import.meta.url).pathname;
-
-function workflowText(file: string): string {
-  return readFileSync(join(REPO_ROOT, '.github/workflows', file), 'utf8');
-}
+import { workflowText } from './helpers/workflows';
 
 /** Job ids: the two-space-indented keys after the top-level `jobs:` line. */
 function jobIds(workflow: string): string[] {
