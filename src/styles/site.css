@@ -469,7 +469,7 @@ main .anchor-icon {
   padding: 0 0.5rem 0 0.4rem;
   border: 0;
   background: transparent;
-  color: var(--fg);
+  color: var(--fg-body);
   font: inherit;
   text-align: left;
   cursor: pointer;
