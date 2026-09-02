@@ -119,6 +119,14 @@ runs. Names a package manager (`brew`, `cargo-binstall`, `bun`, `pip`, `uv`, `np
 package or URL, and the binary the post-install check verifies on `PATH`. The Durable Object only ever sees an install
 spec, never the raw user input.
 
+### Bounce
+
+A live-scoring outcome where the request ends without a scorecard and the user gets an explanation panel instead: the
+input never resolved to an installable tool, the resolved install produced no binary, or the install itself failed. A
+bounce is a first-class result, not an error page; each bounce class carries its own headline, guidance, and, when there
+is failure output worth surfacing, the truncated stderr so the user can see why. Distinct from a scoring error (the
+pipeline broke) and from a low score (the pipeline finished).
+
 ## Web audit
 
 ### Web audit
