@@ -32,9 +32,11 @@ The smoke becomes blocking after **5 consecutive green runs** of the `production
   environment=production`.
 - Skipped runs (any deploy run where the production job did not run) and cancelled runs count for nothing: they prove
   nothing about the gate.
-- The flip is a one-line deletion: remove `continue-on-error: true` from the `production-smoke` job in
-  `.github/workflows/deploy.yml`. Before flipping, re-check every trigger path that runs the job (push to `main`,
-  `workflow_dispatch` with `environment=production`), because the deletion changes semantics for all of them.
+- The flip is two edits in one commit: remove `continue-on-error: true` from the `production-smoke` job in
+  `.github/workflows/deploy.yml`, and invert the matching assertion in `tests/workflow-gates.test.ts` so it requires the
+  line's absence (the guard currently requires its presence, so the deletion alone reds CI). Before flipping, re-check
+  every trigger path that runs the job (push to `main`, `workflow_dispatch` with `environment=production`), because the
+  deletion changes semantics for all of them.
 
 ### Red-run policy
 
@@ -75,8 +77,9 @@ silently stalls the flip criterion.
 
 ### Terminal step (deferred)
 
-The contract ends with the flip-to-blocking edit: delete `continue-on-error: true` from the `production-smoke` job once
-the flip criterion is met. That edit is deliberately deferred work, not part of landing the gate.
+The contract ends with the flip-to-blocking commit: delete `continue-on-error: true` from the `production-smoke` job and
+invert the `tests/workflow-gates.test.ts` assertion that pins it, once the flip criterion is met. That commit is
+deliberately deferred work, not part of landing the gate.
 
 ## Scheduling reality
 
