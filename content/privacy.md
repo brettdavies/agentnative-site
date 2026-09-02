@@ -48,6 +48,17 @@ Pages served to browsers load the Cloudflare Web Analytics beacon, which measure
 beacon is cookieless. Through it Cloudflare collects the page URL, performance timings, and the browser type. It sets no
 cookies and does no cross-site tracking.
 
+## Who is responsible
+
+The site is operated by Brett Davies, who is the data controller for the processing described on this page; the
+[site repository](https://github.com/brettdavies/agentnative-site) is the contact channel. The lawful basis is
+legitimate interest: operating the site and measuring, in aggregate, how it is used. Cloudflare processes all traffic as
+the hosting platform under its standard data processing addendum, with its EU-approved safeguards covering international
+transfers.
+
+Requests that require identifying you, such as access or erasure, cannot be honored: nothing the site retains identifies
+you, so there is no record to look up.
+
 ## What gets published
 
 Any statistic the site publishes is a share or a percentage, never a raw count.
