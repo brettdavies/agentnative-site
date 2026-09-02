@@ -84,22 +84,25 @@ describe('og.css @font-face (OG PNG renderer)', () => {
 });
 
 describe('dist CSS @font-face (shipped bytes; run `bun run build` first)', () => {
-  beforeAll(() => {
+  let distCss: string;
+  let shippedFonts: Set<string>;
+
+  beforeAll(async () => {
     requireDistBuild(DIST);
+    distCss = await distCssBundle();
+    shippedFonts = new Set(await readdir(join(DIST, 'fonts')));
   });
 
-  test('shipped stylesheets keep both faces with src and a Chrome-valid format', async () => {
-    const css = await distCssBundle();
-    assertBothFaces(css, {
+  test('shipped stylesheets keep both faces with src and a Chrome-valid format', () => {
+    assertBothFaces(distCss, {
       sans: 'uncut-sans-variable.woff2',
       mono: 'monaspace-xenon-variable.woff2',
     });
   });
 
-  test('every url(/fonts/...) in shipped CSS resolves to a file in dist/fonts/', async () => {
-    const refs = fontUrlRefs(await distCssBundle());
+  test('every url(/fonts/...) in shipped CSS resolves to a file in dist/fonts/', () => {
+    const refs = fontUrlRefs(distCss);
     expect(refs.length).toBeGreaterThanOrEqual(2);
-    const shippedFonts = new Set(await readdir(join(DIST, 'fonts')));
     for (const ref of refs) {
       expect({ ref, shipped: shippedFonts.has(basename(ref)) }).toEqual({ ref, shipped: true });
     }
@@ -109,8 +112,7 @@ describe('dist CSS @font-face (shipped bytes; run `bun run build` first)', () =>
     const shell = await readFile(SHELL_MJS, 'utf8');
     const hrefs = [...shell.matchAll(/rel="preload"\s+href="(\/fonts\/[^"]+)"/g)].map((m) => m[1]);
     expect(hrefs.length).toBeGreaterThanOrEqual(2);
-    const shippedFonts = new Set(await readdir(join(DIST, 'fonts')));
-    const declared = new Set(fontUrlRefs(await distCssBundle()));
+    const declared = new Set(fontUrlRefs(distCss));
     for (const href of hrefs) {
       expect({
         href,

@@ -13,21 +13,11 @@ export function requireDistBuild(distDir: string): void {
   }
 }
 
-async function walk(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await walk(full)));
-    } else if (entry.isFile()) {
-      files.push(full);
-    }
-  }
-  return files;
-}
-
 export async function distStylesheets(distDir: string): Promise<{ file: string; css: string }[]> {
-  const files = (await walk(distDir)).filter((f) => f.endsWith('.css')).sort();
+  const entries = await readdir(distDir, { recursive: true, withFileTypes: true });
+  const files = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.css'))
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort();
   return Promise.all(files.map(async (file) => ({ file: relative(distDir, file), css: await readFile(file, 'utf8') })));
 }
