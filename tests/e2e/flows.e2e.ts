@@ -83,6 +83,21 @@ test.describe('cold HN land → browse principles → theme dark → reload stil
   });
 });
 
+test.describe('privacy posture page', () => {
+  test('/privacy renders the posture article', async ({ page }) => {
+    await page.goto('/privacy');
+    await expect(page.locator('h1')).toContainText('Privacy');
+    await expect(page.locator('article.doc')).toBeVisible();
+  });
+
+  test('/privacy.md serves the markdown twin', async ({ request }) => {
+    const res = await request.get('/privacy.md');
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
+    expect(await res.text()).toContain('# Privacy');
+  });
+});
+
 test.describe('keyboard + a11y', () => {
   test('skip-link is the first focusable and jumps to #main', async ({ page }) => {
     await page.goto('/');

@@ -270,6 +270,34 @@ bun x wrangler r2 bucket lifecycle list anc-score-cache-staging
 Both buckets were configured on 2026-05-19. The `tests/wrangler-config.test.ts` drift-guard pins the exact literal
 command above.
 
+#### R2 telemetry-lake catalog
+
+Configure once per bucket. The lake stores raw telemetry events indefinitely, so NO object-expiry lifecycle rules are
+configured on either lake bucket — permanence is the point, and `anc-score-cache`'s prefix-scoped expiry rules never
+apply here (dedicated buckets).
+
+```bash
+bun x wrangler r2 bucket create anc-telemetry-lake
+bun x wrangler r2 bucket create anc-telemetry-lake-staging
+bun x wrangler r2 bucket catalog enable anc-telemetry-lake
+bun x wrangler r2 bucket catalog enable anc-telemetry-lake-staging
+bun x wrangler r2 bucket catalog compaction enable anc-telemetry-lake
+bun x wrangler r2 bucket catalog compaction enable anc-telemetry-lake-staging
+bun x wrangler r2 bucket catalog snapshot-expiration enable anc-telemetry-lake
+bun x wrangler r2 bucket catalog snapshot-expiration enable anc-telemetry-lake-staging
+```
+
+Verify:
+
+```bash
+bun x wrangler r2 bucket catalog get anc-telemetry-lake
+bun x wrangler r2 bucket catalog get anc-telemetry-lake-staging
+```
+
+Both buckets were created on 2026-09-02; the catalog commands additionally require the R2 Data Catalog permission on
+the API token (state: `docs/runbooks/sitewide-analytics.md` § Lake pipeline). The `tests/wrangler-config.test.ts`
+drift-guard pins the exact literal catalog-enable commands above.
+
 ## Live-scoring (v3) release procedure
 
 The live-scoring stack adds a Worker route (`/api/score`), a `Sandbox` Durable Object, a Container image, two R2

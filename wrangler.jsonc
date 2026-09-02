@@ -46,6 +46,13 @@
     "enabled": true,
     "head_sampling_rate": 1.0
   },
+  // Script-level Logpush opt-in. Without it the workers-trace-events
+  // dataset receives nothing from this script and the telemetry-lake
+  // export chain (Logpush → Pipelines → Iceberg on R2) has no input, with
+  // no error anywhere. Inheritable key — env.staging restates it
+  // explicitly per this repo's convention (see RELEASES-RATIONALE.md §
+  // Wrangler env inheritance traps).
+  "logpush": true,
   // Live-scoring stateful bindings: DO + Container + R2 + rate-limit.
   // The migrations entry below is a one-way gate: `new_sqlite_classes`
   // MUST be used (not `new_classes`) so the DO is created with SQLite-
@@ -87,14 +94,27 @@
     {
       "binding": "SCORE_CACHE",
       "bucket_name": "anc-score-cache"
+    },
+    // TELEMETRY_LAKE — permanent Iceberg telemetry lake (the Logpush →
+    // Pipelines sink target). Dedicated bucket pair so the lake's
+    // lifecycle and credentials stay isolated from anc-score-cache, whose
+    // prefix-scoped expiry rules must never touch lake data. Catalog +
+    // Logpush setup: RELEASES.md § R2 telemetry-lake catalog and
+    // docs/runbooks/sitewide-analytics.md.
+    {
+      "binding": "TELEMETRY_LAKE",
+      "bucket_name": "anc-telemetry-lake"
     }
   ],
-  // Weekly web-board rescore. The scheduled() handler starts the
-  // web-rescore Workflow through a single-flight helper, so a tick that
-  // lands during an in-flight batch coalesces instead of running a second
-  // one. Freshness between ticks comes from the post-deploy hook
-  // (POST /api/web-rescore) and on-demand audits.
-  "triggers": { "crons": ["0 9 * * SUN"] },
+  // Two schedules, dispatched in scheduled() on the controller's cron
+  // string. Weekly: the web-board rescore, started through a single-flight
+  // helper so a tick that lands during an in-flight batch coalesces
+  // instead of running a second one (freshness between ticks comes from
+  // the post-deploy hook POST /api/web-rescore and on-demand audits).
+  // Daily at 06:00 UTC: the telemetry-lake freshness check, which lists
+  // the lake bucket and alerts through the KV-deduped email path when the
+  // newest ingest-written object is older than a day.
+  "triggers": { "crons": ["0 9 * * SUN", "0 6 * * *"] },
   // Web-rescore Workflow: selects the stalest seeded domains in bounded
   // batches (one audit per step), rebuilds the board after each batch, and
   // cycles until none remain, so the seed list is dynamic and unbounded per
@@ -239,7 +259,12 @@
   // Procedure and hazards: docs/runbooks/mcp-operator.md § Kill switches.
   "vars": {
     "TURNSTILE_SITEKEY": "0x4AAAAAADQFMBoVm56-OPuQ",
-    "MCP_LEGACY_ENABLED": "true"
+    "MCP_LEGACY_ENABLED": "true",
+    // TELEMETRY_ENVIRONMENT names the deploy environment for the daily
+    // lake-freshness check: the stall alert emails the operator only when
+    // it reads "production"; every other value is log-only. Plain var,
+    // not a secret — the value is just the environment's name.
+    "TELEMETRY_ENVIRONMENT": "production"
   },
   // Production (top-level): anc.dev + www.anc.dev custom domains, no
   // .workers.dev URL. Deployed via `wrangler deploy` (no --env flag) on
@@ -267,6 +292,10 @@
       // `agentnative-site-sandbox`.
       "name": "agentnative-site-staging",
       "workers_dev": true,
+      // Explicit restatement: `logpush` is an inheritable key, and without
+      // the opt-in the workers-trace-events dataset receives nothing from
+      // the staging script — the lake export chain goes dark silently.
+      "logpush": true,
       // Staging is the skip-Worker proof surface (KTD6). `cache` / `exports`
       // inherit like `routes`; state the map explicitly so a top-level edit
       // cannot silently leave staging uncached.
@@ -284,11 +313,12 @@
       // inheritance traps.
       "routes": [],
       // Explicit override: `triggers` is an inheritable key, so staging
-      // states its cron deliberately rather than silently inheriting the
-      // top-level one. Staging runs the same weekly rescore so its board
-      // exercises the exact production path during soak. See
+      // states its crons deliberately rather than silently inheriting the
+      // top-level ones. Staging runs the same weekly rescore so its board
+      // exercises the exact production path during soak, and the same
+      // daily lake-freshness check, which is log-only off production. See
       // RELEASES-RATIONALE.md § Wrangler env inheritance traps.
-      "triggers": { "crons": ["0 9 * * SUN"] },
+      "triggers": { "crons": ["0 9 * * SUN", "0 6 * * *"] },
       // Workflow name is account-scoped, so staging gets its own; the
       // binding + class stay identical to production.
       "workflows": [
@@ -346,6 +376,10 @@
         {
           "binding": "SCORE_CACHE",
           "bucket_name": "anc-score-cache-staging"
+        },
+        {
+          "binding": "TELEMETRY_LAKE",
+          "bucket_name": "anc-telemetry-lake-staging"
         }
       ],
       "ratelimits": [
@@ -436,7 +470,12 @@
         // in Workers Logs) is always on for staging. Production stays at
         // summary-only; flip transiently with `wrangler deploy --var` per
         // docs/runbooks/web-audit-operations.md § Debug logging.
-        "WEB_AUDIT_DEBUG": "true"
+        "WEB_AUDIT_DEBUG": "true",
+        // TELEMETRY_ENVIRONMENT: any value other than "production" makes
+        // the daily lake-freshness check log-only — the staging lake is
+        // legitimately quiet most days, and routine staging alerts would
+        // train the operator to ignore the production key.
+        "TELEMETRY_ENVIRONMENT": "staging"
       }
     }
   }

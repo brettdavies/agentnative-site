@@ -63,6 +63,7 @@ import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
 import { SPEC_VERSION } from './spec-version.gen';
+import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
 // outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
@@ -159,6 +160,13 @@ export interface Env {
   // don't exercise the rescore path can stub a minimal env.
   WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
+  // Telemetry-lake freshness bindings. TELEMETRY_LAKE is the lake bucket
+  // the daily cron lists for stall detection; TELEMETRY_ENVIRONMENT names
+  // the deploy environment so the stall alert emails only from production
+  // (everything else is log-only). Optional so tests that don't exercise
+  // the cron can stub a minimal env.
+  TELEMETRY_LAKE?: R2Bucket;
+  TELEMETRY_ENVIRONMENT?: string;
 }
 
 /**
@@ -985,15 +993,31 @@ function loopbackCachedFetch(ctx: ExecutionContext, env: Env, request: Request):
   return new Cached(ctx, env).fetch(request);
 }
 
+// Weekly web-rescore schedule; must match the string wrangler.jsonc
+// deploys or the tick falls through to the unrecognized-cron branch.
+const WEB_RESCORE_CRON = '0 9 * * SUN';
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
   },
 
-  // Weekly board rescore. The cron and the deploy hook coalesce through
-  // the same single-flight helper, so a cron tick during an in-flight
-  // batch no-ops instead of double-spending the audit budget.
-  async scheduled(_controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    await startWebRescore(env as WebRescoreTriggerEnv);
+  // Cron dispatch on the controller's cron string; each schedule is
+  // declared per-env in wrangler.jsonc.
+  async scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    switch (controller.cron) {
+      // Weekly board rescore. The cron and the deploy hook coalesce
+      // through the same single-flight helper, so a cron tick during an
+      // in-flight batch no-ops instead of double-spending the audit
+      // budget.
+      case WEB_RESCORE_CRON:
+        await startWebRescore(env as WebRescoreTriggerEnv);
+        return;
+      case LAKE_FRESHNESS_CRON:
+        await runLakeFreshnessCheck(env as LakeFreshnessEnv);
+        return;
+      default:
+        console.log(JSON.stringify({ scope: 'scheduled', error: 'unrecognized_cron', cron: controller.cron }));
+    }
   },
 } satisfies ExportedHandler<Env>;

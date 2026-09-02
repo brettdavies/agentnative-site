@@ -8,6 +8,7 @@ import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
 import type { AuditEvent } from '../src/worker/audit-web/engine';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { notifyFailure } from '../src/worker/notify';
+import { fakeKv, type SentMessage } from './helpers/notify-fakes';
 
 async function* eventsOf(events: AuditEvent[]): AsyncGenerator<AuditEvent> {
   for (const e of events) yield e;
@@ -117,18 +118,6 @@ describe('instrumentAuditEvents', () => {
     }
   });
 });
-
-type SentMessage = { from: string; to: string; subject: string; text: string };
-
-function fakeKv(): KVNamespace {
-  const store = new Map<string, string>();
-  return {
-    get: async (key: string) => store.get(key) ?? null,
-    put: async (key: string, value: string) => {
-      store.set(key, value);
-    },
-  } as unknown as KVNamespace;
-}
 
 describe('notifyFailure', () => {
   const alert = { key: 'test-alert', subject: 's', text: 't' };

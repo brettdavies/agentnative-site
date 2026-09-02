@@ -151,7 +151,7 @@ describe('scheduled()', () => {
     const createdIds: string[] = [];
     const env = makeEnv({ createdIds }) as unknown as Env;
     await worker.scheduled?.(
-      { scheduledTime: Date.now(), cron: '0 6 * * 1', noRetry: () => {} } as ScheduledController,
+      { scheduledTime: Date.now(), cron: '0 9 * * SUN', noRetry: () => {} } as ScheduledController,
       env,
       {} as ExecutionContext,
     );
