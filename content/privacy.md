@@ -52,5 +52,7 @@ cookies and does no cross-site tracking.
 
 Any statistic the site publishes is a share or a percentage, never a raw count.
 
-The posture on this page is verifiable against requirements R5, R6, and R10 of the telemetry plan in the site's
-[public repository](https://github.com/brettdavies/agentnative-site).
+This page tracks what the site actually does: when collection changes, the page changes with it, without intentional
+lag, though the posture itself may evolve. It is verifiable against the telemetry code in the site's
+[public repository](https://github.com/brettdavies/agentnative-site/tree/main/src/worker); every record the site writes
+flows through that code.
