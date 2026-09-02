@@ -2975,7 +2975,7 @@ describe('emitHomepage — index.md twin frontmatter', () => {
 
 describe('emitSubPages — twin frontmatter', () => {
   // One emission serves all three tests: the subpage pipeline renders
-  // twelve markdown pages through Shiki per run.
+  // thirteen markdown pages through Shiki per run.
   const distDir = join(tmpdir(), `subpages-fm-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   let subPageData: Array<{ name: string; source: string; title: string }> = [];
 
@@ -3003,6 +3003,20 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(auditHtml).toContain('data-surface-audit-seg');
     expect(auditHtml).toContain('id="audit-s-cli" checked');
     expect(auditMd).not.toContain('data-surface-audit-seg');
+  });
+
+  test('privacy twin opens with frontmatter derived from its source; HTML stays clean', async () => {
+    const source = await readFile(join(CONTENT_DIR, 'privacy.md'), 'utf8');
+    const privacyMd = await readFile(join(distDir, 'privacy.md'), 'utf8');
+    const expectedFm = renderFrontmatter({
+      title: extractTitle(source),
+      description: extractDescription(source),
+      url: 'https://anc.dev/privacy',
+    });
+    expect(privacyMd.startsWith(expectedFm)).toBe(true);
+    const privacyHtml = await readFile(join(distDir, 'privacy.html'), 'utf8');
+    expect(privacyHtml).not.toContain('---\ntitle:');
+    expect(privacyHtml).not.toMatch(/^url: /m);
   });
 
   test('web-audit landing emits audit Probe A with Website checked', async () => {

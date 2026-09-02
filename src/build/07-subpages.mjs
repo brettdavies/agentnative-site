@@ -115,6 +115,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
     { name: 'changelog', path: join(contentDir, 'changelog.md') },
     { name: 'contribute', path: join(contentDir, 'contribute.md') },
     { name: 'methodology', path: join(contentDir, 'methodology.md') },
+    { name: 'privacy', path: join(contentDir, 'privacy.md') },
     { name: 'scorecard-schema', path: join(contentDir, 'scorecard-schema.md') },
     { name: 'web-scorecard-schema', path: join(contentDir, 'web-scorecard-schema.md') },
     // /mcp-skill/ is the client-facing skill page advertised by the
