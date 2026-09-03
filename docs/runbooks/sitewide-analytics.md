@@ -55,7 +55,7 @@ Not yet created; this subsection records the job's full options object verbatim 
 The allowlist-vs-dataset-schema audit that must complete before the first job is enabled. Audited 2026-09-02 against the
 `workers_trace_events` dataset reference (Cloudflare docs, page dated 2026-07-08).
 
-The dataset's complete field list: `CPUTimeMs` (int), `DispatchNamespace` (string), `Entrypoint` (string), `Event`
+The complete field list of the dataset: `CPUTimeMs` (int), `DispatchNamespace` (string), `Entrypoint` (string), `Event`
 (object), `EventTimestampMs` (int), `EventType` (string), `Exceptions` (array[object]), `Logs` (array[object]),
 `Outcome` (string), `ScriptName` (string), `ScriptTags` (array[string]), `ScriptVersion` (object), `WallTimeMs` (int).
 
@@ -131,8 +131,8 @@ one per request) carry the request envelope, and on both Workers the index lists
 `$workers.event.request.headers.cf-connecting-ip`, `$workers.event.request.headers.x-real-ip`,
 `$workers.event.request.headers.x-forwarded-for`, `$workers.event.request.headers.user-agent`, and (on production)
 `$workers.event.request.headers.sec-ch-ua*`, together with `$workers.event.request.cf.latitude`, `.longitude`, `.city`,
-and `.postalCode`, all populated. So the live layer holds the client IP and raw User-Agent for seven days on every
-invocation record, outside anything this repo emits. The Logpush allowlist excludes the `Event` envelope that carries
+and `.postalCode`, all populated. The live layer therefore holds the client IP and raw User-Agent for seven days on
+every invocation record, outside anything this repo emits. The Logpush allowlist excludes the `Event` envelope that carries
 them, which is what keeps them out of the lake; a session key derived from the address must not be joined to an
 invocation record by request id, because that record already holds the address it was derived to avoid.
 
