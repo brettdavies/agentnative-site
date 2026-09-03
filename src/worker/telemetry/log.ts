@@ -6,6 +6,7 @@
 // envelope, the closed scope vocabulary, the request-scoped ambient
 // fields, the verbosity tier, and the console level all live here.
 
+import { msBucket, truncateClientName } from '../mcp/telemetry';
 import { getRequestContext } from './request-context';
 
 /** Closed vocabulary of `scope` values. Adding a scope means adding it here. */
@@ -71,10 +72,22 @@ export function setLogSink(next: LogSink | null): void {
   sink = next ?? consoleSink;
 }
 
-function definedFields(fields: LogFields): Record<string, unknown> {
+// Client-supplied strings that reach the log on paths ahead of the rate
+// limiter. Capping them here rather than at each call site keeps a flood
+// from amplifying log volume with unbounded values.
+const TRUNCATED_FIELDS: ReadonlySet<string> = new Set(['client_name', 'method', 'name']);
+
+function cappedFields(fields: LogFields): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) out[key] = value;
+    if (value === undefined) continue;
+    if (key === 'duration_ms' && typeof value === 'number') {
+      out.ms_bucket = msBucket(value);
+    } else if (TRUNCATED_FIELDS.has(key) && (typeof value === 'string' || value === null)) {
+      out[key] = truncateClientName(value);
+    } else {
+      out[key] = value;
+    }
   }
   return out;
 }
@@ -87,9 +100,9 @@ export function emitLog(discriminator: LogDiscriminator, fields: LogFields, opti
   try {
     if (options.tier === 'debug' && options.debug !== true) return;
     const record: LogRecord = {
-      ...definedFields(discriminator),
+      ...cappedFields(discriminator),
       ...getRequestContext(),
-      ...definedFields(fields),
+      ...cappedFields(fields),
     };
     sink(options.level ?? 'log', record);
   } catch {

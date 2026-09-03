@@ -112,3 +112,58 @@ describe('emitLog', () => {
     expect(seen[0].record.errors).toEqual(errors);
   });
 });
+
+describe('emitLog field caps', () => {
+  const long = 'x'.repeat(200);
+
+  test('client_name, method, and name are each truncated at 64 at the boundary', () => {
+    const seen = captureSink();
+    emitLog({ event: 'mcp.request' }, { client_name: long, method: long, name: long });
+    for (const key of ['client_name', 'method', 'name'] as const) {
+      const value = seen[0].record[key];
+      expect(typeof value).toBe('string');
+      expect((value as string).length).toBe(64);
+      expect((value as string).endsWith('…')).toBe(true);
+    }
+  });
+
+  test('a raw millisecond duration emerges bucketed as ms_bucket at the existing boundaries', () => {
+    const seen = captureSink();
+    for (const ms of [0, 49, 50, 199, 200, 999, 1000, 5000]) {
+      emitLog({ event: 'mcp.request' }, { duration_ms: ms });
+    }
+    expect(seen.map((s) => s.record.ms_bucket)).toEqual([
+      '<50',
+      '<50',
+      '50-200',
+      '50-200',
+      '200-1000',
+      '200-1000',
+      '>1000',
+      '>1000',
+    ]);
+    expect(seen.every((s) => !('duration_ms' in s.record))).toBe(true);
+  });
+
+  test('an already-truncated value is not double-truncated', () => {
+    const seen = captureSink();
+    emitLog({ event: 'mcp.request' }, { client_name: long });
+    const once = seen[0].record.client_name as string;
+    emitLog({ event: 'mcp.request' }, { client_name: once });
+    expect(seen[1].record.client_name).toBe(once);
+  });
+
+  test('null and empty capped values resolve the way the mcp.request line always has', () => {
+    const seen = captureSink();
+    emitLog({ event: 'mcp.request' }, { client_name: null, method: '', name: 'tools/list' });
+    expect(seen[0].record).toEqual({ event: 'mcp.request', client_name: null, method: null, name: 'tools/list' });
+  });
+
+  test('a field not on the named cap list passes through untouched', () => {
+    const seen = captureSink();
+    emitLog({ scope: 'web-audit.run' }, { target: long, elapsed_ms: 5000, checks: { pass: 1 } });
+    expect(seen[0].record.target).toBe(long);
+    expect(seen[0].record.elapsed_ms).toBe(5000);
+    expect(seen[0].record.checks).toEqual({ pass: 1 });
+  });
+});
