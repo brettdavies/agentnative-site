@@ -12,6 +12,11 @@ import { classifyClient } from './client-class';
 import { emitLog, type LogFields } from './log';
 import { deriveUserAgent } from './user-agent';
 
+// The path is client-supplied free text on an unauthenticated route, so it
+// is capped for the same flood-amplification reason the emitter caps
+// client-supplied names.
+const MAX_PATH_LENGTH = 256;
+
 export type ServedFormat = 'html' | 'markdown';
 
 function servedFormat(response: Response): ServedFormat | null {
@@ -35,12 +40,18 @@ export function pageRequestFields(original: Request, response: Response, duratio
 
   const { clientClass, agentName } = classifyClient(original.headers);
   const browser = clientClass === 'browser' ? deriveUserAgent(original.headers) : null;
+  const pathTruncated = pathname.length > MAX_PATH_LENGTH;
   return {
-    path: pathname,
+    path: pathTruncated ? pathname.slice(0, MAX_PATH_LENGTH) : pathname,
+    path_truncated: pathTruncated ? true : undefined,
     method: original.method,
     status: response.status,
     format,
     cache_status: response.headers.get('cf-cache-status'),
+    // Two cache layers report HIT: a Static Assets hit comes back through
+    // the Worker with no Age header, and only a Workers Caching hit that
+    // skipped the Worker carries Age.
+    cache_age_present: response.headers.has('age'),
     client_class: clientClass,
     agent_name: agentName,
     browser_family: browser?.brand,

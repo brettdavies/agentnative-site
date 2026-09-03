@@ -46,7 +46,11 @@ export type LogEvent = 'mcp.request';
 
 export type LogDiscriminator = { scope: LogScope; event?: never } | { event: LogEvent; scope?: never };
 
-export type LogFields = Readonly<Record<string, unknown>>;
+/**
+ * Call-site fields. `scope` and `event` are excluded so a call-site key can
+ * never replace the typed discriminator.
+ */
+export type LogFields = Readonly<Record<string, unknown>> & { readonly scope?: never; readonly event?: never };
 
 export type LogRecord = Readonly<Record<string, unknown>>;
 
@@ -78,7 +82,7 @@ export function setLogSink(next: LogSink | null): void {
 // from amplifying log volume with unbounded values.
 const TRUNCATED_FIELDS: ReadonlySet<string> = new Set(['client_name', 'method', 'name']);
 
-function cappedFields(fields: LogFields): Record<string, unknown> {
+function cappedFields(fields: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;

@@ -6,8 +6,15 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-/** Fields the emitter merges into every record emitted inside the request. */
-export type AmbientFields = Readonly<Record<string, string | number | boolean | null>>;
+/**
+ * Fields the emitter merges into every record emitted inside the request.
+ * `scope` and `event` are excluded so an ambient key can never replace the
+ * typed discriminator.
+ */
+export type AmbientFields = Readonly<Record<string, string | number | boolean | null>> & {
+  readonly scope?: never;
+  readonly event?: never;
+};
 
 const storage = new AsyncLocalStorage<AmbientFields>();
 

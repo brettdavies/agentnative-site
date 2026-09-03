@@ -70,6 +70,21 @@ describe('emitLog', () => {
     expect(seen.length).toBe(1);
   });
 
+  test('a fields object carrying scope fails typecheck; bypassed, the call-site key wins at runtime', () => {
+    const seen = captureSink();
+    // @ts-expect-error a fields object may not carry `scope`
+    emitLog({ scope: 'cache.get' }, { scope: 'cache.put', key: 'k' });
+    expect(seen.length).toBe(1);
+    expect(seen[0].record.scope).toBe('cache.put');
+  });
+
+  test('a fields object carrying event fails typecheck; bypassed, both keys land on the record', () => {
+    const seen = captureSink();
+    // @ts-expect-error a fields object may not carry `event`
+    emitLog({ scope: 'cache.get' }, { event: 'mcp.request', key: 'k' });
+    expect(seen[0].record).toEqual({ scope: 'cache.get', event: 'mcp.request', key: 'k' });
+  });
+
   test('a field whose value is undefined is omitted rather than emitted as null', () => {
     const seen = captureSink();
     emitLog({ scope: 'web-seed' }, { present: null, absent: undefined, count: 0 });

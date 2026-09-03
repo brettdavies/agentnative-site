@@ -59,6 +59,7 @@ describe('instrumentAuditEvents', () => {
       expect(summaries[0].surface).toBe('stream');
       expect(summaries[0].checks).toEqual({ pass: 1 });
       expect(lines.some((l) => l.scope === 'web-audit.check')).toBe(false);
+      expect(lines.some((l) => l.scope === 'web-audit.discovery')).toBe(false);
     } finally {
       logs.restore();
     }

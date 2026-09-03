@@ -17,8 +17,15 @@ const SAFARI_UA =
 const REQUESTS_UA = 'python-requests/2.31.0';
 const GPTBOT_UA =
   'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)';
+const OBSCURE_BROWSER_UA = 'Mozilla/5.0 (compatible; ObscureBrowser/1.0) AppleWebKit/605.1';
 
-type Canned = { status?: number; contentType?: string; cacheStatus?: string };
+const BROWSER_FIELDS = ['browser_family', 'browser_version', 'engine', 'engine_version', 'os_family'] as const;
+
+// The bucket depends on wall-clock time between two Date.now() calls, so a
+// record is checked for membership rather than pinned to one bucket.
+const MS_BUCKETS: readonly string[] = ['<50', '50-200', '200-1000', '>1000'];
+
+type Canned = { status?: number; contentType?: string; cacheStatus?: string; age?: string };
 
 function cachedCtx(canned: Canned = {}, seen: Request[] = []): ExecutionContext {
   return {
@@ -28,6 +35,7 @@ function cachedCtx(canned: Canned = {}, seen: Request[] = []): ExecutionContext 
           seen.push(request);
           const headers = new Headers({ 'content-type': canned.contentType ?? 'text/html; charset=utf-8' });
           if (canned.cacheStatus) headers.set('cf-cache-status', canned.cacheStatus);
+          if (canned.age) headers.set('age', canned.age);
           return new Response('inner', { status: canned.status ?? 200, headers });
         },
       },
@@ -73,7 +81,8 @@ describe('page.request at the gateway', () => {
       assetsEnv('x'),
       cachedCtx(),
     );
-    const [record] = pageRecords(logs);
+    const [{ ms_bucket, ...record }] = pageRecords(logs);
+    expect(MS_BUCKETS).toContain(String(ms_bucket));
     expect(record).toEqual({
       scope: 'page.request',
       path: '/about',
@@ -81,6 +90,7 @@ describe('page.request at the gateway', () => {
       status: 200,
       format: 'html',
       cache_status: null,
+      cache_age_present: false,
       client_class: 'browser',
       agent_name: null,
       browser_family: 'Chrome',
@@ -88,7 +98,6 @@ describe('page.request at the gateway', () => {
       engine: 'Blink',
       engine_version: '124.0',
       os_family: 'Windows',
-      ms_bucket: '<50',
     });
   });
 
@@ -102,8 +111,23 @@ describe('page.request at the gateway', () => {
     const [record] = pageRecords(logs);
     expect(record.client_class).toBe('ai-crawler');
     expect(record.agent_name).toBe('GPTBot');
-    for (const key of ['browser_family', 'browser_version', 'engine', 'engine_version', 'os_family']) {
+    for (const key of BROWSER_FIELDS) {
       expect(key in record).toBe(false);
+    }
+  });
+
+  test('a browser outside the brand tables records every browser field present as null', async () => {
+    logs = captureLogs();
+    await worker.fetch(
+      request('https://anc.dev/about', { ua: OBSCURE_BROWSER_UA, accept: 'text/html' }),
+      assetsEnv('x'),
+      cachedCtx(),
+    );
+    const [record] = pageRecords(logs);
+    expect(record.client_class).toBe('browser');
+    for (const key of BROWSER_FIELDS) {
+      expect(key in record).toBe(true);
+      expect(record[key]).toBeNull();
     }
   });
 
@@ -138,11 +162,12 @@ describe('page.request at the gateway', () => {
     await worker.fetch(
       request('https://anc.dev/', { ua: CHROME_UA, accept: 'text/html' }),
       assetsEnv('x'),
-      cachedCtx({ cacheStatus: 'HIT' }),
+      cachedCtx({ cacheStatus: 'HIT', age: '12' }),
     );
     const records = pageRecords(logs);
     expect(records).toHaveLength(1);
     expect(records[0].cache_status).toBe('HIT');
+    expect(records[0].cache_age_present).toBe(true);
     expect(records[0].path).toBe('/');
   });
 
@@ -156,6 +181,24 @@ describe('page.request at the gateway', () => {
     const [record] = pageRecords(logs);
     expect(record.path).toBe('/web-audit');
     expect(JSON.stringify(record)).not.toContain('secret.example');
+  });
+
+  test('a path past the cap is cut and flagged; an ordinary path carries no flag', async () => {
+    logs = captureLogs();
+    await worker.fetch(
+      request(`https://anc.dev/${'a'.repeat(5000)}`, { ua: CHROME_UA, accept: 'text/html' }),
+      assetsEnv('x'),
+      cachedCtx({ status: 404 }),
+    );
+    await worker.fetch(
+      request('https://anc.dev/about', { ua: CHROME_UA, accept: 'text/html' }),
+      assetsEnv('x'),
+      cachedCtx(),
+    );
+    const [flooded, ordinary] = pageRecords(logs);
+    expect(flooded.path).toHaveLength(256);
+    expect(flooded.path_truncated).toBe(true);
+    expect('path_truncated' in ordinary).toBe(false);
   });
 
   test('/api/score and a static asset emit no page.request', async () => {
