@@ -63,6 +63,9 @@ const SITE_PREFERENCE_ORDER = ['text/html', 'text/markdown', 'text/plain'];
 // keeps browsers, classic search crawlers (Googlebot, bingbot — SEO), and AI
 // training/search-index crawlers (GPTBot, ClaudeBot, OAI-SearchBot,
 // Claude-SearchBot, PerplexityBot) on HTML.
+// The analytics taxonomy in src/worker/telemetry/client-class.ts keeps its
+// own table for these tokens and more (it names the crawler classes this
+// list excludes); the two tables diverge on purpose and must not be merged.
 const MARKDOWN_UA_TOKENS = [
   'curl/',
   'wget/',
