@@ -21,6 +21,8 @@
 // One missed cache write costs at most one extra sandbox spawn the
 // next time; throwing would cost the user the response they came for.
 
+import { emitLog } from '../telemetry/log';
+
 export type CacheEnv = { SCORE_CACHE: R2Bucket };
 
 export type CachedScorecard = {
@@ -55,7 +57,7 @@ export async function get(env: CacheEnv, key: string): Promise<CachedScorecard |
   } catch (err) {
     // R2 read failure: treat as miss + log. Never throw — the live path
     // can still produce a result for the user.
-    console.log(JSON.stringify({ scope: 'cache.get', key, error: errMsg(err) }));
+    emitLog({ scope: 'cache.get' }, { key, error: errMsg(err) });
     return null;
   }
   if (obj === null) return null;
@@ -65,7 +67,7 @@ export async function get(env: CacheEnv, key: string): Promise<CachedScorecard |
     raw = await obj.json();
   } catch (err) {
     // Malformed JSON body: treat as corrupted + best-effort delete.
-    console.log(JSON.stringify({ scope: 'cache.get', key, error: `json_parse: ${errMsg(err)}` }));
+    emitLog({ scope: 'cache.get' }, { key, error: `json_parse: ${errMsg(err)}` });
     env.SCORE_CACHE.delete(key).catch(() => {
       // delete failed — entry will age out via the 7-day R2 lifecycle.
     });
@@ -75,7 +77,7 @@ export async function get(env: CacheEnv, key: string): Promise<CachedScorecard |
   if (!isCachedScorecard(raw)) {
     // Schema-corrupted entry: log, best-effort delete, treat as miss. A
     // future request will recompute and overwrite.
-    console.log(JSON.stringify({ scope: 'cache.get', key, error: 'corrupted_payload' }));
+    emitLog({ scope: 'cache.get' }, { key, error: 'corrupted_payload' });
     env.SCORE_CACHE.delete(key).catch(() => {
       // delete failed — entry will age out via the 7-day R2 lifecycle.
     });
@@ -112,7 +114,7 @@ export async function put(
     });
   } catch (err) {
     // Best-effort: a write failure does not block the user's response.
-    console.log(JSON.stringify({ scope: 'cache.put', key, error: errMsg(err) }));
+    emitLog({ scope: 'cache.put' }, { key, error: errMsg(err) });
   }
 }
 

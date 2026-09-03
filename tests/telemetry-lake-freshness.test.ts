@@ -4,7 +4,7 @@
 // guard, and the scheduled() cron dispatch through the Worker default
 // export.
 
-import { describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import worker, { type Env } from '../src/worker/index';
 import {
   LAKE_FRESHNESS_CRON,
@@ -13,6 +13,7 @@ import {
   type LakeFreshnessEnv,
   runLakeFreshnessCheck,
 } from '../src/worker/telemetry/lake-freshness';
+import { captureLogs, type LogCapture } from './helpers/log-capture';
 import { fakeKv, type SentMessage } from './helpers/notify-fakes';
 
 const NOW = Date.parse('2026-09-02T06:00:00Z');
@@ -49,19 +50,17 @@ function alertEnv(
   };
 }
 
-function scopedLines(logSpy: { mock: { calls: unknown[][] } }, scope: string): Array<Record<string, unknown>> {
-  return logSpy.mock.calls
-    .map((c) => JSON.parse(String(c[0])) as Record<string, unknown>)
-    .filter((l) => l.scope === scope);
+function scopedLines(logs: LogCapture, scope: string): Array<Record<string, unknown>> {
+  return logs.records.map((r) => r.record).filter((r) => r.scope === scope);
 }
 
-function statusLines(logSpy: { mock: { calls: unknown[][] } }): Array<Record<string, unknown>> {
-  return scopedLines(logSpy, 'telemetry.lake-freshness');
+function statusLines(logs: LogCapture): Array<Record<string, unknown>> {
+  return scopedLines(logs, 'telemetry.lake-freshness');
 }
 
 describe('runLakeFreshnessCheck', () => {
   test('a fresh lake emits exactly one status line and never alerts', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -81,12 +80,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'skipped',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('a stalled production lake emails once, naming the environment and the stale age', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -109,12 +108,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'sent',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('an empty ingest prefix is a stall (a never-started sink alerts)', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -136,12 +135,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'sent',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('an unprovisioned email path lands on the status line and nothing throws', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const env: LakeFreshnessEnv = {
         TELEMETRY_LAKE: lakeBucket([[{ key: 'ingest/a', uploaded: new Date(NOW - 30 * HOUR_MS) }]]),
@@ -158,12 +157,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'unprovisioned',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('a stale staging lake is log-only even with the email path provisioned', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -183,7 +182,7 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'log-only',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
@@ -191,7 +190,7 @@ describe('runLakeFreshnessCheck', () => {
     // The deployed default is the unscoped state until the runbook's Sink
     // layout record pins the ingest-write prefix.
     expect(LAKE_INGEST_PREFIX).toBe('');
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const listCalls: ListCall[] = [];
@@ -214,12 +213,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'skipped',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('a missing TELEMETRY_LAKE binding logs and returns (best-effort, no alert)', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -239,12 +238,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'skipped',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('a production R2 list failure alerts once through the check-failed key', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -271,12 +270,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'sent',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('a staging R2 list failure is log-only', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const env: LakeFreshnessEnv = {
@@ -301,12 +300,12 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'log-only',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('a truncated listing pages through and picks the true newest across pages', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const sent: SentMessage[] = [];
       const listCalls: ListCall[] = [];
@@ -338,7 +337,7 @@ describe('runLakeFreshnessCheck', () => {
         notify: 'skipped',
       });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 });
@@ -351,7 +350,7 @@ describe('scheduled() cron dispatch', () => {
     // Exactly 24 hours: a full day with no delivery is the stall line.
     expect(LAKE_STALE_THRESHOLD_MS).toBe(24 * HOUR_MS);
 
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const listCalls: ListCall[] = [];
       const env = {
@@ -371,12 +370,12 @@ describe('scheduled() cron dispatch', () => {
       expect(lines).toHaveLength(1);
       expect(lines[0].error).toBe('ingest_prefix_unrecorded');
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 
   test('an unrecognized cron string logs one scoped line and does nothing', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = captureLogs();
     try {
       const createdIds: string[] = [];
       const listCalls: ListCall[] = [];
@@ -402,7 +401,7 @@ describe('scheduled() cron dispatch', () => {
       expect(dispatchLines).toHaveLength(1);
       expect(dispatchLines[0]).toEqual({ scope: 'scheduled', error: 'unrecognized_cron', cron: '15 3 * * *' });
     } finally {
-      logSpy.mockRestore();
+      logSpy.restore();
     }
   });
 });

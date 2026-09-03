@@ -18,6 +18,7 @@ export type LogScope =
   | 'notify.send_failed'
   | 'page.request'
   | 'scheduled'
+  | 'score.outbound'
   | 'score.telemetry.write_failed'
   | 'score.tier'
   | 'telemetry.lake-freshness'

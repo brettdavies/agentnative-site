@@ -268,7 +268,12 @@ describe('Outbound handlers — per-request log shape (test scenario c)', () => 
       globalThis.fetch = originalFetch;
     }
     expect(logs.records).toHaveLength(1);
-    expect(logs.records[0].record).toEqual({ phase: 'install', host: 'crates.io', allowed: true });
+    expect(logs.records[0].record).toEqual({
+      scope: 'score.outbound',
+      phase: 'install',
+      host: 'crates.io',
+      allowed: true,
+    });
   });
 
   test('allowedInstall logs allowed:false and returns 403 for a non-allowed host', async () => {
@@ -280,7 +285,12 @@ describe('Outbound handlers — per-request log shape (test scenario c)', () => 
     });
     expect(resp.status).toBe(403);
     expect(logs.records).toHaveLength(1);
-    expect(logs.records[0].record).toEqual({ phase: 'install', host: 'evil.example.com', allowed: false });
+    expect(logs.records[0].record).toEqual({
+      scope: 'score.outbound',
+      phase: 'install',
+      host: 'evil.example.com',
+      allowed: false,
+    });
   });
 
   test('noHttp logs {phase: "noHttp", host, blocked: true} and returns 403 unconditionally', async () => {
@@ -288,7 +298,12 @@ describe('Outbound handlers — per-request log shape (test scenario c)', () => 
     const resp = await handlers.noHttp(req, {} as never, { containerId: 'test', className: 'Sandbox' });
     expect(resp.status).toBe(403);
     expect(logs.records).toHaveLength(1);
-    expect(logs.records[0].record).toEqual({ phase: 'noHttp', host: 'crates.io', blocked: true });
+    expect(logs.records[0].record).toEqual({
+      scope: 'score.outbound',
+      phase: 'noHttp',
+      host: 'crates.io',
+      blocked: true,
+    });
   });
 });
 

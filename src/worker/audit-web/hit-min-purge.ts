@@ -6,6 +6,7 @@
 // R2 writers stay env-only and do not import this module.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { emitLog } from '../telemetry/log';
 
 export { homeTag, webDomainTag, webTag } from './hit-min-tags';
 
@@ -26,7 +27,7 @@ export function runWithHitMinPurge<T>(ctx: ExecutionContext, fn: () => T): T {
 export function queueHitMinPurge(tags: readonly string[]): void {
   const store = als.getStore();
   if (!store) {
-    console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'queue_without_store', tags }));
+    emitLog({ scope: 'hit-min-purge' }, { error: 'queue_without_store', tags });
     return;
   }
   for (const tag of tags) {
@@ -54,14 +55,14 @@ export async function invokeCachedPurge(ctx: ExecutionContext, tags: readonly st
     if (rpc) {
       const result = await rpc.purgeHitMinTags(unique);
       if (!result.success) {
-        console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors ?? [] }));
+        emitLog({ scope: 'hit-min-purge' }, { tags: unique, errors: result.errors ?? [] });
       }
       return;
     }
-    console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'cache_purge_unavailable', tags: unique }));
+    emitLog({ scope: 'hit-min-purge' }, { error: 'cache_purge_unavailable', tags: unique });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.log(JSON.stringify({ scope: 'hit-min-purge', error: message, tags: unique }));
+    emitLog({ scope: 'hit-min-purge' }, { error: message, tags: unique });
   }
 }
 

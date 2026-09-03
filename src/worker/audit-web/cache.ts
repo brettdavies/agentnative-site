@@ -16,6 +16,8 @@
 // 7-day lifecycle is prefix-scoped to `scores/` and does not apply to the
 // new `audits/web/` prefix, which defaults to no expiry.
 
+import { emitLog, type LogScope } from '../telemetry/log';
+
 export type WebCacheEnv = { SCORE_CACHE: R2Bucket };
 
 export type CachedWebAudit = {
@@ -168,7 +170,7 @@ export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit
   try {
     obj = await env.SCORE_CACHE.get(key);
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.get', key, error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.get' }, { key, error: errMsg(err) });
     return null;
   }
   if (obj === null) return null;
@@ -177,13 +179,13 @@ export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit
   try {
     raw = await obj.json();
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.get', key, error: `json_parse: ${errMsg(err)}` }));
+    emitLog({ scope: 'web-cache.get' }, { key, error: `json_parse: ${errMsg(err)}` });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
 
   if (!isCachedWebAudit(raw)) {
-    console.log(JSON.stringify({ scope: 'web-cache.get', key, error: 'corrupted_payload' }));
+    emitLog({ scope: 'web-cache.get' }, { key, error: 'corrupted_payload' });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
@@ -267,7 +269,7 @@ async function writeAuditObject(
   env: WebCacheEnv,
   key: string,
   payload: CachedWebAudit & { scored_at: string },
-  scope: string,
+  scope: LogScope,
 ): Promise<boolean> {
   try {
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
@@ -276,7 +278,7 @@ async function writeAuditObject(
     });
     return true;
   } catch (err) {
-    console.log(JSON.stringify({ scope, key, error: errMsg(err) }));
+    emitLog({ scope }, { key, error: errMsg(err) });
     return false;
   }
 }
@@ -359,7 +361,7 @@ export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsO
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor);
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.listAllWebAudits', error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.listAllWebAudits' }, { error: errMsg(err) });
   }
   return out;
 }
@@ -409,7 +411,7 @@ export async function getAggregate(
   try {
     obj = await env.SCORE_CACHE.get(key);
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.getAggregate', key, error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.getAggregate' }, { key, error: errMsg(err) });
     return null;
   }
   if (obj === null) return null;
@@ -418,13 +420,13 @@ export async function getAggregate(
   try {
     raw = await obj.json();
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.getAggregate', key, error: `json_parse: ${errMsg(err)}` }));
+    emitLog({ scope: 'web-cache.getAggregate' }, { key, error: `json_parse: ${errMsg(err)}` });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
 
   if (!isCachedWebAggregate(raw)) {
-    console.log(JSON.stringify({ scope: 'web-cache.getAggregate', key, error: 'corrupted_payload' }));
+    emitLog({ scope: 'web-cache.getAggregate' }, { key, error: 'corrupted_payload' });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
@@ -454,7 +456,7 @@ export async function putAggregate(
     });
     return true;
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.putAggregate', key, error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.putAggregate' }, { key, error: errMsg(err) });
     return false;
   }
 }

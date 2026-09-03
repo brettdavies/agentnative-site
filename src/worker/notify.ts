@@ -9,6 +9,8 @@
 // per hour) so a hot failure loop cannot flood the inbox or burn through
 // the Email Sending quota.
 
+import { emitLog } from './telemetry/log';
+
 // Structural type for the Email Sending Workers binding (env.EMAIL.send with
 // a message object). Declared locally because the generated types only carry
 // it once the binding exists in wrangler.jsonc.
@@ -53,12 +55,10 @@ export async function notifyFailure(
     });
     return 'sent';
   } catch (err) {
-    console.error(
-      JSON.stringify({
-        scope: 'notify.send_failed',
-        key: alert.key,
-        error: err instanceof Error ? err.message : String(err),
-      }),
+    emitLog(
+      { scope: 'notify.send_failed' },
+      { key: alert.key, error: err instanceof Error ? err.message : String(err) },
+      { level: 'error' },
     );
     return 'send_failed';
   }

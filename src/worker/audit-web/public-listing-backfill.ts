@@ -15,6 +15,7 @@
 // Completion protocol: re-run until a run reports zero writes.
 
 import { SPEC_VERSION } from '../spec-version.gen';
+import { emitLog } from '../telemetry/log';
 import { get as cacheGet, isPerDomainAuditKey, patchStoredPublicListing, type WebCacheEnv } from './cache';
 import { flushHitMinPurge, queueHitMinPurge, webTag } from './hit-min-purge';
 import { isSeededDomain, loadWebSeed, type WebSeedEnv } from './seed';
@@ -125,7 +126,7 @@ export async function runWebPublicListingBackfill(
       } catch (err) {
         // A list failure ends this run without claiming completion; the
         // re-run-until-zero protocol picks up from the same cursor.
-        console.log(JSON.stringify({ scope: BACKFILL_SCOPE, phase: 'list', error: errMsg(err) }));
+        emitLog({ scope: BACKFILL_SCOPE }, { phase: 'list', error: errMsg(err) });
         result.cursor = cursor ?? null;
         result.done = false;
         return result;
@@ -150,7 +151,7 @@ export async function runWebPublicListingBackfill(
           // Unreadable or corrupt body (cacheGet logged and deleted it):
           // count as failed so the run does not report a false zero.
           result.failed++;
-          console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'unreadable', key: obj.key }));
+          emitLog({ scope: BACKFILL_SCOPE }, { action: 'unreadable', key: obj.key });
           continue;
         }
 
@@ -162,7 +163,7 @@ export async function runWebPublicListingBackfill(
           // the run never converges to a false zero over an unmigrated object,
           // and so the seed-load guard stays the only throw that escapes.
           result.failed++;
-          console.log(JSON.stringify({ scope: BACKFILL_SCOPE, action: 'bad_target_url', key: obj.key }));
+          emitLog({ scope: BACKFILL_SCOPE }, { action: 'bad_target_url', key: obj.key });
           continue;
         }
         const value = await isSeededDomain(env, domain);

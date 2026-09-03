@@ -1,15 +1,15 @@
-// Structured logging for the web-audit engine's consumers. Workers Logs
-// (observability.enabled, 100% head sampling) indexes one JSON object per
-// console call, so every line carries a `scope` field for querying, matching
-// the cache/purge logging convention used across the Worker.
+// Structured logging for the web-audit engine's consumers, through the
+// central emitter so every record carries a `scope` field the cache/purge
+// logging convention across the Worker shares.
 //
 // Two verbosity tiers:
 //   - always: one `web-audit.run` summary per audit plus `web-audit.error`
 //     on an engine failure, cheap enough for production volume.
 //   - WEB_AUDIT_DEBUG === 'true': additionally one `web-audit.check` line
 //     per check result and a `web-audit.discovery` line with the full probe
-//     evidence. Bound in env.staging.vars only; production opts in
-//     transiently via `wrangler deploy --var` when an incident needs it.
+//     evidence, both on the emitter's debug tier. Bound in env.staging.vars
+//     only; production opts in transiently via `wrangler deploy --var` when
+//     an incident needs it.
 
 import { emitLog } from '../telemetry/log';
 import type { AuditEvent } from './engine';
@@ -20,10 +20,6 @@ export interface AuditLogEnv {
 
 export function auditDebugEnabled(env: AuditLogEnv): boolean {
   return env.WEB_AUDIT_DEBUG === 'true';
-}
-
-function log(fields: Record<string, unknown>): void {
-  console.log(JSON.stringify(fields));
 }
 
 /**
@@ -53,15 +49,11 @@ export async function* instrumentAuditEvents(
         );
       } else if (event.type === 'result') {
         statusCounts[event.result.status] = (statusCounts[event.result.status] ?? 0) + 1;
-        if (debug) {
-          log({
-            scope: 'web-audit.check',
-            target: opts.target,
-            id: event.result.id,
-            status: event.result.status,
-            evidence: event.result.evidence,
-          });
-        }
+        emitLog(
+          { scope: 'web-audit.check' },
+          { target: opts.target, id: event.result.id, status: event.result.status, evidence: event.result.evidence },
+          { tier: 'debug', debug },
+        );
       } else if (event.type === 'complete') {
         terminal = event.complete ? 'complete' : 'incomplete';
       } else if (event.type === 'unreachable') {
@@ -70,26 +62,25 @@ export async function* instrumentAuditEvents(
       yield event;
     }
   } finally {
-    log({
-      scope: 'web-audit.run',
-      target: opts.target,
-      surface: opts.surface,
-      terminal,
-      mcp_endpoint: endpoint,
-      elapsed_ms: Date.now() - started,
-      checks: statusCounts,
-    });
+    emitLog(
+      { scope: 'web-audit.run' },
+      {
+        target: opts.target,
+        surface: opts.surface,
+        terminal,
+        mcp_endpoint: endpoint,
+        elapsed_ms: Date.now() - started,
+        checks: statusCounts,
+      },
+    );
   }
 }
 
 /** One `web-audit.error` line for an engine/stream failure; always on. */
 export function logAuditError(target: string, surface: string, err: unknown): void {
-  console.error(
-    JSON.stringify({
-      scope: 'web-audit.error',
-      target,
-      surface,
-      message: err instanceof Error ? err.message : String(err),
-    }),
+  emitLog(
+    { scope: 'web-audit.error' },
+    { target, surface, message: err instanceof Error ? err.message : String(err) },
+    { level: 'error' },
   );
 }
