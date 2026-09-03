@@ -1,0 +1,61 @@
+// One `page.request` record per served page, emitted at the uncached
+// gateway. It has to live there for two reasons: the cache-enabled inner
+// entrypoint is skipped on a cache HIT, so a record inside it would count
+// only misses, and the gateway is the only place the real User-Agent
+// exists, because the classification rewrite deletes it for HTML clients
+// and replaces it with a marker for markdown clients before the inner
+// Worker runs. The record carries the path and never the query string: on
+// /web-audit the query is a visitor-typed value.
+
+import { classifyClient } from './client-class';
+import { emitLog, type LogFields } from './log';
+import { deriveUserAgent } from './user-agent';
+
+export type ServedFormat = 'html' | 'markdown';
+
+function servedFormat(response: Response): ServedFormat | null {
+  const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
+  if (contentType.startsWith('text/html')) return 'html';
+  if (contentType.startsWith('text/markdown')) return 'markdown';
+  return null;
+}
+
+function isPageMethod(method: string): boolean {
+  return method === 'GET' || method === 'HEAD';
+}
+
+/**
+ * Build the record for a gateway-served request, or null when the request
+ * is not a page: a non-GET, an `/api/` path, or a response whose content
+ * type is anything but HTML or markdown (assets, JSON, text files).
+ */
+export function pageRequestFields(original: Request, response: Response, durationMs: number): LogFields | null {
+  if (!isPageMethod(original.method)) return null;
+  const { pathname } = new URL(original.url);
+  if (pathname.startsWith('/api/')) return null;
+  const format = servedFormat(response);
+  if (format === null) return null;
+
+  const { clientClass, agentName } = classifyClient(original.headers);
+  const browser = clientClass === 'browser' ? deriveUserAgent(original.headers) : null;
+  return {
+    path: pathname,
+    method: original.method,
+    status: response.status,
+    format,
+    cache_status: response.headers.get('cf-cache-status'),
+    client_class: clientClass,
+    agent_name: agentName,
+    browser_family: browser?.brand,
+    browser_version: browser?.brandMajorMinor,
+    engine: browser?.engine,
+    engine_version: browser?.engineVersion,
+    os_family: browser?.osFamily,
+    duration_ms: durationMs,
+  };
+}
+
+export function recordPageRequest(original: Request, response: Response, durationMs: number): void {
+  const fields = pageRequestFields(original, response, durationMs);
+  if (fields !== null) emitLog({ scope: 'page.request' }, fields);
+}

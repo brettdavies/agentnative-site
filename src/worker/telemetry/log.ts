@@ -16,6 +16,7 @@ export type LogScope =
   | 'cache.write'
   | 'hit-min-purge'
   | 'notify.send_failed'
+  | 'page.request'
   | 'scheduled'
   | 'score.telemetry.write_failed'
   | 'score.tier'

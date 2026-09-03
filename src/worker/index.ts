@@ -64,6 +64,7 @@ import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
+import { recordPageRequest } from './telemetry/page-request';
 import { runWithRequestContext } from './telemetry/request-context';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
@@ -1006,7 +1007,10 @@ const WEB_RESCORE_CRON = '0 9 * * SUN';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    const started = Date.now();
+    const response = await loopbackCachedFetch(ctx, env, classifyGatewayRequest(request));
+    recordPageRequest(request, response, Date.now() - started);
+    return response;
   },
 
   // Cron dispatch on the controller's cron string; each schedule is
