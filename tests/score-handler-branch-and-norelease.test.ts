@@ -1568,6 +1568,16 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
         const tierLog = logs.records.map((r) => r.record).filter((r) => r.scope === 'score.tier');
         expect(tierLog).toHaveLength(1);
         const entry = tierLog[0];
+        expect(Object.keys(entry)).toEqual([
+          'scope',
+          'tier',
+          'cache_pre_attempted',
+          'cache_pre_hit',
+          'cache_post_attempted',
+          'cache_post_hit',
+          'binary',
+          'input_kind',
+        ]);
         expect(entry.tier).toBe('cache_post');
         expect(entry.cache_pre_attempted).toBe(true);
         expect(entry.cache_pre_hit).toBe(false);

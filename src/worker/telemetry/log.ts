@@ -6,7 +6,7 @@
 // envelope, the closed scope vocabulary, the request-scoped ambient
 // fields, the verbosity tier, and the console level all live here.
 
-import { msBucket, truncateClientName } from '../mcp/telemetry';
+import { msBucket, truncateClientName } from './caps';
 import { getRequestContext } from './request-context';
 
 /** Closed vocabulary of `scope` values. Adding a scope means adding it here. */
