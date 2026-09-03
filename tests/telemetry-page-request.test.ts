@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import worker, { type Env } from '../src/worker/index';
 import type { LogRecord } from '../src/worker/telemetry/log';
+import { recordPageRequest } from '../src/worker/telemetry/page-request';
 import { captureLogs, type LogCapture } from './helpers/log-capture';
 
 const CHROME_UA =
@@ -209,6 +210,13 @@ describe('page.request at the gateway', () => {
     expect(records).toHaveLength(1);
     expect(records[0].path).toBe('/about');
     expect(records[0].client_class).toBe('browser');
+  });
+
+  test('a failure while building the record never reaches the caller', () => {
+    logs = captureLogs();
+    const broken = { url: 'not a url', method: 'GET', headers: new Headers() } as unknown as Request;
+    expect(() => recordPageRequest(broken, new Response('x'), 1)).not.toThrow();
+    expect(pageRecords(logs)).toHaveLength(0);
   });
 
   test('an unknown client records only the unknown class and a null agent name', async () => {

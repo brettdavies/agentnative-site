@@ -7,6 +7,7 @@
 // Worker runs. The record carries the path and never the query string: on
 // /web-audit the query is a visitor-typed value.
 
+import { isGetOrHead } from '../accept';
 import { classifyClient } from './client-class';
 import { emitLog, type LogFields } from './log';
 import { deriveUserAgent } from './user-agent';
@@ -20,17 +21,13 @@ function servedFormat(response: Response): ServedFormat | null {
   return null;
 }
 
-function isPageMethod(method: string): boolean {
-  return method === 'GET' || method === 'HEAD';
-}
-
 /**
  * Build the record for a gateway-served request, or null when the request
  * is not a page: a non-GET, an `/api/` path, or a response whose content
  * type is anything but HTML or markdown (assets, JSON, text files).
  */
 export function pageRequestFields(original: Request, response: Response, durationMs: number): LogFields | null {
-  if (!isPageMethod(original.method)) return null;
+  if (!isGetOrHead(original.method)) return null;
   const { pathname } = new URL(original.url);
   if (pathname.startsWith('/api/')) return null;
   const format = servedFormat(response);
@@ -55,7 +52,12 @@ export function pageRequestFields(original: Request, response: Response, duratio
   };
 }
 
+/** Never throws: the page record can never fail the response it describes. */
 export function recordPageRequest(original: Request, response: Response, durationMs: number): void {
-  const fields = pageRequestFields(original, response, durationMs);
-  if (fields !== null) emitLog({ scope: 'page.request' }, fields);
+  try {
+    const fields = pageRequestFields(original, response, durationMs);
+    if (fields !== null) emitLog({ scope: 'page.request' }, fields);
+  } catch {
+    // Swallowed by design, matching the emitter.
+  }
 }

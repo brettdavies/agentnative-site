@@ -181,7 +181,7 @@ const MCP_GET_CLASS_ACCEPT: Record<McpGetFormat, string> = {
 // that is not already in that allowlist (KTD8).
 const MARKDOWN_CLASS_UA = 'curl/';
 
-function isGetOrHead(method: string): boolean {
+export function isGetOrHead(method: string): boolean {
   const upper = method.toUpperCase();
   return upper === 'GET' || upper === 'HEAD';
 }

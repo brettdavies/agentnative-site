@@ -17,6 +17,8 @@
 // and ClaudeBot keep receiving HTML. The two tables share tokens and diverge
 // on purpose; they must not be merged.
 
+import { MAX_HEADER_LENGTH } from './user-agent';
+
 export type ClientClass = 'browser' | 'ai-fetcher' | 'ai-crawler' | 'search-crawler' | 'cli-client' | 'unknown';
 
 type TokenTable = ReadonlyArray<readonly [token: string, name: string]>;
@@ -97,8 +99,6 @@ const AGENT_TABLES = [
 
 const BROWSER_ENGINE_TOKENS = ['applewebkit', 'gecko', 'chrome/', 'safari/', 'firefox/'] as const;
 
-const USER_AGENT_MAX_LENGTH = 512;
-
 const UNKNOWN: ClientClassification = { clientClass: 'unknown', agentName: null };
 
 function matchTable<T extends TokenTable>(userAgent: string, table: T): NameIn<T> | null {
@@ -113,7 +113,7 @@ function isBrowser(userAgent: string): boolean {
 }
 
 export function classifyClient(headers: Headers): ClientClassification {
-  const userAgent = (headers.get('user-agent') ?? '').slice(0, USER_AGENT_MAX_LENGTH).toLowerCase();
+  const userAgent = (headers.get('user-agent') ?? '').slice(0, MAX_HEADER_LENGTH).toLowerCase();
   if (userAgent === '') return UNKNOWN;
   for (const [clientClass, table] of AGENT_TABLES) {
     const agentName = matchTable(userAgent, table);
