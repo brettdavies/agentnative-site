@@ -17,6 +17,7 @@ import { detectMcpFormat, detectMcpGetFormat } from '../src/worker/accept';
 import worker, { type Env } from '../src/worker/index';
 import { extractTransportErrorCode } from '../src/worker/mcp/telemetry';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { withLogCapture } from './helpers/log-capture';
 import {
   legacyToolsListBatchBody,
   modernElementBatchBody,
@@ -169,33 +170,9 @@ async function readMcpJson(res: Response) {
   return parseMcpHttpBody(raw, res.headers.get('content-type'));
 }
 
-function parseMcpRequestLogs(seen: Array<{ args: unknown[] }>) {
-  return seen
-    .map((s) => {
-      if (typeof s.args[0] !== 'string') return null;
-      try {
-        const parsed = JSON.parse(s.args[0]) as { event?: string };
-        return parsed.event === 'mcp.request' ? parsed : null;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
-}
-
 async function captureMcpRequestLogs<T>(run: () => Promise<T>) {
-  const seen: Array<{ args: unknown[] }> = [];
-  const originalLog = console.log;
-  console.log = (...args: unknown[]) => {
-    seen.push({ args });
-  };
-  let result: T;
-  try {
-    result = await run();
-  } finally {
-    console.log = originalLog;
-  }
-  return { result, lines: parseMcpRequestLogs(seen) };
+  const { result, records } = await withLogCapture(run);
+  return { result, lines: records.map((r) => r.record).filter((r) => r.event === 'mcp.request') };
 }
 
 async function postMcp(env: Env, accept: string, body: object): Promise<Response> {

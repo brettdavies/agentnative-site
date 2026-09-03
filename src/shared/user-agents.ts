@@ -5,6 +5,8 @@
 // them as `{ua:...}` tokens that the build expands
 // (src/build/13-web-audit-registry.mjs), and the build rejects literal
 // User-Agent values in registry.yaml so a new duplicate cannot land.
+// These are outbound identities only. Classifying the User-Agents that
+// visitors send is src/worker/telemetry/user-agent.ts, a separate table.
 
 import { CANONICAL_SITE_URL } from './site-url';
 

@@ -11,6 +11,7 @@
 //     evidence. Bound in env.staging.vars only; production opts in
 //     transiently via `wrangler deploy --var` when an incident needs it.
 
+import { emitLog } from '../telemetry/log';
 import type { AuditEvent } from './engine';
 
 export interface AuditLogEnv {
@@ -45,9 +46,11 @@ export async function* instrumentAuditEvents(
     for await (const event of events) {
       if (event.type === 'discovery') {
         endpoint = event.endpoint;
-        if (debug) {
-          log({ scope: 'web-audit.discovery', target: opts.target, endpoint, evidence: event.evidence });
-        }
+        emitLog(
+          { scope: 'web-audit.discovery' },
+          { target: opts.target, endpoint, evidence: event.evidence },
+          { tier: 'debug', debug },
+        );
       } else if (event.type === 'result') {
         statusCounts[event.result.status] = (statusCounts[event.result.status] ?? 0) + 1;
         if (debug) {

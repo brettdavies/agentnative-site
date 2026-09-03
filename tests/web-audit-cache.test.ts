@@ -30,6 +30,7 @@ import { runWebPublicListingBackfill, type WebBackfillEnv } from '../src/worker/
 import { resetWebSeedCacheForTests } from '../src/worker/audit-web/seed';
 import { Cached, type Env } from '../src/worker/index';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { captureLogs } from './helpers/log-capture';
 
 type ListedObject = { key: string; customMetadata?: Record<string, string> };
 
@@ -1018,17 +1019,14 @@ describe('HIT-min tag purge', () => {
   });
 
   test('queueHitMinPurge outside ALS logs queue_without_store', () => {
-    const logs: string[] = [];
-    const orig = console.log;
-    console.log = (...args: unknown[]) => {
-      logs.push(args.map(String).join(' '));
-    };
+    const logs = captureLogs();
     try {
       queueHitMinPurge(['web']);
     } finally {
-      console.log = orig;
+      logs.restore();
     }
-    expect(logs.some((line) => line.includes('queue_without_store'))).toBe(true);
+    const record = logs.records.find((r) => r.record.scope === 'hit-min-purge')?.record;
+    expect(record).toEqual({ scope: 'hit-min-purge', error: 'queue_without_store', tags: ['web'] });
   });
 
   test('Cached.purgeHitMinTags calls ctx.cache.purge with unique tags', async () => {
