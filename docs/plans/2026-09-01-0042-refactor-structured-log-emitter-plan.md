@@ -592,3 +592,45 @@ gates everything after it.
 | U10  | One record per served page including cache HITs, with a real client class and the R11 browser/agent fields; API and asset paths excluded. U3 does not start until U10 is merged and deployed (parent Alignment item 9). |
 | U6   | Keys API lists every expected dimension; before/after counts and the platform-IP answer recorded.                                                                                                                       |
 | U7   | Runbook filters annotated as working, not rewritten; `AGENTS.md` carries the convention.                                                                                                                                |
+
+---
+
+## Shipped state (2026-09-03)
+
+Two PRs carry the implementation, both squash-merged to `dev`:
+[#330](https://github.com/brettdavies/agentnative-site/pull/330) as `77814f9` (the mechanism and the page record) and
+[#331](https://github.com/brettdavies/agentnative-site/pull/331) as `fbeff01` (the migration, the indexing check, and
+the docs). Per unit:
+
+| Unit | State                                                                                                                                       |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| U13  | Shipped in #330: `docs/research/2026-09-webmcp-observability-spike.md` answers the five questions and recommends an allowlisted-event beacon. It records two corrections to this plan's text: the `page.request` record carries the path only, never the query string, and the `/api/` POST-route inventory in U13's approach undercounts by two. |
+| U0   | Shipped in #330: `src/worker/telemetry/request-context.ts`, entered inside `Cached.fetch`. Forced-interleave leak contrast and the loopback placement check (with the null negative control) both observed and quoted. |
+| U1   | Shipped in #330: `src/worker/telemetry/log.ts`, injectable sink, throwing-sink path observed. `LogFields` and `AmbientFields` exclude `scope` and `event` at the type level; the runtime spread order is unchanged. |
+| U2   | Shipped in #330; the cap helpers live in `src/worker/telemetry/caps.ts` (#331) so the emitter and the MCP telemetry module no longer import each other. |
+| U5   | Shipped in #330: `tests/helpers/log-capture.ts` on the sink; the old mcp-dispatch helper observed reporting zero lines against the temporary object-emission patch. Four helpers moved (the plan listed three; `tests/web-audit-cache.test.ts` was the fourth). #331 removes the console bridge and adds `tests/telemetry-no-raw-console.test.ts`. |
+| U9   | Shipped in #330: `web-audit.discovery` canary, staging deploy run 33712954881; `scope`, `target`, and `evidence.0` through `evidence.7` sub-keys listed by the keys endpoint. |
+| U11  | Shipped in #330: `src/worker/telemetry/user-agent.ts`, hints first, iOS wrappers to WebKit at the device version, Safari 17.4 and 17.5 distinct, Brave's limit pinned. |
+| U12  | Shipped in #330: `src/worker/telemetry/client-class.ts`, six classes, canonical names as a closed union.                                    |
+| U10  | Shipped in #330 at the gateway; staging deploy run 33713988705 showed HIT and MISS records. Review additions: `path` capped at 256 with `path_truncated`, and `cache_age_present` beside `cache_status` because a Static Assets hit returns through the Worker with no `Age` header. |
+| U3   | Shipped in #331: 37 sites (the two `#322` additions included), `score.outbound` on the two Sandbox diagnostics, `writeAuditObject`'s scope narrowed to the union. |
+| U4   | Shipped in #331: all five records captured before and after through the sink and identical, `mcp.request` in key order; `rg -U` clean across `src/worker/`. |
+| U6   | Recorded in `docs/runbooks/sitewide-analytics.md` § Live-layer field index: 177 keys, 63 from this Worker's records, every expected dimension present, against a pre-emitter production baseline of two. The platform-IP answer: the platform's invocation records index and populate `cf-connecting-ip`, `x-real-ip`, `x-forwarded-for`, `user-agent`, and the `cf` geolocation fields; the Worker's console records carry none of them. |
+| U7   | Shipped in #331: runbook filters annotated as working with the keys-endpoint recipe; `AGENTS.md` carries the convention; the `mcp.request` posture sentence unchanged. |
+
+Premise correction recorded against this plan's Problem Frame: Workers Logs already parses a JSON-string console
+line into a structured record and indexes its keys, and the keys endpoint samples recent records, so the "116 keys,
+only `message` and `level`" observation reproduces whenever the sampled window holds no line of ours; `level` and
+`message` there belong to the invocation records. The migration ships on the documented object contract, one owner for
+the envelope and vocabulary, boundary caps, the ambient seam, and the sink-based test seam. The keys-API proof (R8) and
+Success Criteria hold on the live surface; `$metadata.level` stays null on object records as it did on string records.
+
+Open, with blockers:
+
+- Production deploy of the page record waits on the parent plan's staging-lake field-shape and export gates (parent
+  Alignment item 10); the next release branch must not cherry-pick `77814f9` or `fbeff01` before those are recorded.
+- Two design notes left as they are, recorded in #330's review notes: the emitter caps `client_name`, `method`, and
+  `name` by field name across every scope (R3, KTD4), and a dispatch that throws before a response exists leaves no
+  `page.request` record.
+- The session identity plan's platform-key question is answered in the negative direction (above); its derivation must
+  never join a session key to an invocation record by request id.

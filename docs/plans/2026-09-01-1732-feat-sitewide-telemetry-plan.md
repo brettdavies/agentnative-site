@@ -587,11 +587,17 @@ repo-side implementation. Per unit:
 | Unit | State                                                                                                                                     |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | U1   | Config half shipped in #322: binding pair, logpush opt-in, guards, `RELEASES.md` catalog records, runbook with the field-selection audit. Buckets created 2026-09-02. Open: catalog enablement (token lacks the R2 Data Catalog permission), staging Logpush job, export audit, sink-layout record. |
-| U2   | Not started. Blocked on U1's gates and the emitter plan's production page-record deploy.                                                   |
-| U3   | Code shipped in #322, including review hardening: the check fails closed while `LAKE_INGEST_PREFIX` is unscoped, and a production listing failure alerts via `telemetry-lake-check-failed`. Open: the forced-stale staging observation (needs the staging lake live). |
+| U2   | Not started. Blocked on U1's gates. The emitter plan's page record is on `dev` (#330 `77814f9`, #331 `fbeff01`, 2026-09-03) and waits with the rest of that track for U1's gates before its production deploy, so the seven-day coupling window has not opened. |
+| U3   | Code shipped in #322, including review hardening: the check fails closed while `LAKE_INGEST_PREFIX` is unscoped, and a production listing failure alerts via `telemetry-lake-check-failed`. Its status line now emits through the central emitter (#331). Open: the forced-stale staging observation (needs the staging lake live). |
 | U4   | Shipped in #322: page, twin, three registrations, footer link, build and e2e tests; browser-verified light and dark. Follow-up commits on the same PR ground the closing note in the code and add the controller/lawful-basis/processor section. |
 | U5   | Not started. Dashboard-only; U4 reaches production with the next production deploy.                                                        |
 | U6   | Runbook created in #322 (`docs/runbooks/sitewide-analytics.md`); accretes as the dashboard-side records land.                              |
 
 The operator steps above are recorded with their commands and reserved slots in the runbook; the freshness check arms
 via the one-line prefix change after the sink layout is recorded.
+
+The emitter track (`docs/plans/2026-09-01-0042-refactor-structured-log-emitter-plan.md`, its own Shipped state) is
+merged to `dev` in #330 and #331: R2, R9's emission half, R11's emit path, R12, and R14's spike are carried. The U1 export
+audit gains a recorded input from that track's U6: the platform's invocation records hold the client IP and raw
+User-Agent in the live layer, and the `Event` envelope's exclusion from the Logpush allowlist is what keeps them out of
+the lake.
