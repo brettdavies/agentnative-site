@@ -25,6 +25,7 @@ import type { InstallSpec } from '../src/worker/score/discover-binary';
 import { handlers, Sandbox } from '../src/worker/score/do';
 import { type ContainerLike, type ExecLike, score } from '../src/worker/score/sandbox-exec';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { captureLogs, type LogCapture } from './helpers/log-capture';
 
 // ---------------------------------------------------------------------------
 // Stub Sandbox — records every setOutboundHandler + exec call.
@@ -163,9 +164,7 @@ describe('allowedInstall handler — wildcard hostname matcher', () => {
   // that matched `evil.example.com.attacker.tld` as `*.com` would be
   // catastrophic).
   test('exact hostname match still works', async () => {
-    const captured: string[] = [];
-    const orig = console.log;
-    console.log = (m: string) => captured.push(m);
+    const logs = captureLogs();
     try {
       const resp = await handlers.allowedInstall(new Request('https://crates.io/api/v1/crates/ripgrep'), {} as never, {
         containerId: 'x',
@@ -174,15 +173,13 @@ describe('allowedInstall handler — wildcard hostname matcher', () => {
       });
       expect(resp.status).not.toBe(403); // would 403 only if blocked
     } finally {
-      console.log = orig;
+      logs.restore();
     }
-    expect(JSON.parse(captured[0]).allowed).toBe(true);
+    expect(logs.records[0].record.allowed).toBe(true);
   });
 
   test('*.githubusercontent.com matches release-assets, objects, raw, codeload subdomains', async () => {
-    const captured: string[] = [];
-    const orig = console.log;
-    console.log = (m: string) => captured.push(m);
+    const logs = captureLogs();
     const allowlist = ['*.githubusercontent.com'];
     const subs = [
       'objects.githubusercontent.com',
@@ -199,18 +196,16 @@ describe('allowedInstall handler — wildcard hostname matcher', () => {
         });
       }
     } finally {
-      console.log = orig;
+      logs.restore();
     }
-    expect(captured.length).toBe(subs.length);
-    for (const line of captured) {
-      expect(JSON.parse(line).allowed).toBe(true);
+    expect(logs.records.length).toBe(subs.length);
+    for (const { record } of logs.records) {
+      expect(record.allowed).toBe(true);
     }
   });
 
   test('*.githubusercontent.com rejects evil.com.githubusercontent.com.attacker.tld (no suffix-extension attack)', async () => {
-    const captured: string[] = [];
-    const orig = console.log;
-    console.log = (m: string) => captured.push(m);
+    const logs = captureLogs();
     try {
       const resp = await handlers.allowedInstall(
         new Request('https://githubusercontent.com.attacker.tld/payload'),
@@ -219,18 +214,16 @@ describe('allowedInstall handler — wildcard hostname matcher', () => {
       );
       expect(resp.status).toBe(403);
     } finally {
-      console.log = orig;
+      logs.restore();
     }
-    expect(JSON.parse(captured[0]).allowed).toBe(false);
+    expect(logs.records[0].record.allowed).toBe(false);
   });
 
   test('*.githubusercontent.com does NOT match bare githubusercontent.com (apex must be explicit)', async () => {
     // Defensive: the wildcard is for SUBdomains only. Bare apex hits
     // would surprise an operator who allowlisted the wildcard expecting
     // CDN coverage. If apex coverage is needed, add it explicitly.
-    const captured: string[] = [];
-    const orig = console.log;
-    console.log = (m: string) => captured.push(m);
+    const logs = captureLogs();
     try {
       const resp = await handlers.allowedInstall(new Request('https://githubusercontent.com/foo'), {} as never, {
         containerId: 'x',
@@ -239,9 +232,9 @@ describe('allowedInstall handler — wildcard hostname matcher', () => {
       });
       expect(resp.status).toBe(403);
     } finally {
-      console.log = orig;
+      logs.restore();
     }
-    expect(JSON.parse(captured[0]).allowed).toBe(false);
+    expect(logs.records[0].record.allowed).toBe(false);
   });
 });
 
@@ -250,17 +243,13 @@ describe('allowedInstall handler — wildcard hostname matcher', () => {
 // ---------------------------------------------------------------------------
 
 describe('Outbound handlers — per-request log shape (test scenario c)', () => {
-  const originalLog = console.log;
-  let captured: string[] = [];
+  let logs: LogCapture;
 
   beforeEach(() => {
-    captured = [];
-    console.log = (...args: unknown[]) => {
-      captured.push(args.map((a) => String(a)).join(' '));
-    };
+    logs = captureLogs();
   });
   afterEach(() => {
-    console.log = originalLog;
+    logs.restore();
   });
 
   test('allowedInstall logs {phase: "install", host, allowed: true} for an allowed host', async () => {
@@ -278,9 +267,8 @@ describe('Outbound handlers — per-request log shape (test scenario c)', () => 
     } finally {
       globalThis.fetch = originalFetch;
     }
-    expect(captured).toHaveLength(1);
-    const log = JSON.parse(captured[0]);
-    expect(log).toEqual({ phase: 'install', host: 'crates.io', allowed: true });
+    expect(logs.records).toHaveLength(1);
+    expect(logs.records[0].record).toEqual({ phase: 'install', host: 'crates.io', allowed: true });
   });
 
   test('allowedInstall logs allowed:false and returns 403 for a non-allowed host', async () => {
@@ -291,18 +279,16 @@ describe('Outbound handlers — per-request log shape (test scenario c)', () => 
       params: { allowedHostnames: ['crates.io'] },
     });
     expect(resp.status).toBe(403);
-    expect(captured).toHaveLength(1);
-    const log = JSON.parse(captured[0]);
-    expect(log).toEqual({ phase: 'install', host: 'evil.example.com', allowed: false });
+    expect(logs.records).toHaveLength(1);
+    expect(logs.records[0].record).toEqual({ phase: 'install', host: 'evil.example.com', allowed: false });
   });
 
   test('noHttp logs {phase: "noHttp", host, blocked: true} and returns 403 unconditionally', async () => {
     const req = new Request('https://crates.io/api/v1/crates/ripgrep');
     const resp = await handlers.noHttp(req, {} as never, { containerId: 'test', className: 'Sandbox' });
     expect(resp.status).toBe(403);
-    expect(captured).toHaveLength(1);
-    const log = JSON.parse(captured[0]);
-    expect(log).toEqual({ phase: 'noHttp', host: 'crates.io', blocked: true });
+    expect(logs.records).toHaveLength(1);
+    expect(logs.records[0].record).toEqual({ phase: 'noHttp', host: 'crates.io', blocked: true });
   });
 });
 

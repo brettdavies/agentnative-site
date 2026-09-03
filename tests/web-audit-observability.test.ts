@@ -3,11 +3,12 @@
 // detail-on-debug logging, and the notifier must be a safe no-op until
 // provisioned, deduplicated once it is.
 
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { instrumentAuditEvents } from '../src/worker/audit-web/audit-log';
 import type { AuditEvent } from '../src/worker/audit-web/engine';
 import type { WebScorecard } from '../src/worker/audit-web/scorecard';
 import { notifyFailure } from '../src/worker/notify';
+import { captureLogs } from './helpers/log-capture';
 import { fakeKv, type SentMessage } from './helpers/notify-fakes';
 
 async function* eventsOf(events: AuditEvent[]): AsyncGenerator<AuditEvent> {
@@ -43,19 +44,15 @@ const COMPLETE_EVENT: AuditEvent = {
 };
 
 describe('instrumentAuditEvents', () => {
-  afterEach(() => {
-    // spyOn instances restore per-test below; nothing global to reset.
-  });
-
   test('passes every event through unchanged and logs one run summary', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       const input: AuditEvent[] = [{ type: 'discovery', endpoint: null, evidence: [] }, RESULT_EVENT, COMPLETE_EVENT];
       const output = await collect(
         instrumentAuditEvents(eventsOf(input), {}, { target: 'https://example.com/', surface: 'stream' }),
       );
       expect(output).toEqual(input);
-      const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+      const lines = logs.records.map((r) => r.record);
       const summaries = lines.filter((l) => l.scope === 'web-audit.run');
       expect(summaries.length).toBe(1);
       expect(summaries[0].terminal).toBe('complete');
@@ -63,27 +60,27 @@ describe('instrumentAuditEvents', () => {
       expect(summaries[0].checks).toEqual({ pass: 1 });
       expect(lines.some((l) => l.scope === 'web-audit.check')).toBe(false);
     } finally {
-      logSpy.mockRestore();
+      logs.restore();
     }
   });
 
   test('WEB_AUDIT_DEBUG adds per-check and discovery lines', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       const input: AuditEvent[] = [{ type: 'discovery', endpoint: null, evidence: [] }, RESULT_EVENT, COMPLETE_EVENT];
       await collect(
         instrumentAuditEvents(eventsOf(input), { WEB_AUDIT_DEBUG: 'true' }, { target: 'x', surface: 'mcp' }),
       );
-      const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+      const lines = logs.records.map((r) => r.record);
       expect(lines.some((l) => l.scope === 'web-audit.discovery')).toBe(true);
       expect(lines.filter((l) => l.scope === 'web-audit.check').length).toBe(1);
     } finally {
-      logSpy.mockRestore();
+      logs.restore();
     }
   });
 
   test('an unreachable terminal is reported in the summary', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       await collect(
         instrumentAuditEvents(
@@ -92,15 +89,15 @@ describe('instrumentAuditEvents', () => {
           { target: 'x', surface: 'stream' },
         ),
       );
-      const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+      const lines = logs.records.map((r) => r.record);
       expect(lines.find((l) => l.scope === 'web-audit.run')?.terminal).toBe('unreachable');
     } finally {
-      logSpy.mockRestore();
+      logs.restore();
     }
   });
 
   test('the summary still logs when the engine throws mid-stream', async () => {
-    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       async function* explodes(): AsyncGenerator<AuditEvent> {
         yield RESULT_EVENT;
@@ -109,12 +106,12 @@ describe('instrumentAuditEvents', () => {
       await expect(collect(instrumentAuditEvents(explodes(), {}, { target: 'x', surface: 'mcp' }))).rejects.toThrow(
         'boom',
       );
-      const lines = logSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+      const lines = logs.records.map((r) => r.record);
       const summary = lines.find((l) => l.scope === 'web-audit.run');
       expect(summary?.terminal).toBe('none');
       expect(summary?.checks).toEqual({ pass: 1 });
     } finally {
-      logSpy.mockRestore();
+      logs.restore();
     }
   });
 });
@@ -150,7 +147,7 @@ describe('notifyFailure', () => {
   });
 
   test('a failed send is reported, never thrown', async () => {
-    const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+    const logs = captureLogs();
     try {
       const env = {
         EMAIL: {
@@ -162,10 +159,10 @@ describe('notifyFailure', () => {
         ALERT_EMAIL_TO: 'ops@example.com',
       };
       expect(await notifyFailure(env, alert)).toBe('send_failed');
-      const lines = errorSpy.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
-      expect(lines.some((l) => l.scope === 'notify.send_failed')).toBe(true);
+      const failed = logs.records.find((r) => r.record.scope === 'notify.send_failed');
+      expect(failed?.level).toBe('error');
     } finally {
-      errorSpy.mockRestore();
+      logs.restore();
     }
   });
 });
