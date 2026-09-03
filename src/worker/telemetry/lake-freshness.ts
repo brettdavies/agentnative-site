@@ -6,6 +6,7 @@
 // scheduled paths: nothing here throws into the cron.
 
 import { type NotifyEnv, notifyFailure } from '../notify';
+import { emitLog, type LogFields } from './log';
 
 export interface LakeFreshnessEnv extends NotifyEnv {
   TELEMETRY_LAKE?: R2Bucket;
@@ -29,8 +30,6 @@ export const LAKE_STALE_THRESHOLD_MS = 24 * HOUR_MS;
 // whole-bucket listing that compaction can make read fresh.
 export const LAKE_INGEST_PREFIX = '';
 
-const SCOPE = 'telemetry.lake-freshness';
-
 async function newestUploadedMs(bucket: R2Bucket, prefix: string): Promise<number | null> {
   let newest: number | null = null;
   let cursor: string | undefined;
@@ -51,8 +50,8 @@ export async function runLakeFreshnessCheck(
   prefix = LAKE_INGEST_PREFIX,
 ): Promise<void> {
   const environment = env.TELEMETRY_ENVIRONMENT ?? 'unset';
-  const emit = (fields: Record<string, unknown>): void => {
-    console.log(JSON.stringify({ scope: SCOPE, environment, ...fields }));
+  const emit = (fields: LogFields): void => {
+    emitLog({ scope: 'telemetry.lake-freshness' }, { environment, ...fields });
   };
 
   if (!env.TELEMETRY_LAKE) {

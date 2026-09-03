@@ -64,6 +64,7 @@ import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
+import { emitLog } from './telemetry/log';
 import { recordPageRequest } from './telemetry/page-request';
 import { runWithRequestContext } from './telemetry/request-context';
 
@@ -106,13 +107,13 @@ export class Cached extends WorkerEntrypoint<Env> {
   async purgeHitMinTags(tags: string[]): Promise<{ success: boolean; errors: { message: string }[] }> {
     const cache = this.ctx.cache;
     if (!cache || typeof cache.purge !== 'function') {
-      console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'cache_purge_unavailable', tags }));
+      emitLog({ scope: 'hit-min-purge' }, { error: 'cache_purge_unavailable', tags });
       return { success: false, errors: [{ message: 'cache_purge_unavailable' }] };
     }
     const unique = [...new Set(tags.filter((t) => t.length > 0))];
     const result = await cache.purge({ tags: unique });
     if (!result.success) {
-      console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors }));
+      emitLog({ scope: 'hit-min-purge' }, { tags: unique, errors: result.errors });
     }
     return result;
   }
@@ -1028,7 +1029,7 @@ export default {
         await runLakeFreshnessCheck(env as LakeFreshnessEnv);
         return;
       default:
-        console.log(JSON.stringify({ scope: 'scheduled', error: 'unrecognized_cron', cron: controller.cron }));
+        emitLog({ scope: 'scheduled' }, { error: 'unrecognized_cron', cron: controller.cron });
     }
   },
 } satisfies ExportedHandler<Env>;

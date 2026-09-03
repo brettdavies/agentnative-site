@@ -5,6 +5,7 @@
 // in KV; the authoritative liveness check is the Workflow instance status
 // (a stale pointer to a finished batch never blocks a new start).
 
+import { emitLog } from '../telemetry/log';
 import { runWithHitMinPurge } from './hit-min-purge';
 import { runWebPublicListingBackfill, type WebBackfillEnv } from './public-listing-backfill';
 import type { WebRescoreWorkflowBinding } from './rescore-workflow';
@@ -30,7 +31,7 @@ export async function startWebRescore(env: WebRescoreTriggerEnv): Promise<{ inst
       const existing = await env.WEB_RESCORE_WORKFLOW.get(pointer);
       const { status } = await existing.status();
       if (ACTIVE_STATUSES.has(status)) {
-        console.log(JSON.stringify({ scope: 'web-rescore.trigger', coalesced: true, instance: pointer }));
+        emitLog({ scope: 'web-rescore.trigger' }, { coalesced: true, instance: pointer });
         return { instanceId: pointer, coalesced: true };
       }
     } catch {
@@ -42,7 +43,7 @@ export async function startWebRescore(env: WebRescoreTriggerEnv): Promise<{ inst
   if (env.SCORE_KV) {
     await env.SCORE_KV.put(CURRENT_INSTANCE_KEY, instanceId, { expirationTtl: 6 * 3600 }).catch(() => {});
   }
-  console.log(JSON.stringify({ scope: 'web-rescore.trigger', coalesced: false, instance: instanceId }));
+  emitLog({ scope: 'web-rescore.trigger' }, { coalesced: false, instance: instanceId });
   return { instanceId, coalesced: false };
 }
 
@@ -141,12 +142,7 @@ export async function handleWebBackfill(
     );
     return jsonResponse(result, 200);
   } catch (err) {
-    console.log(
-      JSON.stringify({
-        scope: 'web-backfill.trigger',
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    emitLog({ scope: 'web-backfill.trigger' }, { error: err instanceof Error ? err.message : String(err) });
     return jsonResponse({ error: 'backfill_aborted', message: 'seed load failed; no objects written' }, 500);
   }
 }

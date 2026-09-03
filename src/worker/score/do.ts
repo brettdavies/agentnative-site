@@ -30,6 +30,7 @@
 import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
 import { SPEC_VERSION } from '../spec-version.gen';
+import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
 import type { InstallSpec } from './discover-binary';
 import { score as runSandboxScore, type ScoreResult } from './sandbox-exec';
@@ -104,14 +105,14 @@ function hostnameAllowed(host: string, allowlist: readonly string[]): boolean {
 const allowedInstall: OutboundHandler<unknown, AllowedInstallParams> = async (req, _env, ctx) => {
   const host = new URL(req.url).hostname;
   const allowed = hostnameAllowed(host, ctx.params.allowedHostnames);
-  console.log(JSON.stringify({ phase: 'install', host, allowed }));
+  emitLog({ scope: 'score.outbound' }, { phase: 'install', host, allowed });
   if (allowed) return fetch(req);
   return new Response(null, { status: 403 });
 };
 
 const noHttp: OutboundHandler = async (req) => {
   const host = new URL(req.url).hostname;
-  console.log(JSON.stringify({ phase: 'noHttp', host, blocked: true }));
+  emitLog({ scope: 'score.outbound' }, { phase: 'noHttp', host, blocked: true });
   return new Response(null, { status: 403 });
 };
 
@@ -214,12 +215,12 @@ export async function writeCacheBestEffort(
   value: { scorecard: unknown; anc_version: string },
 ): Promise<void> {
   if (!env.SCORE_CACHE) {
-    console.log(JSON.stringify({ scope: 'cache.write', skipped: 'no_binding' }));
+    emitLog({ scope: 'cache.write' }, { skipped: 'no_binding' });
     return;
   }
   const toolVersion = extractToolVersion(value.scorecard);
   if (!toolVersion) {
-    console.log(JSON.stringify({ scope: 'cache.write', skipped: 'no_tool_version', binary: spec.binary }));
+    emitLog({ scope: 'cache.write' }, { skipped: 'no_tool_version', binary: spec.binary });
     return;
   }
   // SPEC_VERSION is the proxy for anc-version in the cache key. The
@@ -241,7 +242,7 @@ export async function writeCacheBestEffort(
     // version), which the guards above already cover. Defense-in-depth:
     // a future regression that bypasses those guards still doesn't
     // surface to the user.
-    console.log(JSON.stringify({ scope: 'cache.write', error: err instanceof Error ? err.message : String(err) }));
+    emitLog({ scope: 'cache.write' }, { error: err instanceof Error ? err.message : String(err) });
   }
 }
 

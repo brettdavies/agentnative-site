@@ -329,6 +329,13 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
   committed that way on purpose: they never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR.
   See [`RELEASES.md`](./RELEASES.md) for the full workflow.
 - **Commits:** Conventional Commits. Short, specific messages.
+- **Worker logs go through the emitter.** Every structured record the Worker writes passes through
+  `src/worker/telemetry/log.ts`: a call site names its `scope` (a closed union; adding a scope means adding it there) and
+  its fields, and nothing else. The emitter merges the request-scoped ambient fields, caps client-supplied names, buckets
+  durations, drops undefined fields, and hands the object to `console` unserialized. Never `console.log(JSON.stringify(...))`
+  in Worker code: a pre-serialized string arrives as one text `message`, so its fields cannot be filtered or grouped in
+  Workers Logs, and the emitter's caps and swallow posture are bypassed. Tests capture records through the emitter's sink
+  (`tests/helpers/log-capture.ts`), never by patching `console`.
 - **PRs:** Squash merge. PR title becomes commit title; PR body becomes commit body (repo setting:
   `squashMergeCommitMessage: PR_BODY`).
 - **Rulesets:** `.github/rulesets/protect-main.json` and `protect-dev.json` are the source of truth for branch

@@ -94,6 +94,7 @@
 
 import { isRepresentationPinned } from '../headers';
 import { AUDITOR_URL, SPEC_VERSION } from '../spec-version.gen';
+import { emitLog } from '../telemetry/log';
 import type { CacheEnv } from './cache';
 import { preferenceFor } from './content-negotiation';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
@@ -216,9 +217,9 @@ function newTelemetry(): Telemetry {
 }
 
 function emitTelemetry(t: Telemetry): void {
-  console.log(
-    JSON.stringify({
-      scope: 'score.tier',
+  emitLog(
+    { scope: 'score.tier' },
+    {
       tier: t.tier,
       cache_pre_attempted: t.cache_pre_attempted,
       cache_pre_hit: t.cache_pre_hit,
@@ -226,7 +227,7 @@ function emitTelemetry(t: Telemetry): void {
       cache_post_hit: t.cache_post_hit,
       binary: t.binary,
       input_kind: t.input_kind,
-    }),
+    },
   );
 }
 

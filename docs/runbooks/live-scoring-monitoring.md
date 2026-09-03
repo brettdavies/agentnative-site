@@ -60,6 +60,25 @@ bun x wrangler tail --env staging --format json --search 'score.tier'
 Historical search (post-mortem, threshold checks): Cloudflare dashboard → Workers → `agentnative-site-staging` → Logs
 (observability) → filter `scope:"score.tier"`. `head_sampling_rate` is `1.0`, so every request is captured.
 
+The `scope:"score.tier"` filters in this runbook, and the `tier` group-bys under them, work as written: the line is
+emitted as an object through `src/worker/telemetry/log.ts`, and Workers Logs indexes every key of an object record as a
+queryable field. To confirm a new field is queryable, ask the Workers Observability keys endpoint over a window that
+holds traffic (the endpoint samples recent records, so a quiet window lists only the platform's `$metadata` keys):
+
+```bash
+# ACCOUNT_ID + a token with Workers Observability Read; the read-only
+# analytics token is the one to use (name in docs/runbooks/sitewide-analytics.md).
+curl -sS -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/observability/telemetry/keys" \
+  -H "Authorization: Bearer $CF_ANALYTICS_READ_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"timeframe":{"from":'"$(( $(date +%s000) - 3600000 ))"',"to":'"$(date +%s000)"'},
+       "filters":[{"key":"$metadata.service","operation":"eq","type":"string","value":"agentnative-site-staging"}],
+       "limit":1000}' \
+  | jaq -r '[.result[].key | select(startswith("$") | not)] | sort | join(", ")'
+```
+
+`scope`, `tier`, `binary`, `input_kind`, and the four cache flags appear in that list after one `/api/score` request in
+the window; nested fields list as dotted keys and arrays as positional keys (`evidence.0.status`).
+
 The smoke script (`scripts/smoke-api-score.sh <base-url>`) exercises the registry-fast-path in CI and locally. Use it as
 a one-shot reachability check before deeper investigation.
 

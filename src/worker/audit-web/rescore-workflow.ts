@@ -22,6 +22,7 @@
 
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { SPEC_VERSION } from '../spec-version.gen';
+import { emitLog } from '../telemetry/log';
 import { rebuildWebAggregates, type WebAggregateEnv } from './aggregate';
 import { type AuditLogEnv, instrumentAuditEvents } from './audit-log';
 import { get as cacheGet, put as cachePut, canonicalTargetOf, isStale, keyFor } from './cache';
@@ -231,7 +232,7 @@ export async function runWebRescore(
         cycleAudited.push(domain);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.log(JSON.stringify({ scope: 'web-rescore', domain, error: message }));
+        emitLog({ scope: 'web-rescore' }, { domain, error: message });
         skipped.push(domain);
       }
     }
