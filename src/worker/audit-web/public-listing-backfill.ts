@@ -169,14 +169,9 @@ export async function runWebPublicListingBackfill(
         const value = await isSeededDomain(env, domain);
         result.would_write++;
         result.diffs.push({ key: obj.key, domain, public_listing: value });
-        console.log(
-          JSON.stringify({
-            scope: BACKFILL_SCOPE,
-            action: dryRun ? 'would_add' : 'add',
-            key: obj.key,
-            domain,
-            public_listing: value,
-          }),
+        emitLog(
+          { scope: BACKFILL_SCOPE },
+          { action: dryRun ? 'would_add' : 'add', key: obj.key, domain, public_listing: value },
         );
 
         if (dryRun) continue;

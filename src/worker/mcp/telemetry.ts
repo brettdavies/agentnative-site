@@ -1,6 +1,8 @@
-// Structured MCP request telemetry — one PII-free `mcp.request` line per POST.
-// Replaces visitor-log.ts `[mcp-call]`. See docs/plans/2026-08-25-001-feat-mcp-
-// 2026-dual-protocol-plan.md appendix.
+// Structured MCP request telemetry: one PII-free `mcp.request` record per
+// POST, emitted through the central emitter, which caps the client-supplied
+// method, name, and client name and buckets the duration.
+
+import { emitLog } from '../telemetry/log';
 
 export type McpEra = 'legacy' | 'modern';
 
@@ -132,21 +134,19 @@ export function extractProtocolVersion(parsedBody: unknown, request: Request): s
 }
 
 export function logMcpRequest(input: McpRequestLogInput): void {
-  // method and name can carry client-supplied strings on paths that
-  // fire before the rate limiter; cap them like client_name so a
-  // flood cannot amplify log volume with unbounded values.
-  const payload = {
-    event: 'mcp.request',
-    era: input.era,
-    method: truncateClientName(input.method),
-    name: truncateClientName(input.name),
-    client_name: input.client_name,
-    protocol_version: input.protocol_version,
-    host: input.host,
-    response_format: input.response_format,
-    outcome: input.outcome,
-    error_code: input.error_code,
-    ms_bucket: msBucket(input.duration_ms),
-  };
-  console.log(JSON.stringify(payload));
+  emitLog(
+    { event: 'mcp.request' },
+    {
+      era: input.era,
+      method: input.method,
+      name: input.name,
+      client_name: input.client_name,
+      protocol_version: input.protocol_version,
+      host: input.host,
+      response_format: input.response_format,
+      outcome: input.outcome,
+      error_code: input.error_code,
+      duration_ms: input.duration_ms,
+    },
+  );
 }

@@ -31,6 +31,7 @@ import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/scor
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { validateInput } from '../src/worker/score/validate';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { captureLogs } from './helpers/log-capture';
 
 // Snapshot globalThis.fetch BEFORE the first makeEnv() override so afterAll
 // can restore it. Bun runs tests in a single process; if this file leaves
@@ -1541,12 +1542,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
     // console.log and verify the shape for two representative paths:
     // a round-2 hit (the new code path this commit adds) and a round-1
     // hit (the existing pre-discovery path).
-    const originalLog = console.log;
-    const logs: string[] = [];
-    console.log = (...args: unknown[]) => {
-      const first = args[0];
-      if (typeof first === 'string') logs.push(first);
-    };
+    const logs = captureLogs();
     try {
       // (a) round-2 hit on a github-url-without-hint.
       {
@@ -1566,18 +1562,10 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
             },
           },
         });
-        logs.length = 0;
+        logs.records.length = 0;
         const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
         expect(res.status).toBe(200);
-        const tierLog = logs
-          .map((l) => {
-            try {
-              return JSON.parse(l) as Record<string, unknown>;
-            } catch {
-              return null;
-            }
-          })
-          .filter((p): p is Record<string, unknown> => p !== null && p.scope === 'score.tier');
+        const tierLog = logs.records.map((r) => r.record).filter((r) => r.scope === 'score.tier');
         expect(tierLog).toHaveLength(1);
         const entry = tierLog[0];
         expect(entry.tier).toBe('cache_post');
@@ -1601,18 +1589,10 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
             },
           },
         });
-        logs.length = 0;
+        logs.records.length = 0;
         const res = await handleScore(postScore('npm install -g dotfiles'), env);
         expect(res.status).toBe(200);
-        const tierLog = logs
-          .map((l) => {
-            try {
-              return JSON.parse(l) as Record<string, unknown>;
-            } catch {
-              return null;
-            }
-          })
-          .filter((p): p is Record<string, unknown> => p !== null && p.scope === 'score.tier');
+        const tierLog = logs.records.map((r) => r.record).filter((r) => r.scope === 'score.tier');
         expect(tierLog).toHaveLength(1);
         const entry = tierLog[0];
         expect(entry.tier).toBe('cache_pre');
@@ -1625,7 +1605,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
         expect(entry.input_kind).toBe('install-command');
       }
     } finally {
-      console.log = originalLog;
+      logs.restore();
     }
   });
 });

@@ -142,12 +142,7 @@ export async function handleWebBackfill(
     );
     return jsonResponse(result, 200);
   } catch (err) {
-    console.log(
-      JSON.stringify({
-        scope: 'web-backfill.trigger',
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    emitLog({ scope: 'web-backfill.trigger' }, { error: err instanceof Error ? err.message : String(err) });
     return jsonResponse({ error: 'backfill_aborted', message: 'seed load failed; no objects written' }, 500);
   }
 }

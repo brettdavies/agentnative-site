@@ -40,6 +40,7 @@
 //           target ≤10k; AE samples high-cardinality indexes
 //           automatically.
 
+import { emitLog } from '../telemetry/log';
 import type { ResolvedStep } from './discover-binary';
 import type { ScoreError } from './response-shape';
 
@@ -85,11 +86,6 @@ export function recordScoreEvent(env: ScoreTelemetryEnv, fields: ScoreEventField
       indexes: fields.tool ? [fields.tool] : [],
     });
   } catch (err) {
-    console.log(
-      JSON.stringify({
-        scope: 'score.telemetry.write_failed',
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    emitLog({ scope: 'score.telemetry.write_failed' }, { error: err instanceof Error ? err.message : String(err) });
   }
 }
