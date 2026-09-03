@@ -96,6 +96,46 @@ unrecorded), the check fails closed: it emits `ingest_prefix_unrecorded` and ren
 one-line prefix change after the layout is recorded. A listing failure in production alerts through the same email path
 with key `telemetry-lake-check-failed`; off production it is log-only.
 
+## Live-layer field index
+
+The live layer indexes every key of an object the Worker logs. Every emit site goes through
+`src/worker/telemetry/log.ts`, so each record's fields are queryable dimensions in Query Builder; the emitter also
+absorbs the string-shaped lines Workers Logs auto-parsed before. The keys endpoint is the instrument for confirming
+this, and it samples recent records: a window with no traffic from the service lists only the platform's `$metadata`
+keys, so query a window that holds traffic (the request recipe is in the
+[live-scoring monitoring runbook](./live-scoring-monitoring.md#querying-the-telemetry)).
+
+Recorded against the staging Worker on 2026-09-03 over a fifteen-minute window holding page, MCP, score, and web-audit
+traffic:
+
+| Measure                                  | Before (production, 7-day window, pre-emitter) | After (staging, window with traffic) |
+| ---------------------------------------- | ---------------------------------------------- | ------------------------------------ |
+| Keys listed                              | 121                                            | 177                                  |
+| Platform keys (`$metadata`, `$workers`)  | 119                                            | 114                                  |
+| Keys from this Worker's records          | 2 (`level`, `message`)                         | 63                                   |
+
+The 63 include `scope`, `event`, `tier`, `client_name`, and every `page.request` field (`path`, `format`, `status`,
+`cache_status`, `cache_age_present`, `client_class`, `agent_name`, `browser_family`, `browser_version`, `engine`,
+`engine_version`, `os_family`, `ms_bucket`), plus nested fields as dotted keys (`checks.pass`) and arrays as positional
+keys (`evidence.0.status`). The `level` and `message` keys in the before column belong to the invocation records and to
+plain-string console lines, not to the Worker's structured records.
+
+Query Builder filters the console records by these keys directly; group `scope:"page.request"` by `client_class` for the
+audience split and `scope:"score.tier"` by `tier` for the live-scoring tier mix.
+
+### Platform keys that carry the client address
+
+Two record types share the index. The Worker's console records (`$metadata.type: cf-worker`) carry only the fields the
+emitter wrote: no request headers, no `cf` object. The platform's invocation records (`$metadata.type: cf-worker-event`,
+one per request) carry the request envelope, and on both Workers the index lists
+`$workers.event.request.headers.cf-connecting-ip`, `$workers.event.request.headers.x-real-ip`,
+`$workers.event.request.headers.x-forwarded-for`, `$workers.event.request.headers.user-agent`, and (on production)
+`$workers.event.request.headers.sec-ch-ua*`, together with `$workers.event.request.cf.latitude`, `.longitude`, `.city`,
+and `.postalCode`, all populated. So the live layer holds the client IP and raw User-Agent for seven days on every
+invocation record, outside anything this repo emits. The Logpush allowlist excludes the `Event` envelope that carries
+them, which is what keeps them out of the lake; a session key derived from the address must not be joined to an
+invocation record by request id, because that record already holds the address it was derived to avoid.
+
 ## Credentials
 
 Records every credential minted for the pipeline: name, permission set, scope. All credentials are least-privilege,
