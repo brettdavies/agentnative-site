@@ -64,6 +64,7 @@ import { handleScore, type ScoreEnv } from './score/handler';
 import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
+import { runWithRequestContext } from './telemetry/request-context';
 
 // The CF Sandbox/Containers SDK looks up `ctx.exports.ContainerProxy` at
 // outbound-handler dispatch time and throws "ctx.exports.ContainerProxy
@@ -87,11 +88,17 @@ export { Sandbox } from './score/do';
 // the skip-Worker HIT target; default `fetch` is the uncached gateway.
 export class Cached extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    return runWithHitMinPurge(this.ctx, async () => {
-      const response = await handleSiteRequest(request, this.env, this.ctx);
-      await flushHitMinPurge();
-      return response;
-    });
+    // The gateway reaches this entrypoint over ctx.exports.Cached.fetch, an
+    // RPC hop that resets the async context: a store entered in
+    // default.fetch reads undefined on this side, so the request context
+    // is entered here, where the emit sites below can see it.
+    return runWithRequestContext({}, () =>
+      runWithHitMinPurge(this.ctx, async () => {
+        const response = await handleSiteRequest(request, this.env, this.ctx);
+        await flushHitMinPurge();
+        return response;
+      }),
+    );
   }
 
   /** Purge HIT-min objects by Cache-Tag. Scoped to this cached entrypoint. */
