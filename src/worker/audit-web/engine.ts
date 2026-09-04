@@ -49,6 +49,12 @@ import { type GuardedFetchOptions, guardedFetch } from './ssrf';
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_PER_CHECK_TIMEOUT_MS = 8_000;
 const DEFAULT_PER_AUDIT_DEADLINE_MS = 25_000;
+// Per-probe timeout once the root fetch has already failed at the network
+// level. A target that tarpits automated clients (accepts the connection,
+// never answers) makes every probe wait out its full timeout; shrinking the
+// slice keeps the whole audit inside the deadline with a genuine attempt
+// per check instead of a half-run of skips.
+const DEGRADED_PER_CHECK_TIMEOUT_MS = 2_000;
 
 export interface RunWebAuditInput {
   url: string;
@@ -67,7 +73,13 @@ export interface RunWebAuditInput {
 export type AuditEvent =
   | { type: 'discovery'; endpoint: string | null; evidence: EvidenceItem[] }
   | { type: 'result'; result: EngineResult }
-  | { type: 'complete'; scorecard: WebScorecard; complete: boolean };
+  | { type: 'complete'; scorecard: WebScorecard; complete: boolean }
+  // Terminal for a target that answered nothing at the network level: no
+  // HTTP status from the root fetch or any discovery probe. Scoring such a
+  // run would publish a misleading 0% for what is actually "the auditor
+  // cannot reach this site" (a block of datacenter egress, a dead host, a
+  // tarpit), so the run ends here and nothing is cached.
+  | { type: 'unreachable'; reason: string };
 
 const HANDLERS: Partial<Record<WebCheck['handler'], (check: WebCheck, ctx: HandlerContext) => Promise<ProbeOutcome>>> =
   {
@@ -228,6 +240,13 @@ function skipResult(check: WebCheck): EngineResult {
   };
 }
 
+// Cloudflare answers on the origin's behalf with these when the origin
+// never spoke: 52x for connection and timeout failures, 530 when the host
+// does not resolve. They carry the auditor's edge, not the target.
+function isEdgeErrorStatus(status: number | null): boolean {
+  return status !== null && (status === 530 || (status >= 520 && status <= 527));
+}
+
 /** An applicable MAY that is simply absent is optional, not a miss (R3). */
 function finalizeOptional(check: WebCheck, result: EngineResult): EngineResult {
   if (check.keyword === 'may' && result.status === 'absent') {
@@ -268,9 +287,19 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   const { base, host, domain } = normalizeBase(input.url);
   const now = input.now ?? Date.now;
   const concurrency = input.concurrency ?? DEFAULT_CONCURRENCY;
-  const perCheckTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
+  const configuredTimeoutMs = input.perCheckTimeoutMs ?? DEFAULT_PER_CHECK_TIMEOUT_MS;
   const perAuditDeadlineMs = input.perAuditDeadlineMs ?? DEFAULT_PER_AUDIT_DEADLINE_MS;
   const deadline = now() + perAuditDeadlineMs;
+
+  // The single canonical root fetch every root-HTML check and several
+  // antecedents read. null = failed at the network level. It runs before
+  // discovery because it doubles as the reachability probe: a network-dead
+  // root drops every later probe to the degraded timeout so a tarpitting
+  // target cannot spend the whole deadline on a handful of fetches.
+  const rootResp = await guardedFetch(base, {}, { ...input.fetchOptions, timeoutMs: configuredTimeoutMs });
+  const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
+  const perCheckTimeoutMs =
+    root === null ? Math.min(configuredTimeoutMs, DEGRADED_PER_CHECK_TIMEOUT_MS) : configuredTimeoutMs;
 
   const discovery = await discoverMcpEndpoint(input.url, input.registry.mcp_discovery, {
     timeoutMs: perCheckTimeoutMs,
@@ -280,14 +309,31 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   });
   yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };
 
-  // The single canonical root fetch every root-HTML check and several
-  // antecedents read. null = failed at the network level.
-  const rootResp = await guardedFetch(
-    base,
-    {},
-    { ...input.fetchOptions, timeoutMs: Math.min(perCheckTimeoutMs, Math.max(1, deadline - now())) },
+  // Nothing from the target itself answered: it is unreachable from the
+  // auditor's vantage point. Any real response, even a 401 or 404, is
+  // auditable evidence and keeps the run going. Silence is not, and neither
+  // is a status the edge synthesised in the target's place: a host that
+  // does not resolve or never answers comes back from the Worker's fetch as
+  // a 530 or 52x page, which says nothing about the site.
+  const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
+  const anyTargetResponse = discovery.evidence.some(
+    (e) => typeof e.status === 'number' && !isEdgeErrorStatus(e.status),
   );
-  const root: ProbeResponse | null = rootResp.status === null ? null : rootResp;
+  if (!rootFromTarget && discovery.endpoint === null && !anyTargetResponse) {
+    const onlyEdgeErrors =
+      root !== null || discovery.evidence.some((e) => typeof e.status === 'number' && isEdgeErrorStatus(e.status));
+    yield {
+      type: 'unreachable',
+      reason: onlyEdgeErrors
+        ? `${base} did not answer any probe (every response was a Cloudflare edge error, ` +
+          `which means the host did not resolve or never replied). ` +
+          'The site may be down, its DNS may be misconfigured, or it may block requests from datacenter IP ranges ' +
+          'such as the auditor’s.'
+        : `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
+          'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.',
+    };
+    return;
+  }
 
   let incomplete = false;
   const results: EngineResult[] = [];

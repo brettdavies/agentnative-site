@@ -161,3 +161,65 @@ successful rescore of it.
 
 **Adding a board entry.** Add the row to `seed.yaml`, merge, and either wait for the deploy hook (fires on the same
 merge's deploy) or trigger the endpoint manually.
+
+## Logging
+
+Every audit, on every surface (the streaming route, the `audit_website` MCP tool, the rescore Workflow), emits one
+summary line to Workers Logs (`observability.enabled` with 100% head sampling in `wrangler.jsonc`):
+
+- `scope: web-audit.run`: target, surface (`stream` | `mcp` | `rescore`), terminal state (`complete` | `incomplete` |
+  `unreachable` | `none` when the engine threw), discovered MCP endpoint, elapsed ms, and a per-status check count.
+- `scope: web-audit.error`: the engine or stream task threw; carries the target, surface, and message.
+
+Query them in the dashboard under Workers & Pages -> agentnative-site -> Logs, filtering on the `scope` field.
+
+### Debug logging
+
+`WEB_AUDIT_DEBUG: "true"` adds one `web-audit.check` line per check result (id, status, evidence) and a
+`web-audit.discovery` line carrying the full probe evidence. Staging binds it in `env.staging.vars`, so every staging
+audit is verbose. Production stays at summary-only; for an incident, flip it transiently without a commit:
+
+```bash
+wrangler deploy --var WEB_AUDIT_DEBUG:true    # production is the top-level env: no --env flag
+# ... reproduce, read logs ...
+wrangler deploy                               # redeploy the committed config to turn it back off
+```
+
+### Diagnosing a blocked or unreachable target
+
+A target behind a bot-blocking CDN produces one of two log signatures:
+
+- `terminal: "complete"` with a check count dominated by `broken` and evidence full of one repeated status (401/403
+  everywhere): the CDN answers, but refuses the auditor. The score is genuine (the site is agent-hostile), and the
+  evidence names the status.
+- `terminal: "unreachable"`: nothing (root fetch or discovery probe) returned an HTTP status. The engine ends the run
+  without caching, the page and tool report the target as unreachable. Typically the CDN tarpits datacenter clients.
+
+Probes identify themselves with the `anc-web-audit/1.0` User-Agent (`AUDIT_USER_AGENT` in
+`src/worker/audit-web/ssrf.ts`), which several CDNs treat more leniently than UA-less requests. Do not change it to
+impersonate a browser: the audit measures how a site treats agents, and evading the block would score a site the
+auditor cannot honestly reach.
+
+## Failure notifications
+
+`src/worker/notify.ts` emails the operator when the audit engine throws (stream task or MCP tool), deduplicated to one
+email per alert key per hour through `SCORE_KV`. It is a no-op until provisioned; the code and wiring ship dormant.
+
+To provision (Cloudflare Email Service, Email Sending beta, Workers Paid):
+
+1. Dashboard -> Compute -> Email Service -> Email Sending -> Onboard Domain -> pick the site zone. Cloudflare adds the
+   bounce/SPF/DKIM/DMARC records on a `cf-bounce` subdomain.
+2. Verify the destination address (Email Routing -> Destination addresses) if it is off-zone; sending to verified
+   destination addresses is free on all plans.
+3. Add the binding and addresses to `wrangler.jsonc` (staging first, then top-level at promotion):
+
+   ```jsonc
+   "send_email": [{ "name": "EMAIL" }],
+   "vars": { "ALERT_EMAIL_FROM": "alerts@<zone>", "ALERT_EMAIL_TO": "<verified destination>" }
+   ```
+
+4. Deploy and confirm with a forced failure on staging; expect one email and a `deduped` outcome on an immediate
+   second failure.
+
+Until step 3 lands, `notifyFailure` returns `unprovisioned` and the only failure signal is `web-audit.error` in
+Workers Logs.

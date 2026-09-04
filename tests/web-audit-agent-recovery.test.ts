@@ -2,6 +2,7 @@
 // floor + llms.txt softening, and agent-UA reachability.
 
 import { describe, expect, test } from 'bun:test';
+import { AI_USER_FETCHER_PROBE_UA } from '../src/shared/user-agents';
 import { type AuditEvent, runWebAudit } from '../src/worker/audit-web/engine';
 import type { WebAuditRegistry, WebCheck } from '../src/worker/audit-web/registry';
 
@@ -60,7 +61,7 @@ const RECOVERY_CHECKS: WebCheck[] = [
     principle: 'P7',
     with: {
       path: '/',
-      headers: { 'User-Agent': 'ChatGPT-User/1.0 (+https://openai.com/bot)', Accept: '*/*' },
+      headers: { 'User-Agent': AI_USER_FETCHER_PROBE_UA, Accept: '*/*' },
       expect: {
         status_below: 300,
         body_not_regex: 'just a moment|attention required|cf-challenge|enable javascript and cookies|captcha',

@@ -18,6 +18,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
+import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from '../../audit-web/audit-log';
 import {
   type CachedWebAudit,
   get as cacheGet,
@@ -47,11 +48,12 @@ import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../aud
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
+import { type NotifyEnv, notifyFailure } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 
-export interface WebAuditToolsEnv {
+export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -315,17 +317,34 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const registry = await loadWebAuditRegistry(env);
       let scorecard: unknown = null;
       let complete = false;
-      for await (const event of runWebAudit({
-        url: canonicalTarget,
-        registry,
-        siteType: site_type ?? null,
-        publicListing: auditListing,
-        specVersion: SPEC_VERSION,
-      })) {
-        if (event.type === 'complete') {
-          scorecard = event.scorecard;
-          complete = event.complete;
+      try {
+        for await (const event of instrumentAuditEvents(
+          runWebAudit({
+            url: canonicalTarget,
+            registry,
+            siteType: site_type ?? null,
+            publicListing: auditListing,
+            specVersion: SPEC_VERSION,
+          }),
+          env,
+          { target: canonicalTarget, surface: 'mcp' },
+        )) {
+          if (event.type === 'complete') {
+            scorecard = event.scorecard;
+            complete = event.complete;
+          } else if (event.type === 'unreachable') {
+            return isError(`target unreachable; nothing was cached. ${event.reason}`);
+          }
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logAuditError(canonicalTarget, 'mcp', err);
+        await notifyFailure(env, {
+          key: 'web-audit-mcp',
+          subject: 'audit_website tool failed',
+          text: `The audit_website engine threw for ${canonicalTarget}: ${message}`,
+        });
+        return isError(`the audit failed: ${message}. Nothing was cached. Retry.`);
       }
       if (!complete || !scorecard) {
         return isError('the audit did not finish within the deadline; nothing was cached. Retry.');
