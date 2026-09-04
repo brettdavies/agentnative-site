@@ -22,9 +22,14 @@ scores the old content, and the deploy hook re-scores it once the release lands 
 
 ## The audit endpoint
 
-`POST /api/audit-web` with a JSON body `{ url, site_type?, turnstile_token }` streams NDJSON. The terminal `{ "type":
-"complete", "scorecard", "share_url" }` event carries the full web scorecard (schema `0.2`). `site_type` is optional
-(`content` | `api`); omit it to let the audit auto-detect.
+`POST /api/audit-web` with a JSON body `{ url, site_type?, public_listing?, turnstile_token }` streams NDJSON. The
+terminal `{ "type": "complete", "cached", "scored_at", "refresh_after", "scorecard", "share_url" }` event carries the
+full web scorecard (schema `0.4`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
+
+A cache hit answers with a single `application/json` body instead of a stream, carrying the same freshness fields and no
+`type`. Content-type is the discriminator: `application/json` means served from cache, NDJSON means the engine ran. Both
+shapes are documented at [/web-scorecard-schema](../../content/web-scorecard-schema.md); the operator-relevant part is
+that `cached`, `scored_at`, and `refresh_after` sit outside the scorecard, so they never move the schema version.
 
 Two gates sit in front of the audit and shape how you reach it per environment:
 
@@ -112,8 +117,36 @@ lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy h
 both places; there is no fallback window.
 
 **On-demand freshness.** An on-demand audit (`audit_website` or `POST /api/audit-web`) of a seeded domain rebuilds the
-aggregates immediately, so a board entry refreshes without waiting for the batch. A cached entry younger than 5 minutes
-serves as-is; older entries re-run on demand.
+aggregates immediately, so a board entry refreshes without waiting for the batch. A cached entry younger than 1 minute
+serves as-is; older entries re-run on demand. Every per-target result surface reports that boundary as `refresh_after`,
+the earliest instant a re-audit leaves the cache-reuse window; the kill switch, rate limits, and service failures can
+still block a fresh audit after it passes. The window is `WEB_AUDIT_STALE_AFTER_MS` in `src/worker/audit-web/cache.ts`;
+`refresh_after` is derived from the stored `scored_at` on every read rather than stored, so retuning that constant moves
+every advertised boundary with it and no stored value goes stale.
+
+**Verifying the freshness contract after a deploy.** A fresh run and the cache read that immediately follows it must
+report the same `scored_at` and `refresh_after` and differ only on `cached`. Against staging (add the CF Access
+service-token headers; staging binds the always-passes Turnstile secret, so any token string verifies):
+
+```bash
+HOST=https://agentnative-site-staging.<subdomain>.workers.dev
+BODY='{"url":"<target>","turnstile_token":"x"}'
+# 1. fresh run: streams NDJSON; the terminal line carries cached=false
+curl -sSf -X POST "$HOST/api/audit-web" -H 'content-type: application/json' -d "$BODY" \
+  | tail -1 | jq '{cached, scored_at, refresh_after}'
+# 2. immediately re-read: a single JSON body, same instants, cached=true
+curl -sSf -X POST "$HOST/api/audit-web" -H 'content-type: application/json' -d "$BODY" \
+  | jq '{cached, scored_at, refresh_after}'
+```
+
+`GET /web/<domain>` and its `.md` twin state the same two instants in prose, and `get_website_audit` reports them as
+response fields, so a disagreement between any two of those surfaces means storage and a response have drifted.
+
+**Result-page tools are read-only.** `/web/<domain>` registers four WebMCP tools (`get_worksheet`, `get_fix_prompt`,
+`get_fix_prompts`, `get_audit_summary`) that read the rendered DOM only. None of them fetches, submits, or navigates, so
+no browser-agent path starts an audit or reaches the endpoint behind Turnstile. Fresh audits arrive only through `POST
+/api/audit-web` (Turnstile-gated) and the `audit_website` MCP tool (IP-gated), which is where the kill switch and the
+limiters sit.
 
 **Cold start / empty board.** After a fresh deploy or a `SPEC_VERSION` bump, the board and homepage pane render a
 "scoring in progress" empty state until the deploy hook's batch lands. If the empty state persists, check the Workflow:

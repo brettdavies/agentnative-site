@@ -83,7 +83,11 @@ const WEB_AUDIT_WIDGET = {
   </p>
   <p class="live-score__status" data-web-audit-status role="status" aria-live="polite" hidden></p>
 </section>`,
-  md: 'Enter a public URL at [anc.dev/web-audit](https://anc.dev/web-audit) to run the audit in your browser.',
+  // Site-relative so absolutifyMarkdownLinks resolves it against the
+  // build's target host. An already-absolute target passes through that
+  // rewrite untouched, which on a staging build would point the twin's
+  // only actionable link back at production.
+  md: 'Enter a public URL on the [web audit page](/web-audit) to run the audit in your browser.',
 };
 
 /**

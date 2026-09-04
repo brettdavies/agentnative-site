@@ -208,12 +208,12 @@ remediation:
       When the request `Accept` allows neither `application/json` nor `text/event-stream`, refuse
       with `406 Not Acceptable` before any JSON-RPC parsing runs. Those two media types are the
       whole of what the streamable-HTTP transport is defined over, so an `Accept` naming neither
-      cannot be served, and a `200` is the wrong way to say so.
-      The failure this check looks for is a server that ignores `Accept` entirely and returns its
-      one representation under a success status. The caller then has to sniff the body to discover
-      the negotiation never happened. Worse is a `200` that echoes the requested type back in
-      `Content-Type` while carrying a JSON-RPC body: the caller routes the payload on your label
-      and the parse fails somewhere downstream of the call you told it had succeeded.
+      cannot be served.
+      The failure this check looks for is a server that ignores `Accept` and answers with its one
+      representation under a success status, leaving the caller to sniff the body to find out the
+      negotiation never happened. Worse is a `200` that echoes the requested type back in
+      `Content-Type` while carrying a JSON-RPC body: the caller routes on your label and the parse
+      fails downstream.
       Do the check at the transport edge and keep the body plain text, so no client mistakes the
       refusal for a JSON-RPC error envelope.
     resources:
@@ -261,13 +261,22 @@ remediation:
       - { label: MDN CORS, url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" }
   well-known-mcp-card:
     title: A .well-known MCP server card is published
-    goal: Publish an MCP server card at the canonical SEP-1649 path and 301 the legacy aliases to it
+    goal: Publish an MCP server card at the canonical SEP-1649 path
     fix: |
       Publish an MCP server card at `/.well-known/mcp/server-card.json` (SEP-1649) naming the
       endpoint, transport, and capabilities: include `mcp_endpoint` (or `url`, or
-      `transport.endpoint`), `serverInfo`, and the transport type. Serve the legacy pointer paths
-      (`/.well-known/mcp`, `/.well-known/mcp.json`, `/mcp.json`) as `301` redirects to the
-      canonical, never as duplicate inline copies.
+      `transport.endpoint`), `serverInfo`, and the transport type.
+    resources:
+      - { label: SEP-1649, url: "https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127" }
+  mcp-card-legacy-aliases:
+    title: Legacy MCP card paths redirect to the canonical card
+    goal: Point every legacy MCP card path at the canonical card instead of serving its own copy
+    fix: |
+      Serve whichever legacy pointer paths you publish (`/.well-known/mcp`, `/.well-known/mcp.json`,
+      `/mcp.json`) as `301` redirects to `/.well-known/mcp/server-card.json`. A legacy path that
+      answers with its own JSON body is a second source of truth that may drift from the canonical
+      card, and a `302`/`307` or a redirect to any other location sends agents somewhere else.
+      Paths you never published need no redirect.
     resources:
       - { label: SEP-1649, url: "https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127" }
   mcp-usage-doc:

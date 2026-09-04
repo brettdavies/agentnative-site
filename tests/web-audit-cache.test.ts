@@ -15,8 +15,10 @@ import {
   put,
   putAggregate,
   WEB_ALL_BOARD_DISPLAY_MAX_AGE_MS,
+  WEB_AUDIT_STALE_AFTER_MS,
   type WebAggregateEntry,
   type WebCacheEnv,
+  webAuditFreshness,
 } from '../src/worker/audit-web/cache';
 import {
   flushHitMinPurge,
@@ -218,6 +220,18 @@ describe('cache.put / get', () => {
     expect(stamped).toBeLessThanOrEqual(Date.now() + 1000);
   });
 
+  test('a caller-supplied scoring instant is the one persisted, in both body and metadata', async () => {
+    const { env, store, putOptions } = makeR2Stub();
+    const url = 'https://example.com/';
+    const scoredAt = '2026-08-27T13:33:00.000Z';
+    expect(await put(env, url, sampleScorecard(url), SPEC_VERSION, scoredAt)).toBe(true);
+
+    const key = await keyFor(url, SPEC_VERSION);
+    expect((JSON.parse(store.get(key) as string) as CachedWebAudit).scored_at).toBe(scoredAt);
+    expect(putOptions.get(key)?.customMetadata?.scored_at).toBe(scoredAt);
+    expect((await get(env, key))?.scored_at).toBe(scoredAt);
+  });
+
   test('a legacy payload without scored_at reads back intact (stale, not corrupt)', async () => {
     const url = 'https://example.com/';
     const key = await keyFor(url, SPEC_VERSION);
@@ -227,22 +241,75 @@ describe('cache.put / get', () => {
     expect(got).not.toBeNull();
     expect(got?.scored_at).toBeUndefined();
     expect(deletedKeys).toHaveLength(0);
-    expect(isStale(got?.scored_at, 5 * 60_000)).toBe(true);
+    expect(isStale(got?.scored_at, WEB_AUDIT_STALE_AFTER_MS)).toBe(true);
   });
 });
 
 describe('isStale', () => {
-  const FIVE_MIN = 5 * 60_000;
+  const THRESHOLD_MS = 5 * 60_000;
 
   test('false within the threshold, true past it', () => {
     const now = Date.now();
-    expect(isStale(new Date(now - FIVE_MIN + 10_000).toISOString(), FIVE_MIN, now)).toBe(false);
-    expect(isStale(new Date(now - FIVE_MIN - 10_000).toISOString(), FIVE_MIN, now)).toBe(true);
+    expect(isStale(new Date(now - THRESHOLD_MS + 10_000).toISOString(), THRESHOLD_MS, now)).toBe(false);
+    expect(isStale(new Date(now - THRESHOLD_MS - 10_000).toISOString(), THRESHOLD_MS, now)).toBe(true);
   });
 
   test('true when scored_at is absent or unparseable', () => {
-    expect(isStale(undefined, FIVE_MIN)).toBe(true);
-    expect(isStale('not-a-date', FIVE_MIN)).toBe(true);
+    expect(isStale(undefined, THRESHOLD_MS)).toBe(true);
+    expect(isStale('not-a-date', THRESHOLD_MS)).toBe(true);
+  });
+});
+
+describe('webAuditFreshness', () => {
+  const SCORED_AT = '2026-08-27T13:33:00.000Z';
+  const REFRESH_AFTER = '2026-08-27T13:34:00.000Z';
+
+  // The one place the window's literal value is pinned. Every other surface
+  // derives its expected instant from the constant, so retuning the window
+  // is a one-line change here plus the constant itself.
+  test('derives refresh_after exactly WEB_AUDIT_STALE_AFTER_MS after the scoring instant', () => {
+    expect(WEB_AUDIT_STALE_AFTER_MS).toBe(60_000);
+    expect(webAuditFreshness(true, SCORED_AT)).toEqual({
+      cached: true,
+      scored_at: SCORED_AT,
+      refresh_after: REFRESH_AFTER,
+    });
+  });
+
+  test('carries provenance without changing the derived instants', () => {
+    expect(webAuditFreshness(false, SCORED_AT)).toEqual({
+      cached: false,
+      scored_at: SCORED_AT,
+      refresh_after: REFRESH_AFTER,
+    });
+  });
+
+  test('an instant older than the window derives a refresh instant in the past', () => {
+    const scoredAt = new Date(Date.now() - 60 * 60_000).toISOString();
+    const fresh = webAuditFreshness(true, scoredAt);
+    expect(fresh.scored_at).toBe(scoredAt);
+    expect(Date.parse(fresh.refresh_after as string)).toBeLessThan(Date.now());
+    expect(isStale(scoredAt, WEB_AUDIT_STALE_AFTER_MS)).toBe(true);
+  });
+
+  test('a missing, empty, or unparseable legacy stamp reports both instants as null', () => {
+    for (const stamp of [undefined, null, '', 'not-a-date']) {
+      expect(webAuditFreshness(true, stamp)).toEqual({ cached: true, scored_at: null, refresh_after: null });
+      expect(isStale(stamp ?? undefined, WEB_AUDIT_STALE_AFTER_MS)).toBe(true);
+    }
+  });
+
+  test('a stored entry round-trips its own instant into the freshness envelope', async () => {
+    const { env } = makeR2Stub();
+    const url = 'https://example.com/';
+    const scoredAt = '2026-08-27T13:33:00.000Z';
+    await put(env, url, sampleScorecard(url), SPEC_VERSION, scoredAt);
+    const got = await get(env, await keyFor(url, SPEC_VERSION));
+    expect(webAuditFreshness(true, got?.scored_at)).toEqual({
+      cached: true,
+      scored_at: scoredAt,
+      refresh_after: REFRESH_AFTER,
+    });
   });
 });
 

@@ -1,43 +1,59 @@
-// Assemble failed-check prompts by RFC-2119 tier. Pure selection so the
-// result-page widget and its tests share one join rule: MUST failures
-// (broken ∪ noncompliant ∪ absent) by default; SHOULD and MAY are opt-in
-// independently. Pass / n_a / skip / error rows never join.
+// Read rendered result-page rows into the shared finding record, and
+// apply the prompt-assembly widget's tier selection on top of the shared
+// selector. Selection rules (which statuses are actionable, which tiers
+// join) live in src/shared/web-audit-findings.ts so this widget and the
+// WebMCP result tools cannot disagree; what stays here is the widget's
+// own product behavior: MUST failures by default, SHOULD and MAY opt-in
+// independently, and page order rather than priority order, because the
+// copied text follows what the reader is looking at.
 
-export type AssembleCarrier = {
-  keyword: string;
-  status: string;
-  prompt: string;
-};
+import { type FindingRow, matchFindings } from '../shared/web-audit-findings';
 
 export type AssembleOpts = {
   includeShould: boolean;
   includeMay: boolean;
 };
 
-const FIXABLE = new Set(['broken', 'noncompliant', 'absent']);
-
-export function selectAssemblePrompts(rows: readonly AssembleCarrier[], opts: AssembleOpts): string {
-  const allowed = new Set<string>(['must']);
-  if (opts.includeShould) allowed.add('should');
-  if (opts.includeMay) allowed.add('may');
+export function selectAssemblePrompts(rows: readonly FindingRow[], opts: AssembleOpts): string {
+  const keywords = ['must'];
+  if (opts.includeShould) keywords.push('should');
+  if (opts.includeMay) keywords.push('may');
   const parts: string[] = [];
-  for (const row of rows) {
-    if (!FIXABLE.has(row.status)) continue;
-    if (!allowed.has(row.keyword)) continue;
-    if (row.prompt.length === 0) continue;
-    parts.push(row.prompt);
+  for (const row of matchFindings(rows, { keywords }, { order: 'document' })) {
+    if (row.prompt) parts.push(row.prompt);
   }
   return parts.join('\n\n');
 }
 
-/** Read carriers in document order (category then check, matching the page). */
-export function carriersFromElements(nodes: Iterable<Element>): AssembleCarrier[] {
-  const out: AssembleCarrier[] = [];
+/**
+ * Read `.web-check[data-id]` roots in document order. The root is the
+ * canonical record: keyword, tier, status, and unprobed ride there on
+ * every row, while the prompt carrier is a child only actionable rows
+ * emit.
+ */
+/** The visible "Result: ..." sentence, without its label. */
+function resultLineOf(el: Element): string | null {
+  const text = el.querySelector('.web-check__result')?.textContent?.trim();
+  if (!text) return null;
+  return text.replace(/^Result:\s*/, '') || null;
+}
+
+export function findingRowsFromElements(nodes: Iterable<Element>): FindingRow[] {
+  const out: FindingRow[] = [];
   for (const el of nodes) {
+    const id = el.getAttribute('data-id');
+    if (!id) continue;
     out.push({
+      id,
       keyword: el.getAttribute('data-keyword') ?? '',
+      tier: el.getAttribute('data-tier') ?? '',
       status: el.getAttribute('data-status') ?? '',
-      prompt: el.getAttribute('data-copy-text') ?? '',
+      unprobed: el.getAttribute('data-unprobed') === 'true',
+      // Read from the rendered paragraph rather than a duplicate attribute,
+      // so the evidence exists once in the DOM.
+      result: resultLineOf(el),
+      prompt: el.querySelector('[data-copy-text]')?.getAttribute('data-copy-text') || null,
+      order: out.length,
     });
   }
   return out;

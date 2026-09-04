@@ -9,7 +9,7 @@
 // ANC_VERSION        — from src/data/anc/VERSION (the currently-published
 //                      anc binary release; vendored from agentnative-cli's
 //                      Cargo.toml).
-// AUDITOR_URL        — production live-scoring surface; moves with anc.dev.
+// AUDITOR_URL        — the canonical live-scoring surface.
 
 export const SPEC_VERSION = '0.5.0';
 export const SITE_SPEC_VERSION = '0.5.0';

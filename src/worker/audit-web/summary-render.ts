@@ -1,171 +1,99 @@
-// Web result-page renderers (plan U9, reworked per plan-003 U14/KTD-8).
-// The web scorecard renders standalone: grouped by visible category in
-// the registry's category_order (carried on scorecard.categories[]),
-// with per-category passed/counted rollups and per-check
-// Goal / Result / Fix / Resources plus the copy-paste prompt. The
-// shared scorecard-format renderer stays CLI-only (it groups by the
-// P1-P8 principles, which are a hidden tag on web surfaces).
+// HTML body for /web/<domain>.
 //
-// The copy-paste prompt is not rendered in the HTML: renderCheck emits it
-// in a hidden `data-copy-text` carrier and the site-wide clipboard.js
-// attaches a Copy-prompt button client-side. The markdown twin keeps the
-// fenced prompt so fetch-only agents lose nothing.
+// The web scorecard renders standalone: grouped by visible category in the
+// registry's category_order (carried on scorecard.categories[]), with
+// per-category passed/counted rollups and per-check Goal / Result / Fix /
+// Resources. The shared scorecard-format renderer stays CLI-only, since it
+// groups by the P1-P8 principles, which are a hidden tag on web surfaces.
+//
+// The copy-paste prompt is never rendered: renderCheck emits it in a hidden
+// `data-copy-text` carrier and the site-wide clipboard.js attaches a
+// Copy-prompt button client-side, so a no-JS render shows the prose and
+// resource links with no dead control. The markdown twin keeps the fenced
+// prompt so fetch-only agents lose nothing.
 
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
+import type { WebAuditFreshness } from './cache';
 import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
-import { assembleRemediation, isFixableStatus, resultLine, type WebRemediationCatalog } from './remediation';
-import type { NaReason, ScorecardStatus } from './scorecard';
-
-type WebScorecardRow = {
-  id: string;
-  label: string;
-  category?: string;
-  keyword?: string;
-  status: ScorecardStatus;
-  na_reason?: NaReason;
-  unprobed?: true;
-  evidence: string | null;
-};
-
-type WebScorecardShape = {
-  spec_version?: string;
-  target_url?: string;
-  tool?: { name?: string; url?: string };
-  score_pct?: number;
-  score?: { relative?: number; global?: number };
-  categories?: Array<{ id: string; name: string; passed: number; counted: number }>;
-  results?: WebScorecardRow[];
-};
-
-export interface WebSummaryInput {
-  scorecard: WebScorecardShape;
-  domain: string;
-  targetUrl: string;
-  /** Friendly display label from the seed; falls back to the domain. */
-  name?: string;
-  /** Static remediation catalog; absent entries degrade to generic prompts. */
-  remediation?: WebRemediationCatalog;
-  /** Origin for skill links in prompts; defaults to the canonical site. */
-  origin?: string;
-}
-
-// Locked label strings for the two scores (U14 open question): the
-// RELATIVE headline reads as the site's own score; GLOBAL is explicitly
-// framed against the maximal site so the two percentages don't compete.
-const RELATIVE_LABEL = 'site score';
-const RELATIVE_SUBLABEL = 'relative to the checks that apply to this site';
-const GLOBAL_LABEL = 'of a maximally agent-ready site';
-
-const STATUS_LABELS: Record<ScorecardStatus, string> = {
-  pass: 'PASS',
-  noncompliant: 'NONCOMPLIANT',
-  broken: 'BROKEN',
-  absent: 'MISSING',
-  n_a: 'N/A',
-  skip: 'SKIP',
-  error: 'ERROR',
-};
-
-function statusLabel(status: ScorecardStatus): string {
-  return STATUS_LABELS[status] ?? String(status).toUpperCase();
-}
-
-// Check-row marks: pass ✓, noncompliant ~, absent (missing) !,
-// broken/error ✕, n_a/skip –. Broken outranks absent in severity (a
-// present-but-broken surface misleads agents) so it carries the fail
-// mark, while a noncompliant surface works and reads as a partial.
-const STATUS_MARKS: Record<ScorecardStatus, string> = {
-  pass: '✓',
-  noncompliant: '~',
-  broken: '✕',
-  absent: '!',
-  n_a: '–',
-  skip: '–',
-  error: '✕',
-};
-
-function statusMark(status: ScorecardStatus): string {
-  return STATUS_MARKS[status] ?? '–';
-}
-
-// The RFC-2119 tier (MUST/SHOULD/MAY) is a per-check obligation, so it
-// renders on each check row, never on the category header: a category holds
-// a mix of tiers, and the scorer weighs each check by its own tier
-// (score.ts), never by its group. Row keyword -> chip class below.
-const TIER_LABELS: Record<string, string> = { must: 'MUST', should: 'SHOULD', may: 'MAY' };
+import { freshnessHtml } from './summary-freshness';
+import { type WebSummaryInput, webSummaryView } from './summary-input';
+import {
+  RELATIVE_LABEL,
+  RELATIVE_SUBLABEL,
+  STATUS_ORDER,
+  type SummaryRow,
+  statusLabel,
+  statusMark,
+  TIER_LABELS,
+  type WebSummaryModel,
+} from './summary-model';
 
 function tierChip(keyword: string | undefined): string {
   if (!keyword || !(keyword in TIER_LABELS)) return '';
   return `<span class="tier tier-${keyword}">${TIER_LABELS[keyword]}</span> `;
 }
 
-/** A row earns a fix prompt only when the run actually observed the surface. */
-function isFixable(row: Pick<WebScorecardRow, 'status' | 'unprobed'>): boolean {
-  return row.unprobed !== true && isFixableStatus(row.status);
+/**
+ * One hidden page-level record of what the page renders: both scores, the
+ * complete per-status counts, and the freshness envelope. The counts come from
+ * the same model the visible page renders, so a machine reader and a human
+ * reader cannot disagree. A null instant omits its attribute rather than
+ * emitting an empty string, so a reader gets null instead of "".
+ */
+function auditContextEl(model: WebSummaryModel, freshness: WebAuditFreshness): string {
+  const attrs = [
+    'data-web-audit-context',
+    `data-site-score="${model.relative}"`,
+    `data-global-score="${model.global}"`,
+    `data-cached="${freshness.cached ? 'true' : 'false'}"`,
+  ];
+  if (freshness.scored_at) attrs.push(`data-scored-at="${escHtml(freshness.scored_at)}"`);
+  if (freshness.refresh_after) attrs.push(`data-refresh-after="${escHtml(freshness.refresh_after)}"`);
+  for (const status of STATUS_ORDER) attrs.push(`data-count-${status}="${model.counts[status]}"`);
+  return `<div ${attrs.join(' ')} hidden></div>`;
 }
 
-function scoresOf(scorecard: WebScorecardShape): { relative: number; global: number } {
-  return {
-    relative: scorecard.score?.relative ?? scorecard.score_pct ?? 0,
-    global: scorecard.score?.global ?? 0,
-  };
-}
-
-function rowsByCategory(scorecard: WebScorecardShape): Map<string, WebScorecardRow[]> {
-  const byCategory = new Map<string, WebScorecardRow[]>();
-  for (const row of scorecard.results ?? []) {
-    const key = row.category ?? '';
-    const bucket = byCategory.get(key) ?? [];
-    bucket.push(row);
-    byCategory.set(key, bucket);
-  }
-  return byCategory;
-}
-
-/** HTML body for /web/<domain>. */
-export function buildWebSummaryBody(input: WebSummaryInput): string {
-  const sc = input.scorecard;
-  const origin = input.origin ?? 'https://anc.dev';
-  const catalog = input.remediation ?? {};
-  const { relative, global: globalScore } = scoresOf(sc);
-  const name = input.name ?? sc.tool?.name ?? input.domain;
-  const targetUrl = sc.tool?.url ?? input.targetUrl;
-  const byCategory = rowsByCategory(sc);
-
-  // Status-count chips for the hero.
-  const counts: Record<string, number> = {};
-  for (const row of sc.results ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
+function heroChips(counts: WebSummaryModel['counts']): string[] {
   const chips: string[] = [];
   if (counts.pass) chips.push(`<span class="chip chip--ok">${counts.pass} pass</span>`);
   if (counts.noncompliant) chips.push(`<span class="chip chip--warn">${counts.noncompliant} noncompliant</span>`);
   if (counts.absent) chips.push(`<span class="chip chip--warn">${counts.absent} missing</span>`);
   if (counts.broken) chips.push(`<span class="chip chip--fail">${counts.broken} broken</span>`);
-  if (counts.error)
+  if (counts.error) {
     chips.push(`<span class="chip chip--fail">${counts.error} error${counts.error === 1 ? '' : 's'}</span>`);
-  const naCount = (counts.n_a ?? 0) + (counts.skip ?? 0);
+  }
+  const naCount = counts.n_a + counts.skip;
   if (naCount) chips.push(`<span class="chip chip--muted">${naCount} n/a</span>`);
+  return chips;
+}
+
+/** HTML body for /web/<domain>. */
+export function buildWebSummaryBody(input: WebSummaryInput): string {
+  const { model, freshness, freshnessState } = webSummaryView(input);
+  const chips = heroChips(model.counts);
 
   let html = `<article class="container scorecard-page" data-web-audit-result><nav class="crumb" aria-label="Breadcrumb">
-  <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(name)}</span>
+  <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(model.name)}</span>
 </nav>
 <header class="scorecard-hero">
   <div class="scorecard-hero__id">
-    <h1>${escHtml(name)}</h1>
-    <p class="live-score-summary__meta">Website <a href="${escHtml(targetUrl)}">${escHtml(targetUrl)}</a> · agent-readiness audit</p>
+    <h1>${escHtml(model.name)}</h1>
+    <p class="live-score-summary__meta">Website <a href="${escHtml(model.targetUrl)}">${escHtml(model.targetUrl)}</a> · agent-readiness audit</p>
 ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''}    <p class="scorecard-hero__note">${escHtml(RELATIVE_SUBLABEL)}; global measures it against a maximally agent-ready site.</p>
+    <p class="scorecard-hero__note" data-web-audit-freshness>${freshnessHtml(freshnessState)}</p>
   </div>
   <div class="scorecard-hero__scores">
-    <div class="scorecell ${bandOf(relative)}"><span class="bigscore__n">${relative}</span><span class="bigscore__l">${escHtml(RELATIVE_LABEL)}</span>${renderMeter(relative, { num: null })}</div>
-    <div class="scorecell ${bandOf(globalScore)}"><span class="bigscore__n">${globalScore}</span><span class="bigscore__l">global-ready</span>${renderMeter(globalScore, { num: null })}</div>
+    <div class="scorecell ${bandOf(model.relative)}"><span class="bigscore__n">${model.relative}</span><span class="bigscore__l">${escHtml(RELATIVE_LABEL)}</span>${renderMeter(model.relative, { num: null })}</div>
+    <div class="scorecell ${bandOf(model.global)}"><span class="bigscore__n">${model.global}</span><span class="bigscore__l">global-ready</span>${renderMeter(model.global, { num: null })}</div>
   </div>
 </header>
+${auditContextEl(model, freshness)}
 <section class="scorecard-audits" aria-label="Checks by category">
 `;
 
   let catIndex = 0;
-  for (const category of sc.categories ?? []) {
+  for (const category of model.categories) {
     catIndex += 1;
-    const rows = byCategory.get(category.id) ?? [];
     const empty = category.counted === 0;
     const rollupBand = empty ? '' : ` ${bandOf((category.passed / category.counted) * 100)}`;
     html += `  <div class="catcard${empty ? ' catcard--empty' : ''}">
@@ -178,8 +106,8 @@ ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''} 
     if (empty) {
       html += `    <p class="audit-group__note">No checks in this category apply to this site.</p>\n`;
     }
-    for (const row of rows) {
-      html += renderCheck(row, catalog, origin);
+    for (const row of category.rows) {
+      html += renderCheck(row);
     }
     html += '  </div>\n';
   }
@@ -193,105 +121,31 @@ ${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''} 
   return html;
 }
 
-function renderCheck(row: WebScorecardRow, catalog: WebRemediationCatalog, origin: string): string {
-  const entry = catalog[row.id];
-  const result = resultLine(row.status, row.evidence, row.na_reason);
-  const fixable = isFixable(row);
-  const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
-  const goal = entry?.goal ?? assembled.goal;
-
+function renderCheck(row: SummaryRow): string {
   const resourceLinks = [
-    ...assembled.resources.map((r) => `<a href="${escHtml(r.url)}" rel="noopener">${escHtml(r.label)}</a>`),
-    `<a href="${escHtml(assembled.skill_url)}">Fix skill</a>`,
+    ...row.resources.map((r) => `<a href="${escHtml(r.url)}" rel="noopener">${escHtml(r.label)}</a>`),
+    `<a href="${escHtml(row.skillUrl)}">Fix skill</a>`,
   ].join(' · ');
 
-  let body = `      <p class="web-check__goal"><strong>Goal:</strong> ${escHtml(goal)}.</p>
-      <p class="web-check__result"><strong>Result:</strong> ${escHtml(result)}</p>
+  let body = `      <p class="web-check__goal"><strong>Goal:</strong> ${escHtml(row.goal)}.</p>
+      <p class="web-check__result"><strong>Result:</strong> ${escHtml(row.result)}</p>
 `;
-  if (fixable) {
-    body += `      <p class="web-check__fix"><strong>Fix:</strong> ${escHtml(assembled.fix)}</p>\n`;
+  if (row.fixable) {
+    body += `      <p class="web-check__fix"><strong>Fix:</strong> ${escHtml(row.fix)}</p>\n`;
   }
   body += `      <p class="web-check__resources"><strong>Resources:</strong> ${resourceLinks}</p>\n`;
-  if (fixable) {
-    // The prompt is never rendered in HTML; clipboard.js reads it from the
-    // data attribute and attaches a Copy-prompt button client-side, so a
-    // no-JS render shows the prose + resource links with no dead control.
-    // The .md twin keeps the fenced prompt for fetch-only agents.
-    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(assembled.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
+  if (row.fixable) {
+    body += `      <span class="web-check__prompt" data-copy-text="${escHtml(row.prompt)}" data-keyword="${escHtml(row.keyword ?? '')}" data-status="${escHtml(row.status)}" hidden></span>\n`;
   }
 
-  return `    <details class="web-check web-check--${row.status}"${fixable ? ' open' : ''} data-id="${escHtml(row.id)}">
+  // The row root is the canonical record: keyword, tier, status, and unprobed
+  // ride here on every row, including the ones that carry no prompt, so a
+  // reader never has to infer priority from a conditional child that only
+  // actionable rows emit.
+  const rootMeta = ` data-keyword="${escHtml(row.keyword ?? '')}" data-tier="${escHtml(row.tier ?? '')}" data-status="${escHtml(row.status)}" data-unprobed="${row.unprobed ? 'true' : 'false'}"`;
+
+  return `    <details class="web-check web-check--${row.status}"${row.fixable ? ' open' : ''} data-id="${escHtml(row.id)}"${rootMeta}>
       <summary><span class="web-check__mark" aria-hidden="true">${statusMark(row.status)}</span> <span class="web-check__label">${escHtml(row.label)}</span> ${tierChip(row.keyword)}<span class="audit__status">${escHtml(statusLabel(row.status))}</span></summary>
 ${body}    </details>
 `;
-}
-
-// Evidence strings carry probed-server values (serverInfo names,
-// Allow-Origin headers), so the target controls them. The HTML twin
-// neutralizes them through escHtml; on the markdown twin a newline
-// breaks out of the bullet and a backtick opens a code span, so inline
-// text is flattened and fenced blocks lose any embedded fence.
-function mdInline(text: string): string {
-  return text.replace(/[\r\n]+/g, ' ').replaceAll('`', '\\`');
-}
-
-function mdFenced(text: string): string {
-  return text.replaceAll('```', "'''");
-}
-
-/** Markdown twin for /web/<domain>.md. Absolute links for cross-origin fetch. */
-export function buildWebSummaryMarkdown(input: WebSummaryInput): string {
-  const sc = input.scorecard;
-  const origin = input.origin ?? 'https://anc.dev';
-  const catalog = input.remediation ?? {};
-  const { relative, global: globalScore } = scoresOf(sc);
-  const name = input.name ?? sc.tool?.name ?? input.domain;
-  const targetUrl = sc.tool?.url ?? input.targetUrl;
-  const byCategory = rowsByCategory(sc);
-
-  const lines: string[] = [
-    `# ${name} — Agent-Readiness Audit`,
-    '',
-    `Website: [${targetUrl}](${targetUrl})`,
-    '',
-    `**Score:** ${relative}% (${RELATIVE_SUBLABEL})`,
-    `**Global:** ${globalScore}% ${GLOBAL_LABEL}`,
-    '',
-  ];
-
-  for (const category of sc.categories ?? []) {
-    const rows = byCategory.get(category.id) ?? [];
-    lines.push(`## ${category.name} (${category.passed}/${category.counted})`, '');
-    if (category.counted === 0) {
-      lines.push('No checks in this category apply to this site.', '');
-    }
-    for (const row of rows) {
-      const entry = catalog[row.id];
-      const result = resultLine(row.status, row.evidence, row.na_reason);
-      const fixable = isFixable(row);
-      const assembled = assembleRemediation(entry, { checkId: row.id, origin, evidence: row.evidence });
-      lines.push(`### ${statusLabel(row.status)} — ${row.label}`, '');
-      if (row.keyword && row.keyword in TIER_LABELS) lines.push(`- Tier: ${TIER_LABELS[row.keyword]}`);
-      lines.push(`- Goal: ${entry?.goal ?? assembled.goal}.`);
-      lines.push(`- Result: ${mdInline(result)}`);
-      if (fixable) lines.push(`- Fix: ${assembled.fix.replace(/\s*\n\s*/g, ' ')}`);
-      const resources = [
-        ...assembled.resources.map((r) => `[${r.label}](${r.url})`),
-        `[Fix skill](${assembled.skill_url})`,
-      ];
-      lines.push(`- Resources: ${resources.join(', ')}`);
-      if (fixable) {
-        lines.push('', '```text', mdFenced(assembled.prompt), '```');
-      }
-      lines.push('');
-    }
-  }
-
-  lines.push(
-    '## Re-run this audit',
-    '',
-    'Re-run from [anc.dev/web-audit](https://anc.dev/web-audit), or call the `audit_website` MCP tool.',
-    '',
-  );
-  return lines.join('\n');
 }

@@ -43,6 +43,7 @@ import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import type { Catalog } from '../catalog';
 import { requestHeader } from '../request-header';
+import { siteOrigin } from '../site-origin';
 
 export interface ScorecardAuditEnv extends OrchestrateEnv {
   MCP_LIVE_SCORING_ENABLED?: string;
@@ -57,7 +58,6 @@ export interface ScorecardAuditEnv extends OrchestrateEnv {
   MCP_CACHE_BYPASS_ALLOWED?: string;
 }
 
-const SITE_URL = 'https://anc.dev';
 const HOUR_MS = 3_600_000;
 const HOURLY_AUDIT_CEILING = 5;
 const HOURLY_KV_TTL_SECONDS = 7200;
@@ -146,6 +146,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
     async (args, extra) => {
+      const siteUrl = siteOrigin();
       // Step 1: MCP_LIVE_SCORING_ENABLED kill switch.
       if (env.MCP_LIVE_SCORING_ENABLED !== 'true') {
         return textContent({
@@ -205,7 +206,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
 
       if (lookup.kind === 'curated') {
         const scorecardUrlPath = lookup.scorecard_url ?? `/score/${lookup.entry.name}`;
-        const scorecard_url = scorecardUrlPath.startsWith('http') ? scorecardUrlPath : `${SITE_URL}${scorecardUrlPath}`;
+        const scorecard_url = scorecardUrlPath.startsWith('http') ? scorecardUrlPath : `${siteUrl}${scorecardUrlPath}`;
         return textContent({
           audited: false,
           source: 'registry',
@@ -220,7 +221,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       if (lookup.kind === 'cached') {
         const scorecard = lookup.scorecard as { tool?: { binary?: string | null } } | null;
         const binary = scorecard?.tool?.binary ?? null;
-        const scorecard_url = binary ? `${SITE_URL}/score/live/${binary}` : null;
+        const scorecard_url = binary ? `${siteUrl}/score/live/${binary}` : null;
         return textContent({
           audited: false,
           source: 'live-cache',
@@ -274,7 +275,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // Step 8: map kind to typed-state response.
       switch (result.kind) {
         case 'cache_post_hit': {
-          const scorecard_url = `${SITE_URL}/score/live/${result.spec.binary}`;
+          const scorecard_url = `${siteUrl}/score/live/${result.spec.binary}`;
           return textContent({
             audited: false,
             source: 'live-cache',
@@ -287,7 +288,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
           });
         }
         case 'fresh': {
-          const scorecard_url = `${SITE_URL}/score/live/${result.spec.binary}`;
+          const scorecard_url = `${siteUrl}/score/live/${result.spec.binary}`;
           return textContent({
             audited: true,
             source: 'fresh-audit',

@@ -69,6 +69,13 @@ function buildMcpDescriptor(baseUrl) {
   )}\n`;
 }
 
+// The site has exactly one canonical location, and it is the production host
+// named by `<link rel="canonical">` and the sitemap. RFC 9116's `Canonical:`
+// is a different thing wearing the same word: it is a self-reference stating
+// where THIS document is served, which a scanner compares against the URL it
+// fetched. Naming production here from a staging build would make staging's
+// own security.txt disown itself. Same shape as the OAuth `resource` and
+// `issuer` fields below. Read these as "self", not as "the canonical site".
 function buildSecurityTxt(baseUrl) {
   const expires = expiresInOneYearIso();
   return [
@@ -285,6 +292,8 @@ function buildOAuthProtectedResource(baseUrl) {
   // empty and the authorization server metadata documents anonymous access.
   return `${JSON.stringify(
     {
+      // RFC 9728 self-reference: names the resource server as deployed, so it
+      // must match the host that served this document, not the canonical site.
       resource: `${baseUrl}/mcp`,
       authorization_servers: [baseUrl],
       scopes_supported: [],
@@ -305,6 +314,8 @@ function buildOAuthAuthorizationServer(baseUrl) {
   // authorization-code grant is supported, and a real probe would only hit prose.
   return `${JSON.stringify(
     {
+      // RFC 8414 issuer identifier: clients compare it against the host they
+      // fetched from, so it names this deployment rather than the canonical site.
       issuer: baseUrl,
       token_endpoint: `${baseUrl}/oauth2/token`,
       jwks_uri: `${baseUrl}/.well-known/jwks.json`,

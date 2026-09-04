@@ -2,12 +2,24 @@
 // ≤1.5k. Probe document.modelContext then navigator.modelContext; no-op if
 // both are absent. See https://webmachinelearning.github.io/webmcp/
 
+import { CANONICAL_SITE_URL } from '../shared/site-url';
+import { pageMeta } from '../shared/web-audit-findings';
 import { auditTools } from './webmcp-audit';
 import { homeTools } from './webmcp-home';
 import { orientationTools } from './webmcp-orientation';
 import { resultTools } from './webmcp-result';
 
-export const EXECUTE_MAX = 1500;
+/**
+ * Longest DOMString a WebMCP tool's `execute()` may return.
+ *
+ * This bounds the browser-side WebMCP surface only. It is not a limit on the
+ * regular MCP server at `/mcp`, whose tool results are ordinary JSON-RPC
+ * payloads with no such ceiling, and not a site-wide response cap. A reader
+ * who mistakes it for either will shorten payloads that were never
+ * constrained: `get_web_remediation` returns the same remediation object this
+ * page's tools have to trim.
+ */
+export const WEBMCP_EXECUTE_MAX = 1500;
 
 export type WebMcpTool = {
   name: string;
@@ -60,30 +72,57 @@ export function isOrientationPath(pathname: string): boolean {
 }
 
 export function capExecute(text: string): string {
-  if (text.length <= EXECUTE_MAX) return text;
-  return `${text.slice(0, EXECUTE_MAX - 1)}…`;
+  if (text.length <= WEBMCP_EXECUTE_MAX) return text;
+  return `${text.slice(0, WEBMCP_EXECUTE_MAX - 1)}…`;
 }
 
-export function formatWorksheet(rows: Array<{ id: string; keyword: string; status: string }>): string {
-  let keep = rows.length;
-  while (keep >= 0) {
-    const omitted = rows.length - keep;
-    const body = JSON.stringify(rows.slice(0, keep));
-    const text = omitted === 0 ? body : `${body} … +${omitted} more`;
-    if (text.length <= EXECUTE_MAX) return text;
-    keep -= 1;
+export type PagedResult = {
+  /** Fields that precede the pagination metadata, e.g. freshness. */
+  head: Record<string, unknown>;
+  offset: number;
+  total: number;
+  items: readonly unknown[];
+  /** JSON key the items are published under. */
+  key?: string;
+};
+
+/**
+ * Serialize one page of whole items under WEBMCP_EXECUTE_MAX. Slicing a
+ * serialized envelope would hand the reader broken JSON, so items are
+ * dropped from the end until the page fits and `pageMeta` reports the
+ * shortfall — the continuation cursor then carries the reader forward
+ * without a gap.
+ */
+export function packPage(page: PagedResult): string {
+  const key = page.key ?? 'items';
+  const render = (keep: number): string => {
+    const items = page.items.slice(0, keep);
+    return JSON.stringify({
+      ok: true,
+      ...page.head,
+      total: page.total,
+      ...pageMeta(page.offset, page.total, items.length),
+      [key]: items,
+    });
+  };
+  for (let keep = page.items.length; keep > 0; keep -= 1) {
+    const text = render(keep);
+    if (text.length <= WEBMCP_EXECUTE_MAX) return text;
   }
-  return capExecute(` … +${rows.length} more`);
+  return render(0);
 }
 
 export function emptyObjectSchema(): Record<string, unknown> {
   return { type: 'object', properties: {}, additionalProperties: false };
 }
 
+// The page's own origin, so a tool result points at the deployment the
+// agent is already on. Falls back to the canonical host only when there
+// is no document to read an origin from (non-browser test harness).
 function resolveOrigin(opts: ToolsForOpts): string {
   if (opts.origin) return opts.origin;
   if (typeof location !== 'undefined' && location.origin) return location.origin;
-  return '';
+  return CANONICAL_SITE_URL;
 }
 
 export function pageDoc(opts: ToolsForOpts): Document {
@@ -144,7 +183,7 @@ export async function bindModelContext(mc: ModelContext, tools: WebMcpTool[], si
 
 function registerWithLifecycle(mc: ModelContext, win: Window, doc: Document | undefined): void {
   const controller = new AbortController();
-  const origin = win.location?.origin ?? '';
+  const origin = win.location?.origin ?? CANONICAL_SITE_URL;
   const pathname = win.location?.pathname ?? '/';
   void bindModelContext(mc, toolsFor(pathname, { doc, origin }), controller.signal);
   win.addEventListener('pagehide', () => controller.abort(), { once: true });

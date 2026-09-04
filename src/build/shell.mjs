@@ -7,8 +7,9 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
-import { escHtml, resolveBaseUrl, SITE_SPEC_VERSION } from './util.mjs';
+import { canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
 
 const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../content');
 const INSTALL_COMMANDS = loadInstallCommands(CONTENT_DIR);
@@ -85,8 +86,10 @@ const renderNavLink = (entry, path) => {
 const OG_IMAGE_ALT =
   'anc.dev, the agent-native standard: MUST run without prompting, SHOULD speak machine-first, MAY decorate when a TTY is open. One bar for agent-readiness, on two surfaces.';
 
-const AI_SUMMARY_PROMPT =
-  'Summarize the agent-native CLI standard from https://anc.dev/llms-full.txt — what are the eight principles and why do they matter for AI agents using CLI tools?';
+// Handed to a third-party LLM (ChatGPT/Claude/Perplexity), which can only
+// fetch a publicly reachable URL. Staging sits behind Cloudflare Access,
+// so this stays pinned to the canonical host on every build.
+const AI_SUMMARY_PROMPT = `Summarize the agent-native CLI standard from ${CANONICAL_SITE_URL}/llms-full.txt — what are the eight principles and why do they matter for AI agents using CLI tools?`;
 
 const AI_PROVIDERS = [
   {
@@ -208,7 +211,13 @@ export function emitShell({
   baseUrl,
   extraScripts = [],
 }) {
-  const base = resolveBaseUrl(baseUrl);
+  // Everything `base` feeds below is crawler-facing identity: the
+  // canonical link, the OpenGraph/Twitter block, and the JSON-LD @id
+  // graph. All of it names where the real site lives, so it ignores
+  // PUBLIC_BASE_URL. The shell's actual navigation — nav, footer, the
+  // markdown-twin `alternate` link — is already site-relative and needs
+  // no base at all.
+  const base = canonicalBaseUrl(baseUrl);
   const canonical = base + canonicalPath;
   const markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`;
   const ogImage = `${base}/og-image.png`;

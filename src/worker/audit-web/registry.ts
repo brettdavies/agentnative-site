@@ -41,7 +41,7 @@ export type AntecedentToken =
   | 'robots-present'
   | 'auth-present';
 
-export type WebCheckEvalRule = 'canonical-redirect' | 'scoped-discovery';
+export type WebCheckEvalRule = 'legacy-alias-redirects' | 'scoped-discovery';
 
 export interface WebCheck {
   id: string;

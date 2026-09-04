@@ -40,6 +40,7 @@
 // when two sources concur, our confidence is higher; when they
 // disagree, we'd rather see it in logs than silently degrade.
 
+import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import type { ParsedInstall } from './parse-install';
 import { parseInstallCommand } from './parse-install';
 import type { DiscoveryHintsIndex } from './registry-lookup';
@@ -119,7 +120,10 @@ const INSTALL_CMD_RE =
 
 const STEP_TIMEOUT_MS = 2_000;
 const TOTAL_TIMEOUT_MS = 8_000;
-const USER_AGENT = 'anc-discovery/1.0 (+https://anc.dev)';
+// Identifies this crawler to the third-party hosts it probes. The contact
+// URL is the canonical host on every deployment: a staging URL behind
+// Cloudflare Access tells an upstream operator nothing they can reach.
+export const USER_AGENT = `anc-discovery/1.0 (+${CANONICAL_SITE_URL})`;
 
 export type DiscoverContext = {
   owner: string;
