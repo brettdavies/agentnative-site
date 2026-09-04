@@ -240,6 +240,13 @@ function skipResult(check: WebCheck): EngineResult {
   };
 }
 
+// Cloudflare answers on the origin's behalf with these when the origin
+// never spoke: 52x for connection and timeout failures, 530 when the host
+// does not resolve. They carry the auditor's edge, not the target.
+function isEdgeErrorStatus(status: number | null): boolean {
+  return status !== null && (status === 530 || (status >= 520 && status <= 527));
+}
+
 /** An applicable MAY that is simply absent is optional, not a miss (R3). */
 function finalizeOptional(check: WebCheck, result: EngineResult): EngineResult {
   if (check.keyword === 'may' && result.status === 'absent') {
@@ -302,17 +309,28 @@ export async function* runWebAudit(input: RunWebAuditInput): AsyncGenerator<Audi
   });
   yield { type: 'discovery', endpoint: discovery.endpoint, evidence: discovery.evidence };
 
-  // Nothing anywhere returned an HTTP status: the target is unreachable
-  // from the auditor's vantage point. Any real response, even a 401 or 404,
-  // is auditable evidence and keeps the run going; total network silence is
-  // not, so end the run without a scorecard.
-  const anyHttpResponse = discovery.evidence.some((e) => typeof e.status === 'number');
-  if (root === null && discovery.endpoint === null && !anyHttpResponse) {
+  // Nothing from the target itself answered: it is unreachable from the
+  // auditor's vantage point. Any real response, even a 401 or 404, is
+  // auditable evidence and keeps the run going. Silence is not, and neither
+  // is a status the edge synthesised in the target's place: a host that
+  // does not resolve or never answers comes back from the Worker's fetch as
+  // a 530 or 52x page, which says nothing about the site.
+  const rootFromTarget = root !== null && !isEdgeErrorStatus(root.status);
+  const anyTargetResponse = discovery.evidence.some(
+    (e) => typeof e.status === 'number' && !isEdgeErrorStatus(e.status),
+  );
+  if (!rootFromTarget && discovery.endpoint === null && !anyTargetResponse) {
+    const onlyEdgeErrors =
+      root !== null || discovery.evidence.some((e) => typeof e.status === 'number' && isEdgeErrorStatus(e.status));
     yield {
       type: 'unreachable',
-      reason:
-        `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
-        'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.',
+      reason: onlyEdgeErrors
+        ? `${base} did not answer any probe (every response was a Cloudflare edge error, ` +
+          `which means the host did not resolve or never replied). ` +
+          'The site may be down, its DNS may be misconfigured, or it may block requests from datacenter IP ranges ' +
+          'such as the auditor’s.'
+        : `${base} did not answer any probe (no HTTP response from the root fetch or MCP discovery). ` +
+          'The site may be down, or it may block requests from datacenter IP ranges such as the auditor’s.',
     };
     return;
   }
