@@ -629,6 +629,10 @@ Open, with blockers:
 
 - Production deploy of the page record waits on the parent plan's staging-lake field-shape and export gates (parent
   Alignment item 10); the next release branch must not cherry-pick `77814f9` or `fbeff01` before those are recorded.
+  `main` at `94d8eda` (release #333, 2026-09-04) carries neither, and its `src/worker/audit-web/audit-log.ts`,
+  `src/worker/notify.ts`, and `src/shared/user-agents.ts` are the pre-emitter versions (`console.*` plus
+  `JSON.stringify`), so the release branch that carries `fbeff01` resolves those three files toward the emitter
+  versions.
 - Two design notes left as they are, recorded in #330's review notes: the emitter caps `client_name`, `method`, and
   `name` by field name across every scope (R3, KTD4), and a dispatch that throws before a response exists leaves no
   `page.request` record.

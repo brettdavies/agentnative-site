@@ -19,17 +19,16 @@ topic: telemetry-session-identity
 - **Authority:** R-IDs win on required behavior.
 - **Execution profile:** Blocked on open questions. This artifact is `requirements-only` on purpose: four design
   questions below have to be answered before implementation units can be written, and three of them were only discovered
-  by review.
+  by review. OQ4 is answered; OQ1 to OQ3 remain open.
 - **Stop conditions:** Do not begin implementation while any Open Question is unresolved. Two of them can invalidate the
   whole approach.
 - **Depends on:** `docs/plans/2026-09-01-0042-refactor-structured-log-emitter-plan.md` — specifically its `page.request`
-  record (U10) and its platform-key finding (U6). Neither exists yet, and this plan has nothing to attach to without the
-  first.
+  record (U10) and its platform-key finding (U6). Both are on `dev` (#330 `77814f9`, #331 `fbeff01`); the finding is
+  recorded in `docs/runbooks/sitewide-analytics.md` § Live-layer field index.
 - **Parent view:** `docs/plans/2026-09-01-1732-feat-sitewide-telemetry-plan.md` owns the sitewide contract these
   journeys serve; its R5 governs what any record or export may carry.
 - **Execution order:** filename timestamps do not encode execution order. This plan runs last in the telemetry family —
-  after the parent's config-wins and lake milestones and the emitter plan's page record and platform-key audit exist —
-  and remains blocked on its own four Open Questions until then.
+  after the parent's config-wins and lake milestones — and remains blocked on OQ1 to OQ3 until then.
 
 ---
 
@@ -82,7 +81,7 @@ was split out: the emitter fix had no unresolved design questions and this does.
   aggregate functions only — no sequence or funnel operators. One session's path is readable; "most common three-page
   journeys" is not expressible and no amount of session design changes that.
 
-### Open Questions — all blocking
+### Open Questions — OQ1 to OQ3 blocking, OQ4 answered
 
 - **OQ1. Does the existing session identity already answer this?** `src/worker/score/session.ts` issues a signed
   `__Host-anc-session` cookie carrying a `sid`, established after a Turnstile solve and already used to key
@@ -105,9 +104,18 @@ was split out: the emitter fix had no unresolved design questions and this does.
   `$metadata`/`$workers` keys. If any holds the client address, then a session identifier lands in the same indexed
   record as the address it was derived to avoid, and R3 is void no matter how careful the derivation is. The emitter
   plan's U6 answers this as a side effect; this plan must not start before it does. The same audit extends to the
-  Logpush export envelope: the sitewide plan's R5 forbids the export reintroducing what the records exclude.
+  Logpush export envelope: the sitewide plan's R5 forbids the export reintroducing what the records exclude. **Answered
+  (emitter plan U6, #331):** yes, on the platform's own records. The invocation records (`$metadata.type:
+  cf-worker-event`, one per request) index and populate `$workers.event.request.headers.cf-connecting-ip`, `x-real-ip`,
+  `x-forwarded-for`, `user-agent`, and the `cf` geolocation fields for the live layer's seven days; the Worker's console
+  records (`$metadata.type: cf-worker`) carry none of them, so R3 holds for every record the site writes. Consequences
+  for the derivation: a session key must never be joined to an invocation record by request id, and the Logpush
+  allowlist's exclusion of the `Event` envelope is what keeps the address out of the lake (the parent's export audit
+  confirms it per delivery). Record: `docs/runbooks/sitewide-analytics.md` § Live-layer field index.
 
 ### Sources
+
+- `docs/runbooks/sitewide-analytics.md` § Live-layer field index — the platform-key audit behind OQ4's answer.
 
 - Verified on workerd, 2026-09-01: an `AsyncLocalStorage` store set in `default.fetch` reads `null` inside
   `Cached.fetch`; the direct-construction fallback propagates it. Every worker test passes `{} as ExecutionContext`,
@@ -175,8 +183,8 @@ returns Cloudflare API 10053, and `tests/wrangler-config.test.ts` guards it.
 
 ## Implementation Units
 
-Not yet written. All four Open Questions are blocking, and OQ1 and OQ2 can change the shape enough that units written
-now would be discarded. Answer them, then enrich this plan to `implementation-ready`.
+Not yet written. OQ1 to OQ3 are blocking, and OQ1 and OQ2 can change the shape enough that units written now would be
+discarded. Answer them, then enrich this plan to `implementation-ready`.
 
 ---
 
