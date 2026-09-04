@@ -460,6 +460,56 @@ describe('runWebAudit reachability', () => {
     expect(complete?.type).toBe('complete');
   });
 
+  test('a host the edge answers for with 530 on every probe is unreachable, not a scored run', async () => {
+    const fetchImpl = stubFetch(() => new Response('origin DNS error', { status: 530 }));
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+      }),
+    );
+    const terminal = events.at(-1);
+    expect(terminal?.type).toBe('unreachable');
+    if (terminal?.type === 'unreachable') {
+      expect(terminal.reason).toContain('edge');
+    }
+    expect(events.some((e) => e.type === 'complete')).toBe(false);
+    expect(events.some((e) => e.type === 'result')).toBe(false);
+  });
+
+  test('an edge 52x on every probe is unreachable for the same reason', async () => {
+    const fetchImpl = stubFetch(() => new Response('origin unreachable', { status: 523 }));
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+      }),
+    );
+    expect(events.at(-1)?.type).toBe('unreachable');
+  });
+
+  test('an edge 530 on the root with a real answer elsewhere is scored, not unreachable', async () => {
+    const fetchImpl = ((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === 'https://example.com/') return Promise.resolve(new Response('origin DNS error', { status: 530 }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const events = await collect(
+      runWebAudit({
+        url: 'https://example.com/',
+        registry: tinyRegistry(),
+        fetchOptions: { fetchImpl },
+        perCheckTimeoutMs: 100,
+      }),
+    );
+    expect(events.some((e) => e.type === 'unreachable')).toBe(false);
+    expect(events.find((e) => e.type === 'complete')?.type).toBe('complete');
+  });
+
   test('a target that answers 401 everywhere is scored, not classified unreachable', async () => {
     const fetchImpl = stubFetch(() => new Response('denied', { status: 401 }));
     const events = await collect(
