@@ -95,7 +95,6 @@ end-state directly:
 
 ```bash
 # 0. Nothing on main that dev never received (security PRs, hotfixes, config). Exits 1 while drift exists.
-#    Until the first v* tag exists, anchor on the last release squash: --since <sha>.
 scripts/release/drift.sh
 
 # 1. Branch from main, NOT dev.

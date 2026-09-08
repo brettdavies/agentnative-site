@@ -98,15 +98,18 @@ Security PRs, hotfixes, and config edits land on `main` first. The release branc
 `dev`'s tree, so anything `main` holds that `dev` never received is reverted by the release or collides with it, and
 Dependabot raises the same fix again.
 
+- [ ] `dev` carries the previous release's own bookkeeping, the `package.json` version and the `CHANGELOG.md` section
+      (gate 0). Gate 0 fails when the previous release's bookkeeping never reached `dev`; run
+      `scripts/sync-dev-after-release.sh v<version>`, merge its PR, and rerun.
 - [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1 lists the ones that do not, as
       `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists
-      the gate anchors on the `main`/`dev` merge base and lists every release squash since; pass
-      `--since <last release squash sha>` to anchor on the last release.
+      the gate anchors on the newest `release:` squash on `main`; pass `--since <sha>` to anchor elsewhere.
 - [ ] `.github/` is identical on both branches (gate 2). A difference either way is a config change that only reached
       one branch.
-- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads `package-lock.json` and
-      `Cargo.lock`; this repo's `bun.lock` is not parsed, so the gate SKIPs here and the `.github/` parity gate plus
-      Dependabot's security PRs are the signal.
+- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads this repo's `bun.lock` one
+      line per package name. `bun.lock` is JSONC and the gate's `jq` parser rejects its trailing commas, so a
+      `parse error` on stderr means the gate saw no packages and its pass is not evidence; until the parser accepts
+      JSONC, the `.github/` parity gate plus Dependabot's security PRs are the signal.
 - [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
 
 ### Cross-repo coordination
