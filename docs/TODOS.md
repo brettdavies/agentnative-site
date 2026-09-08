@@ -105,6 +105,28 @@ by: no headless browser in `src/worker/audit-web`.
 **Effort:** L **Priority:** P3 **Depends on:** First-party page tools shipping so there is something to grade **Blocked
 by:** Headless browser runtime in the web-audit engine
 
+## Release
+
+### Ship the telemetry family deliberately in a coming release
+
+**What:** The telemetry family (#322 privacy posture page + lake config + stall alert, #330 structured-log emitter +
+client taxonomy + gateway page record, #331 emitter migration of every Worker log site) lives on `dev` and staging but
+is absent from `main`: the 2026-09-08 release reverted its 54-file footprint to the pre-telemetry baseline and stripped
+the emitter/lake prose from AGENTS.md and RELEASES.md.
+
+**Why:** The family needs an explicit readiness call before it reaches production. Until it ships, every release cut
+from `dev` must either carry it (the default overlay behavior) or repeat the hold surgery; an overlay built without
+remembering this entry ships telemetry silently.
+
+**Context:** The hold classification is mechanical to reproduce: the three squash commits' file lists, minus the five
+overlap files (AGENTS.md, RELEASES.md, `src/build/07-subpages.mjs`, `src/build/shell.mjs`, `tests/e2e/flows.e2e.ts`)
+whose privacy/telemetry hunks are stripped by hand. When it ships, restore the `#### R2 telemetry-lake catalog` section
+to the released RELEASES.md and the emitter bullet to AGENTS.md. Separately, `RELEASES-PREFLIGHT.md` and
+`RELEASES-POSTFLIGHT.md` both list `scorecard-summary` among the share-page render classes; the renderer no longer emits
+that class (three classes is the full set), so fix both docs through the normal PR flow.
+
+**Effort:** S **Priority:** P1 **Depends on:** telemetry readiness call
+
 ## CI
 
 ### Escalate if the `wrangler dev` death keeps eating deep-check retries
