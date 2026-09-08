@@ -29,6 +29,8 @@ import {
   modernToolsListBody,
   modernToolsListHeaders,
 } from '../helpers/mcp-modern';
+import { EXPECTED_TOOL_COUNT, EXPECTED_TOOL_NAMES, NON_READ_TOOL_NAMES } from '../helpers/mcp-tools';
+import { PRINCIPLE_COUNT, PRINCIPLE_NUMBERS } from '../helpers/site-facts';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
@@ -76,10 +78,6 @@ type JsonRpcBody = {
   };
   error?: { code: number; message: string };
 };
-
-// The two tools that reach external systems and write cache / leaderboard
-// state; every other tool is annotated read-only.
-const NON_READ_TOOLS = new Set(['score_cli', 'audit_website']);
 
 test.describe('staging /mcp — handshake', () => {
   test('initialize returns serverInfo.name "anc" and instructions mention 2026-07-28', async ({ request }) => {
@@ -129,7 +127,7 @@ test.describe('staging /mcp — handshake', () => {
     });
     const body = (await res.json()) as JsonRpcBody;
     const instructions = body.result?.instructions ?? '';
-    expect(instructions).toContain('13 tools');
+    expect(instructions).toContain(`${EXPECTED_TOOL_COUNT} tools`);
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
@@ -141,7 +139,7 @@ test.describe('staging /mcp — handshake', () => {
 });
 
 test.describe('staging /mcp — tools/list', () => {
-  test('returns exactly thirteen tools in the expected order', async ({ request }) => {
+  test('returns the full tool surface in registration order', async ({ request }) => {
     await request.post(`${STAGING_BASE}/mcp`, {
       headers: MCP_HEADERS,
       data: JSON.stringify({
@@ -158,21 +156,7 @@ test.describe('staging /mcp — tools/list', () => {
     expect(res.status()).toBe(200);
     const body = (await res.json()) as JsonRpcBody;
     const names = (body.result?.tools ?? []).map((t) => t.name);
-    expect(names).toEqual([
-      'list_tools',
-      'get_tool',
-      'search_tools',
-      'list_principles',
-      'get_principle',
-      'list_spec_sections',
-      'get_spec_section',
-      'get_scorecard',
-      'score_cli',
-      'get_website_audit',
-      'audit_website',
-      'list_website_audits',
-      'get_web_remediation',
-    ]);
+    expect(names).toEqual([...EXPECTED_TOOL_NAMES]);
   });
 
   test('every tool carries a non-empty description and an inputSchema', async ({ request }) => {
@@ -213,12 +197,12 @@ test.describe('staging /mcp — tools/list', () => {
     });
     const body = (await res.json()) as JsonRpcBody;
     const tools = body.result?.tools ?? [];
-    expect(tools.length).toBe(13);
+    expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
     for (const tool of tools) {
       expect(typeof tool.title).toBe('string');
       expect((tool.title ?? '').length).toBeGreaterThan(0);
       expect(tool.annotations).toEqual(
-        NON_READ_TOOLS.has(tool.name)
+        NON_READ_TOOL_NAMES.has(tool.name)
           ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
           : { readOnlyHint: true },
       );
@@ -230,7 +214,7 @@ test.describe('staging /mcp — tools/list', () => {
 // + Mcp-Method headers and a params._meta envelope, so no initialize
 // handshake precedes these probes.
 test.describe('staging /mcp — modern era (2026-07-28)', () => {
-  test('tools/list serves thirteen tools with public cache hints and no initialize', async ({ request }) => {
+  test('tools/list serves the full tool surface with public cache hints and no initialize', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/mcp`, {
       headers: { ...MCP_HEADERS, ...modernToolsListHeaders() },
       data: JSON.stringify(modernToolsListBody()),
@@ -238,7 +222,7 @@ test.describe('staging /mcp — modern era (2026-07-28)', () => {
     expect(res.status()).toBe(200);
     const body = (await res.json()) as JsonRpcBody;
     expect(body.error).toBeUndefined();
-    expect((body.result?.tools ?? []).length).toBe(13);
+    expect((body.result?.tools ?? []).length).toBe(EXPECTED_TOOL_COUNT);
     expect(body.result?.ttlMs).toBe(3_600_000);
     expect(body.result?.cacheScope).toBe('public');
   });
@@ -356,8 +340,8 @@ test.describe('staging /mcp — principles surface', () => {
     });
     const body = (await res.json()) as JsonRpcBody;
     const rows = JSON.parse(body.result?.content?.[0]?.text ?? '[]') as Array<{ n: number }>;
-    expect(rows.length).toBe(8);
-    expect(rows.map((r) => r.n).sort()).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(rows.length).toBe(PRINCIPLE_COUNT);
+    expect(rows.map((r) => r.n).sort((a, b) => a - b)).toEqual(PRINCIPLE_NUMBERS);
   });
 
   test('get_principle n=1 returns the principle body', async ({ request }) => {

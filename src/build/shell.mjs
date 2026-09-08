@@ -21,7 +21,7 @@ const SITE_TAGLINE = 'the agent-native standard';
 // path prefixes (or regexes) that mark the entry current. Routes without a
 // nav entry (methodology, coverage, contribute, the web board) stay
 // reachable from the footer meta row and in-page cross-links.
-const NAV_LINKS = [
+export const NAV_LINKS = [
   { label: 'Leaderboards', href: '/scorecards', match: ['/scorecards', '/web', '/score'] },
   { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit'] },
   { label: 'The standard', href: '/#principles', match: [/^\/p\d+$/] },
@@ -69,9 +69,18 @@ const renderAuditNav = (path) =>
     webCurrent: auditWebCurrent,
   });
 
+// Dual-surface entries emit a CLI and a Website twin anchor and display
+// only the one matching the active surface.
+const DUAL_SURFACE_NAV_RENDERERS = {
+  Leaderboards: renderLeaderboardsNav,
+  Audit: renderAuditNav,
+};
+
+export const DUAL_SURFACE_NAV_LABELS = Object.keys(DUAL_SURFACE_NAV_RENDERERS);
+
 const renderNavLink = (entry, path) => {
-  if (entry.label === 'Leaderboards') return renderLeaderboardsNav(path);
-  if (entry.label === 'Audit') return renderAuditNav(path);
+  const renderDual = DUAL_SURFACE_NAV_RENDERERS[entry.label];
+  if (renderDual) return renderDual(path);
   const current = navCurrent(path, entry.match) ? ' aria-current="page"' : '';
   return `          <a href="${entry.href}"${current}>${entry.label}</a>`;
 };
@@ -91,7 +100,7 @@ const OG_IMAGE_ALT =
 // so this stays pinned to the canonical host on every build.
 const AI_SUMMARY_PROMPT = `Summarize the agent-native CLI standard from ${CANONICAL_SITE_URL}/llms-full.txt — what are the eight principles and why do they matter for AI agents using CLI tools?`;
 
-const AI_PROVIDERS = [
+export const AI_PROVIDERS = [
   {
     name: 'ChatGPT',
     url: (q) => `https://chat.openai.com/?q=${q}`,

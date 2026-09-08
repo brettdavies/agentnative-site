@@ -22,7 +22,7 @@ import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../sha
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
-import { composeTwin, escHtml } from './util.mjs';
+import { composeTwin, countWord, escHtml } from './util.mjs';
 
 const BOARD_ROWS = 5;
 
@@ -32,7 +32,7 @@ const BOARD_ROWS = 5;
 // category groups a mix of tiers, so a group-level tier would misuse the
 // keyword. The web surface is an audit against external specs — anc does
 // not own these standards (R10).
-const WEB_CHECKS = [
+export const WEB_CHECKS = [
   {
     id: 'C1',
     title: 'Discoverability',
@@ -132,6 +132,8 @@ function buildCliBoardMarkdown(leaderboard) {
   return ['| # | Tool | Score |', '|---|------|-------|', ...rows, ''].join('\n');
 }
 
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 function buildSpecRows(principles) {
   return principles
     .map((p) => {
@@ -222,7 +224,7 @@ ${buildCliBoardRows(leaderboard)}
       <div class="board" data-s="web" aria-label="Top websites">
 {{WEB_BOARD_ROWS}}
       </div>
-      <p class="board-rubric" data-s="cli">Scored against the <strong>8 principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>
+      <p class="board-rubric" data-s="cli">Scored against the <strong>${principles.length} principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>
       <p class="board-rubric" data-s="web">Scored against the emerging agent-web standards: <code>MCP</code>, <code>llms.txt</code>, <code>OpenAPI</code>, JSON Schema, discovery. anc audits; it doesn't own them. <a href="/web">Full board&nbsp;▸</a></p>
       <p id="live-score-help" class="live-score__help" data-s="cli">
         or try
@@ -240,17 +242,17 @@ ${buildCliBoardRows(leaderboard)}
   <section class="spec-section" id="principles">
     <div class="container">
       <div data-s="cli">
-        <h2>Eight principles for a CLI</h2>
+        <h2>${capitalize(countWord(principles.length))} principles for a CLI</h2>
         <p class="sub">The standard anc.dev authors. Each is a testable contract with a MUST / SHOULD / MAY obligation and a named failure mode.</p>
       </div>
       <div data-s="web">
-        <h2>Six checks for a website</h2>
+        <h2>${capitalize(countWord(WEB_CHECKS.length))} checks for a website</h2>
         <p class="sub">Not a standard anc owns; an audit of your agent-facing surface against what the ecosystem is converging on.</p>
       </div>
-      <ol class="spec" data-s="cli" aria-label="The eight principles">
+      <ol class="spec" data-s="cli" aria-label="The ${countWord(principles.length)} principles">
 ${buildSpecRows(principles)}
       </ol>
-      <ol class="spec" data-s="web" aria-label="The six web checks">
+      <ol class="spec" data-s="web" aria-label="The ${countWord(WEB_CHECKS.length)} web checks">
 ${buildWebCheckRows()}
       </ol>
     </div>

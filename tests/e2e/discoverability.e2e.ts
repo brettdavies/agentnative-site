@@ -12,6 +12,7 @@
 //     bun x playwright test --project=staging-mcp tests/e2e/discoverability.e2e.ts
 
 import { expect, test } from '@playwright/test';
+import { EXPECTED_TOOL_NAMES } from '../helpers/mcp-tools';
 
 const STAGING_BASE = process.env.ANC_STAGING_BASE_URL;
 
@@ -275,22 +276,12 @@ test.describe('staging /mcp-skill surfaces', () => {
     expect(ct).toContain('text/markdown');
   });
 
-  test('mcp-skill.md text equality on the nine tool names + four template URIs (drift gate per KTD-8)', async ({
+  test('mcp-skill.md text equality on every tool name + the template URIs (drift gate per KTD-8)', async ({
     request,
   }) => {
     const res = await request.get(`${STAGING_BASE}/mcp-skill.md`, { headers: ACCESS_HEADERS });
     const md = await res.text();
-    for (const toolName of [
-      'list_tools',
-      'get_tool',
-      'search_tools',
-      'list_principles',
-      'get_principle',
-      'list_spec_sections',
-      'get_spec_section',
-      'get_scorecard',
-      'score_cli',
-    ]) {
+    for (const toolName of EXPECTED_TOOL_NAMES) {
       expect(md).toContain(toolName);
     }
     for (const uri of [

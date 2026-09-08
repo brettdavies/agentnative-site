@@ -4,6 +4,13 @@
 
 import { expect, type Page, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
+import {
+  AI_PROVIDER_COUNT,
+  DUAL_SURFACE_NAV_COUNT,
+  NAV_ENTRY_COUNT,
+  PRINCIPLE_COUNT,
+  WEB_CHECK_COUNT,
+} from '../helpers/site-facts';
 
 // A bare overflow delta names no culprit, and these assertions have failed on
 // the Linux CI runner against layouts that measure clean on a developer
@@ -44,11 +51,11 @@ const overflowDetail = (m: Awaited<ReturnType<typeof measureOverflow>>) =>
   `client=${m.clientWidth} scroll=${m.scrollWidth} unclipped=[${m.offenders.join(', ') || 'none'}]`;
 
 test.describe('cold HN land → browse principles → theme dark → reload still dark', () => {
-  test('landing on / shows hero + spec index with 8 principle rows', async ({ page }) => {
+  test('landing on / shows hero + spec index with every principle row', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.hero__title')).toBeVisible();
     const entries = page.locator('.spec[data-s="cli"] .spec__row');
-    await expect(entries).toHaveCount(8);
+    await expect(entries).toHaveCount(PRINCIPLE_COUNT);
   });
 
   test('clicking a principle row navigates to its detail page', async ({ page }) => {
@@ -256,11 +263,11 @@ test.describe('code-copy + anchor-copy', () => {
 const DESKTOP_NAV_VIEWPORT = { width: 1280, height: 900 };
 
 test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
-  test('default (CLI) shows the CLI board, 8 principles, and the Score form', async ({ page }) => {
+  test('default (CLI) shows the CLI board, every principle, and the Score form', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.board[data-s="cli"]')).toBeVisible();
     await expect(page.locator('.board[data-s="web"]')).toBeHidden();
-    await expect(page.locator('.spec[data-s="cli"] .spec__row')).toHaveCount(8);
+    await expect(page.locator('.spec[data-s="cli"] .spec__row')).toHaveCount(PRINCIPLE_COUNT);
     await expect(page.locator('.spec[data-s="web"]')).toBeHidden();
     await expect(page.locator('form[data-live-score-form]')).toBeVisible();
     await expect(page.locator('.hero__proof > [data-s="cli"]')).toBeVisible();
@@ -285,7 +292,7 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await page.locator('label[for="s-web"]').click();
     await expect(page.locator('.board[data-s="web"]')).toBeVisible();
     await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
-    await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(6);
+    await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(WEB_CHECK_COUNT);
     await expect(page.locator('.spec[data-s="cli"]')).toBeHidden();
     await expect(page.locator('form[data-s="web"] input[name="url"]')).toBeVisible();
     await expect(page.locator('form[data-live-score-form]')).toBeHidden();
@@ -360,12 +367,11 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
 });
 
 // Every NAV_LINKS entry in src/build/shell.mjs renders one anchor, except
-// the dual-surface entries (Leaderboards, Audit), which each emit a CLI and
-// a Website twin and display only the one matching the active surface. So a
-// new dual-surface entry raises the anchor total without raising the visible
-// count — the two numbers move independently and must not be bumped together.
-const NAV_ENTRIES = 6;
-const DUAL_SURFACE_NAV_ENTRIES = 2;
+// the dual-surface entries, which each emit a CLI and a Website twin and
+// display only the one matching the active surface. So each dual-surface
+// entry raises the anchor total without raising the visible count.
+const NAV_ENTRIES = NAV_ENTRY_COUNT;
+const DUAL_SURFACE_NAV_ENTRIES = DUAL_SURFACE_NAV_COUNT;
 const NAV_ANCHORS = NAV_ENTRIES + DUAL_SURFACE_NAV_ENTRIES;
 
 test.describe('shell — grouped nav, hamburger, footer rows', () => {
@@ -583,7 +589,7 @@ test.describe('footer AI-provider icons', () => {
   test('every footer ai-provider icon has a non-zero rendered bounding box', async ({ page }) => {
     await page.goto('/');
     const svgs = page.locator('.ai-summary__link svg');
-    await expect(svgs).toHaveCount(5);
+    await expect(svgs).toHaveCount(AI_PROVIDER_COUNT);
     const count = await svgs.count();
     for (let i = 0; i < count; i++) {
       const box = await svgs.nth(i).boundingBox();
