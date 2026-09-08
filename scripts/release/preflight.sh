@@ -6,6 +6,10 @@
 #   scripts/release/preflight.sh <subcommand>
 #
 # Subcommands:
+#   drift     Branch drift: what main carries that dev never received (delegated to drift.sh).
+#             Not env-dependent.
+#   surface   Establish surface: commits + diff vs the last tag, breaking markers. SKIPs while the
+#             repo has no tags. Not env-dependent.
 #   coord     Cross-repo coordination — vendored spec VERSION, skill manifest version, Dockerfile
 #             release URL + sha, and (when docker is available) the staging container pin's baked
 #             anc binary vocabulary vs the Worker's invocation site. Not env-dependent.
@@ -25,14 +29,17 @@
 #   dist      Distribution surfaces against the --env target — /check -> /audit redirect,
 #             skill.json served version vs source. The X-Robots-Tag: noindex check runs only in
 #             staging mode (the staging-host guard does not fire for localhost in local mode).
-#   mechanics Release mechanics sanity — leak check (no guarded paths in cherry-picked diff),
-#             triple-diff against origin/main. Not env-dependent.
-#   all       Run every above sequentially. Sub-gates within each section continue past individual
-#             failures so the operator sees the full picture; the script exits 1 if any gate failed.
+#   mechanics Release mechanics sanity: leak check (no guarded paths in the diff vs origin/main),
+#             unguarded docs the release adds to main, diff-B against origin/dev filtered by the
+#             guarded set. Not env-dependent.
+#   all       Run every above sequentially, drift first. Sub-gates within each section continue past
+#             individual failures so the operator sees the full picture; the script exits 1 if any
+#             gate failed.
 #
 # Flags:
 #   --env <env>          Preflight target: `staging` (default) or `local`. Also honored as $ENV.
 #                        Drives do-smoke, mcp, and dist URL + auth selection.
+#   --tag <tag>          Override LAST_TAG resolution for `surface` (default: newest v* tag).
 #   --binary <name>      Fresh non-registry binary for do-smoke (default: $BINARY or `emoj`). The name
 #                        resolves to a GitHub owner/repo via do_fixture_repo (emoj -> sindresorhus/emoj,
 #                        cowsay -> piuccio/cowsay; otherwise sindresorhus/<name>).
@@ -57,7 +64,6 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 readonly REPO_ROOT
-readonly OP_SKILL="$HOME/.claude/skills/1password/scripts"
 readonly OP_ITEM_TOKEN="Cloudflare Access Service Token - agentnative-site-staging"
 readonly DEFAULT_STAGING_URL="https://agentnative-site-staging.brettdavies.workers.dev"
 readonly DEFAULT_LOCAL_URL="http://localhost:8787"
@@ -69,6 +75,7 @@ readonly DEFAULT_LOCAL_URL="http://localhost:8787"
 # Argument parsing -----------------------------------------------------------
 
 SUBCMD=""
+LAST_TAG=""
 BINARY="${BINARY:-emoj}"
 MCP_BINARY="${MCP_BINARY:-figlet}"
 ENV="${ENV:-staging}"
@@ -76,7 +83,7 @@ STAGING_URL="$DEFAULT_STAGING_URL"
 LOCAL_URL="$DEFAULT_LOCAL_URL"
 
 usage() {
-  sed -n '2,41p' "$0" | sed 's/^# \?//'
+  sed -n '2,48p' "$0" | sed 's/^# \?//'
   exit 2
 }
 
@@ -102,8 +109,12 @@ while [[ $# -gt 0 ]]; do
       LOCAL_URL="$2"
       shift 2
       ;;
+    --tag)
+      LAST_TAG="$2"
+      shift 2
+      ;;
     -h | --help) usage ;;
-    coord | build | do-smoke | mcp | dist | mechanics | all)
+    drift | surface | coord | build | do-smoke | mcp | dist | mechanics | all)
       SUBCMD="$1"
       shift
       ;;
@@ -159,6 +170,50 @@ stage_cf_access_headers() {
   [[ -n "$cid" && -n "$csec" ]] || return 1
   printf 'header = "CF-Access-Client-Id: %s"\n' "$cid" >>"$cfg"
   printf 'header = "CF-Access-Client-Secret: %s"\n' "$csec" >>"$cfg"
+}
+
+# Gate: drift (delegated to drift.sh) ----------------------------------------
+#
+# Security PRs, hotfixes, and config edits land on main first. The release
+# branch is cut from main and then takes dev's tree, so anything main holds
+# that dev never received is reverted by the release or collides with it.
+# drift.sh lists that set (commits since the last release whose changes dev
+# lacks, .github/ parity, and lockfile packages main resolves newer) and
+# fails while any exist. Run it before cutting the release branch.
+
+gate_drift() {
+  local drift_script
+  drift_script="$REPO_ROOT/scripts/release/drift.sh"
+  [[ -x "$drift_script" ]] || return 0
+  header "Branch drift (delegated to drift.sh)"
+  if ! git rev-parse --verify --quiet origin/dev >/dev/null 2>&1; then
+    gate_skip "drift" "no origin/dev branch (single-branch repo)"
+    return
+  fi
+  delegate_to_subscript "$drift_script"
+}
+
+# Gate: surface --------------------------------------------------------------
+#
+# Confirms what is actually changing since the last tag. Counts feed the
+# human's gut-check on release scope and the breaking-marker tally drives the
+# major-version decision.
+
+gate_surface() {
+  header "Establish surface"
+  local last_tag commits files breaking
+  # Only v* tags are release anchors: the competition-baseline* tags mark
+  # scorecard corpus snapshots, not releases.
+  last_tag="${LAST_TAG:-$(git tag --list 'v*' --sort=-version:refname | head -n 1)}"
+  [[ -n "$last_tag" ]] || {
+    gate_skip "LAST_TAG" "no tags in repo yet (first release); surface is everything on the branch"
+    return
+  }
+  commits=$(git log "$last_tag..HEAD" --oneline | wc -l)
+  files=$(git diff "$last_tag..HEAD" --name-only | wc -l)
+  # Scoped markers count too: `feat(api)!:` is breaking as much as `feat!:`.
+  breaking=$(git log "$last_tag..HEAD" --grep '^[a-z]\+\(([^)]*)\)\?!:' --oneline | wc -l)
+  gate_pass "LAST_TAG = $last_tag  ($commits commits, $files files, $breaking breaking)"
 }
 
 # Gate: coord (cross-repo coordination) -------------------------------------
@@ -517,26 +572,27 @@ gate_mechanics() {
     return
   fi
 
-  # Leak check: no guarded paths in cherry-picked diff vs main.
+  # Leak check: no guarded path in what the release adds to main.
   local leaked
   leaked=$(git diff origin/main..HEAD --name-only 2>/dev/null \
     | grep -E "$guarded" || true)
   if [[ -z "$leaked" ]]; then
-    gate_pass "no guarded paths leaked into cherry-picked diff"
+    gate_pass "no guarded paths leaked into the diff vs origin/main"
   else
     gate_fail "guarded paths leaked" "$leaked"
   fi
 
   # The leak check only rejects paths already registered as guarded, so it is
   # blind to a category nobody has registered yet. Enumerate what the release
-  # newly adds to main instead of screening it, and put every added doc in
-  # front of a human: that is the class the guarded list keeps missing.
+  # newly adds to main instead of screening it (anything under docs/, plus
+  # markdown anywhere, so a root-level glossary shows up) and put every added
+  # doc in front of a human: that is the class the guarded list keeps missing.
   if git rev-parse --verify origin/main >/dev/null 2>&1; then
     local added_docs
     # Guarded paths are the leak check's job above. What is left over is the
     # actual blind spot: docs nobody has classified either way.
     added_docs=$(git diff origin/main..HEAD --diff-filter=A --name-only 2>/dev/null \
-      | grep '^docs/' | grep -Ev "$guarded" || true)
+      | grep -E '(^docs/|\.md$)' | grep -Ev "$guarded" || true)
     if [[ -z "$added_docs" ]]; then
       gate_pass "no unguarded docs newly added to main by this release"
     else
@@ -550,8 +606,10 @@ gate_mechanics() {
     && git rev-parse --verify origin/main >/dev/null 2>&1; then
     local missed
     # Excluding all of docs/ would hide a missed pick under docs/runbooks,
-    # which ships to main; exclude only what is actually guarded.
-    missed=$(git diff HEAD..origin/dev --name-only 2>/dev/null | grep -Ev "$guarded" || true)
+    # which ships to main; exclude only what is actually guarded. The version
+    # carrier and the regenerated changelog are release-only by design.
+    missed=$(git diff HEAD..origin/dev --name-only 2>/dev/null | grep -Ev "$guarded" \
+      | grep -Ev '^(package\.json|CHANGELOG\.md)$' || true)
     if [[ -z "$missed" ]]; then
       gate_pass "diff-B: no missed picks vs origin/dev"
     else
@@ -565,6 +623,8 @@ gate_mechanics() {
 # Main dispatcher ------------------------------------------------------------
 
 case "$SUBCMD" in
+  drift) gate_drift ;;
+  surface) gate_surface ;;
   coord) gate_coord ;;
   build) gate_build ;;
   do-smoke) gate_do_smoke ;;
@@ -572,6 +632,8 @@ case "$SUBCMD" in
   dist) gate_dist ;;
   mechanics) gate_mechanics ;;
   all)
+    gate_drift
+    gate_surface
     gate_coord
     gate_build
     gate_do_smoke
