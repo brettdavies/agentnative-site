@@ -323,10 +323,11 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 ## Repo conventions
 
 - **Branches:** `main` (production) and `dev` (integration) are both forever branches. Feature work lands via `feat/*` /
-  `fix/*` / `chore/*` → PR to `dev` (squash merge). Dev ships to main via a short-lived `release/*` branch cherry-picked
-  from `origin/main`, PR'd to main. `main` blocks direct commits through its ruleset. `dev` accepts them, and the
-  dev-only doc paths listed under [`RELEASES.md` § Dev-direct exception](./RELEASES.md#dev-direct-exception) are
-  committed that way on purpose: they never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR.
+  `fix/*` / `chore/*` → PR to `dev` (squash merge). Dev ships to main via a short-lived `release/*` branch cut from
+  `origin/main` with `dev`'s tree overlaid, PR'd to main. `main` blocks direct commits through its ruleset. `dev`
+  accepts them, and the dev-only doc paths listed under
+  [`RELEASES.md` § Dev-direct exception](./RELEASES.md#dev-direct-exception) are committed that way on purpose: they
+  never ship to `main`, so a PR buys nothing. Code goes through a branch and a PR.
   See [`RELEASES.md`](./RELEASES.md) for the full workflow.
 - **Commits:** Conventional Commits. Short, specific messages.
 - **Worker logs go through the emitter.** Every structured record the Worker writes passes through
@@ -364,6 +365,8 @@ engine against a public URL) and for operating the web-board rescore (weekly cro
 - `deploy.yml`: publishes to the `*.workers.dev` staging on every push to `main`.
 - `guard-main-docs.yml`: blocks `docs/plans/`, `docs/solutions/`, `docs/brainstorms/` from reaching main.
 - `guard-release-branch.yml`: rejects PRs to main whose head isn't `release/*`.
+- `guard-main-provenance.yml`: requires every non-exempt commit in a PR to main to carry a `(#N)` PR reference;
+  skipped for `release/*` heads.
 
 ## Tool-site sequencing (do not violate)
 

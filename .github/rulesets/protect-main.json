@@ -27,9 +27,9 @@
         "dismiss_stale_reviews_on_push": false,
         "required_reviewers": [],
         "require_code_owner_review": true,
-        "require_extra_approval_for_unattributed_changes": true,
         "require_last_push_approval": false,
         "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
         "allowed_merge_methods": [
           "squash"
         ]
@@ -39,25 +39,32 @@
       "type": "required_signatures"
     },
     {
+      "type": "required_linear_history"
+    },
+    {
       "type": "required_status_checks",
       "parameters": {
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           {
-            "context": "lint · build · test · wrangler"
+            "context": "lint · build · test · wrangler",
+            "integration_id": 15368
           },
           {
-            "context": "guard-docs / check-forbidden-docs"
+            "context": "guard-docs / check-forbidden-docs",
+            "integration_id": 15368
           },
           {
-            "context": "guard-release / check-release-branch-name"
+            "context": "guard-release / check-release-branch-name",
+            "integration_id": 15368
+          },
+          {
+            "context": "guard-provenance / check-provenance",
+            "integration_id": 15368
           }
         ]
       }
-    },
-    {
-      "type": "required_linear_history"
     }
   ],
   "bypass_actors": [

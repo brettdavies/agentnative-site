@@ -65,7 +65,8 @@ when reachable). CI enforces stages 1 through 4; stages 5 through 7 are pre-push
 
 ## Branch and release model
 
-Feature branches PR to `dev`. Production cuts via `release/<YYYY-MM-DD>-<slug>` cherry-picked from `dev` to `main`.
+Feature branches PR to `dev`. Production cuts via `release/<YYYY-MM-DD>-<slug>`, built as an overlay of `dev` onto
+`main`.
 `deploy.yml` ships `main` to `anc.dev` on push. The full procedure lives in [`RELEASES.md`](./RELEASES.md); rationale in
 [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md).
 
