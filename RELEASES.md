@@ -5,13 +5,15 @@ Operational runbook. Rationale lives in [`RELEASES-RATIONALE.md`](./RELEASES-RAT
 ```text
 feature branch → PR to dev (squash merge)
               → deploy.yml publishes to staging (agentnative-site-staging.*.workers.dev)
-              → cherry-pick to release/* branch
+              → overlay onto a release/* branch cut from main
               → PR to main (squash merge)
               → deploy.yml publishes to production (anc.dev)
 ```
 
-Direct commits to `dev` or `main` are not permitted: every change has a PR number in its squash commit message. The
-[dev-direct exception](#dev-direct-exception) below names the path categories that may be committed directly to `dev`.
+Code reaches `dev` and `main` only through a PR, so every shipped change carries a PR number in its squash commit
+message. `main` enforces this in its ruleset. `dev` does not, because the [dev-direct exception](#dev-direct-exception)
+below names path categories that are committed straight to `dev` by design: they never ship to `main`, so a PR adds
+review ceremony to something no release will ever carry.
 
 ## Branches
 
@@ -85,11 +87,89 @@ Every PR uses `.github/pull_request_template.md` verbatim. Six sections, no inve
 non-registry binary (the surface CI cannot cover and the one that caused the 2026-06-01 rename / container coordination
 incident). Do not proceed to step 1 until preflight is green.
 
+`main` and `dev` share only an ancient merge-base: every release squash-merges into `main`, so the two branches diverge
+in history even as their content converges. Reconciling that with a merge, or a branch cut from `dev`, produces a pile
+of rename/delete and lockfile conflicts that are artifacts of the lineage, not of the content shipping. The release
+branch is therefore built as a **clean descendant of `main`** with `dev`'s tree overlaid on top, asserting the desired
+end-state directly:
+
 ```bash
+# 0. Nothing on main that dev never received (security PRs, hotfixes, config). Exits 1 while drift exists.
+scripts/release/drift.sh
+
 # 1. Branch from main, NOT dev.
 git fetch origin
-git checkout -b release/<YYYY-MM-DD>-<slug> origin/main
+git checkout -B release/<YYYY-MM-DD>-<slug> origin/main
 
+# 2. Overlay dev's entire tracked tree onto the main base. `checkout -- .` writes dev's
+#    paths but does not delete files that exist on main and are absent on dev, so remove
+#    those next (the 'D' rows are main-only files dev deleted).
+git checkout origin/dev -- .
+git diff --name-status origin/main origin/dev | grep '^D'
+trash <each main-only file listed above>
+
+# 3. Strip the paths guard-main-docs forbids on main. The set resolves from the workflow;
+#    never restate it inline, because every hand-kept copy drifted from what CI enforces.
+GUARDED="$(scripts/release/guarded-paths.sh)"
+git ls-files | grep -E "$GUARDED" | xargs -r trash
+git add -A                                                      # stages adds, mods, AND deletions
+
+# 4. Bump "version" in package.json (this repo's version carrier) to <version>, then build
+#    the changelog from the PRs merged into dev since the previous release. The overlay
+#    commit carries no per-PR history, so the section is built from dev's PRs, not from
+#    this branch's commits. The branch name carries no version, so pass the tag.
+scripts/generate-changelog.py --from-dev-prs --tag v<version>
+git add -A
+
+# 5. Verify before committing.
+#    A: staged tree equals dev's minus the version file, the changelog, and the stripped
+#       guarded paths. Anything else printed here is a mistake.
+git diff --cached --name-only origin/dev | grep -Ev "$GUARDED" \
+  | grep -Ev '^(package\.json|CHANGELOG\.md)$' \
+  && echo "unexpected delta above; investigate" || echo "(clean: only intended deltas)"
+#    B: no guarded path in the release tree.
+git diff --cached --name-only origin/main | grep -E "$GUARDED" \
+  && echo "LEAKED a guarded path: reset and redo" || echo "(no guarded paths)"
+#    D: what this release ADDS to main. The leak check screens against the registered
+#       set, so it is blind to a category nobody registered yet; that blind spot is how
+#       docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
+#       Every docs/ entry and every added markdown file needs a reason to ship, or it
+#       needs registering in the workflow's extra_paths and removing from the branch.
+git diff --cached --diff-filter=A --name-only origin/main | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+
+# 6. Commit the overlay as one commit sitting directly on top of main, then run the
+#    preflight gates against it.
+git commit
+scripts/release/preflight.sh all
+
+# 7. Push and open the PR. Scrub body in /tmp/ first.
+git push -u origin release/<YYYY-MM-DD>-<slug>
+gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
+  --title "release: <summary>" --body-file /tmp/body.md
+```
+
+The result is a single commit whose diff against `main` is the release, with `main` as an ancestor, so the PR merges
+with zero conflicts.
+
+**Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
+kebab-case, 3-6 words.
+
+When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on `github.ref ==
+'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on anc.dev. Auto-delete
+removes `release/<slug>` from the remote on merge. `dev` is untouched.
+
+→ Rationale (why overlay, not merge; why cut from `main`):
+[`RELEASES-RATIONALE.md` § Branching model](./RELEASES-RATIONALE.md#branching-model). CHANGELOG mechanics:
+[`RELEASES-RATIONALE.md` § CHANGELOG generation](./RELEASES-RATIONALE.md#changelog-generation).
+
+### Exception: cherry-pick
+
+The overlay is the release construction for this repo. Cherry-picking the dev squash-commits onto the `origin/main`
+base is the exception, kept only for a release with a stated reason it cannot overlay; the per-PR changelog is not such
+a reason, since `--from-dev-prs` builds it from `dev` either way. When cherry-picking, run the triple-diff
+verification:
+
+```bash
 # 2. List the dev commits not yet on main.
 git log --oneline dev --not origin/main
 
@@ -97,11 +177,6 @@ git log --oneline dev --not origin/main
 git cherry-pick <sha1> <sha2> ...
 
 # 4. Triple-diff verification.
-#
-#    GUARDED resolves the reusable's hardcoded base plus this repo's extra_paths
-#    straight out of .github/workflows/guard-main-docs.yml. Do not restate the
-#    pattern here or anywhere else: every hand-kept copy drifted from the workflow,
-#    and a copy that omits a guarded path reports a real leak as clean.
 GUARDED="$(scripts/release/guarded-paths.sh)"
 
 git diff origin/main..HEAD --stat                                              # A: ship surface
@@ -111,41 +186,90 @@ git diff origin/dev..origin/main --stat | tail -5                              #
 # Re-confirm no guarded paths leaked.
 git diff origin/main..HEAD --name-only \
   | grep -E "$GUARDED" \
-  && echo "LEAKED — reset and redo" || echo "(clean)"
+  && echo "LEAKED: reset and redo" || echo "(clean)"
 
-# D: what this release ADDS to main. The leak check screens against the registered
-#    set, so it is blind to a category nobody registered yet; that blind spot is how
-#    docs/TODOS.md and docs/designs/ reached an open release with a green guard-docs.
-#    Read this list. Every docs/ entry needs a reason to ship, or it needs registering
-#    in the workflow's extra_paths and removing from the branch.
-git diff origin/main..HEAD --diff-filter=A --name-only | grep '^docs/' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+# D: what this release ADDS to main (see step 5 above for why).
+git diff origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
 
 # Patch-id cherry check (noisy in squash-merge workflow; triage per-line).
 git cherry HEAD origin/dev | grep '^+' || echo "(none)"
-
-# 5. Push and open PR. Scrub body in /tmp/ first.
-git push -u origin release/<YYYY-MM-DD>-<slug>
-gh pr create --base main --head release/<YYYY-MM-DD>-<slug> \
-  --title "release: <summary>" --body-file /tmp/body.md
 ```
 
-**Branch naming** (mandatory): `release/<YYYY-MM-DD>-<slug>` (e.g. `release/2026-05-01-content-neg-fix`). Slug
-kebab-case, 3-6 words.
+Cherry-picks of PRs that touched guarded paths hit modify/delete or rename/delete conflicts, since those paths live on
+`dev` but are blocked from `main`: mark each unmerged guarded path deleted in the index (`git update-index --remove
+$(git diff --name-only --diff-filter=U)`), trash the orphan worktree files, and `git cherry-pick --continue --no-edit`.
+Steps 4 to 7 of the overlay recipe then apply unchanged.
 
-When the PR merges, `deploy.yml` publishes to **production**: its `production` job gates on `github.ref ==
-'refs/heads/main'`, and the `staging` job gates on `refs/heads/dev`, so a merge here goes live on anc.dev. Auto-delete
-removes `release/<slug>` from the remote on merge. `dev` is untouched.
-
-→ Rationale + triple-diff false-positive triage:
+→ Triple-diff false-positive triage:
 [`RELEASES-RATIONALE.md` § Triple-diff verification](./RELEASES-RATIONALE.md#triple-diff-verification).
+
+### After merge: tag, then sync `dev` with the release
+
+The deploy fires on the push to `main`; the tag is release bookkeeping, the anchor that `drift.sh`, the changelog
+compare link, and the backport script resolve against. Tag the merge commit and publish the GitHub Release from the
+changelog section:
+
+```bash
+git checkout main && git pull
+git tag -a -m "Release v<version>" v<version>
+git push origin v<version>
+awk -v v='<version>' '/^## \[/ { p = index($0, "[" v "]") > 0 } p' CHANGELOG.md > /tmp/notes-v<version>.md
+gh release create v<version> --title "v<version>" --notes-file /tmp/notes-v<version>.md
+```
+
+Then bring the release bookkeeping (`package.json` version, `CHANGELOG.md`) back to `dev` so the integration branch
+starts from the released baseline:
+
+```bash
+scripts/sync-dev-after-release.sh v<version>
+```
+
+The script checks that the tag is reachable from `origin/main` and that the GitHub Release is published, then opens a
+PR against `dev` titled `chore(release): sync dev after v<version>`; merge it once CI is green. The postflight backport
+gate finds that merged PR by title: `scripts/release/postflight.sh --env prod --release-slug v<version> backport`.
+Never merge `main` into `dev` or push to `dev` directly: the squash-merged histories share no recent ancestry, so the
+merge conflicts on every file both sides touched, and a direct push bypasses `dev`'s required checks.
+
+→ Rationale:
+[`RELEASES-RATIONALE.md` § Why backport main → dev after publish](./RELEASES-RATIONALE.md#why-backport-main--dev-after-publish).
+
+## Rollback
+
+A bad release is rolled back at the Worker first, then repaired in git. Rollback re-points what users get; it does not
+revert history. After rolling back, land a `fix/*` or `revert` through the normal `dev` to `release/*` to `main` flow
+so `main` matches what is live. Knowing the last-good deployment id before the release goes out is a
+[`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md) gate.
+
+```bash
+# Last-good identifier: record the current production deployment before the release merges.
+bun x wrangler deployments list | head -20
+
+# Roll production back to the previous deployment (interactive picker, or pass the id).
+bun x wrangler rollback
+bun x wrangler rollback <deployment-id>
+
+# Staging (deploys from dev) rolls back the same way under --env staging.
+bun x wrangler rollback --env staging
+```
+
+`wrangler rollback` re-points the Worker at an earlier version; it does not move Durable Object migrations, container
+image pins, or KV state. A release that applied a DO migration cannot be rolled back across that boundary (see
+[`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls)),
+and a rolled-back Worker keeps serving only while the container image tag it references stays in the registry (see
+[§ Image-retention discipline](./RELEASES-RATIONALE.md#image-retention-discipline)). The MCP kill switches in
+[§ Kill-switch flip procedure](#kill-switch-flip-procedure) and the scoring kill switch in
+[§ Cost guardrails](#cost-guardrails) take a surface offline faster than a rollback when the problem is cost or abuse
+rather than a bad build.
+
+→ Rationale: [`RELEASES-RATIONALE.md` § Rollback](./RELEASES-RATIONALE.md#rollback).
 
 ## Prose scrubbing
 
 Pre-push covers `*.md` files via Vale + LanguageTool. Three artifacts live outside that net and need a manual scrub:
 
 - PR bodies (`gh pr create` / `gh pr edit` send body text directly to GitHub).
-- Release-PR bodies (composed after cherry-picks land).
-- Future generated changelog (if a `CHANGELOG.md` flow lands here).
+- `CHANGELOG.md` (a generated artifact built from upstream PR bodies).
+- Release-PR bodies (composed after `CHANGELOG.md` has been generated).
 
 ```bash
 # 1. Author or fetch in /tmp/.
@@ -170,6 +294,9 @@ lt_check /tmp/body.md
 gh pr create --base <base> --title "..." --body-file /tmp/body.md      # new PR
 gh pr edit <num> --body-file /tmp/body.md                              # existing PR
 ```
+
+For a `CHANGELOG.md` finding, fix the upstream PR body (which `generate-changelog.py` re-fetches every run) and
+regenerate. Hand-editing `CHANGELOG.md` directly produces drift the next regeneration overwrites.
 
 → Rationale + which artifacts need this:
 [`RELEASES-RATIONALE.md` § Prose scrubbing scope](./RELEASES-RATIONALE.md#prose-scrubbing-scope).
@@ -237,9 +364,9 @@ rollout will hit warm OLD-image instances and look identical to a real bug. Full
 
 #### Promotion (release PR to main)
 
-Cut a `release/*` branch from `main`, cherry-pick the dev commits, then add one promotion commit bumping the top-level
-`containers[0].image` to match `env.staging.containers[0].image`. CI on a main-targeting PR enforces: both pins exist in
-the CF managed registry AND both pins point at the same tag.
+Build the `release/*` branch per [§ Releasing dev to main](#releasing-dev-to-main), then add one promotion commit
+bumping the top-level `containers[0].image` to match `env.staging.containers[0].image`. CI on a main-targeting PR
+enforces: both pins exist in the CF managed registry AND both pins point at the same tag.
 
 #### Lockstep-bump shortcut
 
@@ -623,6 +750,13 @@ Rulesets committed under `.github/rulesets/`, applied to the repo via the GitHub
 - `protect-dev.json`: required signatures, deletion blocked, non-fast-forward blocked. PR-only norm is convention +
   `guard-release-branch` on the main side.
 
+Both sets grant the repository admin role `bypass_mode: always`, so every rule above describes what the rules stop
+*other* actors doing. An admin can delete either branch, and "deletion blocked" will not intervene. That bypass is
+deliberate: it is also what makes the branch recoverable, since restoring a deleted forever-branch means pushing it back
+from a local clone. Recover `dev` with `git push origin dev:refs/heads/dev` from a checkout that still holds the tip;
+the merge commit GitHub recorded for the last merged PR (`gh pr view <n> --json merge_commit_sha`) confirms which commit
+the branch should land on.
+
 ### Applying changes
 
 ```bash
@@ -674,6 +808,7 @@ public, run `gh workflow run skill-availability.yml` once to seed a green run on
 ## Related docs
 
 - [`RELEASES-PREFLIGHT.md`](./RELEASES-PREFLIGHT.md): pre-release verification checklist. Gates every `release/*` PR.
+- [`RELEASES-POSTFLIGHT.md`](./RELEASES-POSTFLIGHT.md): post-deploy verification, last-good identifier, backport.
 - [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md): release flow rationale, CI design, status-check pitfalls
 - [`AGENT.md`](./AGENT.md): onboarding, repo conventions, tool-site sequencing
 - [`DESIGN.md`](./DESIGN.md): design system and build contract

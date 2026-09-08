@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
-import { applyHeaders, isStagingHost } from '../src/worker/headers';
+import { applyHeaders, isRepresentationPinned, isStagingHost } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/handler';
 
@@ -796,6 +796,48 @@ describe('worker.fetch — CN rewrite + asset lookup', () => {
     expect(res.headers.get('X-Echo-Path')).toBe('/skill.json');
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared negotiation predicate. The CN rewrite and the Vary writer must
+// classify the same path set; expectations derive from the exported
+// predicate rather than a duplicated path list so a drift in either layer
+// fails here.
+// ---------------------------------------------------------------------------
+
+describe('negotiation predicate — CN rewrite and applyHeaders agree', () => {
+  const paths = [
+    '/p3',
+    '/about',
+    '/p3.md',
+    '/skill.json',
+    '/badge/rg.svg',
+    '/llms.txt',
+    '/robots.txt',
+    '/sitemap.xml',
+    '/og-image.png',
+    '/fonts/uncut-sans-variable.woff2',
+  ];
+
+  test('applyHeaders stamps Vary exactly on the paths the predicate leaves negotiable', () => {
+    for (const path of paths) {
+      const res = applyHeaders(new Response('body'), {
+        request: req(`https://anc.dev${path}`),
+        servedMarkdown: path.endsWith('.md'),
+        pathname: path,
+      });
+      expect(`${path} vary=${res.headers.get('Vary') !== null}`).toBe(`${path} vary=${!isRepresentationPinned(path)}`);
+    }
+  });
+
+  test('the CN rewrite negotiates exactly the paths the predicate leaves negotiable', async () => {
+    const env = makeEnv();
+    for (const path of paths) {
+      const res = await worker.fetch(req(`https://anc.dev${path}`, 'text/markdown'), env, {} as ExecutionContext);
+      const expected = isRepresentationPinned(path) ? path : `${path}.md`;
+      expect(`${path} → ${res.headers.get('X-Echo-Path')}`).toBe(`${path} → ${expected}`);
+    }
   });
 });
 

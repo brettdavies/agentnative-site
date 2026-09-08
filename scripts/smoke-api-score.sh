@@ -18,9 +18,12 @@
 #                            are required for staging (Worker is behind
 #                            Cloudflare Access) and unused for production
 #                            (anc.dev is public).
-#   TURNSTILE_TOKEN          Defaults to "x". The literal "x" succeeds only
-#                            against the CF always-passes test secret used
-#                            on staging. Production needs a real strategy.
+#   TURNSTILE_TOKEN          Defaults to "x". The registry fast-path answers
+#                            curated slugs before the Turnstile gate, so the
+#                            token is never verified on this path and the
+#                            default works against staging and production
+#                            alike. Only a non-curated input would reach
+#                            siteverify and need a real token.
 #   SMOKE_SLEEP_SEC          Edge-propagation delay before the POST.
 #                            Default 10. Tune up if regional latency starts
 #                            producing intermittent 404s.
@@ -81,7 +84,7 @@ if ! echo "${response}" | "$JQ_BIN" --exit-status '
     and (.site_spec_version | type) == "string"
     and (.anc_version | type) == "string"
     and (.auditor_url | type) == "string"
-  ' > /dev/null; then
+  ' >/dev/null; then
   echo "FATAL: /api/score response missing required fields for ${SLUG}" >&2
   exit 1
 fi

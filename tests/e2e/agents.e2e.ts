@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
+import { PRINCIPLE_COUNT, SUB_PAGE_NAMES } from '../helpers/site-facts';
 
 const BASE = 'http://localhost:8787';
 
@@ -141,23 +142,9 @@ test.describe('llms.txt + llms-full.txt — live', () => {
     expect(body).toMatch(/^>\s+/m);
     expect(body).toContain('## Principles');
     const bullets = body.match(/^-\s+\[[^\]]+\]\([^)]*\/p\d+\.md\)$/gm) ?? [];
-    expect(bullets.length).toBe(8);
+    expect(bullets.length).toBe(PRINCIPLE_COUNT);
     expect(body).toContain('## Pages');
-    // Source of truth: subPages array in src/build/07-subpages.mjs.
-    const expectedPages = [
-      'audit',
-      'web-audit',
-      'install',
-      'about',
-      'badge',
-      'changelog',
-      'contribute',
-      'methodology',
-      'scorecard-schema',
-      'web-scorecard-schema',
-      'mcp-skill',
-      'mcp',
-    ];
+    const expectedPages = SUB_PAGE_NAMES;
     const pagesSection = body.slice(body.indexOf('## Pages')).split(/\n## /)[0];
     const pageLinks = pagesSection.match(/^-\s+\[[^\]]+\]\([^)]*\/([a-z-]+)\.md\)$/gm) ?? [];
     const linkedPageNames = new Set(pageLinks.map((line) => line.match(/\/([a-z-]+)\.md\)/)?.[1]).filter(Boolean));

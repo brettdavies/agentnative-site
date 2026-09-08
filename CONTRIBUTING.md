@@ -31,13 +31,14 @@ reviewed when scope and time permit. A solo maintainer cannot promise merge wind
 
 ```text
 feat/* → PR to dev (squash merge)
-       → cherry-pick to release/<YYYY-MM-DD>-<slug>
+       → overlay onto release/<YYYY-MM-DD>-<slug> (cut from main)
        → PR release/* to main (squash merge)
        → deploy.yml fires on push-to-main → Cloudflare Workers production
 ```
 
-`dev` is the integration branch. `main` is what `anc.dev` serves. There are no tags or semver versions; the site deploys
-continuously via Cloudflare's `deploy.yml` on push-to-main. Engineering docs (`docs/plans/`, `docs/solutions/`,
+`dev` is the integration branch. `main` is what `anc.dev` serves. The site deploys via Cloudflare's `deploy.yml` on
+push-to-main; each release also carries a `v<version>` tag and a `CHANGELOG.md` section as bookkeeping (see
+[`RELEASES.md`](./RELEASES.md)). Engineering docs (`docs/plans/`, `docs/solutions/`,
 `docs/brainstorms/`, `docs/reviews/`) live on `dev` only and are blocked from `main` by `guard-main-docs.yml`.
 
 ## Dev setup

@@ -21,7 +21,7 @@ import {
 } from '../../shared/scorecard-format.mjs';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import { detectPreference } from '../accept';
-import { applyHeaders } from '../headers';
+import { applyHeaders, isRepresentationPinned } from '../headers';
 import { SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { get as cacheGet, keyFor as cacheKeyFor } from './cache';
@@ -195,7 +195,7 @@ const MARKDOWN_HEADERS = {
 
 function liveScoreHeaders(base: Record<string, string>, pathname: string): Headers {
   const headers = new Headers(base);
-  if (!pathname.endsWith('.md')) {
+  if (!isRepresentationPinned(pathname)) {
     headers.set('Vary', 'Accept, User-Agent');
   }
   return headers;

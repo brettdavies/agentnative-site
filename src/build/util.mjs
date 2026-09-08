@@ -10,6 +10,33 @@ import { CANONICAL_SITE_URL } from '../shared/site-url';
 
 const PRINCIPLE_FILENAME_RE = /^p(\d+)-([a-z0-9-]+)\.md$/;
 
+const NUMBER_WORDS = [
+  'zero',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+];
+
+/**
+ * Spell a small count as an English word for display prose ("eight
+ * principles"), falling back to the numeral past twelve.
+ *
+ * @param {number} n
+ * @returns {string}
+ */
+export function countWord(n) {
+  return NUMBER_WORDS[n] ?? String(n);
+}
+
 /**
  * Return principle markdown files, sorted by their leading `p<n>-` numeric
  * prefix (not lexicographic — `p10` should follow `p9`, not `p1`).

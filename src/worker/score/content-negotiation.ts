@@ -16,6 +16,7 @@
 
 import type { ScorePreference } from '../accept';
 import { detectScorePreference } from '../accept';
+import { isRepresentationPinned } from '../headers';
 
 export type { ScorePreference } from '../accept';
 
@@ -25,7 +26,8 @@ export function isScorePath(pathname: string): boolean {
 }
 
 export function preferenceFor(pathname: string, request: Request): ScorePreference {
-  if (pathname.endsWith('.json')) return 'json';
-  if (pathname.endsWith('.md')) return 'markdown';
+  if (isRepresentationPinned(pathname)) {
+    return pathname.endsWith('.md') ? 'markdown' : 'json';
+  }
   return detectScorePreference(request);
 }

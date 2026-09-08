@@ -1,0 +1,35 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Gate scope: unreachable files, unused (dev)dependencies, and imports no
+  // manifest declares. Unused exports and exported types stay out: test-only
+  // exports and inference-consumed types dominate those findings.
+  "include": ["files", "dependencies", "devDependencies", "unlisted"],
+  // Entries import analysis cannot see: the eleven src/client/*.ts modules are
+  // bundled by path strings in src/build/01-assets.mjs, test files run by glob
+  // under bun test / playwright, and scripts/** are standalone CLIs. Build,
+  // worker, playwright, and bun-setup entries come from knip's own detection.
+  "entry": [
+    "src/client/theme.ts",
+    "src/client/theme-init.ts",
+    "src/client/surface.ts",
+    "src/client/nav.ts",
+    "src/client/clipboard.ts",
+    "src/client/leaderboard.ts",
+    "src/client/live-score.ts",
+    "src/client/web-audit.ts",
+    "src/client/web-audit-scoring.ts",
+    "src/client/web-leaderboard.ts",
+    "src/client/webmcp.ts",
+    "tests/**/*.test.ts",
+    "tests/e2e/**/*.e2e.ts",
+    "tests/helpers/**/*.ts",
+    "scripts/**/*.{mjs,ts}"
+  ],
+  "project": ["src/**", "tests/**", "scripts/**", "*.{ts,mjs}"],
+  // scripts/design/ is a nested standalone package with its own manifest and
+  // lockfile; analyzing it here misattributes its two real dependencies.
+  "ignore": ["scripts/design/**"],
+  // cloudflare:workers is a workerd-provided protocol import, not the npm
+  // `cloudflare` package knip resolves it to.
+  "ignoreDependencies": ["cloudflare"]
+}

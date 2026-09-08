@@ -1,6 +1,6 @@
 // Content-driven sub-pages emit. Section 7 of the build pipeline.
 //
-// For each entry in `subPages`, reads content/<name>.md, renders the HTML
+// For each entry in `SUB_PAGES`, reads content/<name>.md, renders the HTML
 // via the shared markdown pipeline, wraps in emitShell, and emits both the
 // HTML and markdown twin. The twin is the authored source with site-
 // relative links absolutified, prefixed with title/description/url
@@ -100,45 +100,45 @@ const WEB_AUDIT_WIDGET = {
  * @returns {Promise<Array<{name: string, source: string, title: string}>>}
  *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly.
  */
+export const SUB_PAGES = [
+  { name: 'audit', widget: CLI_AUDIT_WIDGET },
+  {
+    name: 'web-audit',
+    extraScripts: ['/js/web-audit.js', WEBMCP_SCRIPT],
+    widget: WEB_AUDIT_WIDGET,
+  },
+  { name: 'install' },
+  { name: 'about' },
+  { name: 'badge' },
+  { name: 'changelog' },
+  { name: 'contribute' },
+  { name: 'methodology' },
+  { name: 'scorecard-schema' },
+  { name: 'web-scorecard-schema' },
+  // /mcp-skill/ is the client-facing skill page advertised by the
+  // /.well-known/mcp pointer's `documentation` field and by the MCP
+  // server's handshake `instructions` string. The source filename
+  // matches the URL stem; outputs are `dist/mcp-skill.html` +
+  // `dist/mcp-skill.md`. The canonical URL is `/mcp-skill/`, not
+  // `/mcp/` (which is the Worker-served JSON-RPC endpoint). Operator-
+  // facing material lives in the in-repo runbook at
+  // `docs/runbooks/mcp-operator.md` and is not published.
+  { name: 'mcp-skill' },
+  // /mcp renders as a regular content page (HTML + MD twin) so a
+  // human or crawler clicking the literal endpoint URL lands on a
+  // shell-wrapped descriptor — same header, theme toggle, footer as
+  // every other content page. The Worker intercepts /mcp for POST
+  // (JSON-RPC) and for GET + Accept: application/json (proxies
+  // /.well-known/mcp). Other GET methods fall through to the asset-
+  // first dispatch which serves dist/mcp.html or the .md twin via
+  // the site's standard content negotiation.
+  { name: 'mcp' },
+];
+
 export async function emitSubPages({ distDir, contentDir, themeInit }) {
-  const subPages = [
-    { name: 'audit', path: join(contentDir, 'audit.md'), widget: CLI_AUDIT_WIDGET },
-    {
-      name: 'web-audit',
-      path: join(contentDir, 'web-audit.md'),
-      extraScripts: ['/js/web-audit.js', WEBMCP_SCRIPT],
-      widget: WEB_AUDIT_WIDGET,
-    },
-    { name: 'install', path: join(contentDir, 'install.md') },
-    { name: 'about', path: join(contentDir, 'about.md') },
-    { name: 'badge', path: join(contentDir, 'badge.md') },
-    { name: 'changelog', path: join(contentDir, 'changelog.md') },
-    { name: 'contribute', path: join(contentDir, 'contribute.md') },
-    { name: 'methodology', path: join(contentDir, 'methodology.md') },
-    { name: 'scorecard-schema', path: join(contentDir, 'scorecard-schema.md') },
-    { name: 'web-scorecard-schema', path: join(contentDir, 'web-scorecard-schema.md') },
-    // /mcp-skill/ is the client-facing skill page advertised by the
-    // /.well-known/mcp pointer's `documentation` field and by the MCP
-    // server's handshake `instructions` string. The source filename
-    // matches the URL stem; outputs are `dist/mcp-skill.html` +
-    // `dist/mcp-skill.md`. The canonical URL is `/mcp-skill/`, not
-    // `/mcp/` (which is the Worker-served JSON-RPC endpoint). Operator-
-    // facing material lives in the in-repo runbook at
-    // `docs/runbooks/mcp-operator.md` and is not published.
-    { name: 'mcp-skill', path: join(contentDir, 'mcp-skill.md') },
-    // /mcp renders as a regular content page (HTML + MD twin) so a
-    // human or crawler clicking the literal endpoint URL lands on a
-    // shell-wrapped descriptor — same header, theme toggle, footer as
-    // every other content page. The Worker intercepts /mcp for POST
-    // (JSON-RPC) and for GET + Accept: application/json (proxies
-    // /.well-known/mcp). Other GET methods fall through to the asset-
-    // first dispatch which serves dist/mcp.html or the .md twin via
-    // the site's standard content negotiation.
-    { name: 'mcp', path: join(contentDir, 'mcp.md') },
-  ];
   const subPageData = [];
-  for (const { name, path, extraScripts, widget } of subPages) {
-    const source = await readFile(path, 'utf8');
+  for (const { name, extraScripts, widget } of SUB_PAGES) {
+    const source = await readFile(join(contentDir, `${name}.md`), 'utf8');
     // The HTML page gets the widget markup; the twin (and llms-full.txt) get
     // the prose pointer, so no dead form controls reach the agent surface.
     const htmlSource = widget ? source.replaceAll(widget.placeholder, widget.html) : source;
