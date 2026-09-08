@@ -28,21 +28,24 @@ catches mechanical regressions inside this repo. This checklist covers what CI s
 scripts/release/preflight.sh all
 ```
 
-The script (`scripts/release/preflight.sh`) drives all six gate sections. Each gate is skip-safe when prerequisites are
-not met (no docker for the container-pin inspect, no 1Password access for the CF Access service token, no local Worker
-running for the MCP suite) so the operator sees the full picture rather than aborting on the first SKIP.
+The script (`scripts/release/preflight.sh`) drives every gate section, drift first, since nothing else matters while
+`main` holds changes `dev` never received. Each gate is skip-safe when prerequisites are not met (no docker for the
+container-pin inspect, no 1Password access for the CF Access service token, no local Worker running for the MCP suite)
+so the operator sees the full picture rather than aborting on the first SKIP.
 
 Sub-commands let you re-run one section in isolation:
 
 | Sub-command | What it checks                                                                                                                                        | Source of truth                                                              |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `drift`     | Commits on `main` whose changes `dev` lacks, `.github/` parity, lockfile packages `main` resolves newer                                               | `scripts/release/drift.sh`                                                   |
+| `surface`   | Commits + diff vs the last `v*` tag, breaking markers (SKIPs while the repo has no `v*` tag)                                                          | `git log`, `git diff`                                                        |
 | `coord`     | Vendored spec / anc / principles VERSION coherence, skill.json upstream version, Dockerfile release URL + sha, staging container baked anc vocabulary | `cat`, `gh api`, `curl -I`, `docker run`                                     |
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                                                              |
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
 | `dist`      | `/check` → `/audit` redirect and served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode       | `curl`                                                                       |
-| `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B sanity vs `origin/dev`                                                            | `git`, `scripts/release/guarded-paths.sh`                                    |
-| `all`       | every above sequentially                                                                                                                              |                                                                              |
+| `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B vs `origin/dev` filtered by the guarded set                                        | `git`, `scripts/release/guarded-paths.sh`                                    |
+| `all`       | every above sequentially, drift first                                                                                                                 |                                                                              |
 
 Flags:
 
@@ -57,15 +60,21 @@ Flags:
 - `--mcp-binary <name>` — fresh non-registry binary for the live MCP audit (default: `$MCP_BINARY` env var or `figlet`)
 - `--staging-url <url>` — override the staging Worker URL
 - `--local-url <url>` — override the local `wrangler dev` URL
+- `--tag <tag>`: override `LAST_TAG` resolution for `surface` (default: newest `v*` tag)
 
 ## Establish the surface
 
 Everything below assumes you know what's changing. Run this first.
 
+Driven by `scripts/release/preflight.sh surface`. The surface is `origin/main..origin/dev`: this repo's lineage is
+squash-only, so no tag is an ancestor of `dev`, and `preflight.sh surface` SKIPs the tag counts while no `v*` tag
+exists.
+
 ```bash
 LAST_RELEASE=$(git log origin/main --oneline -n 1 --format='%H')
 git log "$LAST_RELEASE..origin/dev" --oneline                    # commits going out
 git diff "$LAST_RELEASE..origin/dev" --stat                      # file-level scope
+git log "$LAST_RELEASE..origin/dev" --grep '^[a-z]\+\(([^)]*)\)\?!:' --oneline   # breaking markers, scoped or not
 git diff "$LAST_RELEASE..origin/dev" -- wrangler.jsonc           # bindings, pins, env drift
 git diff "$LAST_RELEASE..origin/dev" -- src/worker/score/        # live-scoring surface
 git diff "$LAST_RELEASE..origin/dev" -- docker/sandbox/          # container image
@@ -77,7 +86,28 @@ git diff "$LAST_RELEASE..origin/dev" -- registry.yaml            # editorial cha
 Note which of `wrangler.jsonc`, `docker/sandbox/`, `src/data/spec/VERSION`, `src/data/anc/VERSION`,
 `src/data/skill/skill.json`, or `src/worker/score/sandbox-exec.ts` changed. Each one drives a specific check below.
 
+Every `!:` commit (`feat!:` and `feat(scope)!:` alike) gets a row in the release's `### Breaking changes` section.
+
 ## Checklist
+
+### Branch drift (main ahead of dev)
+
+Driven by `scripts/release/preflight.sh drift` (delegates to `scripts/release/drift.sh`).
+
+Security PRs, hotfixes, and config edits land on `main` first. The release branch is cut from `main` and then takes
+`dev`'s tree, so anything `main` holds that `dev` never received is reverted by the release or collides with it, and
+Dependabot raises the same fix again.
+
+- [ ] Every commit on `main` since the last release has its changes on `dev` (gate 1 lists the ones that do not, as
+      `differs` or `missing`). Backport them by PR into `dev` first, merge, and rerun. Until the first `v*` tag exists
+      the gate anchors on the `main`/`dev` merge base and lists every release squash since; pass
+      `--since <last release squash sha>` to anchor on the last release.
+- [ ] `.github/` is identical on both branches (gate 2). A difference either way is a config change that only reached
+      one branch.
+- [ ] No lockfile package resolves newer on `main` than on `dev` (gate 3). The gate reads `package-lock.json` and
+      `Cargo.lock`; this repo's `bun.lock` is not parsed, so the gate SKIPs here and the `.github/` parity gate plus
+      Dependabot's security PRs are the signal.
+- [ ] `dev`-newer packages are the routine updates this release ships; the gate counts them and does not list them.
 
 ### Cross-repo coordination
 
@@ -473,10 +503,10 @@ These items duplicate steps from `RELEASES.md` deliberately: easy to skip, expen
 explicitly.
 
 Driven by `scripts/release/preflight.sh mechanics`. Expected to surface as a real signal only on a `release/<slug>`
-branch (where the diff vs `origin/main` is the actual cherry-pick set); running on the integration `dev` branch will
-correctly report guarded planning paths as leaked.
+branch (where the diff vs `origin/main` is the release); running on the integration `dev` branch will correctly report
+guarded planning paths as leaked.
 
-- [ ] **Leak check before pushing the release branch.** No guarded path may surface in the cherry-picked diff (these
+- [ ] **Leak check before pushing the release branch.** No guarded path may surface in the diff vs `origin/main` (these
   paths are `dev`-direct per the branching rule):
 
   ```bash
@@ -490,22 +520,28 @@ correctly report guarded planning paths as leaked.
   ```
 
 - [ ] **Every doc this release adds to `main` is meant to ship.** The leak check screens against the registered set, so
-  it cannot flag a category nobody registered yet. Enumerate the additions and read them:
+  it cannot flag a category nobody registered yet. Enumerate the additions (anything under `docs/`, plus markdown
+  anywhere, so a root-level glossary shows up) and read them:
 
   ```bash
-  git diff origin/main..HEAD --diff-filter=A --name-only | grep '^docs/' | grep -Ev "$GUARDED" || echo "(none unguarded)"
+  git diff origin/main..HEAD --diff-filter=A --name-only | grep -E '(^docs/|\.md$)' | grep -Ev "$GUARDED" || echo "(none unguarded)"
   ```
 
   An entry that should not ship needs both: registering in the workflow's `extra_paths`, and removing from the release
   branch.
 
-- [ ] **Triple-diff verification clean.** Per `RELEASES.md` § Releasing dev to main:
+- [ ] **Diff-B filtered by the guarded set.** Files on `dev` that the release branch lacks, excluding only the guarded
+  set (not all of `docs/`, since `docs/runbooks/` ships to `main` and would hide a missed pick) and the release-only
+  files (`package.json` version, `CHANGELOG.md`):
 
   ```bash
   git diff origin/main..HEAD --stat                                              # A: ship surface
-  git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" || echo "(none)"   # B: no missed picks
+  git diff HEAD..origin/dev --name-only | grep -Ev "$GUARDED" \
+    | grep -Ev '^(package\.json|CHANGELOG\.md)$' || echo "(none)"                 # B: no missed picks
   git diff origin/dev..origin/main --stat | tail -5                              # C: phantom-commits sanity
   ```
+
+- [ ] **`CHANGELOG.md` versioned section** has no `[Unreleased]` placeholder and matches the `package.json` version.
 
 - [ ] **PR body scrubbed via `/unslop`.** Author in `/tmp/`, run Vale + LanguageTool + `/unslop`, submit via
   `--body-file`. Never inline `--body` / `-m` / heredoc (the `heredoc-pr-guard.sh` PreToolUse hook will reject it). Full
