@@ -41,7 +41,7 @@ import {
   parseWebResultPath,
   type WebAuditRouteEnv,
 } from './audit-web/route';
-import { applyHeaders, isSingleRepresentation } from './headers';
+import { applyHeaders, isRepresentationPinned } from './headers';
 import { getWarmCatalog, loadCatalog } from './mcp/catalog';
 import { coerceMcpJsonResponse, stripCorsHeaders } from './mcp/coerce-json-response';
 import { MCP_DESCRIPTOR_ALIAS_PATHS, MCP_DESCRIPTOR_CANONICAL_PATH } from './mcp/descriptor-paths';
@@ -854,12 +854,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
   const pathIsMarkdown = pathname.endsWith('.md');
   const pathIsJson = pathname.endsWith('.json');
-  // CN rewrite is for HTML pages that have a markdown twin. Skip
+  // CN rewrite is for HTML pages that have a markdown twin. The shared
+  // pinned-representation predicate skips `.md` twins and
   // single-representation files so `curl /llms.txt` (UA heuristic) and
   // `Accept: text/markdown` against `/skill.json` do not look up a
   // non-existent `*.md` twin. Same skip as DESIGN.md §3.4 for JSON.
-  const preferMarkdown =
-    !pathIsMarkdown && !isSingleRepresentation(pathname) && detectPreference(request) === 'markdown';
+  const preferMarkdown = !isRepresentationPinned(pathname) && detectPreference(request) === 'markdown';
   const servedMarkdown = pathIsMarkdown || preferMarkdown;
 
   let assetRequest = request;

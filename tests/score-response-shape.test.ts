@@ -106,11 +106,11 @@ describe('shapeScoreError — wire shape + headers', () => {
     expect(res.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
   });
 
-  test('cache-hit freshness sets browser max-age=300 but CDN no-store and Vary: Accept', () => {
+  test('cache-hit freshness sets browser max-age=300 with CDN no-store and no Vary (the handler stamps Vary from the request path)', () => {
     const res = shapeScoreError({ code: 'unrecognized_input', cta_text: '...' }, 'cache-hit');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
-    expect(res.headers.get('Vary')).toBe('Accept');
+    expect(res.headers.get('Vary')).toBeNull();
   });
 });
 
@@ -132,11 +132,11 @@ describe('shapeScoreSuccess — R11 triad enforcement', () => {
     expect(body.error.code).toBe('incomplete_response_contract');
   });
 
-  test('cache-hit freshness uses cached cache-control', () => {
+  test('cache-hit freshness uses cached cache-control and no Vary', () => {
     const res = shapeScoreSuccess({}, '0.3.0', 'cache-hit');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=300');
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
-    expect(res.headers.get('Vary')).toBe('Accept');
+    expect(res.headers.get('Vary')).toBeNull();
   });
 
   test('live freshness uses no-store', () => {

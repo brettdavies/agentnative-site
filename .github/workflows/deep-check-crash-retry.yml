@@ -1,0 +1,102 @@
+# Buys exactly one more draw at a runner, and only for a deep-check failure
+# that is provably wrangler's (workers-sdk#15317; signature contract in
+# .github/actions/wrangler-crash-probe/probe.sh). Re-running allocates a
+# fresh VM, which is the part that matters: the fault tracks the machine
+# rather than the moment, so a runner tends to be either healthy or fatal
+# for the life of the job. Restarting the dev server in place plateaus at
+# roughly one run in twenty; landing on a different runner drops it under
+# one in a hundred.
+#
+# A separate workflow_run workflow because a job inside deep-check cannot
+# do this: the GitHub API refuses to rerun any job while its run is in
+# progress, and an in-run retry job is itself what keeps the run in
+# progress, so its rerun call always answers "cannot be rerun". Triggering
+# on completion is the only seat from which the rerun call is legal. A
+# rerun replays the existing run rather than creating a new one, so
+# GITHUB_TOKEN drives it without tripping the recursion block that stops
+# tokens from starting workflows.
+#
+# The run_attempt guard caps it at a single retry, so a persistently
+# affected runner fails the run instead of looping: the rerun's completion
+# fires this workflow again with run_attempt 2, which the job-level `if`
+# drops. `--failed` reruns every failed job in one call because a second
+# rerun call would find the run already in progress from the first and be
+# refused — the same constraint that sank the in-run design. When a real
+# failure sits next to a crashed job it gets one redundant (deterministic)
+# re-execution and the run stays red.
+#
+# workflow_run triggers read this file from the default branch, so the
+# retry arms only once this lands on main. It fires for deep-check runs
+# on any ref.
+
+name: deep-check-crash-retry
+
+on:
+  workflow_run:
+    workflows: [deep-check]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  retry:
+    name: retry once on the upstream wrangler crash
+    if: >-
+      github.event.workflow_run.conclusion == 'failure'
+      && github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # Only for probe.sh — pinned to the triggering run's SHA so the
+      # signature grep matches what that run's probe step ran.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Rerun the failed jobs when a crashed job's logs carry the signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          probe=.github/actions/wrangler-crash-probe/probe.sh
+
+          # Artifact names per dev-server-owning job, from deep-check.yml's
+          # upload steps. Only these two jobs boot `wrangler dev`, so only
+          # their logs can carry the signature.
+          declare -A artifact_for=(
+            ["e2e · playwright"]="playwright-report"
+            ["lhci · lighthouse"]="lhci-wrangler-logs"
+          )
+
+          gh api --paginate \
+            "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/1/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure") | .name' > failed-jobs.txt
+          cat failed-jobs.txt
+
+          matched=false
+          for prefix in "e2e · playwright" "lhci · lighthouse"; do
+            grep -qF "$prefix" failed-jobs.txt || continue
+            dest=$(mktemp -d)
+            if ! gh run download "$RUN_ID" -R "$GH_REPO" -n "${artifact_for[$prefix]}" -D "$dest"; then
+              echo "no ${artifact_for[$prefix]} artifact — leaving '$prefix' as reported"
+              continue
+            fi
+            if "$probe" "$dest"; then
+              echo "workers-sdk#15317 signature in '$prefix' logs"
+              matched=true
+            else
+              echo "no upstream signature for '$prefix' — real failure stands"
+            fi
+          done
+
+          if [ "$matched" = true ]; then
+            echo "re-running failed jobs of run $RUN_ID on fresh runners"
+            gh run rerun "$RUN_ID" -R "$GH_REPO" --failed
+          else
+            echo "no crashed job matched — nothing to retry"
+          fi

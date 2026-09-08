@@ -119,6 +119,14 @@ runs. Names a package manager (`brew`, `cargo-binstall`, `bun`, `pip`, `uv`, `np
 package or URL, and the binary the post-install check verifies on `PATH`. The Durable Object only ever sees an install
 spec, never the raw user input.
 
+### Bounce
+
+A live-scoring outcome where the request ends without a scorecard and the user gets an explanation panel instead: the
+input never resolved to an installable tool, the resolved install produced no binary, or the install itself failed. A
+bounce is a first-class result, not an error page; each bounce class carries its own headline, guidance, and, when there
+is failure output worth surfacing, the truncated stderr so the user can see why. Distinct from a scoring error (the
+pipeline broke) and from a low score (the pipeline finished).
+
 ## Web audit
 
 ### Web audit
@@ -271,3 +279,32 @@ The Worker behavior of rewriting absolute URLs in a discovery surface to the inb
 staging and local previews return self-consistent URLs (their own host) instead of the production host baked in at
 build. Every origin-aware surface must go through the one shared rewrite path; a surface served as a verbatim static
 asset silently skips it and reports the wrong origin.
+
+## Telemetry
+
+### Client class
+
+The closed taxonomy classifying every visitor for telemetry: browser, ai-fetcher, ai-crawler, search-crawler,
+cli-client, or unknown. Derived at the gateway from the original User-Agent before normalization deletes or rewrites it,
+and carried on page-serving records; agent identity comes from the taxonomy's own table, never from stored User-Agent
+text. Distinct from the markdown-eligibility class the format-class edge cache keys on — that class routes content, this
+one describes the audience, and their token lists differ deliberately.
+
+### Delivery surface
+
+The channel a response reaches a visitor through: the HTML page, the markdown twin, or the MCP endpoint. Telemetry
+groups consumption share by this axis. Distinct from the visitor surface preference, which is a stored CLI-vs-Website
+leaderboard choice, not a channel.
+
+### Co-browsing
+
+A human and an agent sharing one browsing session, as with WebMCP-style in-page tools. The agent side generates no
+origin traffic of its own, so co-browsing is invisible to server-side telemetry; what the client layer can observe is
+established by measurement before any backend consumes it.
+
+### Telemetry lake
+
+The permanent, open-format store of the site's raw telemetry events: Workers trace events delivered through a managed
+export chain into Apache Iceberg tables on the site's own R2 bucket, queried through the R2 SQL editor. It is the only
+layer that can answer months-horizon questions; the live Workers Logs window and the coarse zone rollups sit in front of
+it with platform-capped retention.

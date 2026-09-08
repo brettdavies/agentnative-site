@@ -51,15 +51,16 @@ Sub-commands let you re-run one verification in isolation. Each is parameterized
 | `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                        | `curl`                                 |
 | `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/release/mcp-smoke.sh`         |
 | `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                    | `curl`                                 |
-| `backport`  | Merged PR to `dev` with the release slug in its title (prod only; SKIPs on staging)                   | `gh pr list --base dev --state merged` |
+| `backport`  | Merged PR to `dev` with `--release-slug` in its title (prod only; SKIPs on staging)                   | `gh pr list --base dev --state merged` |
 | `all`       | Every above (live-DO smoke is documented manually below)                                              |                                        |
 
 Flags:
 
 - `--env staging|prod` — target environment (default: `prod`)
 - `--repo OWNER/REPO` — override the auto-detected nameWithOwner
-- `--release-slug <slug>` — override backport-gate auto-detection (default: parse the most recent merged `release/*` PR
-  title)
+- `--release-slug <slug>`: the string the backport gate looks for in merged `dev` PR titles; pass the release tag
+  (`v<version>`) to find the PR `scripts/sync-dev-after-release.sh` opens (default: parse the most recent merged PR to
+  `main` whose title starts with `release/`)
 - `--mcp-binary <binary>` — override the live-audit binary (default: `${MCP_BINARY:-figlet}`)
 - `--staging-url <url>` — override the staging Worker URL
 - `--prod-url <url>` — override the prod URL
@@ -70,6 +71,21 @@ Flags:
 
 Driven by `scripts/release/postflight.sh --env <staging|prod> deploy` and `scripts/release/postflight.sh --env
 <staging|prod> container`.
+
+- [ ] **Last-good identifier recorded.** Before the release merges, note the production deployment id a rollback
+  needs somewhere reachable under incident pressure, so a rollback is a single command:
+
+  ```bash
+  bun x wrangler deployments list | head -20          # current production deployment id
+  ```
+
+  The container image tag `containers[0].image` points at is part of the same record: `wrangler rollback` keeps
+  serving only while that tag stays in the registry. Commands:
+  [`RELEASES.md` § Rollback](./RELEASES.md#rollback).
+- [ ] **Rollback path confirmed.** If this release is bad, `bun x wrangler rollback` re-points production at the
+  last-good deployment first; then land a `fix` or `revert` through the normal `dev` to `release/*` to `main` flow so
+  `main` reconverges with what is live. A release that applied a DO migration cannot roll back across it (see
+  [`RELEASES-RATIONALE.md` § DO migrations are one-way walls](./RELEASES-RATIONALE.md#do-migrations-are-one-way-walls)).
 
 - [ ] **Env deploy green end-to-end.** The deploy gate watches `deploy.yml` on `dev` (staging) or `main` (prod). For the
   release flow, the `release/<slug> → main` PR merge triggers the prod run. Watch with `gh run watch <run-id>
@@ -289,21 +305,17 @@ Run `scripts/release/postflight.sh mcp` to run all three MCP gates in sequence.
 Driven by `scripts/release/postflight.sh --env prod backport`. The gate SKIPs on `--env staging` because staging deploys
 directly from `dev` — there is no `main → dev` flow to verify.
 
-- [ ] **Backport `main` → `dev`** via a **merged PR to `dev` with the release slug in its title.** The release-branch
-  flow can produce edits on `main` that didn't round-trip to `dev` (release-only CHANGELOG.md sections, RELEASES.md
-  meta-edits, generator config edits). Cherry-pick those across so the next release's preflight diff-establishment step
-  is quiet — a real missed cherry-pick stands out instead of hiding in expected divergence noise.
+- [ ] **Backport `main` → `dev`** via the **PR `scripts/sync-dev-after-release.sh v<version>` opens against `dev`.**
+  The release branch lands edits on `main` that never round-trip to `dev` (the `package.json` version, the
+  `CHANGELOG.md` section, RELEASES.md meta-edits). The script writes the released version into `package.json`, copies
+  `CHANGELOG.md` from `main`, and opens a PR titled `chore(release): sync dev after v<version>`; merge it once CI is
+  green. That keeps the next release's preflight diff-B quiet, so a real missed change stands out instead of hiding in
+  expected divergence noise. Never merge `main` into `dev` or push to `dev` directly (see
+  [`RELEASES.md` § After merge](./RELEASES.md#after-merge-tag-then-sync-dev-with-the-release)).
 
-  The gate (`scripts/release/postflight.sh backport`) is signal-agnostic about which files moved — it looks for the
-  merged PR alone, since "which files" varies release-to-release. Branch-name convention is flexible
-  (`sync/main-to-dev-<slug>`, `backport/<slug>`, head=`main`, etc.); the only requirement is the release slug in the PR
-  title.
-
-  ```bash
-  git switch -c backport/<slug> origin/main      # or whatever naming convention you prefer
-  # ...any other release-only edits you want to backport...
-  gh pr create --base dev --title "backport <slug> release-only files from main"
-  ```
+  The gate (`scripts/release/postflight.sh --env prod --release-slug v<version> backport`) is signal-agnostic about
+  which files moved: it looks for the merged PR alone, matching `--release-slug` against merged `dev` PR titles, since
+  "which files" varies release-to-release.
 
 ## Related docs
 

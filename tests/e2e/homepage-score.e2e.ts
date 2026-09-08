@@ -389,6 +389,14 @@ test.describe('homepage live-scoring form — error + bounce branches', () => {
     const stderrBlock = status.locator('.live-score__bounce-stderr');
     await expect(stderrBlock).toBeVisible();
     await expect(stderrBlock).toContainText(/truncated/);
+
+    // The panel scrolls (overflow: auto), so keyboard users need a tab stop
+    // to reach and scroll it. Tab from the body's install link — the
+    // previous focusable in DOM order — to prove the real keyboard path.
+    await expect(stderrBlock).toHaveAttribute('tabindex', '0');
+    await status.locator('a[href="/install"]').focus();
+    await page.keyboard.press('Tab');
+    await expect(stderrBlock).toBeFocused();
   });
 
   test('bounce: chain_resolved_no_binary_produced shows library-not-CLI headline', async ({ page }) => {

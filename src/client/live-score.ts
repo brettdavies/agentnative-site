@@ -553,8 +553,11 @@ function renderBouncePanel(
   statusEl.hidden = false;
   statusEl.classList.add('live-score__status--bounce');
   statusEl.classList.remove('live-score__status--error');
+  // The stderr panel scrolls (overflow: auto), so it needs a tab stop for
+  // keyboard scrolling; site.css's [tabindex]:focus-visible rule supplies
+  // the focus ring.
   const detailsBlock = panel.details
-    ? `<pre class="live-score__bounce-stderr"><code>${escapeHtml(panel.details)}</code></pre>`
+    ? `<pre class="live-score__bounce-stderr" tabindex="0"><code>${escapeHtml(panel.details)}</code></pre>`
     : '';
   // panel.body is template-literal HTML controlled by THIS module — no
   // user input flows into it. The headline is escaped (it's a fixed string

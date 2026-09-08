@@ -3,15 +3,29 @@
 # Dependabot is what surfaces a newer SHA; without the github-actions block the
 # pins never move.
 #
-# `target-branch: dev` is required: without it Dependabot opens PRs against the
-# default branch (main), which breaks the dev -> main flow. Dependabot reads
-# this config from the default branch, so it must live on main to take effect.
+# `target-branch: dev` is required on every version-update block: without it
+# Dependabot opens PRs against the default branch (main), which breaks the
+# dev -> main flow. Dependabot reads this config from the default branch, so it
+# must live on main to take effect.
 #
-# `ignore` rules hold deps we pin deliberately: typescript majors (a TS major is
-# a reviewed step, never an automatic one), and the Playwright family
-# (@playwright/*, playwright, playwright-core), exact-pinned to the version
-# dotfiles provisions into $PLAYWRIGHT_BROWSERS_PATH, so bumping is a dotfiles
-# job, not a per-repo one.
+# Both version-update blocks batch every minor and patch into one PR per week
+# and ignore majors on every dependency (a major is a reviewed step, never an
+# automatic one). The github-actions group uses `patterns` rather than
+# `update-types` because a SHA pin's SemVer level comes from a trailing comment
+# and an unclassifiable action would otherwise fall out of the group and open
+# alone.
+#
+# The Playwright family (@playwright/*, playwright, playwright-core) is frozen
+# with no `update-types`: exact-pinned to the version dotfiles provisions into
+# $PLAYWRIGHT_BROWSERS_PATH, so bumping is a dotfiles job, not a per-repo one.
+#
+# Security updates target the default branch and ignore every option on a
+# block that carries `target-branch`, so the trailing npm block has no
+# target-branch, `open-pull-requests-limit: 0` so it never opens version
+# updates on main, and a group with `applies-to: security-updates` that batches
+# minor and patch fixes per run. Cooldown, the majors ignore, and the Playwright
+# freeze are deliberately absent from it: a fix that resolves outside the
+# current range must still open.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -24,7 +38,7 @@ updates:
       timezone: America/Chicago
     cooldown:
       default-days: 7
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     reviewers:
       - brettdavies
     labels:
@@ -36,6 +50,9 @@ updates:
           - minor
           - patch
     ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
@@ -58,3 +75,28 @@ updates:
     labels:
       - dependencies
       - github-actions
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Chicago
+    open-pull-requests-limit: 0
+    labels:
+      - dependencies
+      - security
+    groups:
+      npm-security-minor-patch:
+        applies-to: security-updates
+        update-types:
+          - minor
+          - patch

@@ -35,6 +35,12 @@ import {
   mcpRpcExpect200,
   resetMcpTestState,
 } from './helpers/mcp-rpc';
+import {
+  EXPECTED_TOOL_COUNT,
+  EXPECTED_TOOL_NAMES,
+  EXPECTED_TOOL_TITLES,
+  NON_READ_TOOL_NAMES,
+} from './helpers/mcp-tools';
 
 const FIXTURE_CATALOG = {
   generated_at: '2026-06-05T18:00:00.000Z',
@@ -210,7 +216,7 @@ describe('MCP instructions string (drift gate per KTD-8)', () => {
     const result = await initialize(env);
     const instructions = result.result?.instructions ?? '';
     expect(instructions.length).toBeGreaterThan(0);
-    expect(instructions).toContain('13 tools');
+    expect(instructions).toContain(`${EXPECTED_TOOL_COUNT} tools`);
     expect(instructions).toContain('5 resources');
     expect(instructions).toContain('60 requests per 60 seconds');
     expect(instructions).toContain('5 fresh audits per 60 minutes');
@@ -264,45 +270,13 @@ describe('MCP tools/list', () => {
     openWorldHint: true,
   };
 
-  const NON_READ_TOOLS = new Set(['score_cli', 'audit_website']);
-
-  const TOOL_TITLES: Record<string, string> = {
-    list_tools: 'List scored CLI registry entries',
-    get_tool: 'Get a registry entry',
-    search_tools: 'Search the CLI registry',
-    list_principles: 'List agent-native principles',
-    get_principle: 'Get an agent-native principle',
-    list_spec_sections: 'List spec sections',
-    get_spec_section: 'Get a spec section',
-    get_scorecard: 'Get a cached CLI scorecard',
-    score_cli: 'Run a live CLI audit',
-    get_website_audit: 'Get a cached website audit',
-    audit_website: 'Run a live website audit',
-    list_website_audits: 'List cached website audits',
-    get_web_remediation: 'Get web-audit remediation guidance',
-  };
-
-  test('returns exactly thirteen tools in the expected order', async () => {
+  test('returns the full tool surface in registration order', async () => {
     const env = makeEnv();
     await initialize(env);
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = result.result?.tools ?? [];
     const names = tools.map((t) => t.name);
-    expect(names).toEqual([
-      'list_tools',
-      'get_tool',
-      'search_tools',
-      'list_principles',
-      'get_principle',
-      'list_spec_sections',
-      'get_spec_section',
-      'get_scorecard',
-      'score_cli',
-      'get_website_audit',
-      'audit_website',
-      'list_website_audits',
-      'get_web_remediation',
-    ]);
+    expect(names).toEqual([...EXPECTED_TOOL_NAMES]);
   });
 
   test('every tool carries a non-empty description and a JSON-schema-shaped inputSchema', async () => {
@@ -321,7 +295,7 @@ describe('MCP tools/list', () => {
     await initialize(env);
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (result.result?.tools ?? []) as ListedTool[];
-    expect(tools.length).toBe(13);
+    expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
     for (const tool of tools) {
       expect(typeof tool.title).toBe('string');
       expect((tool.title ?? '').length).toBeGreaterThan(0);
@@ -336,8 +310,10 @@ describe('MCP tools/list', () => {
     const result = await rpc(env, { jsonrpc: '2.0', id: 2, method: 'tools/list' });
     const tools = (result.result?.tools ?? []) as ListedTool[];
     for (const tool of tools) {
-      expect(tool.title).toBe(TOOL_TITLES[tool.name]);
-      expect(tool.annotations).toEqual(NON_READ_TOOLS.has(tool.name) ? NON_READ_ANNOTATIONS : READ_ONLY_ANNOTATIONS);
+      expect(tool.title).toBe(EXPECTED_TOOL_TITLES[tool.name]);
+      expect(tool.annotations).toEqual(
+        NON_READ_TOOL_NAMES.has(tool.name) ? NON_READ_ANNOTATIONS : READ_ONLY_ANNOTATIONS,
+      );
     }
   });
 });
@@ -680,13 +656,13 @@ describe('MCP JSON-RPC error-code pins', () => {
 });
 
 describe('MCP modern-era wire (no initialize)', () => {
-  test('tools/list carries cache hints and thirteen tools', async () => {
+  test('tools/list carries cache hints and the full tool surface', async () => {
     const env = makeEnv();
     const { status, body } = await mcpRpc(env, modernToolsListBody(), modernToolsListHeaders());
     expect(status).toBe(200);
     expect(body.error).toBeUndefined();
     const tools = body.result?.tools ?? [];
-    expect(tools.length).toBe(13);
+    expect(tools.length).toBe(EXPECTED_TOOL_COUNT);
     expect(deepFindFirst(body, 'ttlMs')).toBe(3_600_000);
     expect(deepFindFirst(body, 'cacheScope')).toBe('public');
   });
