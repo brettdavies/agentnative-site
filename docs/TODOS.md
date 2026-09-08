@@ -107,23 +107,24 @@ by:** Headless browser runtime in the web-audit engine
 
 ## CI
 
-### Diagnose the `wrangler dev` death during the deep-check matrix
+### Escalate if the `wrangler dev` death keeps eating deep-check retries
 
-**What:** Find out why the Playwright `webServer` (`bun run build && bun x wrangler dev --local --env staging`) exits
-partway through a `deep-check` run, and stop it.
+**What:** The mid-suite `wrangler dev` death is diagnosed and mitigated: the crash-probe action uploads wrangler's debug
+log and the Playwright JSON summary, `probe.sh` recognizes two evidence classes (the workers-sdk#15317 proxy-crash
+signature, and mass connection refusals from a silent kill), and `deep-check-crash-retry.yml` spends one rerun on a
+fresh runner when either matches. What remains is the day the retry is not enough.
 
-**Why:** Every test after the exit fails with `ERR_CONNECTION_REFUSED` or `ECONNREFUSED ::1:8787`, so one crash reads as
-a wall of product failures. Run 33107538749 lost roughly 145 cases that way; run 33196624930 lost the tail of the
-`tablet` project plus the `skill` project. Triage burns on deciding which failures are real, and a genuine regression
-hiding inside a cascade is easy to miss.
+**Why:** The fault is upstream (workers-sdk#15317; fix PR workers-sdk#15448 open, unmerged as of 2026-09-08, and
+wrangler 4.130.0 ships without it). On a bad runner-pool day the crash rate can exceed what one retry absorbs:
+2026-09-08 produced four crashes in four consecutive e2e executions, including a failed rerun.
 
-**Context:** Not reproducible locally: `wrangler dev --local` needs Docker for the Sandbox container image, which is not
-installed on the dev machine. The retained CI log carries no message beyond a bare `[WebServer] ✘ [ERROR]` because
-`playwright.config.ts` sets `stdout: 'ignore'` on the webServer and only pipes stderr. Wrangler writes its own log to
-`~/.config/.wrangler/logs/wrangler-<timestamp>.log`, which nothing uploads. First step is an artifact upload of that
-file plus `stdout: 'pipe'`, then read an actual failure. Separately: this is distinct from the startup failure on
-`main`, where wrangler 4.81.0 cannot load `@cloudflare/sandbox` 0.12.7's `tracing` import from `cloudflare:workers`.
+**Context:** Escalation options if red nightlies persist: (a) supervise the webServer so a killed `wrangler dev`
+restarts in place and Playwright's per-test CI retry re-covers the gap, shrinking the blast radius from "rest of the
+suite" to "tests in flight"; (b) shard the e2e matrix into per-project jobs so a crash fails one short shard and the
+retry reruns only that shard; (c) adopt the upstream fix the moment workers-sdk#15448 merges and drop the special casing
+that stops earning its keep. Watch the issue before building (a) or (b).
 
-**Effort:** M **Priority:** P2 **Depends on:** nothing
+**Effort:** M **Priority:** P2 **Depends on:** upstream workers-sdk#15448 (watch), or a run of red nightlies that
+justifies (a)/(b)
 
 ## Completed
