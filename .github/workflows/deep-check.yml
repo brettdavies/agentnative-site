@@ -35,6 +35,10 @@
 #
 # Not a PR gate — PR merge is governed by ci.yml. Failures here show up
 # in the Actions tab and (for dispatch-with-ref runs) as a commit status.
+# A failure whose wrangler logs carry the upstream proxy-crash signature
+# gets one rerun on fresh runners from deep-check-crash-retry.yml, which
+# triggers on this workflow's completion (the API refuses job reruns
+# while the run is still in progress, so the retry cannot live in here).
 #
 # Secrets:
 #   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID — passed to `wrangler dev`
@@ -146,9 +150,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    outputs:
-      upstream_crash: ${{ steps.wrangler-crash.outputs.upstream }}
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -204,7 +205,9 @@ jobs:
       # Keeps the wrangler log this job's failures are diagnosed from, and
       # reports whether the dev server died from the upstream crash. Both
       # this job and lhci run `wrangler dev`, so the signature lives in one
-      # place rather than drifting between two copies.
+      # place rather than drifting between two copies. The log lands in the
+      # artifact below, which is where deep-check-crash-retry.yml greps the
+      # same signature to decide whether this job earns its one rerun.
       - name: Probe for the upstream wrangler crash
         if: failure()
         id: wrangler-crash
@@ -227,62 +230,6 @@ jobs:
             wrangler-logs/
           if-no-files-found: error
           retention-days: 14
-
-  # Buys exactly one more draw at a runner, and only for a crash that is
-  # provably wrangler's. Re-running the job allocates a fresh VM, which is
-  # the part that matters: the fault tracks the machine rather than the
-  # moment, so a runner tends to be either healthy or fatal for the life of
-  # the job. Restarting the dev server in place plateaus at roughly one run
-  # in twenty; landing on a different runner drops it under one in a hundred.
-  #
-  # `run_attempt` caps it at a single retry, so a persistently affected
-  # runner fails the run instead of looping. A rerun replays the existing
-  # run rather than creating a new one, so GITHUB_TOKEN drives it without
-  # tripping the recursion block that stops tokens from starting workflows.
-  wrangler-crash-retry:
-    name: retry once on the upstream wrangler crash
-    needs: [e2e, lhci]
-    # `failure()` alone would fire for any failure in either job; the output
-    # gates narrow it to the one crash a retry can do anything about. A job
-    # the preflight gate skipped reports an empty output and never matches.
-    if: >-
-      failure() && github.run_attempt == 1
-      && (needs.e2e.outputs.upstream_crash == 'true' || needs.lhci.outputs.upstream_crash == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: write
-
-    steps:
-      - name: Re-run the affected jobs on fresh runners
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          E2E_CRASHED: ${{ needs.e2e.outputs.upstream_crash }}
-          LHCI_CRASHED: ${{ needs.lhci.outputs.upstream_crash }}
-        run: |
-          set -euo pipefail
-
-          targets=()
-          [ "$E2E_CRASHED" = "true" ] && targets+=("e2e · playwright")
-          [ "$LHCI_CRASHED" = "true" ] && targets+=("lhci · lighthouse")
-
-          # Names are matched against the current attempt's job list rather
-          # than hardcoded ids, which change every run. Read once: a rerun
-          # mutates the list underneath a second call.
-          gh api --paginate \
-            "repos/$GH_REPO/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" \
-            --jq '.jobs[] | "\(.id)\t\(.name)"' > jobs.tsv
-
-          for prefix in "${targets[@]}"; do
-            job_id=$(awk -F'\t' -v p="$prefix" 'index($2, p) == 1 { print $1; exit }' jobs.tsv)
-            if [ -z "$job_id" ]; then
-              echo "could not resolve a job id for '$prefix' — leaving that failure as reported" >&2
-              exit 1
-            fi
-            echo "workers-sdk#15317 signature matched for '$prefix'; re-running job $job_id"
-            gh run rerun --job "$job_id"
-          done
 
   staging-mcp:
     name: staging-mcp · live MCP, discoverability, and web-audit result page
@@ -391,9 +338,6 @@ jobs:
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
-    outputs:
-      upstream_crash: ${{ steps.wrangler-crash.outputs.upstream }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
