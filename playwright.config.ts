@@ -49,9 +49,18 @@ export default defineConfig({
   // The HTML report is what makes a CI failure triageable: it bundles the
   // traces and screenshots `outputDir` writes into something openable. Without
   // it `playwright-report/` never exists, and a workflow uploading that path
-  // succeeds while capturing nothing.
+  // succeeds while capturing nothing. The JSON summary is machine evidence
+  // for the wrangler-crash probe: a run whose failures are dominated by
+  // connection refusals means the dev server died mid-suite, and the probe
+  // counts those refusals to grant the crash-retry rerun (see
+  // .github/actions/wrangler-crash-probe/probe.sh).
   reporter: process.env.CI
-    ? [['github'], ['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]]
+    ? [
+        ['github'],
+        ['list'],
+        ['html', { outputFolder: 'playwright-report', open: 'never' }],
+        ['json', { outputFile: 'playwright-summary.json' }],
+      ]
     : 'list',
   use: {
     baseURL: BASE_URL,

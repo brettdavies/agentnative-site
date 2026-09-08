@@ -34,6 +34,7 @@ runs:
       run: |
         mkdir -p wrangler-logs
         cp -r "$HOME/.config/.wrangler/logs/." wrangler-logs/ 2>/dev/null || echo "no wrangler logs written"
+        cp playwright-summary.json wrangler-logs/ 2>/dev/null || echo "no playwright summary (job without a Playwright run)"
         ls -la wrangler-logs/
 
     # The signature and its rationale live in probe.sh, shared with the
