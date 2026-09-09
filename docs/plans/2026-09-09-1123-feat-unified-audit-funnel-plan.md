@@ -138,6 +138,9 @@ this plan is that machine.
 - R19. WebMCP in-page tools on both entry pages can set the lane, fill the target, and hop to the prefilled audit page;
   no tool submits, and the progress page never loads the WebMCP script.
 
+- R22. A second progress page, tab, or shared link on a target already in flight attaches to the running audit's stream
+  and sees the same phases; a second submit for the same input attaches rather than starting a second run.
+
 **Retirement and inventory**
 
 - R20. `/web`, `/web/<domain>`, `/web/scoring*`, `/web-audit`, `/web-audit/skill/*`, `/score/live/*`, `/api/audit-web`,
@@ -165,11 +168,11 @@ this plan is that machine.
   - **Covered by:** R1 to R11.
 - F2. Direct or refreshed progress visit
   - **Trigger:** A1 opens `/scoring?target=` with no stash.
-  - **Steps:** Start button renders (R7); if a client in-flight marker for the target exists, the page polls
-    `/score/<target>.json` and forwards only when the response's `scored_at` is newer than the marker's write time (a
-    previously audited target already has a record under the same key), instead of starting a second run; otherwise the
-    click acquires and POSTs.
-  - **Outcome:** no run starts without a gesture; a refresh mid-run does not silently double spend.
+  - **Steps:** the page POSTs the target without a token (KTD14); a 200 hit forwards at once, a 202 means a run is in
+    flight and it repeats the tokenless POST every 3 s until a 200, and a 403 renders the Start button (R7) whose click
+    acquires and POSTs.
+  - **Outcome:** no run starts without a gesture; a refresh, a second tab, or a shared link during a run sees the
+    in-progress state instead of double spending.
   - **Covered by:** R7, R9, R11.
 - F3. Agent read
   - **Trigger:** A2 calls a read tool or fetches `/score/<target>.json`.
@@ -222,8 +225,6 @@ this plan is that machine.
 
 #### Deferred to Follow-Up Work
 
-- Server-side job record with single-flight attach and `in_progress` state on the MCP read tools (the client in-flight
-  marker in R7 bounds duplicate spend without it).
 - MCP `notifications/progress` on the SSE lane for `score_cli` and `audit_website`.
 - WebMCP read tools on CLI result pages; a web `anc://` resource template.
 - Renaming `/scorecard-schema` and `/web-scorecard-schema` (documentation pages, not funnel URLs).
@@ -232,6 +233,8 @@ this plan is that machine.
 - Sibling repos: the spec repo's stale `anc.dev/scorecards/<tool>` links should read `anc.dev/score/<tool>`; the skill
   bundle and the `anc` CLI need no change under this scheme.
 - Coalescing the two lane kill-switch mechanisms (KV flip vs deploy-time var) into one.
+- Moving the MCP transact tools onto `admitTransact` through a mode that skips siteverify, so one gate stack serves
+  every surface.
 - The `MAX_INSTANCES` constant in `src/worker/score/orchestrate.ts` disagrees with the production container count in
   `wrangler.jsonc`; pre-existing, untouched here.
 - A WAF rate rule on `/score/*.json` as an operator lever if polling volume ever matters.
@@ -260,11 +263,15 @@ this plan is that machine.
   load-bearing: `DOMAIN_SLUG_RE` in `route.ts` accepts single labels, and `SHARE_URL_BINARY_RE` admits no dot, so the
   dot is the discriminator. Normalization lowercases and punycodes hosts via the URL parser, keeps the port, drops path
   and query; the server fixes the `https` scheme for website lookups. The server always re-runs normalization and
-  classification; the client's copy is convenience, not a boundary. The suffix stripper is the only extension parser on
-  `/score/*`, and the rejected-TLD list is every extension the pinned-representation predicates match (`.md`, `.json`,
-  `.map`, `.svg`, and the untwinned-source list), enforced at the form and again on the server. A source-level test
-  fails when a funnel path literal appears outside this module (R21). Rationale: the research found URL minting in at
-  least fourteen places across build, Worker, client, and MCP; a rename is safe only when there is one owner.
+  classification; the client's copy is convenience, not a boundary. A target longer than 128 characters is rejected at
+  the form and at the endpoint before any parsing or normalization (a branch-scoped GitHub URL or an install command
+  over that length is rejected with the shared message; accepted); the bound is a constant in this module, and every
+  surface treats the target as hostile input (HTML-escaped on render, pathname-only in logs). The suffix stripper is the
+  only extension parser on `/score/*`, and the rejected-TLD list is every extension the pinned-representation predicates
+  match (`.md`, `.json`, `.map`, `.svg`, and the untwinned-source list), enforced at the form and again on the server. A
+  source-level test fails when a funnel path literal appears outside this module (R21). Rationale: the research found
+  URL minting in at least fourteen places across build, Worker, client, and MCP; a rename is safe only when there is one
+  owner.
 - KTD2. **The Turnstile token crosses pages in the single-use sessionStorage stash; the progress page never acquires on
   load.** The transact click acquires (invisible Turnstile clears reliably only with a real gesture), `stash(target,
   {token, listing})` writes with a 240 s TTL under Turnstile's 300 s token life, and `take(target)` is single-use. A
@@ -290,46 +297,58 @@ this plan is that machine.
   record and runs: lane kill switch; siteverify under a bounded deadline with an explicit verdict map: `rejected` and
   `missing_token` are 403 `turnstile_failed`; timeout, transport failure, a non-2xx or malformed provider response, and
   a missing secret are 503 `turnstile_unavailable` with `retry_after`; session mint or read; the session limiter keyed
-  on the normalized target; the IP limiter; one KV hourly window for both lanes (reusing the web lane's bucket helper).
-  Fail-closed rules: deny when `cf-connecting-ip` is absent, collapse IPv6 to a /48, treat a missing limiter or KV
-  binding as `service_misconfigured`. Kill-switch polarity is recorded, not unified: the CLI KV key absent means enabled
-  while the web var absent means disabled; only a missing binding fails closed on both. The web core keeps its
+  on the normalized target; the IP limiter; one KV hourly window per lane, keyed `audit:<lane>:<ip>:<hour_bucket>`
+  through the web lane's bucket helper generalized with a lane argument (30 per hour per lane; the MCP website tool
+  keeps drawing from the web lane's bucket, so a CLI burst never locks out website audits). Fail-closed rules: deny when
+  `cf-connecting-ip` is absent, collapse IPv6 to a /48, treat a missing limiter or KV binding as
+  `service_misconfigured`. Kill-switch polarity is recorded, not unified: the CLI KV key absent means enabled while the
+  web var absent means disabled; only a missing binding fails closed on both. The web core keeps its
   stale-serve-when-disabled behavior, the listing patch path, and the per-domain flip budget; the CLI core keeps the
   GitHub accessibility probe. During Phase B the endpoint accepts both `input` and `target` body keys, and its
   non-streaming JSON responses carry the legacy `share_url` and the nested registry-hit `scorecard.kind` and
   `scorecard.scorecard_url` beside the envelope, because the deployed homepage still posts `input` and reads those
-  fields until U8 lands; U13 removes all of them. MCP tools keep composing the lane cores directly, so the extracted
-  cores are a third composition surface that must not reorder MCP's gates. `GET /api/score` and `/api/score.md` retire;
-  `.json` is the read surface.
+  fields until U8 lands; U13 removes all of them. MCP tools keep composing the lane cores directly with their own
+  kill-switch and limiter checks, so three gate stacks exist (the endpoint's `admitTransact` and each MCP transact
+  tool's block); a cross-surface parity test pins their order, and moving the MCP tools onto `admitTransact` through a
+  no-siteverify mode is deferred. `GET /api/score` and `/api/score.md` retire; `.json` is the read surface.
 - KTD4. **The CLI lane streams from the Durable Object, line-framed, with its own deadline, purge scope, and
   telemetry.** the endpoint emits a `resolving` phase line before the dispatch, and `do.ts` `fetch` returns an NDJSON
   body: `phase` lines at install start, install done, binary verification, lockdown, and audit start, then one final
   result line; the R2 write still precedes the result line. `runFreshOnly` reads that body through one line reader,
   forwards phases to an optional `onPhase` callback, and returns the one-shot result so MCP `score_cli` is untouched; a
-  body that is exactly one JSON object is treated as the result line, which covers the mixed-version window during
-  propagation. The endpoint relays line by line (never a raw pipe, so a `heartbeat` written every 10 s while waiting
-  cannot split a line), gives the relay its own deadline above the 60 s sandbox bound with the AbortController held
-  through the body read, runs inside `ctx.waitUntil` under its own purge scope (the request-scoped purge store flushes
-  when the response is returned, before the result line arrives), emits the terminal `score.tier` and analytics rows
-  from the consumer rather than the request's `finally`, and treats a stream that closes without a result line as
+  body that is exactly one JSON object is treated as the result line, which covers a new reader against an old Durable
+  Object during propagation; the reverse pairing (an old isolate reading the new NDJSON body) fails each run it
+  dispatches until propagation settles and is the `error_incomplete_response_contract` signal the first-hour watch
+  expects to fall to zero. The endpoint relays line by line (never a raw pipe, so a `heartbeat` written every 10 s while
+  waiting cannot split a line), gives the relay its own deadline above the 60 s sandbox bound with the AbortController
+  held through the body read, runs inside `ctx.waitUntil` under its own purge scope (the request-scoped purge store
+  flushes when the response is returned, before the result line arrives), emits the terminal `score.tier` and analytics
+  rows from the consumer rather than the request's `finally`, and treats a stream that closes without a result line as
   `incomplete_response_contract`. The platform cancels post-disconnect work 30 s after the client goes away, so a
-  disconnect with more than 30 s of sandbox time remaining loses the `cli:<binary>` purge and the terminal telemetry;
-  the Durable Object's R2 write is unaffected. When the client closes first, the `audit.request` terminal outcome is
-  `client_gone` with the elapsed time, never `incomplete_response_contract`, and the lost purge falls under KTD7's
-  accepted 300 s bound. Whoever consumes the result line queues the `cli:<binary>` purge, so MCP `score_cli` purges too.
-  Platform basis: a Durable Object stays active while its response stream is open, and a Worker pipes a subrequest body
-  through without buffering (Cloudflare Workers Streams and Context docs). The non-sticky `getRandom` pool means the
-  stream is the only channel; no second request can find the running instance.
-- KTD5. **One result envelope, one event union, one error object, all in `src/shared/`.** Envelope: `{ kind, target,
-  scorecard_url, markdown_url, json_url, freshness: { cached, scored_at, refresh_after }, spec_version, scorecard,
-  ...lane metadata }`; `markdown_url`, `json_url`, and `scorecard_url` are null for non-shareable runs, which then carry
-  `summary_html`. The curated-slug shadow rule (KTD6) lives in the envelope builder, so no consumer, including
-  `get_scorecard`'s cached tier, can mint a URL that serves a different tool's page. The envelope carries no sandbox
-  paths, stderr, or session data. Events: `accepted`, `phase`, `discovery`, `check`, `heartbeat`, `complete` (envelope),
-  `incomplete`, `bounce`, `error`. Error object `{ error: { code, message, details?, retry_after?, pm?, cta } }` on
-  every JSON error response and inside `bounce` and `error` events; pre-dispatch failures (validation, gates, resolution
-  bounces, rate limits) are JSON with today's statuses, anything after `accepted` is an event. Consumers: `.json`, the
-  `complete` event, MCP read and transact tool results, the HTML and markdown renderers.
+  disconnect with more than 30 s of sandbox time remaining loses only the relay's terminal telemetry; the Durable
+  Object's R2 write and its purge are unaffected. The `enable_request_signal` compatibility flag is enabled so the relay
+  listens on the incoming request's abort signal: on abort it stops heartbeats, cancels its read of the DO stream, and
+  records `client_gone` with the elapsed time as the `audit.request` terminal outcome, never
+  `incomplete_response_contract`. The Durable Object queues the `cli:<binary>` purge itself, immediately after its R2
+  write, through the `Cached` entrypoint's purge RPC on `ctx.exports` (the handle the Sandbox SDK already resolves
+  there), so the purge shares the writer's lifetime and covers MCP `score_cli` runs; a failed purge RPC is logged on the
+  purge scope, never thrown. The relay owns telemetry only. Platform basis: a Durable Object stays active while its
+  response stream is open, and a Worker pipes a subrequest body through without buffering (Cloudflare Workers Streams
+  and Context docs). The non-sticky `getRandom` pool means the stream is the only channel; no second request can find
+  the running instance.
+- KTD5. **One result envelope, one event union, one error object, all in `src/shared/`.** Envelope: `{ kind, tier,
+  target, scorecard_url, markdown_url, json_url, freshness: { cached, scored_at, refresh_after }, spec_version,
+  scorecard, ...lane metadata }` where `kind` is the lane and `tier` is `registry`, `cache`, or `live`, set by whichever
+  tier produced the result; the curated-reward line, the smoke and postflight assertions, and the freshness semantics
+  read `tier`, and a registry hit found after discovery arrives on the stream as `complete` with `tier: 'registry'` and
+  the curated `scorecard_url`; `markdown_url`, `json_url`, and `scorecard_url` are null for non-shareable runs, which
+  then carry `summary_html`. The curated-slug shadow rule (KTD6) lives in the envelope builder, so no consumer,
+  including `get_scorecard`'s cached tier, can mint a URL that serves a different tool's page. The envelope carries no
+  sandbox paths, stderr, or session data. Events: `accepted`, `phase`, `discovery`, `check`, `heartbeat`, `complete`
+  (envelope), `incomplete`, `bounce`, `error`. Error object `{ error: { code, message, details?, retry_after?, pm?, cta
+  } }` on every JSON error response and inside `bounce` and `error` events; pre-dispatch failures (validation, gates,
+  resolution bounces, rate limits) are JSON with today's statuses, anything after `accepted` is an event. Consumers:
+  `.json`, the `complete` event, MCP read and transact tool results, the HTML and markdown renderers.
 - KTD6. **Result route order and collision policy.** `/score/<target>{,.md,.json}`: strip a representation suffix first;
   classify the remainder. Website: R2 lookup under the `https` key, else 404; records keyed under `http` become
   unreachable and expire under the bucket lifecycle. CLI: consult the isolate-cached registry index first (one lookup,
@@ -342,15 +361,17 @@ this plan is that machine.
   non-shareable render (R9). Chosen over asset-first dispatch, which costs an extra fetch on every live result and makes
   correctness depend on no alias page surviving in `dist/`.
 - KTD7. **Cache classes follow the sibling, and `.json` never sits in the day-long path-keyed class for live results.**
-  `classifyCacheClass` gains a branch ahead of the JSON short class: live CLI and website results (all three
-  representations) are HIT-min with tags `cli:<binary>` and `web:<host>`; curated CLI pages stay HIT-1d and their
-  build-emitted `.json` stays in the short class; `/scoring*` joins the always-MISS predicate; `/scorecards*` is HIT-min
-  like the homepage. Purge producers are three: the CLI relay consumer (KTD4), the web stream, and the rescore workflow,
-  each inside its own purge scope that outlives the response. The live CLI page moves onto `applyHeaders` (it builds its
-  own headers today and puts `s-maxage` on a negotiated `Cache-Control`, the pattern the edge-cache learning forbids). A
-  re-score triggered through MCP after an edge HIT can leave the edge copy stale for at most the 300 s HIT-min TTL if
-  its purge fails, and a relay cancelled by an early client disconnect (KTD4) loses its purge the same way; that 300 s
-  bound is accepted.
+  A path predicate cannot tell a curated slug from a live binary, so the result route passes an explicit cache class and
+  tag into `applyHeaders` for the tier it served: curated CLI pages HIT-1d with no tag (their build-emitted `.json`
+  stays in the short class), live CLI results HIT-min with `cli:<binary>`, website results HIT-min with `web:<host>`,
+  all three representations alike. The path predicates cover every other route: `/scoring*` joins the always-MISS
+  predicate; `/scorecards*` is HIT-min like the homepage; `/audit` with a query string demotes to the short class so
+  prefill hops never mint day-long edge keys, while bare `/audit` stays HIT-1d. Purge producers are three: the Durable
+  Object after its R2 write (KTD4), the web stream, and the rescore workflow, each inside a purge scope that outlives
+  the response. The live CLI page moves onto `applyHeaders` (it builds its own headers today and puts `s-maxage` on a
+  negotiated `Cache-Control`, the pattern the edge-cache learning forbids). A purge RPC that fails after the R2 write
+  can leave the edge copy stale for at most the 300 s HIT-min TTL; that bound is accepted. A 202 in-progress `.json`
+  body (KTD14) is `no-store`.
 - KTD8. **JSON is a pinned, credential-free representation advertised by `Link`.** `.json` already satisfies
   `isRepresentationPinned` (no twin rewrite, no `Vary`); `applyHeaders` emits a second `Link: rel="alternate";
   type="application/json"` beside the markdown one on HTML and twin responses of result pages. Because `.json` responses
@@ -377,6 +398,34 @@ this plan is that machine.
   match.
 - KTD12. **Fix-skill pages live at `/fix/<check-id>`.** Lane-agnostic, short, and free of the retired `/web-audit`
   prefix; the agent-skills index entries keep their `web-audit-fix-<id>` names but point at the new URLs.
+- KTD14. **In-flight state lives in KV, not in the tab, keyed by input and by result.** At `accepted` the endpoint
+  writes `inflight:<lane>:<input>` (the normalized input) to `SCORE_KV` with `started_at` and a TTL equal to the relay
+  deadline, and as soon as the result key is known (the host for the website lane at `accepted`; the binary for the CLI
+  lane once resolution completes) it writes the twin `inflight:<lane>:<result>`; both are deleted at the terminal line.
+  The transact endpoint answers the read tier without a token: a registry or cache hit returns the envelope, an input
+  whose flag exists returns 202 `{ in_progress: true, started_at }`, and anything else returns the 403 that renders
+  Start; a tokenless POST for an in-flight input returns the job's attached stream (KTD15), and a tokened POST for an
+  in-flight input attaches instead of starting a second run. `/score/<target>.json` checks the result-keyed flag before
+  any R2 read and answers 202 with `Cache-Control: no-store` while it exists; MCP `get_scorecard` and
+  `get_website_audit` pass `in_progress` and `started_at` through on a miss. On a stash miss the progress page POSTs
+  without a token: a 200 hit forwards at once, an attached stream renders the replayed and live phases exactly as the
+  initiator's does, and a 403 renders Start; `.json` keeps answering 202 for non-stream readers. KV propagation lag of
+  about a second means a second tab inside that window can still start a duplicate run, and the operator hatch
+  `?fromCache=false` bypasses the flag; both accepted. Chosen over a per-tab sessionStorage marker (invisible to second
+  tabs, shared links, and agents) and over a full job record with single-flight attach (deferred).
+- KTD15. **A job Durable Object fans out a running audit to late arrivals.** `AuditJob`, a new Durable Object class
+  (binding `AUDIT_JOB`, an appended `new_sqlite_classes` migration tag in both environments), is keyed by
+  `idFromName('<lane>:<input>')` and created by the endpoint at `accepted`; the KTD14 KV entries store the job name, and
+  the result-keyed twin lets `.json` and MCP readers find the job by host or binary. The initiating relay appends every
+  stream line to the job through an RPC as it consumes the sandbox or engine stream; the job keeps a bounded event log
+  in SQLite (sequence, line), a status, the terminal envelope, and a self-cleaning alarm at the relay deadline plus a
+  grace. Attach returns an NDJSON stream that replays the log from a sequence and then tails live appends through an
+  in-memory subscriber set; a tokenless POST for an in-flight input, a tokened POST for the same input, and MCP
+  `score_cli` or `audit_website` on an in-flight target all attach, so one run serves every reader and the
+  duplicate-spend window closes. The migration is append-only and lands in its own PR ahead of the code that uses it
+  (repo release rule), and a later `dev` push whose migration list is a subset of the applied tags fails the Cloudflare
+  API, which a dry run does not catch. Chosen over KV-only flags with 202 polling because late arrivals should see live
+  phases, not a wait state.
 - KTD13. **Phased landing: foundations and server before pages, pages before retirement.** The `handler.ts` test surface
   is the largest in the repo; shared modules and the streaming endpoint land behind the existing pages first, then the
   pages switch, then the old routes and their tests are removed in one sweep. Any script that asserts a contract lands
@@ -390,10 +439,10 @@ Progress page state machine (R6 to R11):
 stateDiagram-v2
   [*] --> Loaded: GET /scoring?target=t
   Loaded --> Posting: stash(t) present
-  Loaded --> Idle: no stash
-  Idle --> Polling: in-flight marker(t) present
-  Polling --> Done: /score/t.json returns 200 with scored_at newer than the marker
-  Polling --> Idle: 60 s marker expires
+  Loaded --> Probe: no stash, tokenless POST
+  Probe --> Hit: 200 envelope
+  Probe --> Streaming: attached stream (replay, then live)
+  Probe --> Idle: 403 no token
   Idle --> Acquiring: Start click
   Acquiring --> Posting: token
   Acquiring --> Failed: turnstile error or 20 s timeout
@@ -431,8 +480,9 @@ sequenceDiagram
   D-->>W: phase installing
   W-->>P: phase installing
   W-->>P: heartbeat (every 10 s while silent)
+  D->>D: R2 write, then purge cli:<binary> via ctx.exports.Cached
   D-->>W: phase auditing, then result line
-  W->>W: queue cli:<binary> purge in the relay's own scope, emit terminal telemetry
+  W->>W: emit terminal telemetry
   W-->>P: complete {envelope}
   P->>P: location.replace(scorecard_url)
 ```
@@ -442,7 +492,7 @@ Route table after the change (KD2, KTD6):
 | Path                    | Lane resolution   | Served by                                   | Representations                   | Cache class             |
 | ----------------------- | ----------------- | ------------------------------------------- | --------------------------------- | ----------------------- |
 | `/`                     | segment           | static + Worker inject (boards, sitekey)    | HTML, `.md`                       | HIT-min                 |
-| `/audit`                | segment           | static widget slot + Worker sitekey inject  | HTML, `.md`                       | HIT-1d                  |
+| `/audit` | segment | static widget slot + Worker sitekey inject | HTML, `.md` | HIT-1d; short with a query |
 | `/scoring?target=`      | target shape      | Worker, no WebMCP script                    | HTML; `/scoring.md` pointer       | MISS                    |
 | `/score/<slug>` curated | CLI               | static asset (registry index confirms slug) | HTML, `.md`, `.json` (build emit) | HIT-1d; `.json` short   |
 | `/score/<binary>` live  | CLI               | Worker from R2                              | HTML, `.md`, `.json`              | HIT-min, `cli:<binary>` |
@@ -450,7 +500,8 @@ Route table after the change (KD2, KTD6):
 | `/score/<alias>`        | CLI               | Worker 301 to slug                          | all three                         | short                   |
 | `/scorecards`           | segment, `?lane=` | static + Worker inject (web board)          | HTML, `.md`                       | HIT-min                 |
 | `/fix/<check-id>`       | n/a               | static                                      | HTML, `.md`                       | HIT-1d                  |
-| `POST /api/score`       | target shape      | Worker                                      | NDJSON or JSON                    | MISS                    |
+| `/score/<target>.json` while in flight | any | Worker from KV | 202 in-progress body | MISS (`no-store`) |
+| `POST /api/score` | target shape | Worker | NDJSON or JSON | MISS |
 
 Target classification examples (KTD1):
 
@@ -477,9 +528,9 @@ Target classification examples (KTD1):
   are re-keyed from the route module's predicates; every `tests/worker.test.ts` fixture host under `/web/` moves; the
   private header set in `src/worker/score/summary-render.ts` is deleted in favor of `applyHeaders`.
 - Edge cache: HIT-min keys now include `/score/<binary>*`, `/score/<host>*`, and `/scorecards*` with their query
-  variants; purge is queued from three producers (CLI relay, web stream, rescore workflow), each inside a purge scope
-  that outlives the response, and the Worker-rendered `/audit` must never read `?target=` when rendering, or one
-  visitor's prefill freezes into the HIT-1d edge copy.
+  variants; purge is queued from three producers (the Durable Object after its R2 write, the web stream, the rescore
+  workflow), and the Worker-rendered `/audit` must never read `?target=` when rendering, or one visitor's prefill
+  freezes into the HIT-1d edge copy.
 - R2 lifecycle: CLI live results keep the key `scores/<binary>/<SPEC_VERSION>.json` and gain a `cli:<binary>` tag and
   purge for the first time; a spec bump still orphans prior keys (404 at `/score/<binary>` until re-scored); web keys
   stay `audits/web/<sha256>/<SPEC_VERSION>.json`; stored payloads are byte-identical before and after, because the
@@ -498,8 +549,11 @@ Target classification examples (KTD1):
 - WebMCP prepare boundary: `open_audit` lands on `/audit?lane=&target=`, a static page whose prefill is client-side
   only; the progress page ships without the WebMCP script; the source guard bans submit calls and `/scoring` navigation
   across all WebMCP modules.
+- `wrangler.jsonc` gains the `enable_request_signal` compatibility flag in both environments, pinned by the config test,
+  so the relay can observe a client disconnect (KTD4).
 - Session and limiters: `__Host-anc-session` is shared across lanes; the session and IP limiters stay lane-selected
-  inside `admitTransact`, so a visitor holds two independent budgets, and both lanes now share the KV hourly ceiling.
+  inside `admitTransact`, so a visitor holds two independent budgets, and each lane has its own KV hourly ceiling keyed
+  by lane.
 - Build emits: the sitemap extra paths, `09-llms-emit.mjs`, `11a-discovery-emit.mjs` prose, and
   `15-web-audit-skills.mjs` re-point through the route module; the twin-content guard that fails the build when the
   homepage twin mentions `/api/score` or Turnstile extends to the `/audit` twin.
@@ -523,13 +577,19 @@ Target classification examples (KTD1):
 - **Risk:** A Turnstile outage is reported as visitor rejection and drives retry storms. **Mitigation:** bounded
   siteverify deadline and the 403 versus 503 split in KTD3; the progress page's wait state (U9). External dependency:
   `challenges.cloudflare.com`.
-- **Risk:** Refresh or Start re-spends a run the server cannot deduplicate. **Mitigation:** accepted bound of 30 fresh
-  runs per IP per minute and the shared hourly ceiling per lane, each capped by the 60 s sandbox or the web probe
-  deadline; the in-flight marker and `.json` polling cover the common refresh (U3, U9); the job record stays deferred.
+- **Risk:** The `AuditJob` migration is append-only: merging its PR after a code PR, or reordering tags between
+  environments, fails the deploy with Cloudflare API error 10074 and a dry run does not catch it. **Mitigation:** the
+  migration lands in its own PR first, both environments carry the same tag list, and the `dev` deploy is watched after
+  every merge (U14).
+- **Risk:** Refresh or Start re-spends a run inside the KV propagation window. **Mitigation:** accepted bound of 30
+  fresh runs per IP per minute and 30 per hour per lane, each capped by the 60 s sandbox or the web probe deadline; the
+  KV in-flight flag (KTD14) stops second tabs, shared links, and MCP readers from duplicating a run; single-flight
+  attach stays deferred.
 - **Risk:** `.json` under CORS `*` leaks session data or sandbox detail. **Mitigation:** KTD8 credential-free route
   contract; U6 asserts the envelope contains no stderr, sandbox path, or cookie-derived field.
-- **Risk:** Polling 404s (MISS class) turns `/score/*.json` into a cheap R2-read drain. **Mitigation:** one read per
-  poll, a poll cap equal to the 60 s marker TTL (U9); a WAF rate rule stays available as the operator lever.
+- **Risk:** Polling turns the tokenless read tier into a cheap drain. **Mitigation:** the read tier checks the KV flag
+  before any R2 read, so a 202 costs one KV read; polling stops at the flag's TTL (U9); a WAF rate rule stays available
+  as the operator lever.
 - **Risk:** Kill-switch polarity differs by lane; an operator flips one and assumes both. **Mitigation:** KTD3 records
   the polarity; AE6 covers the split; the runbook names both flips (U11).
 - **Risk:** Phase B's `{target}` body breaks the still-deployed `{input}` homepage on `dev`, and the every-push smoke
@@ -543,9 +603,9 @@ Target classification examples (KTD1):
 - **Risk:** The assets binding's 404-page handling returns a body the curated branch treats as a hit, or its
   trailing-slash rewriting mangles a host-shaped path. **Mitigation:** KTD6 counts only status 200 as curated and
   canonicalizes `.html` and trailing-slash forms in the route; U6 tests a host with no asset.
-- **Risk:** The `cli:<binary>` purge queued inside `ctx.waitUntil` without its own scope logs a queue-without-store
-  error and the HIT-min page serves the prior scorecard for 300 s, silently. **Mitigation:** KTD4's own purge scope
-  inside the relay; U7's purge proof on staging; first-hour filter on the purge scope expects zero errors.
+- **Risk:** The Durable Object's purge RPC fails (entrypoint unavailable mid-deploy, RPC error) and the HIT-min page
+  serves the prior scorecard for 300 s. **Mitigation:** the DO logs the failure on the purge scope and never throws;
+  U7's purge proof on staging; the first-hour filter on that scope expects zero errors.
 - **Risk:** Zone cache survives both the production cut and a Worker rollback: old pages and old navigation links stay
   at warm edge locations for up to a day after the cut, and HIT-1d pages rendered under the new nav keep linking to
   `/fix/*` and `/score/<host>` that a rolled-back Worker 404s. **Mitigation:** U13 adds a zone purge-everything step to
@@ -584,7 +644,8 @@ Un-validated agent bets carried from the scoping draft; each is a default an imp
 - The homepage keeps its current layout; only the form component and the board links change.
 - The CLI lane keeps `?fromCache=false` as a query parameter on the POST.
 - Lane kill switches keep their current mechanisms (KV flip for CLI, var for web) behind the admission helper.
-- Duplicate spend on refresh is accepted at the KTD3 limiter bounds rather than solved with a server-side job record.
+- Duplicate spend is closed by the job Durable Object's single-flight attach (KTD15); the KV propagation window remains
+  only for readers that race the pointer write.
 
 ### Implementation Constraints
 
@@ -597,12 +658,16 @@ Un-validated agent bets carried from the scoping draft; each is a default an imp
   "Browser-verify before declaring done").
 - A new test counts only after it has been observed failing against the unfixed code.
 - Each of U4 to U12 leaves the literal guard's warning count lower than it found it.
+- A unit that changes a file's contract rewrites that file's header narrative to present state in the same PR, and
+  `src/client/scoring.ts`, `src/worker/audit/api.ts`, `src/worker/score/do.ts`, `src/worker/audit/result.ts`,
+  `src/worker/audit/job.ts`, and `src/shared/audit-routes.ts` carry an ASCII diagram of their state machine or dispatch
+  order in that header.
 
 ### Sequencing
 
 - Phase A (no user-visible change): U1, U2, U3.
-- Phase B (server, behind existing pages): U4, U5, U6, U7.
-- Phase C (pages switch over): U8, U9, U10.
+- Phase B (server, behind existing pages): U4, U6, U5, U7, then U14 (its migration PR first).
+- Phase C (pages switch over): U9, then U8, then U10.
 - Phase D (surfaces and retirement): U11, U12, U13.
 
 Phases A to C may each ship to production as their own release; Phase D ships as one release; staging runs each phase
@@ -627,12 +692,17 @@ against the gates in Documentation and Operational Notes.
 purge-everything: static pages carry a one-day CDN lifetime with no cache tag, so nothing else evicts the previous
 build's pages and navigation links, which now 404. The retired-path checks (AE7) run only after that purge.
 
+**Durable Object migration.** The `AuditJob` migration (U14) merges in its own PR before any code that references the
+binding; watch the `dev` deploy after that merge, and never let a later branch carry a migration list that is a subset
+of the applied tags.
+
 **Rollback.** `wrangler rollback` to the deployment id recorded before the release merge, then a zone purge-everything.
 Safe because R2 keys and payloads are unchanged, assets travel with the Worker version, and no Durable Object migration
 is applied (KTD4 changes the `fetch` body, not the class or binding). For cost or abuse the kill switches are faster and
-unchanged behind `admitTransact`: the CLI KV flip, the `MCP_LIVE_SCORING_ENABLED` secret, and the `WEB_AUDIT_ENABLED`
-var. Rehearse once on staging: roll back to the pre-U13 version, prove `/web/<seeded domain>` renders from the same R2
-record, roll forward, `postflight.sh --env staging all` green.
+unchanged (the endpoint checks them in `admitTransact`, the MCP tools in their own gate blocks): the CLI KV flip, the
+`MCP_LIVE_SCORING_ENABLED` secret, and the `WEB_AUDIT_ENABLED` var. Rehearse once on staging: roll back to the pre-U13
+version, prove `/web/<seeded domain>` renders from the same R2 record, roll forward, `postflight.sh --env staging all`
+green.
 
 **Coherence check.** Build-time surfaces (registry index, MCP catalog, seed list, sitemap, `llms.txt`, agent-skills
 index, curated `/score/<slug>{,.md,.json}`, `/fix/*`) and runtime surfaces (Worker routes, MCP URL minting, `/scoring`,
@@ -704,12 +774,13 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 | U5   | CLI lane streaming from the Durable Object    | `src/worker/score/do.ts`, `sandbox-exec.ts`, `orchestrate.ts`                                       | U2, U4         |
 | U6   | Unified result route and JSON representations | `src/worker/audit/result.ts`, `src/build/08-scorecards-emit.mjs`                                    | U1, U2         |
 | U7   | Cache classes, tags, purge, Link alternates   | `src/worker/headers.ts`                                                                             | U1, U6         |
-| U8   | Shared entry form on `/` and `/audit`         | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md`                         | U1, U3         |
-| U9   | Unified progress page                         | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts`                                         | U2, U3, U4, U5 |
+| U8 | Shared entry form on `/` and `/audit` | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md` | U1, U3, U9 |
+| U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 |
 | U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         |
 | U11  | Discovery, inventory, fix-skill move, docs    | `src/build/10-sitemap.mjs`, `09-llms-emit.mjs`, `11a-discovery-emit.mjs`, `15-web-audit-skills.mjs` | U1, U6         |
 | U12  | MCP envelope adoption and WebMCP re-pointing  | `src/worker/mcp/tools/*.ts`, `src/client/webmcp-*.ts`, `content/mcp-skill.md`                       | U2, U6, U8     |
-| U13  | Retire old routes, sweep tests and scripts    | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md`                                     | U8 to U12      |
+| U14 | Job Durable Object and single-flight attach | `src/worker/audit/job.ts`, `wrangler.jsonc`, `src/worker/audit/api.ts` | U4, U5, U6 |
+| U13 | Retire old routes, sweep tests and scripts | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md` | U8 to U12, U14 |
 
 ### U1. Shared route module and target classifier
 
@@ -738,6 +809,7 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - `https://github.com/cli/cli` and `cli/cli` classify CLI; `https://example.com/docs` classifies website with target
     `example.com`.
   - `example.md`, `example.json`, and `example.map` classify as rejected.
+  - A 129-character target is rejected before normalization; a 128-character one is accepted.
   - `stripRepresentation('/score/anc.dev.json')` yields target `anc.dev` and representation `json`; `/score/ripgrep.md`
     yields `ripgrep` and `md`.
   - Reserved names cannot be produced as a `/score/<target>` path by the builder.
@@ -769,6 +841,8 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Test scenarios:**
   - A cached web record and a cached CLI record produce envelopes whose `scorecard` is byte-identical to the stored
     object.
+  - `tier` is `registry` for a registry index hit, `cache` for an R2 hit, and `live` for a fresh run; a post-discovery
+    registry hit builds a `complete` event with `tier: 'registry'`.
   - A branch-scoped run yields null URLs and a `summary_html` string.
   - A live binary equal to a curated slug (fixture registry index) yields null URLs.
   - No envelope field contains a sandbox path, stderr text, or session identifier for a fixture record that carries all
@@ -792,8 +866,8 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   2. Stash one record per normalized target: `{ token, listing, entered_lane, ts }` with the 240 s TTL (the entered lane
      lets the progress page render the reclassification line when it differs from the classified lane), single-use
      `take`, and omit-not-false transport for `listing`.
-  3. Add the in-flight marker (`inflight:<target>`, 60 s TTL) written when a POST starts and cleared on any terminal
-     event.
+  3. Keep a per-target copy of the `entered_lane` and, after a non-shareable completion, the inline summary, both keyed
+     by the normalized target; no in-flight marker lives in the tab (KTD14).
 - **Patterns to follow:** existing `stashTurnstileToken` and `takeTurnstileToken`; `buildAuditWebBody` omit rule.
 - **Test scenarios:**
   - Two submits before the first resolves issue one acquire and one POST (negative control: neutralizing the guard
@@ -801,7 +875,7 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - A stash older than 240 s is discarded and reported absent.
   - `take` returns the record once and null on the second call.
   - A listing of null is omitted from the serialized body; `false` is sent as `false`.
-  - The in-flight marker expires after 60 s and is cleared on `complete`, `bounce`, and `error`.
+  - A stored inline summary is returned once by `take` and cleared on the next terminal event.
 - **Verification:** `bun test`; the lazy-load e2e assertion in `tests/e2e/homepage-score.e2e.ts` still passes once U8
   wires the new entry client.
 
@@ -828,6 +902,12 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      object as JSON. Cache and registry hits are always one JSON body.
   4. Emit one `audit.request` log line per call through the emitter; the terminal fields for streamed runs are filled by
      the U5 consumer.
+  5. Write the KV in-flight flag at `accepted` and delete it at the terminal line (KTD14).
+  6. Post-extraction shape (`handler.ts`): the CLI lane core owns only input validation, the unmetered registry and
+     cache tiers, spec resolution, and the run; the GET path, siteverify, session, and limiter code leave it. Each lane
+     core targets roughly 300 non-comment lines; anything beyond splits by responsibility.
+  7. Header contracts: rewrite the narratives at the top of `src/worker/score/handler.ts` and
+     `src/worker/score/orchestrate.ts` to describe only the present pipeline.
 - **Execution note:** Start with a failing contract test that posts a website target and a CLI target through the same
   endpoint and asserts the shared error object on a limiter denial; the smoke script and postflight registry-hit
   assertion changes ship in this PR so the next `dev` deploy and the staging page gate stay green.
@@ -846,10 +926,21 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - A website target with the web kill switch off returns the disabled error while a CLI target proceeds (AE6).
   - `Accept: application/x-ndjson` on a cache miss yields `accepted` as the first line; a plain `Accept` yields one JSON
     body; a `text/plain` body is rejected.
-  - A rate-limited request returns JSON with `retry_after` and never opens a stream; both lanes share one hourly window.
+  - A rate-limited request returns JSON with `retry_after` and never opens a stream; exhausting the CLI lane's hourly
+    window leaves the website lane's window untouched for the same IP.
   - `?fromCache=false` skips both cache tiers and still consults the registry.
   - Bodies with `input` and with `target` both succeed during Phase B, and a registry hit's JSON body carries the
-    envelope plus the legacy nested fields the deployed homepage reads.
+    envelope with `tier: 'registry'` plus the legacy nested fields the deployed homepage reads.
+  - A 129-character target is rejected with the shared error object before classification; 128 characters pass.
+  - The input-keyed flag is written at `accepted` and the result-keyed twin once the host or binary is known, both with
+    `started_at` and the relay-deadline TTL, and both are deleted at the terminal line; a run that ends by relay
+    deadline leaves them to expire.
+  - A tokenless POST returns the envelope on a registry or cache hit, the attached job stream while the input is in
+    flight, and 403 otherwise, and spends no budget.
+  - A tokened POST whose input is already in flight attaches to the job stream and starts no second run (one sandbox or
+    engine invocation across both callers).
+  - A limiter stubbed to throw produces the same outcome and gate order across the HTTP endpoint, `score_cli`, and
+    `audit_website`.
 - **Verification:** `bun test`; staging `curl` with the always-pass Turnstile token against both lanes returns the
   expected first line; the `dev` deploy smoke passes with the rewritten script.
 
@@ -859,21 +950,25 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Requirements:** R8; KTD4.
 - **Dependencies:** U2, U4.
 - **Files:** modify `src/worker/score/do.ts`, `src/worker/score/sandbox-exec.ts`, `src/worker/score/orchestrate.ts`,
-  `src/worker/audit/api.ts`, `src/worker/audit-web/hit-min-purge.ts` (shared purge-scope helper),
-  `src/worker/mcp/tools/scorecard-audit.ts` (purge on completion); modify `tests/score-do.test.ts`,
-  `tests/worker-score-orchestrate.test.ts`, `tests/score-telemetry.test.ts`; create `tests/score-stream.test.ts`.
+  `src/worker/audit/api.ts`, `src/worker/audit-web/hit-min-purge.ts` (purge RPC callable from the DO), `wrangler.jsonc`
+  (`enable_request_signal` compatibility flag in both environments); modify `tests/score-do.test.ts`,
+  `tests/worker-score-orchestrate.test.ts`, `tests/score-telemetry.test.ts`, `tests/wrangler-config.test.ts` (pins the
+  flag); create `tests/score-stream.test.ts`.
 - **Approach:**
   1. `runScore` accepts an `onPhase` callback and calls it at the five phase boundaries; `do.ts` writes each phase and
      the final result as NDJSON lines into a `TransformStream` and returns its readable side immediately; the R2 write
-     still precedes the result line.
+     still precedes the result line, and the Durable Object queues the `cli:<binary>` purge through `ctx.exports.Cached`
+     right after that write.
   2. `runFreshOnly` reads the DO body line by line, treats a body that is exactly one JSON object as the result line,
      forwards phases to the optional callback, and returns the final result; a stream that closes without a result line
      resolves to `incomplete_response_contract`.
   3. The endpoint relays line by line inside `ctx.waitUntil` under its own purge scope, writes a `heartbeat` every 10 s
      while no line has arrived, holds the relay deadline through the body read, emits the terminal telemetry from the
-     consumer, records `client_gone` with the elapsed time when the client closes first (the platform cancels the relay
-     30 s after a disconnect), and queues the `cli:<binary>` purge after the result line; MCP `score_cli` queues the
-     same purge.
+     consumer, listens on `request.signal` and on abort stops heartbeats and records `client_gone` with the elapsed time
+     (the platform cancels the relay 30 s after a disconnect). The purge is not the relay's job: `do.ts` queues the
+     `cli:<binary>` purge through `ctx.exports.Cached` right after its R2 write, logging a failed RPC without throwing.
+  4. Header contracts: rewrite the narratives at the top of `src/worker/score/do.ts` and
+     `src/worker/score/orchestrate.ts` to describe only the present stream contract.
 - **Execution note:** Keep the two-phase egress ordering test (`tests/score-do.test.ts` scenario b) green throughout;
   extend it to assert phase event order.
 - **Patterns to follow:** `route.ts` streaming body with `ctx.waitUntil` and its purge scope; the
@@ -881,15 +976,20 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Test scenarios:**
   - A stubbed sandbox emits phases in the order install start, install done, binary verification, lockdown, audit start,
     then a result; the client stream contains `resolving` and then those five in that order followed by `complete`.
-  - MCP `score_cli` through `runFreshOnly` with no callback returns the same result object as before and queues a purge.
+  - MCP `score_cli` through `runFreshOnly` with no callback returns the same result object as before; the purge is
+    observed from the DO stub, not the caller.
+  - The DO stub calls the purge RPC with `cli:<binary>` after its R2 write; a purge RPC failure is logged and the result
+    line still follows.
+  - An aborted `request.signal` stops heartbeats within one tick and records `client_gone` with elapsed ms as the
+    `audit.request` terminal outcome.
   - A one-object JSON body (old DO) resolves to the result without an error.
   - A DO stream that ends after `phase installing` produces an `error` event with code `incomplete_response_contract`.
   - No line for 10 s produces a `heartbeat` line; a run that finishes in 3 s produces none; a heartbeat never lands
     inside another line.
   - A relay that exceeds its deadline terminates the client stream with an `error` event.
-  - A client disconnect with under 30 s of run remaining still lets the consumer finish, emit `score.tier` with the real
-    tier, and queue the purge; an earlier disconnect records `client_gone` with the elapsed time as the `audit.request`
-    terminal outcome and never `incomplete_response_contract` (assert via the log capture sink).
+  - A client disconnect with under 30 s of run remaining still lets the consumer finish and emit `score.tier` with the
+    real tier; an earlier disconnect records `client_gone` and never `incomplete_response_contract`; the purge fires
+    from the Durable Object in both cases (assert via the log capture sink).
 - **Verification:** `bun test`; a staging cache-miss run of a small tool shows at least three phase lines in the raw
   NDJSON (Verification Contract stream-shape row).
 
@@ -906,23 +1006,35 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Approach:**
   1. Dispatch per KTD6: suffix strip, classify, registry index first, curated asset only on status 200, alias 301, R2
      live, 404; the route canonicalizes `.html` and trailing-slash forms itself.
-  2. `.json` responses go through `applyHeaders` with `application/json`, never touch the session cookie, and set no
-     cookie; HTML and `.md` render from the same envelope through the existing shared renderers.
+  2. `.json` responses go through `applyHeaders` with `application/json` and the class and tag of the tier that served
+     them, never touch the session cookie, and set no cookie; HTML and `.md` render from the same envelope through the
+     existing shared renderers.
   3. 404 bodies per representation: HTML and `.md` carry a "start an audit" pointer to `/audit?lane=&target=`; `.json`
      returns `{ error: { code: 'not_found', message }, audit_url }` and nothing else.
   4. The curated `.json` emit wraps the committed scorecard in the envelope at build time so `get_scorecard` can read it
      through the assets binding.
+  5. The `.json` route reads the KV in-flight flag before any R2 read and answers 202 `no-store` while it exists
+     (KTD14).
+  6. Post-extraction shape (`route.ts`): the web lane core owns only body validation, the SSRF gate, the cache tier, and
+     the engine stream; the result page, scoring page, board handler, and gate block leave it (U6, U9, U10, U4); same
+     ceiling as `handler.ts`.
+  7. Header contracts: rewrite the narratives at the top of `src/worker/audit-web/route.ts` and
+     `src/worker/score/summary-render.ts` to describe only the present dispatch.
 - **Patterns to follow:** `withNegotiatedHeaders` in `route.ts`; `enrichWebScorecardForDisplay`; `resolveCuratedSlug` in
   the registry lookup.
 - **Test scenarios:**
   - `/score/ripgrep`, `.md`, `.json` serve from the asset; `/score/rg.json` 301s to `/score/ripgrep.json` (AE4).
   - A curated slug whose asset fetch returns the 404 page is not treated as a hit.
+  - When the registry index cannot be loaded, a CLI-shaped target answers 503 with `Retry-After` in all three
+    representations instead of falling through to a 404.
   - `/score/ouch` with an R2 record renders HTML, the twin, and JSON whose `scorecard` equals the record.
   - `/score/anc.dev.json` equals the `get_website_audit` envelope for the same record (AE5, cross-surface `toEqual`).
   - `/score/anc.dev.html` and `/score/anc.dev/` canonicalize to `/score/anc.dev` without reaching the assets binding.
   - A never-audited CLI target and website target return the lane-appropriate 404 in all three representations, `.json`
     carrying only `code`, `message`, and `audit_url`.
   - A `.json` request carrying a session cookie receives no `Set-Cookie` and no `Vary`.
+  - While the in-flight flag exists, `.json` answers 202 with `in_progress`, `started_at`, and `Cache-Control:
+    no-store`, and performs no R2 read.
   - A target containing a reserved name is not treated as a result.
   - `Accept: application/json` on `/score/ripgrep` still returns HTML (suffix-only selection).
 - **Verification:** `bun run build` then `bun test`; staging `curl -H 'Accept: text/html'`, `.md`, and `.json` for one
@@ -937,22 +1049,25 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   `src/worker/audit-web/hit-min-purge.ts`, `src/worker/index.ts`; modify `tests/worker.test.ts`,
   `tests/score-vary.test.ts`; modify `tests/e2e/edge-hit.e2e.ts`.
 - **Approach:**
-  1. `classifyCacheClass`: always-MISS predicate from U1 (adds `/scoring*`), then the live-result HIT-min branch (tags
-     from U1) ahead of the JSON short class, then the existing order.
+  1. `applyHeaders` accepts an explicit cache class and tag from the result route (U6) and honors them ahead of
+     `classifyCacheClass`; the path classifier gains the always-MISS predicate from U1 (adds `/scoring*`) and the
+     `/audit`-with-query demotion, then keeps its existing order.
   2. `hitMinCacheTag` maps `/score/<host>*` to `web:<host>`, `/score/<live binary>*` to `cli:<binary>`, `/scorecards*`
      and `/` to the board tag.
   3. `applyHeaders` emits the JSON `Link` alternate on result pages and their twins.
-  4. Add a `cli:` purge path to the purge helper; the U5 consumer and MCP `score_cli` call it after the result line.
+  4. Add a `cli:` tag to the purge helper; the Durable Object calls the purge RPC after its R2 write (U5).
 - **Patterns to follow:** existing `Cached.purgeHitMinTags`; the rule that negotiated `Cache-Control` never carries
   `s-maxage`.
 - **Test scenarios:**
   - `/scoring?target=x` and `/scoring.md` classify MISS.
-  - `/score/anc.dev.json` classifies HIT-min with tag `web:anc.dev`; `/score/ripgrep.json` classifies short with no tag.
+  - With the result route's injected class, `/score/anc.dev.json` carries HIT-min with tag `web:anc.dev`,
+    `/score/ripgrep.json` carries the short class with no tag, and `/score/ouch.json` carries HIT-min with `cli:ouch`.
+  - `/audit?lane=web&target=x` classifies short; bare `/audit` classifies HIT-1d.
   - `/score/ouch.md` and `/score/ouch.json` carry `cli:ouch`; the HTML sibling carries the same tag and `Vary: Accept,
     User-Agent`.
   - HTML and `.md` responses for `/score/anc.dev` carry two `Link` alternates; `.json` carries none and no `Vary`.
-  - A purge for `cli:ouch` is queued exactly once per completed live run, from a scope that survives the response being
-    returned.
+  - A purge for `cli:ouch` is queued exactly once per completed live run, from the Durable Object, whether or not the
+    client is still connected.
 - **Verification:** `bun test`; staging shows `cf-cache-status: HIT` with `Age` on a second `.json` fetch and MISS on
   `/scoring` (edge-hit e2e project); the purge-proof row of the Verification Contract.
 
@@ -960,7 +1075,7 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 
 - **Goal:** Two identical entry points whose submit click transacts for both lanes.
 - **Requirements:** R1 to R5, R14; KD4, KTD2.
-- **Dependencies:** U1, U3.
+- **Dependencies:** U1, U3, U9 (the form navigates to the page U9 creates).
 - **Files:** create `src/build/audit-form.mjs`; modify `src/build/06-homepage.mjs`, `src/build/07-subpages.mjs`,
   `src/build/shell.mjs` (sitekey meta on every transact page), `src/build/build.mjs` (twin-content guard extends to
   `/audit`), `src/worker/index.ts` (sitekey substitution for `/`, `/audit`, `/scoring`); create
@@ -988,7 +1103,8 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - Submitting `ripgrep` on the Website lane flips the segment and navigates to `/scoring?target=ripgrep` with no delay,
     stashing the entered lane (AE1).
   - Submitting `https://example.com/docs` on either lane navigates to `/scoring?target=example.com`; submitting
-    `example.md` shows the rejection message and does not navigate.
+    `example.md` or a 129-character target shows the rejection message and does not navigate.
+  - The chromium e2e drives the `/audit` entry for both lanes end to end.
   - The Turnstile script is not requested when the page is scrolled without interaction.
   - No-JS submit produces a GET to `/audit?lane=web&target=anc.dev`; with JavaScript the input is prefilled on load, and
     with scripts disabled the form renders empty beside the noscript pointer.
@@ -999,8 +1115,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 
 - **Goal:** One `/scoring` page for both lanes with live updates, the Start gesture, and the terminal behaviors in R9 to
   R11.
-- **Requirements:** R6 to R11; KTD2, KTD5, KTD11.
-- **Dependencies:** U2, U3, U4, U5.
+- **Requirements:** R6 to R11; KTD2, KTD5, KTD11, KTD14.
+- **Dependencies:** U2, U3, U4, U5, U6, U14 (the page forwards to the result routes U6 creates and consumes the attach
+  stream U14 creates).
 - **Files:** create `src/worker/audit/scoring-page.ts` (replaces `handleWebScoringPage`, `scoringBody`,
   `scoringMarkdown`); create `src/client/scoring.ts` (replaces `src/client/web-audit-scoring.ts`); modify
   `src/build/build.mjs` (shell template for the page), `src/build/01-assets.mjs`, `knip.json`; create
@@ -1015,9 +1132,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      state showing the normalized target and lane, the reclassification line when the stash's entered lane differs from
      the classified lane, and a session-storage copy of a non-shareable inline summary restored before Start on a
      same-tab refresh.
-  3. Refresh handling: in-flight marker present means poll `/score/<target>.json` every 3 s for the marker's remaining
-     life, forwarding only when the polled `freshness.scored_at` is later than the marker's write time, then fall back
-     to the Start button.
+  3. Refresh handling: on a stash miss the page POSTs the target without a token; a 200 forwards at once, an attached
+     stream is consumed like the initiator's own (replayed lines render immediately), a 403 renders Start; a network
+     error on the POST or an acquire timeout on Start renders the status text and re-enables Start.
 - **Execution note:** Write the e2e for both shapes (JSON hit forwards; NDJSON miss renders rows then forwards) with
   `Promise.race`, as the live-target learning prescribes.
 - **Patterns to follow:** existing `web-audit-scoring.ts` NDJSON reader; `live-score.ts` bounce panel copy.
@@ -1026,14 +1143,18 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - Landing without a stash issues no request; clicking Start acquires and POSTs (AE2).
   - A stash whose entered lane differs from the classified lane renders the reclassification as the first status line
     (AE1).
-  - A JSON registry hit shows the reward line and replaces location after no less than 2 s.
+  - A JSON body or `complete` event with `tier: 'registry'` shows the reward line and replaces location after no less
+    than 2 s.
   - `complete` without `scorecard_url` renders the inline summary and does not navigate (AE3).
   - A 503 `turnstile_unavailable` renders the wait state, sends no further request until `retry_after` elapses, and
     never says verification failed (AE8).
   - `bounce`, `error`, `incomplete`, and a stream that closes without a terminal line each render status text and
     re-enable Start.
-  - An in-flight marker triggers polling, stops at the marker's expiry, ignores a 200 whose `scored_at` predates the
-    marker, and forwards when a newer one appears.
+  - A tokenless probe answered 200 forwards at once; an attached stream renders the replayed phases and then the live
+    tail and forwards on `complete`; a 403 renders Start.
+  - A network error on the POST renders status text and re-enables Start.
+  - An acquire timeout on the Start click renders the retry state.
+  - `/scoring` with no target serves the prose pointer in HTML and `.md`.
   - A target containing markup renders escaped.
   - The Start state names the target and the lane.
   - After an inline non-shareable completion, a same-tab refresh restores the summary and issues no request.
@@ -1132,18 +1253,61 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Test scenarios:**
   - `get_scorecard { slug: 'ripgrep' }` returns an envelope whose `scorecard` equals the committed scorecard file.
   - `get_website_audit` and `GET /score/<host>.json` produce deep-equal envelopes (AE5).
+  - `get_scorecard` and `get_website_audit` on a target with the in-flight flag set return `found: false, in_progress:
+    true, started_at`.
   - `audit_website` and `score_cli` results carry `scorecard_url` and no `share_url`.
   - WebMCP `open_audit` sets the form action target and calls `form.submit()` only on a form whose action is `/audit`; a
     stub asserts no fetch to `/api/score` and no navigation to `/scoring`.
   - The WebMCP source guard fails on a fixture containing `requestSubmit(`.
 - **Verification:** `bun test`; `staging-mcp` e2e project; every URL in tool results resolves 200 on staging.
 
+### U14. Job Durable Object and single-flight attach
+
+- **Goal:** Late arrivals attach to a running audit's stream instead of waiting; one run serves every reader of a
+  target.
+- **Requirements:** R7, R8, R11, R22; KTD14, KTD15.
+- **Dependencies:** U4, U5, U6.
+- **Files:** create `src/worker/audit/job.ts` (the `AuditJob` Durable Object); modify `wrangler.jsonc` (binding and
+  appended migration tag, both environments), `src/worker/index.ts` (class export), `src/worker/audit/api.ts` (create
+  the job at `accepted`, append each line, attach path for tokenless and in-flight tokened POSTs),
+  `src/worker/mcp/tools/scorecard-audit.ts`, `src/worker/mcp/tools/web-audit.ts` (attach on an in-flight target and
+  return the terminal envelope), `src/client/scoring.ts` (consume an attached stream like the initiator's); create
+  `tests/audit-job.test.ts`; modify `tests/audit-api.test.ts`, `tests/wrangler-config.test.ts`,
+  `tests/web-audit-mcp-tools.test.ts`, `tests/e2e/web-audit.e2e.ts`.
+- **Approach:**
+  1. The migration PR lands first: binding, `new_sqlite_classes` tag appended in both environments, config test pinning
+     the tag list; watch the `dev` deploy before the code PR.
+  2. `AuditJob` keeps an event log (sequence, line) and a status in SQLite, the terminal envelope once known, and an
+     alarm that deletes the job at the relay deadline plus a grace; `append` writes a line and pushes it to every live
+     subscriber; `attach(fromSeq)` returns a stream that replays from the sequence and then tails.
+  3. The endpoint creates the job at `accepted`, stores its name in both KTD14 pointers, appends every relayed line, and
+     closes the job on the terminal line; the tokenless and in-flight tokened POST paths return the attached stream.
+  4. MCP transact tools on an in-flight target attach and await the terminal envelope instead of dispatching a second
+     run.
+  5. Header contract and an ASCII diagram at the top of `job.ts` describing the append, attach, and cleanup lifecycle.
+- **Execution note:** Rehearse the migration on staging before the production cut; a deploy whose migration list is a
+  subset of the applied tags fails with Cloudflare API error 10074.
+- **Patterns to follow:** `src/worker/score/do.ts` for the DO class shape and test-mode shim; `docs/solutions/` DO
+  migration learnings; the U5 line-framed relay.
+- **Test scenarios:**
+  - Two attachers receive the same replayed lines in sequence order and the same live tail.
+  - Attach after completion replays the log ending in `complete` and closes.
+  - A second tokened POST for an in-flight input attaches and produces exactly one sandbox or engine invocation across
+    both callers.
+  - MCP `score_cli` on an in-flight binary attaches and returns the terminal envelope without a second run.
+  - The cleanup alarm deletes the job after the deadline plus grace; an attach after that returns the 403 that renders
+    Start.
+  - The config test fails if the migration tag list differs between environments or is not append-only.
+  - Staging e2e: two tabs on the same target show the same phases and both forward to the result.
+- **Verification:** `bun test`; the migration PR's `dev` deploy green before the code PR opens; the staging two-tab e2e
+  green twice.
+
 ### U13. Retire old routes, sweep tests and scripts
 
 - **Goal:** The old funnel routes, redirects, clients, and their fixtures are gone; release and deploy smokes assert the
   new shapes; the release docs carry the rollback and live-path checks.
 - **Requirements:** R20, R21; KD1.
-- **Dependencies:** U8 to U12.
+- **Dependencies:** U8 to U12, U14.
 - **Files:** modify `src/worker/index.ts` (remove `/check`, `/web.html`, `/web/`, `/score/live/*.html` handlers and all
   retired dispatch), `src/worker/audit-web/route.ts`, `src/worker/score/summary-render.ts`,
   `src/worker/score/handler.ts`, `src/worker/audit/api.ts` (drop the `input` body key); delete
@@ -1155,17 +1319,23 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   (NDJSON fixtures, delete the client-timer phase test), `tests/e2e/flows.e2e.ts`, `tests/helpers/site-facts.ts`; modify
   `scripts/release/preflight.sh` (`share_url`, `/score/live`, drop the `/check` 301 gate),
   `scripts/release/postflight.sh` (funnel live path, sitemap walk, retired paths; the registry-hit assertion already
-  moved in U4), `scripts/release/mcp-smoke.sh`; modify `RELEASES.md` (zone purge-everything steps for the production cut
-  and for rollback), `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md` (funnel live HTTP path, job-level run
-  verification); modify `.github/workflows/deploy.yml` if paths are inlined.
+  moved in U4), `scripts/release/mcp-smoke.sh`; modify `RELEASES.md` (a standing checklist step: any release that
+  retires or renames a public path runs a zone purge-everything after deploy and before postflight, plus the rollback
+  purge), `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md` (funnel live HTTP path, job-level run verification); modify
+  `.github/workflows/deploy.yml` if paths are inlined.
 - **Approach:**
   1. `rg` for every old path, every removed `data-*` selector, and every `waitForURL` across `tests/` and `scripts/`
      before the sweep closes; re-point fixtures that used old paths as neutral HIT-min or MISS examples to new paths
      from U1.
-  2. Release scripts assert `scorecard_url` of the form `/score/<binary>` and the registry-hit envelope; add the sitemap
-     walk and retired-path gates; edit them via shell to preserve 4-space indentation.
+  2. Release scripts assert `scorecard_url` of the form `/score/<binary>` and `tier: 'registry'`; add the sitemap walk
+     and retired-path gates; the postflight retired-path gate runs only after the purge step; edit them via shell to
+     preserve 4-space indentation.
   3. The literal guard flips from warning to failing with zero tolerated hits and, with `knip`, is one of the last two
      gates: no old path outside the route module, no unreachable client entry.
+  4. Header contracts: rewrite the dispatch-order narrative and the asset-first comment at the top of
+     `src/worker/index.ts` to describe only the present order.
+  5. The archetype loop in `tests/e2e/flows.e2e.ts` names `/audit`, `/scoring?target=`, and `/scorecards` so the axe and
+     overflow sweeps keep covering the funnel.
 - **Patterns to follow:** the vestigial-e2e learning's four failure shapes; `tests/helpers/site-facts.ts` derivation of
   counts from build sources.
 - **Test scenarios:**
@@ -1239,3 +1409,21 @@ path), `tests/build.test.ts` and `tests/surface.test.ts` (nav hrefs), `tests/sit
 examples), `tests/e2e/flows.e2e.ts` (archetype page loop), `tests/e2e/homepage-score.e2e.ts` (JSON mocks of `/api/score`
 and the timer-driven phase test), `scripts/release/preflight.sh` and `postflight.sh` (`share_url`, `/score/live`, and
 `/check` assertions).
+
+---
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 20 issues, 0 critical gaps open (1 flagged, resolved in-plan as the registry-index 503 path) |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+| Outside Voice | `codex-plan-review` | Different-context read | 1 | issues found (Claude subagent, same model family) | 10 findings: 6 accepted, 3 kept, 1 escalated into U14 |
+
+- **CROSS-MODEL:** the outside voice was a Claude subagent with fresh context, not a different provider (Codex is not installed and the Grok route fails). Accepted: in-flight keying by input and result with a tokenless read tier (KTD14), the result route injecting its cache class (KTD7), the U9-before-U8 edges, three-stack gate parity (KTD3), the mixed-version wording (KTD4), and the `/audit` query demotion (KTD7). Kept: one `POST /api/score`, the phased build order, the 128-character bound. Its duplicate-run concern became the job Durable Object with single-flight attach (KTD15, U14).
+- **VERDICT:** ENG CLEARED — ready to implement.
+
+NO UNRESOLVED DECISIONS
