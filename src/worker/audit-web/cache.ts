@@ -16,7 +16,10 @@
 // 7-day lifecycle is prefix-scoped to `scores/` and does not apply to the
 // new `audits/web/` prefix, which defaults to no expiry.
 
+import { type AuditFreshness, freshnessFor, WEB_AUDIT_STALE_AFTER_MS } from '../../shared/audit-envelope';
 import { emitLog, type LogScope } from '../telemetry/log';
+
+export { WEB_AUDIT_STALE_AFTER_MS };
 
 export type WebCacheEnv = { SCORE_CACHE: R2Bucket };
 
@@ -50,13 +53,6 @@ export type CachedWebAggregate = {
 };
 
 const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
-
-// Staleness threshold for the on-demand paths: a hit younger than this
-// serves cached; an older hit falls through to a fresh audit (still
-// behind the kill-switch/limiter/Turnstile gates). Also the interval
-// `refresh_after` adds to a scoring instant, so retuning it here moves
-// every surface's advertised cache-expiry eligibility with it.
-export const WEB_AUDIT_STALE_AFTER_MS = 1 * 60_000;
 
 // Logical display expiry for user-submitted rows on the /web all view:
 // an unseeded entry older than this drops off the board even though the
@@ -144,25 +140,17 @@ export function isStale(scoredAt: string | undefined, thresholdMs: number, now: 
  * authoritative scoring time and the earliest moment the entry leaves the
  * cache-reuse window.
  */
-export type WebAuditFreshness = {
-  cached: boolean;
-  scored_at: string | null;
-  refresh_after: string | null;
-};
+export type WebAuditFreshness = AuditFreshness;
 
 /**
- * Build the freshness envelope from one scoring instant. `refresh_after`
- * is always derived here, never stored, so a stored stamp and a served
- * refresh time cannot drift; it means cache-expiry eligibility only, not
- * that a fresh audit will be available (the kill switch, limiters, and
- * Turnstile still apply). A missing or unparseable legacy stamp reports
- * both instants as null rather than synthesizing a recent scoring time.
+ * The web lane's freshness from one scoring instant: the shared table
+ * derives `refresh_after` so a stored stamp and a served refresh time
+ * cannot drift. It means cache-expiry eligibility only, not that a fresh
+ * audit will be available (the kill switch, limiters, and Turnstile still
+ * apply).
  */
 export function webAuditFreshness(cached: boolean, scoredAt: string | null | undefined): WebAuditFreshness {
-  if (!scoredAt) return { cached, scored_at: null, refresh_after: null };
-  const t = Date.parse(scoredAt);
-  if (Number.isNaN(t)) return { cached, scored_at: null, refresh_after: null };
-  return { cached, scored_at: scoredAt, refresh_after: new Date(t + WEB_AUDIT_STALE_AFTER_MS).toISOString() };
+  return freshnessFor('web', cached, scoredAt);
 }
 
 export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
