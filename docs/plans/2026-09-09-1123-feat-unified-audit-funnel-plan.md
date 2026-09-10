@@ -1181,11 +1181,13 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Files:** create `src/worker/audit/result.ts` (absorbs `handleLiveScorePage` from
   `src/worker/score/summary-render.ts` and `handleWebResultPage` from `src/worker/audit-web/route.ts`); modify
   `src/build/08-scorecards-emit.mjs` (emit `dist/score/<slug>.json`, stop emitting alias pages, reaper regex includes
-  `json`); modify `src/worker/index.ts` (dispatch; sitekey substitution on website result pages; the content-negotiation
-  branch serves JSON on `Accept: application/json` under `/score/`); create `src/client/reaudit.ts` (binds U3's
-  `startAudit` to the Re-audit control and runs its countdown); modify `src/build/01-assets.mjs`, `knip.json`; create
-  `tests/audit-result-route.test.ts`; modify `tests/score-live-page.test.ts`, `tests/web-audit-routes.test.ts`,
-  `tests/build.test.ts`, `tests/e2e/web-audit.e2e.ts`.
+  `json`), `src/build/shell.mjs` (the `<head>` alternates for `/score/` pages come from the route module's builders
+  instead of the `<path>.md` rule); modify `src/worker/index.ts` (dispatch; sitekey substitution on website result
+  pages; the content-negotiation branch serves JSON on `Accept: application/json` under `/score/`); create
+  `src/client/reaudit.ts` (binds U3's `startAudit` to the Re-audit control and runs its countdown); modify
+  `src/build/01-assets.mjs`, `knip.json`; create `tests/audit-result-route.test.ts`; modify
+  `tests/score-live-page.test.ts`, `tests/web-audit-routes.test.ts`, `tests/build.test.ts`,
+  `tests/e2e/web-audit.e2e.ts`.
 - **Approach:**
   1. Dispatch per KTD6: trailing-segment split, classify, a branch-scoped target straight to its R2 key, otherwise
      registry index first, curated asset only on status 200, alias 301, R2 live, 404; the route canonicalizes `.html`
@@ -1199,22 +1201,27 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      `/score/<target>` page opens with one shared spine: the `Leaderboard ›` crumb, a mono h1 naming the target with a
      `.tier`-style outline lane chip (a branch-scoped page names `owner/repo@branch`), and one
      `.live-score-summary__meta` line carrying tier (curated, cached, live), freshness, and the `/md` and `/json` links.
-     The freshness segment is lane-aware (R23): a website page ends it with a `.btn--ghost` Re-audit control bound to
-     U3's `startAudit`, rendered `aria-disabled` (never `disabled`) with the tabular countdown "Re-audit in NN s" in an
-     `aria-hidden` span until `refresh_after` (an absolute timestamp in a data attribute, so an edge-cached copy still
-     counts correctly) and enabled after it; a live CLI page states "Scored vX on <date>. Re-audit runs a fresh audit."
-     and carries the same control, enabled, whose click passes `refresh: true` to `startAudit`; a branch page states
-     "Scored at <short source_sha> on <date>. Re-audit runs a fresh audit." and carries the control enabled; a curated
-     page carries no control; the website control's click handler is a no-op before `refresh_after` (`aria-disabled` is
-     the visual state; the handler owns the deadline); `deriveShareBinaryFromSpec` and `shareUrlForSpec` in `handler.ts`
-     are deleted, every URL deriving from `targetOfSpec` and the envelope builder; the sitekey meta ships only on pages
-     that carry the control. Below the spine the two lanes converge on one result design with lane-specific content: a
-     `.bigscore` head with the headline numeral and meter (relative for websites, with the global score as the secondary
-     numeral), then grouped rows (P1 to P8 principles for CLIs, C1 to C5 categories for websites) each rendered as
-     `.pscore__row`-style rows with a `.stpill` status and inline remediation on non-pass rows; the web `.catcard` and
-     `.scorecard-hero` treatments retire in favor of that shared body. Motion: the `.bigscore` meter fills from the
-     empty track to its value once on first paint (600 ms on the site's ease-out curve, numeral static); the grouped
-     rows do not animate; the global reduced-motion block makes the fill inert.
+     Every result page's `<head>`, static or Worker-rendered, carries `<link rel="alternate" type="text/markdown"
+     href="/score/<target>/md">` and `<link rel="alternate" type="application/json" href="/score/<target>/json">` built
+     from U1's `scoreMarkdownPath` and `scoreJsonPath`, byte-equal to the hrefs in the two `Link` headers (U7), so an
+     agent that parses either the headers or the document finds both representations; the `/md` twin's front matter
+     names the same two URLs and the `Accept` values the bare path honors. The freshness segment is lane-aware (R23): a
+     website page ends it with a `.btn--ghost` Re-audit control bound to U3's `startAudit`, rendered `aria-disabled`
+     (never `disabled`) with the tabular countdown "Re-audit in NN s" in an `aria-hidden` span until `refresh_after` (an
+     absolute timestamp in a data attribute, so an edge-cached copy still counts correctly) and enabled after it; a live
+     CLI page states "Scored vX on <date>. Re-audit runs a fresh audit." and carries the same control, enabled, whose
+     click passes `refresh: true` to `startAudit`; a branch page states "Scored at <short source_sha> on <date>.
+     Re-audit runs a fresh audit." and carries the control enabled; a curated page carries no control; the website
+     control's click handler is a no-op before `refresh_after` (`aria-disabled` is the visual state; the handler owns
+     the deadline); `deriveShareBinaryFromSpec` and `shareUrlForSpec` in `handler.ts` are deleted, every URL deriving
+     from `targetOfSpec` and the envelope builder; the sitekey meta ships only on pages that carry the control. Below
+     the spine the two lanes converge on one result design with lane-specific content: a `.bigscore` head with the
+     headline numeral and meter (relative for websites, with the global score as the secondary numeral), then grouped
+     rows (P1 to P8 principles for CLIs, C1 to C5 categories for websites) each rendered as `.pscore__row`-style rows
+     with a `.stpill` status and inline remediation on non-pass rows; the web `.catcard` and `.scorecard-hero`
+     treatments retire in favor of that shared body. Motion: the `.bigscore` meter fills from the empty track to its
+     value once on first paint (600 ms on the site's ease-out curve, numeral static); the grouped rows do not animate;
+     the global reduced-motion block makes the fill inert.
   3. 404 bodies per representation: HTML and `/md` carry one sentence ("No audit exists for `t` yet.") and one "Audit
      `t`" link to `/audit?lane=<lane>&target=<t>`, never the form or a sitekey; when U1's `suggestTargets` returns
      matches they follow as a "Did you mean?" list of links to `/score/<match>`; `/json` returns `{ error: { code:
@@ -1259,6 +1266,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - `Accept: application/json` on `/score/ripgrep` returns the JSON envelope with `Vary: Accept, User-Agent`, `Accept:
     text/markdown` returns the twin, and `/score/ripgrep/json` returns JSON regardless of `Accept` with no `Vary`.
   - `/score/defuddle.md` is looked up as the host `defuddle.md`, never as a twin of `/score/defuddle`.
+  - The `<head>` of `/score/ripgrep`, `/score/ouch`, `/score/anc.dev`, and `/score/o/r@feature` carries both alternate
+    `<link>` elements, their hrefs equal the two `Link` header targets, and each `/md` twin names both URLs and the two
+    `Accept` values.
   - A website result page carries the Re-audit control, the sitekey meta, and the `refresh_after` attribute; a live CLI
     page carries the control (enabled, `data-refresh`) and the scored version; a curated page carries none of them.
   - The meter fill is the page's only animation and is inert under `prefers-reduced-motion` (computed
@@ -1671,7 +1681,7 @@ Design.
 | Browser e2e, staging  | `ANC_STAGING_BASE_URL=<staging> bun run test:e2e --project=web-audit`, `--project=web-audit-webkit`, `--project=homepage-score-live`, `--project=staging-mcp`, `--project=edge-hit`; two consecutive green runs count as green                                                                                                                        | U4 to U13                                                            |
 | Green is not evidence | Every new test is run against the unfixed code first and its failure output quoted in the PR                                                                                                                                                                                                                                                          | every unit                                                           |
 | Browser-verify        | Both themes on staging for `/`, `/audit`, `/scoring`, `/score/<target>` (each kind), `/scorecards`, at 390, 768, and 1440 px against the responsive contract; screenshots in `.context/screenshots/`                                                                                                                                                                                                            | U8, U9, U10                                                          |
-| Representation checks | `curl -H 'Accept: text/html'`, `-H 'Accept: application/json'`, `/md`, and `/json` for one curated slug, one live binary, one branch-scoped run, one host; assert a marker unique to each representation                                                                                                                                                                                                      | U6, U7                                                               |
+| Representation checks | `curl -H 'Accept: text/html'`, `-H 'Accept: application/json'`, `/md`, and `/json` for one curated slug, one live binary, one branch-scoped run, one host; assert a marker unique to each representation and that the two `Link` headers and the two `<head>` alternates name the same URLs                                                                                                                                                                                                      | U6, U7                                                               |
 | Stream shape, staging | `curl -sS -N --retry 5 --retry-delay 10 --retry-all-errors -H 'Accept: application/x-ndjson' -H 'Content-Type: application/json' -d '{"target":"<cache-miss CLI target>","turnstile_token":"x"}' "$STAGING/api/score"` with the Access headers: first line `accepted`, at least three `phase`, last `complete` with `scorecard_url` `/score/<binary>` | U5                                                                   |
 | R2 payload invariant  | `wrangler r2 object get <bucket>/<key> --pipe --remote` piped through `jaq '{schema: .scorecard.schema_version, spec: .spec_version}'` equal before and after the deploy, one key per lane                                                                                                                                                            | U2, U6                                                               |
 | Edge proof            | `cf-cache-status` and `Age` on staging, never wrangler dev                                                                                                                                                                                                                                                                                            | U7                                                                   |
