@@ -13,13 +13,16 @@
 // extending statusForError() makes this file fail to compile.
 
 import { describe, expect, test } from 'bun:test';
+import { buildCliEnvelope } from '../src/shared/audit-envelope';
 import {
   type ScoreError,
+  shapeAuditSuccess,
   shapeScoreError,
   shapeScoreSuccess,
   statusForError,
+  toAuditError,
 } from '../src/worker/score/response-shape';
-import { AUDITOR_URL, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { ANC_VERSION, AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 // One representative of every ScoreError variant — exhaustiveness here is
 // what gives us coverage of the assertNever() guard inside statusForError.
@@ -142,5 +145,81 @@ describe('shapeScoreSuccess — R11 triad enforcement', () => {
   test('live freshness uses no-store', () => {
     const res = shapeScoreSuccess({}, '0.3.0', 'live');
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('toAuditError — every ScoreError variant becomes the shared error object', () => {
+  test('each variant maps to a shared code with a message and a cta', () => {
+    for (const e of ALL_ERRORS) {
+      const { error } = toAuditError(e);
+      expect(typeof error.code).toBe('string');
+      expect(error.message.length).toBeGreaterThan(0);
+      expect(error.cta).toBe(e.cta_text);
+      expect(error).not.toHaveProperty('cta_text');
+    }
+  });
+
+  test('details, retry_after, and pm survive; the stub code maps to sandbox_unavailable', () => {
+    expect(toAuditError({ code: 'rate_limited', retry_after: 42, cta_text: 'c' }).error).toMatchObject({
+      code: 'rate_limited',
+      retry_after: 42,
+    });
+    expect(toAuditError({ code: 'install_unsupported', pm: 'brew_only', cta_text: 'c' }).error).toMatchObject({
+      code: 'install_unsupported',
+      pm: 'brew_only',
+    });
+    expect(toAuditError({ code: 'chain_resolved_install_failed', details: 'apt', cta_text: 'c' }).error).toMatchObject({
+      details: 'apt',
+    });
+    expect(toAuditError({ code: 'sandbox_stub_until_u6', cta_text: 'c' }).error.code).toBe('sandbox_unavailable');
+    expect(toAuditError({ code: 'timeout', phase: 'install', cta_text: 'c' }).error.message).toContain('time budget');
+  });
+});
+
+describe('shapeAuditSuccess — the envelope beside the legacy triad', () => {
+  const envelope = buildCliEnvelope({
+    tier: 'cache',
+    target: 'fd',
+    record: {
+      spec_version: SPEC_VERSION,
+      anc_version: ANC_VERSION,
+      tool_version: '1.0.0',
+      scorecard: { badge: { score_pct: 80 }, run: { started_at: '2026-09-10T00:00:00.000Z' } },
+    },
+    registry: { by_slug: {} },
+    origin: 'https://anc.dev',
+  });
+
+  test('the body is the envelope plus site_spec_version, anc_version, auditor_url, and share_url', async () => {
+    const res = shapeAuditSuccess(envelope, { share_url: 'https://anc.dev/score/live/fd' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      kind: 'cli',
+      tier: 'cache',
+      target: 'fd',
+      scorecard_url: 'https://anc.dev/score/fd',
+      spec_version: SPEC_VERSION,
+      site_spec_version: SITE_SPEC_VERSION,
+      anc_version: ANC_VERSION,
+      auditor_url: AUDITOR_URL,
+      share_url: 'https://anc.dev/score/live/fd',
+    });
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+  });
+
+  test('a live envelope is served no-store and omits share_url when none is given', async () => {
+    const res = shapeAuditSuccess({ ...envelope, tier: 'live', freshness: { ...envelope.freshness, cached: false } });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('share_url');
+  });
+
+  test('an envelope without anc_version is refused as an incomplete contract', async () => {
+    const { anc_version: _omitted, ...bare } = envelope;
+    const res = shapeAuditSuccess(bare);
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('incomplete_response_contract');
   });
 });

@@ -492,6 +492,7 @@ function renderBelowFloorHint(pct, hasIssues) {
  *   version?: string | null,
  *   metadata?: { tool?: object, anc?: object, run?: object, target?: object },
  *   breadcrumb?: { href: string, label: string },
+ *   hideBreadcrumb?: boolean,
  *   headerSubline?: string,
  *   titleSuffix?: string,
  *   showBadgePreview?: boolean,
@@ -519,7 +520,10 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
 
   const results = Array.isArray(scorecard.results) ? scorecard.results : [];
 
-  let html = `<nav class="crumb" aria-label="Breadcrumb">
+  // An inline render (a result with no page of its own) carries no crumb.
+  let html = opts.hideBreadcrumb
+    ? ''
+    : `<nav class="crumb" aria-label="Breadcrumb">
   <a href="${escHtml(breadcrumb.href)}">${escHtml(breadcrumb.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(tool.name)}</span>
 </nav>
 `;

@@ -17,6 +17,7 @@
 // cache layer (registry-lookup tests, future callers that want just the
 // registry tier).
 
+import { curatedEntryForBinary } from '../../shared/audit-envelope';
 import * as cache from './cache';
 import type { InstallSpec } from './discover-binary';
 import type { ParsedInstall } from './parse-install';
@@ -101,10 +102,7 @@ export function _resetRegistryIndexCache(): void {
 export function resolveCuratedSlug(binary: string, registryIndex: RegistryIndex): string | null {
   const direct = registryIndex.by_slug[binary];
   if (direct) return direct.name;
-  for (const entry of Object.values(registryIndex.by_slug)) {
-    if (entry.binary === binary) return entry.name;
-  }
-  return null;
+  return curatedEntryForBinary(binary, registryIndex)?.name ?? null;
 }
 
 export type DiscoveryHint = ParsedInstall & { note?: string };

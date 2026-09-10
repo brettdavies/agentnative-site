@@ -2,6 +2,13 @@
 // success envelope, the error envelope, and the ScoreError discriminated
 // union every score-pipeline module imports.
 //
+// Two success shapes coexist: `shapeScoreSuccess` is the legacy body the
+// deployed homepage reads (scorecard + triad + share_url), and
+// `shapeAuditSuccess` is the shared result envelope with the legacy triad
+// and share_url beside it, the body the unified transact endpoint serves.
+// `toAuditError` renders a ScoreError as the shared error object, with the
+// human message the client copy used to own.
+//
 // Every /api/score response carries the triad spec_version + anc_version +
 // auditor_url. Missing any of the three is a hard 500, NOT a quiet
 // omission. The check fires at response-build time so a partial response
@@ -23,6 +30,8 @@
 //   - AUDITOR_URL is a build-time constant pointing at the production
 //     surface; if anc.dev ever moves, the constant moves with it.
 
+import type { AuditEnvelope } from '../../shared/audit-envelope';
+import { type AuditErrorObject, auditErrorCodeFor, auditErrorFor } from '../../shared/audit-events';
 import { AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 
 export type ScoreError =
@@ -136,6 +145,18 @@ const JSON_HEADERS_CACHE_HIT = {
 
 export type ResponseFreshness = 'live' | 'cache-hit';
 
+// The triad rule, loud: a success body without anc_version never leaves the Worker.
+function incompleteContractRefusal(): Response {
+  return shapeScoreError(
+    {
+      code: 'incomplete_response_contract',
+      details: 'anc_version missing — refusing to emit a partial response',
+      cta_text: CTA_INSTALL_ANC,
+    },
+    'live',
+  );
+}
+
 /**
  * Build a successful score response. The response triad is asserted
  * inline — a payload missing spec_version / anc_version / auditor_url
@@ -148,16 +169,7 @@ export function shapeScoreSuccess(
   freshness: ResponseFreshness,
   shareUrl?: string | null,
 ): Response {
-  if (!anc_version) {
-    return shapeScoreError(
-      {
-        code: 'incomplete_response_contract',
-        details: 'anc_version missing — refusing to emit a partial response',
-        cta_text: CTA_INSTALL_ANC,
-      },
-      'live',
-    );
-  }
+  if (!anc_version) return incompleteContractRefusal();
 
   const body: ScoreSuccess = {
     scorecard,
@@ -200,3 +212,38 @@ export function shapeScoreError(error: ScoreError, freshness: ResponseFreshness 
 export const CTA = {
   installAnc: CTA_INSTALL_ANC,
 } as const;
+
+/** The shared error object for a ScoreError: shared code, its shared message, and the variant's extras. */
+export function toAuditError(error: ScoreError): AuditErrorObject {
+  return auditErrorFor(auditErrorCodeFor('cli', error.code), {
+    cta: error.cta_text,
+    ...('details' in error ? { details: error.details } : {}),
+    ...('retry_after' in error ? { retry_after: error.retry_after } : {}),
+    ...('pm' in error ? { pm: error.pm } : {}),
+  });
+}
+
+export type AuditSuccess = AuditEnvelope & {
+  site_spec_version: string;
+  anc_version: string;
+  auditor_url: string;
+  share_url?: string;
+};
+
+/**
+ * The shared envelope with the legacy triad and `share_url` beside it.
+ * The same triad rule applies: an envelope with no `anc_version` is an
+ * incomplete contract and is refused with a 500.
+ */
+export function shapeAuditSuccess(envelope: AuditEnvelope, legacy: { share_url?: string | null } = {}): Response {
+  if (!envelope.anc_version) return incompleteContractRefusal();
+  const body: AuditSuccess = {
+    ...envelope,
+    site_spec_version: SITE_SPEC_VERSION,
+    anc_version: envelope.anc_version,
+    auditor_url: AUDITOR_URL,
+    ...(legacy.share_url ? { share_url: legacy.share_url } : {}),
+  };
+  const headers = envelope.freshness.cached ? JSON_HEADERS_CACHE_HIT : JSON_HEADERS_LIVE;
+  return new Response(JSON.stringify(body), { status: 200, headers });
+}
