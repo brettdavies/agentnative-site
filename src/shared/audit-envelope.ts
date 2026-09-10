@@ -15,9 +15,15 @@
 //   target contains `@`  ......... branch-scoped: /score/<owner>/<repo>@<branch>
 //   a curated tool's binary ...... registry hit: /score/<slug>, tier registry
 //   a curated slug, other binary . collision: no URL, summary_html instead
+//   a binary the route refuses ... no URL, summary_html instead (a reserved
+//                                   name, or a dotted name the classifier
+//                                   would read as a website host)
 //   anything else ................ live: /score/<binary>
+//
+// A curated entry counts only with a committed scorecard; a metadata-only
+// registry entry owns no page, so its slug is neither a hit nor a shadow.
 
-import { type Lane, scoreJsonPath, scoreMarkdownPath, scorePath } from './audit-routes';
+import { isResultTarget, type Lane, laneOf, scoreJsonPath, scoreMarkdownPath, scorePath } from './audit-routes';
 import { buildScorecardBody, escHtml } from './scorecard-format.mjs';
 
 export type AuditTier = 'registry' | 'cache' | 'live';
@@ -61,10 +67,6 @@ export function freshnessFor(lane: Lane, cached: boolean, scoredAt: string | nul
   const t = Date.parse(scoredAt);
   if (Number.isNaN(t)) return { cached, scored_at: null, refresh_after: null };
   return { cached, scored_at: scoredAt, refresh_after: new Date(t + REFRESH_WINDOW_MS[lane]).toISOString() };
-}
-
-function curatedFreshness(): AuditFreshness {
-  return { cached: true, scored_at: null, refresh_after: null };
 }
 
 export type RegistryEntryLike = {
@@ -133,14 +135,24 @@ export function curatedEntryForBinary<T extends RegistryEntryLike>(
   return null;
 }
 
+function hasScorecard(entry: RegistryEntryLike | null | undefined): entry is RegistryEntryLike {
+  return Boolean(entry?.scorecard_url && entry.anc_version);
+}
+
 /** The curated entry a resolved binary belongs to, or the curated slug it merely shadows. */
 function curatedFor(
   binary: string,
   registry: RegistryIndexLike,
 ): { kind: 'entry'; entry: RegistryEntryLike } | { kind: 'shadow' } | { kind: 'none' } {
   const entry = curatedEntryForBinary(binary, registry);
-  if (entry) return { kind: 'entry', entry };
-  return binary in registry.by_slug ? { kind: 'shadow' } : { kind: 'none' };
+  if (hasScorecard(entry)) return { kind: 'entry', entry };
+  const slugEntry = Object.hasOwn(registry.by_slug, binary) ? registry.by_slug[binary] : undefined;
+  return hasScorecard(slugEntry) ? { kind: 'shadow' } : { kind: 'none' };
+}
+
+/** True when `/score/<binary>` is a path the result route would serve as a CLI result. */
+function isRoutableBinary(binary: string): boolean {
+  return isResultTarget(binary) && laneOf(binary) === 'cli';
 }
 
 export type RegistryEnvelopeInput = {
@@ -150,7 +162,13 @@ export type RegistryEnvelopeInput = {
   scorecard?: unknown;
 };
 
-/** A curated result: the registry index is the source of its URL and score. */
+/**
+ * A curated result: the registry index is the source of its URL. The
+ * score beside an attached scorecard is that scorecard's own, so the
+ * headline number and `scorecard.badge.score_pct` cannot disagree inside
+ * one envelope; the entry's score stands in only when no scorecard is
+ * attached.
+ */
 export function buildRegistryEnvelope(input: RegistryEnvelopeInput): AuditEnvelope {
   const { entry, origin } = input;
   const envelope: AuditEnvelope = {
@@ -158,11 +176,12 @@ export function buildRegistryEnvelope(input: RegistryEnvelopeInput): AuditEnvelo
     tier: 'registry',
     target: entry.name,
     ...urlsFor(origin, entry.name),
-    freshness: curatedFreshness(),
+    freshness: freshnessFor('cli', true, null),
     spec_version: input.specVersion,
     scorecard: input.scorecard ?? null,
   };
-  if (entry.score_pct !== undefined) envelope.score_pct = entry.score_pct;
+  const pct = input.scorecard === undefined ? entry.score_pct : (scorePctOf(input.scorecard) ?? entry.score_pct);
+  if (pct !== undefined) envelope.score_pct = pct;
   if (entry.anc_version !== undefined) envelope.anc_version = entry.anc_version;
   if (entry.version !== undefined) envelope.tool_version = entry.version;
   return envelope;
@@ -218,15 +237,16 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
     });
     return { ...registryEnvelope, anc_version: record.anc_version, tool_version: record.tool_version };
   }
-  if (curated.kind === 'shadow') {
+  if (curated.kind === 'shadow' || !isRoutableBinary(target)) {
     return { ...liveEnvelope(NO_URLS), summary_html: collisionSummaryHtml(target, record) };
   }
   return liveEnvelope(urlsFor(origin, target));
 }
 
-// The result body a collision renders inline on the progress page: the
-// shared scorecard body without its crumb and badge call-to-action, so
-// nothing in it links to a page that would serve a different tool.
+// The result body a result with no page of its own renders inline on the
+// progress page: the shared scorecard body without its crumb and badge
+// call-to-action, so nothing in it links to a page that would serve a
+// different tool or that the route would refuse.
 function collisionSummaryHtml(binary: string, record: CliRecordLike): string {
   const scorecard = asCliScorecard(record.scorecard);
   const tool = { name: scorecard.tool?.name ?? binary, binary: scorecard.tool?.binary ?? binary };

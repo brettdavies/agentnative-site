@@ -10,5 +10,10 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["src/client/**/*.ts"]
+  "include": [
+    "src/client/**/*.ts",
+    "src/shared/audit-routes.ts",
+    "src/shared/audit-envelope.ts",
+    "src/shared/audit-events.ts"
+  ]
 }

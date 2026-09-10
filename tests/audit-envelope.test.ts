@@ -24,7 +24,9 @@ import {
   LEGACY_WEB_ERROR_CODES,
 } from '../src/shared/audit-events';
 import { REJECTION_MESSAGES } from '../src/shared/audit-routes';
-import { webAuditFreshness } from '../src/worker/audit-web/cache';
+import { type CachedWebAudit, webAuditFreshness } from '../src/worker/audit-web/cache';
+import type { CachedScorecard } from '../src/worker/score/cache';
+import { type RegistryIndex, resolveCuratedSlug } from '../src/worker/score/registry-lookup';
 import type { ScoreError } from '../src/worker/score/response-shape';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 
@@ -38,9 +40,13 @@ const registry: RegistryIndexLike = {
       binary: 'rg',
       scorecard_url: '/score/ripgrep',
       score_pct: 92,
-      anc_version: ANC_VERSION,
+      anc_version: '0.4.9',
+      version: '14.0.0',
     },
     ouch: { name: 'ouch', binary: 'ouch-bin', scorecard_url: '/score/ouch', score_pct: 70, anc_version: ANC_VERSION },
+    // Metadata-only entries: listed in the registry, no committed scorecard.
+    delta: { name: 'delta', binary: 'delta' },
+    hexyl: { name: 'hexyl', binary: 'hx' },
   },
 };
 
@@ -105,7 +111,7 @@ describe('envelope builders', () => {
     expect(env.scorecard_url).toBe(`${ORIGIN}/score/ripgrep`);
     expect(env.markdown_url).toBe(`${ORIGIN}/score/ripgrep/md`);
     expect(env.json_url).toBe(`${ORIGIN}/score/ripgrep/json`);
-    expect(env.score_pct).toBe(92);
+    expect(env.score_pct).toBe(80);
     expect(completeEvent(env)).toMatchObject({
       type: 'complete',
       tier: 'registry',
@@ -259,5 +265,128 @@ describe('error codes', () => {
       details: 'd',
     });
     expect(auditError('turnstile_unavailable', 'x', { retry_after: 30, cta: 'c' }).error.retry_after).toBe(30);
+  });
+});
+
+describe('review fixtures: envelope composition', () => {
+  const live = (target: string, record = cliRecord(target)) =>
+    buildCliEnvelope({ tier: 'live', target, record, registry, origin: ORIGIN });
+
+  test('a binary the route cannot serve takes the no-URL branch instead of throwing', () => {
+    for (const target of ['api', 'fix', 'foo.bar']) {
+      const env = live(target);
+      expect(env.tier).toBe('live');
+      expect(env.scorecard_url).toBeNull();
+      expect(env.json_url).toBeNull();
+      expect(env.summary_html).toContain('bigscore');
+    }
+  });
+
+  test('a binary named after an Object.prototype member is an ordinary live result', () => {
+    const env = live('constructor');
+    expect(env).toMatchObject({ tier: 'live', scorecard_url: `${ORIGIN}/score/constructor` });
+    expect(env.summary_html).toBeUndefined();
+  });
+
+  test('a registry entry without a committed scorecard is neither a hit nor a shadow', () => {
+    expect(live('delta')).toMatchObject({ tier: 'live', scorecard_url: `${ORIGIN}/score/delta` });
+    expect(live('hx')).toMatchObject({ tier: 'live', scorecard_url: `${ORIGIN}/score/hx` });
+    expect(live('hexyl')).toMatchObject({ tier: 'live', scorecard_url: `${ORIGIN}/score/hexyl` });
+  });
+
+  test('a registry hit built from a record reports the versions and score of what was scored', () => {
+    const env = live('rg');
+    expect(env.tier).toBe('registry');
+    expect(env.anc_version).toBe(ANC_VERSION);
+    expect(env.tool_version).toBe('1.2.3');
+    expect(env.score_pct).toBe(80);
+    const curated = buildRegistryEnvelope({
+      entry: registry.by_slug.ripgrep,
+      origin: ORIGIN,
+      specVersion: SPEC_VERSION,
+    });
+    expect(curated).toMatchObject({ score_pct: 92, anc_version: '0.4.9', tool_version: '14.0.0' });
+  });
+
+  test('input resolution and result classification order the slug and binary checks differently', () => {
+    // resolveCuratedSlug reads user text, where a slug names its tool;
+    // the envelope reads a resolved binary, where a slug it did not earn is a shadow.
+    expect(resolveCuratedSlug('ouch', registry as RegistryIndex)).toBe('ouch');
+    expect(live('ouch').scorecard_url).toBeNull();
+    expect(resolveCuratedSlug('rg', registry as RegistryIndex)).toBe('ripgrep');
+    expect(live('rg').scorecard_url).toBe(`${ORIGIN}/score/ripgrep`);
+  });
+
+  test('each builder outcome emits exactly its key set', () => {
+    const keys = (env: object) => Object.keys(env).sort();
+    const common = [
+      'freshness',
+      'json_url',
+      'kind',
+      'markdown_url',
+      'scorecard',
+      'scorecard_url',
+      'spec_version',
+      'target',
+      'tier',
+    ];
+    const cli = [...common, 'anc_version', 'score_pct', 'tool_version'].sort();
+    expect(keys(live('fd'))).toEqual(cli);
+    expect(keys(live('ouch'))).toEqual([...cli, 'summary_html'].sort());
+    expect(keys(live('rg'))).toEqual(cli);
+    const branch = (sourceSha?: string) =>
+      buildCliEnvelope({
+        tier: 'live',
+        target: 'o/r@feature',
+        record: cliRecord('r'),
+        registry,
+        origin: ORIGIN,
+        sourceSha,
+      });
+    expect(keys(branch('abc'))).toEqual([...cli, 'source_sha'].sort());
+    expect(keys(branch())).toEqual(cli);
+    expect(keys(buildWebEnvelope({ tier: 'cache', target: 'anc.dev', record: webRecord, origin: ORIGIN }))).toEqual(
+      [...common, 'score_pct', 'target_url'].sort(),
+    );
+    expect(
+      keys(buildRegistryEnvelope({ entry: registry.by_slug.ripgrep, origin: ORIGIN, specVersion: SPEC_VERSION })),
+    ).toEqual([...common, 'anc_version', 'score_pct', 'tool_version'].sort());
+  });
+
+  test('a record-level scored_at wins over the scorecard run instant', () => {
+    const later = '2026-09-11T00:00:00.000Z';
+    const record = { ...cliRecord('fd'), scored_at: later };
+    const env = buildCliEnvelope({ tier: 'cache', target: 'fd', record, registry, origin: ORIGIN });
+    expect(env.freshness.scored_at).toBe(later);
+  });
+
+  test('the inline collision body escapes scorecard text', () => {
+    const record = cliRecord('ouch');
+    record.scorecard.tool.name = '<script>alert(1)</script>';
+    const html = live('ouch', record).summary_html ?? '';
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  test('the worker record and registry types satisfy the envelope inputs', () => {
+    const cached: CachedScorecard = {
+      spec_version: SPEC_VERSION,
+      anc_version: ANC_VERSION,
+      tool_version: '1',
+      scorecard: cliScorecard('fd'),
+    };
+    const web: CachedWebAudit = { spec_version: SPEC_VERSION, target_url: 'https://anc.dev/', scorecard: {} };
+    const index: RegistryIndex = { by_slug: {}, by_owner_repo: {} };
+    expect(
+      buildCliEnvelope({ tier: 'cache', target: 'fd', record: cached, registry: index, origin: ORIGIN }).kind,
+    ).toBe('cli');
+    expect(buildWebEnvelope({ tier: 'cache', target: 'anc.dev', record: web, origin: ORIGIN }).kind).toBe('web');
+  });
+});
+
+describe('review fixtures: error conversion edges', () => {
+  test('the same legacy string maps by lane: invalid_url stays a CLI parse code and becomes invalid_target on the web', () => {
+    expect(auditErrorCodeFor('cli', 'invalid_url')).toBe('invalid_url');
+    expect(auditErrorCodeFor('web', 'invalid_url')).toBe('invalid_target');
   });
 });

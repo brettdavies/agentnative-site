@@ -272,6 +272,11 @@ function encodeTarget(target: string): string {
   return encodeURIComponent(target).replace(/%2F/g, '/').replace(/%40/g, '@').replace(/%3A/g, ':');
 }
 
+/** True when the builder would accept `target` and the splitter would read it back. */
+export function isResultTarget(target: string): boolean {
+  return resultTargetProblem(target) === null;
+}
+
 function assertResultTarget(target: string): void {
   const problem = resultTargetProblem(target);
   if (problem) throw new RangeError(problem);

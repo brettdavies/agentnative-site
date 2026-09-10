@@ -31,7 +31,7 @@
 //     surface; if anc.dev ever moves, the constant moves with it.
 
 import type { AuditEnvelope } from '../../shared/audit-envelope';
-import { type AuditErrorObject, auditErrorCodeFor, auditErrorFor } from '../../shared/audit-events';
+import { AUDIT_ERROR_MESSAGES, type AuditErrorObject, auditError, auditErrorCodeFor } from '../../shared/audit-events';
 import { AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 
 export type ScoreError =
@@ -213,9 +213,16 @@ export const CTA = {
   installAnc: CTA_INSTALL_ANC,
 } as const;
 
-/** The shared error object for a ScoreError: shared code, its shared message, and the variant's extras. */
+/**
+ * The shared error object for a ScoreError: shared code, its shared
+ * message, and the variant's extras. A timeout's phase has no field of
+ * its own on the shared object and is named in the message instead.
+ */
 export function toAuditError(error: ScoreError): AuditErrorObject {
-  return auditErrorFor(auditErrorCodeFor('cli', error.code), {
+  const code = auditErrorCodeFor('cli', error.code);
+  const message =
+    error.code === 'timeout' ? `${AUDIT_ERROR_MESSAGES[code]} (${error.phase} phase)` : AUDIT_ERROR_MESSAGES[code];
+  return auditError(code, message, {
     cta: error.cta_text,
     ...('details' in error ? { details: error.details } : {}),
     ...('retry_after' in error ? { retry_after: error.retry_after } : {}),
@@ -225,22 +232,33 @@ export function toAuditError(error: ScoreError): AuditErrorObject {
 
 export type AuditSuccess = AuditEnvelope & {
   site_spec_version: string;
-  anc_version: string;
   auditor_url: string;
   share_url?: string;
 };
 
 /**
  * The shared envelope with the legacy triad and `share_url` beside it.
- * The same triad rule applies: an envelope with no `anc_version` is an
- * incomplete contract and is refused with a 500.
+ * The triad rule applies to the CLI lane, whose records carry the anc
+ * that scored them: a CLI envelope with no `anc_version` is an incomplete
+ * contract and is refused with a 500 carrying the shared error object. A
+ * website envelope has no anc and is served as-is.
  */
 export function shapeAuditSuccess(envelope: AuditEnvelope, legacy: { share_url?: string | null } = {}): Response {
-  if (!envelope.anc_version) return incompleteContractRefusal();
+  if (envelope.kind === 'cli' && !envelope.anc_version) {
+    return new Response(
+      JSON.stringify(
+        toAuditError({
+          code: 'incomplete_response_contract',
+          details: 'anc_version missing — refusing to emit a partial response',
+          cta_text: CTA_INSTALL_ANC,
+        }),
+      ),
+      { status: 500, headers: JSON_HEADERS_LIVE },
+    );
+  }
   const body: AuditSuccess = {
     ...envelope,
     site_spec_version: SITE_SPEC_VERSION,
-    anc_version: envelope.anc_version,
     auditor_url: AUDITOR_URL,
     ...(legacy.share_url ? { share_url: legacy.share_url } : {}),
   };

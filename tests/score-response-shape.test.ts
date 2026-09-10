@@ -13,7 +13,7 @@
 // extending statusForError() makes this file fail to compile.
 
 import { describe, expect, test } from 'bun:test';
-import { buildCliEnvelope } from '../src/shared/audit-envelope';
+import { buildCliEnvelope, buildWebEnvelope } from '../src/shared/audit-envelope';
 import {
   type ScoreError,
   shapeAuditSuccess,
@@ -34,6 +34,7 @@ const ALL_ERRORS: readonly ScoreError[] = [
   { code: 'unrecognized_input', cta_text: '...' },
   { code: 'unparseable_install_command', details: 'foo', cta_text: '...' },
   { code: 'chain_no_resolve', cta_text: '...' },
+  { code: 'github_repo_not_accessible', cta_text: '...' },
   { code: 'discovery_redirect_loop', cta_text: '...' },
   { code: 'rate_limited', retry_after: 42, cta_text: '...' },
   { code: 'install_unsupported', pm: 'brew', cta_text: '...' },
@@ -43,6 +44,7 @@ const ALL_ERRORS: readonly ScoreError[] = [
   { code: 'turnstile_failed', cta_text: '...' },
   { code: 'scoring_disabled', cta_text: '...' },
   { code: 'sandbox_stub_until_u6', cta_text: '...' },
+  { code: 'sandbox_unavailable', cta_text: '...' },
   { code: 'incomplete_response_contract', details: 'no anc', cta_text: '...' },
   { code: 'service_misconfigured', details: 'missing secret', cta_text: '...' },
 ];
@@ -215,11 +217,59 @@ describe('shapeAuditSuccess — the envelope beside the legacy triad', () => {
     expect(body).not.toHaveProperty('share_url');
   });
 
-  test('an envelope without anc_version is refused as an incomplete contract', async () => {
+  test('a CLI envelope without anc_version is refused with the shared error object', async () => {
     const { anc_version: _omitted, ...bare } = envelope;
     const res = shapeAuditSuccess(bare);
     expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe('incomplete_response_contract');
+    const body = (await res.json()) as { error: Record<string, unknown> };
+    expect(body.error).toMatchObject({
+      code: 'incomplete_response_contract',
+      message: expect.any(String),
+      cta: expect.any(String),
+    });
+    expect(body.error).not.toHaveProperty('cta_text');
+  });
+
+  test('a website envelope carries no anc_version and is served as-is', async () => {
+    const web = buildWebEnvelope({
+      tier: 'cache',
+      target: 'anc.dev',
+      record: {
+        spec_version: SPEC_VERSION,
+        target_url: 'https://anc.dev/',
+        scorecard: { score_pct: 76 },
+        scored_at: '2026-09-10T00:00:00.000Z',
+      },
+      origin: 'https://anc.dev',
+    });
+    const res = shapeAuditSuccess(web);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ kind: 'web', target: 'anc.dev', auditor_url: AUDITOR_URL });
+    expect(body).not.toHaveProperty('anc_version');
+  });
+
+  test('the legacy and the audit shaper agree on the triad, share_url, and headers for one cache hit', async () => {
+    const share = 'https://anc.dev/score/live/fd';
+    const legacy = shapeScoreSuccess(envelope.scorecard, envelope.anc_version, 'cache-hit', share);
+    const audit = shapeAuditSuccess(envelope, { share_url: share });
+    const a = (await legacy.json()) as Record<string, unknown>;
+    const b = (await audit.json()) as Record<string, unknown>;
+    for (const key of ['spec_version', 'site_spec_version', 'anc_version', 'auditor_url', 'share_url', 'scorecard']) {
+      expect(b[key]).toEqual(a[key]);
+    }
+    for (const header of [
+      'Cache-Control',
+      'Cloudflare-CDN-Cache-Control',
+      'Content-Type',
+      'Access-Control-Allow-Origin',
+    ]) {
+      expect(audit.headers.get(header)).toBe(legacy.headers.get(header));
+    }
+  });
+
+  test('a timeout names its phase in the shared message', () => {
+    expect(toAuditError({ code: 'timeout', phase: 'install', cta_text: 'c' }).error.message).toContain('install');
+    expect(toAuditError({ code: 'timeout', phase: 'score', cta_text: 'c' }).error.message).toContain('score');
   });
 });
