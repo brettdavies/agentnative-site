@@ -17,8 +17,8 @@ deepened: 2026-09-09
   watches the audit progress live on one page, and lands on a shareable scorecard that agents can read as markdown or
   JSON at a URL whose shape does not depend on which kind of thing was audited.
 - **Means:** One prepare-transact-progress-result state machine for both lanes: a shared entry form, one `/scoring`
-  progress page fed by one streaming `POST /api/score`, and one `/score/<target>` result namespace with `.md` and
-  `.json` representations (KTD1, KTD3, KTD5, KTD6).
+  progress page fed by one streaming `POST /api/score`, and one `/score/<target>` result namespace with `/md` and
+  `/json` representations and `Accept` negotiation on the bare path (KTD1, KTD3, KTD5, KTD6).
 - **Authority hierarchy:** Product Contract requirements (R-IDs) win on behavior; Key Technical Decisions (KTD-IDs) win
   on mechanism within their cited R constraints; units carry only local deltas.
 - **Stop conditions:** Stop and report if a session-settled decision (KD1 to KD3) proves infeasible, if the Durable
@@ -119,8 +119,8 @@ this plan is that machine.
 **URL scheme and results**
 
 - R12. `/score/<target>` is the only result namespace: curated CLI slugs, live CLI binaries, branch-scoped CLI runs
-  (`/score/<owner>/<repo>@<branch>`), and website hosts all live there, each with `/score/<target>.md` and
-  `/score/<target>.json`; branch-scoped pages are unlisted, `noindex`, and expire with the live-result lifecycle.
+  (`/score/<owner>/<repo>@<branch>`), and website hosts all live there, each with `/score/<target>/md` and
+  `/score/<target>/json`; branch-scoped pages are unlisted, `noindex`, and expire with the live-result lifecycle.
 - R13. `/scorecards` is the only leaderboard, showing the CLI board and the website board behind the same segment as the
   forms, with `?lane=cli|web` for deep links and `?view=all` for the website pane; the website pane sorts by relative
   score with the global score as the tie-break and carries no sort toggle; its markdown twin carries both tables.
@@ -139,8 +139,11 @@ this plan is that machine.
 
 **Agents and representations**
 
-- R17. `/score/<target>.json` returns the shared result envelope for curated CLI, live CLI, and website results; `.json`
-  is a pinned representation selected by suffix only, never by `Accept`.
+- R17. `/score/<target>/json` returns the shared result envelope for curated CLI, live CLI, and website results, and
+  `/score/<target>/md` the markdown twin; both are pinned representations with no `Vary`. The bare `/score/<target>`
+  negotiates `Accept: application/json` and `Accept: text/markdown` on the site's extensionless-URL Vary branch, so an
+  agent that sends a header gets the same body the pinned URL serves. No extension is parsed under `/score/`, so a host
+  under a TLD such as `.md` or `.map` is an ordinary target.
 - R18. MCP `get_scorecard` and `get_website_audit` return that envelope, and every URL any MCP tool or discovery surface
   mints comes from the shared route module; `share_url` is retired in favor of `scorecard_url` across the API, MCP
   results, and docs.
@@ -184,7 +187,7 @@ this plan is that machine.
     in-progress state instead of double spending.
   - **Covered by:** R7, R9, R11.
 - F3. Agent read
-  - **Trigger:** A2 calls a read tool or fetches `/score/<target>.json`.
+  - **Trigger:** A2 calls a read tool or fetches `/score/<target>/json`.
   - **Steps:** both paths build the envelope from the same R2 or curated JSON through the same builder (KTD5).
   - **Outcome:** byte-equal `scorecard` and freshness fields across JSON, MCP, and the twin's headline.
   - **Covered by:** R17, R18.
@@ -205,7 +208,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
 | 5 | Sees the result page | Rewarded: one number, one meter, grouped rows | U6 `.bigscore` head; the curated-reward line on registry hits |
 | 6 | Reads failing rows | Knows the next action | inline remediation, `/fix/<id>` pages |
 | 7 | Fixes and returns | Can prove the fix without retyping | R23 Re-audit control: countdown on website pages, one click re-runs on CLI and branch pages |
-| 8 | Shares the URL or an agent reads it | Trusts that the twin and JSON match the page | R17, R18; `.md` and `.json` links in the meta line |
+| 8 | Shares the URL or an agent reads it | Trusts that the twin and JSON match the page | R17, R18; `/md` and `/json` links in the meta line |
 | Failure | Hits a bounce or a wait state | Told why and what to do next, never blamed | R11; bounce panel with `cta`; wait-state countdown; Run again |
 
 
@@ -218,7 +221,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   POST fires without a second challenge; given the same URL is opened in a new tab, then a Start button renders and no
   request is sent until it is clicked.
 - AE3. **Covers R9, R12.** Given the input is `https://github.com/o/r/tree/feature`, when the run completes, then the
-  progress page forwards to `/score/o/r@feature`, which serves HTML, `.md`, and `.json` with `X-Robots-Tag: noindex`.
+  progress page forwards to `/score/o/r@feature`, which serves HTML, `/md`, and `/json` with `X-Robots-Tag: noindex`.
 - AE9. **Covers R9.** Given a live run resolves a binary that equals a curated slug without being that tool's binary,
   when the run completes, then the progress page renders the result body inline, says the result has no URL, and does
   not navigate.
@@ -227,9 +230,9 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   given it was audited ten seconds ago, then the control is disabled and counts down. Given `/score/ouch` has a cached
   result, when the visitor clicks Re-audit, then a fresh run streams and the page forwards to
   `/score/ouch?v=<scored_at>`, whose address bar reads `/score/ouch` once the page loads.
-- AE4. **Covers R12, R16.** Given `rg` is the binary of curated `ripgrep`, when a client requests `/score/rg.json`, then
-  it receives a 301 to `/score/ripgrep.json`.
-- AE5. **Covers R17, R18.** Given `anc.dev` has a cached website audit, when an agent fetches `/score/anc.dev.json` and
+- AE4. **Covers R12, R16.** Given `rg` is the binary of curated `ripgrep`, when a client requests `/score/rg/json`, then
+  it receives a 301 to `/score/ripgrep/json`.
+- AE5. **Covers R17, R18.** Given `anc.dev` has a cached website audit, when an agent fetches `/score/anc.dev/json` and
   calls `get_website_audit`, then both `scorecard` objects and `freshness` fields are deep-equal.
 - AE6. **Covers R11.** Given the Website kill switch is off and the CLI lane is on, when a visitor audits `anc.dev`,
   then the progress page reports the website audit is disabled, and a CLI audit in the same session proceeds.
@@ -259,8 +262,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
 - MCP `notifications/progress` on the SSE lane for `score_cli` and `audit_website`.
 - WebMCP read tools on CLI result pages; a web `anc://` resource template.
 - Renaming `/scorecard-schema` and `/web-scorecard-schema` (documentation pages, not funnel URLs).
-- `Accept: application/json` negotiation on extensionless result URLs (would add a third `Vary` class to the edge
-  cache).
+
 - Sibling repos: the spec repo's stale `anc.dev/scorecards/<tool>` links should read `anc.dev/score/<tool>`; the skill
   bundle and the `anc` CLI need no change under this scheme.
 - Coalescing the two lane kill-switch mechanisms (KV flip vs deploy-time var) into one.
@@ -268,7 +270,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   every surface.
 - The `MAX_INSTANCES` constant in `src/worker/score/orchestrate.ts` disagrees with the production container count in
   `wrangler.jsonc`; pre-existing, untouched here.
-- A WAF rate rule on `/score/*.json` as an operator lever if polling volume ever matters.
+- A WAF rate rule on `/score/*/json` as an operator lever if polling volume ever matters.
 - A release gate for CLI Re-audit (skip the sandbox when the registry's latest version is unchanged, comparing a
   `latest_version` stored on the record at score time with discovery's current answer) and a commit gate for branch
   snapshots (skip when the branch head equals the record's `source_sha`, behind the token, memoized); both were designed
@@ -296,7 +298,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   `src/shared/audit-routes.ts` module (bare-string and pure-function exports so the Worker, the client, and the Bun
   build can all import it, the pattern `src/shared/site-url.ts` sets) exports the path builders (`scoringPath`,
   `scorePath`, `scoreJsonPath`, `scoreMarkdownPath`, `fixPath`, `leaderboardPath`, `auditPath`), `classifyTarget`,
-  `normalizeTarget`, the representation-suffix stripper, and the reserved-name list. Classification is URL-aware, in
+  `normalizeTarget`, the representation-segment splitter, and the reserved-name list. Classification is URL-aware, in
   this order: a GitHub URL or `owner/repo` is CLI, and a `/tree/<branch>` URL or the `owner/repo@branch` form is CLI
   branch-scoped, normalized to `owner/repo@branch` (a branch name never contains `@`, so the split is unambiguous); any
   other URL is a website, normalized to its host; an IP literal (IPv4, IPv6, bracketed IPv6, hex or octal forms) or the
@@ -308,10 +310,11 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   boundary. A target longer than 128 characters is rejected at the form and at the endpoint before any parsing or
   normalization (a branch-scoped GitHub URL or an install command over that length is rejected with the shared message;
   accepted); the bound is a constant in this module, and every surface treats the target as hostile input (HTML-escaped
-  on render, pathname-only in logs). The suffix stripper is the only extension parser on `/score/*`, and the
-  rejected-TLD list is every extension the pinned-representation predicates match (`.md`, `.json`, `.map`, `.svg`, and
-  the untwinned-source list), enforced at the form and again on the server, on hosts and on the last segment of a branch
-  name alike. A source-level test fails when a funnel path literal appears outside this module (R21). Rationale: the
+  on render, pathname-only in logs). Representations under `/score/*` are trailing path segments (`/md`, `/json`), never
+  extensions, so no extension is parsed there and a host under a TLD such as `.md` or `.map` is an ordinary target; the
+  reserved trailing segments are `md`, `json`, and `html`, and a branch whose last segment is one of them is rejected at
+  the form and again on the server (hostile-input rule). `.html` canonicalization stays site-wide because no TLD is
+  `.html`. A source-level test fails when a funnel path literal appears outside this module (R21). Rationale: the
   research found URL minting in at least fourteen places across build, Worker, client, and MCP; a rename is safe only
   when there is one owner.
 - KTD2. **The Turnstile token crosses pages in the single-use sessionStorage stash; the progress page never acquires on
@@ -361,7 +364,8 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   fields until U8 lands; U13 removes all of them. MCP tools keep composing the lane cores directly with their own
   kill-switch and limiter checks, so three gate stacks exist (the endpoint's `admitTransact` and each MCP transact
   tool's block); a cross-surface parity test pins their order, and moving the MCP tools onto `admitTransact` through a
-  no-siteverify mode is deferred. `GET /api/score` and `/api/score.md` retire; `.json` is the read surface.
+  no-siteverify mode is deferred. `GET /api/score` and `/api/score.md` retire; `/score/<target>/json` is the read
+  surface.
 - KTD4. **The CLI lane streams from the Durable Object, line-framed, with its own deadline, purge scope, and
   telemetry.** the endpoint emits a `resolving` phase line before the dispatch, and `do.ts` `fetch` returns an NDJSON
   body: `phase` lines at install start, install done, binary verification, lockdown, and audit start, then one final
@@ -403,29 +407,30 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   `check`, `heartbeat`, `complete` (envelope), `incomplete`, `bounce`, `error`. Error object `{ error: { code, message,
   details?, retry_after?, pm?, cta } }` on every JSON error response and inside `bounce` and `error` events;
   pre-dispatch failures (validation, gates, resolution bounces, rate limits) are JSON with today's statuses, anything
-  after `accepted` is an event. Consumers: `.json`, the `complete` event, MCP read and transact tool results, the HTML
+  after `accepted` is an event. Consumers: `/json`, the `complete` event, MCP read and transact tool results, the HTML
   and markdown renderers.
-- KTD6. **Result route order and collision policy.** `/score/<target>{,.md,.json}`: strip a representation suffix first;
-  classify the remainder. Branch-scoped CLI (`owner/repo@branch`): R2 lookup under
-  `scores/<owner>/<repo>@<branch>/<SPEC_VERSION>.json`, else 404; the key is `keyFor(targetOfSpec(spec), SPEC_VERSION)`,
-  the same `scores/<target>/<SPEC_VERSION>.json` shape as a live binary (one builder; `targetOfSpec` in the route module
-  returns the binary for package-manager and direct specs and `owner/repo@branch` for git-clone, and the route target,
-  the R2 key, the `cli:<target>` cache tag, and the KTD14 result pointer all derive from it), the `@` that no binary
-  name can contain keeps the two families apart, and the `scores/` prefix puts branch results under the existing 7-day
-  lifecycle rule, so no new rule is provisioned. Website: R2 lookup under the `https` key, else 404; records keyed under
-  `http` become unreachable and expire under the bucket lifecycle. CLI: consult the isolate-cached registry index first
-  (one lookup, no build-order dependency): a curated slug fetches the static asset and only status 200 counts as a hit
-  (the assets binding's 404-page handling returns a body); a curated binary alias returns a 301 to the slug for all
-  three representations; anything else is an R2 live lookup, else 404. The route itself canonicalizes `.html` and
-  trailing-slash forms so host-shaped paths never reach the assets binding's rewriting. After discovery, a resolved
-  binary that equals a curated tool's binary is a registry hit (redirect to the curated page with the reward); a
-  resolved binary that equals a curated slug without being that tool's binary gets a null `scorecard_url` and the inline
-  render (R9), the one result without a URL. Chosen over asset-first dispatch, which costs an extra fetch on every live
-  result and makes correctness depend on no alias page surviving in `dist/`.
-- KTD7. **Cache classes follow the sibling, and `.json` never sits in the day-long path-keyed class for live results.**
+- KTD6. **Result route order and collision policy.** `/score/<target>{,/md,/json}`: split a trailing representation
+  segment first (`md` or `json`; anything else is HTML); classify the remainder. Branch-scoped CLI
+  (`owner/repo@branch`): R2 lookup under `scores/<owner>/<repo>@<branch>/<SPEC_VERSION>.json`, else 404; the key is
+  `keyFor(targetOfSpec(spec), SPEC_VERSION)`, the same `scores/<target>/<SPEC_VERSION>.json` shape as a live binary (one
+  builder; `targetOfSpec` in the route module returns the binary for package-manager and direct specs and
+  `owner/repo@branch` for git-clone, and the route target, the R2 key, the `cli:<target>` cache tag, and the KTD14
+  result pointer all derive from it), the `@` that no binary name can contain keeps the two families apart, and the
+  `scores/` prefix puts branch results under the existing 7-day lifecycle rule, so no new rule is provisioned. Website:
+  R2 lookup under the `https` key, else 404; records keyed under `http` become unreachable and expire under the bucket
+  lifecycle. CLI: consult the isolate-cached registry index first (one lookup, no build-order dependency): a curated
+  slug fetches the static asset and only status 200 counts as a hit (the assets binding's 404-page handling returns a
+  body); a curated binary alias returns a 301 to the slug for all three representations; anything else is an R2 live
+  lookup, else 404. The route itself canonicalizes `.html` and trailing-slash forms so host-shaped paths never reach the
+  assets binding's rewriting. After discovery, a resolved binary that equals a curated tool's binary is a registry hit
+  (redirect to the curated page with the reward); a resolved binary that equals a curated slug without being that tool's
+  binary gets a null `scorecard_url` and the inline render (R9), the one result without a URL. Chosen over asset-first
+  dispatch, which costs an extra fetch on every live result and makes correctness depend on no alias page surviving in
+  `dist/`.
+- KTD7. **Cache classes follow the sibling, and `/json` never sits in the day-long path-keyed class for live results.**
   A path predicate cannot tell a curated slug from a live binary, so the result route passes an explicit cache class and
-  tag into `applyHeaders` for the tier it served: curated CLI pages HIT-1d with no tag (their build-emitted `.json`
-  stays in the short class), live CLI results HIT-min with `cli:<binary>` (a branch-scoped page with
+  tag into `applyHeaders` for the tier it served: curated CLI pages HIT-1d with no tag (their build-emitted JSON stays
+  in the short class), live CLI results HIT-min with `cli:<binary>` (a branch-scoped page with
   `cli:<owner>/<repo>@<branch>`), website results HIT-min with `web:<host>`, all three representations alike. The path
   predicates cover every other route: `/scoring*` joins the always-MISS predicate; `/scorecards*` is HIT-min like the
   homepage; `/audit` with a query string demotes to the short class so prefill hops never mint day-long edge keys, while
@@ -433,14 +438,17 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   and the rescore workflow, each inside a purge scope that outlives the response. The live CLI page moves onto
   `applyHeaders` (it builds its own headers today and puts `s-maxage` on a negotiated `Cache-Control`, the pattern the
   edge-cache learning forbids). A purge RPC that fails after the R2 write can leave the edge copy stale for at most the
-  300 s HIT-min TTL; that bound is accepted. A 202 in-progress `.json` body (KTD14) is `no-store`.
-- KTD8. **JSON is a pinned, credential-free representation advertised by `Link`.** `.json` already satisfies
-  `isRepresentationPinned` (no twin rewrite, no `Vary`); `applyHeaders` emits a second `Link: rel="alternate";
-  type="application/json"` beside the markdown one on HTML and twin responses of result pages. Because `.json` responses
-  carry `Access-Control-Allow-Origin: *`, the route never reads or sets the session cookie, emits no `Set-Cookie`, and
-  its 404 body carries only `code`, `message`, `audit_url`, and `suggestions` (KTD6). Opted-out hosts (`public_listing:
-  false`) are unlisted, not private, as they are today. The gateway canonicalizes `Accept` on non-`/api/` GETs, so
-  suffix selection is the only workable shape.
+  300 s HIT-min TTL; that bound is accepted. A 202 in-progress `/json` body (KTD14) is `no-store`.
+- KTD8. **JSON is a pinned, credential-free representation advertised by `Link`, and the bare path negotiates it.**
+  `/score/<target>/json` and `/score/<target>/md` satisfy `isRepresentationPinned` (no twin rewrite, no `Vary`), which
+  learns the two trailing segments under `/score/` beside the site-wide `.md` suffix; `applyHeaders` emits a second
+  `Link: rel="alternate"; type="application/json"` beside the markdown one on HTML and twin responses of result pages.
+  The content-negotiation branch in `index.ts`, which serves the markdown twin when `Accept` prefers `text/markdown`,
+  also serves the JSON body when `Accept` prefers `application/json` on a bare `/score/*` path, under the same `Vary:
+  Accept, User-Agent` and cache class the negotiated twin gets. Because JSON responses carry
+  `Access-Control-Allow-Origin: *`, the route never reads or sets the session cookie, emits no `Set-Cookie`, and its 404
+  body carries only `code`, `message`, `audit_url`, and `suggestions` (KTD6). Opted-out hosts (`public_listing: false`)
+  are unlisted, not private, as they are today.
 - KTD9. **One leaderboard page, the homepage's injection pattern.** `/scorecards` ships the static CLI board and a
   `{{WEB_BOARD_ROWS}}` region (one shared placeholder constant, pinned by a build test as the homepage pair is) that the
   Worker fills from the leaderboard aggregate (full board, `?view=all` from live R2), so the page is HIT-min with tag
@@ -470,10 +478,10 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   a token: a registry or cache hit returns the envelope, an input whose flag exists returns 202 `{ in_progress: true,
   started_at }`, and anything else returns the 403 that renders Start; a tokenless POST for an in-flight input returns
   the job's attached stream (KTD15), and a tokened POST for an in-flight input attaches instead of starting a second
-  run. `/score/<target>.json` checks the result-keyed flag before any R2 read and answers 202 with `Cache-Control:
+  run. `/score/<target>/json` checks the result-keyed flag before any R2 read and answers 202 with `Cache-Control:
   no-store` while it exists; MCP `get_scorecard` and `get_website_audit` pass `in_progress` and `started_at` through on
   a miss. On a stash miss the progress page POSTs without a token: a 200 hit forwards at once, an attached stream
-  renders the replayed and live phases exactly as the initiator's does, and a 403 renders Start; `.json` keeps answering
+  renders the replayed and live phases exactly as the initiator's does, and a 403 renders Start; `/json` keeps answering
   202 for non-stream readers. KV propagation lag of about a second means a second tab inside that window can still start
   a duplicate run, and the operator hatch `?fromCache=false` bypasses the flag; both accepted. Chosen over a per-tab
   sessionStorage marker (invisible to second tabs, shared links, and agents) and over a full job record with
@@ -481,7 +489,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
 - KTD15. **A job Durable Object fans out a running audit to late arrivals.** `AuditJob`, a new Durable Object class
   (binding `AUDIT_JOB`, an appended `new_sqlite_classes` migration tag in both environments), is keyed by
   `idFromName('<lane>:<input>')` and created by the endpoint at `accepted`; the KTD14 KV entries store the job name, and
-  the result-keyed twin lets `.json` and MCP readers find the job by host or binary. The initiating relay appends every
+  the result-keyed twin lets `/json` and MCP readers find the job by host or binary. The initiating relay appends every
   stream line to the job through an RPC as it consumes the sandbox or engine stream; the job keeps a bounded event log
   in SQLite (sequence, line), a status, the terminal envelope, and a self-cleaning alarm at the relay deadline plus a
   grace. Attach returns an NDJSON stream that replays the log from a sequence and then tails live appends through an
@@ -592,14 +600,14 @@ Route table after the change (KD2, KTD6):
 | `/`                     | segment           | static + Worker inject (boards, sitekey)    | HTML, `.md`                       | HIT-min                 |
 | `/audit` | segment | static widget slot + Worker sitekey inject | HTML, `.md` | HIT-1d; short with a query |
 | `/scoring?target=`      | target shape      | Worker, no WebMCP script                    | HTML; `/scoring.md` pointer       | MISS                    |
-| `/score/<slug>` curated | CLI               | static asset (registry index confirms slug) | HTML, `.md`, `.json` (build emit) | HIT-1d; `.json` short   |
-| `/score/<binary>` live  | CLI               | Worker from R2                              | HTML, `.md`, `.json`              | HIT-min, `cli:<binary>` |
-| `/score/<owner>/<repo>@<branch>` | CLI, branch-scoped | Worker from R2 (branch key), `noindex` | HTML, `.md`, `.json` | HIT-min, `cli:<target>` |
-| `/score/<host>`         | website           | Worker from R2                              | HTML, `.md`, `.json`              | HIT-min, `web:<host>`   |
+| `/score/<slug>` curated | CLI               | static asset (registry index confirms slug) | HTML, `/md`, `/json` (build emit) | HIT-1d; `/json` short   |
+| `/score/<binary>` live  | CLI               | Worker from R2                              | HTML, `/md`, `/json`              | HIT-min, `cli:<binary>` |
+| `/score/<owner>/<repo>@<branch>` | CLI, branch-scoped | Worker from R2 (branch key), `noindex` | HTML, `/md`, `/json` | HIT-min, `cli:<target>` |
+| `/score/<host>`         | website           | Worker from R2                              | HTML, `/md`, `/json`              | HIT-min, `web:<host>`   |
 | `/score/<alias>`        | CLI               | Worker 301 to slug                          | all three                         | short                   |
 | `/scorecards`           | segment, `?lane=` | static + Worker inject (web board)          | HTML, `.md`                       | HIT-min                 |
 | `/fix/<check-id>`       | n/a               | static                                      | HTML, `.md`                       | HIT-1d                  |
-| `/score/<target>.json` while in flight | any | Worker from KV | 202 in-progress body | MISS (`no-store`) |
+| `/score/<target>/json` while in flight | any | Worker from KV | 202 in-progress body | MISS (`no-store`) |
 | `POST /api/score` | target shape | Worker | NDJSON or JSON | MISS |
 
 Target classification examples (KTD1):
@@ -611,13 +619,13 @@ Target classification examples (KTD1):
 | `pip install some.pkg`                                                  | CLI                                                                  | `pip install some.pkg` |
 | `cli/cli`, `https://github.com/cli/cli`                                 | CLI                                                                  | as entered, trimmed    |
 | `https://github.com/o/r/tree/feature/x`, `o/r@feature/x`, `github.com/cli/cli/tree/main` | CLI, branch-scoped | `o/r@feature/x`, `cli/cli@main` |
-| `o/r@release.json`                                                      | rejected at the form and on the server                               | n/a                    |
+| `o/r@release/json`, `o/r@md` | rejected at the form and on the server (a branch's last segment is a reserved representation segment) | n/a |
 | `https://example.com/docs`                                              | website                                                              | `example.com`          |
 | `Example.COM:8443`                                                      | website                                                              | `example.com:8443`     |
 | `bücher.de`                                                             | website                                                              | `xn--bcher-kva.de`     |
 | `socket.io`                                                             | website                                                              | `socket.io`            |
 | `10.0.0.1`, `localhost`, `[::1]`, `0x7f000001`, `foo.internal` | website by shape (IP-literal and localhost check, or the dot rule); the server SSRF gate rejects before any cache read | n/a |
-| `example.md`, `example.json`, `example.map`                             | rejected at the form and on the server                               | n/a                    |
+| `defuddle.md`, `example.map` | website (a TLD-shaped host is an ordinary target) | `defuddle.md`, `example.map` |
 
 ### System-Wide Impact
 
@@ -625,9 +633,10 @@ Target classification examples (KTD1):
   and proxies to the assets binding internally; the "asset-first by exclusion" comment is rewritten; `/scoring`,
   `/fix/*`, and the `/scorecards` inject join the pre-asset block while the `/check`, `/web*`, and `/score/live*`
   redirects leave it.
-- `src/worker/headers.ts`: `isAlwaysMissPath`, `hitMinCacheTag`, and the `.json` short branch of `classifyCacheClass`
-  are re-keyed from the route module's predicates; every `tests/worker.test.ts` fixture host under `/web/` moves; the
-  private header set in `src/worker/score/summary-render.ts` is deleted in favor of `applyHeaders`.
+- `src/worker/headers.ts`: `isAlwaysMissPath`, `hitMinCacheTag`, and the `/json` short branch of `classifyCacheClass`
+  are re-keyed from the route module's predicates, and `isRepresentationPinned` learns the `/md` and `/json` trailing
+  segments under `/score/` beside the site-wide `.md` suffix; every `tests/worker.test.ts` fixture host under `/web/`
+  moves; the private header set in `src/worker/score/summary-render.ts` is deleted in favor of `applyHeaders`.
 - Edge cache: HIT-min keys now include `/score/<binary>*`, `/score/<host>*`, and `/scorecards*` with their query
   variants; purge is queued from three producers (the Durable Object after its R2 write, the web stream, the rescore
   workflow), and the Worker-rendered `/audit` must never read `?target=` when rendering, or one visitor's prefill
@@ -687,7 +696,7 @@ Target classification examples (KTD1):
   fresh runs per IP per minute and 30 per hour per lane, each capped by the 60 s sandbox or the web probe deadline; the
   KV in-flight flag (KTD14) stops second tabs, shared links, and MCP readers from duplicating a run; single-flight
   attach stays deferred.
-- **Risk:** `.json` under CORS `*` leaks session data or sandbox detail. **Mitigation:** KTD8 credential-free route
+- **Risk:** `/json` under CORS `*` leaks session data or sandbox detail. **Mitigation:** KTD8 credential-free route
   contract; U6 asserts the envelope contains no stderr, sandbox path, or cookie-derived field.
 - **Risk:** Polling turns the tokenless read tier into a cheap drain. **Mitigation:** the read tier checks the KV flag
   before any R2 read, so a 202 costs one KV read; polling stops at the flag's TTL (U9); a WAF rate rule stays available
@@ -736,12 +745,13 @@ Un-validated agent bets carried from the scoping draft; each is a default an imp
   under the result namespace.
 - `share_url` is retired in favor of `scorecard_url` on `/api/score` responses and MCP transact results; the MCP tool
   names stay.
-- `GET /api/score` and `/api/score.md` are retired because `.json` covers the read use; the release scripts that used
-  them are rewritten in U13.
+- `GET /api/score` and `/api/score.md` are retired because `/score/<target>/json` covers the read use; the release
+  scripts that used them are rewritten in U13.
 - The 2 s theater floor applies to both lanes (KTD11).
-- The `.md`, `.json`, and `.map` TLD ambiguity is resolved by rejecting those targets at the form and on the server
-  rather than by lookup-dependent parsing (KTD1, KTD6).
-- Curated CLI pages keep HIT-1d and their `.json` sits in the path-keyed short class because both are build emits that
+- The `.md` and `.map` TLD ambiguity is resolved by selecting representations with trailing path segments under
+  `/score/*` instead of extensions, so those hosts are ordinary targets and no lookup-dependent parsing exists (KTD1,
+  KTD6).
+- Curated CLI pages keep HIT-1d and their `/json` sits in the path-keyed short class because both are build emits that
   change only on deploy.
 - The homepage keeps its current layout; only the form component and the board links change.
 - The CLI lane keeps `?fromCache=false` as a query parameter on the POST.
@@ -790,7 +800,7 @@ against the gates in Documentation and Operational Notes.
 
 - Phase A: `scripts/release/postflight.sh --env staging all` output unchanged; the shared modules are inert.
 - Phase B: the stream-shape, R2-payload, and purge rows of the Verification Contract; a curated slug POST returns one
-  JSON body; `/score/<host>.json` fetched twice shows the same `scored_at` with `cached` flipping;
+  JSON body; `/score/<host>/json` fetched twice shows the same `scored_at` with `cached` flipping;
   `ANC_STAGING_BASE_URL=<staging> bun run test:e2e --project=edge-hit`; a live CLI target submitted from the deployed
   staging homepage still lands on its result page.
 - Phase C: `--project=web-audit --project=web-audit-webkit --project=homepage-score-live`, two consecutive greens;
@@ -816,7 +826,7 @@ the `WEB_AUDIT_ENABLED` var. Rehearse once on staging: roll back to the pre-U13 
 renders from the same R2 record, roll forward, `postflight.sh --env staging all` green.
 
 **Coherence check.** Build-time surfaces (registry index, MCP catalog, seed list, sitemap, `llms.txt`, agent-skills
-index, curated `/score/<slug>{,.md,.json}`, `/fix/*`) and runtime surfaces (Worker routes, MCP URL minting, `/scoring`,
+index, curated `/score/<slug>{,/md,/json}`, `/fix/*`) and runtime surfaces (Worker routes, MCP URL minting, `/scoring`,
 live results) ship in one Worker version, so the only disagreement window is edge propagation plus zone-cached HTML from
 the previous version. Proof after each deploy: `get_scorecard` for `ripgrep`, the sitemap `<loc>` for `/score/ripgrep`,
 and a 200 `curl -H 'Accept: text/html'` of it agree.
@@ -908,8 +918,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      or more characters, at most 1 below that, same lane only, top three by distance then length, exact matches
      excluded; candidates whose length differs from the input by more than the bound are skipped before any distance is
      computed, and the scan stops once three distance-one matches exist), the reserved-name list (`scoring`,
-     `scorecards`, `audit`, `fix`, `api`), the representation-suffix stripper, the rejected-TLD list derived from the
-     pinned-representation extensions, and the always-MISS and HIT-min predicates as pure functions over a pathname.
+     `scorecards`, `audit`, `fix`, `api`), the representation-segment splitter (`/md` and `/json` trailing segments
+     under `/score/`), the reserved trailing-segment rule for branch names (`md`, `json`, `html`), and the always-MISS
+     and HIT-min predicates as pure functions over a pathname.
   2. Classification and normalization follow the table in High-Level Technical Design; the GitHub branch peels
      `/tree/<branch>` and the `owner/repo@branch` form into the branch-scoped target; the website branch checks IP
      literals and `localhost` first, then requires at least one dot and applies the existing domain regex; the
@@ -925,12 +936,14 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - `ripgrep` classifies CLI even though the bare domain regex would accept a single label.
   - `https://github.com/cli/cli` and `cli/cli` classify CLI; `https://example.com/docs` classifies website with target
     `example.com`.
-  - `example.md`, `example.json`, and `example.map` classify as rejected.
+  - `defuddle.md` and `example.map` classify as website with themselves as the target; `o/r@release/json` and `o/r@md`
+    are rejected.
   - `https://github.com/o/r/tree/feature/x` and `o/r@feature/x` classify CLI branch-scoped with target `o/r@feature/x`;
-    `o/r@release.json` is rejected.
+    `o/r@release.json` is accepted (a branch named `release.json`) and `o/r@release/json` is rejected.
   - A 129-character target is rejected before normalization; a 128-character one is accepted.
-  - `stripRepresentation('/score/anc.dev.json')` yields target `anc.dev` and representation `json`; `/score/ripgrep.md`
-    yields `ripgrep` and `md`.
+  - `splitRepresentation('/score/anc.dev/json')` yields target `anc.dev` and representation `json`; `/score/ripgrep/md`
+    yields `ripgrep` and `md`; `/score/defuddle.md` yields target `defuddle.md` and representation `html`;
+    `/score/o/r@feature/x` yields the branch target and `html`.
   - Reserved names cannot be produced as a `/score/<target>` path by the builder.
   - `suggestTargets('ripgrpe', [...])` returns `ripgrep` first; `suggestTargets('anc.dv', [...])` returns `anc.dev`; a
     four-character target with two edits returns nothing; a host never suggests a slug; the distance function is never
@@ -967,7 +980,7 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
     object.
   - `tier` is `registry` for a registry index hit, `cache` for an R2 hit, and `live` for a fresh run; a post-discovery
     registry hit builds a `complete` event with `tier: 'registry'`.
-  - A branch-scoped run yields `/score/o/r@feature`, `.md`, and `.json` URLs and no `summary_html`.
+  - A branch-scoped run yields `/score/o/r@feature`, `/md`, and `/json` URLs and no `summary_html`.
   - `refresh_after` is `scored_at` plus the web staleness window for a web record, plus seven days for a live CLI
     record, and null for a curated result.
   - A live binary equal to a curated slug (fixture registry index) yields null URLs and a `summary_html` string that
@@ -1168,23 +1181,24 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Files:** create `src/worker/audit/result.ts` (absorbs `handleLiveScorePage` from
   `src/worker/score/summary-render.ts` and `handleWebResultPage` from `src/worker/audit-web/route.ts`); modify
   `src/build/08-scorecards-emit.mjs` (emit `dist/score/<slug>.json`, stop emitting alias pages, reaper regex includes
-  `json`); modify `src/worker/index.ts` (dispatch; sitekey substitution on website result pages); create
-  `src/client/reaudit.ts` (binds U3's `startAudit` to the Re-audit control and runs its countdown); modify
-  `src/build/01-assets.mjs`, `knip.json`; create `tests/audit-result-route.test.ts`; modify
-  `tests/score-live-page.test.ts`, `tests/web-audit-routes.test.ts`, `tests/build.test.ts`,
-  `tests/e2e/web-audit.e2e.ts`.
+  `json`); modify `src/worker/index.ts` (dispatch; sitekey substitution on website result pages; the content-negotiation
+  branch serves JSON on `Accept: application/json` under `/score/`); create `src/client/reaudit.ts` (binds U3's
+  `startAudit` to the Re-audit control and runs its countdown); modify `src/build/01-assets.mjs`, `knip.json`; create
+  `tests/audit-result-route.test.ts`; modify `tests/score-live-page.test.ts`, `tests/web-audit-routes.test.ts`,
+  `tests/build.test.ts`, `tests/e2e/web-audit.e2e.ts`.
 - **Approach:**
-  1. Dispatch per KTD6: suffix strip, classify, a branch-scoped target straight to its R2 key, otherwise registry index
-     first, curated asset only on status 200, alias 301, R2 live, 404; the route canonicalizes `.html` and
-     trailing-slash forms itself. A `?v=` query is ignored for rendering and makes the route pass the `miss` class
+  1. Dispatch per KTD6: trailing-segment split, classify, a branch-scoped target straight to its R2 key, otherwise
+     registry index first, curated asset only on status 200, alias 301, R2 live, 404; the route canonicalizes `.html`
+     and trailing-slash forms itself. A `?v=` query is ignored for rendering and makes the route pass the `miss` class
      (`no-store`, no tag, no edge copy), so the progress page's forward after a fresh run
      (`scorecard_url?v=<scored_at>`) never lands on a stale edge copy; the page's client replaces the URL with the bare
      one on load, and `rel=canonical` and the twin links stay bare.
-  2. `.json` responses go through `applyHeaders` with `application/json` and the class and tag of the tier that served
-     them, never touch the session cookie, and set no cookie; HTML and `.md` render from the same envelope. Every
+  2. `/json` responses go through `applyHeaders` with `application/json` and the class and tag of the tier that served
+     them, never touch the session cookie, and set no cookie; HTML and `/md` render from the same envelope, and the bare
+     path serves the JSON body or the twin when `Accept` prefers `application/json` or `text/markdown` (KTD8). Every
      `/score/<target>` page opens with one shared spine: the `Leaderboard ›` crumb, a mono h1 naming the target with a
      `.tier`-style outline lane chip (a branch-scoped page names `owner/repo@branch`), and one
-     `.live-score-summary__meta` line carrying tier (curated, cached, live), freshness, and the `.md` and `.json` links.
+     `.live-score-summary__meta` line carrying tier (curated, cached, live), freshness, and the `/md` and `/json` links.
      The freshness segment is lane-aware (R23): a website page ends it with a `.btn--ghost` Re-audit control bound to
      U3's `startAudit`, rendered `aria-disabled` (never `disabled`) with the tabular countdown "Re-audit in NN s" in an
      `aria-hidden` span until `refresh_after` (an absolute timestamp in a data attribute, so an edge-cached copy still
@@ -1201,18 +1215,19 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      `.scorecard-hero` treatments retire in favor of that shared body. Motion: the `.bigscore` meter fills from the
      empty track to its value once on first paint (600 ms on the site's ease-out curve, numeral static); the grouped
      rows do not animate; the global reduced-motion block makes the fill inert.
-  3. 404 bodies per representation: HTML and `.md` carry one sentence ("No audit exists for `t` yet.") and one "Audit
+  3. 404 bodies per representation: HTML and `/md` carry one sentence ("No audit exists for `t` yet.") and one "Audit
      `t`" link to `/audit?lane=<lane>&target=<t>`, never the form or a sitekey; when U1's `suggestTargets` returns
-     matches they follow as a "Did you mean?" list of links to `/score/<match>`; `.json` returns `{ error: { code:
+     matches they follow as a "Did you mean?" list of links to `/score/<match>`; `/json` returns `{ error: { code:
      'not_found', message }, audit_url, suggestions: [{ target, scorecard_url }] }` and nothing else. Candidates come
      from the isolate-cached registry index (slugs and binaries) for a CLI-shaped target and from the seed list plus the
      leaderboard aggregate's publicly listed hosts for a host-shaped target; the host candidate list is memoized in the
      isolate for 60 s beside the registry-index cache, so a burst of 404s reads the aggregate once; a null aggregate
      (absent, unparseable, or corrupted, which `getAggregate` already maps to null) yields seed-only candidates, is
      logged once, and never changes the 404 status or body shape.
-  4. The curated `.json` emit wraps the committed scorecard in the envelope at build time so `get_scorecard` can read it
-     through the assets binding.
-  5. The `.json` route reads the KV in-flight flag before any R2 read and answers 202 `no-store` while it exists
+  4. The curated JSON emit (`dist/score/<slug>.json`, served at `/score/<slug>/json` through the route's asset proxy, as
+     `dist/score/<slug>.md` is served at `/score/<slug>/md`) wraps the committed scorecard in the envelope at build time
+     so `get_scorecard` can read it through the assets binding.
+  5. The `/json` route reads the KV in-flight flag before any R2 read and answers 202 `no-store` while it exists
      (KTD14).
   6. Post-extraction shape (`route.ts`): the web lane core owns only body validation, the SSRF gate, the cache tier, and
      the engine stream; the result page, scoring page, board handler, and gate block leave it (U6, U9, U10, U4); same
@@ -1222,26 +1237,28 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Patterns to follow:** `withNegotiatedHeaders` in `route.ts`; `enrichWebScorecardForDisplay`; `resolveCuratedSlug` in
   the registry lookup.
 - **Test scenarios:**
-  - `/score/ripgrep`, `.md`, `.json` serve from the asset; `/score/rg.json` 301s to `/score/ripgrep.json` (AE4).
+  - `/score/ripgrep`, `/md`, `/json` serve from the asset; `/score/rg/json` 301s to `/score/ripgrep/json` (AE4).
   - A curated slug whose asset fetch returns the 404 page is not treated as a hit.
   - When the registry index cannot be loaded, a CLI-shaped target answers 503 with `Retry-After` in all three
     representations instead of falling through to a 404.
   - `/score/ouch` with an R2 record renders HTML, the twin, and JSON whose `scorecard` equals the record.
   - `/score/o/r@feature` with a branch-key record renders HTML, the twin, and JSON, all carrying `X-Robots-Tag: noindex`
     (AE3); `/score/o/r` with no record returns the 404 pointer prefilled with `o/r`.
-  - `/score/anc.dev.json` equals the `get_website_audit` envelope for the same record (AE5, cross-surface `toEqual`).
+  - `/score/anc.dev/json` equals the `get_website_audit` envelope for the same record (AE5, cross-surface `toEqual`).
   - `/score/anc.dev.html` and `/score/anc.dev/` canonicalize to `/score/anc.dev` without reaching the assets binding.
-  - A never-audited CLI target and website target return the lane-appropriate 404 in all three representations, `.json`
+  - A never-audited CLI target and website target return the lane-appropriate 404 in all three representations, `/json`
     carrying only `code`, `message`, `audit_url`, and `suggestions`; `/score/ripgrpe` lists `ripgrep` under "Did you
     mean?" in HTML, the twin, and `suggestions`; a 404 body contains no form, no sitekey meta, and no transact script.
   - With `getAggregate` returning null, a host-shaped 404 still renders 404 with seed-only suggestions and one log line;
     two host-shaped 404s inside 60 s read the aggregate once (spy).
   - A branch page's meta line names the short `source_sha` and carries the enabled Re-audit control.
-  - A `.json` request carrying a session cookie receives no `Set-Cookie` and no `Vary`.
-  - While the in-flight flag exists, `.json` answers 202 with `in_progress`, `started_at`, and `Cache-Control:
+  - A `/json` request carrying a session cookie receives no `Set-Cookie` and no `Vary`.
+  - While the in-flight flag exists, `/json` answers 202 with `in_progress`, `started_at`, and `Cache-Control:
     no-store`, and performs no R2 read.
   - A target containing a reserved name is not treated as a result.
-  - `Accept: application/json` on `/score/ripgrep` still returns HTML (suffix-only selection).
+  - `Accept: application/json` on `/score/ripgrep` returns the JSON envelope with `Vary: Accept, User-Agent`, `Accept:
+    text/markdown` returns the twin, and `/score/ripgrep/json` returns JSON regardless of `Accept` with no `Vary`.
+  - `/score/defuddle.md` is looked up as the host `defuddle.md`, never as a twin of `/score/defuddle`.
   - A website result page carries the Re-audit control, the sitekey meta, and the `refresh_after` attribute; a live CLI
     page carries the control (enabled, `data-refresh`) and the scored version; a curated page carries none of them.
   - The meter fill is the page's only animation and is inert under `prefers-reduced-motion` (computed
@@ -1252,8 +1269,8 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
     stashes nothing, and does not navigate.
   - `/score/anc.dev?v=123` renders the same body as the bare URL with `Cache-Control: no-store` and no `Cache-Tag`;
     after load the address bar reads `/score/anc.dev`.
-- **Verification:** `bun run build` then `bun test`; staging `curl -H 'Accept: text/html'`, `.md`, and `.json` for one
-  target of each kind.
+- **Verification:** `bun run build` then `bun test`; staging `curl -H 'Accept: text/html'`, `-H 'Accept:
+  application/json'`, `/md`, and `/json` for one target of each kind.
 
 ### U7. Cache classes, tags, purge, Link alternates
 
@@ -1275,15 +1292,15 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   `s-maxage`.
 - **Test scenarios:**
   - `/scoring?target=x` and `/scoring.md` classify MISS.
-  - With the result route's injected class, `/score/anc.dev.json` carries HIT-min with tag `web:anc.dev`,
-    `/score/ripgrep.json` carries the short class with no tag, and `/score/ouch.json` carries HIT-min with `cli:ouch`.
+  - With the result route's injected class, `/score/anc.dev/json` carries HIT-min with tag `web:anc.dev`,
+    `/score/ripgrep/json` carries the short class with no tag, and `/score/ouch/json` carries HIT-min with `cli:ouch`.
   - `/audit?lane=web&target=x` classifies short; bare `/audit` classifies HIT-1d.
-  - `/score/ouch.md` and `/score/ouch.json` carry `cli:ouch`; the HTML sibling carries the same tag and `Vary: Accept,
+  - `/score/ouch/md` and `/score/ouch/json` carry `cli:ouch`; the HTML sibling carries the same tag and `Vary: Accept,
     User-Agent`.
-  - HTML and `.md` responses for `/score/anc.dev` carry two `Link` alternates; `.json` carries none and no `Vary`.
+  - HTML and `/md` responses for `/score/anc.dev` carry two `Link` alternates; `/json` carries none and no `Vary`.
   - A purge for `cli:ouch` is queued exactly once per completed live run, from the Durable Object, whether or not the
     client is still connected.
-- **Verification:** `bun test`; staging shows `cf-cache-status: HIT` with `Age` on a second `.json` fetch and MISS on
+- **Verification:** `bun test`; staging shows `cf-cache-status: HIT` with `Age` on a second `/json` fetch and MISS on
   `/scoring` (edge-hit e2e project); the purge-proof row of the Verification Contract.
 
 ### U8. Shared entry form on `/` and `/audit`
@@ -1304,10 +1321,10 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      call it. Hosts: on `/` the component renders inside `.board-controls` with the listing checkbox as a second
      full-width line under the input on the Website lane; on `/audit` it renders inside `.audit-hero`, which owns the h2
      and lede. The component owns no heading.
-  2. The entry client binds once per page: lazy-load on interaction, per-lane validation including the rejected-TLD
-     list, shape-versus-segment reconciliation that flips the segment and navigates without delay (AE1), then U3's
-     `startAudit` on the click (acquire, stash, navigate) with the submit `aria-disabled` while acquiring, never
-     `disabled`; no sitekey disables the form with the MCP and `anc audit` pointer.
+  2. The entry client binds once per page: lazy-load on interaction, per-lane validation including the reserved
+     trailing-segment rule for branch names, shape-versus-segment reconciliation that flips the segment and navigates
+     without delay (AE1), then U3's `startAudit` on the click (acquire, stash, navigate) with the submit `aria-disabled`
+     while acquiring, never `disabled`; no sitekey disables the form with the MCP and `anc audit` pointer.
   3. `/audit` content carries both explainer blocks under lane-toggled containers, both "From an agent" sections, and a
      `noscript` block; the Worker never reads `?target=` when serving `/audit`.
 - **Execution note:** Browser-verify both pages in both themes on staging before reporting done; the lazy-load and
@@ -1509,7 +1526,7 @@ Design.
 - **Test scenarios:**
   - The sitemap contains `/score/<slug>` for every curated tool and `/score/<domain>` for every seeded domain, and
     nothing under `/web` or `/web-audit`.
-  - `llms.txt` lists `/audit.md`, `/scorecards.md`, and per-tool `/score/<slug>.md`.
+  - `llms.txt` lists `/audit.md`, `/scorecards.md`, and per-tool `/score/<slug>/md`.
   - A seeded host's result page carries no `X-Robots-Tag: noindex`; an on-demand host's does.
   - The agent-skills index entries resolve to `/fix/<id>` and each page exists in `dist/`.
   - A clean `dist/` contains no text node with `/web-audit`, `/web/scoring`, or `/score/live`.
@@ -1541,7 +1558,7 @@ Design.
 - **Patterns to follow:** existing cross-tool parity `describe` blocks in `tests/web-audit-mcp-tools.test.ts`.
 - **Test scenarios:**
   - `get_scorecard { slug: 'ripgrep' }` returns an envelope whose `scorecard` equals the committed scorecard file.
-  - `get_website_audit` and `GET /score/<host>.json` produce deep-equal envelopes (AE5).
+  - `get_website_audit` and `GET /score/<host>/json` produce deep-equal envelopes (AE5).
   - `get_scorecard` and `get_website_audit` on a target with the in-flight flag set return `found: false, in_progress:
     true, started_at`.
   - `audit_website` and `score_cli` results carry `scorecard_url` and no `share_url`; `score_cli` on a branch URL
@@ -1654,7 +1671,7 @@ Design.
 | Browser e2e, staging  | `ANC_STAGING_BASE_URL=<staging> bun run test:e2e --project=web-audit`, `--project=web-audit-webkit`, `--project=homepage-score-live`, `--project=staging-mcp`, `--project=edge-hit`; two consecutive green runs count as green                                                                                                                        | U4 to U13                                                            |
 | Green is not evidence | Every new test is run against the unfixed code first and its failure output quoted in the PR                                                                                                                                                                                                                                                          | every unit                                                           |
 | Browser-verify        | Both themes on staging for `/`, `/audit`, `/scoring`, `/score/<target>` (each kind), `/scorecards`, at 390, 768, and 1440 px against the responsive contract; screenshots in `.context/screenshots/`                                                                                                                                                                                                            | U8, U9, U10                                                          |
-| Representation checks | `curl -H 'Accept: text/html'`, `.md`, and `.json` for one curated slug, one live binary, one branch-scoped run, one host; assert a marker unique to each representation                                                                                                                                                                                                      | U6, U7                                                               |
+| Representation checks | `curl -H 'Accept: text/html'`, `-H 'Accept: application/json'`, `/md`, and `/json` for one curated slug, one live binary, one branch-scoped run, one host; assert a marker unique to each representation                                                                                                                                                                                                      | U6, U7                                                               |
 | Stream shape, staging | `curl -sS -N --retry 5 --retry-delay 10 --retry-all-errors -H 'Accept: application/x-ndjson' -H 'Content-Type: application/json' -d '{"target":"<cache-miss CLI target>","turnstile_token":"x"}' "$STAGING/api/score"` with the Access headers: first line `accepted`, at least three `phase`, last `complete` with `scorecard_url` `/score/<binary>` | U5                                                                   |
 | R2 payload invariant  | `wrangler r2 object get <bucket>/<key> --pipe --remote` piped through `jaq '{schema: .scorecard.schema_version, spec: .spec_version}'` equal before and after the deploy, one key per lane                                                                                                                                                            | U2, U6                                                               |
 | Edge proof            | `cf-cache-status` and `Age` on staging, never wrangler dev                                                                                                                                                                                                                                                                                            | U7                                                                   |
@@ -1662,7 +1679,7 @@ Design.
 | Retired paths         | for each R20 path: `curl -sSI -o /dev/null -w '%{http_code} %{redirect_url}\n'` prints `404` with an empty redirect; run after the propagation settle probe, without `--retry-all-errors`                                                                                                                                                             | U13                                                                  |
 | Sitemap walk          | every `<loc>` in `$ENV_URL/sitemap.xml` fetched with `Accept: text/html` and `--retry-all-errors` returns 200, after the rescore instance completes                                                                                                                                                                                                   | U11, release                                                         |
 | Deploy smoke | `dev` push deploy green including `scripts/smoke-api-score.sh` and the MCP smoke; job-level check `gh run view <run-id> --json jobs --jq '.jobs[] \| {name, conclusion}'` all `success` | U4, U13 |
-| Branch snapshot, staging | resubmit a branch URL whose record exists; a fresh run streams and `/score/<owner>/<repo>@<branch>.json` reports a newer `scored_at` and the cloned `source_sha` | U4, U5 |
+| Branch snapshot, staging | resubmit a branch URL whose record exists; a fresh run streams and `/score/<owner>/<repo>@<branch>/json` reports a newer `scored_at` and the cloned `source_sha` | U4, U5 |
 | Rollback rehearsal    | `wrangler rollback --env staging` to the pre-U13 version, old routes render from unchanged R2, roll forward, `postflight.sh --env staging all` green                                                                                                                                                                                                  | release                                                              |
 | Release preflight     | `scripts/release/preflight.sh all` before the production cut                                                                                                                                                                                                                                                                                          | release                                                              |
 
