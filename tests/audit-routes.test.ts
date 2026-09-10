@@ -13,6 +13,8 @@ import {
   damerauLevenshtein,
   fixPath,
   isAlwaysMissPath,
+  isAuditPath,
+  isFixPath,
   isHitMinPath,
   isScorePath,
   leaderboardPath,
@@ -334,5 +336,101 @@ describe('targetOfSpec', () => {
       expect(splitRepresentation(scorePath(target))?.target).toBe(target);
       expect(keyFor(target, SPEC_VERSION)).toBe(`scores/${target}/${SPEC_VERSION}.json`);
     }
+  });
+});
+
+describe('review fixtures: classification edges', () => {
+  test('a GitHub URL keeps its repo target when a query or fragment is attached', () => {
+    expect(ok('https://github.com/cli/cli?tab=readme-ov-file')).toMatchObject({
+      kind: 'cli',
+      target: 'https://github.com/cli/cli',
+    });
+    expect(ok('https://github.com/cli/cli#readme')).toMatchObject({
+      kind: 'cli',
+      target: 'https://github.com/cli/cli',
+    });
+    expect(ok('https://github.com/o/r/tree/main?x=1')).toMatchObject({ kind: 'cli-branch', target: 'o/r@main' });
+  });
+
+  test('branch components are validated one by one', () => {
+    for (const raw of [
+      'o/r@feature//x',
+      'o/r@feature/.x',
+      'o/r@feature.lock',
+      'o/r@feature/',
+      'o/r@.hidden',
+      'o/r@feature.',
+      'o/r@bad branch',
+    ]) {
+      expect(rejected(raw).reason).toBe('invalid_target');
+    }
+  });
+
+  test('the parse catch paths reject instead of throwing', () => {
+    expect(rejected('http://').reason).toBe('invalid_target');
+    expect(rejected('https://github.com/o/r/tree/%zz').reason).toBe('invalid_target');
+    expect(splitRepresentation('/score/o/r%zz')).toBeNull();
+  });
+
+  test('a non-string input is rejected as empty', () => {
+    expect(rejected(null as unknown as string).reason).toBe('target_empty');
+    expect(rejected(undefined as unknown as string).reason).toBe('target_empty');
+  });
+
+  test('control characters are rejected before classification', () => {
+    expect(rejected('foo\r\nSet-Cookie: a=b').reason).toBe('invalid_target');
+    expect(rejected('x\u0000y').reason).toBe('invalid_target');
+  });
+
+  test('the default https port is dropped whatever scheme was typed', () => {
+    expect(ok('http://example.com:443').target).toBe('example.com');
+  });
+
+  test('a digits-only input is CLI, not a synthesized IPv4 host', () => {
+    expect(ok('2048')).toMatchObject({ lane: 'cli', target: '2048' });
+    expect(ok('10.0.0.1')).toMatchObject({ lane: 'web', target: '10.0.0.1' });
+  });
+
+  test('an input over the target bound suggests nothing', () => {
+    const over = 'a'.repeat(TARGET_MAX_LENGTH + 1);
+    expect(suggestTargets(over, ['a'.repeat(TARGET_MAX_LENGTH)])).toEqual([]);
+  });
+});
+
+describe('review fixtures: result-target agreement', () => {
+  test('a lone reserved segment round-trips through the builder', () => {
+    for (const target of ['md', 'json', 'html']) {
+      expect(splitRepresentation(scorePath(target))).toEqual({ target, representation: 'html' });
+      expect(splitRepresentation(scoreJsonPath(target))).toEqual({ target, representation: 'json' });
+    }
+    const jsonSpec: InstallSpec = { pm: 'npm', package: 'json', binary: 'json' };
+    expect(scorePath(targetOfSpec(jsonSpec))).toBe('/score/json');
+  });
+
+  test('a segment that decodes to a slash or a reserved tail is not a target', () => {
+    expect(splitRepresentation('/score/o%2Fr@md')).toBeNull();
+    expect(splitRepresentation('/score/o/r@feature/%6Ason')).toBeNull();
+  });
+
+  test('the builder refuses targets that would not split back', () => {
+    for (const target of ['/foo', 'foo/', 'o//r', 'https://github.com/cli/cli']) {
+      expect(() => scorePath(target)).toThrow(RangeError);
+    }
+  });
+
+  test('every accepted classification round-trips through the builder and the splitter', () => {
+    for (const raw of ['ripgrep', 'o/r@feature/x', 'example.com:8443', 'defuddle.md', 'json']) {
+      const target = ok(raw).target;
+      expect(splitRepresentation(scorePath(target))).toEqual({ target, representation: 'html' });
+    }
+  });
+
+  test('the audit and fix predicates match the page, its twin, and nothing else', () => {
+    expect(isAuditPath('/audit')).toBe(true);
+    expect(isAuditPath('/audit.md')).toBe(true);
+    expect(isAuditPath('/audit/')).toBe(false);
+    expect(isAuditPath('/audits')).toBe(false);
+    expect(isFixPath('/fix/llms-txt')).toBe(true);
+    expect(isFixPath('/fixed')).toBe(false);
   });
 });

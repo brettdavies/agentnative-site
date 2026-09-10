@@ -73,6 +73,7 @@ export const REJECTION_MESSAGES: Readonly<Record<TargetRejection, string>> = {
 // admits exactly what github.com would resolve.
 const GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const GITHUB_REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
+const GITHUB_HOST_RE = /^(?:https?:\/\/)?(?:www\.)?github\.com\//i;
 const GITHUB_URL_RE = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/(.*))?$/i;
 const GITHUB_SHORTHAND_RE = /^([^/\s@]+)\/([^/\s@]+)(?:@(.+))?$/;
 const BRANCH_NAME_RE = /^[A-Za-z0-9._/-]{1,250}$/;
@@ -81,6 +82,8 @@ const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 // alphanumerics and hyphens joined by dots, bounded length.
 const DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))*$/;
 const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the C0 range is exactly what a hostile target must not carry
+const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f]/;
 
 function reject(reason: TargetRejection): ClassifiedTarget {
   return { ok: false, reason, message: REJECTION_MESSAGES[reason] };
@@ -95,12 +98,12 @@ function lastSegmentIsReserved(value: string): boolean {
   return RESERVED_REPRESENTATION_SEGMENTS.includes(last);
 }
 
+// git's ref rules, applied per component: no empty component, no
+// component starting with a dot, no `.lock` suffix, no `..`, no trailing dot.
 function validBranchName(branch: string): boolean {
   if (!BRANCH_NAME_RE.test(branch)) return false;
-  if (branch.includes('..')) return false;
-  if (branch.startsWith('/') || branch.endsWith('/')) return false;
-  if (branch.startsWith('.') || branch.endsWith('.')) return false;
-  return true;
+  if (branch.includes('..') || branch.endsWith('.')) return false;
+  return branch.split('/').every((c) => c !== '' && !c.startsWith('.') && !c.endsWith('.lock'));
 }
 
 function branchScoped(owner: string, repo: string, branch: string): ClassifiedTarget {
@@ -118,7 +121,9 @@ function safeDecode(segment: string): string | null {
 }
 
 /** A GitHub URL, `owner/repo`, or `owner/repo@branch`; null when the input is none of those. */
-function classifyGithub(input: string): ClassifiedTarget | null {
+function classifyGithub(raw: string): ClassifiedTarget | null {
+  // A query or fragment on a github.com URL carries no target meaning.
+  const input = GITHUB_HOST_RE.test(raw) ? raw.replace(/[?#].*$/, '') : raw;
   const url = input.match(GITHUB_URL_RE);
   if (url) {
     const [, owner, repo, tail] = url;
@@ -152,7 +157,9 @@ function webHostOf(url: URL): string | null {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   if (url.username || url.password) return null;
   if (!isWebHostname(url.hostname)) return null;
-  return url.host;
+  // Website audits run over https, so the port a visitor typed against
+  // http is re-read against https (drops an explicit :443).
+  return new URL(`https://${url.host}/`).host;
 }
 
 function parseUrl(candidate: string): URL | null {
@@ -166,7 +173,7 @@ function parseUrl(candidate: string): URL | null {
 /** A scheme-less host, IP literal, or `host/path` form; null when the first segment is not a website host. */
 function classifyBareHost(input: string): ClassifiedTarget | null {
   const first = input.split(/[/?#]/, 1)[0];
-  if (!first || /\s/.test(first)) return null;
+  if (!first || /\s/.test(first) || /^\d+$/.test(first)) return null;
   const bracketed = first.includes(':') && !first.startsWith('[') && first.split(':').length > 2 ? `[${first}]` : first;
   const url = parseUrl(`https://${bracketed}/`);
   if (!url) return null;
@@ -184,6 +191,7 @@ export function classifyTarget(raw: string): ClassifiedTarget {
   if (raw.length > TARGET_MAX_LENGTH) return reject('target_too_long');
   const input = raw.trim();
   if (!input) return reject('target_empty');
+  if (CONTROL_CHAR_RE.test(input)) return reject('invalid_target');
 
   const github = classifyGithub(input);
   if (github) return github;
@@ -236,8 +244,26 @@ export function splitRepresentation(pathname: string): SplitRepresentation | nul
     segments.pop();
   }
   const decoded = segments.map(safeDecode);
-  if (decoded.some((s) => s === null || s === '')) return null;
-  return { target: decoded.join('/'), representation };
+  if (decoded.some((s) => s === null || s.includes('/'))) return null;
+  const target = decoded.join('/');
+  return resultTargetProblem(target) ? null : { target, representation };
+}
+
+/**
+ * Why a string cannot be a `/score/<target>` target, or null when it can.
+ * The builder throws on it and the splitter returns null on it, so
+ * `splitRepresentation(scorePath(t))` is a round trip for every target
+ * the builder accepts.
+ */
+function resultTargetProblem(target: string): string | null {
+  if (!target) return 'a result path needs a target';
+  if (isReservedName(target)) return `"${target}" is a reserved name, not a result target`;
+  const segments = target.split('/');
+  if (segments.some((s) => s === '')) return `"${target}" has an empty path segment`;
+  if (segments.length > 1 && RESERVED_REPRESENTATION_SEGMENTS.includes(segments[segments.length - 1])) {
+    return `"${target}" ends in a reserved representation segment`;
+  }
+  return null;
 }
 
 // Encode a target for a path or query while keeping the characters the
@@ -247,11 +273,8 @@ function encodeTarget(target: string): string {
 }
 
 function assertResultTarget(target: string): void {
-  if (!target) throw new RangeError('a result path needs a target');
-  if (isReservedName(target)) throw new RangeError(`"${target}" is a reserved name, not a result target`);
-  if (lastSegmentIsReserved(target)) {
-    throw new RangeError(`"${target}" ends in a reserved representation segment`);
-  }
+  const problem = resultTargetProblem(target);
+  if (problem) throw new RangeError(problem);
 }
 
 export function scorePath(target: string): string {
@@ -401,7 +424,7 @@ export function suggestTargets(input: string, candidates: readonly string[], opt
   const distance = opts.distance ?? damerauLevenshtein;
   const limit = opts.limit ?? 3;
   const needle = input.trim().toLowerCase();
-  if (!needle) return [];
+  if (!needle || needle.length > TARGET_MAX_LENGTH) return [];
   const bound = needle.length >= 5 ? 2 : 1;
   const lane = laneOf(needle);
   const scored: { candidate: string; d: number }[] = [];
