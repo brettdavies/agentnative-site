@@ -160,6 +160,8 @@ export type RunCliAuditInput = {
   origin: string;
   skipCachePost: boolean;
   sourceSha?: string;
+  /** Runs once the spec is known and before the sandbox dispatch. */
+  onResolved?: (spec: InstallSpec) => Promise<void>;
 };
 
 const CTA_INSTALL_ANC = CTA.installAnc;
@@ -198,6 +200,7 @@ export async function runCliAudit(input: RunCliAuditInput): Promise<CliRunOutcom
     specVersion: SPEC_VERSION,
     inputHash: input.inputHash,
     skipCachePost: input.skipCachePost,
+    onResolved: input.onResolved,
   });
   return outcomeOf(result, input);
 }
@@ -304,10 +307,18 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
   }
 }
 
+// An unsupported package manager the union names is `install_unsupported`;
+// anything else that failed at install is the generic install failure.
+// One mapping, so the error object is identical whichever tier bounced.
+function installUnsupportedOrFailed(details: string | undefined): ScoreError {
+  const pm = unsupportedPmOf(details);
+  if (pm) return { code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC };
+  return { code: 'chain_resolved_install_failed', details: details ?? '', cta_text: CTA_INSTALL_ANC };
+}
+
 // A resolution failure is one of three: no spec discoverable, an
 // unsupported package manager after the fallbacks, or a branch shape that
-// slipped past validation. The pm extraction mirrors doError so the error
-// object is identical whichever tier bounced.
+// slipped past validation.
 export function resolutionError(
   error: 'chain_no_resolve' | 'install_unsupported' | 'invalid_url_path',
   details?: string,
@@ -319,9 +330,7 @@ export function resolutionError(
       cta_text: 'Paste the repo root URL (e.g. https://github.com/owner/repo), not a branch or release link.',
     };
   }
-  const pm = unsupportedPmOf(details);
-  if (pm) return { code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC };
-  return { code: 'chain_resolved_install_failed', details: details ?? '', cta_text: CTA_INSTALL_ANC };
+  return installUnsupportedOrFailed(details);
 }
 
 // The Durable Object's error codes onto the user-facing union; a code the
@@ -336,11 +345,8 @@ export function doError(error: string, rawDetails?: string): ScoreError {
       return { code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC };
     case 'chain_resolved_no_binary_produced':
       return { code: 'chain_resolved_no_binary_produced', details, cta_text: CTA_INSTALL_ANC };
-    case 'install_unsupported': {
-      const pm = unsupportedPmOf(details);
-      if (pm) return { code: 'install_unsupported', pm, cta_text: CTA_INSTALL_ANC };
-      return { code: 'chain_resolved_install_failed', details, cta_text: CTA_INSTALL_ANC };
-    }
+    case 'install_unsupported':
+      return installUnsupportedOrFailed(details);
     case 'timeout':
       // The sandbox budget covers install and audit together; the audit is
       // the long pole, so a timeout is reported as the score phase.

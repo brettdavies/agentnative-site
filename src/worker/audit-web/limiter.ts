@@ -1,11 +1,14 @@
-// Shared KV-backed hourly window for fresh web audits (plan U7/U12).
+// Shared KV-backed hourly windows, one per lane, keyed
+// `audit:<lane>:<ip>:<hour>`.
 //
-// Both the /api/audit-web streaming route and the audit_website MCP tool
-// consume from the same per-IP hourly budget, so a caller can't get one
-// ceiling via the webapp and another via MCP. Mirrors consumeHourlyBudget
-// in scorecard-audit.ts: the CF rate-limit binding enforces the per-60s
-// burst floor; this layer enforces the hourly ceiling the binding can't
-// express (its max period is 60 seconds).
+// The transact endpoint, the /api/audit-web streaming route, and the
+// audit_website MCP tool all consume the web lane's budget, so a caller
+// can't get one ceiling via one surface and another via the next. Mirrors
+// consumeHourlyBudget in scorecard-audit.ts: the CF rate-limit binding
+// enforces the per-60s burst floor; this layer enforces the hourly ceiling
+// the binding can't express (its max period is 60 seconds).
+
+import type { Lane } from '../../shared/audit-routes';
 
 const HOUR_MS = 3_600_000;
 const HOURLY_AUDIT_CEILING = 30;
@@ -37,9 +40,14 @@ export async function consumeHourlyBucketBudget(
   return true;
 }
 
-/** Consume one unit of the hourly budget for `ip`. Returns false when exhausted. */
+/** Consume one unit of `lane`'s hourly budget for `ip`. Returns false when exhausted. */
+export async function consumeLaneHourlyBudget(kv: KVNamespace, lane: Lane, ip: string): Promise<boolean> {
+  return consumeHourlyBucketBudget(kv, `audit:${lane}`, ip, HOURLY_AUDIT_CEILING);
+}
+
+/** The web lane's hourly budget for `ip`. Returns false when exhausted. */
 export async function consumeWebAuditHourlyBudget(kv: KVNamespace, ip: string): Promise<boolean> {
-  return consumeHourlyBucketBudget(kv, 'web_audit', ip, HOURLY_AUDIT_CEILING);
+  return consumeLaneHourlyBudget(kv, 'web', ip);
 }
 
 /**

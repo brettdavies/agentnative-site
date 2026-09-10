@@ -47,10 +47,17 @@ const REGISTRY_INDEX = {
 };
 const HINTS_INDEX = { by_owner_repo: {} };
 
-type Tracker = { doCalls: number; r2Gets: string[]; probeCalls: string[]; limiterCalls: string[]; kvPuts: string[] };
+type Tracker = {
+  doCalls: number;
+  siteverifyCalls: number;
+  r2Gets: string[];
+  probeCalls: string[];
+  limiterCalls: string[];
+  kvPuts: string[];
+};
 
 function newTracker(): Tracker {
-  return { doCalls: 0, r2Gets: [], probeCalls: [], limiterCalls: [], kvPuts: [] };
+  return { doCalls: 0, siteverifyCalls: 0, r2Gets: [], probeCalls: [], limiterCalls: [], kvPuts: [] };
 }
 
 type Overrides = Partial<{
@@ -65,6 +72,10 @@ type Overrides = Partial<{
   noKv: boolean;
   noLimiter: boolean;
   doResponse: unknown;
+  doThrows: boolean;
+  onDoFetch: () => void;
+  cachePutThrows: boolean;
+  probe: 'ok' | 'unreachable';
   kvSeed: Record<string, string>;
 }>;
 
@@ -99,6 +110,8 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
   };
   const stubFetch: Sandbox['fetch'] = async () => {
     tracker.doCalls += 1;
+    overrides.onDoFetch?.();
+    if (overrides.doThrows) throw new Error('DO exploded');
     return new Response(JSON.stringify(doResponse), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const limiter = (name: string, ok: boolean) => ({
@@ -109,6 +122,7 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
     },
   });
   const turnstileStub = async () => {
+    tracker.siteverifyCalls += 1;
     switch (overrides.turnstile ?? 'pass') {
       case 'reject':
         return new Response(JSON.stringify({ success: false }), { status: 200 });
@@ -146,6 +160,7 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
         return { json: async () => JSON.parse(raw), text: async () => raw };
       },
       async put(key: string, value: unknown) {
+        if (overrides.cachePutThrows) throw new Error('r2 exploded');
         cacheStore.set(key, typeof value === 'string' ? value : String(value));
       },
       async delete(key: string) {
@@ -166,13 +181,16 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
     SCORE_TELEMETRY: { writeDataPoint() {} },
     _kv: (kv as unknown as { _store: Map<string, string> })._store,
   } as unknown as AuditApiEnv & { _kv: Map<string, string> };
-  return Object.assign(env, { _deps: { turnstileFetch, siteverifyTimeoutMs: 50, probeFetch: probeFetchFor(tracker) } });
+  return Object.assign(env, {
+    _deps: { turnstileFetch, siteverifyTimeoutMs: 50, probeFetch: probeFetchFor(tracker, overrides.probe ?? 'ok') },
+  });
 }
 
-function probeFetchFor(tracker: Tracker): typeof fetch {
+function probeFetchFor(tracker: Tracker, probe: 'ok' | 'unreachable'): typeof fetch {
   return (async (input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     tracker.probeCalls.push(url);
+    if (probe === 'unreachable') return new Response('', { status: 530 });
     if (url.includes('dns-query') || url.includes('/resolve')) {
       return new Response(JSON.stringify({ Status: 3, Answer: [] }), {
         status: 200,
@@ -391,16 +409,22 @@ describe('POST /api/score: admission', () => {
     }
   });
 
-  test('a missing Turnstile secret is service_misconfigured', async () => {
+  test('a missing Turnstile secret is 503 turnstile_unavailable with retry_after (KTD3)', async () => {
     const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), makeEnv({ turnstile: 'no-secret' }));
-    expect(res.status).toBe(500);
-    expect((await errorOf(res)).code).toBe('service_misconfigured');
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('30');
+    expect((await errorOf(res)).code).toBe('turnstile_unavailable');
   });
 
-  test('a request with no cf-connecting-ip is denied after siteverify; an IPv6 client is keyed by its /48', async () => {
-    const denied = await call(post({ target: 'anc.dev', turnstile_token: 'x' }, { ip: null }), makeEnv());
+  test('a request with no cf-connecting-ip is denied before siteverify; an IPv6 client is keyed by its /48', async () => {
+    const noIp = newTracker();
+    const denied = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x' }, { ip: null }),
+      makeEnv({ tracker: noIp }),
+    );
     expect(denied.res.status).toBe(403);
     expect((await errorOf(denied.res)).code).toBe('turnstile_failed');
+    expect(noIp.siteverifyCalls).toBe(0);
     const tracker = newTracker();
     const env = makeEnv({ tracker });
     await call(
@@ -666,5 +690,194 @@ describe('POST /api/score: telemetry', () => {
     const rows = seen.records.filter((r) => r.record.scope === 'audit.request').map((r) => r.record);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ lane: 'cli', tier: 'registry', outcome: 'hit' });
+  });
+});
+
+describe('POST /api/score: review pins', () => {
+  test('the website lane ignores ?fromCache=false: a fresh listed record is served with its listing kept and no flip budget spent', async () => {
+    const tracker = newTracker();
+    const listed = {
+      ...WEB_RECORD('anc.dev'),
+      scorecard: { ...WEB_RECORD('anc.dev').scorecard, public_listing: true },
+    };
+    const env = makeEnv({ tracker, cacheContent: { [await webKeyFor('https://anc.dev/', SPEC_VERSION)]: listed } });
+    const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }, { query: '?fromCache=false' }), env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tier: string; scorecard: { public_listing?: boolean } };
+    expect(body.tier).toBe('cache');
+    expect(body.scorecard.public_listing).toBe(true);
+    expect(tracker.probeCalls).toEqual([]);
+    expect(tracker.limiterCalls).toEqual([]);
+    expect(tracker.kvPuts.some((k) => k.startsWith('web_audit_flip:'))).toBe(false);
+  });
+
+  test('?fromCache=false bypasses the in-flight flag on the CLI lane (KTD14) while refresh: true attaches', async () => {
+    const flag = JSON.stringify({ started_at: new Date().toISOString() });
+    const env = makeEnv({ kvSeed: { 'inflight:cli:cargo binstall ouch': flag } });
+    const attached = await call(post({ target: 'cargo binstall ouch', turnstile_token: 'x', refresh: true }), env);
+    expect(attached.res.status).toBe(202);
+    const hatch = await call(
+      post({ target: 'cargo binstall ouch', turnstile_token: 'x' }, { query: '?fromCache=false' }),
+      makeEnv({ kvSeed: { 'inflight:cli:cargo binstall ouch': flag } }),
+    );
+    expect(hatch.res.status).toBe(200);
+    expect(((await hatch.res.json()) as { tier: string }).tier).toBe('live');
+  });
+
+  test('the legacy input key is CLI-only during the phased landing: a website under it is 400 unrecognized_input with no probe, R2 read, or budget', async () => {
+    const tracker = newTracker();
+    const { res } = await call(post({ input: 'anc.dev', turnstile_token: 'x' }), makeEnv({ tracker }));
+    expect(res.status).toBe(400);
+    expect((await errorOf(res)).code).toBe('unrecognized_input');
+    expect(tracker.probeCalls).toEqual([]);
+    expect(tracker.r2Gets).toEqual([]);
+    expect(tracker.limiterCalls).toEqual([]);
+    const viaTarget = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), makeEnv());
+    expect(viaTarget.res.status).toBe(200);
+  });
+
+  test('body validation: invalid JSON, a non-object body, no target, a bad site_type, and a non-boolean public_listing are each 400 with their code and no top-level status', async () => {
+    const cases: Array<[Record<string, unknown> | string, string]> = [
+      ['not json', 'invalid_body'],
+      ['null', 'invalid_body'],
+      ['[]', 'invalid_body'],
+      [{}, 'target_empty'],
+      [{ target: 'anc.dev', site_type: 'bogus' }, 'invalid_site_type'],
+      [{ target: 'anc.dev', public_listing: 'yes' }, 'invalid_public_listing'],
+    ];
+    for (const [body, code] of cases) {
+      const { res } = await call(post(body), makeEnv());
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as { status?: unknown; error: { code: string } };
+      expect(json.error.code).toBe(code);
+      expect(json.status).toBeUndefined();
+    }
+  });
+
+  test('a streamed run emits its audit.request row from the relay with the terminal outcome', async () => {
+    const seen = captureLogs();
+    try {
+      const { res, ctx } = await call(
+        post({ target: 'anc.dev', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+        makeEnv(),
+      );
+      await res.text();
+      await Promise.all(ctx._promises);
+    } finally {
+      seen.restore();
+    }
+    const rows = seen.records.filter((r) => r.record.scope === 'audit.request').map((r) => r.record);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ lane: 'web', tier: 'live', outcome: 'complete', status: 200, stream: true });
+  });
+
+  test('a throw from the CLI core yields a terminal error line on the stream, a 500 error object on the JSON path, and clears the flag', async () => {
+    const env = makeEnv({ doThrows: true });
+    const stream = await call(
+      post({ target: 'cargo binstall ouch', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      env,
+    );
+    const lines = await ndjson(stream.res);
+    await Promise.all(stream.ctx._promises);
+    expect(lines[lines.length - 1]).toMatchObject({ type: 'error', error: { code: 'incomplete_response_contract' } });
+    expect([...env._kv.keys()].some((k) => k.startsWith('inflight:'))).toBe(false);
+    const json = await call(post({ target: 'cargo binstall ouch', turnstile_token: 'x' }), makeEnv({ doThrows: true }));
+    expect(json.res.status).toBe(500);
+    expect((await errorOf(json.res)).code).toBe('incomplete_response_contract');
+  });
+
+  test('a heartbeat never follows the terminal line', async () => {
+    const { res, ctx } = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      makeEnv(),
+    );
+    const lines = await ndjson(res);
+    await Promise.all(ctx._promises);
+    expect(lines[lines.length - 1].type).toBe('complete');
+  });
+
+  test('an unreachable website target ends the stream with an error event and answers 502 on the JSON path', async () => {
+    const stream = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
+      makeEnv({ probe: 'unreachable' }),
+    );
+    const lines = await ndjson(stream.res);
+    await Promise.all(stream.ctx._promises);
+    expect(lines[lines.length - 1]).toMatchObject({ type: 'error', error: { code: 'unreachable' } });
+    const json = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), makeEnv({ probe: 'unreachable' }));
+    expect(json.res.status).toBe(502);
+    expect((await errorOf(json.res)).code).toBe('unreachable');
+  });
+
+  test('a differing explicit public_listing on a fresh website record is patched in place; the flip ceiling answers 429; a failed write answers 500', async () => {
+    const key = await webKeyFor('https://anc.dev/', SPEC_VERSION);
+    const listed = {
+      ...WEB_RECORD('anc.dev'),
+      scorecard: { ...WEB_RECORD('anc.dev').scorecard, public_listing: true },
+    };
+    const tracker = newTracker();
+    const patched = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', public_listing: false }),
+      makeEnv({ tracker, cacheContent: { [key]: listed } }),
+    );
+    expect(patched.res.status).toBe(200);
+    const body = (await patched.res.json()) as { tier: string; scorecard: { public_listing?: boolean } };
+    expect(body.tier).toBe('cache');
+    expect(body.scorecard.public_listing).toBe(false);
+    expect(tracker.probeCalls).toEqual([]);
+    expect(tracker.kvPuts.some((k) => k.startsWith('web_audit_flip:'))).toBe(true);
+
+    const bucket = Math.floor(Date.now() / 3_600_000);
+    const flipKey = tracker.kvPuts.find((k) => k.startsWith('web_audit_flip:')) ?? '';
+    expect(flipKey.endsWith(`:${bucket}`)).toBe(true);
+    const capped = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', public_listing: false }),
+      makeEnv({ cacheContent: { [key]: listed }, kvSeed: { [flipKey]: '5' } }),
+    );
+    expect(capped.res.status).toBe(429);
+    expect((await errorOf(capped.res)).code).toBe('flip_rate_limited');
+
+    const failed = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x', public_listing: false }),
+      makeEnv({ cacheContent: { [key]: listed }, cachePutThrows: true }),
+    );
+    expect(failed.res.status).toBe(500);
+    expect((await errorOf(failed.res)).code).toBe('patch_failed');
+  });
+
+  test('the website lane draws from the hourly bucket the legacy route and the MCP tool share', async () => {
+    const bucket = Math.floor(Date.now() / 3_600_000);
+    const env = makeEnv({ kvSeed: { [`audit:web:203.0.113.9:${bucket}`]: '30' } });
+    const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(429);
+    expect((await errorOf(res)).code).toBe('rate_limited');
+  });
+
+  test('the result-keyed in-flight twin exists before the sandbox dispatch', async () => {
+    let twinAtDispatch = false;
+    const env = makeEnv({
+      onDoFetch: () => {
+        twinAtDispatch = env._kv.has('inflight:cli:ouch');
+      },
+    });
+    const { res, ctx } = await call(post({ target: 'cargo binstall ouch', turnstile_token: 'x' }), env);
+    expect(res.status).toBe(200);
+    await Promise.all(ctx._promises);
+    expect(twinAtDispatch).toBe(true);
+    expect(env._kv.has('inflight:cli:ouch')).toBe(false);
+  });
+
+  test('a post-mint denial still sets the session cookie and its body carries no server detail', async () => {
+    const { res } = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), makeEnv({ limiter: false }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('set-cookie')).toContain('__Host-anc-session=');
+    const noSecret = await call(post({ target: 'anc.dev', turnstile_token: 'x' }), makeEnv({ turnstile: 'no-secret' }));
+    expect(await noSecret.res.text()).not.toMatch(/TURNSTILE_SECRET|binding missing|limiter failed|no client address/);
+    const unavailable = await call(
+      post({ target: 'anc.dev', turnstile_token: 'x' }),
+      makeEnv({ turnstile: 'transport' }),
+    );
+    const unavailableBody = (await unavailable.res.json()) as { error: { details?: string } };
+    expect(unavailableBody.error.details).toBeUndefined();
   });
 });

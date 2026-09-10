@@ -10,22 +10,31 @@
 //   lane validation .......... cli: the worker validator
 //                              web: the https origin + the SSRF gate, before
 //                                   any cache read
-//   unmetered tiers .......... cli: registry, then cache (skipped by refresh,
-//                                   ?fromCache=false, and a branch target)
+//   unmetered tiers .......... cli: registry, then cache (skipped by refresh
+//                                   and ?fromCache=false; a branch target
+//                                   never serves from cache)
 //                              web: cache (a fresh hit serves; a stale hit
-//                                   or a listing change falls through)
+//                                   or a listing change falls through); the
+//                                   operator hatch is CLI-only
 //   in flight ................ the KV flag for this input answers 202 to a
-//                              tokenless POST
+//                              tokenless POST and attaches a tokened one;
+//                              ?fromCache=false bypasses it on the CLI lane
 //   tokenless ................ 403 turnstile_failed, no budget spent
-//   admitTransact ............ kill switch, siteverify, session, limiters
+//   admitTransact ............ kill switch, client identity, siteverify,
+//                              session, limiters
 //   run ...................... Accept x-ndjson streams the event union;
 //                              otherwise the terminal envelope or the error
-//                              object as one JSON body
+//                              object as one JSON body. A throw from a lane
+//                              core is the terminal error line, never an
+//                              escaped exception.
 //
 // During the phased landing the non-streaming JSON responses carry the
 // legacy `share_url` and the registry hit's nested `scorecard.kind` and
 // `scorecard.scorecard_url` beside the envelope, because the deployed
-// homepage reads them until the entry form switches over.
+// homepage reads them until the entry form switches over. A body that
+// carries the legacy `input` key is CLI-only for the same reason: that
+// client cannot render a website envelope, so a website under it is
+// refused as unrecognized input.
 
 import type { AuditEnvelope } from '../../shared/audit-envelope';
 import {
@@ -95,6 +104,8 @@ type ParsedBody = {
   siteType: WebSiteType | null;
   publicListing: boolean | undefined;
   refresh: boolean;
+  /** The body used the legacy `input` key, so it came from the deployed CLI form. */
+  legacyInput: boolean;
 };
 
 type ParseFailure = { status: number } & AuditErrorObject;
@@ -131,9 +142,12 @@ async function parseBody(request: Request): Promise<ParsedBody | ParseFailure> {
   } catch {
     return { status: 400, ...auditErrorFor('invalid_body', { cta: CTA_INPUT }) };
   }
-  if (!raw || typeof raw !== 'object') return { status: 400, ...auditErrorFor('invalid_body', { cta: CTA_INPUT }) };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { status: 400, ...auditErrorFor('invalid_body', { cta: CTA_INPUT }) };
+  }
   const body = raw as Record<string, unknown>;
-  const target = typeof body.target === 'string' ? body.target : typeof body.input === 'string' ? body.input : null;
+  const legacyInput = typeof body.target !== 'string' && typeof body.input === 'string';
+  const target = typeof body.target === 'string' ? body.target : legacyInput ? (body.input as string) : null;
   if (target === null) return { status: 400, ...auditErrorFor('target_empty', { cta: CTA_INPUT }) };
   if (body.site_type !== undefined && body.site_type !== 'content' && body.site_type !== 'api') {
     return { status: 400, ...auditErrorFor('invalid_site_type', { cta: 'Use "content" or "api".' }) };
@@ -147,6 +161,7 @@ async function parseBody(request: Request): Promise<ParsedBody | ParseFailure> {
     siteType: (body.site_type as WebSiteType | undefined) ?? null,
     publicListing: body.public_listing as boolean | undefined,
     refresh: body.refresh === true,
+    legacyInput,
   };
 }
 
@@ -162,11 +177,12 @@ function inflightKey(lane: Lane, key: string): string {
   return `inflight:${lane}:${key}`;
 }
 
+// A KV read that fails is a miss: the flag is a dedup hint, never a gate.
 async function readInFlight(env: AuditApiEnv, lane: Lane, input: string): Promise<InFlight | null> {
   if (!env.SCORE_KV) return null;
-  const raw = await env.SCORE_KV.get(inflightKey(lane, input));
-  if (!raw) return null;
   try {
+    const raw = await env.SCORE_KV.get(inflightKey(lane, input));
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<InFlight>;
     return typeof parsed.started_at === 'string' ? { started_at: parsed.started_at } : null;
   } catch {
@@ -204,7 +220,8 @@ class InFlightFlags {
 }
 
 // ---------------------------------------------------------------------------
-// Telemetry: one audit.request row per call.
+// Telemetry: one audit.request row per call. A streamed run's row is owned
+// by the relay, which emits it once the terminal line is known.
 // ---------------------------------------------------------------------------
 
 type RequestRow = {
@@ -215,6 +232,10 @@ type RequestRow = {
   refresh: boolean;
   stream: boolean;
   target: string | null;
+  /** Server-side reason behind a denial or a swallowed throw. */
+  detail?: string;
+  /** Set by the relay when it takes over emission for a stream. */
+  deferred: boolean;
 };
 
 function emitRequestRow(row: RequestRow, startedMs: number): void {
@@ -229,6 +250,7 @@ function emitRequestRow(row: RequestRow, startedMs: number): void {
       stream: row.stream,
       target: row.target,
       duration_ms: Date.now() - startedMs,
+      ...(row.detail !== undefined ? { detail: row.detail } : {}),
     },
   );
 }
@@ -252,13 +274,14 @@ export async function handleAuditApi(
     refresh: false,
     stream: false,
     target: null,
+    deferred: false,
   };
   try {
-    const response = await handle(request, env, ctx, deps, row);
+    const response = await handle(request, env, ctx, deps, row, started);
     row.status = response.status;
     return response;
   } finally {
-    emitRequestRow(row, started);
+    if (!row.deferred) emitRequestRow(row, started);
   }
 }
 
@@ -268,6 +291,7 @@ async function handle(
   ctx: ExecutionContext,
   deps: AuditApiDeps,
   row: RequestRow,
+  started: number,
 ): Promise<Response> {
   if (request.method.toUpperCase() !== 'POST') {
     row.outcome = 'method';
@@ -279,7 +303,7 @@ async function handle(
   const parsed = await parseBody(request);
   if ('status' in parsed) {
     row.outcome = `error_${parsed.error.code}`;
-    return errorResponse(parsed.status, parsed);
+    return errorResponse(parsed.status, { error: parsed.error });
   }
   row.refresh = parsed.refresh;
   row.stream = wantsEventStream(request);
@@ -291,9 +315,13 @@ async function handle(
   }
   row.lane = classified.lane;
   row.target = classified.target;
+  if (parsed.legacyInput && classified.lane === 'web') {
+    row.outcome = 'error_unrecognized_input';
+    return errorResponse(400, auditErrorFor('unrecognized_input', { cta: CTA_INPUT }));
+  }
   const origin = new URL(request.url).origin;
   const skipCache = new URL(request.url).searchParams.get('fromCache') === 'false';
-  const common = { request, env, ctx, deps, row, origin, parsed, skipCache };
+  const common = { request, env, ctx, deps, row, origin, parsed, skipCache, started };
   return classified.lane === 'web' ? handleWeb(common, classified) : handleCli(common, classified);
 }
 
@@ -306,6 +334,7 @@ type Common = {
   origin: string;
   parsed: ParsedBody;
   skipCache: boolean;
+  started: number;
 };
 
 function inProgressResponse(flag: InFlight): Response {
@@ -323,8 +352,14 @@ function tokenlessResponse(): Response {
   return errorResponse(403, auditErrorFor('turnstile_failed', { cta: 'Start the audit from the page.' }));
 }
 
-function admissionResponse(admission: Extract<Admission, { ok: false }>): Response {
-  return errorResponse(admission.status, { error: admission.error });
+function admissionResponse(admission: Extract<Admission, { ok: false }>, row: RequestRow): Response {
+  row.outcome = `error_${admission.error.code}`;
+  if (admission.detail !== undefined) row.detail = admission.detail;
+  return errorResponse(
+    admission.status,
+    { error: admission.error },
+    admission.setCookie ? { 'set-cookie': admission.setCookie } : {},
+  );
 }
 
 async function admit(common: Common, lane: Lane, target: string): Promise<Admission> {
@@ -353,9 +388,9 @@ async function handleWeb(
     return errorResponse(400, auditErrorFor('invalid_target', { cta: CTA_INPUT, details: prepared.reason }));
   }
   const target = prepared.target;
-  const tier = common.skipCache ? null : await readWebTier(env, target, parsed.publicListing);
+  const tier = await readWebTier(env, target, parsed.publicListing);
 
-  if (tier?.kind === 'serve') {
+  if (tier.kind === 'serve') {
     row.tier = 'cache';
     row.outcome = 'hit';
     return jsonEnvelope(webCacheEnvelope(target, tier.cached, origin));
@@ -374,19 +409,17 @@ async function handleWeb(
 
   const admission = await admit(common, 'web', target.host);
   if (!admission.ok) {
-    row.outcome = `error_${admission.error.code}`;
     // A stale record is still data when the lane is off.
-    const stale = tier?.kind === 'audit' || tier?.kind === 'patch' ? tier.cached : null;
-    if (admission.error.code === 'web_audit_disabled' && stale) {
+    if (admission.error.code === 'web_audit_disabled' && tier.cached) {
       row.tier = 'cache';
       row.outcome = 'hit_disabled';
-      return jsonEnvelope(webCacheEnvelope(target, stale, origin));
+      return jsonEnvelope(webCacheEnvelope(target, tier.cached, origin));
     }
-    return admissionResponse(admission);
+    return admissionResponse(admission, row);
   }
   const cookie = cookieHeader(admission);
 
-  if (tier?.kind === 'patch') {
+  if (tier.kind === 'patch') {
     const outcome = await patchWebListing(env, target, tier);
     if (!outcome.ok) {
       row.outcome = `error_${outcome.reason}`;
@@ -403,12 +436,11 @@ async function handleWeb(
     return jsonEnvelope(webCacheEnvelope(target, outcome.cached, origin), cookie);
   }
 
-  const write = tier?.kind === 'audit' ? tier.write : null;
-  if (write && !(await meterWebAuditFlip(env, target, write))) {
+  if (!(await meterWebAuditFlip(env, target, tier.write))) {
     row.outcome = 'error_flip_rate_limited';
     return errorResponse(429, auditErrorFor('flip_rate_limited', { cta: CTA_RETRY, retry_after: 3600 }), cookie);
   }
-  const listing = tier?.kind === 'audit' ? tier.listing : (parsed.publicListing ?? false);
+  const listing = tier.listing;
 
   row.tier = 'live';
   const flags = new InFlightFlags(env, 'web', new Date().toISOString());
@@ -469,7 +501,8 @@ async function handleCli(
     return jsonEnvelope(tier.envelope, {}, { share_url: tier.shareUrl ? `${origin}${tier.shareUrl}` : undefined });
   }
 
-  const inFlight = await readInFlight(env, 'cli', classified.target);
+  // The operator hatch bypasses the flag; a refresh attaches like any transact.
+  const inFlight = common.skipCache ? null : await readInFlight(env, 'cli', classified.target);
   if (inFlight) {
     row.tier = 'inflight';
     row.outcome = parsed.token ? 'attach' : 'in_progress';
@@ -481,10 +514,7 @@ async function handleCli(
   }
 
   const admission = await admit(common, 'cli', classified.target);
-  if (!admission.ok) {
-    row.outcome = `error_${admission.error.code}`;
-    return admissionResponse(admission);
-  }
+  if (!admission.ok) return admissionResponse(admission, row);
   const cookie = cookieHeader(admission);
 
   row.tier = 'live';
@@ -514,27 +544,57 @@ async function* runCliStream(input: {
     inputHash: await sha256Hex(common.parsed.target),
     origin: common.origin,
     skipCachePost: input.skipCache,
+    // The result-keyed twin, marked as soon as the binary is known (a
+    // git-clone target was already marked at accepted).
+    onResolved: async (spec) => {
+      if (spec.pm !== 'git-clone') await input.flags.mark(targetOfSpec(spec));
+    },
   });
   if (outcome.kind === 'bounce') {
     common.row.tier = outcome.tier;
     yield { type: 'bounce', ...toAuditError(outcome.error) };
     return;
   }
-  if (outcome.spec.pm !== 'git-clone') await input.flags.mark(targetOfSpec(outcome.spec));
   common.row.tier = outcome.kind;
   yield completeEvent(outcome.envelope);
 }
 
 // ---------------------------------------------------------------------------
 // Relay: one JSON body, or a line-framed stream with a heartbeat while
-// silent. The terminal telemetry fields and the flag cleanup run from the
-// consumer inside ctx.waitUntil, so a client that goes away does not
-// strand them.
+// silent. The terminal telemetry fields, the request row, and the flag
+// cleanup run from the consumer inside ctx.waitUntil, so a client that goes
+// away does not strand them.
 // ---------------------------------------------------------------------------
 
 const HEARTBEAT_MS = 10_000;
 
 type StreamMeta = { lane: Lane; target: string };
+
+function isTerminal(event: AuditEvent): boolean {
+  return event.type === 'complete' || event.type === 'incomplete' || event.type === 'bounce' || event.type === 'error';
+}
+
+// Drain a lane core. A throw becomes the terminal error line, so the stream
+// always ends on a typed line and the JSON path answers the shared error
+// object instead of an escaped exception.
+async function consume(
+  events: AsyncGenerator<AuditEvent>,
+  row: RequestRow,
+  forward: (event: AuditEvent) => Promise<void>,
+): Promise<AuditEvent | null> {
+  let terminal: AuditEvent | null = null;
+  try {
+    for await (const event of events) {
+      terminal = event;
+      await forward(event);
+    }
+  } catch (err) {
+    row.detail = err instanceof Error ? err.message : String(err);
+    terminal = { type: 'error', ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }) };
+    await forward(terminal);
+  }
+  return terminal;
+}
 
 async function relay(
   common: Common,
@@ -549,7 +609,7 @@ async function relay(
     let terminal: AuditEvent | null = null;
     await runWithHitMinPurge(ctx, async () => {
       try {
-        for await (const event of events) terminal = event;
+        terminal = await consume(events, row, async () => {});
       } finally {
         await flags.clear();
         await flushHitMinPurge().catch(() => {});
@@ -565,25 +625,32 @@ async function relay(
   // Every write happens inside the background task: a write on a
   // TransformStream settles only once the reader consumes it, so a write
   // awaited before the Response is returned never settles.
+  row.deferred = true;
   ctx.waitUntil(
     runWithHitMinPurge(ctx, async () => {
       let terminal: AuditEvent | null = null;
       let heartbeat: ReturnType<typeof setInterval> | null = setInterval(() => {
         void write({ type: 'heartbeat', at: new Date().toISOString() });
       }, HEARTBEAT_MS);
-      try {
-        await write(accepted);
-        for await (const event of events) {
-          terminal = event;
-          await write(event);
-        }
-      } finally {
+      const stopHeartbeat = () => {
         if (heartbeat) clearInterval(heartbeat);
         heartbeat = null;
+      };
+      try {
+        await write(accepted);
+        terminal = await consume(events, row, async (event) => {
+          // No heartbeat may land after the terminal line.
+          if (isTerminal(event)) stopHeartbeat();
+          await write(event);
+        });
+      } finally {
+        stopHeartbeat();
         row.outcome = terminal ? outcomeOf(terminal) : 'incomplete_response_contract';
+        row.status = 200;
         await flags.clear();
         await flushHitMinPurge().catch(() => {});
         await writer.close().catch(() => {});
+        emitRequestRow(row, common.started);
       }
     }),
   );

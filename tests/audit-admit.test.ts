@@ -148,7 +148,7 @@ describe('admitTransact', () => {
     expect((await admitTransact({ lane: 'cli', request: req(), token: 'x', target: 'ouch', env, deps })).ok).toBe(true);
   });
 
-  test('the siteverify verdict map: rejected and missing are 403, unavailability is 503 with retry_after', async () => {
+  test('the siteverify verdict map: rejected and missing are 403; unavailability and a missing secret are 503 with retry_after', async () => {
     const calls: Calls = [];
     const env = makeEnv(calls);
     const missing = await admitTransact({
@@ -192,21 +192,28 @@ describe('admitTransact', () => {
       env: { ...env, TURNSTILE_SECRET: undefined },
       deps: { turnstileFetch: siteverify('pass') },
     });
-    expect(noSecret).toMatchObject({ ok: false, status: 500, error: { code: 'service_misconfigured' } });
+    expect(noSecret).toMatchObject({ ok: false, status: 503, error: { code: 'turnstile_unavailable' } });
     expect(calls).toEqual([]);
   });
 
-  test('a missing client IP is denied after siteverify and before any limiter', async () => {
+  test('a missing client IP is denied before siteverify spends the token and before any limiter', async () => {
     const calls: Calls = [];
+    let verified = 0;
     const r = await admitTransact({
       lane: 'web',
       request: req({}),
       token: 'x',
       target: 'anc.dev',
       env: makeEnv(calls),
-      deps: { turnstileFetch: siteverify('pass') },
+      deps: {
+        turnstileFetch: (async (...a: Parameters<typeof fetch>) => {
+          verified++;
+          return siteverify('pass')(...a);
+        }) as unknown as typeof fetch,
+      },
     });
     expect(r).toMatchObject({ ok: false, status: 403, error: { code: 'turnstile_failed' } });
+    expect(verified).toBe(0);
     expect(calls).toEqual([]);
   });
 
@@ -295,5 +302,77 @@ describe('admitTransact', () => {
       deps,
     });
     expect(throwing).toMatchObject({ ok: false, status: 500, error: { code: 'service_misconfigured' } });
+  });
+});
+
+describe('admitTransact: review pins', () => {
+  test('a post-mint denial carries the freshly minted session cookie', async () => {
+    const calls: Calls = [];
+    const deps = { turnstileFetch: siteverify('pass') };
+    const limited = await admitTransact({
+      lane: 'web',
+      request: req(),
+      token: 'x',
+      target: 'anc.dev',
+      env: makeEnv(calls, { WEB_AUDIT_LIMITER: limiter('web', calls, false) }),
+      deps,
+    });
+    expect(limited.ok).toBe(false);
+    if (limited.ok) return;
+    expect(limited.status).toBe(429);
+    expect(limited.setCookie).toContain('__Host-anc-session=');
+    const threw = await admitTransact({
+      lane: 'web',
+      request: req(),
+      token: 'x',
+      target: 'anc.dev',
+      env: makeEnv(calls, { WEB_AUDIT_LIMITER: limiter('web', calls, true, true) }),
+      deps,
+    });
+    expect(threw.ok).toBe(false);
+    if (threw.ok) return;
+    expect(threw.status).toBe(500);
+    expect(threw.setCookie).toContain('__Host-anc-session=');
+  });
+
+  test('a missing SESSION_HMAC_SECRET is service_misconfigured', async () => {
+    const calls: Calls = [];
+    const r = await admitTransact({
+      lane: 'cli',
+      request: req(),
+      token: 'x',
+      target: 'ouch',
+      env: makeEnv(calls, { SESSION_HMAC_SECRET: undefined }),
+      deps: { turnstileFetch: siteverify('pass') },
+    });
+    expect(r).toMatchObject({ ok: false, status: 500, error: { code: 'service_misconfigured' } });
+    expect(calls).toEqual([]);
+  });
+
+  test('denial bodies never carry the verifier reason or a binding name; the detail stays server-side', async () => {
+    const calls: Calls = [];
+    const runs: Array<[Partial<AdmitEnv>, Record<string, string>, 'pass' | 'hang']> = [
+      [{ TURNSTILE_SECRET: undefined }, { 'cf-connecting-ip': '203.0.113.9' }, 'pass'],
+      [{}, { 'cf-connecting-ip': '203.0.113.9' }, 'hang'],
+      [{}, {}, 'pass'],
+      [{ SCORE_LIMITER: undefined }, { 'cf-connecting-ip': '203.0.113.9' }, 'pass'],
+      [{ SCORE_LIMITER: limiter('cli', calls, true, true) }, { 'cf-connecting-ip': '203.0.113.9' }, 'pass'],
+    ];
+    for (const [over, headers, mode] of runs) {
+      const r = await admitTransact({
+        lane: 'cli',
+        request: req(headers),
+        token: 'x',
+        target: 'ouch',
+        env: makeEnv(calls, over),
+        deps: { turnstileFetch: siteverify(mode), siteverifyTimeoutMs: 20 },
+      });
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      expect(JSON.stringify(r.error)).not.toMatch(
+        /TURNSTILE_SECRET|binding missing|limiter failed|no client address|"timeout"|transport_error|malformed/,
+      );
+      expect(typeof r.detail).toBe('string');
+    }
   });
 });

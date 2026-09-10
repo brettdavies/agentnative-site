@@ -4,23 +4,28 @@
 //
 //   1. lane kill switch ........ CLI: SCORE_KV `scoring_disabled` (absent = on)
 //                                web: WEB_AUDIT_ENABLED var (absent = off)
-//   2. siteverify .............. missing or rejected token -> 403 turnstile_failed
+//   2. client identity ......... no cf-connecting-ip -> denied before the
+//                                token is spent; IPv6 keyed by /48
+//   3. siteverify .............. missing or rejected token -> 403 turnstile_failed
 //                                timeout, transport, non-2xx, malformed,
 //                                missing secret -> 503 turnstile_unavailable
-//   3. client identity ......... no cf-connecting-ip -> denied; IPv6 keyed by /48
 //   4. session ................. read the __Host-anc-session cookie or mint one
 //   5. session limiter ......... lane's binding, keyed <sid>:<sha256(target)>
 //   6. IP limiter .............. lane's binding, keyed by the client key
-//   7. hourly window ........... SCORE_KV `audit:<lane>:<ip>:<hour>` (30 per lane)
+//   7. hourly window ........... the lane's shared bucket (30 per lane), the
+//                                one the legacy route and the MCP tool draw
 //
 // Fail-closed rules: a missing limiter or KV binding is
 // service_misconfigured, never a skipped gate. The kill-switch polarities
-// differ by lane and are recorded, not unified.
+// differ by lane and are recorded, not unified. A denial after the session
+// mint still carries the Set-Cookie. The verifier's reason and the binding
+// names never reach the body: `detail` is the server-side field the
+// request row logs.
 
 import { type AuditErrorObject, auditErrorFor, CTA_RETRY } from '../../shared/audit-events';
 import type { Lane } from '../../shared/audit-routes';
 import { sha256Hex } from '../audit-web/cache';
-import { consumeHourlyBucketBudget } from '../audit-web/limiter';
+import { consumeLaneHourlyBudget } from '../audit-web/limiter';
 import { isScoringDisabled } from '../score/kill-switch';
 import { CTA } from '../score/response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
@@ -56,9 +61,17 @@ export type AdmitInput = {
 
 export type Admission =
   | { ok: true; sid: string; setCookie: string | null; ip: string }
-  | ({ ok: false; status: number; retryAfter?: number } & AuditErrorObject);
+  | ({
+      ok: false;
+      status: number;
+      retryAfter?: number;
+      setCookie: string | null;
+      /** Server-side only: the verifier reason or the missing binding. */
+      detail?: string;
+    } & AuditErrorObject);
 
-const HOURLY_CEILING = 30;
+type DenyOptions = { retryAfter?: number; setCookie?: string | null; detail?: string };
+
 const TURNSTILE_RETRY_AFTER_SECONDS = 30;
 const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
 const KILL_SWITCH_RETRY_AFTER_SECONDS = 3600;
@@ -81,16 +94,15 @@ export function clientIpKey(address: string | null | undefined): string | null {
   return `${prefix.join(':')}::/48`;
 }
 
-function deny(status: number, error: AuditErrorObject, retryAfter?: number): Admission {
-  return retryAfter === undefined ? { ok: false, status, ...error } : { ok: false, status, retryAfter, ...error };
+function deny(status: number, error: AuditErrorObject, opts: DenyOptions = {}): Admission {
+  const admission: Admission = { ok: false, status, setCookie: opts.setCookie ?? null, ...error };
+  if (opts.retryAfter !== undefined) admission.retryAfter = opts.retryAfter;
+  if (opts.detail !== undefined) admission.detail = opts.detail;
+  return admission;
 }
 
-function misconfigured(details: string): Admission {
-  return deny(500, auditErrorFor('service_misconfigured', { cta: CTA_LOCAL, details }));
-}
-
-function consumeHourlyWindow(kv: KVNamespace, lane: Lane, ip: string): Promise<boolean> {
-  return consumeHourlyBucketBudget(kv, `audit:${lane}`, ip, HOURLY_CEILING);
+function misconfigured(detail: string, setCookie: string | null = null): Admission {
+  return deny(500, auditErrorFor('service_misconfigured', { cta: CTA_LOCAL }), { detail, setCookie });
 }
 
 export async function admitTransact(input: AdmitInput): Promise<Admission> {
@@ -103,41 +115,39 @@ export async function admitTransact(input: AdmitInput): Promise<Admission> {
       return deny(
         503,
         auditErrorFor('scoring_disabled', { cta: CTA_LOCAL, retry_after: KILL_SWITCH_RETRY_AFTER_SECONDS }),
-        KILL_SWITCH_RETRY_AFTER_SECONDS,
+        { retryAfter: KILL_SWITCH_RETRY_AFTER_SECONDS },
       );
     }
   } else if (env.WEB_AUDIT_ENABLED !== 'true') {
     return deny(
       503,
       auditErrorFor('web_audit_disabled', { cta: CTA_RETRY, retry_after: KILL_SWITCH_RETRY_AFTER_SECONDS }),
-      KILL_SWITCH_RETRY_AFTER_SECONDS,
+      { retryAfter: KILL_SWITCH_RETRY_AFTER_SECONDS },
     );
   }
 
   const ipHeader = request.headers.get('cf-connecting-ip');
+  const ip = clientIpKey(ipHeader);
+  if (!ip) return deny(403, auditErrorFor('turnstile_failed', { cta: CTA_RETRY }), { detail: 'no client address' });
+
   const verify = await verifyTurnstile(env, input.token, {
     fetcher: deps.turnstileFetch,
     remoteIp: ipHeader ?? undefined,
     timeoutMs: deps.siteverifyTimeoutMs,
   });
   if (!verify.ok) {
-    if (verify.reason === 'misconfigured') return misconfigured('TURNSTILE_SECRET missing');
-    if (isVerifyUnavailable(verify.reason)) {
+    if (verify.reason === 'misconfigured' || isVerifyUnavailable(verify.reason)) {
       return deny(
         503,
-        auditErrorFor('turnstile_unavailable', {
-          cta: CTA_RETRY,
-          retry_after: TURNSTILE_RETRY_AFTER_SECONDS,
-          details: verify.reason,
-        }),
-        TURNSTILE_RETRY_AFTER_SECONDS,
+        auditErrorFor('turnstile_unavailable', { cta: CTA_RETRY, retry_after: TURNSTILE_RETRY_AFTER_SECONDS }),
+        {
+          retryAfter: TURNSTILE_RETRY_AFTER_SECONDS,
+          detail: verify.reason === 'misconfigured' ? 'TURNSTILE_SECRET missing' : verify.reason,
+        },
       );
     }
-    return deny(403, auditErrorFor('turnstile_failed', { cta: CTA_RETRY }));
+    return deny(403, auditErrorFor('turnstile_failed', { cta: CTA_RETRY }), { detail: verify.reason });
   }
-
-  const ip = clientIpKey(ipHeader);
-  if (!ip) return deny(403, auditErrorFor('turnstile_failed', { cta: CTA_RETRY, details: 'no client address' }));
 
   let sid: string;
   let setCookie: string | null = null;
@@ -157,22 +167,21 @@ export async function admitTransact(input: AdmitInput): Promise<Admission> {
 
   const sessionLimiter = lane === 'cli' ? env.SCORE_LIMITER : env.WEB_AUDIT_LIMITER;
   const ipLimiter = lane === 'cli' ? env.SCORE_LIMITER_IP : env.WEB_AUDIT_LIMITER_IP;
-  if (!sessionLimiter || !ipLimiter) return misconfigured(`${lane} limiter binding missing`);
+  if (!sessionLimiter || !ipLimiter) return misconfigured(`${lane} limiter binding missing`, setCookie);
 
   const limited = (): Admission =>
-    deny(
-      429,
-      auditErrorFor('rate_limited', { cta: CTA_RETRY, retry_after: RATE_LIMIT_RETRY_AFTER_SECONDS }),
-      RATE_LIMIT_RETRY_AFTER_SECONDS,
-    );
+    deny(429, auditErrorFor('rate_limited', { cta: CTA_RETRY, retry_after: RATE_LIMIT_RETRY_AFTER_SECONDS }), {
+      retryAfter: RATE_LIMIT_RETRY_AFTER_SECONDS,
+      setCookie,
+    });
   try {
     const session = await sessionLimiter.limit({ key: `${sid}:${await sha256Hex(input.target)}` });
     if (!session.success) return limited();
     const perIp = await ipLimiter.limit({ key: ip });
     if (!perIp.success) return limited();
-    if (!(await consumeHourlyWindow(env.SCORE_KV, lane, ip))) return limited();
+    if (!(await consumeLaneHourlyBudget(env.SCORE_KV, lane, ip))) return limited();
   } catch (err) {
-    return misconfigured(`limiter failed: ${err instanceof Error ? err.message : String(err)}`);
+    return misconfigured(`limiter failed: ${err instanceof Error ? err.message : String(err)}`, setCookie);
   }
 
   return { ok: true, sid, setCookie, ip };

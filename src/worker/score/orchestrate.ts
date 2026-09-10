@@ -151,6 +151,10 @@ export interface RunFreshOptions {
   // fan-out. Threaded so tests can intercept the brew / npm / pypi /
   // GitHub Releases outbound calls without monkey-patching globalThis.
   fetcher?: typeof fetch;
+  // Runs once the spec is known and before the post-discovery cache read
+  // or the sandbox dispatch, so a caller can key state by the resolved
+  // binary while the run is still ahead.
+  onResolved?: (spec: InstallSpec) => Promise<void>;
 }
 
 // DO envelope classification helpers. Exported so handler.ts can
@@ -190,6 +194,7 @@ export async function runFreshOnly(
   }
   const spec = resolution.spec;
   const resolved_step: ResolvedStep | null = resolution.resolved_step ?? null;
+  if (opts.onResolved) await opts.onResolved(spec);
 
   // Step 2: post-discovery cache lookup. Discovery now knows
   // spec.binary, which the pre-discovery lookup couldn't derive for
