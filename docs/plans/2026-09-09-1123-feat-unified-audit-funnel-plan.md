@@ -133,9 +133,9 @@ this plan is that machine.
 - R23. A website result page and a live CLI result page each carry a Re-audit control that behaves exactly like the
   entry form's submit (Turnstile loads on first interaction, the click acquires a token, stashes, and navigates to
   `/scoring?target=<target>`). The website control is disabled with a countdown until `freshness.refresh_after`. The CLI
-  control sends `refresh: true`, which re-runs the audit only when the source's latest release differs from the cached
-  `tool_version` and otherwise returns the cached result, saying so; the CLI meta line states the scored version, the
-  date, and "re-audits only when a newer release exists". Curated pages carry no control.
+  control sends `refresh: true`, which runs a fresh audit and replaces the cached result (KTD3); a branch page carries
+  the same control and its meta line names the scored commit; the CLI meta line states the scored version and date and
+  says that Re-audit runs a fresh audit. Curated pages carry no control.
 
 **Agents and representations**
 
@@ -204,7 +204,7 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
 | 4 | Waits through phases | Reassured by real progress, not a spinner | R8 heartbeat, phase list, check table |
 | 5 | Sees the result page | Rewarded: one number, one meter, grouped rows | U6 `.bigscore` head; the curated-reward line on registry hits |
 | 6 | Reads failing rows | Knows the next action | inline remediation, `/fix/<id>` pages |
-| 7 | Fixes and returns | Can prove the fix without retyping | R23 Re-audit control: countdown on website pages, release-gated on live CLI pages |
+| 7 | Fixes and returns | Can prove the fix without retyping | R23 Re-audit control: countdown on website pages, one click re-runs on CLI and branch pages |
 | 8 | Shares the URL or an agent reads it | Trusts that the twin and JSON match the page | R17, R18; `.md` and `.json` links in the meta line |
 | Failure | Hits a bounce or a wait state | Told why and what to do next, never blamed | R11; bounce panel with `cta`; wait-state countdown; Run again |
 
@@ -224,9 +224,9 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   not navigate.
 - AE10. **Covers R23.** Given `/score/anc.dev` was audited more than a minute ago, when the visitor clicks Re-audit,
   then a token is acquired on that click and the browser lands on `/scoring?target=anc.dev`, which streams a fresh run;
-  given it was audited ten seconds ago, then the control is disabled and counts down. Given `/score/ouch` is cached at
-  the tool's latest release, when the visitor clicks Re-audit, then the progress page reports that the cached result is
-  still the latest and forwards back without a sandbox run; given a newer release exists, then a fresh run streams.
+  given it was audited ten seconds ago, then the control is disabled and counts down. Given `/score/ouch` has a cached
+  result, when the visitor clicks Re-audit, then a fresh run streams and the page forwards to
+  `/score/ouch?v=<scored_at>`, whose address bar reads `/score/ouch` once the page loads.
 - AE4. **Covers R12, R16.** Given `rg` is the binary of curated `ripgrep`, when a client requests `/score/rg.json`, then
   it receives a 301 to `/score/ripgrep.json`.
 - AE5. **Covers R17, R18.** Given `anc.dev` has a cached website audit, when an agent fetches `/score/anc.dev.json` and
@@ -269,6 +269,10 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
 - The `MAX_INSTANCES` constant in `src/worker/score/orchestrate.ts` disagrees with the production container count in
   `wrangler.jsonc`; pre-existing, untouched here.
 - A WAF rate rule on `/score/*.json` as an operator lever if polling volume ever matters.
+- A release gate for CLI Re-audit (skip the sandbox when the registry's latest version is unchanged, comparing a
+  `latest_version` stored on the record at score time with discovery's current answer) and a commit gate for branch
+  snapshots (skip when the branch head equals the record's `source_sha`, behind the token, memoized); both were designed
+  in review and set aside in favor of the force re-run, whose exposure equals today's miss path.
 - Design, considered and deferred: a screen-reader-readable running countdown value (the wait state announces its start
   and end only); a fuller rethink of the instrument component layer through `/design-consultation` (U11 rewrites
   DESIGN.md §4.15 to present state instead). Considered and rejected: a determinate progress bar and an animated
@@ -326,32 +330,33 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
 - KTD3. **One `POST /api/score` endpoint, lane by target shape, one admission helper.** Body `{ target, turnstile_token,
   site_type?, public_listing?, refresh? }` with `Content-Type: application/json` required (a form-encoded or
   `text/plain` body is rejected, so CSRF defence does not rest on Turnstile alone); `?fromCache=false` survives as the
-  operator hatch. `refresh: true` (R23) is the visitor's bounded re-run: on the CLI lane with a cached record it passes
-  `admitTransact` like any transact, skips the pre-discovery cache tier, runs discovery (which already resolves the
-  latest release from GitHub `releases/latest`, crates.io, npm, or pypi), and dispatches the sandbox only when that
-  version differs from the cached `tool_version` (leading `v` stripped, exact string compare); an equal version or a
-  source with no resolvable version returns the cache hit with `freshness.latest_version` and `freshness.latest`
-  (`true`, or `null` when unresolvable), so one click costs a token and a discovery pass, and a sandbox run only on a
-  real release; on the website lane `refresh` is ignored (the one-minute staleness window already governs). Chosen over
-  two endpoints behind one admission helper: two endpoints put the lane-to-URL map in the progress page, a second place
-  the classifier's answer is spent, whereas one endpoint keeps lane a server decision so the operator hatch, the smoke
-  script, and the error vocabulary stay single. The cost is that the `tests/score-handler*` fixtures,
-  `scripts/smoke-api-score.sh`, and the `score.tier` telemetry row change shape in one PR (U4). Order per lane: parse
-  and classify; lane validation, where the website lane runs `validatePublicUrl` on the server-normalized
-  `https://<host>/` before any cache read (a cache read for a private host is a no-op, and nothing can have been written
-  for one); the unmetered registry and cache tiers; then `admitTransact`. `admitTransact` takes the lane and the cached
-  record and runs: lane kill switch; siteverify under a bounded deadline with an explicit verdict map: `rejected` and
-  `missing_token` are 403 `turnstile_failed`; timeout, transport failure, a non-2xx or malformed provider response, and
-  a missing secret are 503 `turnstile_unavailable` with `retry_after`; session mint or read; the session limiter keyed
-  on the normalized target; the IP limiter; one KV hourly window per lane, keyed `audit:<lane>:<ip>:<hour_bucket>`
-  through the web lane's bucket helper generalized with a lane argument (30 per hour per lane; the MCP website tool
-  keeps drawing from the web lane's bucket, so a CLI burst never locks out website audits). Fail-closed rules: deny when
-  `cf-connecting-ip` is absent, collapse IPv6 to a /48, treat a missing limiter or KV binding as
-  `service_misconfigured`. Kill-switch polarity is recorded, not unified: the CLI KV key absent means enabled while the
-  web var absent means disabled; only a missing binding fails closed on both. The web core keeps its
-  stale-serve-when-disabled behavior, the listing patch path, and the per-domain flip budget; the CLI core keeps the
-  GitHub accessibility probe. During Phase B the endpoint accepts both `input` and `target` body keys, and its
-  non-streaming JSON responses carry the legacy `share_url` and the nested registry-hit `scorecard.kind` and
+  operator hatch. `refresh: true` (R23) is a Turnstile-gated force re-run with the semantics of `?fromCache=false`: on
+  the CLI lane it passes `admitTransact` like any transact, skips both cache tiers, dispatches, and the Durable Object
+  overwrites the record and purges `cli:<target>`; it is ignored on a registry hit and on the website lane (the
+  one-minute staleness window governs there), and an in-flight target attaches instead of starting a second run (KTD14).
+  Branch-scoped targets are snapshots: the cache tier never serves a branch record, so every tokened branch-target POST
+  dispatches and a tokenless one answers the 403 that renders Start; the record is what `/score/<owner>/<repo>@<branch>`
+  renders, with the commit the sandbox cloned (`source_sha`). One click therefore costs a token, the limiters' budget,
+  and one sandbox run, the same exposure as today's miss path; a release gate and a commit gate that would skip the run
+  when nothing changed are deferred (Deferred to Follow-Up Work). Chosen over two endpoints behind one admission helper:
+  two endpoints put the lane-to-URL map in the progress page, a second place the classifier's answer is spent, whereas
+  one endpoint keeps lane a server decision so the operator hatch, the smoke script, and the error vocabulary stay
+  single. The cost is that the `tests/score-handler*` fixtures, `scripts/smoke-api-score.sh`, and the `score.tier`
+  telemetry row change shape in one PR (U4). Order per lane: parse and classify; lane validation, where the website lane
+  runs `validatePublicUrl` on the server-normalized `https://<host>/` before any cache read (a cache read for a private
+  host is a no-op, and nothing can have been written for one); the unmetered registry and cache tiers; then
+  `admitTransact`. `admitTransact` takes the lane and the cached record and runs: lane kill switch; siteverify under a
+  bounded deadline with an explicit verdict map: `rejected` and `missing_token` are 403 `turnstile_failed`; timeout,
+  transport failure, a non-2xx or malformed provider response, and a missing secret are 503 `turnstile_unavailable` with
+  `retry_after`; session mint or read; the session limiter keyed on the normalized target; the IP limiter; one KV hourly
+  window per lane, keyed `audit:<lane>:<ip>:<hour_bucket>` through the web lane's bucket helper generalized with a lane
+  argument (30 per hour per lane; the MCP website tool keeps drawing from the web lane's bucket, so a CLI burst never
+  locks out website audits). Fail-closed rules: deny when `cf-connecting-ip` is absent, collapse IPv6 to a /48, treat a
+  missing limiter or KV binding as `service_misconfigured`. Kill-switch polarity is recorded, not unified: the CLI KV
+  key absent means enabled while the web var absent means disabled; only a missing binding fails closed on both. The web
+  core keeps its stale-serve-when-disabled behavior, the listing patch path, and the per-domain flip budget; the CLI
+  core keeps the GitHub accessibility probe. During Phase B the endpoint accepts both `input` and `target` body keys,
+  and its non-streaming JSON responses carry the legacy `share_url` and the nested registry-hit `scorecard.kind` and
   `scorecard.scorecard_url` beside the envelope, because the deployed homepage still posts `input` and reads those
   fields until U8 lands; U13 removes all of them. MCP tools keep composing the lane cores directly with their own
   kill-switch and limiter checks, so three gate stacks exist (the endpoint's `admitTransact` and each MCP transact
@@ -383,37 +388,40 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   and Context docs). The non-sticky `getRandom` pool means the stream is the only channel; no second request can find
   the running instance.
 - KTD5. **One result envelope, one event union, one error object, all in `src/shared/`.** Envelope: `{ kind, tier,
-  target, scorecard_url, markdown_url, json_url, freshness: { cached, scored_at, refresh_after, latest_version?, latest?
-  }, spec_version, scorecard, ...lane metadata }` where `kind` is the lane and `tier` is `registry`, `cache`, or `live`,
-  set by whichever tier produced the result; the curated-reward line, the smoke and postflight assertions, and the
-  freshness semantics read `tier`, and a registry hit found after discovery arrives on the stream as `complete` with
-  `tier: 'registry'` and the curated `scorecard_url`; `markdown_url`, `json_url`, and `scorecard_url` are null only for
-  the curated-slug collision (KTD6), which then carries `summary_html`: the shared result body of U6 without the crumb,
-  the twin links, and the badge call-to-action, escaped by the same renderer. `refresh_after` is `scored_at` plus the
-  web staleness window for a website record, `scored_at` plus the seven-day `scores/` lifecycle for a live CLI record,
-  and null for a curated result; the website page's Re-audit countdown and the CLI page's re-score date (R23) read it.
-  The curated-slug shadow rule (KTD6) lives in the envelope builder, so no consumer, including `get_scorecard`'s cached
-  tier, can mint a URL that serves a different tool's page. The envelope carries no sandbox paths, stderr, or session
-  data. Events: `accepted`, `phase`, `discovery`, `check`, `heartbeat`, `complete` (envelope), `incomplete`, `bounce`,
-  `error`. Error object `{ error: { code, message, details?, retry_after?, pm?, cta } }` on every JSON error response
-  and inside `bounce` and `error` events; pre-dispatch failures (validation, gates, resolution bounces, rate limits) are
-  JSON with today's statuses, anything after `accepted` is an event. Consumers: `.json`, the `complete` event, MCP read
-  and transact tool results, the HTML and markdown renderers.
+  target, scorecard_url, markdown_url, json_url, freshness: { cached, scored_at, refresh_after }, spec_version,
+  scorecard, ...lane metadata }` (branch results add `source_sha`, the commit the sandbox cloned) where `kind` is the
+  lane and `tier` is `registry`, `cache`, or `live`, set by whichever tier produced the result; the curated-reward line,
+  the smoke and postflight assertions, and the freshness semantics read `tier`, and a registry hit found after discovery
+  arrives on the stream as `complete` with `tier: 'registry'` and the curated `scorecard_url`; `markdown_url`,
+  `json_url`, and `scorecard_url` are null only for the curated-slug collision (KTD6), which then carries
+  `summary_html`: the shared result body of U6 without the crumb, the twin links, and the badge call-to-action, escaped
+  by the same renderer. `refresh_after` is `scored_at` plus the web staleness window for a website record, `scored_at`
+  plus the seven-day `scores/` lifecycle for a live CLI record, and null for a curated result; the website page's
+  Re-audit countdown and the CLI page's re-score date (R23) read it. The curated-slug shadow rule (KTD6) lives in the
+  envelope builder, so no consumer, including `get_scorecard`'s cached tier, can mint a URL that serves a different
+  tool's page. The envelope carries no sandbox paths, stderr, or session data. Events: `accepted`, `phase`, `discovery`,
+  `check`, `heartbeat`, `complete` (envelope), `incomplete`, `bounce`, `error`. Error object `{ error: { code, message,
+  details?, retry_after?, pm?, cta } }` on every JSON error response and inside `bounce` and `error` events;
+  pre-dispatch failures (validation, gates, resolution bounces, rate limits) are JSON with today's statuses, anything
+  after `accepted` is an event. Consumers: `.json`, the `complete` event, MCP read and transact tool results, the HTML
+  and markdown renderers.
 - KTD6. **Result route order and collision policy.** `/score/<target>{,.md,.json}`: strip a representation suffix first;
   classify the remainder. Branch-scoped CLI (`owner/repo@branch`): R2 lookup under
-  `scores/<owner>/<repo>@<branch>/<SPEC_VERSION>.json`, else 404; the key keeps the
-  `scores/<target>/<SPEC_VERSION>.json` shape of a live binary, the `@` that no binary name can contain keeps the two
-  families apart, and the `scores/` prefix puts branch results under the existing 7-day lifecycle rule, so no new rule
-  is provisioned. Website: R2 lookup under the `https` key, else 404; records keyed under `http` become unreachable and
-  expire under the bucket lifecycle. CLI: consult the isolate-cached registry index first (one lookup, no build-order
-  dependency): a curated slug fetches the static asset and only status 200 counts as a hit (the assets binding's
-  404-page handling returns a body); a curated binary alias returns a 301 to the slug for all three representations;
-  anything else is an R2 live lookup, else 404. The route itself canonicalizes `.html` and trailing-slash forms so
-  host-shaped paths never reach the assets binding's rewriting. After discovery, a resolved binary that equals a curated
-  tool's binary is a registry hit (redirect to the curated page with the reward); a resolved binary that equals a
-  curated slug without being that tool's binary gets a null `scorecard_url` and the inline render (R9), the one result
-  without a URL. Chosen over asset-first dispatch, which costs an extra fetch on every live result and makes correctness
-  depend on no alias page surviving in `dist/`.
+  `scores/<owner>/<repo>@<branch>/<SPEC_VERSION>.json`, else 404; the key is `keyFor(targetOfSpec(spec), SPEC_VERSION)`,
+  the same `scores/<target>/<SPEC_VERSION>.json` shape as a live binary (one builder; `targetOfSpec` in the route module
+  returns the binary for package-manager and direct specs and `owner/repo@branch` for git-clone, and the route target,
+  the R2 key, the `cli:<target>` cache tag, and the KTD14 result pointer all derive from it), the `@` that no binary
+  name can contain keeps the two families apart, and the `scores/` prefix puts branch results under the existing 7-day
+  lifecycle rule, so no new rule is provisioned. Website: R2 lookup under the `https` key, else 404; records keyed under
+  `http` become unreachable and expire under the bucket lifecycle. CLI: consult the isolate-cached registry index first
+  (one lookup, no build-order dependency): a curated slug fetches the static asset and only status 200 counts as a hit
+  (the assets binding's 404-page handling returns a body); a curated binary alias returns a 301 to the slug for all
+  three representations; anything else is an R2 live lookup, else 404. The route itself canonicalizes `.html` and
+  trailing-slash forms so host-shaped paths never reach the assets binding's rewriting. After discovery, a resolved
+  binary that equals a curated tool's binary is a registry hit (redirect to the curated page with the reward); a
+  resolved binary that equals a curated slug without being that tool's binary gets a null `scorecard_url` and the inline
+  render (R9), the one result without a URL. Chosen over asset-first dispatch, which costs an extra fetch on every live
+  result and makes correctness depend on no alias page surviving in `dist/`.
 - KTD7. **Cache classes follow the sibling, and `.json` never sits in the day-long path-keyed class for live results.**
   A path predicate cannot tell a curated slug from a live binary, so the result route passes an explicit cache class and
   tag into `applyHeaders` for the tier it served: curated CLI pages HIT-1d with no tag (their build-emitted `.json`
@@ -430,9 +438,9 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   `isRepresentationPinned` (no twin rewrite, no `Vary`); `applyHeaders` emits a second `Link: rel="alternate";
   type="application/json"` beside the markdown one on HTML and twin responses of result pages. Because `.json` responses
   carry `Access-Control-Allow-Origin: *`, the route never reads or sets the session cookie, emits no `Set-Cookie`, and
-  its 404 body carries only `code`, `message`, and `audit_url`. Opted-out hosts (`public_listing: false`) are unlisted,
-  not private, as they are today. The gateway canonicalizes `Accept` on non-`/api/` GETs, so suffix selection is the
-  only workable shape.
+  its 404 body carries only `code`, `message`, `audit_url`, and `suggestions` (KTD6). Opted-out hosts (`public_listing:
+  false`) are unlisted, not private, as they are today. The gateway canonicalizes `Accept` on non-`/api/` GETs, so
+  suffix selection is the only workable shape.
 - KTD9. **One leaderboard page, the homepage's injection pattern.** `/scorecards` ships the static CLI board and a
   `{{WEB_BOARD_ROWS}}` region (one shared placeholder constant, pinned by a build test as the homepage pair is) that the
   Worker fills from the leaderboard aggregate (full board, `?view=all` from live R2), so the page is HIT-min with tag
@@ -529,7 +537,7 @@ heading, the subline, one `role=status` line, one body region, and one action ro
 | Posting   | `Auditing t…`    | "Queued…"                                                                                      | empty                                                                | none                                             |
 | Waiting   | `Audit t`        | "Verification is briefly unavailable. Retrying in NN s" (tabular numerals), then "Ready to retry" | empty                                                              | Start disabled until the countdown ends          |
 | Streaming | `Auditing t…`    | current phase name (CLI) or "N of M checks" (web); the subline keeps the expectation sentence                                              | phase list or check table; the active row carries an elapsed `NN s` counter | none                                      |
-| Hit       | `t audited`      | registry: the curated-reward line; cache: "Cached result from <scored_at>. Opening the scorecard."; a refresh that found no newer release: "vX is still the latest release; cached result from <scored_at>. Opening the scorecard." | empty | none; forwards after the 2 s floor |
+| Hit       | `t audited`      | registry: the curated-reward line; cache: "Cached result from <scored_at>. Opening the scorecard." | empty | none; forwards after the 2 s floor |
 | Done      | `t audited`      | "Opening the scorecard."                                                                       | completed rows, counter stopped                                      | none; `location.replace`                         |
 | Inline    | `t audited`      | "Done." with the subline "This name belongs to a curated tool; this result has no URL."        | the shared result body (KTD5 `summary_html`)                         | "Run again"; "Audit something else"              |
 | Failed    | `Audit t`        | lane-appropriate error text (R11)                                                              | bounce panel replaces the body region                                | "Run again"; "Audit something else"              |
@@ -894,11 +902,14 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Files:** create `src/shared/audit-routes.ts`; create `tests/audit-routes.test.ts`; create
   `tests/no-funnel-path-literals.test.ts`; modify `knip.json` only if the module is flagged.
 - **Approach:**
-  1. Export path builders, `classifyTarget`, `normalizeTarget`, `suggestTargets` (Damerau-Levenshtein over a candidate
-     list: distance at most 2 for targets of five or more characters, at most 1 below that, same lane only, top three by
-     distance then length, exact matches excluded), the reserved-name list (`scoring`, `scorecards`, `audit`, `fix`,
-     `api`), the representation-suffix stripper, the rejected-TLD list derived from the pinned-representation
-     extensions, and the always-MISS and HIT-min predicates as pure functions over a pathname.
+  1. Export path builders, `classifyTarget`, `normalizeTarget`, `targetOfSpec` (binary for package-manager and direct
+     specs, `owner/repo@branch` for git-clone; the one string the route, the R2 key, the cache tag, and the in-flight
+     pointer share), `suggestTargets` (Damerau-Levenshtein over a candidate list: distance at most 2 for targets of five
+     or more characters, at most 1 below that, same lane only, top three by distance then length, exact matches
+     excluded; candidates whose length differs from the input by more than the bound are skipped before any distance is
+     computed, and the scan stops once three distance-one matches exist), the reserved-name list (`scoring`,
+     `scorecards`, `audit`, `fix`, `api`), the representation-suffix stripper, the rejected-TLD list derived from the
+     pinned-representation extensions, and the always-MISS and HIT-min predicates as pure functions over a pathname.
   2. Classification and normalization follow the table in High-Level Technical Design; the GitHub branch peels
      `/tree/<branch>` and the `owner/repo@branch` form into the branch-scoped target; the website branch checks IP
      literals and `localhost` first, then requires at least one dot and applies the existing domain regex; the
@@ -922,7 +933,10 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
     yields `ripgrep` and `md`.
   - Reserved names cannot be produced as a `/score/<target>` path by the builder.
   - `suggestTargets('ripgrpe', [...])` returns `ripgrep` first; `suggestTargets('anc.dv', [...])` returns `anc.dev`; a
-    four-character target with two edits returns nothing; a host never suggests a slug.
+    four-character target with two edits returns nothing; a host never suggests a slug; the distance function is never
+    called for a candidate whose length differs by more than the bound (spy).
+  - `targetOfSpec` round trip: for a binary fixture and a git-clone fixture, the route target, `keyFor`, the
+    `cli:<target>` tag, and the KTD14 result pointer are one string.
   - The literal guard reports a fixture file containing `/web/scoring` as a warning in its default mode, fails on it in
     gate mode, and is silent on the module itself.
 - **Verification:** `bun test` green; the guard observed reporting a deliberate literal in warning mode and failing on
@@ -983,8 +997,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   3. Keep a per-target copy of the `entered_lane` and, after a collision's inline completion, the result body, both
      keyed by the normalized target; no in-flight marker lives in the tab (KTD14).
   4. Export one `startAudit(target, lane, listing, refresh)` click handler (lazy Turnstile load on first interaction,
-     acquire on the click, stash, navigate to `/scoring?target=`) that the entry form (U8) and the website result page's
-     Re-audit control (U6) both bind, so one gesture path exists.
+     acquire on the click, stash, navigate to `/scoring?target=`, with `&refresh=1` appended for a refresh click so
+     retries and reloads keep the intent) that the entry form (U8) and the website result page's Re-audit control (U6)
+     both bind, so one gesture path exists.
 - **Patterns to follow:** existing `stashTurnstileToken` and `takeTurnstileToken`; `buildAuditWebBody` omit rule.
 - **Test scenarios:**
   - Two submits before the first resolves issue one acquire and one POST (negative control: neutralizing the guard
@@ -1008,8 +1023,12 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   `src/worker/score/turnstile.ts` (bounded deadline, typed verdicts, the KTD3 verdict-to-status map); modify
   `src/worker/index.ts` dispatch; modify `src/worker/telemetry/log.ts` (`audit.request` scope); modify
   `scripts/smoke-api-score.sh` and the registry-hit assertion in `scripts/release/postflight.sh` (body key and hit
-  shape, via shell); create `tests/audit-api.test.ts`; modify `tests/score-handler.test.ts`,
-  `tests/web-audit-routes.test.ts`, `tests/wrangler-config.test.ts`, `tests/score-telemetry.test.ts`.
+  shape, via shell); modify `src/worker/score/validate.ts` (`owner/repo@branch` parses to `{ kind: 'github-url', owner,
+  repo, branch }` through `OWNER_RE`, `REPO_RE`, and `validBranchName`, sharing a fixture with U1's classifier); create
+  `tests/audit-api.test.ts`; modify `tests/score-handler.test.ts`, `tests/score-handler-branch-and-norelease.test.ts`
+  (the scenarios asserting that a branch URL bypasses R2 and gets no share URL become commit-gate scenarios),
+  `tests/score-validate.test.ts`, `tests/web-audit-routes.test.ts`, `tests/wrangler-config.test.ts`,
+  `tests/score-telemetry.test.ts`.
 - **Approach:**
   1. Require `Content-Type: application/json`; parse body accepting both `target` and `input` for Phase B; classify with
      U1; run lane validation, where the website lane's SSRF gate runs on the server-normalized origin before any cache
@@ -1022,10 +1041,10 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   4. Emit one `audit.request` log line per call through the emitter; the terminal fields for streamed runs are filled by
      the U5 consumer.
   5. Write the KV in-flight flag at `accepted` and delete it at the terminal line (KTD14).
-  6. `refresh: true` on the CLI lane (R23, KTD3): after `admitTransact`, run discovery, compare its resolved latest
-     version with the cached `tool_version`, dispatch only on a difference, otherwise answer the cache hit with
-     `freshness.latest_version` and `freshness.latest`; the `audit.request` row records `refresh: 'newer' | 'latest' |
-     'unknown'`.
+  6. `refresh: true` on the CLI lane (R23, KTD3): after `admitTransact`, skip both cache tiers and dispatch exactly as
+     `?fromCache=false` does; ignore the flag on a registry hit and on the website lane; an in-flight target attaches.
+     Branch-scoped targets never serve from the cache tier: a tokened branch-target POST dispatches, a tokenless one
+     answers 403. The `audit.request` row records `refresh: true` and the dispatch as `tier: 'live'`.
   7. Post-extraction shape (`handler.ts`): the CLI lane core owns only input validation, the unmetered registry and
      cache tiers, spec resolution, and the run; the GET path, siteverify, session, and limiter code leave it. Each lane
      core targets roughly 300 non-comment lines; anything beyond splits by responsibility.
@@ -1052,10 +1071,13 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - A rate-limited request returns JSON with `retry_after` and never opens a stream; exhausting the CLI lane's hourly
     window leaves the website lane's window untouched for the same IP.
   - `?fromCache=false` skips both cache tiers and still consults the registry.
-  - `refresh: true` with a cached record whose `tool_version` equals the discovered latest version returns the hit with
-    `freshness.latest: true` and dispatches nothing; with an older `tool_version` it dispatches one run; when discovery
-    resolves no version it returns the hit with `freshness.latest: null`; without a valid token it is 403 like any
-    transact; on the website lane it changes nothing.
+  - `refresh: true` with a cached binary record skips both cache tiers, dispatches one run, and the DO overwrites the
+    record; without a valid token it is 403 like any transact.
+  - `refresh: true` is a no-op on a registry hit and on the website lane; on an in-flight target it attaches (one run).
+  - A tokened branch-target POST with an existing snapshot still dispatches; a tokenless one answers 403 and reads no
+    R2.
+  - `owner/repo@feature/x` validates to `github-url` with `branch: 'feature/x'`; `o/r@..` and `o/r@` are rejected; the
+    classifier fixture and the validator fixture agree.
   - Bodies with `input` and with `target` both succeed during Phase B, and a registry hit's JSON body carries the
     envelope with `tier: 'registry'` plus the legacy nested fields the deployed homepage reads.
   - A 129-character target is rejected with the shared error object before classification; 128 characters pass.
@@ -1079,14 +1101,24 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Files:** modify `src/worker/score/do.ts`, `src/worker/score/sandbox-exec.ts`, `src/worker/score/orchestrate.ts`,
   `src/worker/score/cache.ts` (branch key builder), `src/worker/audit/api.ts`, `src/worker/audit-web/hit-min-purge.ts`
   (purge RPC callable from the DO), `wrangler.jsonc` (`enable_request_signal` compatibility flag in both environments);
-  modify `tests/score-do.test.ts`, `tests/worker-score-orchestrate.test.ts`, `tests/score-telemetry.test.ts`,
-  `tests/wrangler-config.test.ts` (pins the flag); create `tests/score-stream.test.ts`.
+  modify `tests/score-do.test.ts`, `tests/score-do-cache-write.test.ts` (the git-clone skip scenario becomes the
+  branch-key write with `source_sha`), `tests/score-cache.test.ts` (`keyFor` takes a target),
+  `tests/worker-score-orchestrate.test.ts`, `tests/score-telemetry.test.ts`, `tests/wrangler-config.test.ts` (pins the
+  flag); create `tests/score-stream.test.ts`.
 - **Approach:**
   1. `runScore` accepts an `onPhase` callback and calls it at the five phase boundaries; `do.ts` writes each phase and
      the final result as NDJSON lines into a `TransformStream` and returns its readable side immediately; the R2 write
-     still precedes the result line, a git-clone spec writes under the branch key instead of skipping the write, and the
-     Durable Object queues the `cli:<target>` purge (binary or `owner/repo@branch`) through `ctx.exports.Cached` right
-     after that write.
+     still precedes the result line; a git-clone spec writes under `keyFor(targetOfSpec(spec), SPEC_VERSION)` instead of
+     skipping the write, with `source_sha` (the sandbox script prints `git rev-parse HEAD` after the clone and the
+     result line carries it) on the record; the write precondition is per family: `tool_version` for a binary record and
+     `source_sha` for a branch record (`CachedScorecard` gains optional `source_sha`, `isCachedScorecard` and
+     `cache.put` accept the per-family shape, and a binary record without a version or a branch record without a SHA is
+     refused and logged `no_tool_version` or `no_source_sha`, since a source run may report no `tool.version`); and the
+     Durable Object queues the `cli:<target>` purge through `ctx.exports.Cached` right after that write. Four
+     in-function narratives that describe the old skip are rewritten to the present rule in the same PR: the `do.ts`
+     cache-write block, the `orchestrate.ts` post-discovery skip, the `handler.ts` branch-skips-tiers block, and the
+     `GitCloneInstall.binary` doc in `discover-binary.ts`; `rg -n 'skip the cache write|intentionally one-off'
+     src/worker/score` must return nothing.
   2. `runFreshOnly` reads the DO body line by line, treats a body that is exactly one JSON object as the result line,
      forwards phases to the optional callback, and returns the final result; a stream that closes without a result line
      resolves to `incomplete_response_contract`.
@@ -1094,7 +1126,8 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      while no line has arrived, holds the relay deadline through the body read, emits the terminal telemetry from the
      consumer, listens on `request.signal` and on abort stops heartbeats and records `client_gone` with the elapsed time
      (the platform cancels the relay 30 s after a disconnect). The purge is not the relay's job: `do.ts` queues the
-     `cli:<binary>` purge through `ctx.exports.Cached` right after its R2 write, logging a failed RPC without throwing.
+     `cli:<target>` purge (`targetOfSpec(spec)` is the only source of the tag) through `ctx.exports.Cached` right after
+     its R2 write, logging a failed RPC without throwing.
   4. Header contracts: rewrite the narratives at the top of `src/worker/score/do.ts` and
      `src/worker/score/orchestrate.ts` to describe only the present stream contract.
 - **Execution note:** Keep the two-phase egress ordering test (`tests/score-do.test.ts` scenario b) green throughout;
@@ -1106,10 +1139,13 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
     then a result; the client stream contains `resolving` and then those five in that order followed by `complete`.
   - MCP `score_cli` through `runFreshOnly` with no callback returns the same result object as before; the purge is
     observed from the DO stub, not the caller.
-  - The DO stub calls the purge RPC with `cli:<binary>` after its R2 write; a purge RPC failure is logged and the result
-    line still follows.
-  - A git-clone spec writes `scores/o/r@feature/<SPEC_VERSION>.json` and purges `cli:o/r@feature`; a binary spec still
-    writes `scores/<binary>/<SPEC_VERSION>.json` and never the branch key.
+  - The DO stub calls the purge RPC with `cli:<target>` after its R2 write for a binary spec and for a git-clone spec; a
+    purge RPC failure is logged and the result line still follows.
+  - A git-clone spec writes `scores/o/r@feature/<SPEC_VERSION>.json` with `source_sha` equal to the SHA the sandbox stub
+    printed and purges `cli:o/r@feature`; a binary spec still writes `scores/<binary>/<SPEC_VERSION>.json` with no
+    `source_sha` and never the branch key; a git-clone result line without a SHA is not written and one whose scorecard
+    has no `tool.version` is still written (per-family precondition); a binary result without `tool.version` is still
+    refused.
   - An aborted `request.signal` stops heartbeats within one tick and records `client_gone` with elapsed ms as the
     `audit.request` terminal outcome.
   - A one-object JSON body (old DO) resolves to the result without an error.
@@ -1140,7 +1176,10 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 - **Approach:**
   1. Dispatch per KTD6: suffix strip, classify, a branch-scoped target straight to its R2 key, otherwise registry index
      first, curated asset only on status 200, alias 301, R2 live, 404; the route canonicalizes `.html` and
-     trailing-slash forms itself.
+     trailing-slash forms itself. A `?v=` query is ignored for rendering and makes the route pass the `miss` class
+     (`no-store`, no tag, no edge copy), so the progress page's forward after a fresh run
+     (`scorecard_url?v=<scored_at>`) never lands on a stale edge copy; the page's client replaces the URL with the bare
+     one on load, and `rel=canonical` and the twin links stay bare.
   2. `.json` responses go through `applyHeaders` with `application/json` and the class and tag of the tier that served
      them, never touch the session cookie, and set no cookie; HTML and `.md` render from the same envelope. Every
      `/score/<target>` page opens with one shared spine: the `Leaderboard ›` crumb, a mono h1 naming the target with a
@@ -1149,22 +1188,28 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
      The freshness segment is lane-aware (R23): a website page ends it with a `.btn--ghost` Re-audit control bound to
      U3's `startAudit`, rendered `aria-disabled` (never `disabled`) with the tabular countdown "Re-audit in NN s" in an
      `aria-hidden` span until `refresh_after` (an absolute timestamp in a data attribute, so an edge-cached copy still
-     counts correctly) and enabled after it; a live CLI page states "Scored vX on <date>. Re-audits only when a newer
-     release exists." and carries the same control, enabled, whose click passes `refresh: true` to `startAudit`; a
-     curated page carries no control; the sitekey meta ships only on pages that carry the control. Below the spine the
-     two lanes converge on one result design with lane-specific content: a `.bigscore` head with the headline numeral
-     and meter (relative for websites, with the global score as the secondary numeral), then grouped rows (P1 to P8
-     principles for CLIs, C1 to C5 categories for websites) each rendered as `.pscore__row`-style rows with a `.stpill`
-     status and inline remediation on non-pass rows; the web `.catcard` and `.scorecard-hero` treatments retire in favor
-     of that shared body. Motion: the `.bigscore` meter fills from the empty track to its value once on first paint (600
-     ms on the site's ease-out curve, numeral static); the grouped rows do not animate; the global reduced-motion block
-     makes the fill inert.
+     counts correctly) and enabled after it; a live CLI page states "Scored vX on <date>. Re-audit runs a fresh audit."
+     and carries the same control, enabled, whose click passes `refresh: true` to `startAudit`; a branch page states
+     "Scored at <short source_sha> on <date>. Re-audit runs a fresh audit." and carries the control enabled; a curated
+     page carries no control; the website control's click handler is a no-op before `refresh_after` (`aria-disabled` is
+     the visual state; the handler owns the deadline); `deriveShareBinaryFromSpec` and `shareUrlForSpec` in `handler.ts`
+     are deleted, every URL deriving from `targetOfSpec` and the envelope builder; the sitekey meta ships only on pages
+     that carry the control. Below the spine the two lanes converge on one result design with lane-specific content: a
+     `.bigscore` head with the headline numeral and meter (relative for websites, with the global score as the secondary
+     numeral), then grouped rows (P1 to P8 principles for CLIs, C1 to C5 categories for websites) each rendered as
+     `.pscore__row`-style rows with a `.stpill` status and inline remediation on non-pass rows; the web `.catcard` and
+     `.scorecard-hero` treatments retire in favor of that shared body. Motion: the `.bigscore` meter fills from the
+     empty track to its value once on first paint (600 ms on the site's ease-out curve, numeral static); the grouped
+     rows do not animate; the global reduced-motion block makes the fill inert.
   3. 404 bodies per representation: HTML and `.md` carry one sentence ("No audit exists for `t` yet.") and one "Audit
      `t`" link to `/audit?lane=<lane>&target=<t>`, never the form or a sitekey; when U1's `suggestTargets` returns
      matches they follow as a "Did you mean?" list of links to `/score/<match>`; `.json` returns `{ error: { code:
      'not_found', message }, audit_url, suggestions: [{ target, scorecard_url }] }` and nothing else. Candidates come
      from the isolate-cached registry index (slugs and binaries) for a CLI-shaped target and from the seed list plus the
-     leaderboard aggregate's publicly listed hosts for a host-shaped target, so a 404 costs at most one aggregate read.
+     leaderboard aggregate's publicly listed hosts for a host-shaped target; the host candidate list is memoized in the
+     isolate for 60 s beside the registry-index cache, so a burst of 404s reads the aggregate once; a null aggregate
+     (absent, unparseable, or corrupted, which `getAggregate` already maps to null) yields seed-only candidates, is
+     logged once, and never changes the 404 status or body shape.
   4. The curated `.json` emit wraps the committed scorecard in the envelope at build time so `get_scorecard` can read it
      through the assets binding.
   5. The `.json` route reads the KV in-flight flag before any R2 read and answers 202 `no-store` while it exists
@@ -1189,6 +1234,9 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - A never-audited CLI target and website target return the lane-appropriate 404 in all three representations, `.json`
     carrying only `code`, `message`, `audit_url`, and `suggestions`; `/score/ripgrpe` lists `ripgrep` under "Did you
     mean?" in HTML, the twin, and `suggestions`; a 404 body contains no form, no sitekey meta, and no transact script.
+  - With `getAggregate` returning null, a host-shaped 404 still renders 404 with seed-only suggestions and one log line;
+    two host-shaped 404s inside 60 s read the aggregate once (spy).
+  - A branch page's meta line names the short `source_sha` and carries the enabled Re-audit control.
   - A `.json` request carrying a session cookie receives no `Set-Cookie` and no `Vary`.
   - While the in-flight flag exists, `.json` answers 202 with `in_progress`, `started_at`, and `Cache-Control:
     no-store`, and performs no R2 read.
@@ -1199,8 +1247,11 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
   - The meter fill is the page's only animation and is inert under `prefers-reduced-motion` (computed
     `animation-duration` at or below 0.01 ms).
   - At 390, 768, and 1440 px the spine matches its responsive contract row (screenshots).
-  - Clicking Re-audit after `refresh_after` acquires a token, stashes, and navigates to `/scoring?target=<host>` (AE10,
-    e2e); before it the control is disabled and counts down.
+  - Clicking Re-audit after `refresh_after` acquires a token, stashes, and navigates to
+    `/scoring?target=<host>&refresh=1` (AE10, e2e); before it the control counts down and a click acquires nothing,
+    stashes nothing, and does not navigate.
+  - `/score/anc.dev?v=123` renders the same body as the bare URL with `Cache-Control: no-store` and no `Cache-Tag`;
+    after load the address bar reads `/score/anc.dev`.
 - **Verification:** `bun run build` then `bun test`; staging `curl -H 'Accept: text/html'`, `.md`, and `.json` for one
   target of each kind.
 
@@ -1316,15 +1367,16 @@ Design.
      `turnstile_unavailable` (Start disabled, the status line "Verification is briefly unavailable. Retrying in NN s"
      counting down in tabular numerals, then "Ready to retry" with Start enabled), an elapsed `NN s` counter beside the
      active phase or check row that stops at the terminal line, the cache-hit line "Cached result from <scored_at>.
-     Opening the scorecard." (or, after a refresh that found no newer release, "vX is still the latest release; cached
-     result from <scored_at>. Opening the scorecard.") and the curated-reward line during the 2 s floor, the stashed
-     `refresh` flag forwarded on the POST, the Start state showing the normalized target, the lane, and the lane's
-     expectation sentence (CLI: "Installs the tool in a sandbox; usually under a minute."; website: "Usually a few
-     seconds."), which the subline keeps beside the counter while streaming, the reclassification line when the stash's
-     entered lane differs from the classified lane, `document.title` mirroring the h1's three states with the site's
-     suffix ("Audit t", "Auditing t…", "t audited" or "t: audit failed"), the action row ("Run again", which is Start
-     relabeled and acquires a fresh token, beside "Audit something else") under every terminal state, and a
-     session-storage copy of a collision's inline body restored before Start on a same-tab refresh.
+     Opening the scorecard." and the curated-reward line during the 2 s floor, the `refresh` flag read from the
+     `refresh=1` query on load and on every Start or Run again gesture and forwarded on the POST (the stash carries a
+     copy for the first request; a tokenless probe never sends it), `location.replace` to `scorecard_url` with
+     `?v=<scored_at>` after a fresh run and bare after a hit, the Start state showing the normalized target, the lane,
+     and the lane's expectation sentence (CLI: "Installs the tool in a sandbox; usually under a minute."; website:
+     "Usually a few seconds."), which the subline keeps beside the counter while streaming, the reclassification line
+     when the stash's entered lane differs from the classified lane, `document.title` mirroring the h1's three states
+     with the site's suffix ("Audit t", "Auditing t…", "t audited" or "t: audit failed"), the action row ("Run again",
+     which is Start relabeled and acquires a fresh token, beside "Audit something else") under every terminal state, and
+     a session-storage copy of a collision's inline body restored before Start on a same-tab refresh.
   3. Progress rows, both lanes: `.pscore__row`-style rows (mono id holding the phase name or check id, title,
      `.stpill`); the active row's pill reads "running" in outline `currentColor` and its trailing slot holds the elapsed
      `NN s` counter in tabular mono; a completed row's pill flips to `--pass`, `--warn`, `--fail`, or `--na`; no
@@ -1351,8 +1403,8 @@ Design.
     (AE1).
   - A JSON body or `complete` event with `tier: 'registry'` shows the reward line and replaces location after no less
     than 2 s.
-  - `complete` with a branch-scoped `scorecard_url` forwards to `/score/o/r@feature` (AE3); `complete` without
-    `scorecard_url` renders the inline result body under the no-URL subline and does not navigate (AE9).
+  - `complete` with a branch-scoped `scorecard_url` forwards to `/score/o/r@feature?v=<scored_at>` (AE3); `complete`
+    without `scorecard_url` renders the inline result body under the no-URL subline and does not navigate (AE9).
   - A 503 `turnstile_unavailable` renders the wait state, sends no further request until `retry_after` elapses, and
     never says verification failed (AE8); the countdown reaches zero, the line reads "Ready to retry", and Start is
     enabled only then.
@@ -1378,6 +1430,9 @@ Design.
     `document.activeElement` is the h1.
   - At 390, 768, and 1440 px the page matches its responsive contract row (screenshots).
   - `document.title` changes with the h1 on Start, on `accepted`, and on each terminal state, and never per phase.
+  - A reload after a wait state on `/scoring?target=t&refresh=1` re-POSTs with `refresh: true`; a plain
+    `/scoring?target=t` never does.
+  - After a fresh run the forward target carries `?v=<scored_at>`; after a registry or cache hit it is bare.
 - **Verification:** `bun test`; `web-audit` and `homepage-score-live` e2e projects against staging, two consecutive
   green runs.
 
@@ -1607,6 +1662,7 @@ Design.
 | Retired paths         | for each R20 path: `curl -sSI -o /dev/null -w '%{http_code} %{redirect_url}\n'` prints `404` with an empty redirect; run after the propagation settle probe, without `--retry-all-errors`                                                                                                                                                             | U13                                                                  |
 | Sitemap walk          | every `<loc>` in `$ENV_URL/sitemap.xml` fetched with `Accept: text/html` and `--retry-all-errors` returns 200, after the rescore instance completes                                                                                                                                                                                                   | U11, release                                                         |
 | Deploy smoke | `dev` push deploy green including `scripts/smoke-api-score.sh` and the MCP smoke; job-level check `gh run view <run-id> --json jobs --jq '.jobs[] \| {name, conclusion}'` all `success` | U4, U13 |
+| Branch snapshot, staging | resubmit a branch URL whose record exists; a fresh run streams and `/score/<owner>/<repo>@<branch>.json` reports a newer `scored_at` and the cloned `source_sha` | U4, U5 |
 | Rollback rehearsal    | `wrangler rollback --env staging` to the pre-U13 version, old routes render from unchanged R2, roll forward, `postflight.sh --env staging all` green                                                                                                                                                                                                  | release                                                              |
 | Release preflight     | `scripts/release/preflight.sh all` before the production cut                                                                                                                                                                                                                                                                                          | release                                                              |
 
@@ -1653,20 +1709,20 @@ and the timer-driven phase test), `scripts/release/preflight.sh` and `postflight
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
 | Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (PLAN) | 20 issues, 0 critical gaps open (1 flagged, resolved in-plan as the registry-index 503 path); predates the design-review deltas below |
-| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR (FULL) | score: 6/10 → 9/10, 22 decisions; branch result pages, Re-audit control (countdown on web, release-gated on CLI), progress state table, responsive and live-region contracts, 404 did-you-mean |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 2 | CLEAR (PLAN) | first pass: 20 issues, 0 critical gaps; re-review of the design-review deltas: 10 issues, 0 critical gaps, all folded |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR (FULL) | score: 6/10 → 9/10, 22 decisions; branch result pages, Re-audit control, progress state table, responsive and live-region contracts, 404 did-you-mean |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
-| Outside Voice | `codex-plan-review` | Different-context read | 1 | issues found (Claude subagent, same model family) | 10 findings: 6 accepted, 3 kept, 1 escalated into U14 |
+| Outside Voice | `codex-plan-review` | Different-context read | 2 | issues found (Claude subagent, same model family) | first pass: 10 findings, 6 accepted; re-review: 10 findings, 8 accepted, 1 kept (branch pages), 1 superseded by the step-back |
 
-- **CROSS-MODEL:** the outside voice was a Claude subagent with fresh context, not a different provider (Codex is not
-  installed and the Grok route fails). Accepted: in-flight keying by input and result with a tokenless read tier
-  (KTD14), the result route injecting its cache class (KTD7), the U9-before-U8 edges, three-stack gate parity (KTD3),
-  the mixed-version wording (KTD4), and the `/audit` query demotion (KTD7). Kept: one `POST /api/score`, the phased
-  build order, the 128-character bound. Its duplicate-run concern became the job Durable Object with single-flight
-  attach (KTD15, U14). The design review's outside voice (a Claude subagent) surfaced the eight state-coverage gaps that
-  Pass 2 closed.
-- **VERDICT:** ENG + DESIGN CLEARED — ready to implement; the eng review predates the design-review deltas (branch
-  result key family, `refresh: true` release-gated re-run, `suggestTargets`, the Re-audit transact control on result
-  pages), so re-run `/plan-eng-review` scoped to those before U4 to U6 start.
+- **CROSS-MODEL:** both outside voices were Claude subagents with fresh context, not a different provider (Codex is not
+  installed and the Grok route fails). Re-review: accepted the tokened-only ordering, the per-family write precondition
+  (`tool_version` for binaries, `source_sha` for branches), the `?v=<scored_at>` forward after a fresh run with the miss
+  class, `refresh=1` in the progress page query, the KTD8 404 body naming `suggestions`, the website handler's no-op
+  before `refresh_after`, and `targetOfSpec` as the only source of the purge tag. Kept branch result pages (the
+  reopenable, shareable branch scorecard is the requirement). The release gate and the commit gate, with their memos,
+  comparator, and deferred charging, were designed and then set aside (D19): `refresh: true` is a Turnstile-gated force
+  re-run with the operator hatch's semantics, and branch results are snapshots.
+- **VERDICT:** ENG + DESIGN CLEARED — ready to implement. The design review predates the step-back on Re-audit
+  (countdown on website pages unchanged; CLI and branch pages now always re-run), a copy change only.
 
 NO UNRESOLVED DECISIONS
