@@ -14,6 +14,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
+import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import {
@@ -414,9 +415,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // Live-scoring routes. Sits ABOVE the asset call so the asset-first
-  // invariant for everything else (every other path proxies to
-  // env.ASSETS) is preserved by exclusion, not by overlap.
+  // The transact endpoint for both audit lanes. A POST to the bare path
+  // is the unified endpoint; the GET read path and the suffixed
+  // representations stay on the legacy handler until they retire.
+  if (isAuditApiPath(pathname) && request.method === 'POST') {
+    return handleAuditApi(request, env as AuditApiEnv, ctx);
+  }
   if (isScorePath(pathname)) {
     return handleScore(request, env as ScoreEnv);
   }

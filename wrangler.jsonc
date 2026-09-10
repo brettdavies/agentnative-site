@@ -16,7 +16,9 @@
   // surface for surfaces that actually serve. Public egress is also the
   // correct vantage point for an agent-readiness audit. External fetches
   // (package installs, github) already go public, so they are unaffected.
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // `enable_request_signal` exposes the incoming request's abort signal to
+  // the Worker, so a streaming relay can observe a client disconnect.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public", "enable_request_signal"],
   // Project-scoped opt-out of wrangler telemetry. Travels with the repo so
   // CI runs and contributor invocations stay opted out regardless of
   // per-user `WRANGLER_SEND_METRICS` or per-machine `wrangler telemetry

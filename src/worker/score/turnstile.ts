@@ -1,30 +1,33 @@
-// Cloudflare Turnstile siteverify wrapper.
+// Cloudflare Turnstile siteverify wrapper. The Worker POSTs the client's
+// token (with the secret) to challenges.cloudflare.com under a bounded
+// deadline and reports a typed verdict. Two verdict classes matter to
+// callers: the visitor's token was refused (`missing_token`, `rejected`),
+// or verification itself could not be completed (`timeout`,
+// `transport_error`, `malformed`), which is the provider's problem and
+// must never be reported to the visitor as their failure.
 //
-// Plan U5 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// "Cost ceiling and abuse mitigation" step 1 + U5 handler step 4): the U8
-// form submits a `turnstile_token` in the POST body. The Worker POSTs it
-// (with the secret) to challenges.cloudflare.com/turnstile/v0/siteverify.
-// Failure → 400 with `turnstile_failed`. Success → caller may set the
-// session cookie.
-//
-// Invisible-mode (no checkbox) + lazy-load are U8 client-side decisions;
-// this module only validates whatever token the client sends.
+// Invisible mode and lazy loading are client-side decisions; this module
+// only validates whatever token the client sends.
 
 const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
+/** Siteverify answers in well under a second; anything past this is an outage, not a slow answer. */
+export const SITEVERIFY_TIMEOUT_MS = 5_000;
 
 export type TurnstileEnv = {
   TURNSTILE_SECRET?: string;
 };
 
-export type VerifyResult =
-  | { ok: true }
-  | { ok: false; reason: 'misconfigured' | 'missing_token' | 'rejected' | 'transport_error' };
+export type VerifyRejection = 'missing_token' | 'rejected';
+export type VerifyUnavailable = 'timeout' | 'transport_error' | 'malformed';
 
-export class TurnstileConfigError extends Error {
-  constructor() {
-    super('TURNSTILE_SECRET not configured');
-    this.name = 'TurnstileConfigError';
-  }
+export type VerifyResult = { ok: true } | { ok: false; reason: 'misconfigured' | VerifyRejection | VerifyUnavailable };
+
+export type VerifyReason = 'misconfigured' | VerifyRejection | VerifyUnavailable;
+
+/** True for the verdicts that mean verification could not be completed rather than that the token was refused. */
+export function isVerifyUnavailable(reason: VerifyReason): reason is VerifyUnavailable {
+  return reason === 'timeout' || reason === 'transport_error' || reason === 'malformed';
 }
 
 export type VerifyOpts = {
@@ -32,6 +35,8 @@ export type VerifyOpts = {
   fetcher?: typeof fetch;
   /** Remote IP from the request (CF-Connecting-IP); optional but Cloudflare-recommended. */
   remoteIp?: string;
+  /** Deadline for the siteverify call; defaults to SITEVERIFY_TIMEOUT_MS. */
+  timeoutMs?: number;
 };
 
 export async function verifyTurnstile(
@@ -48,15 +53,32 @@ export async function verifyTurnstile(
   body.set('response', token);
   if (opts.remoteIp) body.set('remoteip', opts.remoteIp);
 
-  let res: Response;
+  // The deadline is raced as well as signalled: a fetcher that ignores
+  // the abort signal must still resolve to a timeout verdict.
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve('timeout');
+    }, opts.timeoutMs ?? SITEVERIFY_TIMEOUT_MS);
+  });
+  const attempt = (async (): Promise<VerifyResult> => {
+    let res: Response;
+    try {
+      res = await fetcher(SITEVERIFY_URL, { method: 'POST', body, signal: controller.signal });
+    } catch {
+      return { ok: false, reason: controller.signal.aborted ? 'timeout' : 'transport_error' };
+    }
+    if (!res.ok) return { ok: false, reason: 'transport_error' };
+    const parsed = (await res.json().catch(() => null)) as { success?: boolean } | null;
+    if (!parsed || typeof parsed.success !== 'boolean') return { ok: false, reason: 'malformed' };
+    return parsed.success ? { ok: true } : { ok: false, reason: 'rejected' };
+  })();
   try {
-    res = await fetcher(SITEVERIFY_URL, { method: 'POST', body });
-  } catch {
-    return { ok: false, reason: 'transport_error' };
+    const outcome = await Promise.race([attempt, deadline]);
+    return outcome === 'timeout' ? { ok: false, reason: 'timeout' } : outcome;
+  } finally {
+    clearTimeout(timer);
   }
-  if (!res.ok) return { ok: false, reason: 'transport_error' };
-
-  const parsed = (await res.json().catch(() => null)) as { success?: boolean } | null;
-  if (!parsed || parsed.success !== true) return { ok: false, reason: 'rejected' };
-  return { ok: true };
 }

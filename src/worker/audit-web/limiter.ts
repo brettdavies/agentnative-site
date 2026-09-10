@@ -17,9 +17,12 @@ const HOURLY_KV_TTL_SECONDS = 7200;
 // needs. The window is the same fixed hour the audit ceiling uses.
 const FLIP_CEILING = 5;
 
-// Fixed-hour KV counter shared by both budgets: read the current bucket
-// count, refuse at the ceiling, otherwise increment under the shared TTL.
-async function consumeHourlyBucketBudget(
+/**
+ * Fixed-hour KV counter behind every hourly budget: read the current
+ * bucket count, refuse at the ceiling, otherwise increment under the
+ * shared TTL. The key is `<prefix>:<id>:<hour bucket>`.
+ */
+export async function consumeHourlyBucketBudget(
   kv: KVNamespace,
   prefix: string,
   id: string,

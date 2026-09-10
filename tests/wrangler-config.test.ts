@@ -45,6 +45,14 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
   const config = loadWranglerConfig();
   const staging = getStagingEnv(config);
 
+  test('compatibility_flags carries enable_request_signal (the request abort signal a streaming relay observes)', () => {
+    const flags = config.compatibility_flags as string[];
+    expect(flags).toContain('enable_request_signal');
+    // compatibility_flags is inheritable; a staging override must not drop it.
+    const stagingFlags = staging.compatibility_flags as string[] | undefined;
+    if (stagingFlags) expect(stagingFlags).toContain('enable_request_signal');
+  });
+
   test('env.staging.routes is explicitly set to an empty array (prevents anc.dev inheritance)', () => {
     expect(staging.routes).toBeDefined();
     expect(Array.isArray(staging.routes)).toBe(true);
@@ -132,6 +140,18 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
     expect(staging.kv_namespaces).toBeDefined();
     const bindings = (staging.kv_namespaces as Array<Record<string, unknown>>).map((b) => b.binding);
     expect(bindings).toContain('SCORE_KV');
+  });
+
+  test('every limiter and KV binding the admission helper reads exists in both environments', () => {
+    const limiterNames = (list: unknown) => (list as Array<Record<string, unknown>>).map((r) => r.name);
+    const kvNames = (list: unknown) => (list as Array<Record<string, unknown>>).map((b) => b.binding);
+    for (const env of [config, staging]) {
+      const limiters = limiterNames(env.ratelimits);
+      for (const name of ['SCORE_LIMITER', 'SCORE_LIMITER_IP', 'WEB_AUDIT_LIMITER', 'WEB_AUDIT_LIMITER_IP']) {
+        expect(limiters).toContain(name);
+      }
+      expect(kvNames(env.kv_namespaces)).toContain('SCORE_KV');
+    }
   });
 
   test('env.staging.ratelimits declares both SCORE_LIMITER and SCORE_LIMITER_IP', () => {

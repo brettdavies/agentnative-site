@@ -10,14 +10,13 @@
 //      response triad (spec_version + auditor_url; anc_version is
 //      success-only).
 //
-//   2. github-url with an explicit branch (`/tree/<branch>`). Per
-//      b295e3b: branch-scoped inputs ALWAYS skip the curated + cache
-//      tiers and go straight to live scoring. The cache write after
-//      the live run is also skipped (do.ts) because caching under the
-//      bare binary name would clobber the default-branch scorecard.
-//      Two contract checks: branch URL on an uncurated repo runs live;
-//      branch URL on a CURATED repo also runs live (curated cross-check
-//      is skipped when branch is set).
+//   2. github-url with an explicit branch (`/tree/<branch>`). A branch
+//      target is a snapshot: it never serves from the curated or cache
+//      tiers and always runs live, on an uncurated repo and on a curated
+//      one alike. The legacy `/score/live/<binary>` surface cannot serve
+//      a branch result, so this handler's response carries no
+//      `share_url` for it; the unified endpoint's branch result URL is
+//      pinned in tests/audit-api.test.ts.
 //
 // All tests mock at the DO boundary using the same Sandbox['fetch']
 // stub shape score-handler.test.ts uses, so any future Sandbox class
@@ -398,7 +397,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     });
   });
 
-  test('branch URL on uncurated repo → live DO dispatched, NO share_url on response', async () => {
+  test('branch URL on uncurated repo → live DO dispatched; the legacy response carries no share_url', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,
@@ -437,7 +436,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     // NOT registry_hit — branch-scoped inputs never wear the curated kind.
     expect(body.scorecard.kind).toBeUndefined();
     expect(body.scorecard.tool.name).toBe('gping');
-    // Branch-scoped inputs never get a share URL (per deriveShareBinary).
+    // The legacy live surface cannot serve a branch snapshot.
     expect(body.share_url).toBeUndefined();
     // Response triad on success.
     expect(body.spec_version).toBeTruthy();
@@ -482,16 +481,14 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.scorecard.scorecard_url).toBeUndefined();
     expect(body.scorecard.tool.name).toBe('ripgrep');
     expect(body.scorecard.score?.value).toBe(88);
-    // No share_url — branch-scoped, even for curated.
+    // The legacy live surface cannot serve a branch snapshot, curated or not.
     expect(body.share_url).toBeUndefined();
     expect(body.anc_version).toBe(ANC_VERSION);
   });
 
-  test('branch URL on curated repo bypasses R2 cache too (prefilled curated key unreachable)', async () => {
-    // Defense-in-depth on the cache tier: if someone prefills the cache
-    // under the curated binary's key (scores/rg/...), a branch-scoped
-    // request must still go live. This pins the "branch URL skips both
-    // tiers" contract; not just the registry tier.
+  test('branch URL on curated repo is a snapshot: the cache tier never serves it', async () => {
+    // A record under the curated binary's key (scores/rg/...) must not
+    // answer a branch-scoped request; a snapshot always runs live.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,

@@ -127,6 +127,14 @@ export function detectPreference(request: Request): Preference {
   return isMarkdownEligibleAgent(request) ? 'markdown' : 'html';
 }
 
+/** True when the client's Accept ranks the NDJSON event stream above JSON. */
+export function wantsEventStream(request: Request): boolean {
+  const accept = request.headers.get('accept');
+  if (!accept || accept.trim() === '' || accept.trim() === '*/*') return false;
+  // @ts-expect-error — see detectPreference above.
+  return accepts(shim(request)).type(['application/x-ndjson', 'application/json']) === 'application/x-ndjson';
+}
+
 export function detectScorePreference(request: Request): ScorePreference {
   // @ts-expect-error — see detectPreference above.
   const match = accepts(shim(request)).type(SCORE_PREFERENCE_ORDER);

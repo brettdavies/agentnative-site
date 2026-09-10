@@ -69,6 +69,9 @@ export type AuditErrorObject = { error: AuditError };
 
 export type AuditErrorExtras = { cta: string; details?: string; retry_after?: number; pm?: string };
 
+/** The call to action for a transient failure. */
+export const CTA_RETRY = 'Try again in a moment.';
+
 /** The human line for each shared code, the one surface that owns it. */
 export const AUDIT_ERROR_MESSAGES: Readonly<Record<AuditErrorCode, string>> = {
   ...REJECTION_MESSAGES,
