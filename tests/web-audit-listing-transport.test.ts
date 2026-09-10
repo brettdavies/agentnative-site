@@ -8,39 +8,19 @@
 
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { buildAuditWebBody, stashPublicListing, takePublicListing } from '../src/client/web-audit-listing';
+import { installSessionStorage } from './helpers/session-storage';
 
 const HOST = 'example.com';
 const STASH_KEY = `web-audit-listing:${HOST}`;
 
-function makeStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    get length() {
-      return map.size;
-    },
-    clear: () => {
-      map.clear();
-    },
-    getItem: (key: string) => map.get(key) ?? null,
-    key: (index: number) => [...map.keys()][index] ?? null,
-    removeItem: (key: string) => {
-      map.delete(key);
-    },
-    setItem: (key: string, value: string) => {
-      map.set(key, value);
-    },
-  };
-}
-
-const realSessionStorage: Storage | undefined = (globalThis as { sessionStorage?: Storage }).sessionStorage;
+let restoreSessionStorage: () => void = () => {};
 
 beforeEach(() => {
-  (globalThis as { sessionStorage?: Storage }).sessionStorage = makeStorage();
+  restoreSessionStorage();
+  restoreSessionStorage = installSessionStorage();
 });
 
-afterAll(() => {
-  (globalThis as { sessionStorage?: Storage }).sessionStorage = realSessionStorage;
-});
+afterAll(() => restoreSessionStorage());
 
 describe('buildAuditWebBody', () => {
   test('an explicit true rides the body', () => {
