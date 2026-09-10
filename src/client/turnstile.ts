@@ -101,28 +101,35 @@ export function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountH
     }
     pending = { resolve, reject };
     pendingTimer = setTimeout(() => settle({ error: new Error('turnstile_timeout') }), ACQUIRE_TIMEOUT_MS);
-    if (widget) {
-      api.reset(widget.id);
-      api.execute(widget.id);
-      return;
+    try {
+      if (widget) {
+        api.reset(widget.id);
+        api.execute(widget.id);
+        return;
+      }
+      // A teardown removes the widget but leaves its mount in the document;
+      // a later acquire on a restored page reuses that mount instead of
+      // stacking another.
+      const container =
+        mountHost.querySelector<HTMLDivElement>('[data-turnstile-mount]') ??
+        mountHost.ownerDocument.createElement('div');
+      container.setAttribute('data-turnstile-mount', '');
+      container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
+      mountHost.appendChild(container);
+      const id = api.render(container, {
+        sitekey,
+        execution: 'execute',
+        callback: (token: string) => settle({ token }),
+        'error-callback': () => settle({ error: new Error('turnstile_error') }),
+        'expired-callback': () => settle({ error: new Error('turnstile_expired') }),
+      });
+      widget = { id, container };
+      api.execute(id);
+    } catch (err) {
+      // A widget API that throws must not leave the pending guard set for
+      // the next click.
+      settle({ error: err instanceof Error ? err : new Error(String(err)) });
     }
-    // A teardown removes the widget but leaves its mount in the document; a
-    // later acquire on a restored page reuses that mount instead of stacking
-    // another.
-    const container =
-      mountHost.querySelector<HTMLDivElement>('[data-turnstile-mount]') ?? mountHost.ownerDocument.createElement('div');
-    container.setAttribute('data-turnstile-mount', '');
-    container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
-    mountHost.appendChild(container);
-    const id = api.render(container, {
-      sitekey,
-      execution: 'execute',
-      callback: (token: string) => settle({ token }),
-      'error-callback': () => settle({ error: new Error('turnstile_error') }),
-      'expired-callback': () => settle({ error: new Error('turnstile_expired') }),
-    });
-    widget = { id, container };
-    api.execute(id);
   });
 }
 
@@ -131,7 +138,7 @@ export function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountH
  * `elements` (focus, paste, click), so the widget is ready by the time the
  * visitor clicks and a page merely scrolled past never fetches it.
  */
-export function loadTurnstileOnFirstInteraction(elements: Iterable<Element>): void {
+export function loadTurnstileOnFirstInteraction(elements: Iterable<EventTarget>): void {
   for (const element of elements) {
     const armed = new AbortController();
     const load = () => {
@@ -146,15 +153,16 @@ export function loadTurnstileOnFirstInteraction(elements: Iterable<Element>): vo
   }
 }
 
+/**
+ * Remove the widget and reject any acquire still waiting on it, so a
+ * caller awaiting the token reaches its error path instead of hanging on
+ * a resolver that will never fire.
+ */
 export function teardownTurnstile(): void {
   const api = typeof window === 'undefined' ? undefined : window.turnstile;
   if (widget && api) api.remove(widget.id);
-  if (pendingTimer !== null) {
-    clearTimeout(pendingTimer);
-    pendingTimer = null;
-  }
   widget = null;
-  pending = null;
+  settle({ error: new Error('turnstile_torn_down') });
 }
 
 /** Acquire a token end-to-end: load the script, render or reuse the widget, execute, resolve. */

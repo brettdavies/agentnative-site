@@ -16,7 +16,12 @@ import {
   take,
   takeInlineResult,
 } from '../src/client/audit-stash';
-import { acquireTurnstileToken, type TurnstileApi, teardownTurnstile } from '../src/client/turnstile';
+import {
+  acquireTurnstileToken,
+  loadTurnstileOnFirstInteraction,
+  type TurnstileApi,
+  teardownTurnstile,
+} from '../src/client/turnstile';
 import { installSessionStorage } from './helpers/session-storage';
 
 let restoreSessionStorage: () => void = () => {};
@@ -255,6 +260,140 @@ describe('acquireTurnstileToken', () => {
     await expect(acquireTurnstileToken('key', api, host)).rejects.toThrow('turnstile_already_pending');
     settle('tok');
     await first;
+    teardownTurnstile();
+  });
+});
+
+describe('review fixtures: stash edges', () => {
+  test('a record without a valid entered lane is treated as absent', () => {
+    sessionStorage.setItem(
+      'audit-stash:x',
+      JSON.stringify({ token: 't', ts: Date.now(), entered_lane: 'bogus', refresh: false }),
+    );
+    expect(take('x')).toBeNull();
+  });
+
+  test('an expired or corrupt lane entry is absent and removed', () => {
+    sessionStorage.setItem('audit-lane:x', JSON.stringify({ lane: 'web', ts: Date.now() - STASH_TTL_MS - 1 }));
+    expect(enteredLaneOf('x')).toBeNull();
+    expect(sessionStorage.getItem('audit-lane:x')).toBeNull();
+    sessionStorage.setItem('audit-lane:y', 'not json');
+    expect(enteredLaneOf('y')).toBeNull();
+    expect(sessionStorage.getItem('audit-lane:y')).toBeNull();
+  });
+
+  test('the in-flight guard reports in_flight to the second caller', async () => {
+    const gate = deferred<string>();
+    const deps = { acquire: () => gate.promise, navigate: () => {} };
+    const first = startAudit({ target: 'anc.dev', lane: 'web', listing: null }, deps);
+    const second = await startAudit({ target: 'anc.dev', lane: 'web', listing: null }, deps);
+    expect(second).toMatchObject({ ok: false, reason: 'in_flight' });
+    gate.resolve('tok');
+    expect((await first).ok).toBe(true);
+  });
+});
+
+function fakeHost(mount: { current: object | null } = { current: null }, onCreate: () => void = () => {}): HTMLElement {
+  return {
+    ownerDocument: {
+      createElement: () => {
+        onCreate();
+        mount.current = { setAttribute: () => {}, style: {} };
+        return mount.current;
+      },
+    },
+    appendChild: () => {},
+    querySelector: () => mount.current,
+  } as unknown as HTMLElement;
+}
+
+describe('review fixtures: turnstile helper edges', () => {
+  test('the first interaction loads the script once and disarms the other listeners', () => {
+    const element = new EventTarget();
+    const other = new EventTarget();
+    loadTurnstileOnFirstInteraction([element, other]);
+    let appended = 0;
+    const doc = {
+      createElement: () => ({ async: false, defer: false, onload: null, onerror: null, src: '' }),
+      head: { appendChild: () => appended++ },
+    };
+    (globalThis as { document?: unknown }).document = doc;
+    try {
+      element.dispatchEvent(new Event('focus'));
+      element.dispatchEvent(new Event('paste'));
+      element.dispatchEvent(new Event('click'));
+      expect(appended).toBe(1);
+      other.dispatchEvent(new Event('click'));
+      expect(appended).toBe(1);
+    } finally {
+      (globalThis as { document?: unknown }).document = undefined;
+    }
+  });
+
+  test('a torn-down acquire rejects, and the next click can start', async () => {
+    teardownTurnstile();
+    const never: TurnstileApi = { render: () => 'w', execute: () => {}, reset: () => {}, remove: () => {} };
+    const navigations: string[] = [];
+    const first = startAudit(
+      { target: 'ouch', lane: 'cli', listing: null },
+      { acquire: () => acquireTurnstileToken('key', never, fakeHost()), navigate: (p) => navigations.push(p) },
+    );
+    teardownTurnstile();
+    expect(await first).toMatchObject({ ok: false, reason: 'turnstile_failed' });
+    const again = await startAudit(
+      { target: 'ouch', lane: 'cli', listing: null },
+      { acquire: async () => 'tok', navigate: (p) => navigations.push(p) },
+    );
+    expect(again.ok).toBe(true);
+    expect(navigations).toEqual(['/scoring?target=ouch']);
+  });
+
+  test('an orphaned mount is reused rather than stacked', async () => {
+    teardownTurnstile();
+    let created = 0;
+    const host = fakeHost({ current: null }, () => created++);
+    let settle: (token: string) => void = () => {};
+    const api: TurnstileApi = {
+      render: (_el, options) => {
+        settle = (token) => options.callback?.(token);
+        return 'w';
+      },
+      execute: () => {},
+      reset: () => {},
+      remove: () => {},
+    };
+    const first = acquireTurnstileToken('key', api, host);
+    settle('t1');
+    await first;
+    teardownTurnstile();
+    const second = acquireTurnstileToken('key', api, host);
+    settle('t2');
+    await second;
+    expect(created).toBe(1);
+    teardownTurnstile();
+  });
+
+  test('a widget API that throws synchronously does not leave the acquire pending', async () => {
+    teardownTurnstile();
+    const throwing: TurnstileApi = {
+      render: () => {
+        throw new Error('render exploded');
+      },
+      execute: () => {},
+      reset: () => {},
+      remove: () => {},
+    };
+    await expect(acquireTurnstileToken('key', throwing, fakeHost())).rejects.toThrow('render exploded');
+    const ok: TurnstileApi = {
+      render: (_el, o) => {
+        queueMicrotask(() => o.callback?.('tok'));
+        return 'w';
+      },
+      execute: () => {},
+      reset: () => {},
+      remove: () => {},
+    };
+    expect(await acquireTurnstileToken('key', ok, fakeHost())).toBe('tok');
     teardownTurnstile();
   });
 });

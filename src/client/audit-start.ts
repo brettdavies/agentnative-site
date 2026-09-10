@@ -45,6 +45,15 @@ export function _resetStartAuditForTests(opts: { guard: boolean }): void {
   guardEnabled = opts.guard;
 }
 
+// A page restored from the back-forward cache keeps its JavaScript heap, so
+// a click that was in flight when the visitor left would otherwise stay
+// latched.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) inFlight = false;
+  });
+}
+
 async function acquireWithWidget(): Promise<string> {
   const sitekey = readSitekey();
   if (!sitekey) throw new Error('turnstile_sitekey_missing');
