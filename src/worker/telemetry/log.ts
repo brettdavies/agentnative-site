@@ -11,6 +11,7 @@ import { getRequestContext } from './request-context';
 
 /** Closed vocabulary of `scope` values. Adding a scope means adding it here. */
 export type LogScope =
+  | 'audit.request'
   | 'cache.get'
   | 'cache.put'
   | 'cache.write'

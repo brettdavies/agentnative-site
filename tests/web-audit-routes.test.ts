@@ -386,7 +386,7 @@ describe('handleWebAudit fresh-path bot defense', () => {
     const env = makeEnv({ SCORE_KV: kv });
     // Pre-fill the current hour bucket at the ceiling.
     const bucket = Math.floor(Date.now() / 3_600_000);
-    kvStore.set(`web_audit:203.0.113.9:${bucket}`, '30');
+    kvStore.set(`audit:web:203.0.113.9:${bucket}`, '30');
     const resp = await runAudit(auditRequest('https://example.com/'), env, makeCtx());
     expect(resp.status).toBe(429);
     expect(((await resp.json()) as { message: string }).message).toContain('30 per hour');

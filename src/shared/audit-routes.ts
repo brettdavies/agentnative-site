@@ -75,7 +75,8 @@ const GITHUB_OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const GITHUB_REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
 const GITHUB_HOST_RE = /^(?:https?:\/\/)?(?:www\.)?github\.com\//i;
 const GITHUB_URL_RE = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/(.*))?$/i;
-const GITHUB_SHORTHAND_RE = /^([^/\s@]+)\/([^/\s@]+)(?:@(.+))?$/;
+/** `owner/repo` with an optional `@<branch>` tail; the worker validator shares it. */
+export const GITHUB_SHORTHAND_RE = /^([^/\s@]+)\/([^/\s@]+)(?:@(.*))?$/;
 const BRANCH_NAME_RE = /^[A-Za-z0-9._/-]{1,250}$/;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 // The domain shape the website result route accepts: lowercase labels of
@@ -140,6 +141,7 @@ function classifyGithub(raw: string): ClassifiedTarget | null {
   const [, owner, repo, branch] = shorthand;
   if (!GITHUB_OWNER_RE.test(owner) || !GITHUB_REPO_RE.test(repo)) return null;
   if (branch === undefined) return { ok: true, lane: 'cli', kind: 'cli', target: input };
+  if (branch === '') return reject('invalid_target');
   return branchScoped(owner, repo, branch);
 }
 

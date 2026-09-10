@@ -1,31 +1,31 @@
 // Web-audit Worker routes.
 //
-//   POST /api/audit-web         streaming NDJSON audit dispatch
+//   POST /api/audit-web         the legacy streaming dispatch the deployed
+//                               web-audit clients post to
 //   GET  /web/scoring/<domain>  in-progress streaming page (JS-required)
 //   GET  /web/<domain>          shareable cached result page + .md twin
 //
 // The POST path serves cache state as data ahead of every metered gate,
-// then admits a fresh audit through the same gate waterfall as /api/score:
-// kill switch, Turnstile, session mint/read, session limiter with a coarse
-// per-IP fallback, and a KV-backed hourly window, then runs the engine and
-// streams each check result as it resolves. The complete scorecard is
-// written to R2 inside a ctx.waitUntil task so a mid-stream client
-// disconnect still caches a completed run — only complete runs are cached;
-// a deadline-exceeded run streams an `incomplete` terminal and is never
-// persisted.
+// then admits a fresh audit through its gate block (kill switch,
+// Turnstile, session, the session limiter with a per-IP fallback, the
+// hourly window, the per-domain flip budget) and runs the lane core in
+// `./core.ts`, which the unified transact endpoint composes as well. The
+// legacy wire shape (`share_url`, the bare `check` and `complete` lines)
+// is translated from the core's shared events here. The complete
+// scorecard is written to R2 inside a ctx.waitUntil task so a mid-stream
+// client disconnect still caches a completed run; a deadline-exceeded run
+// streams an `incomplete` terminal and is never persisted.
 
 import { detectPreference } from '../accept';
 import { applyHeaders } from '../headers';
-import { type NotifyEnv, notifyFailure } from '../notify';
+import type { NotifyEnv } from '../notify';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
 import { SPEC_VERSION } from '../spec-version.gen';
-import { rebuildAggregatesIfSeeded } from './aggregate';
-import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from './audit-log';
+import type { AuditLogEnv } from './audit-log';
 import {
   type CachedWebAudit,
   get as cacheGet,
-  put as cachePut,
   canonicalTargetOf,
   getAggregate,
   isBoardListable,
@@ -39,19 +39,12 @@ import {
   WEB_AUDIT_STALE_AFTER_MS,
   webAuditFreshness,
 } from './cache';
-import {
-  flushHitMinPurge,
-  invokeCachedPurge,
-  queueHitMinPurge,
-  runWithHitMinPurge,
-  webDomainTag,
-  webTag,
-} from './hit-min-purge';
+import { flushHitMinPurge, invokeCachedPurge, runWithHitMinPurge, webTag } from './hit-min-purge';
 
 export { canonicalTargetOf };
 
+import { runWebAuditStream, type WebTarget } from './core';
 import { normalizeScorecardCategories } from './display';
-import { runWebAudit } from './engine';
 import {
   buildWebLeaderboardBody,
   buildWebLeaderboardMarkdown,
@@ -62,7 +55,6 @@ import { consumeWebAuditHourlyBudget } from './limiter';
 import { decidePublicListingWrite, enforcePublicListingFlipLimit, resolveAuditListing } from './public-listing';
 import { loadWebAuditRegistry } from './registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
-import type { EngineResult } from './scorecard';
 import { boardExcludeDomains, loadWebSeed } from './seed';
 import { validatePublicUrl } from './ssrf';
 import { buildWebSummaryMarkdown } from './summary-markdown';
@@ -140,17 +132,6 @@ export function coerceUrl(raw: unknown): URL | null {
   } catch {
     return null;
   }
-}
-
-function checkEvent(result: EngineResult): string {
-  return `${JSON.stringify({
-    type: 'check',
-    id: result.id,
-    principle: result.principle,
-    keyword: result.keyword,
-    status: result.status,
-    evidence: result.evidence,
-  })}\n`;
 }
 
 export async function handleWebAudit(
@@ -352,72 +333,40 @@ export async function handleWebAudit(
     );
   }
 
-  // 13. Miss or stale hit — stream the engine, cache the completed result
-  // via waitUntil. Serve-cached and patch both returned above, so only the
-  // (re-)audit path reaches here.
+  // 13. Miss or stale hit: run the lane core and translate its shared
+  // events onto the legacy wire shape. The core writes R2, queues the
+  // purge, and rebuilds the seeded aggregates inside this waitUntil task.
   const auditListing = resolveAuditListing(listingWrite, publicListing, cached);
-  const registry = await loadWebAuditRegistry(env);
+  const target: WebTarget = { host: shareDomain, canonical: canonicalTarget };
   const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
+  const write = (line: unknown) => writer.write(encoder.encode(`${JSON.stringify(line)}\n`)).catch(() => {});
 
   ctx.waitUntil(
     runWithHitMinPurge(ctx, async () => {
-      let scorecard: unknown = null;
-      let complete = false;
       try {
-        for await (const event of instrumentAuditEvents(
-          runWebAudit({
-            url: canonicalTarget,
-            registry,
-            siteType,
-            publicListing: auditListing,
-            specVersion: SPEC_VERSION,
-            fetchOptions: deps.probeFetch ? { fetchImpl: deps.probeFetch } : undefined,
-          }),
+        for await (const event of runWebAuditStream({
           env,
-          { target: canonicalTarget, surface: 'stream' },
-        )) {
+          target,
+          siteType,
+          listing: auditListing,
+          origin: new URL(request.url).origin,
+          probeFetch: deps.probeFetch,
+          surface: 'stream',
+        })) {
           if (event.type === 'discovery') {
-            await writer
-              .write(encoder.encode(`${JSON.stringify({ type: 'discovery', mcp_endpoint: event.endpoint })}\n`))
-              .catch(() => {});
-          } else if (event.type === 'result') {
-            await writer.write(encoder.encode(checkEvent(event.result))).catch(() => {});
-          } else if (event.type === 'unreachable') {
-            await writer
-              .write(encoder.encode(`${JSON.stringify({ type: 'error', message: event.reason })}\n`))
-              .catch(() => {});
-            return;
+            await write({ type: 'discovery', mcp_endpoint: event.mcp_endpoint });
+          } else if (event.type === 'check') {
+            await write(event);
           } else if (event.type === 'complete') {
-            scorecard = event.scorecard;
-            complete = event.complete;
+            await write({ type: 'complete', ...event.freshness, scorecard: event.scorecard, share_url: shareUrl });
+          } else if (event.type === 'incomplete') {
+            await write({ type: 'incomplete', scorecard: event.scorecard, share_url: null });
+          } else if (event.type === 'error') {
+            await write({ type: 'error', message: event.error.message });
           }
         }
-        // One scoring instant per run, spent on both persistence and the
-        // terminal envelope, so the cache read that follows this response
-        // can never report a different clock for the same audit. The
-        // envelope reports `cached: false` on the strength of having
-        // produced the result, not on the write landing.
-        const scoredAt = complete && scorecard ? new Date().toISOString() : null;
-        if (scorecard && scoredAt) {
-          const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION, scoredAt);
-          if (wrote) queueHitMinPurge([webTag(), webDomainTag(shareDomain)]);
-          await rebuildAggregatesIfSeeded(env, shareDomain, SPEC_VERSION);
-        }
-        const terminal = complete
-          ? { type: 'complete', ...webAuditFreshness(false, scoredAt), scorecard, share_url: shareUrl }
-          : { type: 'incomplete', scorecard, share_url: null };
-        await writer.write(encoder.encode(`${JSON.stringify(terminal)}\n`)).catch(() => {});
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logAuditError(canonicalTarget, 'stream', err);
-        await writer.write(encoder.encode(`${JSON.stringify({ type: 'error', message })}\n`)).catch(() => {});
-        await notifyFailure(env, {
-          key: 'web-audit-stream',
-          subject: 'web-audit stream task failed',
-          text: `The streaming audit task threw for ${canonicalTarget}: ${message}`,
-        });
       } finally {
         await writer.close().catch(() => {});
         await flushHitMinPurge();

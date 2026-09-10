@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Post-deploy smoke for the live-scoring Worker. Exits 0 when /api/score for
-# a curated slug returns the response triad; exits non-zero otherwise.
+# Post-deploy smoke for the audit funnel's transact endpoint. Exits 0 when
+# POST /api/score for a curated slug returns the shared result envelope
+# with tier=registry beside the legacy response triad; exits non-zero
+# otherwise.
 #
 # Invoked from .github/workflows/deploy.yml after a successful wrangler
-# deploy, and runnable locally for parity. Exercises the registry-fast-path
+# deploy, and runnable locally for parity. Exercises the registry tier
 # only: gate behaviour and live-sandbox dispatch are covered by unit tests
 # and the opt-in homepage-score-live e2e suite. Rationale lives in
 # RELEASES-RATIONALE.md § Post-deploy smoke scope.
@@ -18,11 +20,11 @@
 #                            are required for staging (Worker is behind
 #                            Cloudflare Access) and unused for production
 #                            (anc.dev is public).
-#   TURNSTILE_TOKEN          Defaults to "x". The registry fast-path answers
+#   TURNSTILE_TOKEN          Defaults to "x". The registry tier answers
 #                            curated slugs before the Turnstile gate, so the
 #                            token is never verified on this path and the
 #                            default works against staging and production
-#                            alike. Only a non-curated input would reach
+#                            alike. Only a non-curated target would reach
 #                            siteverify and need a real token.
 #   SMOKE_SLEEP_SEC          Edge-propagation delay before the POST.
 #                            Default 10. Tune up if regional latency starts
@@ -39,14 +41,14 @@ set -euo pipefail
 
 BASE_URL="${1:-}"
 if [ -z "$BASE_URL" ]; then
-  echo "FATAL: missing base URL. Usage: $0 <base-url>" >&2
-  exit 2
+    echo "FATAL: missing base URL. Usage: $0 <base-url>" >&2
+    exit 2
 fi
 
 JQ_BIN="$(command -v jaq || command -v jq || true)"
 if [ -z "$JQ_BIN" ]; then
-  echo "FATAL: neither jaq nor jq is installed. Install one (brew install jaq) and retry." >&2
-  exit 2
+    echo "FATAL: neither jaq nor jq is installed. Install one (brew install jaq) and retry." >&2
+    exit 2
 fi
 
 SLEEP_SEC="${SMOKE_SLEEP_SEC:-10}"
@@ -55,38 +57,44 @@ TURNSTILE_TOKEN="${TURNSTILE_TOKEN:-x}"
 
 ACCESS_HEADERS=()
 if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
-  ACCESS_HEADERS+=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}")
-  ACCESS_HEADERS+=(-H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}")
+    ACCESS_HEADERS+=(-H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}")
+    ACCESS_HEADERS+=(-H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}")
 fi
 
 if [ "$SLEEP_SEC" -gt 0 ]; then
-  echo "Waiting ${SLEEP_SEC}s for edge propagation..."
-  sleep "$SLEEP_SEC"
+    echo "Waiting ${SLEEP_SEC}s for edge propagation..."
+    sleep "$SLEEP_SEC"
 fi
 
-echo "POST ${BASE_URL}/api/score (slug=${SLUG})"
+echo "POST ${BASE_URL}/api/score (target=${SLUG})"
 response="$(curl --silent --show-error --fail-with-body \
-  --max-time 30 \
-  "${ACCESS_HEADERS[@]}" \
-  -H "Content-Type: application/json" \
-  -d "{\"input\":\"${SLUG}\",\"turnstile_token\":\"${TURNSTILE_TOKEN}\"}" \
-  "${BASE_URL}/api/score")"
+    --max-time 30 \
+    "${ACCESS_HEADERS[@]}" \
+    -H "Content-Type: application/json" \
+    -d "{\"target\":\"${SLUG}\",\"turnstile_token\":\"${TURNSTILE_TOKEN}\"}" \
+    "${BASE_URL}/api/score")"
 
 echo "::group::smoke response"
 echo "${response}" | "$JQ_BIN" .
 echo "::endgroup::"
 
-# Contract: scorecard.kind === "registry_hit" plus four-field response triad.
+# Contract: the shared envelope (kind, tier=registry, target, scorecard_url,
+# json_url) beside the legacy triad the deployed homepage still reads.
 # Missing any field is a deploy-stop signal.
 if ! echo "${response}" | "$JQ_BIN" --exit-status '
-    .scorecard.kind == "registry_hit"
+    .kind == "cli"
+    and .tier == "registry"
+    and .target == "'"${SLUG}"'"
+    and (.scorecard_url | type) == "string"
+    and (.json_url | type) == "string"
+    and .scorecard.kind == "registry_hit"
     and (.spec_version | type) == "string"
     and (.site_spec_version | type) == "string"
     and (.anc_version | type) == "string"
     and (.auditor_url | type) == "string"
   ' >/dev/null; then
-  echo "FATAL: /api/score response missing required fields for ${SLUG}" >&2
-  exit 1
+    echo "FATAL: /api/score response missing required fields for ${SLUG}" >&2
+    exit 1
 fi
 
-echo "[pass] /api/score returned registry_hit with full response triad"
+echo "[pass] /api/score returned a registry-tier envelope with the full response triad"

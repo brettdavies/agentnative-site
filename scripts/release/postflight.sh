@@ -318,17 +318,18 @@ gate_pages() {
     gate_fail "${ENV_URL}/scorecards" "did not return HTML with leaderboard-table"
   fi
 
-  local body kind anc_v spec_v
+  local body tier kind anc_v spec_v
   body=$(ecurl -fSsL -m 10 "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
-    -d '{"input":"ripgrep","turnstile_token":"x"}' 2>/dev/null || true)
+    -d '{"target":"ripgrep","turnstile_token":"x"}' 2>/dev/null || true)
+  tier=$(printf '%s' "$body" | jq -r '.tier // empty' 2>/dev/null || true)
   kind=$(printf '%s' "$body" | jq -r '.scorecard.kind // empty' 2>/dev/null || true)
   anc_v=$(printf '%s' "$body" | jq -r '.anc_version // empty' 2>/dev/null || true)
   spec_v=$(printf '%s' "$body" | jq -r '.spec_version // empty' 2>/dev/null || true)
-  if [[ "$kind" == "registry_hit" && -n "$anc_v" && -n "$spec_v" ]]; then
-    gate_pass "${ENV_URL}/api/score registry-hit returns kind=registry_hit, anc=$anc_v, spec=$spec_v"
+  if [[ "$tier" == "registry" && "$kind" == "registry_hit" && -n "$anc_v" && -n "$spec_v" ]]; then
+    gate_pass "${ENV_URL}/api/score registry hit returns tier=registry, anc=$anc_v, spec=$spec_v"
   else
-    gate_fail "${ENV_URL}/api/score registry-hit" "kind=$kind anc=$anc_v spec=$spec_v"
+    gate_fail "${ENV_URL}/api/score registry hit" "tier=$tier kind=$kind anc=$anc_v spec=$spec_v"
   fi
 }
 

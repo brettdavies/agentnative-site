@@ -428,8 +428,8 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
   });
 });
 
-describe('/api/score — branch-scoped pastes (existing behavior unchanged)', () => {
-  test('github-url with /tree/<branch>: share_url stays null', async () => {
+describe('/api/score — branch-scoped pastes are snapshots', () => {
+  test('github-url with /tree/<branch>: the legacy live surface carries no share_url', async () => {
     installSmartFetch();
     try {
       const tracker: CallTracker = { doCalls: 0, lastSpecBinary: null };

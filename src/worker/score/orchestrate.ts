@@ -1,21 +1,13 @@
-// Shared /api/score orchestration core.
+// The CLI orchestration primitives every CLI surface composes: the
+// lane core (`./core.ts`, behind both transact endpoints), the MCP
+// get_scorecard and score_cli tools.
 //
-// The plan extracts the post-input-validation orchestration of
-// /api/score into this file so both the human form (handler.ts) and
-// the MCP score tools (get_scorecard, score_cli) compose the same
-// resolver / cache / DO-dispatch pipeline.
+//   lookupOnly ..... registry, then the R2 cache; no fresh audit
+//   runFreshOnly ... resolveSpec, the post-discovery cache lookup, then
+//                    a Durable Object dispatch through the getRandom pool
 //
-// U3 landed the LOOKUP-ONLY intent (lookupOnly + shared loadHintsIndex
-// cache). U5a lands the RUN-FRESH-ON-MISS intent (runFreshOnly):
-// resolveSpec → post-discovery cache lookup → DO pool dispatch via
-// getRandom(env.SCORE, MAX_INSTANCES). The DO writes the cache itself
-// via writeCacheBestEffort; this module never writes R2 directly.
-//
-// handler.ts continues to inline its own copy of the run-fresh pipeline
-// today; a follow-up unit (U5b) will refactor /api/score to compose
-// runFreshOnly so the duplication collapses. The behavior of
-// runFreshOnly here matches the inlined slice exactly so the lift is a
-// straight substitution.
+// The Durable Object writes the cache itself; this module never writes
+// R2. Neither function rate-limits: the caller's gates run first.
 
 import { type Container, getRandom } from '@cloudflare/containers';
 import * as cache from './cache';
@@ -88,18 +80,15 @@ export async function lookupOnly(
 // runFreshOnly — the run-fresh-on-miss intent.
 // =====================================================================
 //
-// Used by score_cli after lookupOnly returns kind=miss. Takes a
-// ValidatedInput, resolves it to an InstallSpec, consults the
-// post-discovery cache one more time (the discovery layer often
-// produces a binary that the pre-discovery cache lookup couldn't
-// derive), then dispatches to the Sandbox DO pool via getRandom and
-// returns a typed result the caller maps to its own response shape.
+// Takes a ValidatedInput, resolves it to an InstallSpec, consults the
+// post-discovery cache once more (discovery often produces a binary the
+// pre-discovery lookup could not derive), then dispatches to the Sandbox
+// DO pool through getRandom and returns a typed result the caller maps
+// to its own response shape.
 //
-// MUST be called only after upstream metered gates (Turnstile + session
-// + SCORE_LIMITER on the human form; MCP_AUDIT_LIMITER + KV-per-hour on
-// the MCP form). This function performs no rate limiting; the costly
-// outbound calls (discovery fan-out and DO dispatch) fire unconditionally
-// when called.
+// Called only after the caller's metered gates. This function performs
+// no rate limiting; the costly outbound calls (discovery fan-out and DO
+// dispatch) fire unconditionally when called.
 
 // spec + resolved_step are present on every variant where the
 // orchestrator passed the post-discovery skip gate (i.e. resolveSpec
@@ -162,6 +151,10 @@ export interface RunFreshOptions {
   // fan-out. Threaded so tests can intercept the brew / npm / pypi /
   // GitHub Releases outbound calls without monkey-patching globalThis.
   fetcher?: typeof fetch;
+  // Runs once the spec is known and before the post-discovery cache read
+  // or the sandbox dispatch, so a caller can key state by the resolved
+  // binary while the run is still ahead.
+  onResolved?: (spec: InstallSpec) => Promise<void>;
 }
 
 // DO envelope classification helpers. Exported so handler.ts can
@@ -201,6 +194,7 @@ export async function runFreshOnly(
   }
   const spec = resolution.spec;
   const resolved_step: ResolvedStep | null = resolution.resolved_step ?? null;
+  if (opts.onResolved) await opts.onResolved(spec);
 
   // Step 2: post-discovery cache lookup. Discovery now knows
   // spec.binary, which the pre-discovery lookup couldn't derive for
