@@ -104,7 +104,8 @@ this plan is that machine.
   renders the normalized target and resolved lane beside a Start button whose click acquires a token and starts the
   audit.
 - R8. The page renders live progress from the event stream: CLI phases (`resolving` from the Worker before dispatch,
-  then the Durable Object's install start, install done, binary verification, lockdown, and audit start) and web
+  then the Durable Object's install start, install done, binary verification for an installed binary, lockdown, and
+  audit start) and web
   discovery plus per-check rows, with a heartbeat keeping the connection alive during silent phases.
 - R9. On a result with a scorecard URL the page forwards with `location.replace` after a 2 s floor so it never enters
   history; a branch-scoped source run has one (`/score/<owner>/<repo>@<branch>`, R12). Only a curated-slug collision
@@ -368,9 +369,9 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   surface.
 - KTD4. **The CLI lane streams from the Durable Object, line-framed, with its own deadline, purge scope, and
   telemetry.** the endpoint emits a `resolving` phase line before the dispatch, and `do.ts` `fetch` returns an NDJSON
-  body: `phase` lines at install start, install done, binary verification, lockdown, and audit start, then one final
-  result line; the R2 write still precedes the result line. `runFreshOnly` reads that body through one line reader,
-  forwards phases to an optional `onPhase` callback, and returns the one-shot result so MCP `score_cli` is untouched; a
+  body: `phase` lines at install start, install done, binary verification (an installed binary only; a source clone
+  has no binary to verify), lockdown, and audit start, then one final result line; the R2 write still precedes the
+  result line. `runFreshOnly` reads that body through one line reader, forwards phases to an optional `onPhase` callback, and returns the one-shot result so MCP `score_cli` is untouched; a
   body that is exactly one JSON object is treated as the result line, which covers a new reader against an old Durable
   Object during propagation; the reverse pairing (an old isolate reading the new NDJSON body) fails each run it
   dispatches until propagation settles and is the `error_incomplete_response_contract` signal the first-hour watch
@@ -382,13 +383,15 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   `incomplete_response_contract`. The platform cancels post-disconnect work 30 s after the client goes away, so a
   disconnect with more than 30 s of sandbox time remaining loses only the relay's terminal telemetry; the Durable
   Object's R2 write and its purge are unaffected. The `enable_request_signal` compatibility flag is enabled so the relay
-  listens on the incoming request's abort signal: on abort it stops heartbeats, cancels its read of the DO stream, and
-  records `client_gone` with the elapsed time as the `audit.request` terminal outcome, never
-  `incomplete_response_contract`. The Durable Object queues the `cli:<binary>` purge itself, immediately after its R2
+  listens on the incoming request's abort signal: on abort it stops heartbeats, records `client_gone` with the elapsed
+  time as the `audit.request` terminal outcome at that moment, never `incomplete_response_contract`, and drains the run
+  behind the gone client so the flags clear and the terminal telemetry carries the real tier whenever the platform lets
+  the task finish. A run that ends without a result line is an `error` event; a rejection the run reported stays a
+  `bounce`. The Durable Object queues the `cli:<binary>` purge itself, immediately after its R2
   write, through the `Cached` entrypoint's purge RPC on `ctx.exports` (the handle the Sandbox SDK already resolves
-  there), so the purge shares the writer's lifetime and covers MCP `score_cli` runs; a failed purge RPC is logged on the
-  purge scope, never thrown. The relay owns telemetry only. Platform basis: a Durable Object stays active while its
-  response stream is open, and a Worker pipes a subrequest body through without buffering (Cloudflare Workers Streams
+  there), so the purge shares the writer's lifetime and covers MCP `score_cli` runs; the RPC is bounded by a
+  five-second race, and a failed or stalled purge is logged on the purge scope, never thrown. The relay owns telemetry
+  only. Platform basis: a Durable Object stays active while its response stream is open, and a Worker pipes a subrequest body through without buffering (Cloudflare Workers Streams
   and Context docs). The non-sticky `getRandom` pool means the stream is the only channel; no second request can find
   the running instance.
 - KTD5. **One result envelope, one event union, one error object, all in `src/shared/`.** Envelope: `{ kind, tier,
@@ -886,22 +889,22 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 
 ## Implementation Units
 
-| U-ID | Title                                         | Key files                                                                                           | Depends on     |
-| ---- | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------- |
-| U1   | Shared route module and target classifier     | `src/shared/audit-routes.ts`, `tests/audit-routes.test.ts`                                          | none           |
-| U2   | Shared envelope, event union, error object    | `src/shared/audit-envelope.ts`, `src/shared/audit-events.ts`                                        | U1             |
-| U3   | Shared Turnstile helper and target stash      | `src/client/turnstile.ts`, `src/client/audit-stash.ts`                                              | U1             |
-| U4   | Admission helper and single transact endpoint | `src/worker/audit/admit.ts`, `src/worker/audit/api.ts`, `scripts/smoke-api-score.sh`                | U1, U2         |
-| U5   | CLI lane streaming from the Durable Object    | `src/worker/score/do.ts`, `sandbox-exec.ts`, `orchestrate.ts`                                       | U2, U4         |
-| U6   | Unified result route and JSON representations | `src/worker/audit/result.ts`, `src/build/08-scorecards-emit.mjs`                                    | U1, U2         |
-| U7   | Cache classes, tags, purge, Link alternates   | `src/worker/headers.ts`                                                                             | U1, U6         |
-| U8 | Shared entry form on `/` and `/audit` | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md` | U1, U3, U9 |
-| U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 |
-| U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         |
-| U11  | Discovery, inventory, fix-skill move, docs    | `src/build/10-sitemap.mjs`, `09-llms-emit.mjs`, `11a-discovery-emit.mjs`, `15-web-audit-skills.mjs` | U1, U6         |
-| U12  | MCP envelope adoption and WebMCP re-pointing  | `src/worker/mcp/tools/*.ts`, `src/client/webmcp-*.ts`, `content/mcp-skill.md`                       | U2, U6, U8     |
-| U14 | Job Durable Object and single-flight attach | `src/worker/audit/job.ts`, `wrangler.jsonc`, `src/worker/audit/api.ts` | U4, U5, U6 |
-| U13 | Retire old routes, sweep tests and scripts | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md` | U8 to U12, U14 |
+| U-ID | Title                                         | Key files                                                                                           | Depends on     | Shipped     |
+| ---- | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------- | ----------- |
+| U1   | Shared route module and target classifier     | `src/shared/audit-routes.ts`, `tests/audit-routes.test.ts`                                          | none           | #340        |
+| U2   | Shared envelope, event union, error object    | `src/shared/audit-envelope.ts`, `src/shared/audit-events.ts`                                        | U1             | #341        |
+| U3   | Shared Turnstile helper and target stash      | `src/client/turnstile.ts`, `src/client/audit-stash.ts`                                              | U1             | #342        |
+| U4   | Admission helper and single transact endpoint | `src/worker/audit/admit.ts`, `src/worker/audit/api.ts`, `scripts/smoke-api-score.sh`                | U1, U2         | #343        |
+| U5   | CLI lane streaming from the Durable Object    | `src/worker/score/do.ts`, `sandbox-exec.ts`, `orchestrate.ts`                                       | U2, U4         | #346 (open) |
+| U6   | Unified result route and JSON representations | `src/worker/audit/result.ts`, `src/build/08-scorecards-emit.mjs`                                    | U1, U2         | #345        |
+| U7   | Cache classes, tags, purge, Link alternates   | `src/worker/headers.ts`                                                                             | U1, U6         |             |
+| U8 | Shared entry form on `/` and `/audit` | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md` | U1, U3, U9 |             |
+| U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 |             |
+| U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         |             |
+| U11  | Discovery, inventory, fix-skill move, docs    | `src/build/10-sitemap.mjs`, `09-llms-emit.mjs`, `11a-discovery-emit.mjs`, `15-web-audit-skills.mjs` | U1, U6         |             |
+| U12  | MCP envelope adoption and WebMCP re-pointing  | `src/worker/mcp/tools/*.ts`, `src/client/webmcp-*.ts`, `content/mcp-skill.md`                       | U2, U6, U8     |             |
+| U14 | Job Durable Object and single-flight attach | `src/worker/audit/job.ts`, `wrangler.jsonc`, `src/worker/audit/api.ts` | U4, U5, U6 |             |
+| U13 | Retire old routes, sweep tests and scripts | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md` | U8 to U12, U14 |             |
 
 ### U1. Shared route module and target classifier
 
@@ -1253,6 +1256,7 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
     (AE3); `/score/o/r` with no record returns the 404 pointer prefilled with `o/r`.
   - `/score/anc.dev/json` equals the `get_website_audit` envelope for the same record (AE5, cross-surface `toEqual`).
   - `/score/anc.dev.html` and `/score/anc.dev/` canonicalize to `/score/anc.dev` without reaching the assets binding.
+  - `llms.txt` names each curated twin at `/score/<slug>/md` through the route module's builder.
   - A never-audited CLI target and website target return the lane-appropriate 404 in all three representations, `/json`
     carrying only `code`, `message`, `audit_url`, and `suggestions`; `/score/ripgrpe` lists `ripgrep` under "Did you
     mean?" in HTML, the twin, and `suggestions`; a 404 body contains no form, no sitekey meta, and no transact script.
@@ -1536,7 +1540,7 @@ Design.
 - **Test scenarios:**
   - The sitemap contains `/score/<slug>` for every curated tool and `/score/<domain>` for every seeded domain, and
     nothing under `/web` or `/web-audit`.
-  - `llms.txt` lists `/audit.md`, `/scorecards.md`, and per-tool `/score/<slug>/md`.
+  - `llms.txt` lists `/audit.md` and `/scorecards.md` beside the per-tool `/score/<slug>/md` twins.
   - A seeded host's result page carries no `X-Robots-Tag: noindex`; an on-demand host's does.
   - The agent-skills index entries resolve to `/fix/<id>` and each page exists in `dist/`.
   - A clean `dist/` contains no text node with `/web-audit`, `/web/scoring`, or `/score/live`.
@@ -1572,7 +1576,7 @@ Design.
   - `get_scorecard` and `get_website_audit` on a target with the in-flight flag set return `found: false, in_progress:
     true, started_at`.
   - `audit_website` and `score_cli` results carry `scorecard_url` and no `share_url`; `score_cli` on a branch URL
-    returns `/score/o/r@feature`.
+    returns `/score/o/r@feature` with the `source_sha` it scored.
   - WebMCP `open_audit` sets the form action target and calls `form.submit()` only on a form whose action is `/audit`; a
     stub asserts no fetch to `/api/score` and no navigation to `/scoring`.
   - The WebMCP source guard fails on a fixture containing `requestSubmit(`.
