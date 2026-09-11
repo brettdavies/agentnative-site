@@ -23,7 +23,8 @@ import {
   type ResultEnv,
 } from './audit/result';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
-import { flushHitMinPurge, runWithHitMinPurge, webTag } from './audit-web/hit-min-purge';
+import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
+import { webTag } from './audit-web/hit-min-tags';
 import {
   buildFrontpageBoardEmptyState,
   buildFrontpageBoardMarkdown,

@@ -165,7 +165,7 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     }
   });
 
-  test('a prefilled /audit is the short edge class; bare /audit stays HIT-1d', async ({ request }) => {
+  test('a prefilled /audit is HIT-min; bare /audit stays HIT-1d', async ({ request }) => {
     const prefilled = await warmThenGet(request, '/audit?lane=web&target=example.com', BROWSER);
     expect(prefilled.status()).toBe(200);
     expect(prefilled.headers()['cache-control'] ?? '').toContain('max-age=0');

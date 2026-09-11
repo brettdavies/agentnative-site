@@ -219,12 +219,11 @@ function alternateLink(href: string, type: string): string {
 }
 
 /**
- * The `Link` alternates of a result page: the `/md` twin and the `/json`
+ * The `Link` header value of a result page: the `/md` twin and the `/json`
  * envelope, from the same builders as the page's `<head>` links. Null off
  * the result namespace.
  */
-function resultAlternateLinks(pathname: string): string | null {
-  if (!isScorePath(pathname)) return null;
+function resultLinkHeader(pathname: string): string | null {
   const split = splitRepresentation(pathname);
   if (!split) return null;
   return [
@@ -365,13 +364,13 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   const headers = new Headers(response.headers);
   const url = new URL(opts.request.url);
   const requestPathname = url.pathname;
-  const resultLinks = resultAlternateLinks(opts.pathname);
 
   headers.delete('Cache-Tag');
 
   if (opts.servedMarkdown) {
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
     headers.set('X-Robots-Tag', 'noindex');
+    const resultLinks = resultLinkHeader(opts.pathname);
     if (resultLinks) headers.set('Link', resultLinks);
     if (isRepresentationPinned(requestPathname)) {
       headers.delete('Vary');
@@ -393,7 +392,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   } else if (isUntwinnedSource(opts.pathname)) {
     headers.delete('Vary');
   } else {
-    const twinLink = resultLinks ?? alternateLink(markdownTwinFor(opts.pathname), 'text/markdown');
+    const twinLink = resultLinkHeader(opts.pathname) ?? alternateLink(markdownTwinFor(opts.pathname), 'text/markdown');
     headers.set('Link', opts.pathname === '/' ? `${twinLink}, ${ROOT_DISCOVERY_LINKS}` : twinLink);
     headers.set('X-Llms-Txt', '/llms.txt');
     headers.set('Vary', 'Accept, User-Agent');

@@ -464,8 +464,8 @@ describe('applyHeaders — HIT-min live boards', () => {
     }
   });
 
-  // The legacy /web board is served by its route, which names its class;
-  // the path alone no longer carries a tag.
+  // The legacy /web board is served by its dispatch, which names its class;
+  // the path itself carries no tag.
   test('/web.md with the served web tag is no-Vary HIT-min even when Link pathname is HTML-canonical /web', () => {
     const res = applyHeaders(new Response('md'), {
       request: req('https://anc.dev/web.md'),
@@ -736,7 +736,7 @@ describe('applyHeaders — MISS class', () => {
 });
 
 describe('applyHeaders — /audit prefill demotion', () => {
-  test('/audit with a query is the short edge class with no tag; bare /audit stays HIT-1d', () => {
+  test('/audit with a query is HIT-min with no tag; bare /audit stays HIT-1d', () => {
     const prefilled = applyHeaders(new Response('form'), {
       request: req('https://anc.dev/audit?lane=web&target=example.com'),
       servedMarkdown: false,
