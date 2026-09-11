@@ -59,9 +59,9 @@ export type GitCloneInstall = {
   owner: string;
   repo: string;
   branch: string;
-  // The "binary" is the repo name by convention — used as the share-url
-  // slug and the cache key. Branch-scoped scores skip the cache write
-  // (handler.ts), so the binary here is purely a display label.
+  // The repo name by convention: a display label only. A source clone's
+  // result target, cache key, and purge tag all derive from
+  // `owner/repo@branch` (`targetOfSpec`), never from this field.
   binary: string;
 };
 export type InstallSpec = ParsedInstall | DirectInstall | GitCloneInstall;

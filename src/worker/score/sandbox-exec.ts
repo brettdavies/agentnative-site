@@ -21,6 +21,7 @@
 // bounce as install_unsupported with pm=brew_only.
 
 import type { Sandbox } from '@cloudflare/sandbox';
+import type { CliPhase } from '../../shared/audit-events';
 import type { GitCloneInstall, InstallSpec } from './discover-binary';
 import { SDIST_TRUSTED_NAMES } from './sdist-allowlist';
 import { validBranchName } from './validate';
@@ -51,7 +52,17 @@ export type ScoreSuccess = {
     // Wall-clock duration of the anc audit exec. Same shape +
     // rationale as install_ms; populated on the ok-true branch.
     anc_audit_ms: number;
+    // The commit a source clone checked out, when the clone printed it.
+    source_sha?: string;
   };
+};
+
+/** The phases the sandbox reports, in order; the endpoint owns `resolving`. */
+export type SandboxPhase = Exclude<CliPhase, 'resolving'>;
+
+export type ScoreOptions = {
+  /** Called at each phase boundary, before the step the phase names runs. */
+  onPhase?: (phase: SandboxPhase) => void;
 };
 
 export type ScoreFailure = {
@@ -84,6 +95,7 @@ export type ScoreErrorCode =
 const GATE_PREFIX = 'GATE:';
 const DETAILS_PREFIX = 'DETAILS:';
 const DETECTED_BINARY_PREFIX = 'DETECTED_BINARY=';
+const SOURCE_SHA_PREFIX = 'SOURCE_SHA=';
 
 // ---------------------------------------------------------------------------
 // Public surface
@@ -164,11 +176,15 @@ const INSTALL_HOSTS: Record<string, readonly string[]> = {
 // Orchestration
 // ---------------------------------------------------------------------------
 
-export async function score(sandbox: ContainerLike, spec: InstallSpec): Promise<ScoreResult> {
-  return await Promise.race([runScore(sandbox, spec), timeoutAfter(TOTAL_TIMEOUT_MS)]);
+export async function score(sandbox: ContainerLike, spec: InstallSpec, opts: ScoreOptions = {}): Promise<ScoreResult> {
+  return await Promise.race([runScore(sandbox, spec, opts.onPhase ?? (() => {})), timeoutAfter(TOTAL_TIMEOUT_MS)]);
 }
 
-async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<ScoreResult> {
+async function runScore(
+  sandbox: ContainerLike,
+  spec: InstallSpec,
+  phase: (phase: SandboxPhase) => void,
+): Promise<ScoreResult> {
   const installCmd = installCommandFor(spec);
   if (!installCmd) {
     return { ok: false, error: 'install_unsupported', details: `pm=${spec.pm}` };
@@ -182,6 +198,7 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     allowedHostnames: [...hosts],
   });
 
+  phase('installing');
   const installStart = Date.now();
   const installResult = await sandbox.exec(installCmd, { timeout: TOTAL_TIMEOUT_MS });
   const installMs = Date.now() - installStart;
@@ -209,6 +226,8 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     };
   }
 
+  phase('installed');
+
   // Auto-detect (Fix 1): direct-install commands print
   // `DETECTED_BINARY=<name>` on stdout when the archive carried a binary
   // whose filename differs from spec.binary (the gogcli → gog case).
@@ -226,10 +245,12 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
   // <binary>` gate, which would always miss because the repo name is
   // not necessarily a CLI binary the clone produced.
   const isSourceScoped = spec.pm === 'git-clone';
+  const sourceSha = isSourceScoped ? extractSourceSha(installResult.stdout) : null;
 
   if (!isSourceScoped) {
     // Verify the install produced a runnable binary on PATH. Catches the
     // pallets/click case (wheel installs cleanly, no console_scripts entry).
+    phase('verifying');
     const whichCmd = `which ${shellQuote(binary)}`;
     const whichResult = await sandbox.exec(whichCmd, { timeout: SHORT_EXEC_TIMEOUT_MS });
     if (!whichResult.success || !whichResult.stdout.trim()) {
@@ -240,6 +261,7 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
   // Phase 2 — lock down. `anc audit` must not reach any host. Setting the
   // handler BEFORE exec is the second safety invariant covered by test
   // scenario (b).
+  phase('lockdown');
   await sandbox.setOutboundHandler('noHttp');
 
   // Capture anc_version live from the running binary, never a build-time
@@ -273,6 +295,7 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
     : auditProfile
       ? `anc audit --command ${shellQuote(binary)} --output json --audit-profile ${shellQuote(auditProfile)}`
       : `anc audit --command ${shellQuote(binary)} --output json`;
+  phase('auditing');
   const ancAuditStart = Date.now();
   const auditResult = await sandbox.exec(ancAuditCmd, { timeout: TOTAL_TIMEOUT_MS });
   const ancAuditMs = Date.now() - ancAuditStart;
@@ -295,7 +318,13 @@ async function runScore(sandbox: ContainerLike, spec: InstallSpec): Promise<Scor
 
   return {
     ok: true,
-    value: { scorecard, anc_version: ancVersion, install_ms: installMs, anc_audit_ms: ancAuditMs },
+    value: {
+      scorecard,
+      anc_version: ancVersion,
+      install_ms: installMs,
+      anc_audit_ms: ancAuditMs,
+      ...(sourceSha ? { source_sha: sourceSha } : {}),
+    },
   };
 }
 
@@ -651,6 +680,20 @@ export function extractDetectedBinary(stdout: string): string | null {
   return null;
 }
 
+// The commit the clone checked out, printed by the clone command as its
+// last stdout line; anything but a full lowercase hex SHA is ignored.
+export function extractSourceSha(stdout: string): string | null {
+  const lines = stdout.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line.startsWith(SOURCE_SHA_PREFIX)) {
+      const sha = line.slice(SOURCE_SHA_PREFIX.length).trim();
+      return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+    }
+  }
+  return null;
+}
+
 // Parse GATE:<step> + DETAILS:<text> markers from the install stderr.
 // Returns the highest-fidelity error description we can produce for the
 // user, plus a `kind` discriminator so runScore() can re-classify the
@@ -737,7 +780,8 @@ export function buildGitCloneCommand(spec: GitCloneInstall): string | null {
     `( set -e; rm -rf ${shellQuote(CLONE_DEST)}; ` +
     `git clone --depth 1 --no-tags --single-branch ` +
     `--branch ${shellQuote(spec.branch)} ` +
-    `${shellQuote(repoUrl)} ${shellQuote(CLONE_DEST)} )`
+    `${shellQuote(repoUrl)} ${shellQuote(CLONE_DEST)}; ` +
+    `echo "${SOURCE_SHA_PREFIX}$(git -C ${shellQuote(CLONE_DEST)} rev-parse HEAD)" )`
   );
 }
 

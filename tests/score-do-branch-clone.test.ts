@@ -98,7 +98,8 @@ describe('buildGitCloneCommand — shape', () => {
       `( set -e; rm -rf '/tmp/anc-clone-target'; ` +
         `git clone --depth 1 --no-tags --single-branch ` +
         `--branch 'main' ` +
-        `'https://github.com/cli/cli.git' '/tmp/anc-clone-target' )`,
+        `'https://github.com/cli/cli.git' '/tmp/anc-clone-target'; ` +
+        `echo "SOURCE_SHA=$(git -C '/tmp/anc-clone-target' rev-parse HEAD)" )`,
     );
   });
 
@@ -324,5 +325,50 @@ describe('InstallSpec union — git-clone is a recognized variant', () => {
   test('exhaustiveness — git-clone is a valid pm value', () => {
     const spec: InstallSpec = { pm: 'git-clone', owner: 'a', repo: 'b', branch: 'main', binary: 'b' };
     expect(spec.pm).toBe('git-clone');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source SHA: the clone prints the checked-out commit and the result carries it.
+// ---------------------------------------------------------------------------
+
+describe('score() — git-clone source sha', () => {
+  const SHA = 'a'.repeat(40);
+
+  test('the clone command prints the checked-out commit after the clone', () => {
+    const cmd = buildGitCloneCommand(CLI_SPEC);
+    expect(cmd).toContain("git -C '/tmp/anc-clone-target' rev-parse HEAD");
+    expect(cmd).toContain('SOURCE_SHA=');
+  });
+
+  test('the result carries the SHA the clone printed', async () => {
+    const { stub } = makeStub((command) =>
+      command.includes('git clone')
+        ? { success: true, stdout: `SOURCE_SHA=${SHA}\n`, stderr: '' }
+        : defaultResponder(command),
+    );
+    const result = await score(stub, CLI_SPEC);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.source_sha).toBe(SHA);
+  });
+
+  test('a clone that prints no SHA, or a malformed one, yields no source_sha', async () => {
+    for (const stdout of ['', 'SOURCE_SHA=not-a-sha\n', `SOURCE_SHA=${SHA.slice(0, 39)}\n`]) {
+      const { stub } = makeStub((command) =>
+        command.includes('git clone') ? { success: true, stdout, stderr: '' } : defaultResponder(command),
+      );
+      const result = await score(stub, CLI_SPEC);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.source_sha).toBeUndefined();
+    }
+  });
+
+  test('a source clone reports installing, installed, lockdown, auditing and never verifying', async () => {
+    const phases: string[] = [];
+    const { stub } = makeStub();
+    await score(stub, CLI_SPEC, { onPhase: (phase) => phases.push(phase) });
+    expect(phases).toEqual(['installing', 'installed', 'lockdown', 'auditing']);
   });
 });

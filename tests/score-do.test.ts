@@ -1145,3 +1145,61 @@ describe('sandbox-exec.score() — gate-capture in install details (Fix 3)', () 
     expect(m.extractGateDetails('')).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase callback: one call per boundary, each bracketing the step it names.
+// ---------------------------------------------------------------------------
+
+describe('sandbox-exec.score() — phase callback', () => {
+  test('a binary install reports installing, installed, verifying, lockdown, auditing, each around its own step', async () => {
+    const events: string[] = [];
+    const { stub } = makeStub((command) => {
+      events.push(`exec:${command.split(' ').slice(0, 2).join(' ')}`);
+      return defaultResponder(command);
+    });
+    await score(stub, CARGO_SPEC, { onPhase: (phase) => events.push(`phase:${phase}`) });
+    expect(events).toEqual([
+      'phase:installing',
+      'exec:cargo-binstall --no-confirm',
+      'phase:installed',
+      'phase:verifying',
+      "exec:which 'rg'",
+      'phase:lockdown',
+      'exec:anc --version',
+      'phase:auditing',
+      'exec:anc audit',
+    ]);
+  });
+
+  test('lockdown is reported before the noHttp swap and auditing after it', async () => {
+    const events: string[] = [];
+    const stub: ContainerLike = {
+      async setOutboundHandler(name: string): Promise<void> {
+        events.push(`swap:${name}`);
+      },
+      async exec(command: string): Promise<ExecLike> {
+        return defaultResponder(command);
+      },
+    };
+    await score(stub, CARGO_SPEC, { onPhase: (phase) => events.push(`phase:${phase}`) });
+    expect(events).toEqual([
+      'swap:allowedInstall',
+      'phase:installing',
+      'phase:installed',
+      'phase:verifying',
+      'phase:lockdown',
+      'swap:noHttp',
+      'phase:auditing',
+    ]);
+  });
+
+  test('a failed install reports installing and nothing after it', async () => {
+    const phases: string[] = [];
+    const { stub } = makeStub((command) =>
+      command.startsWith('cargo-binstall') ? { success: false, stdout: '', stderr: 'boom' } : defaultResponder(command),
+    );
+    const result = await score(stub, CARGO_SPEC, { onPhase: (phase) => phases.push(phase) });
+    expect(result.ok).toBe(false);
+    expect(phases).toEqual(['installing']);
+  });
+});

@@ -271,8 +271,9 @@ async function handleScoreInner(url: URL, request: Request, env: ScoreEnv, telem
   }
 
   // 2. The unmetered tiers: registry, then the R2 cache when the binary is
-  //    cheaply derivable. A branch-scoped target skips the cache tier (a
-  //    snapshot is never served from cache) and so does ?fromCache=false.
+  //    cheaply derivable. A branch-scoped target never serves from this
+  //    tier: its record is a snapshot under its own key, read by the
+  //    result page. ?fromCache=false skips the tier too.
   const skipCache = url.searchParams.get('fromCache') === 'false';
   const origin = url.origin;
   if (!isBranchScoped(validated) && !skipCache) telemetry.cache_pre_attempted = true;
