@@ -199,9 +199,11 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
 // first. Staging alone carries the two tags of its cross-migration rollback
 // rehearsal (RELEASES.md); apart from those, both environments carry one list.
 
+// An entry lists only tags a successful deploy has applied to that
+// environment, never a tag added to make a config change pass.
 const APPLIED_MIGRATIONS = {
   production: ['v1'],
-  staging: ['v1', 'v2-drop-sandbox', 'v3-restore-sandbox'],
+  staging: ['v1', 'v2-drop-sandbox', 'v3-restore-sandbox', 'v4-audit-job'],
 };
 const STAGING_REHEARSAL_TAGS = ['v2-drop-sandbox', 'v3-restore-sandbox'];
 

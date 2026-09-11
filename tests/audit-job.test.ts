@@ -1,48 +1,7 @@
-import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import type { AuditEvent } from '../src/shared/audit-events';
-import { ATTACH_PATH, AuditJob, JOB_GRACE_MS, JOB_LOG_LIMIT } from '../src/worker/audit/job';
-
-// A Durable Object state over bun:sqlite: the job's SQL runs against a real
-// SQLite engine, and the alarm is a value the test fires by hand.
-function fakeState() {
-  let db = new Database(':memory:');
-  const state = {
-    alarm: null as number | null,
-    deleted: 0,
-    storage: {
-      sql: {
-        exec(query: string, ...bindings: Array<string | number | null>) {
-          const rows = db.query(query).all(...bindings) as Array<Record<string, string | number | null>>;
-          return {
-            toArray: () => rows,
-            one: () => {
-              if (rows.length !== 1) throw new Error(`expected one row, got ${rows.length}`);
-              return rows[0];
-            },
-            [Symbol.iterator]: () => rows[Symbol.iterator](),
-          };
-        },
-      },
-      async setAlarm(at: number) {
-        state.alarm = at;
-      },
-      // Mirrors the platform: deleteAll clears the database, not the alarm.
-      async deleteAll() {
-        db.close();
-        db = new Database(':memory:');
-        state.deleted += 1;
-      },
-    },
-  };
-  return state;
-}
-
-function makeJob() {
-  const state = fakeState();
-  const job = new AuditJob(state as unknown as DurableObjectState, {} as never);
-  return { job, state };
-}
+import { type AuditEvent, auditErrorFor, CTA_RETRY } from '../src/shared/audit-events';
+import { ATTACH_PATH, type AuditJob, JOB_GRACE_MS, JOB_LOG_LIMIT } from '../src/worker/audit/job';
+import { makeJob } from './helpers/audit-job-state';
 
 const at = '2026-09-11T00:00:00.000Z';
 const accepted: AuditEvent = { type: 'accepted', lane: 'cli', target: 'ouch', started_at: at };
@@ -60,6 +19,13 @@ const complete = {
   spec_version: '0.4.0',
   scorecard: { badge: { score_pct: 71 } },
 } as unknown as AuditEvent;
+const incomplete: AuditEvent = { type: 'incomplete', scorecard: {} };
+const bounce: AuditEvent = {
+  type: 'bounce',
+  ...auditErrorFor('invalid_url', { cta: 'Paste a tool name, an install command, or a GitHub URL.' }),
+};
+const failure: AuditEvent = { type: 'error', ...auditErrorFor('sandbox_unavailable', { cta: CTA_RETRY }) };
+const terminals: AuditEvent[] = [complete, incomplete, bounce, failure];
 
 async function claimed(job: AuditJob): Promise<string> {
   const claim = await job.claim(at, 90_000);
@@ -76,7 +42,11 @@ async function lines(res: Response): Promise<Array<Record<string, unknown>>> {
   return text
     .split('\n')
     .filter((l) => l.trim().length > 0)
-    .map((l) => JSON.parse(l));
+    .map((l): Record<string, unknown> => JSON.parse(l));
+}
+
+function liveReaders(job: AuditJob): number {
+  return (job as unknown as { subscribers: Set<unknown> }).subscribers.size;
 }
 
 describe('AuditJob: claim', () => {
@@ -181,16 +151,18 @@ describe('AuditJob: append and attach', () => {
     expect(replay.at(-1)?.type).toBe('complete');
   });
 
-  test('an append after the terminal line is refused', async () => {
+  test('a reader that cancels its stream is dropped, and another live reader keeps receiving', async () => {
     const { job } = makeJob();
     const run = await claimed(job);
+    await job.append(run, accepted);
+    const gone = await attach(job);
+    const stays = await attach(job);
+    if (!gone.body) throw new Error('expected a stream');
+    await gone.body.cancel();
+    await job.append(run, installing);
+    expect(liveReaders(job)).toBe(1);
     await job.append(run, complete);
-    expect(await job.append(run, installing)).toBe(false);
-  });
-
-  test('an attach to a job that was never claimed is 404', async () => {
-    const { job } = makeJob();
-    expect((await attach(job)).status).toBe(404);
+    expect((await lines(stays)).map((l) => l.type)).toEqual(['accepted', 'phase', 'complete']);
   });
 
   test('a request other than GET on the attach path is 404', async () => {
@@ -198,6 +170,47 @@ describe('AuditJob: append and attach', () => {
     await claimed(job);
     const res = await job.fetch(new Request(`https://job.internal${ATTACH_PATH}`, { method: 'POST', body: '{}' }));
     expect(res.status).toBe(404);
+  });
+});
+
+describe('AuditJob: terminal events', () => {
+  for (const terminal of terminals) {
+    test(`a ${terminal.type} line reaches a live reader and closes its stream, ends the run, and moves the alarm to the grace`, async () => {
+      const { job, state } = makeJob();
+      const run = await claimed(job);
+      await job.append(run, accepted);
+      const live = await attach(job);
+      const before = Date.now();
+      expect(await job.append(run, terminal)).toBe(true);
+      const after = Date.now();
+      expect(state.alarm).toBeGreaterThanOrEqual(before + JOB_GRACE_MS);
+      expect(state.alarm).toBeLessThanOrEqual(after + JOB_GRACE_MS);
+      expect(await job.append(run, installing)).toBe(false);
+      expect(await lines(live)).toEqual([accepted, terminal]);
+    });
+  }
+});
+
+describe('AuditJob: no claim, no storage', () => {
+  test('an attach to a job that was never claimed is 404 and leaves no tables', async () => {
+    const { job, state } = makeJob();
+    expect((await attach(job)).status).toBe(404);
+    expect(state.tables()).toEqual([]);
+  });
+
+  test('an attach after the cleanup alarm is 404 and leaves no tables', async () => {
+    const { job, state } = makeJob();
+    const run = await claimed(job);
+    await job.append(run, complete);
+    await job.alarm();
+    expect((await attach(job)).status).toBe(404);
+    expect(state.tables()).toEqual([]);
+  });
+
+  test('an append on a job that was never claimed returns false and leaves no tables', async () => {
+    const { job, state } = makeJob();
+    expect(await job.append(crypto.randomUUID(), accepted)).toBe(false);
+    expect(state.tables()).toEqual([]);
   });
 });
 
@@ -232,6 +245,17 @@ describe('AuditJob: cleanup alarm', () => {
     const run = await claimed(job);
     await job.append(run, complete);
     await job.alarm();
+    expect((await job.claim(at, 90_000)).claimed).toBe(true);
+  });
+
+  test('an alarm fired twice is harmless: storage stays empty, and a later claim works', async () => {
+    const { job, state } = makeJob();
+    const run = await claimed(job);
+    await job.append(run, complete);
+    await job.alarm();
+    await job.alarm();
+    expect(state.tables()).toEqual([]);
+    expect(state.alarm).toBeNull();
     expect((await job.claim(at, 90_000)).claimed).toBe(true);
   });
 });

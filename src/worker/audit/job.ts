@@ -26,6 +26,10 @@
 // eviction drops them, and their readers see the stream end without a
 // terminal line, the same as a lost connection. An attach to a job that was
 // never claimed, or was already deleted, is a 404.
+//
+// Only a claim creates the tables, and a claim always arms the alarm that
+// deletes them. An attach, append, or alarm on a job with no claim finds no
+// job table and writes nothing, so no storage outlives its alarm.
 
 import { DurableObject } from 'cloudflare:workers';
 import { type AuditEvent, auditErrorFor, CTA_RETRY, isTerminalEvent } from '../../shared/audit-events';
@@ -61,7 +65,7 @@ export class AuditJob extends DurableObject {
     if (current?.status === 'running') this.endSubscribers(timeoutLine());
     const run = crypto.randomUUID();
     const deadline = now + deadlineMs;
-    const sql = this.sql();
+    const sql = this.createTables();
     sql.exec('DELETE FROM events');
     sql.exec(
       'INSERT OR REPLACE INTO job (id, run, status, started_at, deadline) VALUES (1, ?, ?, ?, ?)',
@@ -82,7 +86,7 @@ export class AuditJob extends DurableObject {
     if (event.type === 'heartbeat') return true;
     const line = JSON.stringify(event);
     const terminal = isTerminalEvent(event);
-    const sql = this.sql();
+    const sql = this.ctx.storage.sql;
     // The log is emptied at claim and seq counts up from 1 with no gaps, so
     // the highest seq is the kept count: one index lookup, not a scan.
     const kept = sql.exec<{ n: number }>('SELECT COALESCE(MAX(seq), 0) AS n FROM events').one().n;
@@ -116,7 +120,10 @@ export class AuditJob extends DurableObject {
       }
       writer.write(encoder.encode(`${line}\n`)).catch(() => this.subscribers.delete(subscriber));
     };
-    const replay = this.sql().exec<{ line: string }>('SELECT line FROM events WHERE seq >= ? ORDER BY seq', from);
+    const replay = this.ctx.storage.sql.exec<{ line: string }>(
+      'SELECT line FROM events WHERE seq >= ? ORDER BY seq',
+      from,
+    );
     for (const row of replay) subscriber(row.line);
     if (current.status === 'running') this.subscribers.add(subscriber);
     else subscriber(null);
@@ -130,12 +137,23 @@ export class AuditJob extends DurableObject {
   }
 
   private current(): JobRow | null {
-    return (
-      this.sql().exec<JobRow>('SELECT run, status, started_at, deadline FROM job WHERE id = 1').toArray()[0] ?? null
-    );
+    const sql = this.existingTables();
+    if (!sql) return null;
+    return sql.exec<JobRow>('SELECT run, status, started_at, deadline FROM job WHERE id = 1').toArray()[0] ?? null;
   }
 
-  private sql(): SqlStorage {
+  /** The database once a claim has created the tables; null before, so a read never writes. */
+  private existingTables(): SqlStorage | null {
+    const sql = this.ctx.storage.sql;
+    if (!this.schemaReady) {
+      const found = sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'job'").toArray().length > 0;
+      if (!found) return null;
+      this.schemaReady = true;
+    }
+    return sql;
+  }
+
+  private createTables(): SqlStorage {
     const sql = this.ctx.storage.sql;
     if (!this.schemaReady) {
       sql.exec(
