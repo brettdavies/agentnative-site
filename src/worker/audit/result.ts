@@ -24,6 +24,10 @@
 //   bare path .......... negotiates `Accept: application/json` and
 //                        `Accept: text/markdown`; `?v=` is ignored for
 //                        rendering and makes the response uncacheable
+//   cache class ........ named by this route for the tier it served: a
+//                        curated page is HIT-1d (its JSON path-keyed), a
+//                        live, branch, or website result is HIT-min under
+//                        the tag its writer purges, in every representation
 //
 // The 404 body is one sentence, one prefilled `/audit` link, and a
 // "Did you mean?" list from the registry (CLI shapes) or the seed list
@@ -67,7 +71,7 @@ import { freshnessHtml, freshnessState } from '../audit-web/summary-freshness';
 import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
-import { applyHeaders } from '../headers';
+import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
 import { loadShellTemplate, substituteShell } from '../shell-template';
@@ -238,7 +242,17 @@ async function serveResult(request: Request, env: ResultEnv, deps: ResultDeps, s
   if (!served.legacy && classified.target !== served.target) {
     return redirect(pathFor(classified.target, served.representation));
   }
-  const ctx: RenderContext = { request, env, deps, url, served, representation, negotiated, origin: url.origin };
+  const ctx: RenderContext = {
+    request,
+    env,
+    deps,
+    url,
+    served,
+    lane: classified.lane,
+    representation,
+    negotiated,
+    origin: url.origin,
+  };
 
   if (classified.lane === 'web') return serveWeb(ctx, classified.target);
   if (classified.kind === 'cli-branch') return serveBranch(ctx, classified.target);
@@ -251,6 +265,7 @@ type RenderContext = {
   deps: ResultDeps;
   url: URL;
   served: Served;
+  lane: Lane;
   representation: Representation;
   /** True when the bare path chose the representation from `Accept`. */
   negotiated: boolean;
@@ -424,12 +439,12 @@ async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promi
       specVersion: typeof baked.spec_version === 'string' ? baked.spec_version : SPEC_VERSION,
       scorecard: baked.scorecard,
     });
-    return finish(ctx, jsonResponse(envelopeJsonBody(envelope)), 'json');
+    return finish(ctx, jsonResponse(envelopeJsonBody(envelope)), 'json', { curated: true });
   }
   const body = await asset.text();
   const headers: Record<string, string> =
     ctx.representation === 'md' ? {} : { 'content-type': 'text/html; charset=utf-8' };
-  return finish(ctx, new Response(body, { status: 200, headers }), ctx.representation);
+  return finish(ctx, new Response(body, { status: 200, headers }), ctx.representation, { curated: true });
 }
 
 async function inFlightResponse(ctx: RenderContext, lane: Lane, target: string): Promise<Response | null> {
@@ -441,6 +456,7 @@ async function inFlightResponse(ctx: RenderContext, lane: Lane, target: string):
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
+      'cloudflare-cdn-cache-control': 'no-store',
       'access-control-allow-origin': '*',
       'x-robots-tag': 'noindex',
     },
@@ -494,12 +510,13 @@ async function respondCli(
 
 async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response> {
   const { representation } = ctx;
+  const noindex = rendered.noindex;
   if (representation === 'json') {
-    return finish(ctx, jsonResponse(envelopeJsonBody(rendered.envelope), rendered.noindex), 'json');
+    return finish(ctx, jsonResponse(envelopeJsonBody(rendered.envelope), noindex), 'json', { noindex });
   }
   if (representation === 'md') {
     const body = await rendered.markdown();
-    return finish(ctx, new Response(body, { status: 200 }), 'md', rendered.noindex);
+    return finish(ctx, new Response(body, { status: 200 }), 'md', { noindex });
   }
   let template: string;
   try {
@@ -530,7 +547,9 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
     ctx,
     new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
     'html',
-    rendered.noindex,
+    {
+      noindex,
+    },
   );
 }
 
@@ -548,25 +567,31 @@ function jsonResponse(body: Record<string, unknown>, noindex = false): Response 
 /**
  * Apply the site header policy for the representation actually served,
  * keyed by the request path so pinned twins carry no Vary and the bare
- * path does. A `?v=` query makes the response uncacheable. A JSON
+ * path does, with the cache class this route knows and the path cannot:
+ * a curated page is bake-at-build, a live result is HIT-min under its
+ * purge tag. A `?v=` query makes the response uncacheable. A JSON
  * response never carries a cookie.
  */
-function finish(ctx: RenderContext, response: Response, representation: Representation, noindex = false): Response {
+function finish(
+  ctx: RenderContext,
+  response: Response,
+  representation: Representation,
+  opts: { noindex?: boolean; curated?: boolean } = {},
+): Response {
   const servedMarkdown = representation === 'md';
   const servedJson = representation === 'json';
+  const cache: CacheClassSpec = ctx.url.searchParams.has('v')
+    ? { klass: 'miss' }
+    : resultCacheClass({ curated: opts.curated === true, lane: ctx.lane, target: ctx.served.target, representation });
   const headed = applyHeaders(response, {
     request: ctx.request,
     servedMarkdown,
     servedJson,
     pathname: scorePath(ctx.served.target),
+    cache,
   });
-  if (noindex) headed.headers.set('X-Robots-Tag', 'noindex');
+  if (opts.noindex) headed.headers.set('X-Robots-Tag', 'noindex');
   if (ctx.negotiated) headed.headers.set('Vary', 'Accept, User-Agent');
-  if (ctx.url.searchParams.has('v')) {
-    headed.headers.set('Cache-Control', 'no-store');
-    headed.headers.set('Cloudflare-CDN-Cache-Control', 'no-store');
-    headed.headers.delete('Cache-Tag');
-  }
   headed.headers.delete('Set-Cookie');
   return headed;
 }

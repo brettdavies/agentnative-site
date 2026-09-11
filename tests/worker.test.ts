@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
-import { applyHeaders, isRepresentationPinned, isStagingHost } from '../src/worker/headers';
+import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
 import { _resetIndexCache } from '../src/worker/score/handler';
 
@@ -447,11 +447,31 @@ describe('applyHeaders — HIT-min live boards', () => {
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
   });
 
-  test('/web.md is no-Vary HIT-min even when Link pathname is HTML-canonical /web', () => {
+  test('/scorecards, its twin, and its lane and view queries share the homepage tag', () => {
+    for (const url of [
+      'https://anc.dev/scorecards',
+      'https://anc.dev/scorecards.md',
+      'https://anc.dev/scorecards?lane=web&view=all',
+    ]) {
+      const res = applyHeaders(new Response('board'), {
+        request: req(url),
+        servedMarkdown: url.endsWith('.md'),
+        pathname: '/scorecards',
+      });
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+      expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+      expect(res.headers.get('Cache-Tag')).toBe('home');
+    }
+  });
+
+  // The legacy /web board is served by its dispatch, which names its class;
+  // the path itself carries no tag.
+  test('/web.md with the served web tag is no-Vary HIT-min even when Link pathname is HTML-canonical /web', () => {
     const res = applyHeaders(new Response('md'), {
       request: req('https://anc.dev/web.md'),
       servedMarkdown: true,
       pathname: '/web',
+      cache: { klass: 'hit-min', tag: 'web' },
     });
     expect(res.headers.get('Vary')).toBeNull();
     expect(res.headers.get('Cache-Tag')).toBe('web');
@@ -459,37 +479,220 @@ describe('applyHeaders — HIT-min live boards', () => {
     expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
   });
 
-  test('/web?view=all and /web?view=curated carry the web tag', () => {
+  test('/web?view=all and /web?view=curated carry the served web tag', () => {
     for (const url of ['https://anc.dev/web?view=all', 'https://anc.dev/web?view=curated']) {
       const res = applyHeaders(new Response('html'), {
         request: req(url),
         servedMarkdown: false,
         pathname: '/web',
+        cache: { klass: 'hit-min', tag: 'web' },
       });
       expect(res.headers.get('Cache-Tag')).toBe('web');
       expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
     }
   });
 
-  test('/web/<domain> carries only web:{domain}, not web', () => {
+  test('a legacy /web/<domain> path without a served class is untagged HIT-1d', () => {
     const res = applyHeaders(new Response('html'), {
       request: req('https://anc.dev/web/example.com'),
       servedMarkdown: false,
       pathname: '/web/example.com',
     });
-    expect(res.headers.get('Cache-Tag')).toBe('web:example.com');
-    expect(res.headers.get('Cache-Tag')).not.toBe('web');
-    expect(res.headers.get('Vary')).toBe('Accept, User-Agent');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+    expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+  });
+});
+
+describe('applyHeaders — cache class served by the result route', () => {
+  const web = (representation: 'html' | 'md' | 'json') =>
+    resultCacheClass({ curated: false, lane: 'web', target: 'anc.dev', representation });
+  const curated = (representation: 'html' | 'md' | 'json') =>
+    resultCacheClass({ curated: true, lane: 'cli', target: 'ripgrep', representation });
+
+  test('a website result is HIT-min under web:<host> in every representation', () => {
+    const html = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/score/anc.dev'),
+      servedMarkdown: false,
+      pathname: '/score/anc.dev',
+      cache: web('html'),
+    });
+    expect(html.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+    expect(html.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+    expect(html.headers.get('Cache-Tag')).toBe('web:anc.dev');
+    expect(html.headers.get('Vary')).toBe('Accept, User-Agent');
+
+    const md = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/score/anc.dev/md'),
+      servedMarkdown: true,
+      pathname: '/score/anc.dev',
+      cache: web('md'),
+    });
+    expect(md.headers.get('Cache-Tag')).toBe('web:anc.dev');
+    expect(md.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+    expect(md.headers.get('Vary')).toBeNull();
+
+    const json = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/anc.dev/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/anc.dev',
+      cache: web('json'),
+    });
+    expect(json.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+    expect(json.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+    expect(json.headers.get('Cache-Tag')).toBe('web:anc.dev');
+    expect(json.headers.get('Vary')).toBeNull();
   });
 
-  test('/web/<domain>.md is no-Vary HIT-min with only web:{domain}', () => {
-    const res = applyHeaders(new Response('md'), {
-      request: req('https://anc.dev/web/example.com.md'),
-      servedMarkdown: true,
-      pathname: '/web/example.com',
+  test('a live binary carries cli:<binary> and a branch run cli:<owner>/<repo>@<branch>', () => {
+    expect(resultCacheClass({ curated: false, lane: 'cli', target: 'ouch', representation: 'json' })).toEqual({
+      klass: 'hit-min',
+      tag: 'cli:ouch',
     });
+    expect(resultCacheClass({ curated: false, lane: 'cli', target: 'o/r@feature', representation: 'html' })).toEqual({
+      klass: 'hit-min',
+      tag: 'cli:o/r@feature',
+    });
+    const res = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/ouch/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/ouch',
+      cache: { klass: 'hit-min', tag: 'cli:ouch' },
+    });
+    expect(res.headers.get('Cache-Tag')).toBe('cli:ouch');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
+  test('a curated slug is HIT-1d with no tag and its build-emitted JSON is the path-keyed short class', () => {
+    expect(curated('html')).toEqual({ klass: 'hit-1d' });
+    expect(curated('md')).toEqual({ klass: 'hit-1d' });
+    expect(curated('json')).toEqual({ klass: 'short' });
+    const html = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/score/ripgrep'),
+      servedMarkdown: false,
+      pathname: '/score/ripgrep',
+      cache: curated('html'),
+    });
+    expect(html.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(html.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(html.headers.get('Cache-Tag')).toBeNull();
+    const json = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/ripgrep/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/ripgrep',
+      cache: curated('json'),
+    });
+    expect(json.headers.get('Cache-Control')).toBe('public, max-age=300, s-maxage=86400, stale-while-revalidate=60');
+    expect(json.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
+    expect(json.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('a 4xx or 5xx is MISS and untagged even when the route named a class', () => {
+    for (const status of [404, 503]) {
+      const res = applyHeaders(new Response('nope', { status }), {
+        request: req('https://anc.dev/score/anc.dev/json'),
+        servedMarkdown: false,
+        servedJson: true,
+        pathname: '/score/anc.dev',
+        cache: web('json'),
+      });
+      expect(res.headers.get('Cache-Control')).toBe('no-store');
+      expect(res.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+      expect(res.headers.get('Cache-Tag')).toBeNull();
+    }
+  });
+
+  test('a served MISS class makes a 200 uncacheable and drops the tag', () => {
+    const res = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/score/anc.dev?v=123'),
+      servedMarkdown: false,
+      pathname: '/score/anc.dev',
+      cache: { klass: 'miss' },
+    });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  // The path-keyed class is the only one carrying s-maxage, and a bare
+  // result path negotiates, so serving it there would let a zone HIT store
+  // the response without Vary.
+  test('a served short class on a negotiable path demotes to HIT-1d; a pinned one keeps it', () => {
+    const negotiable = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/ripgrep', 'application/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/ripgrep',
+      cache: { klass: 'short' },
+    });
+    expect(negotiable.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(negotiable.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(negotiable.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+
+    const pinned = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/ripgrep/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/ripgrep',
+      cache: { klass: 'short' },
+    });
+    expect(pinned.headers.get('Cache-Control')).toBe('public, max-age=300, s-maxage=86400, stale-while-revalidate=60');
+    expect(pinned.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
+  });
+});
+
+describe('applyHeaders — Link alternates on result pages', () => {
+  const MD = '</score/anc.dev/md>; rel="alternate"; type="text/markdown"';
+  const JSON_ALT = '</score/anc.dev/json>; rel="alternate"; type="application/json"';
+
+  test('the HTML page and both markdown forms carry the twin and the JSON alternate', () => {
+    const html = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/score/anc.dev'),
+      servedMarkdown: false,
+      pathname: '/score/anc.dev',
+    });
+    expect(html.headers.get('Link')).toBe(`${MD}, ${JSON_ALT}`);
+    const negotiated = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/score/anc.dev'),
+      servedMarkdown: true,
+      pathname: '/score/anc.dev',
+    });
+    expect(negotiated.headers.get('Link')).toBe(`${MD}, ${JSON_ALT}`);
+    expect(negotiated.headers.get('Vary')).toBe('Accept, User-Agent');
+    const pinned = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/score/anc.dev/md'),
+      servedMarkdown: true,
+      pathname: '/score/anc.dev',
+    });
+    expect(pinned.headers.get('Link')).toBe(`${MD}, ${JSON_ALT}`);
+    expect(pinned.headers.get('Vary')).toBeNull();
+  });
+
+  test('the JSON representation carries no Link and no Vary', () => {
+    const res = applyHeaders(new Response('{}', { headers: { Link: '</stale>; rel="alternate"' } }), {
+      request: req('https://anc.dev/score/anc.dev/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/anc.dev',
+    });
+    expect(res.headers.get('Link')).toBeNull();
     expect(res.headers.get('Vary')).toBeNull();
-    expect(res.headers.get('Cache-Tag')).toBe('web:example.com');
+  });
+
+  test('a page outside the result namespace keeps the single markdown alternate and no Link on its twin', () => {
+    const html = applyHeaders(new Response('html'), {
+      request: req('https://anc.dev/about'),
+      servedMarkdown: false,
+      pathname: '/about',
+    });
+    expect(html.headers.get('Link')).toBe('</about.md>; rel="alternate"; type="text/markdown"');
+    const md = applyHeaders(new Response('md'), {
+      request: req('https://anc.dev/about.md'),
+      servedMarkdown: true,
+      pathname: '/about.md',
+    });
+    expect(md.headers.get('Link')).toBeNull();
   });
 });
 
@@ -523,6 +726,7 @@ describe('applyHeaders — MISS class', () => {
       request: req('https://anc.dev/web/never-audited.dev'),
       servedMarkdown: false,
       pathname: '/web/never-audited.dev',
+      cache: { klass: 'hit-min', tag: 'web:never-audited.dev' },
     });
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Cache-Tag')).toBeNull();
@@ -536,6 +740,47 @@ describe('applyHeaders — MISS class', () => {
     });
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Cache-Tag')).toBeNull();
+  });
+
+  test('/scoring with a target and /scoring.md are MISS on 200', () => {
+    const page = applyHeaders(new Response('progress'), {
+      request: req('https://anc.dev/scoring?target=ripgrep'),
+      servedMarkdown: false,
+      pathname: '/scoring',
+    });
+    expect(page.headers.get('Cache-Control')).toBe('no-store');
+    expect(page.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+    expect(page.headers.get('Cache-Tag')).toBeNull();
+    const twin = applyHeaders(new Response('progress'), {
+      request: req('https://anc.dev/scoring.md'),
+      servedMarkdown: true,
+      pathname: '/scoring.md',
+    });
+    expect(twin.headers.get('Cache-Control')).toBe('no-store');
+    expect(twin.headers.get('Cloudflare-CDN-Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('applyHeaders — /audit prefill demotion', () => {
+  test('/audit with a query is HIT-min with no tag; bare /audit stays HIT-1d', () => {
+    const prefilled = applyHeaders(new Response('form'), {
+      request: req('https://anc.dev/audit?lane=web&target=example.com'),
+      servedMarkdown: false,
+      pathname: '/audit',
+    });
+    expect(prefilled.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+    expect(prefilled.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(prefilled.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=300');
+    expect(prefilled.headers.get('Cache-Tag')).toBeNull();
+    expect(prefilled.headers.get('Vary')).toBe('Accept, User-Agent');
+    const bare = applyHeaders(new Response('form'), {
+      request: req('https://anc.dev/audit'),
+      servedMarkdown: false,
+      pathname: '/audit',
+    });
+    expect(bare.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(bare.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+    expect(bare.headers.get('Cache-Tag')).toBeNull();
   });
 });
 
