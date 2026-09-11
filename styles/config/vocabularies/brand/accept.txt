@@ -12,6 +12,7 @@ Hostname
 Karpathy
 LT
 Leaderboard
+Leaderboards
 Madapusi
 Misrouted
 OAuth
