@@ -40,11 +40,17 @@ function fakeDeps(nowMs: number) {
   const starts: StartAuditInput[] = [];
   const navigations: string[] = [];
   const armed: EventTarget[] = [];
+  const reports: string[] = [];
+  let outcome: StartAuditResult | null = null;
   const deps: ReauditDeps = {
     startAudit: async (input: StartAuditInput): Promise<StartAuditResult> => {
       starts.push(input);
+      if (outcome) return outcome;
       navigations.push(`/scoring?target=${input.target}${input.refresh ? '&refresh=1' : ''}`);
       return { ok: true, target: input.target, lane: input.lane, entered_lane: input.lane };
+    },
+    report: (message: string) => {
+      reports.push(message);
     },
     now: () => clock.now,
     setInterval: (tick: () => void, ms: number) => {
@@ -58,7 +64,19 @@ function fakeDeps(nowMs: number) {
       armed.push(...elements);
     },
   };
-  return { deps, clock, intervals, cleared, starts, navigations, armed };
+  return {
+    deps,
+    clock,
+    intervals,
+    cleared,
+    starts,
+    navigations,
+    armed,
+    reports,
+    fail: (o: StartAuditResult) => {
+      outcome = o;
+    },
+  };
 }
 
 const WEB = { 'data-target': 'anc.dev', 'data-lane': 'web', 'aria-disabled': 'true' };
@@ -211,5 +229,24 @@ describe('on load', () => {
     );
     expect(replaced).toEqual([]);
     expect(queried).toBe(1);
+  });
+});
+
+describe('bindReaudit: a failed start is reported', () => {
+  test('a click whose startAudit answers ok: false reports the message and clears it on the next attempt', async () => {
+    const { control } = fakeControl({ 'data-target': 'ouch', 'data-lane': 'cli', 'data-refresh': '1' });
+    const fake = fakeDeps(T0);
+    bindReaudit(control, fake.deps);
+    fake.fail({ ok: false, reason: 'turnstile_failed', message: 'Verification failed. Please try again.' });
+    click(control);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fake.reports).toEqual(['Verification failed. Please try again.']);
+    fake.fail(null as unknown as StartAuditResult);
+    click(control);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fake.reports).toEqual(['Verification failed. Please try again.', '']);
+    expect(fake.navigations).toHaveLength(1);
   });
 });

@@ -280,7 +280,7 @@ describe('buildWebSummaryBody (U14)', () => {
       /web-check__label">[^<]*<\/span> <span class="tier tier-must">MUST<\/span> <span class="audit__status"/,
     );
     // The category header still carries no tier (that was the misnomer).
-    expect(html).not.toContain('catcard__hd tier-');
+    expect(html).not.toMatch(/pscore__row--category[^>]*tier-(must|should|may)/);
   });
 });
 
@@ -961,5 +961,42 @@ describe('leaderboard friendly-name display', () => {
     expect(rows).toContain('href="/web/developers.cloudflare.com"');
     expect(rows).toContain('width:96%'); // relative meter
     expect(rows).not.toContain('width:90%'); // not the global score
+  });
+});
+
+describe('website category rows carry a status pill from their rollup', () => {
+  function scorecardWith(categories: Array<{ id: string; name: string; passed: number; counted: number }>) {
+    return {
+      schema_version: '0.2',
+      spec_version: SPEC_VERSION,
+      target_url: 'https://example.com/',
+      tool: { name: 'example.com', url: 'https://example.com/' },
+      score_pct: 50,
+      score: { relative: 50, global: 40 },
+      categories,
+      results: [],
+    };
+  }
+  const html = buildWebSummaryBody({
+    scorecard: scorecardWith([
+      { id: 'a', name: 'All pass', passed: 2, counted: 2 },
+      { id: 'b', name: 'Some pass', passed: 1, counted: 2 },
+      { id: 'c', name: 'None pass', passed: 0, counted: 2 },
+      { id: 'd', name: 'Nothing applies', passed: 0, counted: 0 },
+    ]),
+    domain: 'example.com',
+    targetUrl: 'https://example.com/',
+  });
+
+  test('every counted check passing is pass, none is fail, some is partial, nothing counted is n/a', () => {
+    const rows = [
+      ...html.matchAll(/data-category="([a-d])"[\s\S]*?<span class="stpill stpill--(\w+)">(\w+\/?\w*)<\/span>/g),
+    ].map((m) => [m[1], m[2], m[3]]);
+    expect(rows).toEqual([
+      ['a', 'pass', 'pass'],
+      ['b', 'warn', 'partial'],
+      ['c', 'fail', 'fail'],
+      ['d', 'na', 'n/a'],
+    ]);
   });
 });

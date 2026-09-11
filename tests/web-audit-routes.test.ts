@@ -613,7 +613,7 @@ describe('handleWebScoringPage', () => {
   });
 });
 
-describe('handleWebResultPage', () => {
+describe('handleLegacyWebResultPath', () => {
   function resultEnv(prefill: Record<string, unknown> = {}) {
     return makeEnv({ SCORE_CACHE: makeR2(prefill).bucket });
   }

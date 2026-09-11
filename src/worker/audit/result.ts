@@ -43,6 +43,7 @@ import {
 import {
   auditPath,
   classifyTarget,
+  isResultTarget,
   type Lane,
   type Representation,
   SCORE_PREFIX,
@@ -111,7 +112,7 @@ export async function handleResultRoute(request: Request, env: ResultEnv, deps: 
 
   const split = splitRepresentation(url.pathname);
   if (!split) {
-    const rep = trailingRepresentation(url.pathname);
+    const rep = negotiate(request, trailingRepresentation(url.pathname));
     const raw = url.pathname.slice(SCORE_PREFIX.length).replace(/\/(md|json)$/, '');
     return notFound(request, env, deps, { target: decodeURIComponentSafe(raw), lane: null, rep });
   }
@@ -121,41 +122,46 @@ export async function handleResultRoute(request: Request, env: ResultEnv, deps: 
 }
 
 /** `/score/live/<binary>` and its `.md` twin, served through the unified renderer. */
-export async function handleLegacyLiveScorePath(
-  request: Request,
-  env: ResultEnv,
-  deps: ResultDeps = {},
-): Promise<Response> {
-  const denied = methodDenied(request);
-  if (denied) return denied;
-  const match = new URL(request.url).pathname.match(/^\/score\/live\/([^/]+?)(\.md|\.html)?$/);
-  const target = match ? decodeURIComponentSafe(match[1]) : '';
-  if (match?.[2] === '.html') return redirect(scorePath(target));
-  const representation: Representation = match?.[2] === '.md' ? 'md' : 'html';
-  const classified = classifyTarget(target);
-  if (!match || !classified.ok || classified.lane !== 'cli') {
-    return notFound(request, env, deps, { target, lane: 'cli', rep: representation });
-  }
-  return serveResult(request, env, deps, { target, representation });
+export function handleLegacyLiveScorePath(request: Request, env: ResultEnv, deps: ResultDeps = {}): Promise<Response> {
+  return serveLegacyPath(request, env, deps, { pattern: /^\/score\/live\/([^/]+?)(\.md|\.html)?$/, lane: 'cli' });
 }
 
 /** `/web/<host>` and its `.md` twin, served through the unified renderer. */
-export async function handleLegacyWebResultPath(
+export function handleLegacyWebResultPath(request: Request, env: ResultEnv, deps: ResultDeps = {}): Promise<Response> {
+  return serveLegacyPath(request, env, deps, { pattern: /^\/web\/([^/]+?)(\.md|\.html)?$/, lane: 'web' });
+}
+
+// A lane-specific path names its lane up front. Its `.html` form redirects
+// to the unified page only for a target the route can serve; anything else
+// is the 404, never a throw from the path builder.
+async function serveLegacyPath(
   request: Request,
   env: ResultEnv,
-  deps: ResultDeps = {},
+  deps: ResultDeps,
+  legacy: { pattern: RegExp; lane: Lane },
 ): Promise<Response> {
   const denied = methodDenied(request);
   if (denied) return denied;
-  const match = new URL(request.url).pathname.match(/^\/web\/([^/]+?)(\.md|\.html)?$/);
+  const match = new URL(request.url).pathname.match(legacy.pattern);
   const target = match ? decodeURIComponentSafe(match[1]) : '';
-  if (match?.[2] === '.html') return redirect(scorePath(target));
-  const representation: Representation = match?.[2] === '.md' ? 'md' : 'html';
   const classified = classifyTarget(target);
-  if (!match || !classified.ok || classified.lane !== 'web') {
-    return notFound(request, env, deps, { target, lane: 'web', rep: representation });
+  const servable =
+    match !== null && classified.ok && classified.lane === legacy.lane && isResultTarget(classified.target);
+  if (match?.[2] === '.html') {
+    if (servable) return redirect(pathFor(classified.target, 'html'));
+    return notFound(request, env, deps, { target, lane: legacy.lane, rep: negotiate(request, 'html'), legacy: true });
   }
-  return serveResult(request, env, deps, { target: classified.target, representation });
+  const representation: Representation = match?.[2] === '.md' ? 'md' : 'html';
+  if (!servable) {
+    const rep = negotiate(request, representation);
+    return notFound(request, env, deps, { target, lane: legacy.lane, rep, legacy: true });
+  }
+  return serveResult(request, env, deps, { target: classified.target, representation, legacy: true });
+}
+
+/** The representation a bare path serves: what the client asked for, or the pinned segment. */
+function negotiate(request: Request, representation: Representation): Representation {
+  return representation === 'html' ? detectResultPreference(request) : representation;
 }
 
 function methodDenied(request: Request): Response | null {
@@ -202,7 +208,7 @@ function decodeURIComponentSafe(raw: string): string {
 // Lane dispatch
 // ---------------------------------------------------------------------------
 
-type Served = { target: string; representation: Representation };
+type Served = { target: string; representation: Representation; legacy?: boolean };
 
 type Rendered = {
   envelope: AuditEnvelope;
@@ -217,12 +223,21 @@ type Rendered = {
 
 async function serveResult(request: Request, env: ResultEnv, deps: ResultDeps, served: Served): Promise<Response> {
   const url = new URL(request.url);
-  const classified = classifyTarget(served.target);
-  if (!classified.ok)
-    return notFound(request, env, deps, { target: served.target, lane: null, rep: served.representation });
-
   const negotiated = served.representation === 'html';
-  const representation: Representation = negotiated ? detectResultPreference(request) : served.representation;
+  const representation = negotiate(request, served.representation);
+  const classified = classifyTarget(served.target);
+  if (!classified.ok) {
+    return notFound(request, env, deps, {
+      target: served.target,
+      lane: null,
+      rep: representation,
+      legacy: served.legacy,
+    });
+  }
+  // A form the classifier normalizes (case, whitespace) has one canonical page.
+  if (!served.legacy && classified.target !== served.target) {
+    return redirect(pathFor(classified.target, served.representation));
+  }
   const ctx: RenderContext = { request, env, deps, url, served, representation, negotiated, origin: url.origin };
 
   if (classified.lane === 'web') return serveWeb(ctx, classified.target);
@@ -247,7 +262,7 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
   if (inFlight) return inFlight;
   const canonical = canonicalTargetOf(new URL(`https://${host}/`));
   const record = await webCacheGet(ctx.env, await webKeyFor(canonical, SPEC_VERSION));
-  if (!record) return notFound(ctx.request, ctx.env, ctx.deps, { target: host, lane: 'web', rep: ctx.representation });
+  if (!record) return missing(ctx, host, 'web');
 
   const envelope = buildWebEnvelope({ tier: 'cache', target: host, record, origin: ctx.origin });
   const now = ctx.deps.now?.() ?? Date.now();
@@ -310,7 +325,7 @@ async function serveBranch(ctx: RenderContext, target: string): Promise<Response
   if (inFlight) return inFlight;
   const registry = await registryOrNull(ctx.env);
   const record = await cliCacheGet(ctx.env, cliKeyFor(target, SPEC_VERSION));
-  if (!record) return notFound(ctx.request, ctx.env, ctx.deps, { target, lane: 'cli', rep: ctx.representation });
+  if (!record) return missing(ctx, target, 'cli');
   const sourceSha = (record as { source_sha?: unknown }).source_sha;
   const envelope = buildCliEnvelope({
     tier: 'cache',
@@ -352,7 +367,7 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
   const inFlight = await inFlightResponse(ctx, 'cli', target);
   if (inFlight) return inFlight;
   const record = await cliCacheGet(ctx.env, cliKeyFor(target, SPEC_VERSION));
-  if (!record) return notFound(ctx.request, ctx.env, ctx.deps, { target, lane: 'cli', rep: ctx.representation });
+  if (!record) return missing(ctx, target, 'cli');
   const envelope = buildCliEnvelope({ tier: 'cache', target, record, registry, origin: ctx.origin });
   const date = shortDate(cliScoredAt(record));
   const version = record.tool_version ? `v${escHtml(record.tool_version)}` : '';
@@ -391,7 +406,9 @@ function cliScoredAt(record: { scored_at?: unknown; scorecard: unknown }): strin
 
 /** A curated slug serves the build-emitted asset; anything but a 200 is not a hit. */
 async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promise<Response | null> {
-  const suffix = ctx.representation === 'json' ? '.json' : ctx.representation === 'md' ? '.md' : '.html';
+  // The binding's html_handling serves `<slug>.html` at the extensionless
+  // path and answers the `.html` form with a redirect; ask the way a browser does.
+  const suffix = ctx.representation === 'json' ? '.json' : ctx.representation === 'md' ? '.md' : '';
   const asset = await ctx.env.ASSETS.fetch(new Request(`https://assets.internal${scorePath(entry.name)}${suffix}`));
   if (asset.status !== 200) return null;
   if (ctx.representation === 'json') {
@@ -435,16 +452,9 @@ function unavailable(ctx: RenderContext): Response {
     ctx.representation === 'json'
       ? JSON.stringify({ error: { code: 'service_misconfigured', message: 'The registry index is unavailable.' } })
       : 'The registry index is unavailable; try again shortly.\n';
-  const contentType =
-    ctx.representation === 'json'
-      ? 'application/json; charset=utf-8'
-      : ctx.representation === 'md'
-        ? 'text/markdown; charset=utf-8'
-        : 'text/plain; charset=utf-8';
-  return new Response(body, {
-    status: 503,
-    headers: { 'content-type': contentType, 'cache-control': 'no-store', 'retry-after': String(RETRY_AFTER_SECONDS) },
-  });
+  const headers: Record<string, string> = { 'retry-after': String(RETRY_AFTER_SECONDS) };
+  if (ctx.representation === 'html') headers['content-type'] = 'text/plain; charset=utf-8';
+  return finish(ctx, new Response(body, { status: 503, headers }), ctx.representation);
 }
 
 // ---------------------------------------------------------------------------
@@ -565,9 +575,12 @@ function finish(ctx: RenderContext, response: Response, representation: Represen
 // 404: one sentence, one prefilled audit link, a "Did you mean?" list.
 // ---------------------------------------------------------------------------
 
-type NotFoundInput = { target: string; lane: Lane | null; rep: Representation };
+type NotFoundInput = { target: string; lane: Lane | null; rep: Representation; legacy?: boolean };
 
-let hostCandidatesMemo: { at: number; hosts: string[]; env: ResultEnv } | null = null;
+// A healthy candidate list holds for the minute; a degraded one (no
+// aggregate) is retried sooner so an R2 blip does not pin seed-only lists.
+const HOST_CANDIDATES_DEGRADED_TTL_MS = 10_000;
+let hostCandidatesMemo: { at: number; ttl: number; hosts: string[]; env: ResultEnv } | null = null;
 let aggregateWarned = false;
 
 /** Test-only: drop the host-candidate memo. */
@@ -590,7 +603,7 @@ async function cliCandidates(env: ResultEnv): Promise<string[]> {
 
 /** Seeded hosts plus the leaderboard aggregate's hosts, memoized for a minute; a null aggregate degrades to seed-only. */
 async function hostCandidates(env: ResultEnv, now: number): Promise<string[]> {
-  if (hostCandidatesMemo && hostCandidatesMemo.env === env && now - hostCandidatesMemo.at < HOST_CANDIDATES_TTL_MS) {
+  if (hostCandidatesMemo && hostCandidatesMemo.env === env && now - hostCandidatesMemo.at < hostCandidatesMemo.ttl) {
     return hostCandidatesMemo.hosts;
   }
   const hosts = new Set<string>();
@@ -606,7 +619,8 @@ async function hostCandidates(env: ResultEnv, now: number): Promise<string[]> {
     aggregateWarned = true;
     emitLog({ scope: 'audit.result' }, { outcome: 'aggregate_unavailable', fallback: 'seed_only' }, { level: 'warn' });
   }
-  hostCandidatesMemo = { at: now, hosts: [...hosts], env };
+  const ttl = aggregate ? HOST_CANDIDATES_TTL_MS : HOST_CANDIDATES_DEGRADED_TTL_MS;
+  hostCandidatesMemo = { at: now, ttl, hosts: [...hosts], env };
   return hostCandidatesMemo.hosts;
 }
 
@@ -614,6 +628,10 @@ async function suggestionsFor(env: ResultEnv, deps: ResultDeps, target: string, 
   if (!target || !lane) return [];
   const candidates = lane === 'web' ? await hostCandidates(env, deps.now?.() ?? Date.now()) : await cliCandidates(env);
   return suggestTargets(target, candidates, { limit: SUGGESTION_LIMIT });
+}
+
+function missing(ctx: RenderContext, target: string, lane: Lane): Promise<Response> {
+  return notFound(ctx.request, ctx.env, ctx.deps, { target, lane, rep: ctx.representation, legacy: ctx.served.legacy });
 }
 
 async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, input: NotFoundInput): Promise<Response> {
@@ -666,6 +684,7 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
     title: 'Not audited yet — anc.dev',
     description: message,
     canonicalPath: pathname,
+    markdownTwinPath: input.legacy ? undefined : `${pathname}/md`,
     body,
     alternatesHtml: '',
   });

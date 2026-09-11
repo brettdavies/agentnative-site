@@ -620,7 +620,7 @@ ${renderAuditRows(bonusChecks)}
   if (meta.target?.kind === 'command' && typeof meta.run?.invocation === 'string') {
     reproCommand = escHtml(meta.run.invocation);
   } else {
-    const profileFlag = scorecard.audit_profile ? ` --audit-profile ${scorecard.audit_profile}` : '';
+    const profileFlag = scorecard.audit_profile ? ` --audit-profile ${escHtml(scorecard.audit_profile)}` : '';
     reproCommand = `anc audit --command ${escHtml(tool.binary)}${profileFlag}`;
   }
   const ctaText =

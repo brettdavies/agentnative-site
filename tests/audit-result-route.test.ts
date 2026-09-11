@@ -41,7 +41,7 @@ async function webRegistryJson(): Promise<string> {
 
 const SHELL_TEMPLATE = `<!doctype html><html><head><title>{{TITLE}}</title><meta name="description" content="{{DESCRIPTION}}" /><link rel="canonical" href="https://anc.dev{{CANONICAL_PATH}}" />
     {{ALTERNATES}}
-</head><body><main>{{BODY}}</main></body></html>`;
+</head><body><main>{{BODY}}</main><footer><a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a></footer></body></html>`;
 
 const REGISTRY_INDEX = {
   by_slug: {
@@ -149,6 +149,7 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
     ASSETS: {
       async fetch(req: Request | string): Promise<Response> {
         const path = new URL(typeof req === 'string' ? req : req.url).pathname;
+        const manual = typeof req !== 'string' && req.redirect === 'manual';
         assetGets.push(path);
         const assets: Record<string, string> = {
           '/_internal/score-live-shell.html': SHELL_TEMPLATE,
@@ -169,7 +170,14 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
           if (overrides.failRegistry) return new Response('down', { status: 500 });
           return new Response(JSON.stringify(REGISTRY_INDEX), { status: 200 });
         }
-        const body = assets[path];
+        // Mirrors `html_handling: auto-trailing-slash`: `/x` serves `x.html`
+        // and `/x.html` answers a 307 to `/x`, which fetch follows.
+        if (path.endsWith('.html') && assets[path] !== undefined) {
+          const location = path.slice(0, -'.html'.length);
+          if (manual) return new Response(null, { status: 307, headers: { location } });
+          return env.ASSETS.fetch(`https://assets.internal${location}`);
+        }
+        const body = assets[path] ?? assets[`${path}.html`];
         if (body === undefined) return new Response('<html>not found page</html>', { status: 404 });
         return new Response(body, { status: 200 });
       },
@@ -228,6 +236,10 @@ async function route(path: string, env: TestEnv, headers: Record<string, string>
   return handleResultRoute(get(path, headers, method), env, { now: () => Date.parse('2026-09-10T20:00:30.000Z') });
 }
 
+async function routeAt(path: string, env: TestEnv, nowIso: string) {
+  return handleResultRoute(get(path), env, { now: () => Date.parse(nowIso) });
+}
+
 function headLinks(html: string): string[] {
   return [...html.matchAll(/<link rel="alternate" type="([^"]+)" href="([^"]+)"/g)].map((m) => `${m[1]} ${m[2]}`);
 }
@@ -267,6 +279,13 @@ describe('curated slugs (registry first)', () => {
       expect(res.status).toBe(301);
       expect(res.headers.get('location')).toBe(target);
     }
+  });
+
+  test('the curated HTML fetch asks the binding for the extensionless page, so no html_handling redirect hop is taken', async () => {
+    const env = await seededEnv();
+    const res = await route('/score/ripgrep', env);
+    expect(res.status).toBe(200);
+    expect(env._assetGets.filter((p) => p.startsWith('/score/'))).toEqual(['/score/ripgrep']);
   });
 
   test('a curated slug whose asset fetch returns the 404 page is not treated as a hit', async () => {
@@ -623,5 +642,122 @@ describe('legacy paths served through the unified renderer', () => {
     expect(twin.headers.get('content-type')).toContain('text/markdown');
     const missing = await handleLegacyWebResultPath(get('/web/nosuch.example'), env);
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('review pins', () => {
+  test('the registry-outage 503 goes through the header policy: JSON carries CORS and no-store', async () => {
+    const env = await seededEnv({ failRegistry: true });
+    const res = await route('/score/ouch/json', env);
+    expect(res.status).toBe(503);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(res.headers.get('retry-after')).toBe('30');
+  });
+
+  test('a legacy .html form for a reserved or unroutable target is a 404, never a throw', async () => {
+    const env = await seededEnv();
+    for (const path of ['/web/scoring.html', '/web/api.html']) {
+      const res = await handleLegacyWebResultPath(get(path), env);
+      expect(res.status).toBe(404);
+    }
+    for (const path of ['/score/live/api.html', '/score/live/foo%2Fjson.html', '/score/live/scoring.html']) {
+      const res = await handleLegacyLiveScorePath(get(path), env);
+      expect(res.status).toBe(404);
+    }
+  });
+
+  test('a 404 for a rejected target honors Accept on the bare path', async () => {
+    const env = await seededEnv();
+    for (const path of ['/score/api', '/score/anc.dev/html']) {
+      const res = await route(path, env, { accept: 'application/json' });
+      expect(res.status).toBe(404);
+      expect(res.headers.get('content-type')).toContain('application/json');
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('not_found');
+    }
+    const md = await route('/score/api', env, { accept: 'text/markdown' });
+    expect(md.headers.get('content-type')).toContain('text/markdown');
+  });
+
+  test('the footer twin on a result page and on its 404 is the /md segment, and a legacy 404 keeps its .md twin', async () => {
+    const env = await seededEnv();
+    const page = await (await route('/score/ouch', env)).text();
+    expect(page).toContain(`<a href="${scoreMarkdownPath('ouch')}">This page as markdown</a>`);
+    const missing = await (await route('/score/nosuchtool', env)).text();
+    expect(missing).toContain('<a href="/score/nosuchtool/md">This page as markdown</a>');
+    const legacy = await (await handleLegacyWebResultPath(get('/web/nosuch.example'), env)).text();
+    expect(legacy).toContain('<a href="/web/nosuch.example.md">This page as markdown</a>');
+  });
+
+  test('a non-canonical target form redirects to its canonical page', async () => {
+    const env = await seededEnv();
+    const res = await route('/score/ANC.dev', env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('/score/anc.dev');
+    expect(env._r2Gets).toEqual([]);
+  });
+
+  test('a website control past refresh_after renders enabled with no countdown', async () => {
+    const env = await seededEnv();
+    const page = await (await routeAt('/score/anc.dev', env, '2026-09-10T20:05:00.000Z')).text();
+    expect(page).toMatch(
+      /<button[^>]*data-reaudit[^>]*data-refresh-after="2026-09-10T20:01:00.000Z"[^>]*>Re-audit<\/button>/,
+    );
+    expect(page).not.toMatch(/data-reaudit[^>]*aria-disabled/);
+    expect(page).not.toContain('data-reaudit-countdown');
+    expect(page).toContain('data-reaudit-status');
+  });
+
+  test('a shell outage on the 404 path is a plain 500', async () => {
+    const env = await seededEnv({ assets: { '/_internal/score-live-shell.html': undefined as unknown as string } });
+    const res = await route('/score/nosuchtool', env);
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toContain('text/plain');
+  });
+
+  test('a degraded host-candidate list is memoized only briefly; a healthy one for the full minute', async () => {
+    const bare = await seededEnv();
+    await routeAt('/score/seeded.de/json', bare, '2026-09-10T20:00:00.000Z');
+    await routeAt('/score/seeded.de/json', bare, '2026-09-10T20:00:05.000Z');
+    expect(bare._aggregateReads).toBe(1);
+    await routeAt('/score/seeded.de/json', bare, '2026-09-10T20:00:20.000Z');
+    expect(bare._aggregateReads).toBe(2);
+    _resetResultCaches();
+    const listed = await seededEnv({
+      aggregate: {
+        spec_version: SPEC_VERSION,
+        generated_at: '2026-09-10T00:00:00.000Z',
+        entries: [
+          {
+            domain: 'listed.dev',
+            url: 'https://listed.dev/',
+            name: 'Listed',
+            description: '',
+            score_pct: 50,
+            score: { relative: 50, global: 50 },
+          },
+        ],
+      },
+    });
+    await routeAt('/score/listed.dv/json', listed, '2026-09-10T20:00:00.000Z');
+    await routeAt('/score/listed.dv/json', listed, '2026-09-10T20:00:40.000Z');
+    expect(listed._aggregateReads).toBe(1);
+  });
+
+  test('a hostile target is escaped everywhere the 404 page repeats it', async () => {
+    const env = await seededEnv();
+    let res = await route('/score/x%22%3E%3Cimg%20src=x%20onerror=1%3E', env);
+    if (res.status === 301) {
+      const location = res.headers.get('location') ?? '';
+      expect(location).not.toContain('<');
+      res = await route(location, env);
+    }
+    expect(res.status).toBe(404);
+    const html = await res.text();
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('onerror=1>');
+    expect(html).toContain('&lt;img');
   });
 });

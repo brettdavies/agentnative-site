@@ -10,7 +10,8 @@
 //     '-- otherwise ........................ enabled at once
 //   click (default prevented)
 //     |-- before the deadline .............. no-op: no acquire, no stash, no navigation
-//     '-- at or after it ................... startAudit({ target, lane, listing: null[, refresh] })
+//     '-- at or after it ................... startAudit({ target, lane, listing: null[, refresh] });
+//                                          a refused start is written to the status node
 //
 // The deadline is an absolute timestamp, so an edge-cached copy of the page
 // still counts down correctly from the visitor's clock. aria-disabled is the
@@ -41,6 +42,8 @@ export type ReauditDeps = {
   setInterval: (tick: () => void, ms: number) => number;
   clearInterval: (handle: number) => void;
   loadTurnstileOnFirstInteraction: (elements: Iterable<EventTarget>) => void;
+  /** Shows why a click could not start; an empty message clears it. */
+  report: (message: string) => void;
 };
 
 const TICK_MS = 1000;
@@ -51,6 +54,10 @@ const productionDeps: ReauditDeps = {
   setInterval: (tick, ms) => window.setInterval(tick, ms),
   clearInterval: (handle) => window.clearInterval(handle),
   loadTurnstileOnFirstInteraction,
+  report: (message) => {
+    const status = document.querySelector('[data-reaudit-status]');
+    if (status) status.textContent = message;
+  },
 };
 
 function readLane(value: string | null): Lane | null {
@@ -98,7 +105,7 @@ export function bindReaudit(control: ReauditControl, deps: ReauditDeps = product
   control.addEventListener('click', (event) => {
     event.preventDefault();
     if (deps.now() < deadline) return;
-    void deps.startAudit(input);
+    void deps.startAudit(input).then((result) => deps.report(result.ok ? '' : result.message));
   });
 }
 

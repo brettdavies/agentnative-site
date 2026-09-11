@@ -31,15 +31,20 @@ export type SpineInput = {
   control: ReauditControl | null;
 };
 
-/** The Re-audit control; `aria-disabled`, never `disabled`, so it stays focusable while counting down. */
+/**
+ * The Re-audit control; `aria-disabled`, never `disabled`, so it stays
+ * focusable while counting down. The status node beside it is where the
+ * client reports a click that could not start (a verification failure).
+ */
 export function renderReauditControl(control: ReauditControl): string {
   const common = `type="button" class="btn btn--ghost reaudit" data-reaudit data-target="${escHtml(control.target)}"`;
+  const status = '<span class="reaudit__status" data-reaudit-status role="status"></span>';
   if (control.kind === 'refresh') {
-    return `<button ${common} data-lane="${control.lane}" data-refresh="1">Re-audit</button>`;
+    return `<button ${common} data-lane="${control.lane}" data-refresh="1">Re-audit</button>${status}`;
   }
   const after = `data-refresh-after="${escHtml(control.refreshAfter)}"`;
-  if (control.secondsLeft <= 0) return `<button ${common} data-lane="web" ${after}>Re-audit</button>`;
-  return `<button ${common} data-lane="web" ${after} aria-disabled="true">Re-audit<span class="reaudit__countdown" data-reaudit-countdown aria-hidden="true"> in ${control.secondsLeft} s</span></button>`;
+  if (control.secondsLeft <= 0) return `<button ${common} data-lane="web" ${after}>Re-audit</button>${status}`;
+  return `<button ${common} data-lane="web" ${after} aria-disabled="true">Re-audit<span class="reaudit__countdown" data-reaudit-countdown aria-hidden="true"> in ${control.secondsLeft} s</span></button>${status}`;
 }
 
 export function renderResultSpine(input: SpineInput): string {

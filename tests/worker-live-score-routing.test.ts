@@ -141,6 +141,18 @@ describe('/live-score URL canonicalization', () => {
     expect(res.headers.get('content-type')).toContain('text/markdown');
   });
 
+  test('Accept: application/json on a bare /score/<target> reaches the route through the gateway', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(
+      new Request('https://anc.dev/score/ouch', { headers: { accept: 'application/json' } }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe('not_found');
+  });
+
   test('/score/live/<binary> (no extension) → served by the unified renderer', async () => {
     const env = makeEnv();
     const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep'), env, {} as ExecutionContext);
