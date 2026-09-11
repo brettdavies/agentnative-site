@@ -369,29 +369,30 @@ Journey storyboard for F1 (the 5-second visceral read, the 5-minute behavioral l
   surface.
 - KTD4. **The CLI lane streams from the Durable Object, line-framed, with its own deadline, purge scope, and
   telemetry.** the endpoint emits a `resolving` phase line before the dispatch, and `do.ts` `fetch` returns an NDJSON
-  body: `phase` lines at install start, install done, binary verification (an installed binary only; a source clone
-  has no binary to verify), lockdown, and audit start, then one final result line; the R2 write still precedes the
-  result line. `runFreshOnly` reads that body through one line reader, forwards phases to an optional `onPhase` callback, and returns the one-shot result so MCP `score_cli` is untouched; a
-  body that is exactly one JSON object is treated as the result line, which covers a new reader against an old Durable
-  Object during propagation; the reverse pairing (an old isolate reading the new NDJSON body) fails each run it
-  dispatches until propagation settles and is the `error_incomplete_response_contract` signal the first-hour watch
-  expects to fall to zero. The endpoint relays line by line (never a raw pipe, so a `heartbeat` written every 10 s while
-  waiting cannot split a line), gives the relay its own deadline above the 60 s sandbox bound with the AbortController
-  held through the body read, runs inside `ctx.waitUntil` under its own purge scope (the request-scoped purge store
-  flushes when the response is returned, before the result line arrives), emits the terminal `score.tier` and analytics
-  rows from the consumer rather than the request's `finally`, and treats a stream that closes without a result line as
-  `incomplete_response_contract`. The platform cancels post-disconnect work 30 s after the client goes away, so a
-  disconnect with more than 30 s of sandbox time remaining loses only the relay's terminal telemetry; the Durable
-  Object's R2 write and its purge are unaffected. The `enable_request_signal` compatibility flag is enabled so the relay
-  listens on the incoming request's abort signal: on abort it stops heartbeats, records `client_gone` with the elapsed
-  time as the `audit.request` terminal outcome at that moment, never `incomplete_response_contract`, and drains the run
-  behind the gone client so the flags clear and the terminal telemetry carries the real tier whenever the platform lets
-  the task finish. A run that ends without a result line is an `error` event; a rejection the run reported stays a
-  `bounce`. The Durable Object queues the `cli:<binary>` purge itself, immediately after its R2
-  write, through the `Cached` entrypoint's purge RPC on `ctx.exports` (the handle the Sandbox SDK already resolves
-  there), so the purge shares the writer's lifetime and covers MCP `score_cli` runs; the RPC is bounded by a
-  five-second race, and a failed or stalled purge is logged on the purge scope, never thrown. The relay owns telemetry
-  only. Platform basis: a Durable Object stays active while its response stream is open, and a Worker pipes a subrequest body through without buffering (Cloudflare Workers Streams
+  body: `phase` lines at install start, install done, binary verification (an installed binary only; a source clone has
+  no binary to verify), lockdown, and audit start, then one final result line; the R2 write still precedes the result
+  line. `runFreshOnly` reads that body through one line reader, forwards phases to an optional `onPhase` callback, and
+  returns the one-shot result so MCP `score_cli` is untouched; a body that is exactly one JSON object is treated as the
+  result line, which covers a new reader against an old Durable Object during propagation; the reverse pairing (an old
+  isolate reading the new NDJSON body) fails each run it dispatches until propagation settles and is the
+  `error_incomplete_response_contract` signal the first-hour watch expects to fall to zero. The endpoint relays line by
+  line (never a raw pipe, so a `heartbeat` written every 10 s while waiting cannot split a line), gives the relay its
+  own deadline above the 60 s sandbox bound with the AbortController held through the body read, runs inside
+  `ctx.waitUntil` under its own purge scope (the request-scoped purge store flushes when the response is returned,
+  before the result line arrives), emits the terminal `score.tier` and analytics rows from the consumer rather than the
+  request's `finally`, and treats a stream that closes without a result line as `incomplete_response_contract`. The
+  platform cancels post-disconnect work 30 s after the client goes away, so a disconnect with more than 30 s of sandbox
+  time remaining loses only the relay's terminal telemetry; the Durable Object's R2 write and its purge are unaffected.
+  The `enable_request_signal` compatibility flag is enabled so the relay listens on the incoming request's abort signal:
+  on abort it stops heartbeats, records `client_gone` with the elapsed time as the `audit.request` terminal outcome at
+  that moment, never `incomplete_response_contract`, and drains the run behind the gone client so the flags clear and
+  the terminal telemetry carries the real tier whenever the platform lets the task finish. A run that ends without a
+  result line is an `error` event; a rejection the run reported stays a `bounce`. The Durable Object queues the
+  `cli:<binary>` purge itself, immediately after its R2 write, through the `Cached` entrypoint's purge RPC on
+  `ctx.exports` (the handle the Sandbox SDK already resolves there), so the purge shares the writer's lifetime and
+  covers MCP `score_cli` runs; the RPC is bounded by a five-second race, and a failed or stalled purge is logged on the
+  purge scope, never thrown. The relay owns telemetry only. Platform basis: a Durable Object stays active while its
+  response stream is open, and a Worker pipes a subrequest body through without buffering (Cloudflare Workers Streams
   and Context docs). The non-sticky `getRandom` pool means the stream is the only channel; no second request can find
   the running instance.
 - KTD5. **One result envelope, one event union, one error object, all in `src/shared/`.** Envelope: `{ kind, tier,
