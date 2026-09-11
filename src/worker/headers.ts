@@ -330,7 +330,13 @@ function classifyCacheClass(url: URL, linkPathname: string, status: number, serv
   if (status >= 400 || isAlwaysMissPath(requestPathname)) {
     return { klass: 'miss' };
   }
-  if (served) return served;
+  // The path-keyed class is the only one carrying s-maxage, and a zone HIT
+  // stores a negotiated response without its Vary, so a route may serve
+  // that class only where the URL is one representation.
+  if (served) {
+    if (served.klass === 'short' && !isRepresentationPinned(requestPathname)) return { klass: 'hit-1d' };
+    return served;
+  }
   if (isHashedAsset(linkPathname) || isHashedAsset(requestPathname)) {
     return { klass: 'immutable' };
   }

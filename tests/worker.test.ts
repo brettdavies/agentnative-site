@@ -614,6 +614,32 @@ describe('applyHeaders — cache class served by the result route', () => {
     expect(res.headers.get('Cache-Control')).toBe('no-store');
     expect(res.headers.get('Cache-Tag')).toBeNull();
   });
+
+  // The path-keyed class is the only one carrying s-maxage, and a bare
+  // result path negotiates, so serving it there would let a zone HIT store
+  // the response without Vary.
+  test('a served short class on a negotiable path demotes to HIT-1d; a pinned one keeps it', () => {
+    const negotiable = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/ripgrep', 'application/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/ripgrep',
+      cache: { klass: 'short' },
+    });
+    expect(negotiable.headers.get('Cache-Control')).toBe('public, max-age=300, stale-while-revalidate=60');
+    expect(negotiable.headers.get('Cache-Control')).not.toContain('s-maxage');
+    expect(negotiable.headers.get('Cloudflare-CDN-Cache-Control')).toBe('public, max-age=86400');
+
+    const pinned = applyHeaders(new Response('{}'), {
+      request: req('https://anc.dev/score/ripgrep/json'),
+      servedMarkdown: false,
+      servedJson: true,
+      pathname: '/score/ripgrep',
+      cache: { klass: 'short' },
+    });
+    expect(pinned.headers.get('Cache-Control')).toBe('public, max-age=300, s-maxage=86400, stale-while-revalidate=60');
+    expect(pinned.headers.get('Cloudflare-CDN-Cache-Control')).toBeNull();
+  });
 });
 
 describe('applyHeaders — Link alternates on result pages', () => {

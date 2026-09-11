@@ -418,6 +418,11 @@ describe('worker dispatch', () => {
     expect(resp.headers.get('link')).toContain('</web.md>; rel="alternate"');
     expect(resp.headers.get('x-llms-txt')).toBe('/llms.txt');
     expect(resp.headers.get('x-robots-tag')).toBeNull();
+    // The board is purged by tag on a score write, so the dispatch must
+    // stamp the tag the purge names.
+    expect(resp.headers.get('cache-tag')).toBe('web');
+    expect(resp.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+    expect(resp.headers.get('cloudflare-cdn-cache-control')).toBe('public, max-age=300');
   });
 
   test('/web.html and /web/ canonicalize to /web with a 301', async () => {

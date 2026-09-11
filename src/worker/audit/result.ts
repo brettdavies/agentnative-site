@@ -456,6 +456,7 @@ async function inFlightResponse(ctx: RenderContext, lane: Lane, target: string):
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
+      'cloudflare-cdn-cache-control': 'no-store',
       'access-control-allow-origin': '*',
       'x-robots-tag': 'noindex',
     },
