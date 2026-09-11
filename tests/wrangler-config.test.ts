@@ -192,6 +192,43 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
   });
 });
 
+// Cloudflare records each environment's applied migration tags, and a deploy
+// whose list is not a superset of them fails with API error 10074 on the
+// real deploy; a dry run does not consult applied state. The applied
+// histories are pinned here so dropping or reordering a tag fails this test
+// first. Staging alone carries the two tags of its cross-migration rollback
+// rehearsal (RELEASES.md); apart from those, both environments carry one list.
+
+const APPLIED_MIGRATIONS = {
+  production: ['v1'],
+  staging: ['v1', 'v2-drop-sandbox', 'v3-restore-sandbox'],
+};
+const STAGING_REHEARSAL_TAGS = ['v2-drop-sandbox', 'v3-restore-sandbox'];
+
+describe('wrangler.jsonc — Durable Object migrations', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+  const tagsOf = (block: Record<string, unknown>) => (block.migrations as Array<{ tag: string }>).map((m) => m.tag);
+
+  test('each environment extends the tags already applied to it', () => {
+    expect(tagsOf(config).slice(0, APPLIED_MIGRATIONS.production.length)).toEqual(APPLIED_MIGRATIONS.production);
+    expect(tagsOf(staging).slice(0, APPLIED_MIGRATIONS.staging.length)).toEqual(APPLIED_MIGRATIONS.staging);
+  });
+
+  test('apart from the staging rehearsal tags, both environments carry the same tag list', () => {
+    expect(tagsOf(staging).filter((tag) => !STAGING_REHEARSAL_TAGS.includes(tag))).toEqual(tagsOf(config));
+  });
+
+  test('both environments create AuditJob as a SQLite class and bind it as AUDIT_JOB', () => {
+    for (const block of [config, staging]) {
+      const migration = (block.migrations as Array<Record<string, unknown>>).find((m) => m.tag === 'v4-audit-job');
+      expect(migration?.new_sqlite_classes).toEqual(['AuditJob']);
+      const bindings = (block.durable_objects as { bindings: Array<Record<string, unknown>> }).bindings;
+      expect(bindings).toContainEqual({ name: 'AUDIT_JOB', class_name: 'AuditJob' });
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Analytics Engine bindings (plan U10)
 // ---------------------------------------------------------------------------
