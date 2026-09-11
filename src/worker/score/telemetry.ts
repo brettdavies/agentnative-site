@@ -1,9 +1,9 @@
-// Workers Analytics Engine telemetry helper for /api/score.
-//
-// One writeDataPoint per request, emitted from handler.ts in the same
-// try/finally that emits the `score.tier` console log line. The console
-// log is the manual-recovery fallback when AE is down; this helper is
-// the queryable surface.
+// The CLI lane's terminal telemetry: the `score.tier` log line and the
+// Workers Analytics Engine row, one of each per request. The legacy
+// handler emits them from its try/finally; the unified endpoint emits
+// them once the terminal line is known, from the relay consumer for a
+// stream. The console log is the manual-recovery fallback when AE is
+// down; the AE row is the queryable surface.
 //
 // Field schema is contractual — `tests/score-telemetry.test.ts` pins
 // every blob/double/index slot so a future reorder breaks loudly
@@ -41,8 +41,123 @@
 //           automatically.
 
 import { emitLog } from '../telemetry/log';
-import type { ResolvedStep } from './discover-binary';
+import type { InstallSpec, ResolvedStep } from './discover-binary';
 import type { ScoreError } from './response-shape';
+
+// ---------------------------------------------------------------------------
+// The per-request tier accumulator.
+//
+// `tier` records the resolution branch that produced the response:
+//   - `curated`     : registry-fast-path hit
+//   - `cache_pre`   : the pre-discovery R2 cache hit (binary derivable from input)
+//   - `cache_post`  : the post-discovery R2 cache hit (binary discovered, then re-checked)
+//   - `live`        : DO dispatched and returned success
+//   - `error_<code>`: terminal error (validation, gate denial, no-resolve, etc.)
+//
+// The cache attempt and hit flags let operators query "what percentage of
+// cache hits came from pre vs post discovery?" through the observability
+// binding. Operational signal only; never part of the response body.
+// ---------------------------------------------------------------------------
+
+export type ScoreTierTelemetry = {
+  tier: string;
+  cache_pre_attempted: boolean;
+  cache_pre_hit: boolean;
+  cache_post_attempted: boolean;
+  cache_post_hit: boolean;
+  binary: string | null;
+  input_kind: string | null;
+  pm: PmTag | null;
+  freshness: FreshnessTag | null;
+  resolved_step: ResolvedStep | 'registry' | null;
+  install_ms: number | null;
+  anc_audit_ms: number | null;
+};
+
+export function newScoreTierTelemetry(): ScoreTierTelemetry {
+  return {
+    tier: 'unset',
+    cache_pre_attempted: false,
+    cache_pre_hit: false,
+    cache_post_attempted: false,
+    cache_post_hit: false,
+    binary: null,
+    input_kind: null,
+    pm: null,
+    freshness: null,
+    resolved_step: null,
+    install_ms: null,
+    anc_audit_ms: null,
+  };
+}
+
+/** The fields a resolved spec settles; a bounce before resolution leaves them null. */
+export function applySpecTelemetry(
+  t: ScoreTierTelemetry,
+  spec: InstallSpec | undefined,
+  resolvedStep: ResolvedStep | null | undefined,
+  skipCachePost: boolean,
+): void {
+  if (!spec) return;
+  t.binary = spec.binary;
+  t.pm = spec.pm;
+  t.resolved_step = resolvedStep ?? null;
+  t.cache_post_attempted = spec.pm !== 'git-clone' && !skipCachePost;
+}
+
+/** The `score.tier` log line. */
+export function emitScoreTier(t: ScoreTierTelemetry): void {
+  emitLog(
+    { scope: 'score.tier' },
+    {
+      tier: t.tier,
+      cache_pre_attempted: t.cache_pre_attempted,
+      cache_pre_hit: t.cache_pre_hit,
+      cache_post_attempted: t.cache_post_attempted,
+      cache_post_hit: t.cache_post_hit,
+      binary: t.binary,
+      input_kind: t.input_kind,
+    },
+  );
+}
+
+// The accumulator onto the AE writeDataPoint payload. Pure, so the
+// telemetry-regression test can pin every slot's derivation. blob1 maps
+// ValidatedInput.kind ('slug' | 'install-command' | 'github-url' |
+// 'unknown') onto the AE input-kind union: 'slug' becomes 'registry'
+// because validate.ts only emits 'slug' for inputs that matched the
+// by_slug index. Error codes are derived by stripping the `error_` prefix
+// the tier string carries; non-error tiers return null in blob3.
+export function buildScoreEventFields(t: ScoreTierTelemetry, totalMs: number, status: number): ScoreEventFields {
+  const errorCode = t.tier.startsWith('error_') ? (t.tier.slice('error_'.length) as ScoreError['code']) : null;
+  return {
+    input_kind: mapInputKind(t.input_kind),
+    pm: t.pm,
+    error_code: errorCode,
+    freshness: t.freshness,
+    resolved_step: t.resolved_step,
+    total_ms: totalMs,
+    install_ms: t.install_ms,
+    anc_audit_ms: t.anc_audit_ms,
+    response_status: status,
+    tool: t.binary,
+  };
+}
+
+export function mapInputKind(kind: string | null): InputKindTag | null {
+  switch (kind) {
+    case 'slug':
+      return 'registry';
+    case 'install-command':
+      return 'install-command';
+    case 'github-url':
+      return 'github-url';
+    case 'unknown':
+      return 'invalid';
+    default:
+      return null;
+  }
+}
 
 // The AE binding type ships in @cloudflare/workers-types; declared
 // locally as a structural shape so the worker module compiles in

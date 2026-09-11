@@ -1,25 +1,24 @@
-// R2 read/write wrapper for live-scoring scorecards.
+// R2 read/write wrapper for live-scoring scorecards. Single source of
+// truth for the cache key shape so reads and writes can't drift.
 //
-// Plan U7 (docs/plans/2026-04-28-002-feat-live-scoring-cf-sandbox-plan.md
-// lines 1994-2123). Single source of truth for the cache key shape so
-// reads and writes can't drift.
+// Cache key: `scores/{target}/{spec-version}.json`, where the target is
+// the binary or `owner/repo@branch` for a source clone. The version slot
+// is the build-time `SPEC_VERSION`: computing the running anc binary's
+// version requires installing it first, which defeats the cache. Spec
+// bumps already mean an anc bump in practice, so SPEC_VERSION-as-proxy
+// carries the "anc bump invalidates" property at the cost of caching
+// across anc-only bumps that don't bump the spec. The 7-day R2 lifecycle
+// reaps the entry on the long tail.
 //
-// Cache key: `scores/{binary}/{anc-version}.json`. The {anc-version} slot
-// is filled with the build-time `SPEC_VERSION` constant at launch
-// (handoff Decision 2 + gotcha 3, .context/handoffs/2026-05-19-001):
-// computing the running anc binary's version requires installing it
-// first, which defeats the cache. Spec bumps already mean an anc bump in
-// practice, so SPEC_VERSION-as-proxy carries the "anc bump invalidates"
-// property at the cost of caching across anc-only bumps that don't bump
-// the spec. The 7-day R2 lifecycle reaps the entry on the long tail.
+// Refusal-to-cache-half-state, per family: a binary record needs a tool
+// version and a branch record needs the source SHA it scored; put()
+// throws when a record carries neither. The cached payload IS the
+// contract; a partial entry would silently degrade future cache reads.
 //
-// Refusal-to-cache-half-state: put() throws if `ancVersion` or
-// `toolVersion` is empty. The cached payload IS the contract; a partial
-// entry would silently degrade future cache reads.
-//
-// Write failures are best-effort: logged, never thrown to the caller.
-// One missed cache write costs at most one extra sandbox spawn the
-// next time; throwing would cost the user the response they came for.
+// Write failures are best-effort: logged and reported as a false
+// return, never thrown to the caller. One missed cache write costs at
+// most one extra sandbox spawn the next time; throwing would cost the
+// user the response they came for.
 
 import { emitLog } from '../telemetry/log';
 
@@ -28,7 +27,9 @@ export type CacheEnv = { SCORE_CACHE: R2Bucket };
 export type CachedScorecard = {
   spec_version: string;
   anc_version: string;
+  /** Empty only on a branch record, which carries `source_sha` instead. */
   tool_version: string;
+  source_sha?: string;
   scorecard: unknown;
 };
 
@@ -42,8 +43,8 @@ export type CachedScorecard = {
 // bucket recreate doesn't lose the TTL.
 const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
 
-export function keyFor(binary: string, ancVersion: string): string {
-  return `scores/${binary}/${ancVersion}.json`;
+export function keyFor(target: string, specVersion: string): string {
+  return `scores/${target}/${specVersion}.json`;
 }
 
 export async function get(env: CacheEnv, key: string): Promise<CachedScorecard | null> {
@@ -86,6 +87,7 @@ export async function get(env: CacheEnv, key: string): Promise<CachedScorecard |
   return raw;
 }
 
+/** Write one record; true once R2 accepted it, false on a swallowed R2 failure. */
 export async function put(
   env: CacheEnv,
   key: string,
@@ -93,15 +95,19 @@ export async function put(
   ancVersion: string,
   toolVersion: string,
   specVersion: string,
-): Promise<void> {
+  sourceSha?: string,
+): Promise<boolean> {
   if (!ancVersion) throw new Error('cache.put: ancVersion required (refusal-to-cache-half-state)');
-  if (!toolVersion) throw new Error('cache.put: toolVersion required (refusal-to-cache-half-state)');
+  if (!toolVersion && !sourceSha) {
+    throw new Error('cache.put: toolVersion or sourceSha required (refusal-to-cache-half-state)');
+  }
   if (!specVersion) throw new Error('cache.put: specVersion required (refusal-to-cache-half-state)');
 
   const payload: CachedScorecard = {
     spec_version: specVersion,
     anc_version: ancVersion,
     tool_version: toolVersion,
+    ...(sourceSha ? { source_sha: sourceSha } : {}),
     scorecard,
   };
 
@@ -112,22 +118,25 @@ export async function put(
         cacheControl: CACHE_CONTROL,
       },
     });
+    return true;
   } catch (err) {
     // Best-effort: a write failure does not block the user's response.
     emitLog({ scope: 'cache.put' }, { key, error: errMsg(err) });
+    return false;
   }
 }
 
 function isCachedScorecard(value: unknown): value is CachedScorecard {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;
+  const sourceSha = typeof obj.source_sha === 'string' && obj.source_sha.length > 0;
   return (
     typeof obj.spec_version === 'string' &&
     obj.spec_version.length > 0 &&
     typeof obj.anc_version === 'string' &&
     obj.anc_version.length > 0 &&
     typeof obj.tool_version === 'string' &&
-    obj.tool_version.length > 0 &&
+    (obj.tool_version.length > 0 || sourceSha) &&
     'scorecard' in obj
   );
 }

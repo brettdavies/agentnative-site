@@ -243,7 +243,8 @@ export async function lookupScorecard(
 // lookupScorecard so the derivation is independently testable and so the
 // "where does the binary come from?" decision lives in one place.
 function deriveCacheBinary(input: ValidatedInput, registry: RegistryLookupResult): string | null {
-  if (input.kind === 'install-command') return input.spec.binary;
+  // A slash marks the branch family's keys; no binary on PATH carries one.
+  if (input.kind === 'install-command') return input.spec.binary.includes('/') ? null : input.spec.binary;
   if (registry.kind === 'hint') return registry.hint.binary;
   // github-url without a hint, or slug without a curated scorecard:
   // no upfront binary. The live path will run discovery and write to

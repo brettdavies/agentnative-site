@@ -478,9 +478,29 @@ describe('score_cli: happy path fresh audit', () => {
     };
     expect(body.audited).toBe(true);
     expect(body.source).toBe('fresh-audit');
-    expect(body.scorecard_url).toBe('https://anc.dev/score/live/newcli');
+    expect(body.scorecard_url).toBe('https://anc.dev/score/newcli');
     expect(body.spec_version).toBe(SPEC_VERSION);
     expect(doSpy.calls.length).toBe(1);
+  });
+
+  test('a branch-scoped fresh run names the branch page and carries the SHA it scored', async () => {
+    const audit: RateStub = { calls: 0, shouldSucceed: true };
+    const { env } = makeEnv({
+      auditLimiter: audit,
+      doResponse: new Response(
+        JSON.stringify({
+          scorecard: { tool: { name: 'r', binary: 'r' } },
+          anc_version: SPEC_VERSION,
+          source_sha: 'e'.repeat(40),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    });
+    const result = await callScoreCli(env, { github_url: 'https://github.com/o/r/tree/feature' }, '198.51.100.11');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { scorecard_url: string; source_sha?: string };
+    expect(body.scorecard_url).toBe('https://anc.dev/score/o/r@feature');
+    expect(body.source_sha).toBe('e'.repeat(40));
   });
 
   test('DO dispatch uses getRandom pool pattern (idFromName called once per request)', async () => {

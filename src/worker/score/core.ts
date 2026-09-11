@@ -16,7 +16,14 @@ import { SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
-import { loadHintsIndex, lookupOnly, type OrchestrateEnv, type RunFreshResult, runFreshOnly } from './orchestrate';
+import {
+  loadHintsIndex,
+  lookupOnly,
+  type OrchestrateEnv,
+  type PhaseLine,
+  type RunFreshResult,
+  runFreshOnly,
+} from './orchestrate';
 import {
   type DiscoveryHintsIndex,
   deriveShareBinary,
@@ -158,9 +165,12 @@ export type RunCliAuditInput = {
   inputHash: string;
   origin: string;
   skipCachePost: boolean;
-  sourceSha?: string;
   /** Runs once the spec is known and before the sandbox dispatch. */
   onResolved?: (spec: InstallSpec) => Promise<void>;
+  /** Receives each phase line the Durable Object writes. */
+  onPhase?: (line: PhaseLine) => void;
+  /** Aborting it stops the Durable Object read; the call rejects with the reason. */
+  signal?: AbortSignal;
 };
 
 const CTA_INSTALL_ANC = CTA.installAnc;
@@ -200,6 +210,8 @@ export async function runCliAudit(input: RunCliAuditInput): Promise<CliRunOutcom
     inputHash: input.inputHash,
     skipCachePost: input.skipCachePost,
     onResolved: input.onResolved,
+    onPhase: input.onPhase,
+    signal: input.signal,
   });
   return outcomeOf(result, input);
 }
@@ -211,6 +223,7 @@ function envelopeFor(
   ancVersion: string,
   toolVersion: string,
   input: RunCliAuditInput,
+  sourceSha?: string,
 ): AuditEnvelope {
   const record = { spec_version: SPEC_VERSION, anc_version: ancVersion, tool_version: toolVersion, scorecard };
   return buildCliEnvelope({
@@ -219,20 +232,13 @@ function envelopeFor(
     record,
     registry: input.indexes.registryIndex,
     origin: input.origin,
-    sourceSha: spec.pm === 'git-clone' ? input.sourceSha : undefined,
+    sourceSha: spec.pm === 'git-clone' ? sourceSha : undefined,
   });
 }
 
 function toolVersionOf(scorecard: unknown): string {
   const version = (scorecard as { tool?: { version?: unknown } } | null)?.tool?.version;
   return typeof version === 'string' ? version : '';
-}
-
-// The deployed homepage forwards to `share_url`. A branch run has a page
-// only once its record is written under the branch key, so it carries none
-// until then.
-function legacyShareUrl(spec: InstallSpec, envelope: AuditEnvelope): string | null {
-  return spec.pm === 'git-clone' ? null : envelope.scorecard_url;
 }
 
 function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutcome {
@@ -251,7 +257,7 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: legacyShareUrl(result.spec, envelope),
+        shareUrl: envelope.scorecard_url,
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
       };
@@ -264,13 +270,14 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         result.anc_version,
         toolVersionOf(result.scorecard),
         input,
+        result.source_sha ?? undefined,
       );
       return {
         kind: 'live',
         envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: legacyShareUrl(result.spec, envelope),
+        shareUrl: envelope.scorecard_url,
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
         installMs: result.install_ms,
@@ -312,7 +319,11 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         error: {
           code: 'incomplete_response_contract',
           details:
-            result.reason === 'non_json_body' ? 'DO returned non-JSON' : 'DO returned unrecognized envelope shape',
+            result.reason === 'non_json_body'
+              ? 'DO returned non-JSON'
+              : result.reason === 'stream_ended'
+                ? 'DO stream ended without a result line'
+                : 'DO returned unrecognized envelope shape',
           cta_text: CTA_INSTALL_ANC,
         },
       };

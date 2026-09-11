@@ -1,20 +1,18 @@
-// Live-scoring Sandbox Durable Object — install + anc audit inside an
-// Alpine + musl Container, with two-phase egress (R7) enforced via the
-// CF Sandbox SDK's named outbound handlers (Pattern Y). The class
-// extends `@cloudflare/sandbox` and inherits the runtime egress control
-// + container exec surface from `@cloudflare/containers`.
+// Live-scoring Sandbox Durable Object: install + anc audit inside a
+// Debian-slim Container, with two-phase egress (R7) enforced via the CF
+// Sandbox SDK's named outbound handlers (Pattern Y). The class extends
+// `@cloudflare/sandbox` and inherits the runtime egress control and the
+// container exec surface from `@cloudflare/containers`.
 //
-// 2026-05-20 discovery-move: the DO used to own the full
-// ValidatedInput → InstallSpec resolution (including the brew/go
-// fallbacks + the discoverBinary chain). That layer moved upstream to
-// the Worker (src/worker/score/resolve-spec.ts) so chain_no_resolve
-// requests bounce without spinning up a container. The DO's surface
-// now starts at "given an InstallSpec, install + score" — the
-// orchestration in sandbox-exec.ts is unchanged, but the request body
-// crossing the DO boundary is `{spec: InstallSpec, hash: string}`
-// instead of the pre-move `{input: ValidatedInput, hash: string}`.
-// `loadHintsIndex` is no longer needed here either (the Worker loads
-// hints once and threads them through resolveSpec).
+// Contract with the Worker: `POST { spec: InstallSpec, hash }` answers a
+// 200 whose body is NDJSON. One `phase` line per sandbox boundary
+// (installing, installed, verifying, lockdown, auditing), then exactly one
+// result line: the success envelope `{ scorecard, anc_version, install_ms,
+// anc_audit_ms, source_sha? }` or `{ error, details? }`. The R2 write and
+// the `cli:<target>` purge run before the result line is written, so a
+// reader that sees the result can read the record back. The body starts
+// streaming before the run finishes; the Durable Object stays active while
+// the response stream is open.
 //
 // Test-mode importability:
 //
@@ -23,17 +21,23 @@
 //   runtime can't resolve `cloudflare:workers` natively; tests/bun-setup.ts
 //   registers a virtual-module shim so do.ts loads inside `bun test`
 //   without bringing in real DO state machinery. The shim provides no-op
-//   base classes — enough for `import { Sandbox } from '@cloudflare/sandbox'`
+//   base classes, enough for `import { Sandbox } from '@cloudflare/sandbox'`
 //   to succeed at module load. Tests that exercise real DO behavior
-//   (state, alarms, container exec) require a workerd-backed runtime.
+//   (state, alarms, container exec) require a workerd-backed runtime;
+//   `streamScore` and `writeCacheBestEffort` are exported so the body
+//   contract and the write contract are testable without the class.
 
 import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
+import { isResultTarget, targetOfSpec } from '../../shared/audit-routes';
+import { ndjsonLineWriter } from '../../shared/ndjson';
+import { invokeCachedPurge } from '../audit-web/hit-min-purge';
+import { cliTargetTag } from '../audit-web/hit-min-tags';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import * as cache from './cache';
 import type { InstallSpec } from './discover-binary';
-import { score as runSandboxScore, type ScoreResult } from './sandbox-exec';
+import { score as runSandboxScore, type SandboxPhase, type ScoreResult } from './sandbox-exec';
 
 // ---------------------------------------------------------------------------
 // Env contract
@@ -42,29 +46,19 @@ import { score as runSandboxScore, type ScoreResult } from './sandbox-exec';
 // Wrangler injects all Worker bindings into the DO's env at construction.
 // We declare only what this DO uses so tests can pass a minimal stub.
 // SCORE_CACHE is optional because the DO functions correctly without it
-// (the cache write is best-effort by design — failure logs but never
+// (the cache write is best-effort by design: failure logs but never
 // blocks the user response), and tests that exercise the install + score
 // flow without exercising the cache write don't need to stub it.
 //
 // ASSETS stays in the env shape because @cloudflare/sandbox + the
-// Worker binding plumbing inject it regardless; the DO no longer
-// uses it now that the hints index lives entirely in the Worker tier.
+// Worker binding plumbing inject it regardless; the DO does not read it.
 export type ScoreSandboxEnv = {
   ASSETS: Fetcher;
   SCORE_CACHE?: R2Bucket;
 };
 
-// Request body the Worker sends to the DO after 2026-05-20:
-//
-//   stub.fetch(new Request('https://do.internal/score', {
-//     method: 'POST',
-//     body: JSON.stringify({ spec: InstallSpec, hash: string }),
-//   }))
-//
-// Pre-move shape was `{ input: ValidatedInput, hash }`; the rename to
-// `spec` is the signal that resolution has already happened upstream.
-// `hash` is unused in the install+score path today; it stays on the
-// wire for telemetry alignment with the Worker's per-request log line.
+// `hash` is unused in the install+score path; it stays on the wire for
+// telemetry alignment with the Worker's per-request log line.
 export type ScoreRequestBody = {
   spec: InstallSpec;
   hash: string;
@@ -131,8 +125,7 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
   // seen on staging after the Debian-slim rework. With interception off,
   // container HTTPS bypasses allowedInstall + noHttp entirely; outbound
   // hits upstream from the CF Container IP rather than the Worker fetch
-  // IP. Phase 2 lockdown is lost while this flag is false — must revert
-  // before merge.
+  // IP. Phase 2 lockdown is lost while this flag is false.
   override interceptHttps = false;
 
   // Override BaseSandbox.fetch (which normally proxies to the container's
@@ -154,37 +147,19 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
       return json({ error: 'invalid_do_body' }, 400);
     }
 
-    const result = await this.score(parsed.spec);
-    if (!result.ok) {
-      return json({ error: result.error, details: result.details }, statusFor(result.error));
-    }
-
-    // Write the successful scorecard to R2 so the next request for the
-    // same binary short-circuits at the handler's lookupOnly cache
-    // tier. Best-effort: the cache helpers swallow R2 failures
-    // (logged, never thrown). The await delays the response by one R2
-    // round-trip (~30-100 ms typical); the latency cost is paid once per
-    // tool per anc bump and saves a full sandbox spawn (~3-20 s) on the
-    // next request. The trade is intentional and bounded.
-    //
-    // Branch-scoped clones skip the cache write: the cache key is
-    // `scores/<binary>/<spec-version>.json` which doesn't include the
-    // branch. Caching a branch-scored result would clobber the
-    // default-branch scorecard for any subsequent request that hits
-    // the same binary. Branch-scoring is intentionally one-off.
-    if (parsed.spec.pm !== 'git-clone') {
-      await writeCacheBestEffort(this.env, parsed.spec, result.value);
-    }
-
-    return json(result.value, 200);
+    const { body, done } = streamScore(parsed.spec, {
+      env: this.env,
+      run: (spec, onPhase) => this.score(spec, onPhase),
+      purge: (tags) => invokeCachedPurge(this.ctx, tags),
+    });
+    this.ctx.waitUntil(done);
+    return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
   }
 
-  // RPC entry point — used by tests that want to invoke the score flow
-  // without round-tripping a Request. Also makes the orchestration unit
-  // independently exercisable from a server-side caller (e.g. a future
-  // batch-scoring cron Worker).
-  async score(spec: InstallSpec): Promise<ScoreResult> {
-    return runSandboxScore(this, spec);
+  // RPC entry point: the score flow without a Request round-trip, for a
+  // server-side caller such as a batch-scoring cron Worker.
+  async score(spec: InstallSpec, onPhase?: (phase: SandboxPhase) => void): Promise<ScoreResult> {
+    return runSandboxScore(this, spec, { onPhase });
   }
 }
 
@@ -194,55 +169,136 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
 Sandbox.outboundHandlers = { allowedInstall, noHttp };
 
 // ---------------------------------------------------------------------------
+// The NDJSON body
+// ---------------------------------------------------------------------------
+
+export type StreamScoreDeps = {
+  env: ScoreSandboxEnv;
+  /** The sandbox run; the callback receives each phase as it begins. */
+  run: (spec: InstallSpec, onPhase: (phase: SandboxPhase) => void) => Promise<ScoreResult>;
+  /** The `Cached` entrypoint's purge RPC; a throw is logged, never raised. */
+  purge: (tags: string[]) => Promise<void>;
+  /** How long the purge may hold the result line; the production default is `PURGE_TIMEOUT_MS`. */
+  purgeTimeoutMs?: number;
+  now?: () => string;
+};
+
+/**
+ * The response body for one run: a `phase` line per boundary, then one
+ * result line after the R2 write and its purge. The body is returned at
+ * once; `done` settles when the run behind it has written its last line.
+ */
+export function streamScore(
+  spec: InstallSpec,
+  deps: StreamScoreDeps,
+): { body: ReadableStream<Uint8Array>; done: Promise<void> } {
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  const now = deps.now ?? (() => new Date().toISOString());
+  const line = ndjsonLineWriter(writer);
+  const done = (async () => {
+    try {
+      const result = await deps.run(spec, (phase) => {
+        void line({ type: 'phase', phase, at: now() });
+      });
+      if (result.ok) {
+        await writeCacheBestEffort(deps.env, spec, result.value, deps.purge, deps.purgeTimeoutMs);
+        await line(result.value);
+      } else {
+        await line({ error: result.error, ...(result.details !== undefined ? { details: result.details } : {}) });
+      }
+    } catch (err) {
+      // The message stays in the log: container and exec errors can name
+      // internal hosts and paths.
+      emitLog({ scope: 'score.sandbox' }, { error: err instanceof Error ? err.message : String(err) });
+      await line({ error: 'sandbox_exception' });
+    } finally {
+      await writer.close().catch(() => {});
+    }
+  })();
+  return { body: readable, done };
+}
+
+// ---------------------------------------------------------------------------
 // Cache write
 // ---------------------------------------------------------------------------
 
-// Best-effort R2 write after a successful score. Skipped (with a log) when
-// SCORE_CACHE isn't bound on the DO env, or when the scorecard doesn't
-// carry an extractable tool version (cache.put refuses half-state, so we
-// short-circuit at the surface to avoid the throw). All write paths
-// inside cache.put already swallow R2 failures — this wrapper handles
-// the precondition layer above that.
-//
-// Exported for unit tests (tests/score-do-cache-write.test.ts) since the
-// Sandbox class itself isn't directly instantiable under bun:test without
-// the workerd shim. The wrapper carries the full precondition + write
-// flow that fetch() invokes, so testing it directly pins the cache-write
-// contract without touching DO boilerplate.
+export type ScoredValue = { scorecard: unknown; anc_version: string; source_sha?: string };
+
+// The purge sits between the R2 write and the result line; a stalled RPC
+// must not hold the client's result.
+const PURGE_TIMEOUT_MS = 5_000;
+
+// Best-effort R2 write after a successful score, under the key the result
+// route reads: `scores/<binary>/...` for an installed binary and
+// `scores/<owner>/<repo>@<branch>/...` for a source clone. The per-family
+// precondition is checked here so cache.put's refusal never throws at
+// runtime: a binary record needs the scorecard's tool version, a branch
+// record needs the SHA the clone printed (a source run may report no
+// tool version). Skipped with a log when SCORE_CACHE isn't bound. Once
+// R2 accepts the record, `cli:<target>` is purged through the RPC the
+// caller passes; a failed purge is logged and never thrown.
 export async function writeCacheBestEffort(
   env: ScoreSandboxEnv,
   spec: InstallSpec,
-  value: { scorecard: unknown; anc_version: string },
+  value: ScoredValue,
+  purge?: (tags: string[]) => Promise<void>,
+  purgeTimeoutMs: number = PURGE_TIMEOUT_MS,
 ): Promise<void> {
   if (!env.SCORE_CACHE) {
     emitLog({ scope: 'cache.write' }, { skipped: 'no_binding' });
     return;
   }
-  const toolVersion = extractToolVersion(value.scorecard);
-  if (!toolVersion) {
+  const target = targetOfSpec(spec);
+  if (!isResultTarget(target)) {
+    emitLog({ scope: 'cache.write' }, { skipped: 'unroutable_target', target });
+    return;
+  }
+  const toolVersion = extractToolVersion(value.scorecard) ?? '';
+  const sourceSha = spec.pm === 'git-clone' ? value.source_sha : undefined;
+  if (spec.pm === 'git-clone' && !sourceSha) {
+    emitLog({ scope: 'cache.write' }, { skipped: 'no_source_sha', target });
+    return;
+  }
+  if (spec.pm !== 'git-clone' && !toolVersion) {
     emitLog({ scope: 'cache.write' }, { skipped: 'no_tool_version', binary: spec.binary });
     return;
   }
   // SPEC_VERSION is the proxy for anc-version in the cache key. The
-  // cached payload still carries the exec-captured anc_version as data
-  // — the key vs. payload split is intentional. See cache.ts module
+  // cached payload still carries the exec-captured anc_version as data;
+  // the key vs. payload split is intentional. See cache.ts module
   // header for the full rationale.
-  const key = cache.keyFor(spec.binary, SPEC_VERSION);
+  const key = cache.keyFor(target, SPEC_VERSION);
+  let wrote = false;
   try {
-    await cache.put(
+    wrote = await cache.put(
       { SCORE_CACHE: env.SCORE_CACHE },
       key,
       value.scorecard,
       value.anc_version,
       toolVersion,
       SPEC_VERSION,
+      sourceSha,
     );
   } catch (err) {
-    // cache.put only throws on refusal-to-cache-half-state (missing
-    // version), which the guards above already cover. Defense-in-depth:
-    // a future regression that bypasses those guards still doesn't
-    // surface to the user.
+    // cache.put only throws on refusal-to-cache-half-state, which the
+    // guards above already cover. Defense-in-depth: a future regression
+    // that bypasses those guards still doesn't surface to the user.
     emitLog({ scope: 'cache.write' }, { error: err instanceof Error ? err.message : String(err) });
+  }
+  if (!wrote || !purge) return;
+  const tags = [cliTargetTag(target)];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('purge_timeout')), purgeTimeoutMs);
+  });
+  try {
+    await Promise.race([purge(tags), timeout]);
+  } catch (err) {
+    emitLog({ scope: 'hit-min-purge' }, { error: err instanceof Error ? err.message : String(err), tags });
+  } finally {
+    if (timer) clearTimeout(timer);
+    timeout.catch(() => {});
   }
 }
 
@@ -269,22 +325,4 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
-}
-
-function statusFor(error: string): number {
-  switch (error) {
-    case 'chain_resolved_install_failed':
-    case 'chain_resolved_no_binary_produced':
-    case 'install_unsupported':
-    case 'anc_audit_failed':
-      return 502;
-    case 'timeout':
-      return 504;
-    case 'chain_no_resolve':
-      return 404;
-    case 'anc_version_unreadable':
-      return 500;
-    default:
-      return 500;
-  }
 }

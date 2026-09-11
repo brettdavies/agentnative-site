@@ -13,6 +13,7 @@ import { getRequestContext } from './request-context';
 export type LogScope =
   | 'audit.request'
   | 'audit.result'
+  | 'score.sandbox'
   | 'cache.get'
   | 'cache.put'
   | 'cache.write'

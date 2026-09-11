@@ -14,6 +14,10 @@
 //                                                         | incomplete
 //                                                         | bounce
 //                                                         | error
+//
+// `bounce` is a rejection the run reported (a resolution or install
+// failure, a gate denial); `error` is a run that did not answer (a stream
+// that ended without a result line, a relay deadline, an engine throw).
 
 import type { AuditEnvelope } from './audit-envelope';
 import { type Lane, REJECTION_MESSAGES } from './audit-routes';
@@ -177,7 +181,8 @@ export function auditErrorCodeFor(lane: Lane, legacy: string): AuditErrorCode {
 }
 
 /** CLI phases in stream order: the endpoint emits `resolving`, the Durable Object the rest. */
-export type CliPhase = 'resolving' | 'installing' | 'installed' | 'verifying' | 'lockdown' | 'auditing';
+export const CLI_PHASES = ['resolving', 'installing', 'installed', 'verifying', 'lockdown', 'auditing'] as const;
+export type CliPhase = (typeof CLI_PHASES)[number];
 
 export type AuditEvent =
   | { type: 'accepted'; lane: Lane; target: string; started_at: string }

@@ -24,9 +24,17 @@
 //                              session, limiters
 //   run ...................... Accept x-ndjson streams the event union;
 //                              otherwise the terminal envelope or the error
-//                              object as one JSON body. A throw from a lane
-//                              core is the terminal error line, never an
-//                              escaped exception.
+//                              object as one JSON body. The CLI lane relays
+//                              the Durable Object's phase lines, writes a
+//                              heartbeat after 10 s of silence, bounds the
+//                              Durable Object read with the relay deadline
+//                              (a `timeout` error past it), and records a
+//                              client that goes away as `client_gone` while
+//                              the run completes behind it. The CLI lane's
+//                              `score.tier` line and analytics row are
+//                              emitted once the terminal line is known. A
+//                              throw from a lane core is the terminal error
+//                              line, never an escaped exception.
 //
 // During the phased landing the non-streaming JSON responses carry the
 // legacy `share_url` and the registry hit's nested `scorecard.kind` and
@@ -52,6 +60,7 @@ import {
   type Lane,
   targetOfSpec,
 } from '../../shared/audit-routes';
+import { ndjsonLineWriter } from '../../shared/ndjson';
 import { wantsEventStream } from '../accept';
 import { sha256Hex } from '../audit-web/cache';
 import {
@@ -76,7 +85,15 @@ import {
   validateCliInput,
 } from '../score/core';
 import { CTA, type ScoreError, toAuditError } from '../score/response-shape';
-import type { ScoreTelemetryEnv } from '../score/telemetry';
+import {
+  applySpecTelemetry,
+  buildScoreEventFields,
+  emitScoreTier,
+  newScoreTierTelemetry,
+  recordScoreEvent,
+  type ScoreTelemetryEnv,
+  type ScoreTierTelemetry,
+} from '../score/telemetry';
 import { AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
 import { type Admission, type AdmitDeps, type AdmitEnv, admitTransact } from './admit';
@@ -86,14 +103,28 @@ export type AuditApiEnv = AdmitEnv & CliCoreEnv & WebCoreEnv & Partial<ScoreTele
 export type AuditApiDeps = AdmitDeps & {
   /** Injected probe fetch for the website engine in tests. */
   probeFetch?: typeof fetch;
+  /** The silence a stream tolerates before a heartbeat line; 10 s in production. */
+  heartbeatMs?: number;
+  /** The relay deadline over the Durable Object read; `RELAY_DEADLINE_SECONDS` in production. */
+  relayDeadlineMs?: number;
 };
 
 export function isAuditApiPath(pathname: string): boolean {
   return pathname === API_SCORE_PATH;
 }
 
-/** The relay's deadline, the TTL of the in-flight flags. */
+/**
+ * The relay's deadline over the Durable Object read, and the TTL of the
+ * in-flight flags. It sits above the sandbox's own 60 s install-plus-audit
+ * budget (`TOTAL_TIMEOUT_MS` in sandbox-exec.ts) so the sandbox answers
+ * first and the slack covers the container's cold start, the R2 write, and
+ * the purge.
+ */
 export const RELAY_DEADLINE_SECONDS = 90;
+
+// The abort reason the relay uses for its own deadline, so the consumer
+// can tell it from any other rejection.
+const RELAY_DEADLINE = Symbol('relay_deadline');
 
 const CTA_INPUT = 'Enter a CLI tool, a GitHub repository, or a website.';
 
@@ -223,8 +254,10 @@ class InFlightFlags {
 }
 
 // ---------------------------------------------------------------------------
-// Telemetry: one audit.request row per call. A streamed run's row is owned
-// by the relay, which emits it once the terminal line is known.
+// Telemetry: one audit.request row per call, and for the CLI lane one
+// score.tier line with one analytics row. A streamed run's rows are owned
+// by the relay, which emits them once the terminal line is known; a client
+// that goes away gets its request row at that moment.
 // ---------------------------------------------------------------------------
 
 type RequestRow = {
@@ -239,9 +272,30 @@ type RequestRow = {
   detail?: string;
   /** Set by the relay when it takes over emission for a stream. */
   deferred: boolean;
+  /** The CLI lane's tier accumulator; absent on the website lane. */
+  cli?: ScoreTierTelemetry;
+  emitted: boolean;
+  cliEmitted: boolean;
 };
 
+function newRequestRow(): RequestRow {
+  return {
+    lane: null,
+    tier: 'unset',
+    outcome: 'unset',
+    status: 500,
+    refresh: false,
+    stream: false,
+    target: null,
+    deferred: false,
+    emitted: false,
+    cliEmitted: false,
+  };
+}
+
 function emitRequestRow(row: RequestRow, startedMs: number): void {
+  if (row.emitted) return;
+  row.emitted = true;
   emitLog(
     { scope: 'audit.request' },
     {
@@ -258,6 +312,15 @@ function emitRequestRow(row: RequestRow, startedMs: number): void {
   );
 }
 
+function emitCliTerminal(env: AuditApiEnv, row: RequestRow, startedMs: number): void {
+  if (!row.cli || row.cliEmitted) return;
+  row.cliEmitted = true;
+  emitScoreTier(row.cli);
+  if (env.SCORE_TELEMETRY) {
+    recordScoreEvent(env as ScoreTelemetryEnv, buildScoreEventFields(row.cli, Date.now() - startedMs, row.status));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
@@ -269,22 +332,16 @@ export async function handleAuditApi(
   deps: AuditApiDeps = {},
 ): Promise<Response> {
   const started = Date.now();
-  const row: RequestRow = {
-    lane: null,
-    tier: 'unset',
-    outcome: 'unset',
-    status: 500,
-    refresh: false,
-    stream: false,
-    target: null,
-    deferred: false,
-  };
+  const row = newRequestRow();
   try {
     const response = await handle(request, env, ctx, deps, row, started);
     row.status = response.status;
     return response;
   } finally {
-    if (!row.deferred) emitRequestRow(row, started);
+    if (!row.deferred) {
+      emitRequestRow(row, started);
+      emitCliTerminal(env, row, started);
+    }
   }
 }
 
@@ -324,7 +381,7 @@ async function handle(
   }
   const origin = new URL(request.url).origin;
   const skipCache = new URL(request.url).searchParams.get('fromCache') === 'false';
-  const common = { request, env, ctx, deps, row, origin, parsed, skipCache, started };
+  const common = { request, env, ctx, deps, row, origin, parsed, skipCache, started, abort: new AbortController() };
   return classified.lane === 'web' ? handleWeb(common, classified) : handleCli(common, classified);
 }
 
@@ -338,6 +395,8 @@ type Common = {
   parsed: ParsedBody;
   skipCache: boolean;
   started: number;
+  /** Aborted by the relay at its deadline; the CLI core's Durable Object read observes it. */
+  abort: AbortController;
 };
 
 function inProgressResponse(flag: InFlight): Response {
@@ -471,19 +530,28 @@ async function handleCli(
   const { env, row, parsed, origin } = common;
   const indexes = await loadCliIndexes(env);
   const validated = validateCliInput(classified.target, indexes);
+  const cli = newScoreTierTelemetry();
+  row.cli = cli;
+  cli.input_kind = validated.kind;
   if (validated.kind === 'unknown') {
     row.outcome = `error_${validated.error}`;
+    cli.tier = row.outcome;
     return errorResponse(400, toAuditError(validationError(validated.error, classified.target)));
   }
   const branch = isBranchScoped(validated);
   // A refresh and the operator hatch both skip the cache tier; the registry
   // is always consulted, so a curated tool never runs the sandbox.
   const skipCache = common.skipCache || parsed.refresh;
+  cli.cache_pre_attempted = !branch && !skipCache;
   const tier = await readCliTier(env, validated, indexes, { origin, skipCache });
 
   if (tier.kind === 'registry') {
     row.tier = 'registry';
     row.outcome = 'hit';
+    cli.tier = 'curated';
+    cli.binary = tier.entry.binary ?? null;
+    cli.freshness = 'registry-hit';
+    cli.resolved_step = 'registry';
     return jsonEnvelope(
       tier.envelope,
       {},
@@ -501,6 +569,10 @@ async function handleCli(
   if (tier.kind === 'cache') {
     row.tier = 'cache';
     row.outcome = 'hit';
+    cli.tier = 'cache_pre';
+    cli.cache_pre_hit = true;
+    cli.binary = tier.binary;
+    cli.freshness = 'cache-hit';
     return jsonEnvelope(tier.envelope, {}, { share_url: tier.shareUrl ?? undefined });
   }
 
@@ -509,15 +581,20 @@ async function handleCli(
   if (inFlight) {
     row.tier = 'inflight';
     row.outcome = parsed.token ? 'attach' : 'in_progress';
+    cli.tier = 'inflight';
     return inProgressResponse(inFlight);
   }
   if (!parsed.token) {
     row.outcome = 'tokenless';
+    cli.tier = 'error_turnstile_failed';
     return tokenlessResponse();
   }
 
   const admission = await admit(common, 'cli', classified.target);
-  if (!admission.ok) return admissionResponse(admission, row);
+  if (!admission.ok) {
+    cli.tier = `error_${admission.error.code}`;
+    return admissionResponse(admission, row);
+  }
   const cookie = cookieHeader(admission);
 
   row.tier = 'live';
@@ -527,8 +604,50 @@ async function handleCli(
       ? [`${validated.owner}/${validated.repo}@${validated.branch}`]
       : [];
   await flags.mark(classified.target, ...branchTarget);
-  const events = runCliStream({ common, validated, indexes, flags, skipCache: common.skipCache || parsed.refresh });
+  const events = runCliStream({
+    common,
+    validated,
+    indexes,
+    flags,
+    skipCache: common.skipCache || parsed.refresh,
+    cli,
+    signal: common.abort.signal,
+  });
   return relay(common, { lane: 'cli', target: classified.target }, events, flags, cookie);
+}
+
+// Phase lines arrive through a callback while the run is awaited; the
+// queue turns them into yields so the relay forwards them as they land.
+class AsyncQueue<T> {
+  private items: T[] = [];
+  private closed = false;
+  private wake: (() => void) | null = null;
+
+  push(item: T): void {
+    this.items.push(item);
+    this.wake?.();
+  }
+
+  close(): void {
+    this.closed = true;
+    this.wake?.();
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<T> {
+    while (true) {
+      if (this.items.length > 0) {
+        yield this.items.shift() as T;
+        continue;
+      }
+      if (this.closed) return;
+      await new Promise<void>((resolve) => {
+        this.wake = () => {
+          this.wake = null;
+          resolve();
+        };
+      });
+    }
+  }
 }
 
 async function* runCliStream(input: {
@@ -537,10 +656,13 @@ async function* runCliStream(input: {
   indexes: CliIndexes;
   flags: InFlightFlags;
   skipCache: boolean;
+  cli: ScoreTierTelemetry;
+  signal: AbortSignal;
 }): AsyncGenerator<AuditEvent> {
-  const { common, validated, indexes } = input;
+  const { common, validated, indexes, cli } = input;
   yield { type: 'phase', phase: 'resolving', at: new Date().toISOString() };
-  const outcome = await runCliAudit({
+  const phases = new AsyncQueue<AuditEvent>();
+  const pending = runCliAudit({
     env: common.env,
     validated,
     indexes,
@@ -550,23 +672,50 @@ async function* runCliStream(input: {
     // The result-keyed twin, marked as soon as the binary is known (a
     // git-clone target was already marked at accepted).
     onResolved: async (spec) => {
+      // Attribution lands as soon as the spec is known, so a run that ends
+      // by throw still names its tool; the resolved step follows the outcome.
+      applySpecTelemetry(cli, spec, null, input.skipCache);
       if (spec.pm !== 'git-clone') await input.flags.mark(targetOfSpec(spec));
     },
-  });
+    onPhase: (line) => phases.push({ type: 'phase', phase: line.phase, at: line.at }),
+    signal: input.signal,
+  }).finally(() => phases.close());
+  // The rejection is observed below, after the phases drain.
+  pending.catch(() => {});
+  for await (const event of phases) yield event;
+  const outcome = await pending;
+  applySpecTelemetry(cli, outcome.spec, outcome.resolvedStep, input.skipCache);
   if (outcome.kind === 'bounce') {
     common.row.tier = outcome.tier;
-    yield { type: 'bounce', ...toAuditError(outcome.error) };
+    cli.tier = outcome.tier;
+    // A run that produced no result line failed after it started; a
+    // rejection ahead of the run bounces.
+    const type = outcome.error.code === 'incomplete_response_contract' ? 'error' : 'bounce';
+    yield { type, ...toAuditError(outcome.error) };
     return;
   }
   common.row.tier = outcome.kind;
+  if (outcome.kind === 'cache') {
+    cli.tier = 'cache_post';
+    cli.cache_post_hit = true;
+    cli.freshness = 'cache-hit';
+  } else {
+    cli.tier = 'live';
+    cli.freshness = 'live';
+    cli.install_ms = outcome.installMs;
+    cli.anc_audit_ms = outcome.ancAuditMs;
+  }
   yield completeEvent(outcome.envelope);
 }
 
 // ---------------------------------------------------------------------------
-// Relay: one JSON body, or a line-framed stream with a heartbeat while
-// silent. The terminal telemetry fields, the request row, and the flag
-// cleanup run from the consumer inside ctx.waitUntil, so a client that goes
-// away does not strand them.
+// Relay: one JSON body, or a line-framed stream with a heartbeat after 10 s
+// of silence. The relay deadline bounds the Durable Object read through
+// the request's abort controller. The terminal telemetry, the request row,
+// and the flag cleanup run from the consumer inside ctx.waitUntil; a client
+// that goes away gets its request row at once and the consumer drains the
+// run behind it, so the flags clear and the terminal telemetry carries the
+// real tier whenever the platform lets the task finish.
 // ---------------------------------------------------------------------------
 
 const HEARTBEAT_MS = 10_000;
@@ -579,11 +728,13 @@ function isTerminal(event: AuditEvent): boolean {
 
 // Drain a lane core. A throw becomes the terminal error line, so the stream
 // always ends on a typed line and the JSON path answers the shared error
-// object instead of an escaped exception.
+// object instead of an escaped exception; the relay's own deadline is the
+// one throw that reads as a timeout.
 async function consume(
   events: AsyncGenerator<AuditEvent>,
   row: RequestRow,
   forward: (event: AuditEvent) => Promise<void>,
+  signal: AbortSignal,
 ): Promise<AuditEvent | null> {
   let terminal: AuditEvent | null = null;
   try {
@@ -592,8 +743,17 @@ async function consume(
       await forward(event);
     }
   } catch (err) {
-    row.detail = err instanceof Error ? err.message : String(err);
-    terminal = { type: 'error', ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }) };
+    if (signal.aborted && signal.reason === RELAY_DEADLINE) {
+      row.detail = 'relay_deadline';
+      terminal = {
+        type: 'error',
+        ...auditErrorFor('timeout', { cta: CTA_RETRY, details: 'The relay deadline passed before the run answered.' }),
+      };
+    } else {
+      row.detail = err instanceof Error ? err.message : String(err);
+      terminal = { type: 'error', ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }) };
+    }
+    if (row.cli && row.cli.tier === 'unset') row.cli.tier = `error_${terminal.error.code}`;
     await forward(terminal);
   }
   return terminal;
@@ -606,14 +766,24 @@ async function relay(
   flags: InFlightFlags,
   cookie: Record<string, string>,
 ): Promise<Response> {
-  const { ctx, row } = common;
+  const { ctx, row, env, request, abort } = common;
   const accepted: AuditEvent = { type: 'accepted', lane: meta.lane, target: meta.target, started_at: flags.startedAt };
+  // The website engine bounds itself; the Durable Object read is what the
+  // relay deadline bounds.
+  const deadline =
+    meta.lane === 'cli'
+      ? setTimeout(() => abort.abort(RELAY_DEADLINE), common.deps.relayDeadlineMs ?? RELAY_DEADLINE_SECONDS * 1000)
+      : null;
+  const clearDeadline = () => {
+    if (deadline) clearTimeout(deadline);
+  };
   if (!row.stream) {
     let terminal: AuditEvent | null = null;
     await runWithHitMinPurge(ctx, async () => {
       try {
-        terminal = await consume(events, row, async () => {});
+        terminal = await consume(events, row, async () => {}, abort.signal);
       } finally {
+        clearDeadline();
         await flags.clear();
         await flushHitMinPurge().catch(() => {});
       }
@@ -621,10 +791,10 @@ async function relay(
     return terminalResponse(terminal, row, cookie);
   }
 
-  const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
-  const write = (event: AuditEvent) => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)).catch(() => {});
+  const write = ndjsonLineWriter(writer);
+  const heartbeatMs = common.deps.heartbeatMs ?? HEARTBEAT_MS;
   // Every write happens inside the background task: a write on a
   // TransformStream settles only once the reader consumes it, so a write
   // awaited before the Response is returned never settles.
@@ -632,28 +802,57 @@ async function relay(
   ctx.waitUntil(
     runWithHitMinPurge(ctx, async () => {
       let terminal: AuditEvent | null = null;
-      let heartbeat: ReturnType<typeof setInterval> | null = setInterval(() => {
-        void write({ type: 'heartbeat', at: new Date().toISOString() });
-      }, HEARTBEAT_MS);
+      let clientGone = false;
+      let heartbeat: ReturnType<typeof setInterval> | null = null;
       const stopHeartbeat = () => {
         if (heartbeat) clearInterval(heartbeat);
         heartbeat = null;
       };
+      // Silence is measured from the last line written.
+      const armHeartbeat = () => {
+        stopHeartbeat();
+        if (clientGone) return;
+        heartbeat = setInterval(() => void write({ type: 'heartbeat', at: new Date().toISOString() }), heartbeatMs);
+      };
+      const onClientGone = () => {
+        if (clientGone) return;
+        clientGone = true;
+        stopHeartbeat();
+        void writer.abort().catch(() => {});
+        row.outcome = 'client_gone';
+        row.status = 200;
+        emitRequestRow(row, common.started);
+      };
+      if (request.signal.aborted) onClientGone();
+      else request.signal.addEventListener('abort', onClientGone, { once: true });
       try {
         await write(accepted);
-        terminal = await consume(events, row, async (event) => {
-          // No heartbeat may land after the terminal line.
-          if (isTerminal(event)) stopHeartbeat();
-          await write(event);
-        });
+        armHeartbeat();
+        terminal = await consume(
+          events,
+          row,
+          async (event) => {
+            // No heartbeat may land after the terminal line.
+            if (isTerminal(event)) stopHeartbeat();
+            if (clientGone) return;
+            await write(event);
+            if (!isTerminal(event)) armHeartbeat();
+          },
+          abort.signal,
+        );
       } finally {
+        clearDeadline();
         stopHeartbeat();
-        row.outcome = terminal ? outcomeOf(terminal) : 'incomplete_response_contract';
-        row.status = 200;
+        request.signal.removeEventListener('abort', onClientGone);
+        if (!clientGone) {
+          row.outcome = terminal ? outcomeOf(terminal) : 'incomplete_response_contract';
+          row.status = 200;
+        }
         await flags.clear();
         await flushHitMinPurge().catch(() => {});
         await writer.close().catch(() => {});
         emitRequestRow(row, common.started);
+        emitCliTerminal(env, row, common.started);
       }
     }),
   );
@@ -700,7 +899,7 @@ function terminalResponse(terminal: AuditEvent | null, row: RequestRow, cookie: 
 
 // The deployed homepage forwards to `share_url`; a result with a page names it.
 function legacyCliFields(envelope: AuditEnvelope): Record<string, unknown> {
-  return envelope.scorecard_url && !envelope.target.includes('@') ? { share_url: envelope.scorecard_url } : {};
+  return envelope.scorecard_url ? { share_url: envelope.scorecard_url } : {};
 }
 
 function statusForCode(code: string): number {

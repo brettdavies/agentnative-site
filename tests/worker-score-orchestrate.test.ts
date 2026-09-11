@@ -431,3 +431,111 @@ describe('runFreshOnly: git-clone branch-scoped specs skip the post-discovery ca
     expect(doSpy.calls.length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The Durable Object body is NDJSON: phase lines, then one result line.
+// ---------------------------------------------------------------------------
+
+function ndjsonResponse(lines: unknown[], trailingNewline = true): Response {
+  const body = lines.map((line) => JSON.stringify(line)).join('\n') + (trailingNewline ? '\n' : '');
+  return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+}
+
+const NPM_INPUT: ValidatedInput = { kind: 'install-command', spec: { pm: 'npm', package: 'newcli', binary: 'newcli' } };
+
+describe('runFreshOnly: reading the Durable Object stream', () => {
+  const RESULT = {
+    scorecard: { tool: { binary: 'newcli' } },
+    anc_version: SPEC_VERSION,
+    install_ms: 5,
+    anc_audit_ms: 7,
+  };
+
+  test('phase lines reach the callback in order and the result line resolves to fresh', async () => {
+    const { env } = makeOrchestrateEnv({
+      doResponse: ndjsonResponse([
+        { type: 'phase', phase: 'installing', at: '2026-09-11T00:00:01.000Z' },
+        { type: 'phase', phase: 'installed', at: '2026-09-11T00:00:02.000Z' },
+        { type: 'phase', phase: 'auditing', at: '2026-09-11T00:00:03.000Z' },
+        { ...RESULT, source_sha: 'd'.repeat(40) },
+      ]),
+    });
+    const phases: Array<{ phase: string; at: string }> = [];
+    const result = await runFreshOnly(NPM_INPUT, env, FIXTURE_HINTS_INDEX, {
+      specVersion: SPEC_VERSION,
+      inputHash: 'h',
+      onPhase: (line) => phases.push(line),
+    });
+    expect(phases).toEqual([
+      { phase: 'installing', at: '2026-09-11T00:00:01.000Z' },
+      { phase: 'installed', at: '2026-09-11T00:00:02.000Z' },
+      { phase: 'auditing', at: '2026-09-11T00:00:03.000Z' },
+    ]);
+    expect(result.kind).toBe('fresh');
+    if (result.kind !== 'fresh') return;
+    expect(result.install_ms).toBe(5);
+    expect(result.source_sha).toBe('d'.repeat(40));
+  });
+
+  test('a body that is exactly one JSON object with no newline is the result line', async () => {
+    const { env } = makeOrchestrateEnv({ doResponse: ndjsonResponse([RESULT], false) });
+    const result = await runFreshOnly(NPM_INPUT, env, FIXTURE_HINTS_INDEX, {
+      specVersion: SPEC_VERSION,
+      inputHash: 'h',
+    });
+    expect(result.kind).toBe('fresh');
+    if (result.kind === 'fresh') expect(result.source_sha).toBeNull();
+  });
+
+  test('a stream that ends after a phase line is incomplete_response_contract with reason stream_ended', async () => {
+    const { env } = makeOrchestrateEnv({
+      doResponse: ndjsonResponse([{ type: 'phase', phase: 'installing', at: '2026-09-11T00:00:01.000Z' }]),
+    });
+    const result = await runFreshOnly(NPM_INPUT, env, FIXTURE_HINTS_INDEX, {
+      specVersion: SPEC_VERSION,
+      inputHash: 'h',
+    });
+    expect(result).toMatchObject({ kind: 'incomplete_response_contract', reason: 'stream_ended' });
+  });
+
+  test('an error line after phases resolves to do_error and the phases still reach the callback', async () => {
+    const { env } = makeOrchestrateEnv({
+      doResponse: ndjsonResponse([
+        { type: 'phase', phase: 'installing', at: '2026-09-11T00:00:01.000Z' },
+        { error: 'chain_resolved_install_failed', details: 'npm exploded' },
+      ]),
+    });
+    const phases: string[] = [];
+    const result = await runFreshOnly(NPM_INPUT, env, FIXTURE_HINTS_INDEX, {
+      specVersion: SPEC_VERSION,
+      inputHash: 'h',
+      onPhase: (line) => phases.push(line.phase),
+    });
+    expect(phases).toEqual(['installing']);
+    expect(result).toMatchObject({ kind: 'do_error', error: 'chain_resolved_install_failed', details: 'npm exploded' });
+  });
+
+  test('a line that is not JSON is incomplete_response_contract with reason non_json_body', async () => {
+    const { env } = makeOrchestrateEnv({
+      doResponse: new Response('{"type":"phase","phase":"installing","at":"2026-09-11T00:00:01.000Z"}\nnot json\n'),
+    });
+    const result = await runFreshOnly(NPM_INPUT, env, FIXTURE_HINTS_INDEX, {
+      specVersion: SPEC_VERSION,
+      inputHash: 'h',
+    });
+    expect(result).toMatchObject({ kind: 'incomplete_response_contract', reason: 'non_json_body' });
+  });
+
+  test('an aborted signal stops the read and rejects with the abort reason', async () => {
+    const stalled = new ReadableStream<Uint8Array>({ start() {} });
+    const { env } = makeOrchestrateEnv({ doResponse: new Response(stalled) });
+    const controller = new AbortController();
+    const pending = runFreshOnly(NPM_INPUT, env, FIXTURE_HINTS_INDEX, {
+      specVersion: SPEC_VERSION,
+      inputHash: 'h',
+      signal: controller.signal,
+    });
+    controller.abort(new Error('deadline'));
+    await expect(pending).rejects.toThrow('deadline');
+  });
+});

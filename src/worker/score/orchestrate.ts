@@ -4,12 +4,19 @@
 //
 //   lookupOnly ..... registry, then the R2 cache; no fresh audit
 //   runFreshOnly ... resolveSpec, the post-discovery cache lookup, then
-//                    a Durable Object dispatch through the getRandom pool
+//                    a Durable Object dispatch through the getRandom pool,
+//                    read line by line: `phase` lines go to the optional
+//                    callback, the one result line becomes the result
 //
-// The Durable Object writes the cache itself; this module never writes
-// R2. Neither function rate-limits: the caller's gates run first.
+// The Durable Object body is NDJSON; a body that is exactly one JSON
+// object is read as the result line. A stream that closes without a
+// result line is `incomplete_response_contract`. The caller's abort
+// signal stops the read. The Durable Object writes the cache and purges
+// itself; this module never writes R2. Neither function rate-limits: the
+// caller's gates run first.
 
 import { type Container, getRandom } from '@cloudflare/containers';
+import { CLI_PHASES, type CliPhase } from '../../shared/audit-events';
 import * as cache from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { type DiscoveryHintsIndex, lookupScorecard, type ScorecardLookupResult } from './registry-lookup';
@@ -113,6 +120,8 @@ export type RunFreshResult =
       resolved_step: ResolvedStep | null;
       install_ms: number | null;
       anc_audit_ms: number | null;
+      /** The commit a source clone scored; null for an installed binary. */
+      source_sha: string | null;
     }
   | {
       kind: 'resolution_error';
@@ -130,10 +139,13 @@ export type RunFreshResult =
     }
   | {
       kind: 'incomplete_response_contract';
-      reason: 'non_json_body' | 'unrecognized_envelope';
+      reason: 'non_json_body' | 'unrecognized_envelope' | 'stream_ended';
       spec?: InstallSpec;
       resolved_step?: ResolvedStep | null;
     };
+
+/** One `phase` line from the Durable Object, as written. */
+export type PhaseLine = { phase: CliPhase; at: string };
 
 export interface RunFreshOptions {
   specVersion: string;
@@ -155,6 +167,10 @@ export interface RunFreshOptions {
   // or the sandbox dispatch, so a caller can key state by the resolved
   // binary while the run is still ahead.
   onResolved?: (spec: InstallSpec) => Promise<void>;
+  /** Receives each `phase` line as the Durable Object writes it. */
+  onPhase?: (line: PhaseLine) => void;
+  /** Aborting it stops the Durable Object read; the call rejects with the reason. */
+  signal?: AbortSignal;
 }
 
 // DO envelope classification helpers. Exported so handler.ts can
@@ -166,9 +182,13 @@ export function isStubError(payload: unknown): boolean {
   );
 }
 
-export function isDoSuccess(
-  payload: unknown,
-): payload is { scorecard: unknown; anc_version: string; install_ms?: number; anc_audit_ms?: number } {
+export function isDoSuccess(payload: unknown): payload is {
+  scorecard: unknown;
+  anc_version: string;
+  install_ms?: number;
+  anc_audit_ms?: number;
+  source_sha?: string;
+} {
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return 'scorecard' in obj && typeof obj.anc_version === 'string';
@@ -202,12 +222,10 @@ export async function runFreshOnly(
   // from a pre-discovery hit; the kind tag lets the caller distinguish
   // for telemetry purposes only.
   //
-  // Skip conditions match handler.ts:
-  //   - spec.pm === 'git-clone' (branch-scoped scores aren't cached;
-  //     caching under the bare binary would clobber default-branch
-  //     scorecards).
-  //   - opts.skipCachePost (operator escape hatch).
-  if (spec.pm !== 'git-clone' && !opts.skipCachePost) {
+  // A branch target is a snapshot: its record lives under its own key
+  // and no transact tier serves it, so only a binary consults the cache
+  // here. opts.skipCachePost is the operator escape hatch.
+  if (spec.pm !== 'git-clone' && !spec.binary.includes('/') && !opts.skipCachePost) {
     const cached = await cache.get(env, cache.keyFor(spec.binary, opts.specVersion));
     if (cached) {
       return {
@@ -222,10 +240,10 @@ export async function runFreshOnly(
   }
 
   // Step 3: DO dispatch via getRandom. The DO writes the cache itself
-  // via writeCacheBestEffort against scores/<binary>/<spec-version>.json,
-  // so the next request for the same binary short-circuits at
-  // lookupOnly's cache tier (or the post-discovery tier above, when the
-  // input is a github-url-without-hint).
+  // via writeCacheBestEffort under the target's key, so the next request
+  // for the same binary short-circuits at lookupOnly's cache tier (or the
+  // post-discovery tier above, when the input is a github-url-without-hint)
+  // and a branch snapshot is readable by the result page.
   //
   // spec + resolved_step are threaded onto every error variant from here
   // down so the human-form caller (handler.ts) can preserve AE-row
@@ -247,15 +265,18 @@ export async function runFreshOnly(
       method: 'POST',
       body: JSON.stringify({ spec, hash: opts.inputHash }),
       headers: { 'content-type': 'application/json' },
+      signal: opts.signal,
     }),
   );
 
-  let doPayload: unknown;
-  try {
-    doPayload = await doRes.json();
-  } catch {
+  const read = await readResultLine(doRes.body, opts.onPhase, opts.signal);
+  if (read.kind === 'non_json') {
     return { kind: 'incomplete_response_contract', reason: 'non_json_body', spec, resolved_step };
   }
+  if (read.kind === 'ended') {
+    return { kind: 'incomplete_response_contract', reason: 'stream_ended', spec, resolved_step };
+  }
+  const doPayload = read.payload;
 
   if (isStubError(doPayload)) return { kind: 'sandbox_stub_until_u6', spec, resolved_step };
 
@@ -272,8 +293,85 @@ export async function runFreshOnly(
       resolved_step,
       install_ms: typeof doPayload.install_ms === 'number' ? doPayload.install_ms : null,
       anc_audit_ms: typeof doPayload.anc_audit_ms === 'number' ? doPayload.anc_audit_ms : null,
+      source_sha: typeof doPayload.source_sha === 'string' && doPayload.source_sha ? doPayload.source_sha : null,
     };
   }
 
   return { kind: 'incomplete_response_contract', reason: 'unrecognized_envelope', spec, resolved_step };
+}
+
+// ---------------------------------------------------------------------------
+// The line reader
+// ---------------------------------------------------------------------------
+
+const PHASE_NAMES: ReadonlySet<string> = new Set(CLI_PHASES);
+
+type ReadOutcome = { kind: 'line'; payload: unknown } | { kind: 'non_json' } | { kind: 'ended' };
+
+function isPhaseLine(payload: unknown): payload is { type: 'phase' } & PhaseLine {
+  if (typeof payload !== 'object' || payload === null) return false;
+  const obj = payload as Record<string, unknown>;
+  return (
+    obj.type === 'phase' && typeof obj.phase === 'string' && PHASE_NAMES.has(obj.phase) && typeof obj.at === 'string'
+  );
+}
+
+// One promise that rejects with the signal's reason the moment it aborts,
+// raced against every read so a stalled body never outlives the signal.
+function abortRejection(signal: AbortSignal): { rejection: Promise<never>; release: () => void } {
+  let onAbort: (() => void) | null = null;
+  const rejection = new Promise<never>((_, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  rejection.catch(() => {});
+  return { rejection, release: () => onAbort && signal.removeEventListener('abort', onAbort) };
+}
+
+async function readResultLine(
+  body: ReadableStream<Uint8Array> | null,
+  onPhase: ((line: PhaseLine) => void) | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ReadOutcome> {
+  if (!body) return { kind: 'ended' };
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const classify = (raw: string): ReadOutcome | null => {
+    const line = raw.trim();
+    if (!line) return null;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(line);
+    } catch {
+      return { kind: 'non_json' };
+    }
+    if (isPhaseLine(payload)) {
+      onPhase?.({ phase: payload.phase, at: payload.at });
+      return null;
+    }
+    return { kind: 'line', payload };
+  };
+  let buffered = '';
+  const abort = signal ? abortRejection(signal) : null;
+  try {
+    while (true) {
+      const { value, done } = abort ? await Promise.race([reader.read(), abort.rejection]) : await reader.read();
+      buffered += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      let newline = buffered.indexOf('\n');
+      while (newline >= 0) {
+        const outcome = classify(buffered.slice(0, newline));
+        buffered = buffered.slice(newline + 1);
+        if (outcome) return outcome;
+        newline = buffered.indexOf('\n');
+      }
+      if (done) return classify(buffered) ?? { kind: 'ended' };
+    }
+  } finally {
+    abort?.release();
+    reader.cancel().catch(() => {});
+  }
 }

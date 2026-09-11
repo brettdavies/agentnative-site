@@ -207,3 +207,90 @@ describe('cache.put', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-family records: a binary record carries tool_version, a branch record
+// carries source_sha; each is valid without the other.
+// ---------------------------------------------------------------------------
+
+function memoryEnv(opts: { throwOnPut?: boolean } = {}) {
+  const store = new Map<string, string>();
+  const deleted: string[] = [];
+  const env: CacheEnv = {
+    SCORE_CACHE: {
+      async get(key: string) {
+        const raw = store.get(key);
+        return raw === undefined ? null : { json: async () => JSON.parse(raw) };
+      },
+      async put(key: string, value: string) {
+        if (opts.throwOnPut) throw new Error('r2 down');
+        store.set(key, value);
+      },
+      async delete(key: string) {
+        deleted.push(key);
+        store.delete(key);
+      },
+    } as unknown as R2Bucket,
+  };
+  return { env, store, deleted };
+}
+
+describe('cache records per family', () => {
+  const BRANCH_KEY = keyFor('o/r@feature', SPEC_VERSION);
+  const SHA = 'b'.repeat(40);
+
+  test('keyFor takes any result target: a branch target keys under scores/<owner>/<repo>@<branch>/', () => {
+    expect(BRANCH_KEY).toBe(`scores/o/r@feature/${SPEC_VERSION}.json`);
+  });
+
+  test('put writes a branch record with source_sha and no tool version, and reports the write', async () => {
+    const { env, store } = memoryEnv();
+    const wrote = await put(env, BRANCH_KEY, { tool: { name: 'r' } }, '0.9.0', '', SPEC_VERSION, SHA);
+    expect(wrote).toBe(true);
+    expect(JSON.parse(store.get(BRANCH_KEY) ?? '{}')).toEqual({
+      spec_version: SPEC_VERSION,
+      anc_version: '0.9.0',
+      tool_version: '',
+      source_sha: SHA,
+      scorecard: { tool: { name: 'r' } },
+    });
+  });
+
+  test('put refuses a record with neither a tool version nor a source sha', async () => {
+    const { env } = memoryEnv();
+    await expect(put(env, BRANCH_KEY, {}, '0.9.0', '', SPEC_VERSION)).rejects.toThrow(/toolVersion or sourceSha/);
+  });
+
+  test('put reports false when R2 refuses the write', async () => {
+    const { env } = memoryEnv({ throwOnPut: true });
+    expect(await put(env, keyFor('rg', SPEC_VERSION), {}, '0.9.0', '1.0.0', SPEC_VERSION)).toBe(false);
+  });
+
+  test('get returns a branch record whose tool version is empty when it carries a source sha', async () => {
+    const { env, store, deleted } = memoryEnv();
+    store.set(
+      BRANCH_KEY,
+      JSON.stringify({
+        spec_version: SPEC_VERSION,
+        anc_version: '0.9.0',
+        tool_version: '',
+        source_sha: SHA,
+        scorecard: {},
+      }),
+    );
+    const record = await get(env, BRANCH_KEY);
+    expect(record?.source_sha).toBe(SHA);
+    expect(deleted).toEqual([]);
+  });
+
+  test('get still treats a record with an empty tool version and no source sha as corrupted', async () => {
+    const { env, store, deleted } = memoryEnv();
+    const key = keyFor('rg', SPEC_VERSION);
+    store.set(
+      key,
+      JSON.stringify({ spec_version: SPEC_VERSION, anc_version: '0.9.0', tool_version: '', scorecard: {} }),
+    );
+    expect(await get(env, key)).toBeNull();
+    expect(deleted).toEqual([key]);
+  });
+});
