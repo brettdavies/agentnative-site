@@ -18,6 +18,7 @@
 // client disconnect still caches a completed run; a deadline-exceeded run
 // streams an `incomplete` terminal and is never persisted.
 
+import { escHtml } from '../../shared/esc-html';
 import { detectPreference } from '../accept';
 import { applyHeaders } from '../headers';
 import type { NotifyEnv } from '../notify';
@@ -503,15 +504,6 @@ function withNegotiatedHeaders(
   return headed;
 }
 
-export { _resetShellTemplateCache as _resetWebShellTemplateCache } from '../shell-template';
-
-function esc(s: string): string {
-  return s.replace(
-    /[<>&"']/g,
-    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // GET /web/scoring/<domain> in-progress streaming page (JS-required)
 // ---------------------------------------------------------------------------
@@ -588,9 +580,9 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
 // The sitekey meta and the page script are injected in the body substitution
 // rather than the shared shell, so the shell template needs no per-page slot.
 function scoringBody(domain: string, sitekey: string): string {
-  const d = esc(domain);
+  const d = escHtml(domain);
   return `<article class="container scorecard-page" data-web-audit-scoring>
-  <meta name="turnstile-sitekey" content="${esc(sitekey)}" />
+  <meta name="turnstile-sitekey" content="${escHtml(sitekey)}" />
   <header class="scorecard-header">
     <h1>Auditing <code>${d}</code>&hellip;</h1>
     <p class="live-score-summary__meta">Each check streams in as it resolves. You'll be forwarded to the saved scorecard when the audit finishes.</p>

@@ -37,6 +37,7 @@ import {
   buildRegistryEnvelope,
   buildWebEnvelope,
   curatedEntryForBinary,
+  hasScorecard,
   type RegistryEntryLike,
 } from '../../shared/audit-envelope';
 import {
@@ -60,7 +61,7 @@ import { canonicalTargetOf, getAggregate, get as webCacheGet, keyFor as webKeyFo
 import { normalizeScorecardCategories } from '../audit-web/display';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
-import { isSeededDomain, loadWebSeed } from '../audit-web/seed';
+import { loadWebSeed, type WebSeedEntry } from '../audit-web/seed';
 import { freshnessHtml, freshnessState } from '../audit-web/summary-freshness';
 import type { WebSummaryInput } from '../audit-web/summary-input';
 import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
@@ -263,30 +264,28 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
     linked: true,
     control,
   };
+  // Listing follows provenance: a seeded host is indexable, an on-demand
+  // one is not; the same seed entry names the page.
+  const seedEntry = await seedEntryFor(ctx.env, host);
   const summaryInput = async (): Promise<WebSummaryInput> => {
-    let remediation: WebRemediationCatalog = {};
-    try {
-      remediation = await loadWebRemediationCatalog(ctx.env);
-    } catch {
-      remediation = {};
-    }
+    const [remediationLoad, registryLoad] = await Promise.allSettled([
+      loadWebRemediationCatalog(ctx.env),
+      loadWebAuditRegistry(ctx.env),
+    ]);
+    const remediation: WebRemediationCatalog = remediationLoad.status === 'fulfilled' ? remediationLoad.value : {};
     let normalized: unknown = record.scorecard;
-    try {
-      normalized = normalizeScorecardCategories(record.scorecard, await loadWebAuditRegistry(ctx.env));
-    } catch {
-      normalized = record.scorecard;
-    }
-    let name: string | undefined;
-    try {
-      name = (await loadWebSeed(ctx.env)).find((entry) => entry.domain === host)?.name;
-    } catch {
-      name = undefined;
+    if (registryLoad.status === 'fulfilled') {
+      try {
+        normalized = normalizeScorecardCategories(record.scorecard, registryLoad.value);
+      } catch {
+        normalized = record.scorecard;
+      }
     }
     const targetUrl = (normalized as { tool?: { url?: string } }).tool?.url ?? record.target_url;
     return {
       scorecard: normalized as WebSummaryInput['scorecard'],
       domain: host,
-      name,
+      name: seedEntry?.name,
       targetUrl,
       remediation,
       origin: ctx.origin,
@@ -296,18 +295,11 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
       links: { scorecard: envelope.scorecard_url, markdown: envelope.markdown_url, json: envelope.json_url },
     };
   };
-  // Listing follows provenance: a seeded host is indexable, an on-demand one is not.
-  let seeded = false;
-  try {
-    seeded = await isSeededDomain(ctx.env, host);
-  } catch {
-    seeded = false;
-  }
   return respond(ctx, {
     envelope,
     tier: 'cache',
     spine,
-    noindex: !seeded,
+    noindex: seedEntry === undefined,
     html: async () => buildWebSummaryBody(await summaryInput()),
     markdown: async () => buildWebSummaryMarkdown(await summaryInput()),
   });
@@ -332,20 +324,14 @@ async function serveBranch(ctx: RenderContext, target: string): Promise<Response
   const sha = envelope.source_sha ? envelope.source_sha.slice(0, 7) : null;
   const scored = sha ? `Scored at <code>${escHtml(sha)}</code>` : 'Scored';
   const freshness = `${scored}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  return respondCli(
-    ctx,
-    envelope,
-    record,
-    {
-      target,
-      lane: 'cli',
-      tier: 'cache',
-      freshnessHtml: freshness,
-      linked: true,
-      control: { kind: 'refresh', target, lane: 'cli' },
-    },
-    true,
-  );
+  return respondCli(ctx, envelope, record, {
+    target,
+    lane: 'cli',
+    tier: 'cache',
+    freshnessHtml: freshness,
+    linked: true,
+    control: { kind: 'refresh', target, lane: 'cli' },
+  });
 }
 
 async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
@@ -371,24 +357,22 @@ async function serveCli(ctx: RenderContext, target: string): Promise<Response> {
   const date = shortDate(cliScoredAt(record));
   const version = record.tool_version ? `v${escHtml(record.tool_version)}` : '';
   const freshness = `Scored${version ? ` ${version}` : ''}${date ? ` on ${escHtml(date)}` : ''}. Re-audit runs a fresh audit.`;
-  return respondCli(
-    ctx,
-    envelope,
-    record,
-    {
-      target,
-      lane: 'cli',
-      tier: 'cache',
-      freshnessHtml: freshness,
-      linked: true,
-      control: { kind: 'refresh', target, lane: 'cli' },
-    },
-    true,
-  );
+  return respondCli(ctx, envelope, record, {
+    target,
+    lane: 'cli',
+    tier: 'cache',
+    freshnessHtml: freshness,
+    linked: true,
+    control: { kind: 'refresh', target, lane: 'cli' },
+  });
 }
 
-function hasScorecard(entry: RegistryEntryLike | null | undefined): entry is RegistryEntryLike {
-  return Boolean(entry?.scorecard_url && entry.anc_version);
+async function seedEntryFor(env: ResultEnv, host: string): Promise<WebSeedEntry | undefined> {
+  try {
+    return (await loadWebSeed(env)).find((entry) => entry.domain === host);
+  } catch {
+    return undefined;
+  }
 }
 
 async function registryOrNull(env: ResultEnv): Promise<RegistryIndex | null> {
@@ -426,9 +410,8 @@ async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promi
     return finish(ctx, jsonResponse(envelopeJsonBody(envelope)), 'json');
   }
   const body = await asset.text();
-  const headers = {
-    'content-type': ctx.representation === 'md' ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8',
-  };
+  const headers: Record<string, string> =
+    ctx.representation === 'md' ? {} : { 'content-type': 'text/html; charset=utf-8' };
   return finish(ctx, new Response(body, { status: 200, headers }), ctx.representation);
 }
 
@@ -468,12 +451,12 @@ function unavailable(ctx: RenderContext): Response {
 // Rendering
 // ---------------------------------------------------------------------------
 
+// A live or branch result is on-demand, so its page is unlisted.
 async function respondCli(
   ctx: RenderContext,
   envelope: AuditEnvelope,
   record: { tool_version: string; anc_version: string; spec_version: string; scorecard: unknown },
   spine: SpineInput,
-  noindex: boolean,
 ): Promise<Response> {
   const scorecard = record.scorecard as Parameters<typeof buildScorecardBody>[1];
   const tool = {
@@ -485,14 +468,13 @@ async function respondCli(
     envelope,
     tier: 'cache',
     spine,
-    noindex,
+    noindex: true,
     html: async () =>
       buildScorecardBody(tool, scorecard, { version: record.tool_version, spine, showBadgePreview: false }),
     markdown: async () =>
       buildScorecardMarkdown(tool, scorecard, {
         version: record.tool_version,
         baseUrl: ctx.origin,
-        header: `# ${tool.name}`,
         links,
         lane: 'cli',
         tier: 'cache',
@@ -507,12 +489,7 @@ async function respond(ctx: RenderContext, rendered: Rendered): Promise<Response
   }
   if (representation === 'md') {
     const body = await rendered.markdown();
-    return finish(
-      ctx,
-      new Response(body, { status: 200, headers: { 'content-type': 'text/markdown; charset=utf-8' } }),
-      'md',
-      rendered.noindex,
-    );
+    return finish(ctx, new Response(body, { status: 200 }), 'md', rendered.noindex);
   }
   let template: string;
   try {
@@ -555,9 +532,7 @@ function controlAssets(ctx: RenderContext, spine: SpineInput): string {
 }
 
 function jsonResponse(body: Record<string, unknown>, noindex = false): Response {
-  const headers: Record<string, string> = { 'content-type': 'application/json; charset=utf-8' };
-  if (noindex) headers['x-robots-tag'] = 'noindex';
-  return new Response(JSON.stringify(body), { status: 200, headers });
+  return new Response(JSON.stringify(body), { status: 200, headers: noindex ? { 'x-robots-tag': 'noindex' } : {} });
 }
 
 /**
@@ -642,11 +617,10 @@ async function suggestionsFor(env: ResultEnv, deps: ResultDeps, target: string, 
 }
 
 async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, input: NotFoundInput): Promise<Response> {
-  const origin = new URL(request.url).origin;
+  const { origin, pathname } = new URL(request.url);
   const audit = auditPath(input.lane ? { lane: input.lane, target: input.target } : { target: input.target });
   const suggestions = await suggestionsFor(env, deps, input.target, input.lane);
   const message = `No audit exists for ${input.target} yet.`;
-  const pathname = new URL(request.url).pathname;
   const opts = { request, pathname, servedMarkdown: input.rep === 'md', servedJson: input.rep === 'json' };
 
   if (input.rep === 'json') {
@@ -655,13 +629,7 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
       audit_url: `${origin}${audit}`,
       suggestions: suggestions.map((s) => ({ target: s, scorecard_url: `${origin}${scorePath(s)}` })),
     };
-    return applyHeaders(
-      new Response(JSON.stringify(body), {
-        status: 404,
-        headers: { 'content-type': 'application/json; charset=utf-8' },
-      }),
-      opts,
-    );
+    return applyHeaders(new Response(JSON.stringify(body), { status: 404 }), opts);
   }
   if (input.rep === 'md') {
     const lines = [
@@ -673,10 +641,7 @@ async function notFound(request: Request, env: ResultEnv, deps: ResultDeps, inpu
     if (suggestions.length > 0) {
       lines.push('## Did you mean?', '', ...suggestions.map((s) => `- [${s}](${origin}${scorePath(s)})`), '');
     }
-    return applyHeaders(
-      new Response(lines.join('\n'), { status: 404, headers: { 'content-type': 'text/markdown; charset=utf-8' } }),
-      opts,
-    );
+    return applyHeaders(new Response(lines.join('\n'), { status: 404 }), opts);
   }
   const did =
     suggestions.length > 0

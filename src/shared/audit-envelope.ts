@@ -135,7 +135,8 @@ export function curatedEntryForBinary<T extends RegistryEntryLike>(
   return null;
 }
 
-function hasScorecard(entry: RegistryEntryLike | null | undefined): entry is RegistryEntryLike {
+/** A curated entry counts only with a committed scorecard behind it. */
+export function hasScorecard(entry: RegistryEntryLike | null | undefined): entry is RegistryEntryLike {
   return Boolean(entry?.scorecard_url && entry.anc_version);
 }
 
