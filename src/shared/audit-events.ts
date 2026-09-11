@@ -14,6 +14,10 @@
 //                                                         | incomplete
 //                                                         | bounce
 //                                                         | error
+//
+// `bounce` is a rejection the run reported (a resolution or install
+// failure, a gate denial); `error` is a run that did not answer (a stream
+// that ended without a result line, a relay deadline, an engine throw).
 
 import type { AuditEnvelope } from './audit-envelope';
 import { type Lane, REJECTION_MESSAGES } from './audit-routes';

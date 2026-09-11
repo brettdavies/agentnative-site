@@ -225,7 +225,7 @@ export async function runFreshOnly(
   // A branch target is a snapshot: its record lives under its own key
   // and no transact tier serves it, so only a binary consults the cache
   // here. opts.skipCachePost is the operator escape hatch.
-  if (spec.pm !== 'git-clone' && !opts.skipCachePost) {
+  if (spec.pm !== 'git-clone' && !spec.binary.includes('/') && !opts.skipCachePost) {
     const cached = await cache.get(env, cache.keyFor(spec.binary, opts.specVersion));
     if (cached) {
       return {

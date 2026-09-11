@@ -59,7 +59,7 @@ async function readAll(res: Response): Promise<Array<Record<string, unknown>>> {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
-const linesOf = (readable: ReadableStream<Uint8Array>) => readAll(new Response(readable));
+const linesOf = (stream: { body: ReadableStream<Uint8Array> }) => readAll(new Response(stream.body));
 
 describe('streamScore: the Durable Object body', () => {
   let logs: LogCapture;
@@ -114,7 +114,27 @@ describe('streamScore: the Durable Object body', () => {
       },
       purge: async () => {},
     });
-    expect(await linesOf(readable)).toEqual([{ error: 'sandbox_exception', details: 'container gone' }]);
+    expect(await linesOf(readable)).toEqual([{ error: 'sandbox_exception' }]);
+    expect(logs.records.find((r) => r.record.scope === 'score.sandbox')?.record).toMatchObject({
+      error: 'container gone',
+    });
+  });
+
+  test('a purge RPC that never answers is bounded, and the result line still follows', async () => {
+    const { env, writes } = sandboxEnv();
+    const readable = streamScore(BINARY_SPEC, {
+      env,
+      run: async () => OK,
+      purge: () => new Promise<void>(() => {}),
+      purgeTimeoutMs: 20,
+    });
+    const lines = await linesOf(readable);
+    expect(lines[lines.length - 1]).toMatchObject({ anc_version: ANC_VERSION });
+    expect(writes).toHaveLength(1);
+    expect(logs.records.find((r) => r.record.scope === 'hit-min-purge')?.record).toMatchObject({
+      error: 'purge_timeout',
+      tags: ['cli:cowsay'],
+    });
   });
 
   test('a purge RPC failure is logged and the result line still follows', async () => {
@@ -187,7 +207,7 @@ describe('streamScore: the Durable Object body', () => {
 
 import { handleAuditApi } from '../src/worker/audit/api';
 import type { Sandbox } from '../src/worker/score/do';
-import { makeEnv } from './audit-api.test';
+import { makeEnv } from './helpers/audit-api-env';
 
 type StreamPlan = {
   /** Lines the stub writes, each after `gapMs`. */
@@ -302,8 +322,8 @@ describe('the relay over a streaming Durable Object', () => {
 
   test('silence produces a heartbeat, a quick run produces none, and every line parses on its own', async () => {
     const slow = makeEnv({
-      doFetch: streamingDo({ lines: [DO_PHASES[0], DO_RESULT], gapMs: 60 }),
-      deps: { heartbeatMs: 20 },
+      doFetch: streamingDo({ lines: [DO_PHASES[0], DO_RESULT], gapMs: 120 }),
+      deps: { heartbeatMs: 10 },
     });
     const a = ctxWithPromises();
     const slowLines = await readAll(await handleAuditApi(ndjsonPost('cargo binstall ouch'), slow, a.ctx, slow._deps));
@@ -311,7 +331,7 @@ describe('the relay over a streaming Durable Object', () => {
     expect(slowLines.filter((l) => l.type === 'heartbeat').length).toBeGreaterThan(0);
     expect(slowLines[slowLines.length - 1].type).toBe('complete');
 
-    const quick = makeEnv({ doFetch: streamingDo({ lines: [DO_RESULT] }), deps: { heartbeatMs: 20 } });
+    const quick = makeEnv({ doFetch: streamingDo({ lines: [DO_RESULT] }), deps: { heartbeatMs: 200 } });
     const b = ctxWithPromises();
     const quickLines = await readAll(
       await handleAuditApi(ndjsonPost('cargo binstall ouch'), quick, b.ctx, quick._deps),
@@ -320,17 +340,38 @@ describe('the relay over a streaming Durable Object', () => {
     expect(quickLines.filter((l) => l.type === 'heartbeat')).toEqual([]);
   });
 
-  test('a relay that exceeds its deadline ends the client stream with a timeout error and clears the flags', async () => {
+  test('a relay that exceeds its deadline ends the client stream with a timeout error, clears the flags, and attributes the tier', async () => {
+    const points: Array<{ blobs?: (string | null)[]; indexes?: string[] }> = [];
     const env = makeEnv({
       doFetch: streamingDo({ lines: [DO_PHASES[0]], stall: true }),
       deps: { relayDeadlineMs: 40 },
     });
+    env.SCORE_TELEMETRY = { writeDataPoint: (event) => void points.push(event) };
     const { ctx, promises } = ctxWithPromises();
     const lines = await readAll(await handleAuditApi(ndjsonPost('cargo binstall ouch'), env, ctx, env._deps));
     await Promise.all(promises);
     expect(lines[lines.length - 1]).toMatchObject({ type: 'error', error: { code: 'timeout' } });
     expect(rows('audit.request')[0]).toMatchObject({ lane: 'cli', outcome: 'error_timeout' });
+    expect(rows('score.tier')[0]).toMatchObject({ tier: 'error_timeout', binary: 'ouch' });
+    expect(points[0].blobs?.[2]).toBe('timeout');
+    expect(points[0].indexes).toEqual(['ouch']);
     expect([...env._kv.keys()].filter((k) => k.startsWith('inflight:'))).toEqual([]);
+  });
+
+  test('a request whose signal aborted before the relay listens is still recorded as client_gone', async () => {
+    const controller = new AbortController();
+    const env = makeEnv({ doFetch: streamingDo({ lines: [DO_RESULT] }) });
+    const gate = env._deps.turnstileFetch;
+    if (!gate) throw new Error('the test environment injects a Turnstile fetch');
+    env._deps.turnstileFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      controller.abort();
+      return gate(input, init);
+    }) as typeof fetch;
+    const { ctx, promises } = ctxWithPromises();
+    await handleAuditApi(ndjsonPost('cargo binstall ouch', { signal: controller.signal }), env, ctx, env._deps);
+    await Promise.all(promises);
+    expect(rows('audit.request')).toHaveLength(1);
+    expect(rows('audit.request')[0]).toMatchObject({ outcome: 'client_gone' });
   });
 
   test('a stream that ends after a phase line ends the client stream with incomplete_response_contract', async () => {

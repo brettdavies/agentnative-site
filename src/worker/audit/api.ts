@@ -113,7 +113,13 @@ export function isAuditApiPath(pathname: string): boolean {
   return pathname === API_SCORE_PATH;
 }
 
-/** The relay's deadline over the Durable Object read, and the TTL of the in-flight flags. */
+/**
+ * The relay's deadline over the Durable Object read, and the TTL of the
+ * in-flight flags. It sits above the sandbox's own 60 s install-plus-audit
+ * budget (`TOTAL_TIMEOUT_MS` in sandbox-exec.ts) so the sandbox answers
+ * first and the slack covers the container's cold start, the R2 write, and
+ * the purge.
+ */
 export const RELAY_DEADLINE_SECONDS = 90;
 
 // The abort reason the relay uses for its own deadline, so the consumer
@@ -666,11 +672,16 @@ async function* runCliStream(input: {
     // The result-keyed twin, marked as soon as the binary is known (a
     // git-clone target was already marked at accepted).
     onResolved: async (spec) => {
+      // Attribution lands as soon as the spec is known, so a run that ends
+      // by throw still names its tool; the resolved step follows the outcome.
+      applySpecTelemetry(cli, spec, null, input.skipCache);
       if (spec.pm !== 'git-clone') await input.flags.mark(targetOfSpec(spec));
     },
     onPhase: (line) => phases.push({ type: 'phase', phase: line.phase, at: line.at }),
     signal: input.signal,
   }).finally(() => phases.close());
+  // The rejection is observed below, after the phases drain.
+  pending.catch(() => {});
   for await (const event of phases) yield event;
   const outcome = await pending;
   applySpecTelemetry(cli, outcome.spec, outcome.resolvedStep, input.skipCache);
@@ -742,6 +753,7 @@ async function consume(
       row.detail = err instanceof Error ? err.message : String(err);
       terminal = { type: 'error', ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }) };
     }
+    if (row.cli && row.cli.tier === 'unset') row.cli.tier = `error_${terminal.error.code}`;
     await forward(terminal);
   }
   return terminal;
@@ -811,7 +823,8 @@ async function relay(
         row.status = 200;
         emitRequestRow(row, common.started);
       };
-      request.signal.addEventListener('abort', onClientGone, { once: true });
+      if (request.signal.aborted) onClientGone();
+      else request.signal.addEventListener('abort', onClientGone, { once: true });
       try {
         await write(accepted);
         armHeartbeat();

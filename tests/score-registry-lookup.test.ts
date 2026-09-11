@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { DiscoveryHintsIndex, RegistryIndex } from '../src/worker/score/registry-lookup';
-import { deriveShareBinary, lookupRegistry, SHARE_URL_BINARY_RE } from '../src/worker/score/registry-lookup';
+import {
+  deriveShareBinary,
+  lookupRegistry,
+  lookupScorecard,
+  SHARE_URL_BINARY_RE,
+} from '../src/worker/score/registry-lookup';
 import type { ValidatedInput } from '../src/worker/score/validate';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 const REGISTRY: RegistryIndex = {
   by_slug: {
@@ -183,5 +189,50 @@ describe('SHARE_URL_BINARY_RE — invariant', () => {
     // A hint or install-command binary becomes an R2 key only when it has
     // this shape, so the source string is pinned and a drift fails loudly.
     expect(SHARE_URL_BINARY_RE.source).toBe('^[a-z0-9][a-z0-9-]{0,63}$');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A binary key never names a branch record: a slash marks the branch family.
+// ---------------------------------------------------------------------------
+
+describe('cache-tier keys never alias a branch record', () => {
+  test('an install command whose package name carries a slash reads no record', async () => {
+    const stored = new Map<string, string>([
+      [
+        `scores/o/r@feature/${SPEC_VERSION}.json`,
+        JSON.stringify({
+          spec_version: SPEC_VERSION,
+          anc_version: '0.9.0',
+          tool_version: '',
+          source_sha: 'f'.repeat(40),
+          scorecard: {},
+        }),
+      ],
+    ]);
+    const env = {
+      ASSETS: { fetch: async () => new Response('{}', { status: 200 }) } as unknown as Fetcher,
+      SCORE_CACHE: {
+        async get(key: string) {
+          const raw = stored.get(key);
+          return raw === undefined ? null : { json: async () => JSON.parse(raw) };
+        },
+        async delete() {},
+      } as unknown as R2Bucket,
+    };
+    const input: ValidatedInput = {
+      kind: 'install-command',
+      spec: { pm: 'brew', package: 'o/r@feature', binary: 'o/r@feature' },
+    };
+    const result = await lookupScorecard(
+      input,
+      env,
+      { by_slug: {}, by_owner_repo: {} },
+      { by_owner_repo: {} },
+      {
+        specVersion: SPEC_VERSION,
+      },
+    );
+    expect(result.kind).toBe('miss');
   });
 });

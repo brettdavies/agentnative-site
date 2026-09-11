@@ -29,7 +29,7 @@
 
 import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
-import { targetOfSpec } from '../../shared/audit-routes';
+import { isResultTarget, targetOfSpec } from '../../shared/audit-routes';
 import { ndjsonLineWriter } from '../../shared/ndjson';
 import { invokeCachedPurge } from '../audit-web/hit-min-purge';
 import { cliTargetTag } from '../audit-web/hit-min-tags';
@@ -147,11 +147,12 @@ export class Sandbox extends BaseSandbox<ScoreSandboxEnv> {
       return json({ error: 'invalid_do_body' }, 400);
     }
 
-    const body = streamScore(parsed.spec, {
+    const { body, done } = streamScore(parsed.spec, {
       env: this.env,
       run: (spec, onPhase) => this.score(spec, onPhase),
       purge: (tags) => invokeCachedPurge(this.ctx, tags),
     });
+    this.ctx.waitUntil(done);
     return new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson; charset=utf-8' } });
   }
 
@@ -177,37 +178,45 @@ export type StreamScoreDeps = {
   run: (spec: InstallSpec, onPhase: (phase: SandboxPhase) => void) => Promise<ScoreResult>;
   /** The `Cached` entrypoint's purge RPC; a throw is logged, never raised. */
   purge: (tags: string[]) => Promise<void>;
+  /** How long the purge may hold the result line; the production default is `PURGE_TIMEOUT_MS`. */
+  purgeTimeoutMs?: number;
   now?: () => string;
 };
 
 /**
  * The response body for one run: a `phase` line per boundary, then one
  * result line after the R2 write and its purge. The body is returned at
- * once; the run continues behind it.
+ * once; `done` settles when the run behind it has written its last line.
  */
-export function streamScore(spec: InstallSpec, deps: StreamScoreDeps): ReadableStream<Uint8Array> {
+export function streamScore(
+  spec: InstallSpec,
+  deps: StreamScoreDeps,
+): { body: ReadableStream<Uint8Array>; done: Promise<void> } {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const now = deps.now ?? (() => new Date().toISOString());
   const line = ndjsonLineWriter(writer);
-  void (async () => {
+  const done = (async () => {
     try {
       const result = await deps.run(spec, (phase) => {
         void line({ type: 'phase', phase, at: now() });
       });
       if (result.ok) {
-        await writeCacheBestEffort(deps.env, spec, result.value, deps.purge);
+        await writeCacheBestEffort(deps.env, spec, result.value, deps.purge, deps.purgeTimeoutMs);
         await line(result.value);
       } else {
         await line({ error: result.error, ...(result.details !== undefined ? { details: result.details } : {}) });
       }
     } catch (err) {
-      await line({ error: 'sandbox_exception', details: err instanceof Error ? err.message : String(err) });
+      // The message stays in the log: container and exec errors can name
+      // internal hosts and paths.
+      emitLog({ scope: 'score.sandbox' }, { error: err instanceof Error ? err.message : String(err) });
+      await line({ error: 'sandbox_exception' });
     } finally {
       await writer.close().catch(() => {});
     }
   })();
-  return readable;
+  return { body: readable, done };
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +224,10 @@ export function streamScore(spec: InstallSpec, deps: StreamScoreDeps): ReadableS
 // ---------------------------------------------------------------------------
 
 export type ScoredValue = { scorecard: unknown; anc_version: string; source_sha?: string };
+
+// The purge sits between the R2 write and the result line; a stalled RPC
+// must not hold the client's result.
+const PURGE_TIMEOUT_MS = 5_000;
 
 // Best-effort R2 write after a successful score, under the key the result
 // route reads: `scores/<binary>/...` for an installed binary and
@@ -230,12 +243,17 @@ export async function writeCacheBestEffort(
   spec: InstallSpec,
   value: ScoredValue,
   purge?: (tags: string[]) => Promise<void>,
+  purgeTimeoutMs: number = PURGE_TIMEOUT_MS,
 ): Promise<void> {
   if (!env.SCORE_CACHE) {
     emitLog({ scope: 'cache.write' }, { skipped: 'no_binding' });
     return;
   }
   const target = targetOfSpec(spec);
+  if (!isResultTarget(target)) {
+    emitLog({ scope: 'cache.write' }, { skipped: 'unroutable_target', target });
+    return;
+  }
   const toolVersion = extractToolVersion(value.scorecard) ?? '';
   const sourceSha = spec.pm === 'git-clone' ? value.source_sha : undefined;
   if (spec.pm === 'git-clone' && !sourceSha) {
@@ -270,10 +288,17 @@ export async function writeCacheBestEffort(
   }
   if (!wrote || !purge) return;
   const tags = [cliTargetTag(target)];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('purge_timeout')), purgeTimeoutMs);
+  });
   try {
-    await purge(tags);
+    await Promise.race([purge(tags), timeout]);
   } catch (err) {
     emitLog({ scope: 'hit-min-purge' }, { error: err instanceof Error ? err.message : String(err), tags });
+  } finally {
+    if (timer) clearTimeout(timer);
+    timeout.catch(() => {});
   }
 }
 

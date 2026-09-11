@@ -664,32 +664,28 @@ function timeoutAfter(ms: number): Promise<ScoreFailure> {
 // it lands back in spec.binary, since downstream it shell-quotes the
 // value rather than re-validating its shape.
 export function extractDetectedBinary(stdout: string): string | null {
-  const lines = stdout.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (line.startsWith(DETECTED_BINARY_PREFIX)) {
-      const name = line.slice(DETECTED_BINARY_PREFIX.length).trim();
-      // Whitelist filename characters — the install command's own filter
-      // rejects path-traversal upstream, but defense in depth keeps any
-      // smuggled bytes out of the shell-quoted `anc audit --command` slot.
-      if (/^[A-Za-z0-9._-]+$/.test(name) && name.length > 0 && name.length <= 64) {
-        return name;
-      }
-    }
-  }
-  return null;
+  // Whitelist filename characters: the install command's own filter
+  // rejects path-traversal upstream, but defense in depth keeps any
+  // smuggled bytes out of the shell-quoted `anc audit --command` slot.
+  return extractTrailingMarker(stdout, DETECTED_BINARY_PREFIX, (name) => /^[A-Za-z0-9._-]{1,64}$/.test(name));
 }
 
 // The commit the clone checked out, printed by the clone command as its
 // last stdout line; anything but a full lowercase hex SHA is ignored.
 export function extractSourceSha(stdout: string): string | null {
+  return extractTrailingMarker(stdout, SOURCE_SHA_PREFIX, (sha) => /^[0-9a-f]{40}$/.test(sha));
+}
+
+// The last stdout line carrying `prefix` whose value passes `isValid`;
+// the install output is scanned from its end because the marker is
+// echoed after the step it describes.
+function extractTrailingMarker(stdout: string, prefix: string, isValid: (value: string) => boolean): string | null {
   const lines = stdout.split(/\r?\n/);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim();
-    if (line.startsWith(SOURCE_SHA_PREFIX)) {
-      const sha = line.slice(SOURCE_SHA_PREFIX.length).trim();
-      return /^[0-9a-f]{40}$/.test(sha) ? sha : null;
-    }
+    if (!line.startsWith(prefix)) continue;
+    const value = line.slice(prefix.length).trim();
+    if (isValid(value)) return value;
   }
   return null;
 }

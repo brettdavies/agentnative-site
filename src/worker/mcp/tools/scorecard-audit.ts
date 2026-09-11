@@ -37,7 +37,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { scorePath } from '../../../shared/audit-routes';
+import { scorePath, targetOfSpec } from '../../../shared/audit-routes';
 import { loadHintsIndex, lookupOnly, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
@@ -276,7 +276,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // Step 8: map kind to typed-state response.
       switch (result.kind) {
         case 'cache_post_hit': {
-          const scorecard_url = `${siteUrl}/score/live/${result.spec.binary}`;
+          const scorecard_url = `${siteUrl}${scorePath(targetOfSpec(result.spec))}`;
           return textContent({
             audited: false,
             source: 'live-cache',
@@ -289,7 +289,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
           });
         }
         case 'fresh': {
-          const scorecard_url = `${siteUrl}/score/live/${result.spec.binary}`;
+          const scorecard_url = `${siteUrl}${scorePath(targetOfSpec(result.spec))}`;
           return textContent({
             audited: true,
             source: 'fresh-audit',
@@ -297,6 +297,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
             scorecard: result.scorecard,
             anc_version: result.anc_version,
             spec_version: SPEC_VERSION,
+            ...(result.source_sha ? { source_sha: result.source_sha } : {}),
           });
         }
         case 'resolution_error': {
