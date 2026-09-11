@@ -6,8 +6,10 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../../src/build/13-web-audit-registry.mjs';
 import { type AuditApiDeps, type AuditApiEnv, handleAuditApi } from '../../src/worker/audit/api';
+import type { AuditJob } from '../../src/worker/audit/job';
 import type { Sandbox } from '../../src/worker/score/do';
 import { ANC_VERSION, SPEC_VERSION } from '../../src/worker/spec-version.gen';
+import { fakeJobNamespace } from './audit-job-state';
 
 // POST /api/score accepts both lanes with one gate stack and one response
 // contract. These tests post a website target and a CLI target through the
@@ -78,6 +80,8 @@ export type Overrides = Partial<{
   cachePutThrows: boolean;
   probe: 'ok' | 'unreachable';
   kvSeed: Record<string, string>;
+  /** The AUDIT_JOB namespace; a fresh fake of real AuditJob objects by default. */
+  jobs: DurableObjectNamespace<AuditJob>;
 }>;
 
 export function makeKv(seed: Record<string, string>, tracker?: Tracker): KVNamespace {
@@ -173,6 +177,7 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
       idFromName: () => ({ id: 'stub' }),
       get: () => ({ fetch: stubFetch }),
     } as unknown as DurableObjectNamespace,
+    AUDIT_JOB: overrides.jobs ?? fakeJobNamespace(),
     SCORE_LIMITER: overrides.noLimiter ? undefined : limiter('cli', overrides.limiter ?? true),
     SCORE_LIMITER_IP: limiter('cli-ip', overrides.ipLimiter ?? true),
     WEB_AUDIT_LIMITER: overrides.noLimiter ? undefined : limiter('web', overrides.limiter ?? true),

@@ -17,6 +17,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
 import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
 import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from '../../audit-web/audit-log';
 import {
@@ -50,10 +51,11 @@ import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { type NotifyEnv, notifyFailure } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
+import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 
-export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv {
+export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -259,6 +261,28 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           message:
             'the website audit is currently disabled by the operator; cached scorecards remain available via get_website_audit.',
         });
+      }
+
+      // A run already in flight for this domain is attached to, not run
+      // twice; attaching spends no audit budget. An explicit listing choice
+      // is its own request and goes through the gates below.
+      if (public_listing === undefined) {
+        const attached = await awaitInFlightTerminal(env, 'web', domain, getMcpRequest()?.signal);
+        if (attached?.type === 'complete') {
+          return textContent({
+            audited: true,
+            source: 'fresh-audit',
+            attached: true,
+            ...attached.freshness,
+            scorecard: await enrichForRead(env, attached.scorecard),
+            share_url: shareUrl,
+            spec_version: attached.spec_version,
+          });
+        }
+        if (attached) {
+          const reason = attached.type === 'incomplete' ? 'incomplete' : attached.error.code;
+          return isError(`the audit this call attached to did not finish (${reason}); nothing was cached. Retry.`);
+        }
       }
 
       // cf-connecting-ip presence (no anon fallback).

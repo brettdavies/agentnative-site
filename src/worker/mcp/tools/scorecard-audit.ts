@@ -37,16 +37,19 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { scorePath, targetOfSpec } from '../../../shared/audit-routes';
+import type { TerminalEvent } from '../../../shared/audit-events';
+import { normalizeTarget, scorePath, targetOfSpec } from '../../../shared/audit-routes';
+import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
 import { loadHintsIndex, lookupOnly, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
 import type { Catalog } from '../catalog';
+import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 
-export interface ScorecardAuditEnv extends OrchestrateEnv {
+export interface ScorecardAuditEnv extends OrchestrateEnv, InFlightEnv {
   MCP_LIVE_SCORING_ENABLED?: string;
   MCP_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_KV?: KVNamespace;
@@ -100,6 +103,35 @@ async function sha256Hex(input: string): Promise<string> {
   return Array.from(new Uint8Array(buf))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+// The endpoint keys an in-flight run by the classifier's normalized target.
+function inFlightKey(raw: string): string {
+  return normalizeTarget(raw) ?? raw;
+}
+
+// The terminal line of a run this call attached to, in the shapes a fresh run returns.
+function attachedResult(terminal: TerminalEvent) {
+  if (terminal.type === 'complete') {
+    return textContent({
+      audited: true,
+      source: 'fresh-audit',
+      attached: true,
+      scorecard_url: terminal.scorecard_url,
+      scorecard: terminal.scorecard,
+      anc_version: terminal.anc_version ?? null,
+      spec_version: terminal.spec_version,
+      ...(terminal.source_sha ? { source_sha: terminal.source_sha } : {}),
+    });
+  }
+  const failure =
+    terminal.type === 'incomplete'
+      ? { error: 'incomplete', details: terminal.reason ?? null }
+      : { error: terminal.error.code, details: terminal.error.details ?? null };
+  return {
+    content: [{ type: 'text' as const, text: JSON.stringify({ ...failure, stage: 'attached' }, null, 2) }],
+    isError: true,
+  };
 }
 
 async function consumeHourlyBudget(
@@ -231,6 +263,11 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
           message: 'a cached live-score result already exists; call get_scorecard for the inline record.',
         });
       }
+
+      // A run already in flight for this input is attached to, not run twice;
+      // attaching spends no audit budget.
+      const attached = await awaitInFlightTerminal(env, 'cli', inFlightKey(choice.raw), getMcpRequest()?.signal);
+      if (attached) return attachedResult(attached);
 
       // Step 4: cf-connecting-ip presence check (no anon fallback).
       const ipString = requestHeader(extra, 'cf-connecting-ip');

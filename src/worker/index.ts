@@ -16,6 +16,7 @@ import { isLegacyRequest } from '@modelcontextprotocol/server';
 import { isScorePath as isResultPath } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
+import type { AuditJob } from './audit/job';
 import {
   handleLegacyLiveScorePath,
   handleLegacyWebResultPath,
@@ -85,6 +86,7 @@ import { runWithRequestContext } from './telemetry/request-context';
 export { ContainerProxy } from '@cloudflare/sandbox';
 // Audit job DO class, exported for `class_name: "AuditJob"`.
 export { AuditJob } from './audit/job';
+
 // Web-rescore Workflow class. Re-exported so wrangler's binding resolver
 // can find `class_name: "WebRescoreWorkflow"` from wrangler.jsonc's
 // workflows section.
@@ -135,6 +137,9 @@ export class Cached extends WorkerEntrypoint<Env> {
 export interface Env {
   ASSETS: Fetcher;
   SCORE?: DurableObjectNamespace;
+  // The audit job for each running audit; the transact endpoint and the MCP
+  // transact tools attach late readers to it.
+  AUDIT_JOB?: DurableObjectNamespace<AuditJob>;
   SCORE_KV?: KVNamespace;
   SCORE_CACHE?: R2Bucket;
   SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
