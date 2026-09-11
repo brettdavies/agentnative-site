@@ -41,7 +41,7 @@
 //           automatically.
 
 import { emitLog } from '../telemetry/log';
-import type { ResolvedStep } from './discover-binary';
+import type { InstallSpec, ResolvedStep } from './discover-binary';
 import type { ScoreError } from './response-shape';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +89,20 @@ export function newScoreTierTelemetry(): ScoreTierTelemetry {
     install_ms: null,
     anc_audit_ms: null,
   };
+}
+
+/** The fields a resolved spec settles; a bounce before resolution leaves them null. */
+export function applySpecTelemetry(
+  t: ScoreTierTelemetry,
+  spec: InstallSpec | undefined,
+  resolvedStep: ResolvedStep | null | undefined,
+  skipCachePost: boolean,
+): void {
+  if (!spec) return;
+  t.binary = spec.binary;
+  t.pm = spec.pm;
+  t.resolved_step = resolvedStep ?? null;
+  t.cache_post_attempted = spec.pm !== 'git-clone' && !skipCachePost;
 }
 
 /** The `score.tier` log line. */

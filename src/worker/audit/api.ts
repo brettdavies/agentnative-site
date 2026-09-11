@@ -60,6 +60,7 @@ import {
   type Lane,
   targetOfSpec,
 } from '../../shared/audit-routes';
+import { ndjsonLineWriter } from '../../shared/ndjson';
 import { wantsEventStream } from '../accept';
 import { sha256Hex } from '../audit-web/cache';
 import {
@@ -85,6 +86,7 @@ import {
 } from '../score/core';
 import { CTA, type ScoreError, toAuditError } from '../score/response-shape';
 import {
+  applySpecTelemetry,
   buildScoreEventFields,
   emitScoreTier,
   newScoreTierTelemetry,
@@ -671,12 +673,7 @@ async function* runCliStream(input: {
   }).finally(() => phases.close());
   for await (const event of phases) yield event;
   const outcome = await pending;
-  if (outcome.spec) {
-    cli.binary = outcome.spec.binary;
-    cli.pm = outcome.spec.pm;
-    cli.resolved_step = outcome.resolvedStep ?? null;
-    cli.cache_post_attempted = outcome.spec.pm !== 'git-clone' && !input.skipCache;
-  }
+  applySpecTelemetry(cli, outcome.spec, outcome.resolvedStep, input.skipCache);
   if (outcome.kind === 'bounce') {
     common.row.tier = outcome.tier;
     cli.tier = outcome.tier;
@@ -759,17 +756,22 @@ async function relay(
 ): Promise<Response> {
   const { ctx, row, env, request, abort } = common;
   const accepted: AuditEvent = { type: 'accepted', lane: meta.lane, target: meta.target, started_at: flags.startedAt };
-  const deadline = setTimeout(
-    () => abort.abort(RELAY_DEADLINE),
-    common.deps.relayDeadlineMs ?? RELAY_DEADLINE_SECONDS * 1000,
-  );
+  // The website engine bounds itself; the Durable Object read is what the
+  // relay deadline bounds.
+  const deadline =
+    meta.lane === 'cli'
+      ? setTimeout(() => abort.abort(RELAY_DEADLINE), common.deps.relayDeadlineMs ?? RELAY_DEADLINE_SECONDS * 1000)
+      : null;
+  const clearDeadline = () => {
+    if (deadline) clearTimeout(deadline);
+  };
   if (!row.stream) {
     let terminal: AuditEvent | null = null;
     await runWithHitMinPurge(ctx, async () => {
       try {
         terminal = await consume(events, row, async () => {}, abort.signal);
       } finally {
-        clearTimeout(deadline);
+        clearDeadline();
         await flags.clear();
         await flushHitMinPurge().catch(() => {});
       }
@@ -777,10 +779,9 @@ async function relay(
     return terminalResponse(terminal, row, cookie);
   }
 
-  const encoder = new TextEncoder();
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
-  const write = (event: AuditEvent) => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)).catch(() => {});
+  const write = ndjsonLineWriter(writer);
   const heartbeatMs = common.deps.heartbeatMs ?? HEARTBEAT_MS;
   // Every write happens inside the background task: a write on a
   // TransformStream settles only once the reader consumes it, so a write
@@ -810,7 +811,7 @@ async function relay(
         row.status = 200;
         emitRequestRow(row, common.started);
       };
-      request.signal?.addEventListener('abort', onClientGone, { once: true });
+      request.signal.addEventListener('abort', onClientGone, { once: true });
       try {
         await write(accepted);
         armHeartbeat();
@@ -827,9 +828,9 @@ async function relay(
           abort.signal,
         );
       } finally {
-        clearTimeout(deadline);
+        clearDeadline();
         stopHeartbeat();
-        request.signal?.removeEventListener('abort', onClientGone);
+        request.signal.removeEventListener('abort', onClientGone);
         if (!clientGone) {
           row.outcome = terminal ? outcomeOf(terminal) : 'incomplete_response_contract';
           row.status = 200;

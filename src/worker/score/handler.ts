@@ -25,13 +25,13 @@ import { AUDITOR_URL } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import { preferenceFor } from './content-negotiation';
 import { type CliCoreEnv, isBranchScoped, loadCliIndexes, readCliTier, runCliAudit, validateCliInput } from './core';
-import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { isScoringDisabled, type KillSwitchEnv } from './kill-switch';
 import { _resetHintsIndexCache } from './orchestrate';
 import { _resetRegistryIndexCache } from './registry-lookup';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import {
+  applySpecTelemetry,
   buildScoreEventFields,
   emitScoreTier,
   newScoreTierTelemetry,
@@ -277,17 +277,9 @@ async function handleScoreInner(
   // 5. The run: the accessibility probe, spec resolution, the
   //    post-discovery cache tier, and the Durable Object, all in the core.
   const outcome = await runCliAudit({ env, validated, indexes, inputHash, origin, skipCachePost: skipCache });
-  const applySpecTelemetry = (spec: InstallSpec | undefined, resolved_step: ResolvedStep | null | undefined): void => {
-    if (!spec) return;
-    telemetry.binary = spec.binary;
-    telemetry.pm = spec.pm;
-    telemetry.resolved_step = resolved_step ?? null;
-    telemetry.cache_post_attempted = spec.pm !== 'git-clone' && !skipCache;
-  };
-
   switch (outcome.kind) {
     case 'cache': {
-      applySpecTelemetry(outcome.spec, outcome.resolvedStep);
+      applySpecTelemetry(telemetry, outcome.spec, outcome.resolvedStep, skipCache);
       telemetry.cache_post_hit = true;
       telemetry.tier = 'cache_post';
       telemetry.freshness = 'cache-hit';
@@ -298,7 +290,7 @@ async function handleScoreInner(
       );
     }
     case 'live': {
-      applySpecTelemetry(outcome.spec, outcome.resolvedStep);
+      applySpecTelemetry(telemetry, outcome.spec, outcome.resolvedStep, skipCache);
       telemetry.tier = 'live';
       telemetry.freshness = 'live';
       telemetry.install_ms = outcome.installMs;
@@ -310,7 +302,7 @@ async function handleScoreInner(
       );
     }
     case 'bounce': {
-      applySpecTelemetry(outcome.spec, outcome.resolvedStep);
+      applySpecTelemetry(telemetry, outcome.spec, outcome.resolvedStep, skipCache);
       telemetry.tier = outcome.tier;
       return shapeWithPreference(shapeScoreError(outcome.error), preference, { setCookie });
     }

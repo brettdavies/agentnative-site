@@ -30,6 +30,7 @@
 import type { OutboundHandler } from '@cloudflare/containers';
 import { Sandbox as BaseSandbox } from '@cloudflare/sandbox';
 import { targetOfSpec } from '../../shared/audit-routes';
+import { ndjsonLineWriter } from '../../shared/ndjson';
 import { invokeCachedPurge } from '../audit-web/hit-min-purge';
 import { cliTargetTag } from '../audit-web/hit-min-tags';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -187,9 +188,8 @@ export type StreamScoreDeps = {
 export function streamScore(spec: InstallSpec, deps: StreamScoreDeps): ReadableStream<Uint8Array> {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
-  const encoder = new TextEncoder();
   const now = deps.now ?? (() => new Date().toISOString());
-  const line = (payload: unknown) => writer.write(encoder.encode(`${JSON.stringify(payload)}\n`)).catch(() => {});
+  const line = ndjsonLineWriter(writer);
   void (async () => {
     try {
       const result = await deps.run(spec, (phase) => {

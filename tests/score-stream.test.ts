@@ -51,13 +51,15 @@ const OK: ScoreResult = {
   },
 };
 
-async function linesOf(readable: ReadableStream<Uint8Array>): Promise<Array<Record<string, unknown>>> {
-  const text = await new Response(readable).text();
+async function readAll(res: Response): Promise<Array<Record<string, unknown>>> {
+  const text = await res.text();
   return text
     .split('\n')
-    .filter((line) => line.length > 0)
+    .filter((line) => line.trim().length > 0)
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
+
+const linesOf = (readable: ReadableStream<Uint8Array>) => readAll(new Response(readable));
 
 describe('streamScore: the Durable Object body', () => {
   let logs: LogCapture;
@@ -262,14 +264,6 @@ function ctxWithPromises() {
     props: {},
   } as unknown as ExecutionContext;
   return { ctx, promises };
-}
-
-async function readAll(res: Response): Promise<Array<Record<string, unknown>>> {
-  const text = await res.text();
-  return text
-    .split('\n')
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 type Row = Record<string, unknown>;

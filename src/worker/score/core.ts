@@ -241,12 +241,6 @@ function toolVersionOf(scorecard: unknown): string {
   return typeof version === 'string' ? version : '';
 }
 
-// The deployed homepage forwards to `share_url`: the result's own page,
-// which a branch run has once its record is written under the branch key.
-function legacyShareUrl(envelope: AuditEnvelope): string | null {
-  return envelope.scorecard_url;
-}
-
 function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutcome {
   switch (result.kind) {
     case 'cache_post_hit': {
@@ -263,7 +257,7 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: legacyShareUrl(envelope),
+        shareUrl: envelope.scorecard_url,
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
       };
@@ -283,7 +277,7 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: legacyShareUrl(envelope),
+        shareUrl: envelope.scorecard_url,
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
         installMs: result.install_ms,

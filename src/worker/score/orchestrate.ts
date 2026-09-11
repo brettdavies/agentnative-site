@@ -16,7 +16,7 @@
 // caller's gates run first.
 
 import { type Container, getRandom } from '@cloudflare/containers';
-import type { CliPhase } from '../../shared/audit-events';
+import { CLI_PHASES, type CliPhase } from '../../shared/audit-events';
 import * as cache from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { type DiscoveryHintsIndex, lookupScorecard, type ScorecardLookupResult } from './registry-lookup';
@@ -304,14 +304,7 @@ export async function runFreshOnly(
 // The line reader
 // ---------------------------------------------------------------------------
 
-const CLI_PHASES: ReadonlySet<string> = new Set<CliPhase>([
-  'resolving',
-  'installing',
-  'installed',
-  'verifying',
-  'lockdown',
-  'auditing',
-]);
+const PHASE_NAMES: ReadonlySet<string> = new Set(CLI_PHASES);
 
 type ReadOutcome = { kind: 'line'; payload: unknown } | { kind: 'non_json' } | { kind: 'ended' };
 
@@ -319,20 +312,24 @@ function isPhaseLine(payload: unknown): payload is { type: 'phase' } & PhaseLine
   if (typeof payload !== 'object' || payload === null) return false;
   const obj = payload as Record<string, unknown>;
   return (
-    obj.type === 'phase' && typeof obj.phase === 'string' && CLI_PHASES.has(obj.phase) && typeof obj.at === 'string'
+    obj.type === 'phase' && typeof obj.phase === 'string' && PHASE_NAMES.has(obj.phase) && typeof obj.at === 'string'
   );
 }
 
-// Rejects with the signal's reason the moment it aborts, whether or not
-// the underlying read ever settles.
-function abortable<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  if (!signal) return pending;
-  if (signal.aborted) return Promise.reject(signal.reason);
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
+// One promise that rejects with the signal's reason the moment it aborts,
+// raced against every read so a stalled body never outlives the signal.
+function abortRejection(signal: AbortSignal): { rejection: Promise<never>; release: () => void } {
+  let onAbort: (() => void) | null = null;
+  const rejection = new Promise<never>((_, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    onAbort = () => reject(signal.reason);
     signal.addEventListener('abort', onAbort, { once: true });
-    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
   });
+  rejection.catch(() => {});
+  return { rejection, release: () => onAbort && signal.removeEventListener('abort', onAbort) };
 }
 
 async function readResultLine(
@@ -359,9 +356,10 @@ async function readResultLine(
     return { kind: 'line', payload };
   };
   let buffered = '';
+  const abort = signal ? abortRejection(signal) : null;
   try {
     while (true) {
-      const { value, done } = await abortable(reader.read(), signal);
+      const { value, done } = abort ? await Promise.race([reader.read(), abort.rejection]) : await reader.read();
       buffered += decoder.decode(value ?? new Uint8Array(), { stream: !done });
       let newline = buffered.indexOf('\n');
       while (newline >= 0) {
@@ -373,6 +371,7 @@ async function readResultLine(
       if (done) return classify(buffered) ?? { kind: 'ended' };
     }
   } finally {
+    abort?.release();
     reader.cancel().catch(() => {});
   }
 }
