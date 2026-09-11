@@ -805,8 +805,9 @@ against the gates in Documentation and Operational Notes.
 - Phase A: `scripts/release/postflight.sh --env staging all` output unchanged; the shared modules are inert.
 - Phase B: the stream-shape, R2-payload, and purge rows of the Verification Contract; a curated slug POST returns one
   JSON body; `/score/<host>/json` fetched twice shows the same `scored_at` with `cached` flipping;
-  `ANC_STAGING_BASE_URL=<staging> bun run test:e2e --project=edge-hit`; a live CLI target submitted from the deployed
-  staging homepage still lands on its result page.
+  the edge cache classes, asserted by the `edge-hit` leg of `deep-check`'s staging job (it runs there with the
+  repository's Access service token, so no local credential is needed); a live CLI target submitted from the
+  deployed staging homepage still lands on its result page.
 - Phase C: `--project=web-audit --project=web-audit-webkit --project=homepage-score-live`, two consecutive greens;
   both-theme browser check of `/`, `/audit`, `/scoring`, `/score/<target>` for each kind, and `/scorecards`;
   `postflight.sh --env staging pages`.
