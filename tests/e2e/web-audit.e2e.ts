@@ -75,7 +75,7 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
     ]);
     await page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 });
     expect(typeof sawStreaming).toBe('boolean');
-    await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
+    await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
     await expect(page.locator('.scorecard-audits')).toBeVisible();
 
     // The scoring page used location.replace(), so it never entered history:

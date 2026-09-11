@@ -2310,6 +2310,19 @@ main .remediation__body {
   overflow-wrap: anywhere;
 }
 
+/* The scoring page's header. */
+.scorecard-header {
+  padding-bottom: 1.5rem;
+}
+.scorecard-header h1 {
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(1.75rem, 2.5vw + 1rem, 2.5rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 0.25rem 0 0.5rem;
+  line-height: 1.15;
+}
+
 /* Audience banner — informational signal above the score summary */
 .scorecard-audience-banner {
   margin: 1rem 0 1.5rem;

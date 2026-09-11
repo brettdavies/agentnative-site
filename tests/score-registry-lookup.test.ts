@@ -179,11 +179,9 @@ describe('deriveShareBinary — branch-aware', () => {
 });
 
 describe('SHARE_URL_BINARY_RE — invariant', () => {
-  test('matches the /score/live/<binary> route slug shape exactly', () => {
-    // The summary-render.ts BINARY_SLUG_RE is `SHARE_URL_BINARY_RE`
-    // (re-exported), so any value the handler mints is a value the
-    // route accepts. This test pins the source string so a refactor
-    // that drifts one without the other fails loudly.
+  test('pins the pre-discovery cache-key slug shape', () => {
+    // A hint or install-command binary becomes an R2 key only when it has
+    // this shape, so the source string is pinned and a drift fails loudly.
     expect(SHARE_URL_BINARY_RE.source).toBe('^[a-z0-9][a-z0-9-]{0,63}$');
   });
 });
