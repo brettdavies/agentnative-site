@@ -583,10 +583,10 @@ test.describe('homepage live-scoring form — CSP + markdown-twin regressions', 
 });
 
 test.describe('/live-score URL canonicalization', () => {
-  test('/score/live/<binary>.html → 301 to /score/live/<binary>', async ({ request }) => {
+  test('/score/live/<binary>.html → 301 to the unified page', async ({ request }) => {
     const res = await request.get('/score/live/ripgrep.html', { maxRedirects: 0 });
     expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe('/score/live/ripgrep');
+    expect(res.headers().location).toBe('/score/ripgrep');
   });
 
   test('/score/live/<binary> (no extension) returns HTML 404 when uncached', async ({ request }) => {
@@ -601,16 +601,19 @@ test.describe('/live-score URL canonicalization', () => {
     expect(res.headers()['content-type']).toContain('text/markdown');
   });
 
-  test('/score/live/<curated-binary> → 301 to /score/<curated-binary>', async ({ request }) => {
+  // A curated slug is served through the legacy adapter, not redirected:
+  // only a binary alias whose name differs from its slug redirects, and
+  // only the `.html` form canonicalizes.
+  test('/score/live/<curated-slug> serves the unified page', async ({ request }) => {
     const res = await request.get('/score/live/ripgrep', { maxRedirects: 0 });
-    expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe('/score/ripgrep');
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/html');
   });
 
-  test('/score/live/<curated-binary>.md → 301 to /score/<curated-binary>.md', async ({ request }) => {
+  test('/score/live/<curated-slug>.md serves the markdown twin', async ({ request }) => {
     const res = await request.get('/score/live/ripgrep.md', { maxRedirects: 0 });
-    expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe('/score/ripgrep.md');
+    expect(res.status()).toBe(200);
+    expect(res.headers()['content-type']).toContain('text/markdown');
   });
 });
 
