@@ -27,8 +27,13 @@
 #                            alike. Only a non-curated target would reach
 #                            siteverify and need a real token.
 #   SMOKE_SLEEP_SEC          Edge-propagation delay before the POST.
-#                            Default 10. Tune up if regional latency starts
-#                            producing intermittent 404s.
+#                            Default 10. The POST then retries five times,
+#                            ten seconds apart, on any error, so an isolate
+#                            that still runs the previous deploy inside the
+#                            propagation window (it rejects the `target`
+#                            body with a 400) cannot fail the deploy on its
+#                            own; a stable error still exits non-zero once
+#                            the retries are spent.
 #   SLUG                     Curated slug to score. Default "ripgrep".
 #                            Must be present in registry.yaml.
 #
@@ -68,6 +73,7 @@ fi
 
 echo "POST ${BASE_URL}/api/score (target=${SLUG})"
 response="$(curl --silent --show-error --fail-with-body \
+    --retry 5 --retry-delay 10 --retry-all-errors \
     --max-time 30 \
     "${ACCESS_HEADERS[@]}" \
     -H "Content-Type: application/json" \
