@@ -4,7 +4,7 @@
   // manifest declares. Unused exports and exported types stay out: test-only
   // exports and inference-consumed types dominate those findings.
   "include": ["files", "dependencies", "devDependencies", "unlisted"],
-  // Entries import analysis cannot see: the eleven src/client/*.ts modules are
+  // Entries import analysis cannot see: the twelve src/client/*.ts modules are
   // bundled by path strings in src/build/01-assets.mjs, test files run by glob
   // under bun test / playwright, and scripts/** are standalone CLIs. Build,
   // worker, playwright, and bun-setup entries come from knip's own detection.
@@ -20,6 +20,7 @@
     "src/client/web-audit-scoring.ts",
     "src/client/web-leaderboard.ts",
     "src/client/webmcp.ts",
+    "src/client/reaudit.ts",
     "tests/**/*.test.ts",
     "tests/e2e/**/*.e2e.ts",
     "tests/helpers/**/*.ts",

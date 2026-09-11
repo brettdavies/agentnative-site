@@ -12,7 +12,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import worker, { type Env } from '../src/worker/index';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
-import { _resetShellTemplateCache } from '../src/worker/score/summary-render';
+import { _resetShellTemplateCache } from '../src/worker/shell-template';
 
 const SHELL_TEMPLATE = `<!doctype html>
 <html><head><title>{{TITLE}}</title></head>
@@ -41,6 +41,9 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
       async fetch(req: Request | string) {
         const url = typeof req === 'string' ? req : req.url;
         const path = new URL(url).pathname;
+        if (path === '/registry-index.json') {
+          return new Response(JSON.stringify({ by_slug: {}, by_owner_repo: {} }), { status: 200 });
+        }
         if (path === '/' || path === '/index.html') {
           return new Response(HOMEPAGE_HTML, {
             status: 200,
@@ -91,11 +94,11 @@ beforeEach(() => {
 });
 
 describe('/live-score URL canonicalization', () => {
-  test('/score/live/<binary>.html → 301 redirect to /score/live/<binary>', async () => {
+  test('/score/live/<binary>.html → 301 redirect to the unified /score/<binary>', async () => {
     const env = makeEnv();
     const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep.html'), env, {} as ExecutionContext);
     expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('/score/live/ripgrep');
+    expect(res.headers.get('location')).toBe('/score/ripgrep');
   });
 
   test('/score/live/<binary>.html redirects regardless of cache state', async () => {
@@ -108,11 +111,10 @@ describe('/live-score URL canonicalization', () => {
       {} as ExecutionContext,
     );
     expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('/score/live/unknown-tool');
+    expect(res.headers.get('location')).toBe('/score/unknown-tool');
   });
 
-  test('/score/live/<bad-slug>.html does NOT redirect — falls to ASSETS 404', async () => {
-    // Path-traversal guards: shape regex rejects uppercase, dots, slashes.
+  test('/score/live/<bad-slug>.html never serves a page: a 404, or a 301 whose target is a 404', async () => {
     const env = makeEnv();
     for (const path of [
       '/score/live/RipGrep.html',
@@ -120,10 +122,13 @@ describe('/live-score URL canonicalization', () => {
       '/score/live/-bad.html',
       '/score/live/foo/bar.html',
     ]) {
-      const res = await worker.fetch(new Request(`https://anc.dev${path}`), env, {} as ExecutionContext);
-      // Either a 404 from ASSETS or a 301 — the must-NOT is that the
-      // redirect path matches a malformed slug and serves it as canonical.
-      expect(res.headers.get('location')).not.toBe(path.replace('.html', ''));
+      let res = await worker.fetch(new Request(`https://anc.dev${path}`), env, {} as ExecutionContext);
+      if (res.status === 301) {
+        const location = res.headers.get('location') ?? '';
+        expect(location.endsWith('.html')).toBe(false);
+        res = await worker.fetch(new Request(`https://anc.dev${location}`), env, {} as ExecutionContext);
+      }
+      expect(res.status).toBe(404);
     }
   });
 
@@ -136,7 +141,7 @@ describe('/live-score URL canonicalization', () => {
     expect(res.headers.get('content-type')).toContain('text/markdown');
   });
 
-  test('/score/live/<binary> (no extension) → handled by handleLiveScorePage', async () => {
+  test('/score/live/<binary> (no extension) → served by the unified renderer', async () => {
     const env = makeEnv();
     const res = await worker.fetch(new Request('https://anc.dev/score/live/ripgrep'), env, {} as ExecutionContext);
     // No cache prefilled → 404 HTML (the canonical route, not a redirect).

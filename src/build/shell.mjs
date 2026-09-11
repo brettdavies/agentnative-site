@@ -7,6 +7,7 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
 import { canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
@@ -168,39 +169,35 @@ const esc = escHtml;
 /** Deferred client bundle for browser-agent (WebMCP) tool registration. */
 export const WEBMCP_SCRIPT = '/js/webmcp.js';
 
+// A template-rendered page's footer twin follows the result-path rule:
+// the canonical path plus the segment the route builder appends. The
+// segment is read off the builders so the footer and the substituted
+// head cannot disagree about it.
+
 /**
- * @param {object} args
- * @param {string} args.title                — document <title> + og:title.
- * @param {string} args.description          — meta description + og:description.
- * @param {string} args.canonicalPath        — site-relative path, e.g. '/p3'.
- * @param {string} args.bodyHtml             — rendered principle / page HTML.
- * @param {string} args.themeInitJs          — inline head script source.
- * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
- * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
- *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
- * @param {string=} args.baseUrl             — absolute base (default prod).
- * @returns {string} full HTML document.
- */
-/**
- * Emit a placeholder-only version of the shell. Used by the Worker to
- * render dynamic pages (/score/live/<binary>) without duplicating the
- * shell layout. The template has four placeholders:
+ * Emit a placeholder-only version of the shell. The Worker renders its
+ * dynamic pages from it without duplicating the shell layout. The
+ * template has five placeholders:
  *
  *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
  *   {{DESCRIPTION}}      — meta description + og:description
  *   {{CANONICAL_PATH}}   — site-relative canonical path (no trailing extension)
+ *   {{ALTERNATES}}       — the head's page-specific `rel="alternate"` links,
+ *                          built by src/shared/result-head.ts from the route
+ *                          module's representation builders
  *   {{BODY}}             — already-rendered body HTML (pre-escaped by caller)
  *
  * Same shell layout as the static pages; the only difference is the
- * placeholders for the four dynamic fields. The markdown-twin link in
- * the footer substitutes to `{{CANONICAL_PATH}}.md` so live-score pages
- * carry the same markdown-twin affordance as every other page.
+ * placeholders for the dynamic fields. The footer's markdown-twin anchor
+ * is `{{CANONICAL_PATH}}` plus the route builder's twin segment.
  */
 export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
   return emitShell({
     title: '{{TITLE}}',
     description: '{{DESCRIPTION}}',
     canonicalPath: '{{CANONICAL_PATH}}',
+    markdownTwinPath: '{{MARKDOWN_TWIN_PATH}}',
+    alternatesHtml: '{{ALTERNATES}}',
     bodyHtml: '{{BODY}}',
     themeInitJs: themeInitJs ?? '',
     isIndex: false,
@@ -209,10 +206,30 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
   });
 }
 
+/**
+ * @param {object} args
+ * @param {string} args.title                — document <title> + og:title.
+ * @param {string} args.description          — meta description + og:description.
+ * @param {string} args.canonicalPath        — site-relative path, e.g. '/p3'.
+ * @param {string=} args.markdownTwinPath    — href of the page's markdown twin
+ *     (default `<canonicalPath>.md`, `/index.md` on '/'); the footer anchor and
+ *     the default head alternate both use it.
+ * @param {string=} args.alternatesHtml      — the head's page-specific
+ *     `rel="alternate"` link markup (default: the markdown-twin link alone).
+ * @param {string} args.bodyHtml             — rendered principle / page HTML.
+ * @param {string} args.themeInitJs          — inline head script source.
+ * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
+ * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
+ *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
+ * @param {string=} args.baseUrl             — absolute base (default prod).
+ * @returns {string} full HTML document.
+ */
 export function emitShell({
   title,
   description,
   canonicalPath,
+  markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`,
+  alternatesHtml = markdownAlternateLink(markdownTwinPath),
   bodyHtml,
   themeInitJs,
   isIndex = false,
@@ -228,7 +245,6 @@ export function emitShell({
   // no base at all.
   const base = canonicalBaseUrl(baseUrl);
   const canonical = base + canonicalPath;
-  const markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`;
   const ogImage = `${base}/og-image.png`;
 
   const orgId = `${base}/#organization`;
@@ -321,7 +337,7 @@ export function emitShell({
     <title>${esc(title)}</title>
     <meta name="description" content="${esc(description)}" />
     <link rel="canonical" href="${canonical}" />
-    <link rel="alternate" type="text/markdown" href="${markdownTwinPath}" title="This page as markdown" />
+    ${alternatesHtml}
     <link rel="alternate" type="text/markdown" href="/llms.txt" title="LLM-friendly index" />
     <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="LLM-friendly full spec" />
     <link rel="alternate" type="application/json" href="/.well-known/mcp/server-card.json" title="MCP server card" />

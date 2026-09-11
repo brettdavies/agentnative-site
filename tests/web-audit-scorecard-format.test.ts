@@ -162,7 +162,7 @@ describe('buildWebSummaryBody (U14)', () => {
   test('headlines RELATIVE with GLOBAL as a labeled secondary metric', () => {
     expect(html).toContain('bigscore__n">82<');
     expect(html).toContain('site score');
-    expect(html).toContain('bigscore__n">72<');
+    expect(html).toContain('result-score__secondary-n">72<');
     expect(html).toContain('global-ready');
     expect(html).toContain('maximally agent-ready site');
   });
@@ -184,7 +184,7 @@ describe('buildWebSummaryBody (U14)', () => {
   });
 
   test('a category with only n_a rows shows 0/0 and is de-emphasized', () => {
-    expect(html).toContain('catcard--empty');
+    expect(html).toContain('pscore__row--empty');
     expect(html).toContain('<span class="audit-group__rollup">0 / 0</span>');
   });
 
@@ -665,10 +665,10 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
     // C4 is API, C5 is MCP; the header goes id -> title -> rollup with no
     // tier badge (MUST/SHOULD/MAY is a per-check obligation, not a group's).
     expect(html).toMatch(
-      /<span class="spec__id">C4<\/span>\s*<h3 class="audit-group__title">API<\/h3>\s*<span class="audit-group__rollup/,
+      /<span class="spec__id">C4<\/span>\s*<div class="pscore__body">\s*<h3 class="spec__title audit-group__title">API<\/h3>\s*<p class="pscore__evidence"><span class="audit-group__rollup/,
     );
     expect(html).toMatch(
-      /<span class="spec__id">C5<\/span>\s*<h3 class="audit-group__title">MCP<\/h3>\s*<span class="audit-group__rollup/,
+      /<span class="spec__id">C5<\/span>\s*<div class="pscore__body">\s*<h3 class="spec__title audit-group__title">MCP<\/h3>\s*<p class="pscore__evidence"><span class="audit-group__rollup/,
     );
   });
 
@@ -695,7 +695,7 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
   });
 
   test('no category header carries a tier badge or a tier-* class', () => {
-    const headers = [...html.matchAll(/<div class="catcard__hd[^"]*">[\s\S]*?<\/div>/g)].map((m) => m[0]);
+    const headers = [...html.matchAll(/<span class="spec__id">C\d<\/span>[\s\S]*?<\/p>/g)].map((m) => m[0]);
     expect(headers).toHaveLength(6);
     for (const header of headers) {
       expect(header).not.toContain('class="tier"');

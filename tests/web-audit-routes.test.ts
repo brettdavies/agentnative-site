@@ -6,15 +6,14 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
+import { handleLegacyWebResultPath } from '../src/worker/audit/result';
 import { type CachedWebAudit, keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { decidePublicListingWrite } from '../src/worker/audit-web/public-listing';
 import {
   handleWebAudit,
-  handleWebResultPage,
   handleWebScoringPage,
   isWebAuditPath,
   isWebScoringPath,
-  parseWebResultPath,
   parseWebScoringPath,
   type WebAuditRouteEnv,
 } from '../src/worker/audit-web/route';
@@ -530,24 +529,6 @@ describe('staleness gate + aggregate invalidation', () => {
   });
 });
 
-describe('parseWebResultPath', () => {
-  test('extracts a bare domain', () => {
-    expect(parseWebResultPath('/web/example.com')).toEqual({ domain: 'example.com', isMarkdown: false });
-  });
-  test('extracts a domain with the .md twin suffix', () => {
-    expect(parseWebResultPath('/web/example.com.md')).toEqual({ domain: 'example.com', isMarkdown: true });
-  });
-  test('rejects path traversal and uppercase', () => {
-    expect(parseWebResultPath('/web/../etc')).toBeNull();
-    expect(parseWebResultPath('/web/Example.com')).toBeNull();
-    expect(parseWebResultPath('/web/a/b')).toBeNull();
-  });
-  test('does not resolve the reserved /web/scoring segment as a domain', () => {
-    expect(parseWebResultPath('/web/scoring')).toBeNull();
-    expect(parseWebResultPath('/web/scoring.md')).toBeNull();
-  });
-});
-
 describe('parseWebScoringPath / isWebScoringPath', () => {
   test('matches the bare page, a domain, and the .md twins', () => {
     expect(parseWebScoringPath('/web/scoring')).toEqual({ domain: null, isMarkdown: false });
@@ -664,7 +645,7 @@ describe('handleWebResultPage', () => {
 
   test('renders 200 HTML through the shared renderer for a cached domain', async () => {
     const env = resultEnv(await cachedFor('https://example.com/'));
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env);
+    const resp = await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com'), env);
     expect(resp.status).toBe(200);
     expect(resp.headers.get('content-type')).toContain('text/html');
     expect(resp.headers.get('x-robots-tag')).toBe('noindex');
@@ -678,7 +659,7 @@ describe('handleWebResultPage', () => {
 
   test('serves the markdown twin for the .md suffix', async () => {
     const env = resultEnv(await cachedFor('https://example.com/'));
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env);
+    const resp = await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com.md'), env);
     expect(resp.status).toBe(200);
     expect(resp.headers.get('content-type')).toContain('text/markdown');
     expect(resp.headers.get('vary')).toBeNull();
@@ -690,7 +671,7 @@ describe('handleWebResultPage', () => {
 
   test('honors Accept: text/markdown on the suffix-less path', async () => {
     const env = resultEnv(await cachedFor('https://example.com/'));
-    const resp = await handleWebResultPage(
+    const resp = await handleLegacyWebResultPath(
       new Request('https://anc.dev/web/example.com', { headers: { Accept: 'text/markdown' } }),
       env,
     );
@@ -699,16 +680,19 @@ describe('handleWebResultPage', () => {
 
   test('404s a domain with no cached audit', async () => {
     const env = resultEnv();
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/never-audited.dev'), env);
+    const resp = await handleLegacyWebResultPath(new Request('https://anc.dev/web/never-audited.dev'), env);
     expect(resp.status).toBe(404);
     expect(resp.headers.get('cache-control')).toBe('no-store');
     expect(resp.headers.get('cache-tag')).toBeNull();
-    expect(await resp.text()).toContain('not audited');
+    expect(await resp.text()).toContain('No audit exists for');
   });
 
   test('405s a non-GET method', async () => {
     const env = resultEnv();
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com', { method: 'POST' }), env);
+    const resp = await handleLegacyWebResultPath(
+      new Request('https://anc.dev/web/example.com', { method: 'POST' }),
+      env,
+    );
     expect(resp.status).toBe(405);
   });
 
@@ -770,17 +754,17 @@ describe('handleWebResultPage', () => {
 
   test('an old-shape stored scorecard renders separate API and MCP category cards, not the combined bucket', async () => {
     const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env);
+    const resp = await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com'), env);
     expect(resp.status).toBe(200);
     const html = await resp.text();
-    expect(html).toContain('<h3 class="audit-group__title">API</h3>');
-    expect(html).toContain('<h3 class="audit-group__title">MCP</h3>');
+    expect(html).toContain('audit-group__title">API</h3>');
+    expect(html).toContain('audit-group__title">MCP</h3>');
     expect(html).not.toContain('MCP &amp; API');
   });
 
   test('the .md twin emits separate ## API and ## MCP headings', async () => {
     const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env);
+    const resp = await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com.md'), env);
     expect(resp.status).toBe(200);
     const md = await resp.text();
     expect(md).toContain('## API (0/1)');
@@ -791,10 +775,10 @@ describe('handleWebResultPage', () => {
 
   test('remediation still renders per non-passing check after normalization (HTML + .md)', async () => {
     const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
-    const html = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env)).text();
+    const html = await (await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com'), env)).text();
     expect(html).toContain('class="web-check__fix"');
     expect(html).toContain('https://anc.dev/web-audit/skill/openapi');
-    const md = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env)).text();
+    const md = await (await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com.md'), env)).text();
     expect(md).toContain('- Fix:');
     expect(md).toContain('https://anc.dev/web-audit/skill/openapi');
   });
@@ -804,7 +788,7 @@ describe('handleWebResultPage', () => {
       SCORE_CACHE: makeR2(await oldShapeCachedFor('https://example.com/')).bucket,
       ASSETS: makeAssets({ failRegistry: true }),
     });
-    const resp = await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env);
+    const resp = await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com'), env);
     expect(resp.status).toBe(200);
     const html = await resp.text();
     expect(html).toContain('MCP &amp; API');
@@ -865,8 +849,8 @@ describe('result-page audit context, row metadata, and freshness (U3)', () => {
 
   async function renderBoth(prefill: Record<string, unknown>) {
     const env = pageEnv(prefill);
-    const html = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com'), env)).text();
-    const md = await (await handleWebResultPage(new Request('https://anc.dev/web/example.com.md'), env)).text();
+    const html = await (await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com'), env)).text();
+    const md = await (await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com.md'), env)).text();
     return { html, md };
   }
 

@@ -103,6 +103,9 @@ export async function copyAssets({ repoRoot, distDir }) {
     join(distDir, 'js/web-leaderboard.js'),
   );
   const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, 'js/webmcp.js'));
+  // Result-page Re-audit control (countdown to refresh_after, then the same
+  // transact click as the entry form) and the ?v= forwarding-query strip.
+  const reauditJs = await bundleClient(join(repoRoot, 'src/client/reaudit.ts'), join(distDir, 'js/reaudit.js'));
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
@@ -118,5 +121,6 @@ export async function copyAssets({ repoRoot, distDir }) {
     webAuditScoringJs,
     webLeaderboardJs,
     webmcpJs,
+    reauditJs,
   };
 }

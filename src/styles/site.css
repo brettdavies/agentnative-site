@@ -2009,55 +2009,6 @@ body:has(.scorecard-page) main {
   margin-bottom: var(--space-6);
 }
 
-/* Hero — mono tool name, command chip, summary chips, twin score cards. */
-.scorecard-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-6);
-  align-items: start;
-  padding-bottom: var(--space-7);
-  border-bottom: 1px solid var(--border-subtle);
-  margin-bottom: var(--space-7);
-}
-.scorecard-hero h1 {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: clamp(2rem, 1.4rem + 2.4vw, 3.2rem);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-  margin: 0;
-}
-.scorecard-hero__id {
-  min-width: 0;
-}
-.scorecard-hero__id p {
-  overflow-wrap: anywhere;
-}
-.scorecard-hero__cmd {
-  margin: var(--space-4) 0 0;
-}
-.scorecard-hero__cmd code {
-  display: inline-block;
-  font-size: 0.85rem;
-  padding: 0.5em 0.8em;
-  border-radius: var(--radius);
-}
-.scorecard-hero__scores {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(11rem, 1fr));
-  gap: var(--space-4);
-}
-.scorecell {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-5);
-  background: var(--bg-raised);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-}
-
 .chiprow {
   display: flex;
   flex-wrap: wrap;
@@ -2205,9 +2156,6 @@ main .remediation__body {
 }
 
 @media (max-width: 900px) {
-  .scorecard-hero {
-    grid-template-columns: 1fr;
-  }
   .pscore__row {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -2215,19 +2163,6 @@ main .remediation__body {
     grid-column: 2;
     justify-self: start;
   }
-}
-@media (max-width: 560px) {
-  .scorecard-hero__scores {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* Web result page — category cards with marked check rows. */
-.scorecard-hero__note {
-  margin: var(--space-3) 0 0;
-  font-size: 0.85rem;
-  color: var(--fg-muted);
-  max-width: 48ch;
 }
 .assemble-prompt {
   margin: var(--space-5) 0 var(--space-6);
@@ -2275,22 +2210,6 @@ main .remediation__body {
 .assemble-prompt [data-assemble-copy]:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-.catcard {
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-  box-shadow: var(--shadow-board);
-  overflow: hidden;
-  margin-bottom: var(--space-6);
-}
-.catcard__hd {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  background: var(--band-surface-bg);
-  border-bottom: 1px solid var(--border-subtle);
 }
 .audit-group__rollup {
   margin-left: auto;
@@ -2391,42 +2310,6 @@ main .remediation__body {
   overflow-wrap: anywhere;
 }
 
-.scorecard-header {
-  padding-bottom: 1.5rem;
-}
-
-.scorecard-header h1 {
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: clamp(1.75rem, 2.5vw + 1rem, 2.5rem);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  margin: 0.25rem 0 0.5rem;
-  line-height: 1.15;
-}
-
-.scorecard-header__desc {
-  color: var(--fg-secondary, #6a7278);
-  margin: 0 0 0.75rem;
-  font-size: 1.05rem;
-}
-
-.scorecard-header__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  color: var(--fg-muted, #525960);
-  font-size: 0.88rem;
-}
-
-.scorecard-header__meta a {
-  color: var(--accent, #0058aa);
-  text-decoration: none;
-}
-.scorecard-header__meta a:hover {
-  text-decoration: underline;
-}
-
 /* Audience banner — informational signal above the score summary */
 .scorecard-audience-banner {
   margin: 1rem 0 1.5rem;
@@ -2499,11 +2382,6 @@ main .remediation__body {
   font-size: 0.95rem;
   font-weight: 600;
   margin: 0 0 0.5rem;
-}
-.catcard__hd .audit-group__title {
-  margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
 }
 
 .audit-group__title a {
@@ -2700,6 +2578,219 @@ main .remediation__body {
 :root[data-theme="dark"] .tier-badge--notable {
   background: oklch(23.00% 0.04 70);
   color: oklch(80.00% 0.08 70);
+}
+
+/* ================================================================
+ * Result page — one spine, one score head, grouped rows. The lanes
+ * differ in content, not layout; the crumb, the mono h1 with its lane
+ * chip, and the meta line are shared by every /score/<target> page.
+ * ================================================================ */
+.result-spine {
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-6);
+}
+.result-spine__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.8rem);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0;
+}
+.result-spine__target {
+  overflow-wrap: anywhere;
+}
+.result-spine__lane {
+  color: var(--fg-secondary);
+}
+.result-spine__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+.result-spine__tier {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.result-spine__links a {
+  color: var(--fg-secondary);
+}
+.reaudit {
+  margin-inline-start: auto;
+}
+.reaudit[aria-disabled="true"] {
+  color: var(--fg-muted);
+  border-color: var(--border-subtle);
+  cursor: default;
+}
+.reaudit[aria-disabled="true"]:hover {
+  border-color: var(--border-subtle);
+}
+.reaudit__countdown {
+  font-family: var(--font-mono);
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  white-space: pre;
+}
+
+/* Score head: the headline numeral, its meter, and the secondary numeral. */
+.result-score {
+  display: grid;
+  grid-template-columns: auto minmax(12rem, 22rem);
+  align-items: center;
+  column-gap: var(--space-6);
+  row-gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.result-score .bigscore {
+  grid-row: 1 / span 2;
+}
+.result-score__meter {
+  grid-column: 2;
+  display: block;
+}
+.result-score__meter .meter__track {
+  height: 12px;
+}
+.result-score__secondary {
+  grid-column: 2;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--text-secondary);
+}
+.result-score__secondary-n {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-feature-settings: var(--ff-tabular, "tnum" 1, "kern" 1);
+  color: var(--fg-heading);
+}
+.result-score__note {
+  margin: 0 0 var(--space-6);
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  max-width: var(--measure);
+}
+/* The meter fills once on first paint; nothing else on the page animates. */
+.result-score .meter__fill {
+  transform-origin: left center;
+  animation: result-fill 600ms var(--ease) both;
+}
+@keyframes result-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-score .meter__fill {
+    animation-duration: 0.01ms;
+  }
+}
+
+/* CLI brief under the score head: description, the audit command, meta, chips. */
+.result-brief {
+  margin-bottom: var(--space-6);
+}
+.result-brief__desc {
+  color: var(--fg-secondary);
+  margin: 0 0 var(--space-3);
+  font-size: 1.05rem;
+  max-width: var(--measure);
+}
+.result-brief__cmd {
+  margin: 0 0 var(--space-3);
+}
+.result-brief__cmd code {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 0.5em 0.8em;
+  border-radius: var(--radius);
+}
+.result-brief__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--fg-muted);
+  font-size: 0.88rem;
+  margin-bottom: var(--space-3);
+}
+.result-brief__meta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.result-brief__meta a:hover {
+  text-decoration: underline;
+}
+
+/* Website category rows nest their check details under the row body. */
+.pscore__row--category .audit-group__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.pscore__row--category .audit-group__rollup {
+  margin-left: 0;
+}
+.pscore__row--empty .spec__title,
+.pscore__row--empty .pscore__evidence {
+  color: var(--fg-muted);
+}
+.pscore__checks {
+  margin-top: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* The 404: one sentence, one prefilled audit link, a did-you-mean list. */
+.result-missing .result-spine__title {
+  font-size: clamp(1.4rem, 1rem + 1.6vw, 2rem);
+}
+.result-suggest ul {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.result-suggest li a {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.35em 0.7em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--fg-heading);
+}
+
+@media (max-width: 900px) {
+  .result-score {
+    grid-template-columns: 1fr;
+  }
+  .result-score .bigscore {
+    grid-row: auto;
+  }
+  .result-score__meter,
+  .result-score__secondary {
+    grid-column: 1;
+  }
+}
+@media (max-width: 560px) {
+  .result-spine__meta .reaudit {
+    flex-basis: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

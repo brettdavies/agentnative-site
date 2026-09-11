@@ -296,9 +296,9 @@ export async function build() {
     skillMarkdown,
   });
 
-  // 9b. Live-score shell template. Worker's summary-render.ts fetches
-  // this asset to wrap dynamic `/score/live/<binary>` responses in the
-  // same shell as static pages. The `/_internal/*` namespace is
+  // 9b. Worker page shell template. The Worker's shell-template module
+  // fetches this asset to wrap its rendered pages (result pages, the
+  // scoring page) in the same shell as static pages. The `/_internal/*` namespace is
   // intercepted by the Worker entry so direct user access returns 404 —
   // the file exists for internal env.ASSETS fetches only. Filename
   // mirrors the URL path so a future reader greps `score-live` and

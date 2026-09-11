@@ -1,35 +1,27 @@
 // Worker-safe shared primitives used by BOTH the build (scorecards-render.mjs,
-// runs in Node) AND the Worker (src/worker/score/summary-render.ts, runs in
-// the Cloudflare runtime).
+// runs in Node) AND the Worker (the unified result route, runs in the
+// Cloudflare runtime).
 //
 // Single source of truth for:
-//   - HTML escape (escHtml)
 //   - Principle name + group constants (PRINCIPLE_NAMES, PRINCIPLE_GROUPS, BONUS_GROUPS)
 //   - groupToPrincipleNum derivation
 //   - topIssues extractor (FAIL > WARN, capped)
-//   - The shared markdown-summary builder used by /live-score/<binary>.md and
-//     the head of the static /score/<tool>.md page
+//   - The CLI result body and markdown twin every CLI result page renders,
+//     curated or live
+//
+// The HTML escaper and the meter live in their own modules and are
+// re-exported here so every importer keeps one import site.
 //
 // Pure module — no Node imports, no fs reads, no `process.env`. Lives under
 // `src/shared/` so the dependency direction is obvious: build code and worker
 // code both depend on `shared/`, never the other way around.
 
+import { escHtml } from './esc-html.ts';
+import { renderBigScore, renderResultSpine, resultFrontMatter, shortDate } from './result-spine.ts';
 import { CANONICAL_SITE_URL } from './site-url';
 
-/**
- * Escape HTML special characters. Used at every server→client boundary that
- * embeds scorecard fields (some of which come from CLI evidence strings the
- * tool author wrote in their --help output).
- *
- * @param {string} s
- * @returns {string}
- */
-export function escHtml(s) {
-  return String(s).replace(
-    /[<>&"']/g,
-    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c],
-  );
-}
+export { escHtml } from './esc-html.ts';
+export { bandOf, renderMeter } from './meter.ts';
 
 /**
  * Headline obligation tier for a principle. P1-P7 carry MUST-tier
@@ -42,32 +34,6 @@ export function escHtml(s) {
  */
 export function principleTier(n) {
   return n === 8 ? 'SHOULD' : 'MUST';
-}
-
-/**
- * Score-band class for a 0-100 score (grading axis: fail / warn / pass).
- * Thresholds: <50 low, 50-79 mid, >=80 high. Shared by every meter emitter
- * (homepage boards, leaderboards, scorecards, Worker renders) so the band
- * cutoffs never drift between surfaces.
- *
- * @param {number} pct
- * @returns {'band-low' | 'band-mid' | 'band-high'}
- */
-export function bandOf(pct) {
-  return pct >= 80 ? 'band-high' : pct >= 50 ? 'band-mid' : 'band-low';
-}
-
-/**
- * Render a score meter (track + band-colored fill, optional numeral).
- *
- * @param {number} pct — 0-100 fill width and band source.
- * @param {{ num?: string | null }} [opts] — numeral text; null omits it,
- *        default renders the integer pct.
- * @returns {string}
- */
-export function renderMeter(pct, { num = String(Math.round(pct)) } = {}) {
-  const numHtml = num === null ? '' : `<span class="meter__num">${escHtml(num)}</span>`;
-  return `<span class="meter ${bandOf(pct)}"><span class="meter__track"><span class="meter__fill" style="width:${Math.max(0, Math.min(100, pct))}%"></span></span>${numHtml}</span>`;
 }
 
 /** Map of principle group code → human-readable name. */
@@ -192,9 +158,9 @@ export function formatAuditTableMarkdownLines(checks, opts = {}) {
 
 // -------------------------------------------------------------------
 // Scoring + per-section HTML/markdown renderers shared by the build
-// pipeline (src/build/scorecards-render.mjs) and the Worker live-score
-// renderer (src/worker/score/summary-render.ts). Single source of truth
-// so /score/<tool> and /score/live/<binary> stay structurally aligned.
+// pipeline (src/build/scorecards-render.mjs) and the Worker result route
+// (src/worker/audit/result.ts). Single source of truth so a curated page
+// and a live page stay structurally aligned.
 // -------------------------------------------------------------------
 
 // Badge eligibility floor (percent). Authoritative for the rendered
@@ -366,15 +332,13 @@ export function getAncBuildVersion(anc) {
 
 // -------------------------------------------------------------------
 // Per-tool scorecard body + markdown twin — single source of truth for
-// /score/<slug> (static, registry-joined) and /score/live/<binary>
-// (Worker, no registry editorial fields). Editorial fields on `tool`
+// a curated /score/<slug> (static, registry-joined) and a live
+// /score/<binary> (Worker, no registry editorial fields). Editorial fields on `tool`
 // (`tier`, `description`, `language`, `repo`/`url`, `install`) are
 // optional: present for the curated path, absent for the live path. The
 // `opts` parameter supplies breadcrumb override, freshness marker (live
 // only), and reproducibility URL for the CTA tail.
 // -------------------------------------------------------------------
-
-const DEFAULT_BREADCRUMB = { href: '/scorecards', label: 'ANC 100' };
 
 /**
  * Render the "Eight principles, scored" section: one row per principle
@@ -469,9 +433,9 @@ function renderBelowFloorHint(pct, hasIssues) {
 }
 
 /**
- * Build the per-tool scorecard page body HTML. One renderer for both
- * `/score/<slug>` (build-time, registry-joined `tool`) and
- * `/score/live/<binary>` (Worker, scorecard-derived `tool` only). Calls
+ * Build the per-tool scorecard page body HTML. One renderer for both a
+ * curated page (build-time, registry-joined `tool`) and a live page
+ * (Worker, scorecard-derived `tool` only). Calls
  * are differentiated by which optional fields `tool` carries and a few
  * cosmetic toggles in `opts`.
  *
@@ -491,10 +455,8 @@ function renderBelowFloorHint(pct, hasIssues) {
  *   principleScore?: { met: number, total: number },
  *   version?: string | null,
  *   metadata?: { tool?: object, anc?: object, run?: object, target?: object },
- *   breadcrumb?: { href: string, label: string },
+ *   spine?: import('./result-spine.ts').SpineInput,
  *   hideBreadcrumb?: boolean,
- *   headerSubline?: string,
- *   titleSuffix?: string,
  *   showBadgePreview?: boolean,
  *   ctaNoteHtml?: string,
  *   hideBadgeEmbed?: boolean,
@@ -514,26 +476,17 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   };
   const topIssues = opts.topIssues ?? extractTopIssues(scorecard);
   const principleScore = opts.principleScore ?? computePrincipleScore(scorecard);
-  const breadcrumb = opts.breadcrumb ?? DEFAULT_BREADCRUMB;
-  const titleSuffix = opts.titleSuffix ?? '';
-  const headerSubline = opts.headerSubline ?? '';
-
   const results = Array.isArray(scorecard.results) ? scorecard.results : [];
 
-  // An inline render (a result with no page of its own) carries no crumb.
-  let html = opts.hideBreadcrumb
-    ? ''
-    : `<nav class="crumb" aria-label="Breadcrumb">
-  <a href="${escHtml(breadcrumb.href)}">${escHtml(breadcrumb.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(tool.name)}</span>
-</nav>
-`;
+  // The spine: a curated page with no caller-supplied spine states its
+  // audit date; an inline render (no page of its own) carries no crumb.
+  const spine = opts.spine ?? curatedSpine(tool, meta, !opts.hideBreadcrumb);
+  let html = renderResultSpine(spine);
 
-  // Header. Description, tier badge, language tag, and repo/url link are
-  // emitted only when present on the `tool` object — keeps the live path
-  // (no registry editorial fields) clean without if-else branches in the
-  // caller. `titleSuffix` (live: version pill) trails the h1 text;
-  // `headerSubline` (live: binary+anc+spec+freshness) renders as a
-  // small meta paragraph below the h1 to avoid h1 inflation.
+  // The brief: description, tier badge, language tag, and repo/url link
+  // are emitted only when present on the `tool` object, so the live path
+  // (no registry editorial fields) stays clean without branches in the
+  // caller.
   const metaParts = [];
   if (tool.tier)
     metaParts.push(`<span class="tier-badge tier-badge--${escHtml(tool.tier)}">${escHtml(tool.tier)}</span>`);
@@ -568,19 +521,14 @@ export function buildScorecardBody(tool, scorecard, opts = {}) {
   ].filter(Boolean);
   if (stampParts.length > 0) chips.push(`<span class="chip chip--muted">${escHtml(stampParts.join(' · '))}</span>`);
 
-  const scoreBand = bandOf(pct);
-  const principleRatio = (principleScore.met / (principleScore.total || 1)) * 100;
-
-  html += `<header class="scorecard-hero">
-  <div class="scorecard-hero__id">
-    <h1>${escHtml(tool.name)}${titleSuffix ? ` ${titleSuffix}` : ''}</h1>
-${headerSubline ? `    <p class="live-score-summary__meta">${headerSubline}</p>\n` : ''}${tool.description ? `    <p class="scorecard-header__desc">${escHtml(tool.description)}</p>\n` : ''}    <p class="scorecard-hero__cmd"><code>$ anc audit ${escHtml(tool.binary)} --json</code></p>
-${metaParts.length > 0 ? `    <div class="scorecard-header__meta">\n      ${metaParts.join('\n      ')}\n    </div>\n` : ''}${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''}  </div>
-  <div class="scorecard-hero__scores">
-    <div class="scorecell ${scoreBand}"><span class="bigscore__n">${pct}</span><span class="bigscore__l">pass rate</span>${renderMeter(pct, { num: null })}</div>
-    <div class="scorecell ${bandOf(principleRatio)}"><span class="bigscore__n">${principleScore.met}/${principleScore.total}</span><span class="bigscore__l">principles met</span>${renderMeter(principleRatio, { num: null })}</div>
-  </div>
-</header>
+  html += renderBigScore({
+    pct,
+    label: 'pass rate',
+    secondary: { value: `${principleScore.met}/${principleScore.total}`, label: 'principles met' },
+  });
+  html += `<section class="result-brief">
+${tool.description ? `  <p class="result-brief__desc">${escHtml(tool.description)}</p>\n` : ''}  <p class="result-brief__cmd"><code>$ anc audit ${escHtml(tool.binary)} --json</code></p>
+${metaParts.length > 0 ? `  <div class="result-brief__meta">\n    ${metaParts.join('\n    ')}\n  </div>\n` : ''}${chips.length > 0 ? `  <div class="chiprow">${chips.join('')}</div>\n` : ''}</section>
 `;
 
   html += renderAudienceBanner(scorecard.audience, scorecard.audit_profile);
@@ -696,12 +644,12 @@ ${renderAuditRows(bonusChecks)}
 /**
  * Build the per-tool scorecard markdown twin. Editorial fields on `tool`
  * are optional (same shape as buildScorecardBody). `opts.baseUrl` makes
- * the principle links absolute for cross-origin consumers
- * (Worker /score/live/<binary>.md fetched with `Accept: text/markdown`).
+ * the principle links absolute for cross-origin consumers (the Worker's
+ * `/score/<binary>/md` twin fetched with `Accept: text/markdown`).
  *
  * @param {object} tool
  * @param {object} scorecard
- * @param {{ version?: string | null, metadata?: object, principleScore?: { met:number,total:number }, baseUrl?: string, header?: string, footer?: string[], hideBadgeEmbed?: boolean, hideReproduce?: boolean, hideVersionRow?: boolean }} [opts]
+ * @param {{ version?: string | null, metadata?: object, principleScore?: { met:number,total:number }, baseUrl?: string, header?: string, footer?: string[], hideBadgeEmbed?: boolean, hideReproduce?: boolean, hideVersionRow?: boolean, links?: import('./result-spine.ts').ResultLinks, lane?: 'cli' | 'web', tier?: import('./result-spine.ts').ResultTier }} [opts]
  * @returns {string} markdown
  */
 export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
@@ -716,6 +664,17 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
   const baseUrl = opts.baseUrl ?? '';
   const lines = [];
 
+  // The twin's front matter names every representation of this result.
+  if (opts.links) {
+    lines.push(
+      resultFrontMatter({
+        target: tool.name,
+        lane: opts.lane ?? 'cli',
+        tier: opts.tier ?? 'registry',
+        links: opts.links,
+      }),
+    );
+  }
   if (opts.header) lines.push(opts.header);
   else lines.push(`# ${tool.name}`);
   lines.push('');
@@ -801,4 +760,20 @@ export function buildScorecardMarkdown(tool, scorecard, opts = {}) {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * The spine a curated page renders when the caller supplies none: the
+ * audit date and the anc build from the scorecard's own metadata.
+ *
+ * @param {{ name: string }} tool
+ * @param {{ run?: { started_at?: string }, anc?: object }} meta
+ * @param {boolean} linked
+ * @returns {import('./result-spine.ts').SpineInput}
+ */
+function curatedSpine(tool, meta, linked) {
+  const date = shortDate(meta.run?.started_at);
+  const anc = getAncBuildVersion(meta.anc);
+  const parts = [date ? `Audited ${escHtml(date)}` : 'Audited', anc ? `by anc ${escHtml(anc)}` : null].filter(Boolean);
+  return { target: tool.name, lane: 'cli', tier: 'registry', freshnessHtml: parts.join(' '), linked, control: null };
 }

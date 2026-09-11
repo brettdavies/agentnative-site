@@ -348,7 +348,7 @@ describe('POST /api/score: unmetered tiers', () => {
       kind: 'cli',
       tier: 'cache',
       target: 'ouch',
-      share_url: 'https://anc.dev/score/live/ouch',
+      share_url: 'https://anc.dev/score/ouch',
     });
     expect(tracker.limiterCalls).toEqual([]);
     expect(tracker.doCalls).toBe(0);
@@ -563,7 +563,7 @@ describe('POST /api/score: response mode', () => {
       target: 'ouch',
       scorecard_url: 'https://anc.dev/score/ouch',
       anc_version: ANC_VERSION,
-      share_url: 'https://anc.dev/score/live/ouch',
+      share_url: 'https://anc.dev/score/ouch',
     });
     expect(tracker.doCalls).toBe(1);
   });

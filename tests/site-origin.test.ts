@@ -34,18 +34,14 @@ import { emitShell } from '../src/build/shell.mjs';
 import { absolutifyMarkdownLinks, canonicalBaseUrl, composeTwin, resolveBaseUrl } from '../src/build/util.mjs';
 import { toolsFor } from '../src/client/webmcp-lib';
 import { CANONICAL_SITE_URL } from '../src/shared/site-url';
+import { handleLegacyLiveScorePath, handleLegacyWebResultPath, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
-import {
-  handleWebAudit,
-  handleWebResultPage,
-  handleWebScoringPage,
-  type WebAuditRouteEnv,
-} from '../src/worker/audit-web/route';
+import { handleWebAudit, handleWebScoringPage, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { keyFor as scoreKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
-import { _resetShellTemplateCache, handleLiveScorePage } from '../src/worker/score/summary-render';
+import { _resetShellTemplateCache } from '../src/worker/shell-template';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import {
   getJsonToolContent,
@@ -371,21 +367,21 @@ describe('web result pages link back to the origin they were served from', () =>
 
   test('/web/<domain> HTML', async () => {
     const env = await webEnv(await cachedWebAudit('https://example.com/'));
-    const res = await handleWebResultPage(new Request(`${NON_CANONICAL_ORIGIN}/web/example.com`), env);
+    const res = await handleLegacyWebResultPath(new Request(`${NON_CANONICAL_ORIGIN}/web/example.com`), env);
     expect(res.status).toBe(200);
     expectServedOnOwnOrigin(await res.text());
   });
 
   test('/web/<domain>.md markdown twin', async () => {
     const env = await webEnv(await cachedWebAudit('https://example.com/'));
-    const res = await handleWebResultPage(new Request(`${NON_CANONICAL_ORIGIN}/web/example.com.md`), env);
+    const res = await handleLegacyWebResultPath(new Request(`${NON_CANONICAL_ORIGIN}/web/example.com.md`), env);
     expect(res.status).toBe(200);
     expectServedOnOwnOrigin(await res.text());
   });
 
   test('/web/<unknown>.md not-found twin', async () => {
     const env = await webEnv();
-    const res = await handleWebResultPage(new Request(`${NON_CANONICAL_ORIGIN}/web/never-audited.test.md`), env);
+    const res = await handleLegacyWebResultPath(new Request(`${NON_CANONICAL_ORIGIN}/web/never-audited.test.md`), env);
     expect(res.status).toBe(404);
     expectServedOnOwnOrigin(await res.text());
   });
@@ -400,9 +396,7 @@ describe('web result pages link back to the origin they were served from', () =>
 
 describe('live-score pages link back to the origin they were served from', () => {
   async function liveEnv(prefill: Record<string, unknown> = {}) {
-    return { ASSETS: await makeAssets(), SCORE_CACHE: makeR2(prefill) } as unknown as Parameters<
-      typeof handleLiveScorePage
-    >[1];
+    return { ASSETS: await makeAssets(), SCORE_CACHE: makeR2(prefill) } as unknown as ResultEnv;
   }
 
   const cached = {
@@ -416,14 +410,14 @@ describe('live-score pages link back to the origin they were served from', () =>
 
   test('/score/live/<binary>.md markdown twin', async () => {
     const env = await liveEnv(cached);
-    const res = await handleLiveScorePage(new Request(`${NON_CANONICAL_ORIGIN}/score/live/cowsay.md`), env);
+    const res = await handleLegacyLiveScorePath(new Request(`${NON_CANONICAL_ORIGIN}/score/live/cowsay.md`), env);
     expect(res.status).toBe(200);
     expectServedOnOwnOrigin(await res.text());
   });
 
   test('/score/live/<unknown>.md not-found twin', async () => {
     const env = await liveEnv();
-    const res = await handleLiveScorePage(new Request(`${NON_CANONICAL_ORIGIN}/score/live/nosuchtool.md`), env);
+    const res = await handleLegacyLiveScorePath(new Request(`${NON_CANONICAL_ORIGIN}/score/live/nosuchtool.md`), env);
     expect(res.status).toBe(404);
     expectServedOnOwnOrigin(await res.text());
   });

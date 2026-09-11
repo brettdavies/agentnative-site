@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { InstallSpec } from '../src/worker/score/discover-binary';
 import type { DiscoveryHintsIndex, RegistryIndex } from '../src/worker/score/registry-lookup';
-import {
-  deriveShareBinary,
-  deriveShareBinaryFromSpec,
-  lookupRegistry,
-  SHARE_URL_BINARY_RE,
-} from '../src/worker/score/registry-lookup';
+import { deriveShareBinary, lookupRegistry, SHARE_URL_BINARY_RE } from '../src/worker/score/registry-lookup';
 import type { ValidatedInput } from '../src/worker/score/validate';
 
 const REGISTRY: RegistryIndex = {
@@ -181,52 +175,6 @@ describe('deriveShareBinary — branch-aware', () => {
     };
     const input: ValidatedInput = { kind: 'github-url', owner: 'foo', repo: 'bar' };
     expect(deriveShareBinary(input, hints)).toBeNull();
-  });
-});
-
-describe('deriveShareBinaryFromSpec — post-discovery derivation', () => {
-  test('direct (releases-asset) spec → binary passes through', () => {
-    const spec: InstallSpec = {
-      pm: 'direct',
-      url: 'https://github.com/sharkdp/hexyl/releases/download/v0.16.0/hexyl-x86_64-linux.tar.gz',
-      binary: 'hexyl',
-    };
-    expect(deriveShareBinaryFromSpec(spec)).toBe('hexyl');
-  });
-
-  test('parsed-install spec (any PM) → binary passes through', () => {
-    for (const pm of ['brew', 'cargo-binstall', 'bun', 'pip', 'uv', 'npm', 'go'] as const) {
-      const spec: InstallSpec = { pm, package: 'foo', binary: 'foo' };
-      expect(deriveShareBinaryFromSpec(spec)).toBe('foo');
-    }
-  });
-
-  test('git-clone spec → null (branch-scoped, no shareable surface)', () => {
-    const spec: InstallSpec = {
-      pm: 'git-clone',
-      owner: 'sharkdp',
-      repo: 'hexyl',
-      branch: 'feature/x',
-      binary: 'hexyl',
-    };
-    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
-  });
-
-  test('uppercase / underscore / period / leading hyphen → null', () => {
-    for (const binary of ['MyTool', 'my_tool', 'tool.js', '-bad']) {
-      const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary };
-      expect(deriveShareBinaryFromSpec(spec)).toBeNull();
-    }
-  });
-
-  test('empty binary → null (refuse to mint /score/live/)', () => {
-    const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary: '' };
-    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
-  });
-
-  test('over-long binary (>64 chars) → null', () => {
-    const spec: InstallSpec = { pm: 'direct', url: 'https://x', binary: 'a'.repeat(65) };
-    expect(deriveShareBinaryFromSpec(spec)).toBeNull();
   });
 });
 

@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emitHomepage } from '../src/build/06-homepage.mjs';
 import { emitSubPages } from '../src/build/07-subpages.mjs';
+import {
+  curatedRegistryEntry,
+  curatedResultEnvelope,
+  REAPABLE_SCORE_FILE_RE,
+} from '../src/build/08-scorecards-emit.mjs';
 import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
 import { runInvariantChecks } from '../src/build/build.mjs';
 import { extractDescription, extractTitle } from '../src/build/content.mjs';
@@ -25,7 +30,7 @@ import {
   buildScorecardMarkdown,
   renderAudienceBanner,
 } from '../src/build/scorecards-render.mjs';
-import { emitShell } from '../src/build/shell.mjs';
+import { emitShell, emitShellTemplate } from '../src/build/shell.mjs';
 import { loadSkillData } from '../src/build/skill.mjs';
 import {
   ANC_VERSION,
@@ -39,6 +44,8 @@ import {
   SPEC_VERSION,
   sortedGlob,
 } from '../src/build/util.mjs';
+import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
+import { markdownAlternateLink, resultAlternateLinks } from '../src/shared/result-head';
 import { CANONICAL_SITE_URL } from '../src/shared/site-url';
 
 // Shape of one registry.yaml entry as loaded by loadRegistry — narrows the
@@ -580,6 +587,122 @@ describe('emitShell — Audit dual nav', () => {
     expect(shell('/audit')).not.toContain('data-s="web" data-audit-nav aria-current');
     expect(shell('/web-audit')).toContain('href="/web-audit" data-s="web" data-audit-nav aria-current="page"');
     expect(shell('/web-audit/skill/openapi')).toContain('data-s="web" data-audit-nav aria-current="page"');
+  });
+});
+
+// -------------------------------------------------------------------
+// emitShell — head alternates and the Worker template placeholders
+// -------------------------------------------------------------------
+
+describe('emitShell — head alternates', () => {
+  const base = {
+    title: 'Coverage',
+    description: 'Which requirements have audits.',
+    canonicalPath: '/coverage',
+    bodyHtml: '<article>body</article>',
+    themeInitJs: '/* theme init */',
+    baseUrl: undefined,
+  };
+
+  test('an ordinary page advertises its <path>.md twin in the head and the footer', () => {
+    const html = emitShell(base);
+    expect(html).toContain(markdownAlternateLink('/coverage.md'));
+    expect(html).toContain('<a href="/coverage.md">This page as markdown</a>');
+  });
+
+  test('a result page carries the given alternates verbatim and links no <path>.md twin', () => {
+    const html = emitShell({
+      ...base,
+      canonicalPath: scorePath('ripgrep'),
+      markdownTwinPath: scoreMarkdownPath('ripgrep'),
+      alternatesHtml: resultAlternateLinks('ripgrep'),
+    });
+    expect(html).toContain(resultAlternateLinks('ripgrep'));
+    expect(html).toContain(`<a href="${scoreMarkdownPath('ripgrep')}">This page as markdown</a>`);
+    expect(html).not.toContain(`${scorePath('ripgrep')}.md`);
+  });
+});
+
+describe('emitShellTemplate — placeholders', () => {
+  const html = emitShellTemplate();
+
+  test('the head alternates are one placeholder and no {{CANONICAL_PATH}}.md link remains', () => {
+    expect(html).toContain('{{ALTERNATES}}');
+    expect(html).not.toContain('{{CANONICAL_PATH}}.md');
+    for (const placeholder of ['{{TITLE}}', '{{DESCRIPTION}}', '{{CANONICAL_PATH}}', '{{BODY}}']) {
+      expect(html).toContain(placeholder);
+    }
+  });
+
+  test('the footer twin is a placeholder the Worker substitutes per page', () => {
+    expect(html).toContain('<a href="{{MARKDOWN_TWIN_PATH}}">This page as markdown</a>');
+    expect(html).not.toContain('{{CANONICAL_PATH}}.md');
+  });
+});
+
+// -------------------------------------------------------------------
+// Scorecard emit — curated JSON envelope + per-tool file reaper
+// -------------------------------------------------------------------
+
+describe('curatedResultEnvelope — the curated /json body', () => {
+  const tool = { name: 'ripgrep', binary: 'rg' };
+  const scorecard = {
+    spec_version: '0.3.0',
+    badge: { score_pct: 84 },
+    tool: { name: 'ripgrep', binary: 'rg' },
+    results: [],
+  };
+  const envelope = curatedResultEnvelope(tool, scorecard, '0.9.2', '14.1.1');
+
+  test('wraps the committed scorecard in the registry-tier envelope', () => {
+    expect(envelope).toMatchObject({
+      kind: 'cli',
+      tier: 'registry',
+      target: 'ripgrep',
+      spec_version: '0.3.0',
+      score_pct: 84,
+      anc_version: '0.9.2',
+      tool_version: '14.1.1',
+      freshness: { cached: true },
+    });
+    expect(envelope.scorecard).toEqual(scorecard);
+  });
+
+  test('names the three representations under the canonical site origin', () => {
+    expect(envelope.scorecard_url).toBe('https://anc.dev/score/ripgrep');
+    expect(envelope.markdown_url).toBe('https://anc.dev/score/ripgrep/md');
+    expect(envelope.json_url).toBe('https://anc.dev/score/ripgrep/json');
+    expect(envelope.scorecard_url).toBe(`${CANONICAL_SITE_URL}${scorePath('ripgrep')}`);
+    expect(envelope.markdown_url).toBe(`${CANONICAL_SITE_URL}${scoreMarkdownPath('ripgrep')}`);
+    expect(envelope.json_url).toBe(`${CANONICAL_SITE_URL}${scoreJsonPath('ripgrep')}`);
+  });
+
+  test('the registry-index enrichment and the envelope entry are one projection', () => {
+    expect(curatedRegistryEntry({ tool, scorecard, ancVersion: '0.9.2', version: '14.1.1' })).toEqual({
+      name: 'ripgrep',
+      binary: 'rg',
+      scorecard_url: scorePath('ripgrep'),
+      score_pct: 84,
+      anc_version: '0.9.2',
+      version: '14.1.1',
+    });
+    const withoutAnc = curatedRegistryEntry({ tool, scorecard, ancVersion: undefined, version: '14.1.1' });
+    expect(withoutAnc).not.toHaveProperty('anc_version');
+    expect(curatedResultEnvelope(tool, scorecard, undefined, '14.1.1')).not.toHaveProperty('anc_version');
+  });
+});
+
+describe('REAPABLE_SCORE_FILE_RE — stale per-tool files', () => {
+  test('matches the three curated representations by slug', () => {
+    for (const file of ['foo.html', 'foo.md', 'foo.json']) {
+      expect(file.match(REAPABLE_SCORE_FILE_RE)?.[1]).toBe('foo');
+    }
+  });
+
+  test('ignores dotted names, nested paths, and other extensions', () => {
+    for (const file of ['anc.dev.html', 'nested/foo.html', 'foo.svg', 'Foo.html', 'foo.json.bak']) {
+      expect(REAPABLE_SCORE_FILE_RE.test(file)).toBe(false);
+    }
   });
 });
 

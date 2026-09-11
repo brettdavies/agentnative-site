@@ -1,3 +1,4 @@
+import { isScorePath, scoreMarkdownPath, splitRepresentation } from '../shared/audit-routes';
 import { homeTag, webDomainTag, webTag } from './audit-web/hit-min-tags';
 
 // Response-header policy for the agentnative-site Worker.
@@ -136,6 +137,8 @@ const CSP_HTML =
 export interface ApplyHeadersOptions {
   request: Request;
   servedMarkdown: boolean;
+  /** True when the body is the JSON result envelope, whatever the path says. */
+  servedJson?: boolean;
   pathname: string;
 }
 
@@ -146,9 +149,21 @@ export function isStagingHost(host: string): boolean {
 
 function markdownTwinFor(pathname: string): string {
   if (pathname === '/') return '/index.md';
+  // A result page's twin is a trailing segment, never an extension.
+  if (isScorePath(pathname)) {
+    const split = splitRepresentation(pathname);
+    if (split) return scoreMarkdownPath(split.target);
+  }
   // Strip trailing slash and optional `.html` before appending `.md`.
   const normalized = pathname.replace(/\/$/, '').replace(/\.html$/, '');
   return `${normalized}.md`;
+}
+
+/** True for `/score/<target>/md` and `/score/<target>/json`: one representation, never negotiated. */
+function isPinnedResultRepresentation(pathname: string): boolean {
+  if (!isScorePath(pathname)) return false;
+  const split = splitRepresentation(pathname);
+  return split !== null && split.representation !== 'html';
 }
 
 function isHashedAsset(pathname: string): boolean {
@@ -185,7 +200,7 @@ function isSingleRepresentation(pathname: string): boolean {
  * drift between layers.
  */
 export function isRepresentationPinned(pathname: string): boolean {
-  return pathname.endsWith('.md') || isSingleRepresentation(pathname);
+  return pathname.endsWith('.md') || isSingleRepresentation(pathname) || isPinnedResultRepresentation(pathname);
 }
 
 function isAlwaysMissPath(pathname: string): boolean {
@@ -287,7 +302,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     } else {
       headers.set('Vary', 'Accept, User-Agent');
     }
-  } else if (isJson(opts.pathname)) {
+  } else if (opts.servedJson || isJson(opts.pathname)) {
     headers.set('Content-Type', 'application/json; charset=utf-8');
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('X-Robots-Tag', 'noindex');

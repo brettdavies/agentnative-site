@@ -1,10 +1,11 @@
-// HTML body for /web/<domain>.
+// HTML body for a website result page.
 //
-// The web scorecard renders standalone: grouped by visible category in the
-// registry's category_order (carried on scorecard.categories[]), with
-// per-category passed/counted rollups and per-check Goal / Result / Fix /
-// Resources. The shared scorecard-format renderer stays CLI-only, since it
-// groups by the P1-P8 principles, which are a hidden tag on web surfaces.
+// The page opens with the shared result spine and score head, then groups
+// the checks under the registry's visible categories (carried on
+// scorecard.categories[] in category_order) as C-rows: each row carries
+// the category's passed-of-counted rollup as its status and nests the
+// per-check Goal / Result / Fix / Resources details. The CLI renderer
+// groups by the P1-P8 principles instead, which are a hidden tag here.
 //
 // The copy-paste prompt is never rendered: renderCheck emits it in a hidden
 // `data-copy-text` carrier and the site-wide clipboard.js attaches a
@@ -12,15 +13,18 @@
 // resource links with no dead control. The markdown twin keeps the fenced
 // prompt so fetch-only agents lose nothing.
 
-import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
+import { escHtml } from '../../shared/esc-html';
+import { bandOf } from '../../shared/meter';
+import { renderBigScore, renderResultSpine, type SpineInput } from '../../shared/result-spine';
 import type { WebAuditFreshness } from './cache';
-import { WEB_BREADCRUMB, WEB_CTA_NOTE_HTML } from './copy';
+import { WEB_CTA_NOTE_HTML } from './copy';
 import { freshnessHtml } from './summary-freshness';
 import { type WebSummaryInput, webSummaryView } from './summary-input';
 import {
   RELATIVE_LABEL,
   RELATIVE_SUBLABEL,
   STATUS_ORDER,
+  type SummaryCategory,
   type SummaryRow,
   statusLabel,
   statusMark,
@@ -53,66 +57,67 @@ function auditContextEl(model: WebSummaryModel, freshness: WebAuditFreshness): s
   return `<div ${attrs.join(' ')} hidden></div>`;
 }
 
-function heroChips(counts: WebSummaryModel['counts']): string[] {
-  const chips: string[] = [];
-  if (counts.pass) chips.push(`<span class="chip chip--ok">${counts.pass} pass</span>`);
-  if (counts.noncompliant) chips.push(`<span class="chip chip--warn">${counts.noncompliant} noncompliant</span>`);
-  if (counts.absent) chips.push(`<span class="chip chip--warn">${counts.absent} missing</span>`);
-  if (counts.broken) chips.push(`<span class="chip chip--fail">${counts.broken} broken</span>`);
-  if (counts.error) {
-    chips.push(`<span class="chip chip--fail">${counts.error} error${counts.error === 1 ? '' : 's'}</span>`);
-  }
-  const naCount = counts.n_a + counts.skip;
-  if (naCount) chips.push(`<span class="chip chip--muted">${naCount} n/a</span>`);
-  return chips;
+type CategoryPill = { cls: 'pass' | 'warn' | 'fail' | 'na'; text: string };
+
+/** A category's status from its rollup: every counted check passing is a pass, none is a fail. */
+function categoryPill(category: SummaryCategory): CategoryPill {
+  if (category.counted === 0) return { cls: 'na', text: 'n/a' };
+  if (category.passed === category.counted) return { cls: 'pass', text: 'pass' };
+  if (category.passed === 0) return { cls: 'fail', text: 'fail' };
+  return { cls: 'warn', text: 'partial' };
 }
 
-/** HTML body for /web/<domain>. */
+/** HTML body for a website result page. */
 export function buildWebSummaryBody(input: WebSummaryInput): string {
   const { model, freshness, freshnessState } = webSummaryView(input);
-  const chips = heroChips(model.counts);
+  const spine: SpineInput = input.spine ?? {
+    target: input.domain,
+    lane: 'web',
+    tier: 'cache',
+    freshnessHtml: `<span data-web-audit-freshness>${freshnessHtml(freshnessState)}</span>`,
+    linked: true,
+    control: null,
+  };
 
-  let html = `<article class="container scorecard-page" data-web-audit-result><nav class="crumb" aria-label="Breadcrumb">
-  <a href="${escHtml(WEB_BREADCRUMB.href)}">${escHtml(WEB_BREADCRUMB.label)}</a><span class="sep" aria-hidden="true">/</span><span>${escHtml(model.name)}</span>
-</nav>
-<header class="scorecard-hero">
-  <div class="scorecard-hero__id">
-    <h1>${escHtml(model.name)}</h1>
-    <p class="live-score-summary__meta">Website <a href="${escHtml(model.targetUrl)}">${escHtml(model.targetUrl)}</a> · agent-readiness audit</p>
-${chips.length > 0 ? `    <div class="chiprow">${chips.join('')}</div>\n` : ''}    <p class="scorecard-hero__note">${escHtml(RELATIVE_SUBLABEL)}; global measures it against a maximally agent-ready site.</p>
-    <p class="scorecard-hero__note" data-web-audit-freshness>${freshnessHtml(freshnessState)}</p>
-  </div>
-  <div class="scorecard-hero__scores">
-    <div class="scorecell ${bandOf(model.relative)}"><span class="bigscore__n">${model.relative}</span><span class="bigscore__l">${escHtml(RELATIVE_LABEL)}</span>${renderMeter(model.relative, { num: null })}</div>
-    <div class="scorecell ${bandOf(model.global)}"><span class="bigscore__n">${model.global}</span><span class="bigscore__l">global-ready</span>${renderMeter(model.global, { num: null })}</div>
-  </div>
-</header>
+  let html = `<article class="container scorecard-page" data-web-audit-result>${renderResultSpine(spine)}${renderBigScore(
+    {
+      pct: model.relative,
+      label: RELATIVE_LABEL,
+      secondary: { value: String(model.global), label: 'global-ready' },
+    },
+  )}<p class="result-score__note">${escHtml(RELATIVE_SUBLABEL)}; global measures it against a maximally agent-ready site. Website <a href="${escHtml(model.targetUrl)}">${escHtml(model.targetUrl)}</a>.</p>
 ${auditContextEl(model, freshness)}
-<section class="scorecard-audits" aria-label="Checks by category">
+<section class="pscore scorecard-audits" aria-labelledby="pscore-heading">
+  <h2 id="pscore-heading">Checks by category</h2>
+  <ol class="pscore__list">
 `;
 
   let catIndex = 0;
   for (const category of model.categories) {
     catIndex += 1;
     const empty = category.counted === 0;
+    const pill = categoryPill(category);
     const rollupBand = empty ? '' : ` ${bandOf((category.passed / category.counted) * 100)}`;
-    html += `  <div class="catcard${empty ? ' catcard--empty' : ''}">
-    <div class="catcard__hd">
+    html += `    <li class="pscore__row pscore__row--category${empty ? ' pscore__row--empty' : ''}" data-category="${escHtml(category.id)}">
       <span class="spec__id">C${catIndex}</span>
-      <h3 class="audit-group__title">${escHtml(category.name)}</h3>
-      <span class="audit-group__rollup${rollupBand}">${category.passed} / ${category.counted}</span>
-    </div>
+      <div class="pscore__body">
+        <h3 class="spec__title audit-group__title">${escHtml(category.name)}</h3>
+        <p class="pscore__evidence"><span class="audit-group__rollup${rollupBand}">${category.passed} / ${category.counted}</span> checks pass</p>
 `;
-    if (empty) {
-      html += `    <p class="audit-group__note">No checks in this category apply to this site.</p>\n`;
+    if (empty) html += `        <p class="audit-group__note">No checks in this category apply to this site.</p>\n`;
+    if (category.rows.length > 0) {
+      html += `        <div class="pscore__checks">\n`;
+      for (const row of category.rows) html += renderCheck(row);
+      html += `        </div>\n`;
     }
-    for (const row of category.rows) {
-      html += renderCheck(row);
-    }
-    html += '  </div>\n';
+    html += `      </div>
+      <span class="stpill stpill--${pill.cls}">${pill.text}</span>
+    </li>
+`;
   }
 
-  html += `</section>
+  html += `  </ol>
+</section>
 <section class="scorecard-cta">
   <p class="scorecard-cta__note">${WEB_CTA_NOTE_HTML}</p>
 </section>
