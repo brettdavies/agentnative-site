@@ -5,9 +5,9 @@
 //   - Build-time indexes for the live-scoring path (registry-index.json,
 //     discovery-hints-index.json)
 //   - Leaderboard page (dist/scorecards.html + .md)
-//   - Per-tool scorecard pages (dist/score/<name>.{html,md})
+//   - Per-tool scorecard pages (dist/score/<name>.{html,md,json}); the JSON
+//     is the committed scorecard wrapped in the shared result envelope
 //   - Badge SVGs (dist/badge/<name>.svg)
-//   - Binary-name redirect pages for tools where binary !== name
 //   - Stale-file reaping for removed registry entries
 //   - Coverage matrix page (dist/coverage.{html,md})
 //   - Skill manifest surfaces (dist/skill.json + dist/skill.{html,md})
@@ -18,6 +18,10 @@
 
 import { mkdir, readdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { buildRegistryEnvelope } from '../shared/audit-envelope';
+import { scoreMarkdownPath, scorePath } from '../shared/audit-routes';
+import { resultAlternateLinks } from '../shared/result-head';
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { renderBadgeSvg } from './badge.mjs';
 import { buildCoverageBody, buildCoverageMarkdown, loadCoverageMatrix } from './coverage.mjs';
 import { emitBuildIndexes } from './registry-index.mjs';
@@ -36,7 +40,57 @@ import {
 } from './scorecards-render.mjs';
 import { emitShell } from './shell.mjs';
 import { emitSkillJson, emitSkillMarkdown, loadSkillData, renderSkillPage } from './skill.mjs';
-import { absolutifyMarkdownLinks, escHtml } from './util.mjs';
+import { absolutifyMarkdownLinks } from './util.mjs';
+
+/** The per-tool files this emit owns under dist/score/, keyed by slug; anything else there is left alone. */
+export const REAPABLE_SCORE_FILE_RE = /^([a-z0-9-]+)\.(html|md|json)$/;
+
+/**
+ * The scored-build projection of one curated tool. The registry index
+ * carries it so /api/score can answer a registry hit (spec_version +
+ * anc_version + auditor_url, plus the score for the homepage form's
+ * inline "Curated · N%" reward) without fetching the scorecard, and the
+ * curated JSON envelope wraps the same object, so the two surfaces
+ * cannot disagree about the URL, score, or versions.
+ *
+ * @param {object} args
+ * @param {{ name: string, binary: string }} args.tool
+ * @param {{ badge: { score_pct: number } }} args.scorecard
+ * @param {string=} args.ancVersion — the anc release that produced the scorecard.
+ * @param {string=} args.version — the tool version that was scored.
+ * @returns {import('../shared/audit-envelope').RegistryEntryLike}
+ */
+export function curatedRegistryEntry({ tool, scorecard, ancVersion, version }) {
+  const entry = {
+    name: tool.name,
+    binary: tool.binary,
+    scorecard_url: scorePath(tool.name),
+    score_pct: scorecard.badge.score_pct,
+    version,
+  };
+  if (ancVersion) entry.anc_version = ancVersion;
+  return entry;
+}
+
+/**
+ * The envelope served as a curated tool's JSON representation: the
+ * committed scorecard wrapped at build time so the read tools can serve
+ * it through the assets binding as-is.
+ *
+ * @param {{ name: string, binary: string }} tool
+ * @param {{ spec_version: string, badge: { score_pct: number } }} scorecard
+ * @param {string=} ancVersion
+ * @param {string=} version
+ * @returns {import('../shared/audit-envelope').AuditEnvelope}
+ */
+export function curatedResultEnvelope(tool, scorecard, ancVersion, version) {
+  return buildRegistryEnvelope({
+    entry: curatedRegistryEntry({ tool, scorecard, ancVersion, version }),
+    origin: CANONICAL_SITE_URL,
+    specVersion: scorecard.spec_version,
+    scorecard,
+  });
+}
 
 /**
  * Emit the leaderboard, per-tool scorecards + badges, coverage page, and
@@ -102,16 +156,12 @@ export async function emitScorecardSurface({
   // full scorecard payload.
   const enrichments = {};
   for (const t of toolsWithScorecards) {
-    enrichments[t.tool.name] = {
+    enrichments[t.tool.name] = curatedRegistryEntry({
+      tool: t.tool,
+      scorecard: t.scorecard,
+      ancVersion: t.metadata?.anc?.version,
       version: t.version,
-      anc_version: t.metadata?.anc?.version ?? null,
-      scorecard_url: `/score/${t.tool.name}`,
-      // Carried into the registry-fast-path envelope so the homepage
-      // form can show a "Curated · X% pass rate" reward inline without
-      // a second round-trip to fetch the scorecard JSON. Schema 0.5
-      // guarantees badge.score_pct is an integer 0..100.
-      score_pct: t.scorecard?.badge?.score_pct ?? null,
-    };
+    });
   }
   const { warnings: indexWarnings } = await emitBuildIndexes({
     registry,
@@ -148,29 +198,20 @@ export async function emitScorecardSurface({
   );
   await writeFile(join(distDir, 'scorecards.md'), absolutifyMarkdownLinks(buildLeaderboardMarkdown(leaderboard)));
 
-  // Per-tool scorecard pages → dist/score/<tool-name>.html + .md
+  // Per-tool scorecard pages → dist/score/<tool-name>.html + .md + .json
   // Badge SVGs               → dist/badge/<tool-name>.svg
-  // Binary-name redirects    → dist/score/<binary>.html + .md (when
-  //                            registry.binary !== registry.name)
+  // A binary alias (/score/rg) is a Worker redirect to the canonical slug;
+  // nothing is emitted under the alias, for any representation.
   await mkdir(join(distDir, 'score'), { recursive: true });
   await mkdir(join(distDir, 'badge'), { recursive: true });
-  // Drop stale per-tool pages and badge SVGs from prior builds. When a tool
-  // is removed from the registry (e.g., aider, plandex, fabric in PR #40),
-  // its old html/md/svg would otherwise linger in dist/ and ship as broken
-  // links / orphaned badges referencing a tool the leaderboard no longer
-  // knows about. The allowlist also includes binary slugs for the
-  // name-vs-binary tools (ripgrep/rg, ast-grep/sg, …) so the redirect
-  // pages emitted by the per-tool loop aren't unlinked on every build
-  // — without this guard the reaper deletes them every time, defeating
-  // the redirect entirely.
+  // Drop stale per-tool files and badge SVGs from prior builds, so a tool
+  // removed from the registry does not linger in dist/ as a broken page,
+  // twin, JSON body, or orphaned badge the leaderboard no longer knows
+  // about. Only canonical slugs are expected: an alias file from an
+  // earlier build is stale by definition and is reaped here.
   const expectedNames = new Set(leaderboard.map((e) => e.tool.name));
-  for (const e of leaderboard) {
-    if (e.tool.binary && e.tool.binary !== e.tool.name) {
-      expectedNames.add(e.tool.binary);
-    }
-  }
   for (const file of await readdir(join(distDir, 'score')).catch(() => [])) {
-    const m = file.match(/^([a-z0-9-]+)\.(html|md)$/);
+    const m = file.match(REAPABLE_SCORE_FILE_RE);
     if (m && !expectedNames.has(m[1])) {
       await unlink(join(distDir, 'score', file));
     }
@@ -178,10 +219,9 @@ export async function emitScorecardSurface({
   // Badge SVGs are emitted for the canonical name only (no binary-slug
   // SVG). A reader following /score/rg → /score/ripgrep ends up on the
   // canonical page, where /badge/ripgrep.svg renders correctly.
-  const expectedBadgeNames = new Set(leaderboard.map((e) => e.tool.name));
   for (const file of await readdir(join(distDir, 'badge')).catch(() => [])) {
     const m = file.match(/^([a-z0-9-]+)\.svg$/);
-    if (m && !expectedBadgeNames.has(m[1])) {
+    if (m && !expectedNames.has(m[1])) {
       await unlink(join(distDir, 'badge', file));
     }
   }
@@ -192,12 +232,15 @@ export async function emitScorecardSurface({
     const topIssues = extractTopIssues(scorecard);
 
     const scorecardBody = buildScorecardBody(tool, scorecard, topIssues, principleScore, version, metadata);
+    const canonicalPath = scorePath(tool.name);
     await writeFile(
       join(distDir, 'score', `${tool.name}.html`),
       emitShell({
         title: `${tool.name} — Agent-Native Scorecard`,
         description: `Agent-readiness scorecard for ${tool.name}: ${tool.description}`,
-        canonicalPath: `/score/${tool.name}`,
+        canonicalPath,
+        markdownTwinPath: scoreMarkdownPath(tool.name),
+        alternatesHtml: resultAlternateLinks(tool.name),
         bodyHtml: scorecardBody,
         themeInitJs: themeInit,
       }),
@@ -206,7 +249,11 @@ export async function emitScorecardSurface({
       join(distDir, 'score', `${tool.name}.md`),
       absolutifyMarkdownLinks(buildScorecardMarkdown(tool, scorecard, topIssues, principleScore, version, metadata)),
     );
-    scorecardPaths.push(`/score/${tool.name}`);
+    await writeFile(
+      join(distDir, 'score', `${tool.name}.json`),
+      `${JSON.stringify(curatedResultEnvelope(tool, scorecard, metadata?.anc?.version, version), null, 2)}\n`,
+    );
+    scorecardPaths.push(canonicalPath);
 
     // Badge SVG — emitted for every scored tool, even those below the
     // eligibility floor. The /score/<tool> page gates the embed snippet
@@ -220,31 +267,6 @@ export async function emitScorecardSurface({
     const svg = renderBadgeSvg(scorecard.badge.score_pct / 100, scorecard.spec_version);
     await writeFile(join(distDir, 'badge', `${tool.name}.svg`), svg);
     badgePaths.push(`/badge/${tool.name}.svg`);
-
-    // Binary-name redirect: tools where registry.binary !== registry.name
-    // (e.g., ripgrep/rg, ast-grep/sg, bottom/btm — 11 entries today) get a
-    // second pair of files at /score/<binary>.html + .md that point at the
-    // canonical /score/<name>. Closes the URL fragmentation a reader hits
-    // when guessing the URL from the binary they typed at a shell prompt.
-    if (tool.binary && tool.binary !== tool.name) {
-      const targetPath = `/score/${tool.name}`;
-      const titleSafe = escHtml(tool.name);
-      const redirectHtml = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Redirecting to ${titleSafe}</title>
-  <link rel="canonical" href="${targetPath}">
-  <meta http-equiv="refresh" content="0; url=${targetPath}">
-</head>
-<body>
-  <p>Redirecting to <a href="${targetPath}">${titleSafe}</a>. If your browser does not redirect, follow the link.</p>
-</body>
-</html>
-`;
-      await writeFile(join(distDir, 'score', `${tool.binary}.html`), redirectHtml);
-      await writeFile(join(distDir, 'score', `${tool.binary}.md`), `See [${targetPath}](${targetPath}).\n`);
-    }
   }
 
   // 8b. Coverage matrix page — /coverage.

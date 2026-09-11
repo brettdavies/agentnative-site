@@ -135,7 +135,8 @@ export function curatedEntryForBinary<T extends RegistryEntryLike>(
   return null;
 }
 
-function hasScorecard(entry: RegistryEntryLike | null | undefined): entry is RegistryEntryLike {
+/** A curated entry counts only with a committed scorecard behind it. */
+export function hasScorecard(entry: RegistryEntryLike | null | undefined): entry is RegistryEntryLike {
   return Boolean(entry?.scorecard_url && entry.anc_version);
 }
 
@@ -250,11 +251,10 @@ export function buildCliEnvelope(input: CliEnvelopeInput): AuditEnvelope {
 function collisionSummaryHtml(binary: string, record: CliRecordLike): string {
   const scorecard = asCliScorecard(record.scorecard);
   const tool = { name: scorecard.tool?.name ?? binary, binary: scorecard.tool?.binary ?? binary };
-  const headerSubline = `Binary <code>${escHtml(binary)}</code> · scored by anc ${escHtml(record.anc_version)} · spec ${escHtml(record.spec_version)}`;
+  const freshnessHtml = `Binary <code>${escHtml(binary)}</code> · scored by anc ${escHtml(record.anc_version)} · spec ${escHtml(record.spec_version)}`;
   return buildScorecardBody(tool, scorecard, {
     version: record.tool_version,
-    headerSubline,
-    hideBreadcrumb: true,
+    spine: { target: binary, lane: 'cli', tier: 'live', freshnessHtml, linked: false, control: null },
     hideBadgeEmbed: true,
     showBadgePreview: false,
   });

@@ -42,6 +42,7 @@
 // in tests/worker-mcp-dispatch.test.ts.
 
 import accepts from 'accepts';
+import { isScorePath } from '../shared/audit-routes';
 
 export type Preference = 'html' | 'markdown';
 export type ScorePreference = 'json' | 'markdown';
@@ -93,6 +94,7 @@ function isMarkdownEligibleAgent(request: Request): boolean {
 }
 
 const SCORE_PREFERENCE_ORDER = ['application/json', 'text/markdown', 'text/html'];
+const RESULT_PREFERENCE_ORDER = ['text/html', 'text/markdown', 'text/plain', 'application/json'];
 const MCP_FORMAT_ORDER = ['application/json', 'text/event-stream'];
 const MCP_GET_ORDER = ['text/html', 'application/json', 'text/markdown'];
 
@@ -133,6 +135,22 @@ export function wantsEventStream(request: Request): boolean {
   if (!accept || accept.trim() === '' || accept.trim() === '*/*') return false;
   // @ts-expect-error — see detectPreference above.
   return accepts(shim(request)).type(['application/x-ndjson', 'application/json']) === 'application/x-ndjson';
+}
+
+/**
+ * The representation a bare `/score/<target>` path serves: HTML by default,
+ * the twin when the client ranks markdown or plain text (or is a recognized
+ * markdown agent with no stated preference), the envelope when it ranks
+ * JSON above HTML.
+ */
+export function detectResultPreference(request: Request): 'html' | 'md' | 'json' {
+  const accept = request.headers.get('accept');
+  const statesNoPreference = !accept || accept.trim() === '' || accept.trim() === '*/*';
+  if (statesNoPreference) return detectPreference(request) === 'markdown' ? 'md' : 'html';
+  // @ts-expect-error — see detectPreference above.
+  const match = accepts(shim(request)).type(RESULT_PREFERENCE_ORDER);
+  if (match === 'application/json') return 'json';
+  return match === 'text/markdown' || match === 'text/plain' ? 'md' : 'html';
 }
 
 export function detectScorePreference(request: Request): ScorePreference {
@@ -239,6 +257,15 @@ export function classifyGatewayRequest(request: Request): Request {
     } else {
       headers.set('accept', MCP_GET_CLASS_ACCEPT[mcpFormat]);
     }
+  } else if (isScorePath(url.pathname)) {
+    // A result path has three classes: the JSON envelope is a negotiable
+    // representation of the bare path, so an Accept that ranks JSON above
+    // HTML must reach the route.
+    const representation = detectResultPreference(request);
+    headers.set(
+      'accept',
+      representation === 'json' ? 'application/json' : SITE_CLASS_ACCEPT[representation === 'md' ? 'markdown' : 'html'],
+    );
   } else if (!url.pathname.startsWith('/api/')) {
     // Negotiated HTML/markdown site surface only. /api/score and friends
     // keep the inbound Accept so q-value JSON vs markdown still works (KTD8).

@@ -165,6 +165,19 @@ describe('detectPreference — User-Agent allowlist', () => {
 // ---------------------------------------------------------------------------
 
 describe('classifyGatewayRequest — format-class table', () => {
+  test('a result path keeps a JSON class: Accept application/json survives the gateway, markdown and HTML classify as elsewhere', () => {
+    const json = classifyGatewayRequest(req('https://anc.dev/score/ouch', 'application/json', UA.browser));
+    expect(json.headers.get('accept')).toBe('application/json');
+    const md = classifyGatewayRequest(req('https://anc.dev/score/ouch', 'text/markdown', UA.browser));
+    expect(md.headers.get('accept')).toBe('text/markdown');
+    const html = classifyGatewayRequest(req('https://anc.dev/score/ouch', 'text/html', UA.browser));
+    expect(html.headers.get('accept')).toBe('text/html');
+    const curl = classifyGatewayRequest(req('https://anc.dev/score/ouch', '*/*', UA.curl));
+    expect(curl.headers.get('accept')).toBe('text/markdown');
+    const elsewhere = classifyGatewayRequest(req('https://anc.dev/about', 'application/json', UA.browser));
+    expect(elsewhere.headers.get('accept')).toBe('text/html');
+  });
+
   test('Chrome text/html and Chrome */* share one HTML class after normalize', () => {
     const html = classifyGatewayRequest(req('https://anc.dev/about', 'text/html', UA.browser));
     const star = classifyGatewayRequest(req('https://anc.dev/about', '*/*', UA.browser));

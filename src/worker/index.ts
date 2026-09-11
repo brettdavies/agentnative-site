@@ -13,8 +13,15 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
+import { isScorePath as isResultPath } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
+import {
+  handleLegacyLiveScorePath,
+  handleLegacyWebResultPath,
+  handleResultRoute,
+  type ResultEnv,
+} from './audit/result';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import {
@@ -34,12 +41,10 @@ import type { WebRescoreWorkflowBinding } from './audit-web/rescore-workflow';
 import {
   handleWebAudit,
   handleWebLeaderboard,
-  handleWebResultPage,
   handleWebScoringPage,
   isWebAuditPath,
   isWebLeaderboardPath,
   isWebScoringPath,
-  parseWebResultPath,
   type WebAuditRouteEnv,
 } from './audit-web/route';
 import { applyHeaders, isRepresentationPinned } from './headers';
@@ -62,7 +67,6 @@ import {
 import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
-import { handleLiveScorePage, parseLiveScorePath } from './score/summary-render';
 import { SPEC_VERSION } from './spec-version.gen';
 import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
 import { emitLog } from './telemetry/log';
@@ -417,7 +421,7 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
 
   // The transact endpoint for both audit lanes. A POST to the bare path
   // is the unified endpoint; the GET read path and the suffixed
-  // representations stay on the legacy handler until they retire.
+  // representations are the deployed homepage's handler.
   if (isAuditApiPath(pathname) && request.method === 'POST') {
     return handleAuditApi(request, env as AuditApiEnv, ctx);
   }
@@ -783,18 +787,14 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
-  // /score/live/<binary>.html → 301 to /score/live/<binary>. Mirrors
-  // the rest of the site (static `/score/<tool>.html` is canonicalized
-  // away from the .html extension by CF Static Assets'
-  // html_handling=auto-trailing-slash); the /score/live/ route is
-  // Worker-served so the same redirect is explicit here.
-  const liveScoreHtmlMatch = pathname.match(/^\/score\/live\/([a-z0-9][a-z0-9-]{0,63})\.html$/);
-  if (liveScoreHtmlMatch) {
-    const canonical = `/score/live/${liveScoreHtmlMatch[1]}`;
-    return new Response(null, {
-      status: 301,
-      headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
-    });
+  // The legacy live-score path serves through the unified result renderer
+  // until it retires; it is dispatched ahead of the result route because
+  // `live/<binary>` would otherwise read as a GitHub shorthand target.
+  if (/^\/score\/live\/[^/]+$/.test(pathname)) {
+    return handleLegacyLiveScorePath(request, env as ResultEnv);
+  }
+  if (isResultPath(pathname)) {
+    return handleResultRoute(request, env as ResultEnv);
   }
 
   // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
@@ -806,18 +806,6 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
       status: 301,
       headers: { Location: canonical, 'Cache-Control': 'public, max-age=300' },
     });
-  }
-
-  // Shareable live-score result page. Reads the cached scorecard from
-  // R2 by binary slug, renders an HTML summary view.
-  // Strict regex enforced by parseLiveScorePath — slugs must match
-  // /^[a-z0-9][a-z0-9-]{0,63}$/, so an attacker can't pivot this
-  // route into an arbitrary R2 key read. Accepts both /score/live/<binary>
-  // and /score/live/<binary>.md (markdown twin) per the site-wide
-  // twin invariant. The "live" segment is reserved as a registry name
-  // (scorecards.mjs) so no curated tool can collide with this route.
-  if (parseLiveScorePath(pathname)) {
-    return handleLiveScorePage(request, env as ScoreEnv);
   }
 
   // /web board + .md twin — Worker-rendered from the R2 leaderboard
@@ -845,23 +833,10 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     return handleWebScoringPage(request, env as WebAuditRouteEnv);
   }
 
-  // /web/<domain>.html → 301 to /web/<domain>. Mirrors the live-score
-  // .html canonicalization; the /web route is Worker-served so the
-  // extension redirect is explicit here.
-  const webHtmlMatch = pathname.match(/^\/web\/([^/]+)\.html$/);
-  if (webHtmlMatch) {
-    return new Response(null, {
-      status: 301,
-      headers: { Location: `/web/${webHtmlMatch[1]}`, 'Cache-Control': 'public, max-age=300' },
-    });
-  }
-
-  // Shareable web-audit result page + markdown twin. Reads the cached
-  // web scorecard from R2 by domain slug (strict regex in
-  // parseWebResultPath bounds the R2 lookup). Sits above the asset-first
-  // dispatch like the live-score page.
-  if (parseWebResultPath(pathname)) {
-    return handleWebResultPage(request, env as WebAuditRouteEnv);
+  // The legacy website result path serves through the unified result
+  // renderer until it retires.
+  if (/^\/web\/[^/]+$/.test(pathname)) {
+    return handleLegacyWebResultPath(request, env as ResultEnv);
   }
 
   // /_internal/* paths are build-only assets (shell templates the

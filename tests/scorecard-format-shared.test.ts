@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   BONUS_GROUPS,
+  buildScorecardBody,
   escHtml,
   extractTopIssues,
   formatAuditRowMarkdown,
@@ -18,6 +19,7 @@ import {
   PRINCIPLE_NAMES,
   statusLabel,
 } from '../src/shared/scorecard-format.mjs';
+import { SPEC_VERSION } from '../src/worker/spec-version.gen';
 
 describe('escHtml', () => {
   test('escapes & < > " \'', () => {
@@ -182,5 +184,21 @@ describe('formatAuditTableMarkdownLines', () => {
   });
   test('returns [] for empty input (caller decides fallback copy)', () => {
     expect(formatAuditTableMarkdownLines([])).toEqual([]);
+  });
+});
+
+describe('buildScorecardBody escapes the audit profile in the reproduce command', () => {
+  test('a profile carrying markup renders escaped', () => {
+    const html = buildScorecardBody(
+      { name: 'tool', binary: 'tool' },
+      {
+        spec_version: SPEC_VERSION,
+        audit_profile: 'x"><img src=x onerror=1>',
+        badge: { score_pct: 10, eligible: false },
+        results: [],
+      },
+    );
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('--audit-profile x&quot;&gt;&lt;img');
   });
 });

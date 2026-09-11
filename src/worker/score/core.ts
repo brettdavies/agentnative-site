@@ -20,7 +20,6 @@ import { loadHintsIndex, lookupOnly, type OrchestrateEnv, type RunFreshResult, r
 import {
   type DiscoveryHintsIndex,
   deriveShareBinary,
-  deriveShareBinaryFromSpec,
   loadRegistryIndex,
   lookupRegistry,
   type RegistryIndex,
@@ -115,7 +114,7 @@ export async function readCliTier(
       kind: 'cache',
       envelope,
       binary: target,
-      shareUrl: binary ? `/score/live/${binary}` : null,
+      shareUrl: envelope.scorecard_url,
       ancVersion: lookup.anc_version,
       toolVersion: lookup.tool_version,
       scorecard: lookup.scorecard,
@@ -229,42 +228,55 @@ function toolVersionOf(scorecard: unknown): string {
   return typeof version === 'string' ? version : '';
 }
 
-function shareUrlFor(spec: InstallSpec): string | null {
-  const binary = deriveShareBinaryFromSpec(spec);
-  return binary ? `/score/live/${binary}` : null;
+// The deployed homepage forwards to `share_url`. A branch run has a page
+// only once its record is written under the branch key, so it carries none
+// until then.
+function legacyShareUrl(spec: InstallSpec, envelope: AuditEnvelope): string | null {
+  return spec.pm === 'git-clone' ? null : envelope.scorecard_url;
 }
 
 function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutcome {
   switch (result.kind) {
-    case 'cache_post_hit':
+    case 'cache_post_hit': {
+      const envelope = envelopeFor(
+        'cache',
+        result.spec,
+        result.scorecard,
+        result.anc_version,
+        result.tool_version,
+        input,
+      );
       return {
         kind: 'cache',
-        envelope: envelopeFor('cache', result.spec, result.scorecard, result.anc_version, result.tool_version, input),
+        envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: shareUrlFor(result.spec),
+        shareUrl: legacyShareUrl(result.spec, envelope),
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
       };
-    case 'fresh':
+    }
+    case 'fresh': {
+      const envelope = envelopeFor(
+        'live',
+        result.spec,
+        result.scorecard,
+        result.anc_version,
+        toolVersionOf(result.scorecard),
+        input,
+      );
       return {
         kind: 'live',
-        envelope: envelopeFor(
-          'live',
-          result.spec,
-          result.scorecard,
-          result.anc_version,
-          toolVersionOf(result.scorecard),
-          input,
-        ),
+        envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: shareUrlFor(result.spec),
+        shareUrl: legacyShareUrl(result.spec, envelope),
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
         installMs: result.install_ms,
         ancAuditMs: result.anc_audit_ms,
       };
+    }
     case 'resolution_error':
       return { kind: 'bounce', tier: `error_${result.error}`, error: resolutionError(result.error, result.details) };
     case 'sandbox_unavailable':

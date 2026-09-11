@@ -162,7 +162,7 @@ describe('buildWebSummaryBody (U14)', () => {
   test('headlines RELATIVE with GLOBAL as a labeled secondary metric', () => {
     expect(html).toContain('bigscore__n">82<');
     expect(html).toContain('site score');
-    expect(html).toContain('bigscore__n">72<');
+    expect(html).toContain('result-score__secondary-n">72<');
     expect(html).toContain('global-ready');
     expect(html).toContain('maximally agent-ready site');
   });
@@ -184,7 +184,7 @@ describe('buildWebSummaryBody (U14)', () => {
   });
 
   test('a category with only n_a rows shows 0/0 and is de-emphasized', () => {
-    expect(html).toContain('catcard--empty');
+    expect(html).toContain('pscore__row--empty');
     expect(html).toContain('<span class="audit-group__rollup">0 / 0</span>');
   });
 
@@ -280,7 +280,7 @@ describe('buildWebSummaryBody (U14)', () => {
       /web-check__label">[^<]*<\/span> <span class="tier tier-must">MUST<\/span> <span class="audit__status"/,
     );
     // The category header still carries no tier (that was the misnomer).
-    expect(html).not.toContain('catcard__hd tier-');
+    expect(html).not.toMatch(/pscore__row--category[^>]*tier-(must|should|may)/);
   });
 });
 
@@ -665,10 +665,10 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
     // C4 is API, C5 is MCP; the header goes id -> title -> rollup with no
     // tier badge (MUST/SHOULD/MAY is a per-check obligation, not a group's).
     expect(html).toMatch(
-      /<span class="spec__id">C4<\/span>\s*<h3 class="audit-group__title">API<\/h3>\s*<span class="audit-group__rollup/,
+      /<span class="spec__id">C4<\/span>\s*<div class="pscore__body">\s*<h3 class="spec__title audit-group__title">API<\/h3>\s*<p class="pscore__evidence"><span class="audit-group__rollup/,
     );
     expect(html).toMatch(
-      /<span class="spec__id">C5<\/span>\s*<h3 class="audit-group__title">MCP<\/h3>\s*<span class="audit-group__rollup/,
+      /<span class="spec__id">C5<\/span>\s*<div class="pscore__body">\s*<h3 class="spec__title audit-group__title">MCP<\/h3>\s*<p class="pscore__evidence"><span class="audit-group__rollup/,
     );
   });
 
@@ -695,7 +695,7 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
   });
 
   test('no category header carries a tier badge or a tier-* class', () => {
-    const headers = [...html.matchAll(/<div class="catcard__hd[^"]*">[\s\S]*?<\/div>/g)].map((m) => m[0]);
+    const headers = [...html.matchAll(/<span class="spec__id">C\d<\/span>[\s\S]*?<\/p>/g)].map((m) => m[0]);
     expect(headers).toHaveLength(6);
     for (const header of headers) {
       expect(header).not.toContain('class="tier"');
@@ -961,5 +961,42 @@ describe('leaderboard friendly-name display', () => {
     expect(rows).toContain('href="/web/developers.cloudflare.com"');
     expect(rows).toContain('width:96%'); // relative meter
     expect(rows).not.toContain('width:90%'); // not the global score
+  });
+});
+
+describe('website category rows carry a status pill from their rollup', () => {
+  function scorecardWith(categories: Array<{ id: string; name: string; passed: number; counted: number }>) {
+    return {
+      schema_version: '0.2',
+      spec_version: SPEC_VERSION,
+      target_url: 'https://example.com/',
+      tool: { name: 'example.com', url: 'https://example.com/' },
+      score_pct: 50,
+      score: { relative: 50, global: 40 },
+      categories,
+      results: [],
+    };
+  }
+  const html = buildWebSummaryBody({
+    scorecard: scorecardWith([
+      { id: 'a', name: 'All pass', passed: 2, counted: 2 },
+      { id: 'b', name: 'Some pass', passed: 1, counted: 2 },
+      { id: 'c', name: 'None pass', passed: 0, counted: 2 },
+      { id: 'd', name: 'Nothing applies', passed: 0, counted: 0 },
+    ]),
+    domain: 'example.com',
+    targetUrl: 'https://example.com/',
+  });
+
+  test('every counted check passing is pass, none is fail, some is partial, nothing counted is n/a', () => {
+    const rows = [
+      ...html.matchAll(/data-category="([a-d])"[\s\S]*?<span class="stpill stpill--(\w+)">(\w+\/?\w*)<\/span>/g),
+    ].map((m) => [m[1], m[2], m[3]]);
+    expect(rows).toEqual([
+      ['a', 'pass', 'pass'],
+      ['b', 'warn', 'partial'],
+      ['c', 'fail', 'fail'],
+      ['d', 'na', 'n/a'],
+    ]);
   });
 });

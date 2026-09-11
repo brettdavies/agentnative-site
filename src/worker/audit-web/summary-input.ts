@@ -4,6 +4,7 @@
 // and the markdown twin are two presentations of one input, and a caller
 // hands the same object to both.
 
+import type { ResultLinks, SpineInput } from '../../shared/result-spine';
 import { CANONICAL_SITE_URL } from '../../shared/site-url';
 import type { WebAuditFreshness } from './cache';
 import type { WebRemediationCatalog } from './remediation';
@@ -31,6 +32,10 @@ export interface WebSummaryInput {
    * timestamp states are reproducible; the emitted instants never depend on it.
    */
   now?: number;
+  /** The page's spine; omitted renders a cached, linked, control-free spine. */
+  spine?: SpineInput;
+  /** The three representation URLs the twin's front matter names; omitted renders none. */
+  links?: ResultLinks;
 }
 
 /** Everything a renderer needs, resolved once from the caller's input. */

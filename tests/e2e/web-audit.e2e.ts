@@ -75,7 +75,7 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
     ]);
     await page.waitForURL(`**/web/${TARGET_DOMAIN}`, { timeout: 75_000 });
     expect(typeof sawStreaming).toBe('boolean');
-    await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
+    await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
     await expect(page.locator('.scorecard-audits')).toBeVisible();
 
     // The scoring page used location.replace(), so it never entered history:
@@ -144,10 +144,11 @@ test.describe('web audit — scoring-page flow and shareable result', () => {
 
   test('@render the result page groups by category and headlines RELATIVE with GLOBAL secondary', async ({ page }) => {
     await page.goto(`/web/${TARGET_DOMAIN}`);
-    await expect(page.locator('.scorecard-hero .bigscore__n').first()).toContainText(/\d/);
-    await expect(page.locator('.scorecard-hero .bigscore__l').first()).toContainText('site score');
-    // Two notes share the class: the score explainer, then freshness.
-    await expect(page.locator('.scorecard-hero__note').first()).toContainText('maximally agent-ready');
+    await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
+    await expect(page.locator('.result-score .bigscore__l').first()).toContainText('site score');
+    await expect(page.locator('.result-score__secondary')).toContainText('global-ready');
+    await expect(page.locator('.result-score__note')).toContainText('maximally agent-ready');
+    await expect(page.locator('.result-spine [data-reaudit]')).toHaveAttribute('data-lane', 'web');
     // Whether the entry carries a scoring instant or not, the freshness line
     // says a fresh audit is still gated.
     await expect(page.locator('[data-web-audit-freshness]')).toContainText('subject to service limits');

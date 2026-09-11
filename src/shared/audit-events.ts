@@ -54,7 +54,9 @@ export type AuditErrorCode =
   | 'sandbox_unavailable'
   | 'incomplete_response_contract'
   | 'unreachable'
-  | 'patch_failed';
+  | 'patch_failed'
+  // A result page or read tool for a target with no stored result.
+  | 'not_found';
 
 export type AuditError = {
   code: AuditErrorCode;
@@ -105,6 +107,7 @@ export const AUDIT_ERROR_MESSAGES: Readonly<Record<AuditErrorCode, string>> = {
   incomplete_response_contract: 'The scoring service returned an incomplete response.',
   unreachable: 'The site could not be reached.',
   patch_failed: 'The listing change did not save.',
+  not_found: 'No audit exists for that target yet.',
 };
 
 /** The one error object every JSON error response and every bounce or error event carries. */

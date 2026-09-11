@@ -75,7 +75,6 @@ import {
   runCliAudit,
   validateCliInput,
 } from '../score/core';
-import { SHARE_URL_BINARY_RE } from '../score/registry-lookup';
 import { CTA, type ScoreError, toAuditError } from '../score/response-shape';
 import type { ScoreTelemetryEnv } from '../score/telemetry';
 import { AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
@@ -178,7 +177,11 @@ function inflightKey(lane: Lane, key: string): string {
 }
 
 // A KV read that fails is a miss: the flag is a dedup hint, never a gate.
-async function readInFlight(env: AuditApiEnv, lane: Lane, input: string): Promise<InFlight | null> {
+export async function readInFlight(
+  env: { SCORE_KV?: KVNamespace },
+  lane: Lane,
+  input: string,
+): Promise<InFlight | null> {
   if (!env.SCORE_KV) return null;
   try {
     const raw = await env.SCORE_KV.get(inflightKey(lane, input));
@@ -498,7 +501,7 @@ async function handleCli(
   if (tier.kind === 'cache') {
     row.tier = 'cache';
     row.outcome = 'hit';
-    return jsonEnvelope(tier.envelope, {}, { share_url: tier.shareUrl ? `${origin}${tier.shareUrl}` : undefined });
+    return jsonEnvelope(tier.envelope, {}, { share_url: tier.shareUrl ?? undefined });
   }
 
   // The operator hatch bypasses the flag; a refresh attaches like any transact.
@@ -695,12 +698,9 @@ function terminalResponse(terminal: AuditEvent | null, row: RequestRow, cookie: 
   return errorResponse(500, auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }), cookie);
 }
 
-// The legacy live surface serves only binaries that match its slug shape.
+// The deployed homepage forwards to `share_url`; a result with a page names it.
 function legacyCliFields(envelope: AuditEnvelope): Record<string, unknown> {
-  const binary = envelope.target.includes('@') ? null : envelope.target;
-  return binary && SHARE_URL_BINARY_RE.test(binary) && envelope.scorecard_url
-    ? { share_url: envelope.scorecard_url.replace(/\/score\/[^/]+$/, `/score/live/${binary}`) }
-    : {};
+  return envelope.scorecard_url && !envelope.target.includes('@') ? { share_url: envelope.scorecard_url } : {};
 }
 
 function statusForCode(code: string): number {
@@ -735,18 +735,22 @@ function statusForCode(code: string): number {
   }
 }
 
+/** The envelope as every JSON surface serves it, with the site version triad beside it. */
+export function envelopeJsonBody(envelope: AuditEnvelope): Record<string, unknown> {
+  return {
+    ...envelope,
+    site_spec_version: SITE_SPEC_VERSION,
+    auditor_url: AUDITOR_URL,
+    ...(envelope.anc_version ? { anc_version: envelope.anc_version } : {}),
+  };
+}
+
 function jsonEnvelope(
   envelope: AuditEnvelope,
   cookie: Record<string, string> = {},
   legacy: Record<string, unknown> = {},
 ): Response {
-  const body = {
-    ...envelope,
-    site_spec_version: SITE_SPEC_VERSION,
-    auditor_url: AUDITOR_URL,
-    ...(envelope.anc_version ? { anc_version: envelope.anc_version } : {}),
-    ...legacy,
-  };
+  const body = { ...envelopeJsonBody(envelope), ...legacy };
   return new Response(JSON.stringify(body), { status: 200, headers: jsonHeaders(cookie) });
 }
 

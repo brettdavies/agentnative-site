@@ -4,6 +4,7 @@
 // pieces that depend on registry-aggregate data: leaderboard table, tier
 // counts, badge-floor callout.
 
+import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../shared/audit-routes.ts';
 import {
   BADGE_ELIGIBILITY_FLOOR_PCT,
   escHtml,
@@ -12,6 +13,7 @@ import {
   buildScorecardMarkdown as sharedBuildScorecardMarkdown,
   renderAudienceBanner as sharedRenderAudienceBanner,
 } from '../shared/scorecard-format.mjs';
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { renderSurfaceSeg } from '../shared/surface-seg.mjs';
 
 const BADGE_FLOOR_DISPLAY_PCT = BADGE_ELIGIBILITY_FLOOR_PCT;
@@ -141,10 +143,10 @@ export const renderAudienceBanner = sharedRenderAudienceBanner;
 // Per-tool scorecard body + markdown twin.
 //
 // The actual rendering lives in `src/shared/scorecard-format.mjs` so the
-// build-time `/score/<slug>` and the Worker `/score/live/<binary>` route
-// emit byte-for-byte the same shape. This file keeps the legacy
-// positional signature so existing callers in 08-scorecards-emit.mjs and
-// tests/build.test.ts don't need to change.
+// build-time curated page and the Worker's live page emit the same shape.
+// This file keeps the positional signature its callers in
+// 08-scorecards-emit.mjs and tests/build.test.ts use, and supplies the
+// curated page's twin links.
 // -------------------------------------------------------------------
 
 /**
@@ -163,6 +165,15 @@ export function buildScorecardBody(tool, scorecard, topIssues, principleScore, r
     metadata,
     showBadgePreview: true,
   });
+}
+
+/** The three absolute URLs a curated result's twin names in its front matter. */
+function curatedLinks(tool) {
+  return {
+    scorecard: `${CANONICAL_SITE_URL}${scorePath(tool.name)}`,
+    markdown: `${CANONICAL_SITE_URL}${scoreMarkdownPath(tool.name)}`,
+    json: `${CANONICAL_SITE_URL}${scoreJsonPath(tool.name)}`,
+  };
 }
 
 // -------------------------------------------------------------------
@@ -209,5 +220,8 @@ export function buildScorecardMarkdown(tool, scorecard, _topIssues, principleSco
     principleScore,
     version: resolvedVersion,
     metadata,
+    links: curatedLinks(tool),
+    lane: 'cli',
+    tier: 'registry',
   });
 }

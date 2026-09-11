@@ -3,7 +3,9 @@
 //   POST /api/audit-web         the legacy streaming dispatch the deployed
 //                               web-audit clients post to
 //   GET  /web/scoring/<domain>  in-progress streaming page (JS-required)
-//   GET  /web/<domain>          shareable cached result page + .md twin
+//
+// The result page lives in `src/worker/audit/result.ts`; the legacy
+// `/web/<domain>` path is an adapter over it.
 //
 // The POST path serves cache state as data ahead of every metered gate,
 // then admits a fresh audit through its gate block (kill switch,
@@ -16,15 +18,16 @@
 // client disconnect still caches a completed run; a deadline-exceeded run
 // streams an `incomplete` terminal and is never persisted.
 
+import { escHtml } from '../../shared/esc-html';
 import { detectPreference } from '../accept';
 import { applyHeaders } from '../headers';
 import type { NotifyEnv } from '../notify';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from '../score/session';
 import { type TurnstileEnv, verifyTurnstile } from '../score/turnstile';
+import { loadShellTemplate, substituteShell } from '../shell-template';
 import { SPEC_VERSION } from '../spec-version.gen';
 import type { AuditLogEnv } from './audit-log';
 import {
-  type CachedWebAudit,
   get as cacheGet,
   canonicalTargetOf,
   getAggregate,
@@ -32,7 +35,6 @@ import {
   isStale,
   keyFor,
   listAllWebAudits,
-  normalizeTargetUrl,
   patchStoredPublicListing,
   scorecardWithPublicListing,
   sha256Hex,
@@ -44,7 +46,6 @@ import { flushHitMinPurge, invokeCachedPurge, runWithHitMinPurge, webTag } from 
 export { canonicalTargetOf };
 
 import { runWebAuditStream, type WebTarget } from './core';
-import { normalizeScorecardCategories } from './display';
 import {
   buildWebLeaderboardBody,
   buildWebLeaderboardMarkdown,
@@ -53,12 +54,8 @@ import {
 } from './leaderboard-render';
 import { consumeWebAuditHourlyBudget } from './limiter';
 import { decidePublicListingWrite, enforcePublicListingFlipLimit, resolveAuditListing } from './public-listing';
-import { loadWebAuditRegistry } from './registry';
-import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
-import { boardExcludeDomains, loadWebSeed } from './seed';
+import { boardExcludeDomains } from './seed';
 import { validatePublicUrl } from './ssrf';
-import { buildWebSummaryMarkdown } from './summary-markdown';
-import { buildWebSummaryBody } from './summary-render';
 
 type RateLimit = { limit(o: { key: string }): Promise<{ success: boolean }> };
 
@@ -468,32 +465,13 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
 }
 
 // ---------------------------------------------------------------------------
-// GET /web/<domain> result page + .md twin (U8)
+// Path shapes under /web/ and the header policy the scoring page shares
 // ---------------------------------------------------------------------------
 
 // Strict domain slug: labels of alphanumerics + hyphens joined by dots,
 // optional :port. No uppercase, no path traversal, bounded length. This
 // is the user-input boundary for the R2 lookup, so the regex is tight.
 const DOMAIN_SLUG_RE = /^(?=.{1,253}(?::|$))[a-z0-9]([a-z0-9-]{0,62})(\.[a-z0-9]([a-z0-9-]{0,62}))*(:[0-9]{1,5})?$/;
-
-export type WebResultPathMatch = { domain: string; isMarkdown: boolean };
-
-// Segments reserved under `/web/` that must not resolve as a domain lookup.
-// `scoring` is the in-progress streaming page, so `/web/scoring` is never a
-// cached-result domain even though it passes DOMAIN_SLUG_RE.
-const WEB_RESERVED_SEGMENTS = new Set(['scoring']);
-
-export function parseWebResultPath(pathname: string): WebResultPathMatch | null {
-  const md = pathname.match(/^\/web\/([^/]+)\.md$/);
-  if (md) return isDomainLookup(md[1]) ? { domain: md[1], isMarkdown: true } : null;
-  const m = pathname.match(/^\/web\/([^/]+)$/);
-  if (!m) return null;
-  return isDomainLookup(m[1]) ? { domain: m[1], isMarkdown: false } : null;
-}
-
-function isDomainLookup(segment: string): boolean {
-  return !WEB_RESERVED_SEGMENTS.has(segment) && DOMAIN_SLUG_RE.test(segment);
-}
 
 /** Reserved `/web/scoring` prefix — the in-progress streaming page. */
 export function isWebScoringPath(pathname: string): boolean {
@@ -510,19 +488,6 @@ export function parseWebScoringPath(pathname: string): WebScoringPathMatch | nul
   return DOMAIN_SLUG_RE.test(m[1]) ? { domain: m[1], isMarkdown: m[2] === '.md' } : null;
 }
 
-// Content-Type + noindex only. Vary / Link / CSP / negotiated cache come
-// from applyHeaders so result pages share the asset-path policy. X-Robots-Tag
-// survives the HTML branch (applyHeaders does not clear it).
-const HTML_HEADERS = {
-  'Content-Type': 'text/html; charset=utf-8',
-  'X-Robots-Tag': 'noindex',
-} as const;
-
-const MARKDOWN_HEADERS = {
-  'Content-Type': 'text/markdown; charset=utf-8',
-  'X-Robots-Tag': 'noindex',
-} as const;
-
 function withNegotiatedHeaders(
   request: Request,
   response: Response,
@@ -537,197 +502,6 @@ function withNegotiatedHeaders(
     headed.headers.delete('Cache-Tag');
   }
   return headed;
-}
-
-let shellTemplatePromise: Promise<string> | null = null;
-async function loadShellTemplate(env: { ASSETS: Fetcher }): Promise<string> {
-  if (!shellTemplatePromise) {
-    shellTemplatePromise = (async () => {
-      const res = await env.ASSETS.fetch(new Request('https://assets.internal/_internal/score-live-shell.html'));
-      if (!res.ok) throw new Error(`web-audit shell template missing (status ${res.status})`);
-      return await res.text();
-    })().catch((err) => {
-      shellTemplatePromise = null;
-      throw err;
-    });
-  }
-  return shellTemplatePromise;
-}
-
-export function _resetWebShellTemplateCache(): void {
-  shellTemplatePromise = null;
-}
-
-function substituteShell(
-  template: string,
-  fields: { title: string; description: string; canonicalPath: string; body: string },
-): string {
-  return template
-    .replaceAll('{{TITLE}}', esc(fields.title))
-    .replaceAll('{{DESCRIPTION}}', esc(fields.description))
-    .replaceAll('{{CANONICAL_PATH}}', esc(fields.canonicalPath))
-    .replaceAll('{{BODY}}', fields.body);
-}
-
-function esc(s: string): string {
-  return s.replace(
-    /[<>&"']/g,
-    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] as string,
-  );
-}
-
-/**
- * Resolve a domain's audit for the result page from per-domain R2 only
- * (a miss renders the not-yet-scored state; there is no committed
- * fallback). Tries https then http for the R2 key since the cache is
- * scheme-specific. The stored scoring instant rides along so the page can
- * report the same freshness the API and MCP surfaces report; a legacy
- * entry without one resolves to null rather than a synthesized time.
- */
-async function lookupByDomain(
-  env: WebAuditRouteEnv,
-  domain: string,
-): Promise<{ scorecard: unknown; targetUrl: string; scoredAt: string | null } | null> {
-  for (const scheme of ['https', 'http']) {
-    const targetUrl = normalizeTargetUrl(`${scheme}://${domain}/`);
-    const cached: CachedWebAudit | null = await cacheGet(env, await keyFor(targetUrl, SPEC_VERSION));
-    if (cached) return { scorecard: cached.scorecard, targetUrl, scoredAt: cached.scored_at ?? null };
-  }
-  return null;
-}
-
-export async function handleWebResultPage(request: Request, env: WebAuditRouteEnv): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return new Response('method not allowed', { status: 405, headers: { 'content-type': 'text/plain' } });
-  }
-  const url = new URL(request.url);
-  const match = parseWebResultPath(url.pathname);
-  if (!match) return renderNotFound(request, env, '(invalid)', false);
-
-  const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
-  const hit = await lookupByDomain(env, match.domain);
-  if (!hit) return renderNotFound(request, env, match.domain, wantMarkdown);
-
-  // A missing remediation catalog degrades to generic prompts.
-  let remediation: WebRemediationCatalog = {};
-  try {
-    remediation = await loadWebRemediationCatalog(env);
-  } catch {
-    remediation = {};
-  }
-
-  // Re-derive the current category split at read time so a cached
-  // scorecard renders the current shape; a failed registry load falls
-  // back to the stored shape rather than failing the page.
-  let normalized: unknown = hit.scorecard;
-  try {
-    normalized = normalizeScorecardCategories(hit.scorecard, await loadWebAuditRegistry(env));
-  } catch {
-    normalized = hit.scorecard;
-  }
-
-  const scorecard = normalized as {
-    tool?: { name?: string; url?: string };
-    score_pct?: number;
-  };
-  // Friendly display label from the seed (absent for an unseeded on-demand
-  // audit); summary-render falls back to the domain.
-  let seedName: string | undefined;
-  try {
-    seedName = (await loadWebSeed(env)).find((e) => e.domain === match.domain)?.name;
-  } catch {
-    seedName = undefined;
-  }
-  const input = {
-    scorecard: scorecard as never,
-    domain: match.domain,
-    name: seedName,
-    targetUrl: scorecard.tool?.url ?? hit.targetUrl,
-    remediation,
-    origin: new URL(request.url).origin,
-    // A result page is always a cache read, so provenance is never fresh.
-    freshness: webAuditFreshness(true, hit.scoredAt),
-  };
-
-  if (wantMarkdown) {
-    return withNegotiatedHeaders(
-      request,
-      new Response(buildWebSummaryMarkdown(input), { status: 200, headers: MARKDOWN_HEADERS }),
-      true,
-      url.pathname,
-    );
-  }
-
-  const pct = scorecard.score_pct ?? 0;
-  const title = `${match.domain} — Agent-Readiness Audit`;
-  const description = `${match.domain} scored ${pct}% for agent-readiness against the agentnative web audit (spec ${SPEC_VERSION}).`;
-  let template: string;
-  try {
-    template = await loadShellTemplate(env);
-  } catch (err) {
-    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain' },
-    });
-  }
-  const html = substituteShell(template, {
-    title,
-    description,
-    canonicalPath: `/web/${match.domain}`,
-    body: buildWebSummaryBody(input),
-  });
-  return withNegotiatedHeaders(
-    request,
-    new Response(html, { status: 200, headers: HTML_HEADERS }),
-    false,
-    url.pathname,
-  );
-}
-
-async function renderNotFound(
-  request: Request,
-  env: WebAuditRouteEnv,
-  domain: string,
-  wantMarkdown: boolean,
-): Promise<Response> {
-  const { origin, pathname } = new URL(request.url);
-  if (wantMarkdown) {
-    const lines = [
-      `# ${domain} is not audited yet`,
-      '',
-      `No cached agent-readiness audit exists for this domain. Run one at [${origin}/web-audit](${origin}/web-audit) or call the \`audit_website\` MCP tool.`,
-      '',
-    ];
-    return withNegotiatedHeaders(
-      request,
-      new Response(lines.join('\n'), { status: 404, headers: MARKDOWN_HEADERS }),
-      true,
-      pathname,
-    );
-  }
-  const body = `<header class="scorecard-header">
-  <h1><code>${esc(domain)}</code> is not audited yet</h1>
-  <p class="live-score-summary__meta">No cached agent-readiness audit exists for this domain.</p>
-</header>
-<section class="scorecard-cta">
-  <p>Run one at <a href="/web-audit">anc.dev/web-audit</a> or call the <code>audit_website</code> MCP tool.</p>
-</section>`;
-  let template: string;
-  try {
-    template = await loadShellTemplate(env);
-  } catch (err) {
-    return new Response(`shell template unavailable: ${err instanceof Error ? err.message : String(err)}`, {
-      status: 500,
-      headers: { 'content-type': 'text/plain' },
-    });
-  }
-  const html = substituteShell(template, {
-    title: `Not audited — anc.dev`,
-    description: `No cached agent-readiness audit for ${domain}.`,
-    canonicalPath: `/web/${domain}`,
-    body,
-  });
-  return withNegotiatedHeaders(request, new Response(html, { status: 404, headers: HTML_HEADERS }), false, pathname);
 }
 
 // ---------------------------------------------------------------------------
@@ -757,7 +531,14 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
   }
   const url = new URL(request.url);
   const match = parseWebScoringPath(url.pathname);
-  if (!match) return renderNotFound(request, env, '(invalid)', detectPreference(request) === 'markdown');
+  if (!match) {
+    return withNegotiatedHeaders(
+      request,
+      new Response('not found\n', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } }),
+      false,
+      url.pathname,
+    );
+  }
 
   const wantMarkdown = match.isMarkdown || detectPreference(request) === 'markdown';
   if (wantMarkdown) {
@@ -799,9 +580,9 @@ export async function handleWebScoringPage(request: Request, env: WebAuditRouteE
 // The sitekey meta and the page script are injected in the body substitution
 // rather than the shared shell, so the shell template needs no per-page slot.
 function scoringBody(domain: string, sitekey: string): string {
-  const d = esc(domain);
+  const d = escHtml(domain);
   return `<article class="container scorecard-page" data-web-audit-scoring>
-  <meta name="turnstile-sitekey" content="${esc(sitekey)}" />
+  <meta name="turnstile-sitekey" content="${escHtml(sitekey)}" />
   <header class="scorecard-header">
     <h1>Auditing <code>${d}</code>&hellip;</h1>
     <p class="live-score-summary__meta">Each check streams in as it resolves. You'll be forwarded to the saved scorecard when the audit finishes.</p>

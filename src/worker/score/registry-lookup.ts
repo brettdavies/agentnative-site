@@ -19,15 +19,12 @@
 
 import { curatedEntryForBinary } from '../../shared/audit-envelope';
 import * as cache from './cache';
-import type { InstallSpec } from './discover-binary';
 import type { ParsedInstall } from './parse-install';
 import type { ValidatedInput } from './validate';
 
-// Public-facing slug shape for /score/live/<binary>. MUST stay in lockstep
-// with summary-render.ts's BINARY_SLUG_RE — the handler validates here so a
-// share_url it mints can never miss the route. Kept as a top-level const so
-// the derivation site and the route share the same source of truth via the
-// same regex literal (regex equality enforced by a unit test).
+// The slug shape a pre-discovery binary must have before it is used as a
+// cache key: lowercase alphanumerics and hyphens, bounded length, so a
+// hint or an install command cannot name an arbitrary R2 key.
 export const SHARE_URL_BINARY_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export type RegistryEntry = {
@@ -58,9 +55,8 @@ export type RegistryIndex = {
 
 // Module-scope promise cache. Workers re-instantiate isolates frequently
 // so the staleness window is bounded; the singleton avoids re-parsing the
-// JSON on every request inside the same isolate. Shared with handler.ts
-// (was duplicated there) so /api/score and /score/live/<binary> read from
-// the same in-memory copy.
+// JSON on every request inside the same isolate. One copy serves the
+// transact endpoint, the `/api/score` GET handler, and the result route.
 let registryIndexPromise: Promise<RegistryIndex> | null = null;
 
 type AssetEnv = { ASSETS: Fetcher };
@@ -95,9 +91,8 @@ export function _resetRegistryIndexCache(): void {
  * for tools where the registry-entry's `binary` field matches (handles
  * ripgrep/rg, ast-grep/sg, bottom/btm, and similar alias cases).
  *
- * Used by /score/live/<binary> to refuse rendering at the live path
- * when the binary maps to a registry-curated tool — that tool has a
- * canonical /score/<slug> page, which is what the user should see.
+ * A binary that maps to a curated tool has a canonical /score/<slug> page,
+ * which is what a caller should send the visitor to.
  */
 export function resolveCuratedSlug(binary: string, registryIndex: RegistryIndex): string | null {
   const direct = registryIndex.by_slug[binary];
@@ -257,28 +252,16 @@ function deriveCacheBinary(input: ValidatedInput, registry: RegistryLookupResult
 }
 
 /**
- * Public form of the cache-key binary derivation, used by the handler to
- * compute the `share_url` (`/score/live/<binary>`) for cached + live
- * inline-scorecard responses BEFORE discovery has run. Same logic as the
- * internal cache-tier derivation, exported so the handler can reuse it
- * without re-running a full lookup. Returns null when no binary is
- * derivable upfront (github-url without a hint, or branch-scoped paste).
- *
- * For paths where discovery HAS resolved the spec (live success + cache_post
- * hit), the handler uses `deriveShareBinaryFromSpec()` instead, which can
- * surface the discovered binary even when no hint matched upfront.
- *
- * Both helpers gate on `SHARE_URL_BINARY_RE` so a share_url the handler
- * mints can never miss the /score/live/<binary> route.
+ * The binary a cache-tier read is keyed by before discovery has run: the
+ * install command's binary, or the discovery hint's for a github-url.
+ * Returns null when no binary is derivable upfront (a github-url without
+ * a hint, or a branch-scoped paste, whose record lives under the branch
+ * key). Gated on `SHARE_URL_BINARY_RE`, the slug shape the pre-discovery
+ * cache key accepts.
  */
 export function deriveShareBinary(input: ValidatedInput, hintsIndex: DiscoveryHintsIndex): string | null {
   if (input.kind === 'install-command') return safeShareBinary(input.spec.binary);
   if (input.kind === 'github-url') {
-    // Branch-scoped pastes don't get a share URL. The /score/live/<binary>
-    // surface is keyed by binary alone; reusing it for a branch-scoped
-    // score would clobber the default-branch scorecard. The user still
-    // gets the scorecard inline in the response — they just can't bookmark
-    // it. A branch-aware share URL is a future enhancement.
     if (input.branch) return null;
     const key = `${input.owner}/${input.repo}`;
     const hint = lookupOwnerRepo(hintsIndex.by_owner_repo, key);
@@ -288,31 +271,6 @@ export function deriveShareBinary(input: ValidatedInput, hintsIndex: DiscoveryHi
   // branch (which uses scorecard_url, not share_url). A slug without a
   // curated scorecard isn't valid input — validateInput rejects it.
   return null;
-}
-
-/**
- * Post-discovery share-URL derivation. Called by the handler on the live
- * success branch and the post-discovery cache-hit branch (step 6.5), when
- * `resolveSpec()` has produced an `InstallSpec` whose `binary` is the same
- * value the DO writes the R2 cache under and the /score/live/<binary>
- * route reads from.
- *
- * Branch-scoped scores (pm='git-clone') stay null — their cache write is
- * skipped (handler.ts step 6.5 + do.ts), so the share surface has nothing
- * to point at and reusing the bare-binary key would clobber the
- * default-branch scorecard.
- *
- * The binary is validated against `SHARE_URL_BINARY_RE` before being
- * folded into a URL. Discovery's `ctx.repo` passes through to spec.binary
- * for most github-url paths, and GitHub repo names can legally contain
- * characters the slug regex rejects (uppercase, `_`, `.`). The cache write
- * itself uses spec.binary unmodified — a future re-paste still benefits
- * from the cache via the binary key, but the public share surface only
- * exposes binaries the route can serve.
- */
-export function deriveShareBinaryFromSpec(spec: InstallSpec): string | null {
-  if (spec.pm === 'git-clone') return null;
-  return safeShareBinary(spec.binary);
 }
 
 function safeShareBinary(binary: string | undefined | null): string | null {

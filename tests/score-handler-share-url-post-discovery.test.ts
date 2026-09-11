@@ -1,28 +1,16 @@
-// Post-discovery share-URL derivation tests. See TODO 025.
+// Post-discovery share-URL tests for the legacy handler.
 //
-// Bug class: for github-url inputs without a hint, the handler computed
-// share_url upfront via deriveShareBinary(input, hints) — which returns
-// null when no hint matches. The DO would still discover the binary and
-// write the scorecard to R2 under scores/<binary>/<spec_version>.json,
-// but the response carried no share_url, so the homepage form fell into
-// the "no shareable URL yet" branch and the user could never re-visit
-// /score/live/<binary> even though R2 held the entry.
+// For github-url inputs without a hint, `share_url` is the discovered
+// binary's `/score/<binary>` page, the URL the envelope builder mints from
+// the same binary the Durable Object writes the record under, so the
+// deployed homepage can forward to a page that serves. Branch-scoped
+// pastes carry no `share_url` until their record is written under the
+// branch key; install-command and github-url-with-hint inputs are unchanged.
 //
-// This file pins:
-//   - github-url WITHOUT a hint → live discovery → share_url derives
-//     from spec.binary (DO's R2 write key).
-//   - The same applies to the post-discovery cache-hit branch.
-//   - Branch-scoped pastes stay null.
-//   - install-command + github-url-with-hint stay unchanged.
-//
-// Red-team:
-//   - spec.binary returns a slug the /score/live/<binary> route rejects
-//     (uppercase, underscore, dot) — share_url is null, not a 404-bound URL.
-//   - DO success envelope where scorecard.tool.binary disagrees with
-//     spec.binary — the DO writes the cache by spec.binary, so share_url
-//     must follow spec.binary, not the scorecard payload.
-//   - Discovery resolves but the binary contains shell-special characters
-//     somehow (defense in depth past validate.ts) — share_url is null.
+// Red-team: the binary is used as-is (uppercase, underscore, leading
+// hyphen), since the route serves whatever the record was written under;
+// a DO envelope whose scorecard.tool.binary disagrees with spec.binary
+// follows spec.binary, the cache key.
 
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { keyFor } from '../src/worker/score/cache';
@@ -240,7 +228,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
       // cache-key derivation to the same value the share URL uses.
       expect(tracker.lastSpecBinary).toBe('hexyl');
       const body = (await res.json()) as { share_url?: string; scorecard: unknown };
-      expect(body.share_url).toBe('/score/live/hexyl');
+      expect(body.share_url).toBe('https://anc.dev/score/hexyl');
     } finally {
       restoreFetch();
     }
@@ -262,7 +250,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
       expect(res.status).toBe(200);
       expect(tracker.lastSpecBinary).toBe('onefetch');
       const body = (await res.json()) as { share_url?: string };
-      expect(body.share_url).toBe('/score/live/onefetch');
+      expect(body.share_url).toBe('https://anc.dev/score/onefetch');
     } finally {
       restoreFetch();
     }
@@ -293,7 +281,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
       expect(res.status).toBe(200);
       const body = (await res.json()) as { share_url?: string };
       // Must follow spec.binary (hexyl, the cache key), not the scorecard.
-      expect(body.share_url).toBe('/score/live/hexyl');
+      expect(body.share_url).toBe('https://anc.dev/score/hexyl');
     } finally {
       restoreFetch();
     }
@@ -323,7 +311,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
       // DO must NOT be dispatched — cache_post tier served the response.
       expect(tracker.doCalls).toBe(0);
       const body = (await res.json()) as { share_url?: string };
-      expect(body.share_url).toBe('/score/live/hexyl');
+      expect(body.share_url).toBe('https://anc.dev/score/hexyl');
     } finally {
       restoreFetch();
     }
@@ -331,7 +319,7 @@ describe('/api/score — share_url for github-url WITHOUT a hint (post-discovery
 });
 
 describe('/api/score — share_url red-team for github-url WITHOUT a hint', () => {
-  test('discovered binary with uppercase letters: share_url is null (route would 404)', async () => {
+  test('discovered binary with uppercase letters: share_url is its /score page', async () => {
     // BINARY_SLUG_RE in summary-render.ts (/^[a-z0-9][a-z0-9-]{0,63}$/)
     // rejects uppercase. The DO will still write to R2 under whatever
     // spec.binary contains (no slug enforcement in the cache key), but
@@ -353,13 +341,13 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
       const res = await handleScore(postScore('https://github.com/some-org/MyTool'), env);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { share_url?: string };
-      expect(body.share_url).toBeUndefined();
+      expect(body.share_url).toBe('https://anc.dev/score/MyTool');
     } finally {
       restoreFetch();
     }
   });
 
-  test('discovered binary with underscore: share_url is null', async () => {
+  test('discovered binary with underscore: share_url is its /score page', async () => {
     // GitHub repos can contain underscores (e.g., `my_tool`). The
     // /score/live/<binary> route's BINARY_SLUG_RE rejects underscores;
     // refuse to mint a share URL that would 404.
@@ -376,7 +364,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
       const res = await handleScore(postScore('https://github.com/some-org/my_tool'), env);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { share_url?: string };
-      expect(body.share_url).toBeUndefined();
+      expect(body.share_url).toBe('https://anc.dev/score/my_tool');
     } finally {
       restoreFetch();
     }
@@ -404,7 +392,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
     }
   });
 
-  test('discovered binary leading hyphen: share_url is null', async () => {
+  test('discovered binary leading hyphen: share_url is its /score page', async () => {
     // BINARY_SLUG_RE requires the first char to be alphanumeric.
     installSmartFetch({ releaseAssetName: '-bad-x86_64-linux.tar.gz' });
     try {
@@ -420,7 +408,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
       // (Input itself may or may not pass validate; share-URL guard is
       // the last line of defense.)
       const body = (await res.json()) as { share_url?: string };
-      expect(body.share_url).toBeUndefined();
+      expect(body.share_url).toBe('https://anc.dev/score/-bad-repo');
       void res.status;
     } finally {
       restoreFetch();
