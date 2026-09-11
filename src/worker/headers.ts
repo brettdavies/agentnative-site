@@ -1,5 +1,15 @@
-import { isScorePath, scoreMarkdownPath, splitRepresentation } from '../shared/audit-routes';
-import { homeTag, webDomainTag, webTag } from './audit-web/hit-min-tags';
+import {
+  isAuditPath,
+  isHitMinPath,
+  isAlwaysMissPath as isProgressPath,
+  isScorePath,
+  type Lane,
+  type Representation,
+  scoreJsonPath,
+  scoreMarkdownPath,
+  splitRepresentation,
+} from '../shared/audit-routes';
+import { homeTag, resultTag } from './audit-web/hit-min-tags';
 
 // Response-header policy for the agentnative-site Worker.
 //
@@ -14,41 +24,60 @@ import { homeTag, webDomainTag, webTag } from './audit-web/hit-min-tags';
 //                          Vary: Accept, User-Agent  (extensionless URLs only)
 //                          Explicit `.md` is one representation: no Vary.
 //
-//   Cache classes (P4). applyHeaders is the only writer of Cache-Tag and
-//   class TTL. Upstream Cache-Tag is discarded.
+//   Result pages          Link: </score/<t>/md>; rel="alternate"; type="text/markdown",
+//   (/score/<t>, its        </score/<t>/json>; rel="alternate"; type="application/json"
+//   twin, negotiated md)  on the HTML page and both markdown forms, byte-equal
+//                          to the page's <head> alternates. JSON carries none.
 //
-//   HIT-1d (bake-at-build HTML/markdown)  Cache-Control: public, max-age=300,
-//                                         stale-while-revalidate=60
-//                                         (no s-maxage — that re-arms the
+//   Cache classes (P4). applyHeaders is the only writer of Cache-Tag and
+//   class TTL. Upstream Cache-Tag is discarded. A route that knows more
+//   than the path does (the result route: a curated slug vs a live binary)
+//   passes the class it served in `cache`; a 4xx/5xx or an always-MISS
+//   path is MISS regardless.
+//
+//   HIT-1d (bake-at-build HTML/markdown,  Cache-Control: public, max-age=300,
+//   curated /score/<slug> pages, bare     stale-while-revalidate=60
+//   /audit)                               (no s-maxage — that re-arms the
 //                                         custom-domain zone HIT that stripped
 //                                         Vary)
 //                                         Cloudflare-CDN-Cache-Control:
 //                                         public, max-age=86400
 //
-//   HIT-min (live boards)                 Cache-Control: public, max-age=0,
+//   HIT-min (live boards and results)     Cache-Control: public, max-age=0,
 //                                         must-revalidate
 //                                         Cloudflare-CDN-Cache-Control:
 //                                         public, max-age=300
-//                                         Cache-Tag: home | web | web:{domain}
+//                                         Cache-Tag: home | web | web:{host}
+//                                         | cli:{target}
+//                                         /, /index.md, /scorecards* carry
+//                                         `home` from the path; /web* is
+//                                         tagged by its route; a live or
+//                                         website /score/<target> is tagged
+//                                         by the result route in all three
+//                                         representations. /audit with a
+//                                         query is HIT-min with no tag so a
+//                                         prefill hop never mints a day-long
+//                                         edge key.
 //
 //   MISS                                  Cache-Control: no-store
 //                                         Cloudflare-CDN-Cache-Control: no-store
-//                                         (status >= 400; /web/scoring*; scoring
-//                                         overlay also strips Cache-Tag)
+//                                         (status >= 400; /scoring*;
+//                                         /web/scoring*; a served MISS class
+//                                         such as a `?v=` result fetch)
 //
 //   Path-keyed files (.json, .svg, .txt,  Cache-Control: public, max-age=300,
-//   .xml, …)                              s-maxage=86400, stale-while-revalidate=60
+//   .xml, …; curated /score/<slug>/json)  s-maxage=86400, stale-while-revalidate=60
 //                                         No Vary. No Cloudflare-CDN-Cache-Control.
 //
 //   Hashed assets                         Cache-Control: public, max-age=31536000,
 //   (/fonts/*, /og-image.png)             immutable
 //
-//   JSON responses (.json) Content-Type: application/json; charset=utf-8
-//                          Access-Control-Allow-Origin: *
-//                          X-Robots-Tag: noindex
-//                          (No Link rel=alternate, no X-Llms-Txt — JSON has
-//                          no markdown twin. Detected by URL extension so any
-//                          /<slug>.json endpoint reuses the branch.)
+//   JSON responses         Content-Type: application/json; charset=utf-8
+//   (.json, /score/<t>/json, Access-Control-Allow-Origin: *
+//   negotiated JSON)       X-Robots-Tag: noindex
+//                          (No Link rel=alternate, no X-Llms-Txt — JSON is
+//                          the machine form. Detected by URL extension or
+//                          the caller's `servedJson`.)
 //
 //   SVG responses (.svg)   Content-Type: image/svg+xml; charset=utf-8
 //                          Access-Control-Allow-Origin: *
@@ -134,12 +163,43 @@ const CSP_HTML =
   "object-src 'none'; " +
   "frame-ancestors 'self'";
 
+export type CacheClass = 'hit-1d' | 'hit-min' | 'miss' | 'short' | 'immutable';
+
+/** A cache class with the HIT-min purge tag it carries, when it carries one. */
+export type CacheClassSpec = { klass: CacheClass; tag?: string };
+
 export interface ApplyHeadersOptions {
   request: Request;
   servedMarkdown: boolean;
   /** True when the body is the JSON result envelope, whatever the path says. */
   servedJson?: boolean;
   pathname: string;
+  /**
+   * The class the route served, for routes where the path alone cannot
+   * tell (a curated slug from a live binary). Honored after the MISS
+   * predicates: a 4xx/5xx or an always-MISS path stays MISS.
+   */
+  cache?: CacheClassSpec;
+}
+
+export type ServedResult = {
+  /** True when the body is the build-emitted page of a registry slug. */
+  curated: boolean;
+  lane: Lane;
+  target: string;
+  representation: Representation;
+};
+
+/**
+ * The cache class a result carries. Curated pages are bake-at-build
+ * (HIT-1d; their JSON is path-keyed like every `.json`), so a new Worker
+ * version is their only refresh. Live CLI, branch, and website results are
+ * HIT-min under the tag their writer purges, all three representations
+ * alike, so `/json` never sits in a day-long class.
+ */
+export function resultCacheClass(result: ServedResult): CacheClassSpec {
+  if (result.curated) return { klass: result.representation === 'json' ? 'short' : 'hit-1d' };
+  return { klass: 'hit-min', tag: resultTag(result.lane, result.target) };
 }
 
 /** `true` when the Host header ends with `.workers.dev` — the staging origin. */
@@ -149,14 +209,28 @@ export function isStagingHost(host: string): boolean {
 
 function markdownTwinFor(pathname: string): string {
   if (pathname === '/') return '/index.md';
-  // A result page's twin is a trailing segment, never an extension.
-  if (isScorePath(pathname)) {
-    const split = splitRepresentation(pathname);
-    if (split) return scoreMarkdownPath(split.target);
-  }
   // Strip trailing slash and optional `.html` before appending `.md`.
   const normalized = pathname.replace(/\/$/, '').replace(/\.html$/, '');
   return `${normalized}.md`;
+}
+
+function alternateLink(href: string, type: string): string {
+  return `<${href}>; rel="alternate"; type="${type}"`;
+}
+
+/**
+ * The `Link` alternates of a result page: the `/md` twin and the `/json`
+ * envelope, from the same builders as the page's `<head>` links. Null off
+ * the result namespace.
+ */
+function resultAlternateLinks(pathname: string): string | null {
+  if (!isScorePath(pathname)) return null;
+  const split = splitRepresentation(pathname);
+  if (!split) return null;
+  return [
+    alternateLink(scoreMarkdownPath(split.target), 'text/markdown'),
+    alternateLink(scoreJsonPath(split.target), 'application/json'),
+  ].join(', ');
 }
 
 /** True for `/score/<target>/md` and `/score/<target>/json`: one representation, never negotiated. */
@@ -203,27 +277,27 @@ export function isRepresentationPinned(pathname: string): boolean {
   return pathname.endsWith('.md') || isSingleRepresentation(pathname) || isPinnedResultRepresentation(pathname);
 }
 
+// The progress page of either lane and the legacy in-progress web page are
+// never stored at the edge, whatever their status.
 function isAlwaysMissPath(pathname: string): boolean {
-  return pathname === '/web/scoring' || pathname === '/web/scoring.md' || pathname.startsWith('/web/scoring/');
+  return (
+    isProgressPath(pathname) ||
+    pathname === '/web/scoring' ||
+    pathname === '/web/scoring.md' ||
+    pathname.startsWith('/web/scoring/')
+  );
 }
 
 /**
- * HIT-min Cache-Tag for a request pathname, or null when the URL is not
- * HIT-min. Same tag on every HTML/markdown variant of a URL. Classify from
- * the request URL, not from `opts.pathname` (that stays HTML-canonical for
- * Link/twin generation so `/web.md` is not treated as extensionless).
+ * HIT-min Cache-Tag a request pathname carries on its own, or null. The
+ * homepage and the leaderboard are the only pages the path alone can
+ * tag; every other HIT-min page is tagged by the route that serves it.
+ * Classify from the request URL, not from `opts.pathname` (that stays
+ * HTML-canonical for Link/twin generation).
  */
 export function hitMinCacheTag(pathname: string): string | null {
-  if (pathname === '/' || pathname === '/index.md') return homeTag();
-  if (pathname === '/web' || pathname === '/web.md') return webTag();
-  const match = pathname.match(/^\/web\/([^/]+?)(\.md)?$/);
-  if (!match) return null;
-  const domain = match[1];
-  if (domain === 'scoring') return null;
-  return webDomainTag(domain);
+  return isHitMinPath(pathname) ? homeTag() : null;
 }
-
-type CacheClass = 'hit-1d' | 'hit-min' | 'miss' | 'short' | 'immutable';
 
 function applyCacheClass(headers: Headers, klass: CacheClass, tag?: string): void {
   headers.delete('Cache-Tag');
@@ -252,14 +326,12 @@ function applyCacheClass(headers: Headers, klass: CacheClass, tag?: string): voi
   }
 }
 
-function classifyCacheClass(
-  requestPathname: string,
-  linkPathname: string,
-  status: number,
-): { klass: CacheClass; tag?: string } {
+function classifyCacheClass(url: URL, linkPathname: string, status: number, served?: CacheClassSpec): CacheClassSpec {
+  const requestPathname = url.pathname;
   if (status >= 400 || isAlwaysMissPath(requestPathname)) {
     return { klass: 'miss' };
   }
+  if (served) return served;
   if (isHashedAsset(linkPathname) || isHashedAsset(requestPathname)) {
     return { klass: 'immutable' };
   }
@@ -273,6 +345,8 @@ function classifyCacheClass(
   ) {
     return { klass: 'short' };
   }
+  // A prefilled audit page is one edge object per target string.
+  if (isAuditPath(requestPathname) && url.search !== '') return { klass: 'hit-min' };
   const tag = hitMinCacheTag(requestPathname);
   if (tag) return { klass: 'hit-min', tag };
   return { klass: 'hit-1d' };
@@ -291,12 +365,14 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   const headers = new Headers(response.headers);
   const url = new URL(opts.request.url);
   const requestPathname = url.pathname;
+  const resultLinks = resultAlternateLinks(opts.pathname);
 
   headers.delete('Cache-Tag');
 
   if (opts.servedMarkdown) {
     headers.set('Content-Type', 'text/markdown; charset=utf-8');
     headers.set('X-Robots-Tag', 'noindex');
+    if (resultLinks) headers.set('Link', resultLinks);
     if (isRepresentationPinned(requestPathname)) {
       headers.delete('Vary');
     } else {
@@ -306,6 +382,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     headers.set('Content-Type', 'application/json; charset=utf-8');
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('X-Robots-Tag', 'noindex');
+    headers.delete('Link');
     headers.delete('Vary');
   } else if (isSvg(opts.pathname)) {
     headers.set('Content-Type', 'image/svg+xml; charset=utf-8');
@@ -316,7 +393,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
   } else if (isUntwinnedSource(opts.pathname)) {
     headers.delete('Vary');
   } else {
-    const twinLink = `<${markdownTwinFor(opts.pathname)}>; rel="alternate"; type="text/markdown"`;
+    const twinLink = resultLinks ?? alternateLink(markdownTwinFor(opts.pathname), 'text/markdown');
     headers.set('Link', opts.pathname === '/' ? `${twinLink}, ${ROOT_DISCOVERY_LINKS}` : twinLink);
     headers.set('X-Llms-Txt', '/llms.txt');
     headers.set('Vary', 'Accept, User-Agent');
@@ -326,7 +403,7 @@ export function applyHeaders(response: Response, opts: ApplyHeadersOptions): Res
     headers.set('Content-Security-Policy', CSP_HTML);
   }
 
-  const { klass, tag } = classifyCacheClass(requestPathname, opts.pathname, response.status);
+  const { klass, tag } = classifyCacheClass(url, opts.pathname, response.status, opts.cache);
   applyCacheClass(headers, klass, tag);
 
   // Staging guard — three-line check per locked decision #4. Applied LAST so

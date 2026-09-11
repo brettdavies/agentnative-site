@@ -23,7 +23,7 @@ import {
   type ResultEnv,
 } from './audit/result';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
-import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
+import { flushHitMinPurge, runWithHitMinPurge, webTag } from './audit-web/hit-min-purge';
 import {
   buildFrontpageBoardEmptyState,
   buildFrontpageBoardMarkdown,
@@ -822,7 +822,12 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     const servedMarkdown = pathname.endsWith('.md') || detectPreference(request) === 'markdown';
     const response = await handleWebLeaderboard(request, env as WebAuditRouteEnv);
     if (response.status !== 200) return response;
-    return applyHeaders(response, { request, servedMarkdown, pathname: '/web' });
+    return applyHeaders(response, {
+      request,
+      servedMarkdown,
+      pathname: '/web',
+      cache: { klass: 'hit-min', tag: webTag() },
+    });
   }
 
   // /web/scoring[/<domain>] — the transient in-progress streaming page.

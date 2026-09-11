@@ -118,6 +118,64 @@ test.describe('skip-Worker HIT — staging Workers Caching', () => {
     expect(about.headers()['cache-control'] ?? '').not.toContain('must-revalidate');
   });
 
+  test('repeat GET /score/ripgrep/json is HIT with Age in the path-keyed short class with no Vary', async ({
+    request,
+  }) => {
+    const second = await warmThenGet(request, '/score/ripgrep/json', { accept: 'application/json' });
+    expect(second.status()).toBe(200);
+    expect(second.headers()['content-type']).toContain('application/json');
+    expect(second.headers()['vary'] ?? '').toBe('');
+    expect(isSkipWorkerHit(second.headers())).toBe(true);
+    expect(second.headers()['cache-control'] ?? '').toContain('s-maxage=86400');
+  });
+
+  test('repeat GET /score/<seeded host>/json is HIT with Age in the HIT-min class with no Vary', async ({
+    request,
+  }) => {
+    // The website record is written by the web-audit suite; without it the
+    // route answers the no-store 404 and there is no class to prove.
+    const first = await request.get(`${STAGING_BASE}/score/anc.dev/json`, {
+      headers: { ...ACCESS_HEADERS, accept: 'application/json' },
+    });
+    test.skip(first.status() === 404, 'no website record for anc.dev on this staging deploy');
+    expect(first.status()).toBe(200);
+    const second = await request.get(`${STAGING_BASE}/score/anc.dev/json`, {
+      headers: { ...ACCESS_HEADERS, accept: 'application/json' },
+    });
+    expect(second.headers()['vary'] ?? '').toBe('');
+    expect(isSkipWorkerHit(second.headers())).toBe(true);
+    expect(second.headers()['cache-control'] ?? '').toContain('max-age=0');
+    expect(second.headers()['cache-control'] ?? '').toContain('must-revalidate');
+  });
+
+  test('repeat GET /scorecards is HIT with Age in the HIT-min class with Vary', async ({ request }) => {
+    const second = await warmThenGet(request, '/scorecards', BROWSER);
+    expect(second.status()).toBe(200);
+    expect(varyIsAcceptUserAgent(second.headers()['vary'])).toBe(true);
+    expect(isSkipWorkerHit(second.headers())).toBe(true);
+    expect(second.headers()['cache-control'] ?? '').toContain('max-age=0');
+    expect(second.headers()['cache-control'] ?? '').toContain('must-revalidate');
+  });
+
+  test('GET /scoring is not a skip-Worker HIT', async ({ request }) => {
+    for (const path of ['/scoring?target=ripgrep', '/scoring.md']) {
+      const res = await request.get(`${STAGING_BASE}${path}`, { headers: { ...ACCESS_HEADERS, ...BROWSER } });
+      expect(res.headers()['cf-cache-status']?.toUpperCase()).not.toBe('HIT');
+      expect(res.headers()['cache-control'] ?? '').toContain('no-store');
+    }
+  });
+
+  test('a prefilled /audit is the short edge class; bare /audit stays HIT-1d', async ({ request }) => {
+    const prefilled = await warmThenGet(request, '/audit?lane=web&target=example.com', BROWSER);
+    expect(prefilled.status()).toBe(200);
+    expect(prefilled.headers()['cache-control'] ?? '').toContain('max-age=0');
+    expect(prefilled.headers()['cache-control'] ?? '').not.toContain('s-maxage');
+    const bare = await warmThenGet(request, '/audit', BROWSER);
+    expect(bare.headers()['cache-control'] ?? '').toContain('max-age=300');
+    expect(bare.headers()['cache-control'] ?? '').not.toContain('must-revalidate');
+    expect(isSkipWorkerHit(bare.headers())).toBe(true);
+  });
+
   test('GET /web/scoring is not a skip-Worker HIT', async ({ request }) => {
     const res = await request.get(`${STAGING_BASE}/web/scoring`, {
       headers: { ...ACCESS_HEADERS, ...BROWSER },

@@ -609,6 +609,87 @@ describe('representations and headers', () => {
     }
   });
 
+  test('live, branch, and website results are HIT-min under their purge tag in all three representations', async () => {
+    const env = await seededEnv();
+    const expected: Record<string, string> = {
+      ouch: 'cli:ouch',
+      'o/r@feature': 'cli:o/r@feature',
+      'anc.dev': 'web:anc.dev',
+    };
+    for (const [target, tag] of Object.entries(expected)) {
+      for (const path of [scorePath(target), scoreMarkdownPath(target), scoreJsonPath(target)]) {
+        const res = await route(path, env);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('cache-tag')).toBe(tag);
+        expect(res.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
+        expect(res.headers.get('cloudflare-cdn-cache-control')).toBe('public, max-age=300');
+        expect(res.headers.get('vary')).toBe(path === scorePath(target) ? 'Accept, User-Agent' : null);
+      }
+    }
+  });
+
+  test('a curated slug is HIT-1d with no tag and its build-emitted /json is the path-keyed short class', async () => {
+    const env = await seededEnv();
+    for (const path of [scorePath('ripgrep'), scoreMarkdownPath('ripgrep')]) {
+      const res = await route(path, env);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-tag')).toBeNull();
+      expect(res.headers.get('cache-control')).toBe('public, max-age=300, stale-while-revalidate=60');
+      expect(res.headers.get('cloudflare-cdn-cache-control')).toBe('public, max-age=86400');
+    }
+    const json = await route(scoreJsonPath('ripgrep'), env);
+    expect(json.headers.get('cache-tag')).toBeNull();
+    expect(json.headers.get('cache-control')).toBe('public, max-age=300, s-maxage=86400, stale-while-revalidate=60');
+    expect(json.headers.get('cloudflare-cdn-cache-control')).toBeNull();
+  });
+
+  test('the legacy adapters carry the same tag as the unified page', async () => {
+    const env = await seededEnv();
+    const legacyWeb = await handleLegacyWebResultPath(get('/web/anc.dev'), env);
+    expect(legacyWeb.headers.get('cache-tag')).toBe('web:anc.dev');
+    const legacyLive = await handleLegacyLiveScorePath(get('/score/live/ouch'), env);
+    expect(legacyLive.headers.get('cache-tag')).toBe('cli:ouch');
+  });
+
+  test('a 404 and the registry-outage 503 carry no tag and are no-store', async () => {
+    const env = await seededEnv();
+    const missing = await route('/score/never-audited.dev/json', env);
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('cache-tag')).toBeNull();
+    expect(missing.headers.get('cache-control')).toBe('no-store');
+    const outage = await route('/score/ouch', await seededEnv({ failRegistry: true }));
+    expect(outage.status).toBe(503);
+    expect(outage.headers.get('cache-tag')).toBeNull();
+    expect(outage.headers.get('cache-control')).toBe('no-store');
+  });
+
+  test('the Link alternates on the HTML page and its twin name the head alternates; /json carries none', async () => {
+    const env = await seededEnv();
+    const linkTargets = (link: string | null): string[] =>
+      (link ?? '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.includes('rel="alternate"'))
+        .map((entry) => {
+          const [, href, type] = entry.match(/^<([^>]+)>;.*type="([^"]+)"/) ?? [];
+          return `${type} ${href}`;
+        });
+    for (const target of ['ripgrep', 'ouch', 'anc.dev', 'o/r@feature']) {
+      const html = await route(scorePath(target), env);
+      const alternates = headLinks(await html.text());
+      expect(alternates).toHaveLength(2);
+      expect(linkTargets(html.headers.get('link'))).toEqual(alternates);
+      const twin = await route(scoreMarkdownPath(target), env);
+      expect(linkTargets(twin.headers.get('link'))).toEqual(alternates);
+      const negotiated = await route(scorePath(target), env, { accept: 'text/markdown' });
+      expect(negotiated.headers.get('content-type')).toContain('text/markdown');
+      expect(linkTargets(negotiated.headers.get('link'))).toEqual(alternates);
+      const json = await route(scoreJsonPath(target), env);
+      expect(json.headers.get('link')).toBeNull();
+      expect(json.headers.get('vary')).toBeNull();
+    }
+  });
+
   test('a non-GET method is 405 with Allow', async () => {
     const env = await seededEnv();
     const res = await route('/score/ouch', env, {}, 'POST');
