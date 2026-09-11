@@ -2761,7 +2761,11 @@ main .remediation__body {
 .pscore__checks {
   margin-top: var(--space-4);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
+}
+.pscore__checks > .web-check {
+  min-width: 0;
 }
 
 /* The 404: one sentence, one prefilled audit link, a did-you-mean list. */
