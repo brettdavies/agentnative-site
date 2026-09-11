@@ -898,7 +898,7 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 | U4   | Admission helper and single transact endpoint | `src/worker/audit/admit.ts`, `src/worker/audit/api.ts`, `scripts/smoke-api-score.sh`                | U1, U2         | #343        |
 | U5   | CLI lane streaming from the Durable Object    | `src/worker/score/do.ts`, `sandbox-exec.ts`, `orchestrate.ts`                                       | U2, U4         | #346        |
 | U6   | Unified result route and JSON representations | `src/worker/audit/result.ts`, `src/build/08-scorecards-emit.mjs`                                    | U1, U2         | #345        |
-| U7   | Cache classes, tags, purge, Link alternates   | `src/worker/headers.ts`                                                                             | U1, U6         |             |
+| U7   | Cache classes, tags, purge, Link alternates   | `src/worker/headers.ts`                                                                             | U1, U6         | #347        |
 | U8 | Shared entry form on `/` and `/audit` | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md` | U1, U3, U9 |             |
 | U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 |             |
 | U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         |             |
