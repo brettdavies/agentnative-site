@@ -241,11 +241,10 @@ function toolVersionOf(scorecard: unknown): string {
   return typeof version === 'string' ? version : '';
 }
 
-// The deployed homepage forwards to `share_url`. A branch run has a page
-// only once its record is written under the branch key, so it carries none
-// until then.
-function legacyShareUrl(spec: InstallSpec, envelope: AuditEnvelope): string | null {
-  return spec.pm === 'git-clone' ? null : envelope.scorecard_url;
+// The deployed homepage forwards to `share_url`: the result's own page,
+// which a branch run has once its record is written under the branch key.
+function legacyShareUrl(envelope: AuditEnvelope): string | null {
+  return envelope.scorecard_url;
 }
 
 function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutcome {
@@ -264,7 +263,7 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: legacyShareUrl(result.spec, envelope),
+        shareUrl: legacyShareUrl(envelope),
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
       };
@@ -284,7 +283,7 @@ function outcomeOf(result: RunFreshResult, input: RunCliAuditInput): CliRunOutco
         envelope,
         spec: result.spec,
         resolvedStep: result.resolved_step,
-        shareUrl: legacyShareUrl(result.spec, envelope),
+        shareUrl: legacyShareUrl(envelope),
         ancVersion: result.anc_version,
         scorecard: result.scorecard,
         installMs: result.install_ms,

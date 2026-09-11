@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
-import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from '../src/worker/audit/api';
+import { type AuditApiDeps, type AuditApiEnv, handleAuditApi, isAuditApiPath } from '../src/worker/audit/api';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import type { Sandbox } from '../src/worker/score/do';
@@ -72,8 +72,12 @@ type Overrides = Partial<{
   noKv: boolean;
   noLimiter: boolean;
   doResponse: unknown;
+  /** Replaces the JSON-body Durable Object stub with a fetch of the caller's own. */
+  doFetch: Sandbox['fetch'];
   doThrows: boolean;
   onDoFetch: () => void;
+  /** Merged into the deps the caller passes to handleAuditApi. */
+  deps: Partial<AuditApiDeps>;
   cachePutThrows: boolean;
   probe: 'ok' | 'unreachable';
   kvSeed: Record<string, string>;
@@ -96,7 +100,7 @@ function makeKv(seed: Record<string, string>, tracker?: Tracker): KVNamespace {
   } as unknown as KVNamespace;
 }
 
-export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<string, string> } {
+export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<string, string>; _deps: AuditApiDeps } {
   const tracker = overrides.tracker ?? newTracker();
   const cacheStore = new Map<string, string>();
   for (const [k, v] of Object.entries(overrides.cacheContent ?? {})) cacheStore.set(k, JSON.stringify(v));
@@ -108,10 +112,11 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
     scorecard: { tool: { name: 'ouch', binary: 'ouch', version: '0.5.0' }, badge: { score_pct: 71, eligible: true } },
     anc_version: ANC_VERSION,
   };
-  const stubFetch: Sandbox['fetch'] = async () => {
+  const stubFetch: Sandbox['fetch'] = async (req) => {
     tracker.doCalls += 1;
     overrides.onDoFetch?.();
     if (overrides.doThrows) throw new Error('DO exploded');
+    if (overrides.doFetch) return overrides.doFetch(req);
     return new Response(JSON.stringify(doResponse), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const limiter = (name: string, ok: boolean) => ({
@@ -182,7 +187,12 @@ export function makeEnv(overrides: Overrides = {}): AuditApiEnv & { _kv: Map<str
     _kv: (kv as unknown as { _store: Map<string, string> })._store,
   } as unknown as AuditApiEnv & { _kv: Map<string, string> };
   return Object.assign(env, {
-    _deps: { turnstileFetch, siteverifyTimeoutMs: 50, probeFetch: probeFetchFor(tracker, overrides.probe ?? 'ok') },
+    _deps: {
+      turnstileFetch,
+      siteverifyTimeoutMs: 50,
+      probeFetch: probeFetchFor(tracker, overrides.probe ?? 'ok'),
+      ...(overrides.deps ?? {}),
+    },
   });
 }
 
@@ -211,7 +221,7 @@ function makeCtx(): ExecutionContext & { _promises: Promise<unknown>[] } {
   } as unknown as ExecutionContext & { _promises: Promise<unknown>[] };
 }
 
-type Deps = { turnstileFetch: typeof fetch; siteverifyTimeoutMs: number; probeFetch: typeof fetch };
+type Deps = AuditApiDeps;
 
 function post(
   body: Record<string, unknown> | string,
@@ -640,7 +650,12 @@ describe('POST /api/score: refresh and branch snapshots', () => {
     const tokened = await call(post({ target: 'o/r@main', turnstile_token: 'x' }), env);
     expect(tokened.res.status).toBe(200);
     const body = (await tokened.res.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({ tier: 'live', target: 'o/r@main', scorecard_url: 'https://anc.dev/score/o/r@main' });
+    expect(body).toMatchObject({
+      tier: 'live',
+      target: 'o/r@main',
+      scorecard_url: 'https://anc.dev/score/o/r@main',
+      share_url: 'https://anc.dev/score/o/r@main',
+    });
     expect(tracker.doCalls).toBe(1);
   });
 });

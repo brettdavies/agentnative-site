@@ -37,6 +37,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { scorePath } from '../../../shared/audit-routes';
 import { loadHintsIndex, lookupOnly, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
@@ -205,7 +206,7 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       });
 
       if (lookup.kind === 'curated') {
-        const scorecardUrlPath = lookup.scorecard_url ?? `/score/${lookup.entry.name}`;
+        const scorecardUrlPath = lookup.scorecard_url ?? scorePath(lookup.entry.name);
         const scorecard_url = scorecardUrlPath.startsWith('http') ? scorecardUrlPath : `${siteUrl}${scorecardUrlPath}`;
         return textContent({
           audited: false,

@@ -22,7 +22,6 @@
 import { API_SCORE_PATH } from '../../shared/audit-routes';
 import { isRepresentationPinned } from '../headers';
 import { AUDITOR_URL } from '../spec-version.gen';
-import { emitLog } from '../telemetry/log';
 import type { CacheEnv } from './cache';
 import { preferenceFor } from './content-negotiation';
 import { type CliCoreEnv, isBranchScoped, loadCliIndexes, readCliTier, runCliAudit, validateCliInput } from './core';
@@ -33,12 +32,12 @@ import { _resetRegistryIndexCache } from './registry-lookup';
 import { CTA, type ScoreError, shapeScoreError, shapeScoreSuccess } from './response-shape';
 import { issue, newSession, read as readSession, SessionConfigError, type SessionEnv } from './session';
 import {
-  type FreshnessTag,
-  type InputKindTag,
-  type PmTag,
+  buildScoreEventFields,
+  emitScoreTier,
+  newScoreTierTelemetry,
   recordScoreEvent,
-  type ScoreEventFields,
   type ScoreTelemetryEnv,
+  type ScoreTierTelemetry,
 } from './telemetry';
 import { isVerifyUnavailable, type TurnstileEnv, verifyTurnstile } from './turnstile';
 import type { ValidatedInput } from './validate';
@@ -83,124 +82,13 @@ export function _resetIndexCache(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Telemetry — per-request tier accumulator.
-//
-// One structured log line per request, scope `score.tier`, captures which
-// tier served the response and the pre/post-discovery cache attempt+hit
-// flags so operators can later query "what percentage of cache hits came
-// from pre vs post discovery?" via the observability binding. NOT exposed
-// in the response body — operational signal, not part of the
-// spec_version + anc_version + auditor_url response contract.
-//
-// `tier` records the resolution branch that produced the response:
-//   - `curated`     — registry-fast-path hit
-//   - `cache_pre`   — step 2 R2 cache hit (binary derivable from input)
-//   - `cache_post`  — step 6.5 R2 cache hit (binary discovered, then re-checked)
-//   - `live`        — DO dispatched and returned success
-//   - `error_<code>`— terminal error (validation, gate denial, no-resolve, etc.)
-//
-// The accumulator is mutated as the pipeline progresses; the single log
-// line is emitted in a try/finally so every code path reports.
-// ---------------------------------------------------------------------------
-
-type Telemetry = {
-  tier: string;
-  cache_pre_attempted: boolean;
-  cache_pre_hit: boolean;
-  cache_post_attempted: boolean;
-  cache_post_hit: boolean;
-  binary: string | null;
-  input_kind: string | null;
-  // U10 Analytics Engine fields — see telemetry.ts for the blob/double
-  // slot map. Captured here as the pipeline advances; folded into a
-  // single writeDataPoint call in handleScore's finally block.
-  pm: PmTag | null;
-  freshness: FreshnessTag | null;
-  resolved_step: ResolvedStep | 'registry' | null;
-  install_ms: number | null;
-  anc_audit_ms: number | null;
-};
-
-function newTelemetry(): Telemetry {
-  return {
-    tier: 'unset',
-    cache_pre_attempted: false,
-    cache_pre_hit: false,
-    cache_post_attempted: false,
-    cache_post_hit: false,
-    binary: null,
-    input_kind: null,
-    pm: null,
-    freshness: null,
-    resolved_step: null,
-    install_ms: null,
-    anc_audit_ms: null,
-  };
-}
-
-function emitTelemetry(t: Telemetry): void {
-  emitLog(
-    { scope: 'score.tier' },
-    {
-      tier: t.tier,
-      cache_pre_attempted: t.cache_pre_attempted,
-      cache_pre_hit: t.cache_pre_hit,
-      cache_post_attempted: t.cache_post_attempted,
-      cache_post_hit: t.cache_post_hit,
-      binary: t.binary,
-      input_kind: t.input_kind,
-    },
-  );
-}
-
-// Map the in-handler Telemetry shape into the AE writeDataPoint
-// payload. Pure function so the telemetry-regression test can pin
-// every slot's derivation. blob1 maps ValidatedInput.kind ('slug' |
-// 'install-command' | 'github-url' | 'unknown') onto the AE input-
-// kind union — 'slug' becomes 'registry' because validate.ts only
-// emits 'slug' for inputs that matched the by_slug index. Error
-// codes are derived by stripping the `error_` prefix the in-handler
-// tier string carries; non-error tiers (curated / cache_pre /
-// cache_post / live / unset) return null in blob3.
-function buildScoreEventFields(t: Telemetry, totalMs: number, status: number): ScoreEventFields {
-  const errorCode = t.tier.startsWith('error_') ? (t.tier.slice('error_'.length) as ScoreError['code']) : null;
-  return {
-    input_kind: mapInputKind(t.input_kind),
-    pm: t.pm,
-    error_code: errorCode,
-    freshness: t.freshness,
-    resolved_step: t.resolved_step,
-    total_ms: totalMs,
-    install_ms: t.install_ms,
-    anc_audit_ms: t.anc_audit_ms,
-    response_status: status,
-    tool: t.binary,
-  };
-}
-
-function mapInputKind(kind: string | null): InputKindTag | null {
-  switch (kind) {
-    case 'slug':
-      return 'registry';
-    case 'install-command':
-      return 'install-command';
-    case 'github-url':
-      return 'github-url';
-    case 'unknown':
-      return 'invalid';
-    default:
-      return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
 const CTA_INSTALL_ANC = CTA.installAnc;
 
 export async function handleScore(request: Request, env: ScoreEnv): Promise<Response> {
-  const telemetry = newTelemetry();
+  const telemetry = newScoreTierTelemetry();
   const start = Date.now();
   const url = new URL(request.url);
   let response: Response | undefined;
@@ -213,12 +101,17 @@ export async function handleScore(request: Request, env: ScoreEnv): Promise<Resp
     // the AE row so the error-code distribution still sees the
     // unhandled-exception class as 5xx rather than a missing value.
     const status = response?.status ?? 500;
-    emitTelemetry(telemetry);
+    emitScoreTier(telemetry);
     recordScoreEvent(env, buildScoreEventFields(telemetry, totalMs, status));
   }
 }
 
-async function handleScoreInner(url: URL, request: Request, env: ScoreEnv, telemetry: Telemetry): Promise<Response> {
+async function handleScoreInner(
+  url: URL,
+  request: Request,
+  env: ScoreEnv,
+  telemetry: ScoreTierTelemetry,
+): Promise<Response> {
   const method = request.method.toUpperCase();
   const preference = preferenceFor(url.pathname, request);
 

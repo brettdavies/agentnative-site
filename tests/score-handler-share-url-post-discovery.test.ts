@@ -417,7 +417,7 @@ describe('/api/score — share_url red-team for github-url WITHOUT a hint', () =
 });
 
 describe('/api/score — branch-scoped pastes are snapshots', () => {
-  test('github-url with /tree/<branch>: the legacy live surface carries no share_url', async () => {
+  test('github-url with /tree/<branch>: the response names the branch page as share_url', async () => {
     installSmartFetch();
     try {
       const tracker: CallTracker = { doCalls: 0, lastSpecBinary: null };
@@ -431,7 +431,7 @@ describe('/api/score — branch-scoped pastes are snapshots', () => {
       const res = await handleScore(postScore('https://github.com/sharkdp/hexyl/tree/feature/foo'), env);
       expect(res.status).toBe(200);
       const body = (await res.json()) as { share_url?: string };
-      expect(body.share_url).toBeUndefined();
+      expect(body.share_url).toBe('https://anc.dev/score/sharkdp/hexyl@feature/foo');
     } finally {
       restoreFetch();
     }

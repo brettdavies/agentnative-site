@@ -13,10 +13,9 @@
 //   2. github-url with an explicit branch (`/tree/<branch>`). A branch
 //      target is a snapshot: it never serves from the curated or cache
 //      tiers and always runs live, on an uncurated repo and on a curated
-//      one alike. The legacy `/score/live/<binary>` surface cannot serve
-//      a branch result, so this handler's response carries no
-//      `share_url` for it; the unified endpoint's branch result URL is
-//      pinned in tests/audit-api.test.ts.
+//      one alike. Its record is written under the branch key, so the
+//      response names the branch page as `share_url`; the unified
+//      endpoint's branch result URL is pinned in tests/audit-api.test.ts.
 //
 // All tests mock at the DO boundary using the same Sandbox['fetch']
 // stub shape score-handler.test.ts uses, so any future Sandbox class
@@ -397,7 +396,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     });
   });
 
-  test('branch URL on uncurated repo → live DO dispatched; the legacy response carries no share_url', async () => {
+  test('branch URL on uncurated repo → live DO dispatched; the response names the branch page as share_url', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,
@@ -436,8 +435,8 @@ describe('/api/score — branch URLs + no-release repos', () => {
     // NOT registry_hit — branch-scoped inputs never wear the curated kind.
     expect(body.scorecard.kind).toBeUndefined();
     expect(body.scorecard.tool.name).toBe('gping');
-    // The legacy live surface cannot serve a branch snapshot.
-    expect(body.share_url).toBeUndefined();
+    // The branch record is written under its own key, so its page exists.
+    expect(body.share_url).toMatch(/\/score\/orf\/gping@master$/);
     // Response triad on success.
     expect(body.spec_version).toBeTruthy();
     expect(body.auditor_url).toBeTruthy();
@@ -481,8 +480,8 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.scorecard.scorecard_url).toBeUndefined();
     expect(body.scorecard.tool.name).toBe('ripgrep');
     expect(body.scorecard.score?.value).toBe(88);
-    // The legacy live surface cannot serve a branch snapshot, curated or not.
-    expect(body.share_url).toBeUndefined();
+    // A curated repo's branch snapshot still has its own page.
+    expect(body.share_url).toMatch(/\/score\/BurntSushi\/ripgrep@/);
     expect(body.anc_version).toBe(ANC_VERSION);
   });
 
