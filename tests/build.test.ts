@@ -9,6 +9,7 @@ import {
   curatedResultEnvelope,
   REAPABLE_SCORE_FILE_RE,
 } from '../src/build/08-scorecards-emit.mjs';
+import { scorecardTwinLinks } from '../src/build/09-llms-emit.mjs';
 import { badgeColor, badgeFormat, renderBadgeSvg } from '../src/build/badge.mjs';
 import { runInvariantChecks } from '../src/build/build.mjs';
 import { extractDescription, extractTitle } from '../src/build/content.mjs';
@@ -3302,5 +3303,15 @@ describe('llms surface — twin frontmatter stays out (regression lock)', () => 
     expect(out).toContain('initialize');
     expect(out).toContain('https://anc.dev/mcp-skill.md');
     expect(out).toContain('Full recipes');
+  });
+});
+
+describe('llms.txt scorecard links', () => {
+  test('each curated tool links its markdown twin at the /md segment, alphabetical by name', () => {
+    const links = scorecardTwinLinks([{ tool: { name: 'ripgrep' } }, { tool: { name: 'bat' } }]);
+    expect(links).toEqual([
+      { name: 'bat', path: '/score/bat/md' },
+      { name: 'ripgrep', path: '/score/ripgrep/md' },
+    ]);
   });
 });
