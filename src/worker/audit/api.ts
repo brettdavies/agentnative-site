@@ -80,7 +80,7 @@ import {
   readWebTier,
   runWebAuditStream,
   type WebCoreEnv,
-  webCacheEnvelope,
+  webEnvelope,
 } from '../audit-web/core';
 import { flushHitMinPurge, runWithHitMinPurge } from '../audit-web/hit-min-purge';
 import type { WebSiteType } from '../audit-web/registry';
@@ -461,7 +461,7 @@ async function handleWeb(
   if (tier.kind === 'serve') {
     row.tier = 'cache';
     row.outcome = 'hit';
-    return jsonEnvelope(webCacheEnvelope(target, tier.cached, origin));
+    return jsonEnvelope(await webEnvelope(env, { tier: 'cache', host: target.host, record: tier.cached, origin }));
   }
 
   // An explicit listing choice is its own request: attaching would answer it
@@ -482,7 +482,7 @@ async function handleWeb(
     if (admission.error.code === 'web_audit_disabled' && tier.cached) {
       row.tier = 'cache';
       row.outcome = 'hit_disabled';
-      return jsonEnvelope(webCacheEnvelope(target, tier.cached, origin));
+      return jsonEnvelope(await webEnvelope(env, { tier: 'cache', host: target.host, record: tier.cached, origin }));
     }
     return admissionResponse(admission, row);
   }
@@ -503,7 +503,10 @@ async function handleWeb(
     await flushHitMinPurge().catch(() => {});
     row.tier = 'cache';
     row.outcome = 'patched';
-    return jsonEnvelope(webCacheEnvelope(target, outcome.cached, origin), cookie);
+    return jsonEnvelope(
+      await webEnvelope(env, { tier: 'cache', host: target.host, record: outcome.cached, origin }),
+      cookie,
+    );
   }
 
   if (!(await meterWebAuditFlip(env, target, tier.write))) {

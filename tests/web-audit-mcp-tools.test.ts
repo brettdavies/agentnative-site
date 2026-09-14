@@ -11,6 +11,7 @@ import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
 import type { AuditEvent } from '../src/shared/audit-events';
 import type { AuditJob } from '../src/worker/audit/job';
+import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
@@ -212,7 +213,7 @@ afterEach(() => {
 });
 
 describe('get_website_audit', () => {
-  test('cache hit returns found:true with the scorecard and share_url', async () => {
+  test('cache hit returns found:true with the result envelope and its three URLs', async () => {
     const key = await keyFor('https://example.com/', SPEC_VERSION);
     const env = await makeEnv({
       cachePrefill: {
@@ -225,7 +226,15 @@ describe('get_website_audit', () => {
     });
     const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
     expect(body.found).toBe(true);
-    expect(body.share_url).toBe('https://anc.dev/web/example.com');
+    expect(body).toMatchObject({
+      kind: 'web',
+      tier: 'cache',
+      target: 'example.com',
+      scorecard_url: 'https://anc.dev/score/example.com',
+      markdown_url: 'https://anc.dev/score/example.com/md',
+      json_url: 'https://anc.dev/score/example.com/json',
+    });
+    expect(body).not.toHaveProperty('share_url');
     expect((body.scorecard as { badge: { score_pct: number } }).badge.score_pct).toBe(88);
   });
 
@@ -503,7 +512,7 @@ function onDemandDomainsFromMarkdown(md: string): string[] {
 }
 
 describe('list_website_audits', () => {
-  test('returns board summaries from the leaderboard aggregate with share_urls', async () => {
+  test('returns board summaries from the leaderboard aggregate with scorecard_urls', async () => {
     const env = await makeEnv({
       cachePrefill: {
         [`audits/web/leaderboard/${SPEC_VERSION}.json`]: {
@@ -524,10 +533,11 @@ describe('list_website_audits', () => {
     });
     const body = jsonContent(await callTool(env, 'list_website_audits', {}));
     expect(body.count).toBe(1);
-    const entries = body.entries as Array<{ domain: string; share_url: string; score_pct: number }>;
+    const entries = body.entries as Array<{ domain: string; scorecard_url: string; score_pct: number }>;
     expect(entries[0].domain).toBe('anc.dev');
     expect(entries[0].score_pct).toBe(67);
-    expect(entries[0].share_url).toBe('https://anc.dev/web/anc.dev');
+    expect(entries[0].scorecard_url).toBe('https://anc.dev/score/anc.dev');
+    expect(entries[0]).not.toHaveProperty('share_url');
   });
 
   test('an absent aggregate returns an empty list, not an error', async () => {
@@ -879,7 +889,7 @@ describe('audit_website public_listing', () => {
     const env = await envWithStore(store);
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
     expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-    expect(body.share_url).toBe('https://anc.dev/web/example.com');
+    expect(body.scorecard_url).toBe('https://anc.dev/score/example.com');
     const stored = JSON.parse(store.get(key) as string) as {
       scorecard: { public_listing: boolean };
       scored_at: string;
@@ -1014,6 +1024,66 @@ describe('audit_website public_listing', () => {
 // `cached`, `scored_at`, and `refresh_after` beside the scorecard, byte-identical
 // to what the browser API returns for the same stored state; misses,
 // disabled-without-cache, and gate errors carry none.
+// AE5 (R17, R18): the JSON representation and the MCP read tool are the same
+// envelope over the same record. Deep equality is the assertion, not a field
+// list: a new field on one surface has to reach the other or this fails.
+describe('AE5: get_website_audit and /score/<host>/json are one envelope', () => {
+  const HOST = 'example.com';
+
+  test('both surfaces return deep-equal scorecard, freshness, and result URLs for one stored record', async () => {
+    const key = await keyFor(`https://${HOST}/`, SPEC_VERSION);
+    const record = {
+      spec_version: SPEC_VERSION,
+      target_url: `https://${HOST}/`,
+      scored_at: '2026-09-10T20:00:00.000Z',
+      scorecard: {
+        schema_version: '0.2',
+        target_url: `https://${HOST}/`,
+        score_pct: 64,
+        score: { relative: 82, global: 64 },
+        results: [
+          { id: 'llms-txt', status: 'pass', label: 'llms.txt', evidence: '200' },
+          { id: 'openapi', status: 'absent', label: 'OpenAPI', evidence: 'no /openapi.json' },
+        ],
+      },
+    };
+    const env = await makeEnv({ cachePrefill: { [key]: record } });
+
+    const tool = jsonContent(await callTool(env, 'get_website_audit', { url: HOST }));
+
+    _resetResultCaches();
+    const res = await handleResultRoute(new Request(`https://anc.dev/score/${HOST}/json`), env as unknown as ResultEnv);
+    expect(res.status).toBe(200);
+    const route = (await res.json()) as Record<string, unknown>;
+
+    expect(tool.scorecard).toEqual(route.scorecard);
+    expect(tool.freshness).toEqual(route.freshness);
+    expect({
+      kind: tool.kind,
+      tier: tool.tier,
+      target: tool.target,
+      scorecard_url: tool.scorecard_url,
+      markdown_url: tool.markdown_url,
+      json_url: tool.json_url,
+      spec_version: tool.spec_version,
+      score_pct: tool.score_pct,
+    }).toEqual({
+      kind: route.kind,
+      tier: route.tier,
+      target: route.target,
+      scorecard_url: route.scorecard_url,
+      markdown_url: route.markdown_url,
+      json_url: route.json_url,
+      spec_version: route.spec_version,
+      score_pct: route.score_pct,
+    });
+    // The equality is over an enriched body, not two empty ones: the row the
+    // run marked absent carries its fix on both surfaces.
+    const rows = (tool.scorecard as { results: Array<{ id: string; remediation?: { skill_url: string } }> }).results;
+    expect(rows.find((r) => r.id === 'openapi')?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
+  });
+});
+
 describe('web-audit MCP freshness envelope', () => {
   const TARGET = 'https://example.com/';
   const IP = '203.0.113.21';
@@ -1023,7 +1093,10 @@ describe('web-audit MCP freshness envelope', () => {
   const refreshAfter = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
 
   type Freshness = { cached: unknown; scored_at: unknown; refresh_after: unknown };
-  const freshnessOf = (body: Record<string, unknown>): Freshness => ({
+  // MCP results carry freshness inside the shared envelope; the legacy browser
+  // route still carries the three fields at the top level until it retires.
+  const freshnessOf = (body: Record<string, unknown>): Freshness => body.freshness as Freshness;
+  const flatFreshnessOf = (body: Record<string, unknown>): Freshness => ({
     cached: body.cached,
     scored_at: body.scored_at,
     refresh_after: body.refresh_after,
@@ -1075,8 +1148,7 @@ describe('web-audit MCP freshness envelope', () => {
     const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'never-seen.dev' }));
     expect(body.found).toBe(false);
     expect(body).not.toHaveProperty('cached');
-    expect(body).not.toHaveProperty('scored_at');
-    expect(body).not.toHaveProperty('refresh_after');
+    expect(body).not.toHaveProperty('freshness');
   });
 
   test('audit_website serve-cached reports cached:true with the stored instant', async () => {
@@ -1094,7 +1166,7 @@ describe('web-audit MCP freshness envelope', () => {
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
     expect(body.source).toBe('cache');
     expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
-    expect(Date.parse(body.refresh_after as string)).toBeLessThan(Date.now());
+    expect(Date.parse(freshnessOf(body).refresh_after as string)).toBeLessThan(Date.now());
   });
 
   test('an audit_website listing patch reports cached:true and does not restamp the stored instant', async () => {
@@ -1135,16 +1207,14 @@ describe('web-audit MCP freshness envelope', () => {
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'never-seen.dev' }, IP));
     expect(body.audited).toBe(false);
     expect(body).not.toHaveProperty('cached');
-    expect(body).not.toHaveProperty('scored_at');
-    expect(body).not.toHaveProperty('refresh_after');
+    expect(body).not.toHaveProperty('freshness');
   });
 
   test('list_website_audits carries no freshness fields', async () => {
     const env = await makeEnv({ cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['first.dev']) } });
     const body = jsonContent(await callTool(env, 'list_website_audits', {}));
     expect(body).not.toHaveProperty('cached');
-    expect(body).not.toHaveProperty('scored_at');
-    expect(body).not.toHaveProperty('refresh_after');
+    expect(body).not.toHaveProperty('freshness');
   });
 
   // AE5 across surfaces: one stored entry, three read paths, identical values.
@@ -1186,7 +1256,7 @@ describe('web-audit MCP freshness envelope', () => {
     const expected = { cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) };
     expect(freshnessOf(getBody)).toEqual(expected);
     expect(freshnessOf(auditBody)).toEqual(expected);
-    expect(freshnessOf(webBody)).toEqual(expected);
+    expect(flatFreshnessOf(webBody)).toEqual(expected);
   });
 
   test('both read-tool descriptions document the fields and the eligibility caveat', async () => {
@@ -1355,11 +1425,10 @@ describe('audit_website: a run already in flight', () => {
       audited: true,
       attached: true,
       source: 'fresh-audit',
-      cached: false,
-      scored_at: AT,
+      freshness: { cached: false, scored_at: AT },
       spec_version: SPEC_VERSION,
     });
-    expect(String(body.share_url)).toContain('example.com');
+    expect(String(body.scorecard_url)).toContain('example.com');
     expect((body.scorecard as { score_pct: number }).score_pct).toBe(64);
   });
 

@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findingRowsFromElements, selectAssemblePrompts } from '../src/client/assemble-prompt';
-import { fillAuditUrl, setPlan, setPublicListing } from '../src/client/webmcp-audit';
-import { fillCliTarget, fillWebTarget, openWebAudit, setSurface } from '../src/client/webmcp-home';
+import { fillTarget, openAudit, setSurface } from '../src/client/webmcp-entry';
 import { bindModelContext, getPageState, initWebMcp, toolsFor, WEBMCP_EXECUTE_MAX } from '../src/client/webmcp-lib';
 import { getAuditSummary, getFixPrompt, getFixPrompts, getWorksheet } from '../src/client/webmcp-result';
+import { AUDIT_PATH } from '../src/shared/audit-routes';
 import {
   assembleRemediation,
   PROMPT_EVIDENCE_MAX,
@@ -23,8 +23,7 @@ const DIST_JS = join(REPO_ROOT, 'dist', 'js', 'webmcp.js');
 const WEBMCP_SOURCES = [
   'client/webmcp.ts',
   'client/webmcp-lib.ts',
-  'client/webmcp-home.ts',
-  'client/webmcp-audit.ts',
+  'client/webmcp-entry.ts',
   'client/webmcp-result.ts',
   'client/webmcp-orientation.ts',
   'client/assemble-prompt.ts',
@@ -135,10 +134,12 @@ function names(pathname: string): string[] {
   return toolsFor(pathname).map((t) => t.name);
 }
 
-function homeDoc(opts: { surface?: 'cli' | 'web'; target?: string } = {}): {
+function homeDoc(opts: { surface?: 'cli' | 'web'; target?: string; listing?: boolean; action?: string } = {}): {
   doc: Document;
   form: Stub;
   input: Stub;
+  listing: Stub;
+  submit: Stub;
   cliRadio: Stub;
   webRadio: Stub;
 } {
@@ -151,33 +152,21 @@ function homeDoc(opts: { surface?: 'cli' | 'web'; target?: string } = {}): {
     checked: opts.surface === 'web',
   });
   const input = stubEl({ attrs: { 'data-audit-target': '' }, value: opts.target ?? '' });
-  const form = stubEl({ attrs: { 'data-audit-form': '' }, children: [input] });
+  const listing = stubEl({ attrs: { 'data-audit-listing': '', type: 'checkbox' }, checked: opts.listing ?? false });
+  const submit = stubEl({ attrs: { 'data-audit-submit': '', type: 'submit' } });
+  const form = stubEl({
+    attrs: { 'data-audit-form': '', action: opts.action ?? AUDIT_PATH },
+    children: [input, listing, submit],
+  });
   return {
     doc: stubDoc([cliRadio, webRadio, form]),
     form,
     input,
+    listing,
+    submit,
     cliRadio,
     webRadio,
   };
-}
-
-function auditDoc(opts: { url?: string; listing?: boolean; plan?: string } = {}): {
-  doc: Document;
-  input: Stub;
-  status: Stub;
-  listing: Stub;
-} {
-  const input = stubEl({ attrs: { 'data-web-audit-input': '' }, value: opts.url ?? '' });
-  const listing = stubEl({
-    attrs: { 'data-web-audit-listing': '', type: 'checkbox' },
-    checked: opts.listing ?? false,
-  });
-  const status = stubEl({
-    attrs: { 'data-web-audit-status': '' },
-    textContent: opts.plan ?? '',
-    hidden: !opts.plan,
-  });
-  return { doc: stubDoc([input, listing, status]), input, status, listing };
 }
 
 type ResultRow = {
@@ -277,13 +266,12 @@ function matrixRows(): ResultRow[] {
 }
 
 describe('toolsFor(pathname)', () => {
-  test('homepage registers orientation, page state, and P1 acts', () => {
+  test('homepage registers orientation, page state, and the entry-form acts', () => {
     expect(names('/')).toEqual([
       'get_page_state',
       'set_surface',
-      'fill_cli_target',
-      'fill_web_target',
-      'open_web_audit',
+      'fill_target',
+      'open_audit',
       'get_principle_url',
       'get_llms_index',
       'get_mcp_endpoint',
@@ -291,23 +279,21 @@ describe('toolsFor(pathname)', () => {
     expect(names('/index.html')).toEqual(names('/'));
   });
 
-  test('/audit registers the entry form tools the homepage has', () => {
-    expect(names('/audit')).toEqual(['set_surface', 'fill_cli_target', 'fill_web_target', 'open_web_audit']);
+  test('/audit carries the same entry-form tools as the homepage, and its markdown twin does too', () => {
+    expect(names('/audit')).toEqual(['get_page_state', 'set_surface', 'fill_target', 'open_audit']);
+    expect(names('/audit/')).toEqual(names('/audit'));
+    expect(names('/audit.md')).toEqual(names('/audit'));
   });
 
-  test('/web-audit registers the video-path prepare tools', () => {
-    expect(names('/web-audit')).toEqual(['get_page_state', 'fill_audit_url', 'set_plan', 'set_public_listing']);
-    expect(names('/web-audit/')).toEqual(names('/web-audit'));
-  });
-
-  test('/web/<host> registers worksheet answers', () => {
-    expect(names('/web/anc.dev')).toEqual([
+  test('a result page registers worksheet answers', () => {
+    expect(names('/score/anc.dev')).toEqual([
       'get_page_state',
       'get_worksheet',
       'get_fix_prompt',
       'get_fix_prompts',
       'get_audit_summary',
     ]);
+    expect(names('/score/o/r@feature')).toEqual(names('/score/anc.dev'));
   });
 
   test('orientation pages keep the three URL tools only', () => {
@@ -315,17 +301,19 @@ describe('toolsFor(pathname)', () => {
     expect(names('/mcp')).toEqual(names('/p1'));
   });
 
-  test('scoring, about, and the web board register nothing', () => {
-    expect(names('/web/scoring/anc.dev')).toEqual([]);
-    expect(names('/web/scoring')).toEqual([]);
+  // R19: the progress page runs the audit, so it carries no in-page tools
+  // and never loads the script that would register them.
+  test('the progress page, the leaderboard, and the bare score prefix register nothing', () => {
+    expect(names('/scoring')).toEqual([]);
+    expect(names('/scoring?target=anc.dev')).toEqual([]);
+    expect(names('/scorecards')).toEqual([]);
     expect(names('/about')).toEqual([]);
-    expect(names('/web')).toEqual([]);
-    expect(names('/score/curl')).toEqual([]);
+    expect(names('/score/')).toEqual([]);
   });
 
   test('names, descriptions, and schemas stay inside the WebMCP caps', () => {
     const seen = new Set<string>();
-    for (const path of ['/', '/web-audit', '/web/anc.dev', '/p1', '/mcp']) {
+    for (const path of ['/', '/audit', '/score/anc.dev', '/p1', '/mcp']) {
       for (const tool of toolsFor(path, { origin: 'https://anc.dev' })) {
         expect(tool.name.length).toBeLessThanOrEqual(30);
         expect(tool.description.length).toBeLessThanOrEqual(500);
@@ -341,7 +329,7 @@ describe('toolsFor(pathname)', () => {
     const home = toolsFor('/', { origin: 'https://anc.dev' });
     expect(home.find((t) => t.name === 'get_page_state')?.annotations?.readOnlyHint).toBe(true);
     expect(home.find((t) => t.name === 'set_surface')?.annotations?.readOnlyHint).toBeUndefined();
-    for (const tool of toolsFor('/web/anc.dev')) {
+    for (const tool of toolsFor('/score/anc.dev')) {
       expect({ name: tool.name, readOnly: tool.annotations?.readOnlyHint }).toEqual({
         name: tool.name,
         readOnly: true,
@@ -350,7 +338,7 @@ describe('toolsFor(pathname)', () => {
   });
 
   test('the paged result tools declare the filter and pagination schema', () => {
-    const tools = toolsFor('/web/anc.dev');
+    const tools = toolsFor('/score/anc.dev');
     for (const name of ['get_worksheet', 'get_fix_prompts']) {
       const schema = tools.find((t) => t.name === name)?.inputSchema as {
         properties: Record<string, { items?: { enum?: string[] } }>;
@@ -367,37 +355,51 @@ describe('toolsFor(pathname)', () => {
 });
 
 describe('execute helpers (Document stub)', () => {
-  test('fill_audit_url sets .value only and never submits', () => {
-    const page = auditDoc();
-    const out = fillAuditUrl(page.doc, { url: 'https://anc.dev' });
-    expect(page.input.value).toBe('https://anc.dev');
-    expect(out).toContain('Filled');
-    expect(page.input.events).toEqual([]);
+  test('fill_target writes the value and picks the lane from the target shape', () => {
+    const page = homeDoc();
+    expect(fillTarget(page.doc, { target: 'ripgrep' })).toContain('CLI target');
+    expect(page.input.value).toBe('ripgrep');
+    expect(page.cliRadio.checked).toBe(true);
+    // The classifier reads anc.dev as a host, so the lane follows without the
+    // caller naming it.
+    expect(fillTarget(page.doc, { target: 'anc.dev' })).toContain('website target');
+    expect(page.webRadio.checked).toBe(true);
+    // A fill states the target; it does not switch the page's panes.
+    expect(page.webRadio.events).toEqual([]);
   });
 
-  test('set_plan writes textContent and toggles hidden', () => {
-    const page = auditDoc();
-    setPlan(page.doc, { text: 'Agent prepared: audit anc.dev · waiting for you' });
-    expect(page.status.textContent).toBe('Agent prepared: audit anc.dev · waiting for you');
-    expect(page.status.hidden).toBe(false);
-    setPlan(page.doc, { text: '' });
-    expect(page.status.textContent).toBe('');
-    expect(page.status.hidden).toBe(true);
+  test('an explicit lane overrides the classifier, and a bad one is refused', () => {
+    const page = homeDoc();
+    expect(fillTarget(page.doc, { target: 'anc.dev', lane: 'cli' })).toContain('CLI target');
+    expect(page.cliRadio.checked).toBe(true);
+    expect(fillTarget(page.doc, { target: 'anc.dev', lane: 'sideways' })).toBe('lane must be "cli" or "web".');
+    expect(fillTarget(page.doc, { target: '' })).toBe('target must be a non-empty string.');
   });
 
-  test('set_plan rejects text over 200 characters', () => {
-    const page = auditDoc();
-    const out = setPlan(page.doc, { text: 'x'.repeat(201) });
-    expect(out).toContain('200');
-    expect(page.status.textContent).toBe('');
+  test('open_audit submits only a form whose action is the audit page', () => {
+    const page = homeDoc();
+    expect(openAudit(page.doc, { target: 'anc.dev' })).toContain('audit page');
+    expect(page.form.submits).toBe(1);
+    expect(page.input.value).toBe('anc.dev');
+    // A repointed action is the shape that would turn this hop into a
+    // transacting submit, so the tool refuses it instead.
+    const repointed = homeDoc({ action: '/api/score' });
+    expect(openAudit(repointed.doc, { target: 'anc.dev' })).toContain('only submits a form whose action is');
+    expect(repointed.form.submits).toBe(0);
   });
 
-  test('set_public_listing checks or unchecks the /web-audit box', () => {
-    const page = auditDoc({ listing: false });
-    expect(setPublicListing(page.doc, { listed: true })).toContain('listing');
-    expect(page.listing.checked).toBe(true);
-    setPublicListing(page.doc, { listed: false });
-    expect(page.listing.checked).toBe(false);
+  test('a rejected fill stops open_audit before it submits', () => {
+    const page = homeDoc();
+    expect(openAudit(page.doc, { target: '' })).toBe('target must be a non-empty string.');
+    expect(page.form.submits).toBe(0);
+  });
+
+  test('no entry tool clicks the submit control', () => {
+    const page = homeDoc();
+    setSurface(page.doc, { surface: 'web' });
+    fillTarget(page.doc, { target: 'anc.dev' });
+    openAudit(page.doc, {});
+    expect(page.submit.events).toEqual([]);
   });
 
   test('get_worksheet defaults to observed fixable rows in priority order', () => {
@@ -575,49 +577,33 @@ describe('execute helpers (Document stub)', () => {
 
   test('wrong-page acts return an error string', () => {
     const empty = stubDoc([]);
-    expect(fillAuditUrl(empty, { url: 'https://anc.dev' })).toContain('/web-audit');
-    expect(setPlan(empty, { text: 'hi' })).toContain('/web-audit');
     expect(setSurface(empty, { surface: 'web' })).toContain('homepage');
-    expect(fillCliTarget(empty, { text: 'ripgrep' })).toContain('homepage');
-    expect(openWebAudit(empty, {})).toContain('homepage');
+    expect(fillTarget(empty, { target: 'ripgrep' })).toContain('homepage');
+    expect(openAudit(empty, {})).toContain('homepage');
   });
 
-  test('the entry form tools fill the one target, select its lane, switch surface, and submit the GET form', () => {
+  test('set_surface flips the radios and dispatches change so the page follows', () => {
     const page = homeDoc();
-    expect(fillCliTarget(page.doc, { text: 'ripgrep' })).toContain('Filled');
-    expect(page.input.value).toBe('ripgrep');
-    expect(page.cliRadio.checked).toBe(true);
-    expect(fillWebTarget(page.doc, { url: 'https://anc.dev' })).toContain('Filled');
-    expect(page.input.value).toBe('https://anc.dev');
-    expect(page.webRadio.checked).toBe(true);
-    page.webRadio.checked = false;
-    page.cliRadio.checked = true;
     expect(setSurface(page.doc, { surface: 'web' })).toContain('web');
     expect(page.webRadio.checked).toBe(true);
     expect(page.cliRadio.checked).toBe(false);
     expect(page.webRadio.events[0]?.type).toBe('change');
-    const out = openWebAudit(page.doc, { url: 'https://example.com' });
-    expect(page.input.value).toBe('https://example.com');
-    expect(page.form.submits).toBe(1);
-    expect(out.toLowerCase()).toContain('audit page');
+    expect(setSurface(page.doc, { surface: 'sideways' })).toBe('surface must be "cli" or "web".');
   });
 
-  test('get_page_state reads back the target the fill tools wrote', () => {
-    // The read half of fill then verify. Reading a hook the entry form does
-    // not carry answers an empty URL after every successful fill.
+  test('get_page_state reads back the target the fill tool wrote', () => {
     const page = homeDoc();
-    fillCliTarget(page.doc, { text: 'ripgrep' });
-    const state = JSON.parse(getPageState(page.doc, '/')) as {
-      url: string;
-      surface: string;
-      listing: boolean | null;
-    };
-    expect(state.url).toBe('ripgrep');
-    expect(state.surface).toBe('cli');
-    expect(state.listing).toBeNull();
+    fillTarget(page.doc, { target: 'ripgrep' });
+    const state = JSON.parse(getPageState(page.doc, '/')) as Record<string, unknown>;
+    expect(state).toEqual({ path: '/', surface: 'cli', target: 'ripgrep', listing: false });
   });
 
-  test('execute returns a DOMString and never calls fetch or /web/scoring', async () => {
+  test('a page with no entry form reports no surface rather than guessing one', () => {
+    const state = JSON.parse(getPageState(stubDoc([]), '/score/anc.dev')) as Record<string, unknown>;
+    expect(state).toEqual({ path: '/score/anc.dev', surface: null, target: '', listing: null });
+  });
+
+  test('execute returns a DOMString and never calls fetch or reaches the progress page', async () => {
     const fetches: string[] = [];
     const orig = globalThis.fetch;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -625,26 +611,26 @@ describe('execute helpers (Document stub)', () => {
       return new Response('nope', { status: 500 });
     }) as typeof fetch;
     try {
-      const audit = auditDoc();
       const home = homeDoc();
       const result = resultDoc([{ id: 'openapi', keyword: 'must', status: 'absent', prompt: 'fix it' }]);
       const origin = 'https://anc.dev';
       const outputs: string[] = [];
-      for (const tool of toolsFor('/web-audit', { doc: audit.doc, origin })) {
-        outputs.push(await tool.execute({ url: 'https://anc.dev', text: 'ready', listed: true }));
-      }
       for (const tool of toolsFor('/', { doc: home.doc, origin })) {
-        outputs.push(await tool.execute({ surface: 'web', text: 'ripgrep', url: 'https://anc.dev', n: 1 }));
+        outputs.push(await tool.execute({ surface: 'web', target: 'anc.dev' }));
       }
-      for (const tool of toolsFor('/web/anc.dev', { doc: result, origin })) {
+      for (const tool of toolsFor('/audit', { doc: home.doc, origin })) {
+        outputs.push(await tool.execute({ surface: 'cli', target: 'ripgrep' }));
+      }
+      for (const tool of toolsFor('/score/anc.dev', { doc: result, origin })) {
         outputs.push(await tool.execute({ id: 'openapi' }));
       }
       expect(fetches).toEqual([]);
-      expect(home.form.submits).toBe(1);
+      // open_audit on each entry page: the form's own GET, nothing more.
+      expect(home.form.submits).toBe(2);
       for (const out of outputs) {
         expect(typeof out).toBe('string');
         expect(out.length).toBeLessThanOrEqual(WEBMCP_EXECUTE_MAX);
-        expect(out).not.toContain('/web/scoring');
+        expect(out).not.toContain('/scoring');
         expect(out).not.toContain('/api/score');
       }
     } finally {
@@ -873,13 +859,13 @@ describe('catalog prompts fit the WebMCP output cap (R21, KTD4)', () => {
     }
     expect(item.prompt_truncated).toBe(true);
     expect(prompt).toContain('… full fix at ');
-    expect(prompt).toContain('/web-audit/skill/');
+    expect(prompt).toContain('/fix/');
     // The recovery route is structured, so a reader never has to parse it
     // back out of the prompt's trailing marker.
     const pointer = item.full_fix as { tool: string; args: Record<string, string>; url: string };
     expect(pointer.tool).toBe('get_web_remediation');
     expect(pointer.args.check_id).toBe(item.id as string);
-    expect(pointer.url.endsWith(`/web-audit/skill/${item.id as string}.md`)).toBe(true);
+    expect(pointer.url.endsWith(`/fix/${item.id as string}.md`)).toBe(true);
     // The per-run facts survive the trim; only the catalog prose is cut.
     expect(prompt.startsWith('Goal: ')).toBe(true);
     expect(prompt).toContain('--- begin evidence ---');

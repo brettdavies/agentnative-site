@@ -1,8 +1,9 @@
 // score_cli MCP tool — cache-miss-only fresh-audit path.
 //
-// Composes the shared /api/score orchestrator's lookupOnly + runFreshOnly
-// intents so MCP and /api/score can never drift on cache semantics or
-// DO dispatch. The tool's flow (per KTD-3, KTD-4, KTD-7 of the plan):
+// Composes the CLI lane core's read tier and the shared orchestrator's
+// fresh run, so this tool, the transact endpoint, and the result route
+// cannot drift on cache semantics, DO dispatch, or the envelope they hand
+// back. Every scorecard-bearing answer here is that one envelope. The flow:
 //
 //   1. MCP_LIVE_SCORING_ENABLED kill switch. When falsy, returns
 //      isError: false with content { audited: false, message: "...
@@ -10,9 +11,9 @@
 //      get_scorecard so the cached scorecards remain available.
 //   2. validateInput on the raw input. Rejection returns isError: true
 //      with the validator's typed error envelope (security gate).
-//   3. lookupOnly first. Curated and cached hits return isError: false
-//      with audited: false + next_tool: get_scorecard — cache state is
-//      data, not failure. Miss continues to the audit path.
+//   3. readCliTier first. Curated and cached hits return isError: false
+//      with audited: false + next_tool: get_scorecard beside the envelope
+//      — cache state is data, not failure. Miss continues to the audit path.
 //   4. cf-connecting-ip presence check. Missing IP returns isError: true
 //      with the -32099 envelope. No anon fallback at the audit tier:
 //      container-run cost is non-trivial and a shared anon bucket would
@@ -38,9 +39,10 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { TerminalEvent } from '../../../shared/audit-events';
-import { normalizeTarget, scorePath, targetOfSpec } from '../../../shared/audit-routes';
+import { normalizeTarget } from '../../../shared/audit-routes';
 import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
-import { loadHintsIndex, lookupOnly, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
+import { type CliCoreEnv, cliRunEnvelope, readCliTier } from '../../score/core';
+import { loadHintsIndex, type OrchestrateEnv, runFreshOnly } from '../../score/orchestrate';
 import { type DiscoveryHintsIndex, loadRegistryIndex, type RegistryIndex } from '../../score/registry-lookup';
 import { validateInput } from '../../score/validate';
 import { SPEC_VERSION } from '../../spec-version.gen';
@@ -49,7 +51,7 @@ import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 
-export interface ScorecardAuditEnv extends OrchestrateEnv, InFlightEnv {
+export interface ScorecardAuditEnv extends OrchestrateEnv, CliCoreEnv, InFlightEnv {
   MCP_LIVE_SCORING_ENABLED?: string;
   MCP_AUDIT_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   SCORE_KV?: KVNamespace;
@@ -113,16 +115,8 @@ function inFlightKey(raw: string): string {
 // The terminal line of a run this call attached to, in the shapes a fresh run returns.
 function attachedResult(terminal: TerminalEvent) {
   if (terminal.type === 'complete') {
-    return textContent({
-      audited: true,
-      source: 'fresh-audit',
-      attached: true,
-      scorecard_url: terminal.scorecard_url,
-      scorecard: terminal.scorecard,
-      anc_version: terminal.anc_version ?? null,
-      spec_version: terminal.spec_version,
-      ...(terminal.source_sha ? { source_sha: terminal.source_sha } : {}),
-    });
+    const { type: _tag, ...envelope } = terminal;
+    return textContent({ audited: true, source: 'fresh-audit', attached: true, ...envelope });
   }
   const failure =
     terminal.type === 'incomplete'
@@ -232,34 +226,25 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // Without the env binding, bypass_cache is silently ignored, so prod
       // behavior is unchanged even if the arg is forged in the request.
       const bypassCache = args.bypass_cache === true && env.MCP_CACHE_BYPASS_ALLOWED === 'true';
-      const lookup = await lookupOnly(validated, env, registryIndex, hintsIndex, {
-        specVersion: SPEC_VERSION,
-        skipCache: bypassCache,
-      });
+      const indexes = { registryIndex, hintsIndex };
+      const tier = await readCliTier(env, validated, indexes, { origin: siteUrl, skipCache: bypassCache });
 
-      if (lookup.kind === 'curated') {
-        const scorecardUrlPath = lookup.scorecard_url ?? scorePath(lookup.entry.name);
-        const scorecard_url = scorecardUrlPath.startsWith('http') ? scorecardUrlPath : `${siteUrl}${scorecardUrlPath}`;
+      if (tier.kind === 'registry') {
         return textContent({
           audited: false,
           source: 'registry',
           next_tool: 'get_scorecard',
-          scorecard_url,
-          message:
-            `a curated scorecard for "${lookup.entry.name}" already exists; call get_scorecard for the inline ` +
-            'record.',
+          ...tier.envelope,
+          message: `a curated scorecard for "${tier.entry.name}" already exists; call get_scorecard for the inline record.`,
         });
       }
 
-      if (lookup.kind === 'cached') {
-        const scorecard = lookup.scorecard as { tool?: { binary?: string | null } } | null;
-        const binary = scorecard?.tool?.binary ?? null;
-        const scorecard_url = binary ? `${siteUrl}/score/live/${binary}` : null;
+      if (tier.kind === 'cache') {
         return textContent({
           audited: false,
           source: 'live-cache',
           next_tool: 'get_scorecard',
-          scorecard_url,
+          ...tier.envelope,
           message: 'a cached live-score result already exists; call get_scorecard for the inline record.',
         });
       }
@@ -324,29 +309,34 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
       // Step 8: map kind to typed-state response.
       switch (result.kind) {
         case 'cache_post_hit': {
-          const scorecard_url = `${siteUrl}${scorePath(targetOfSpec(result.spec))}`;
+          const envelope = cliRunEnvelope({
+            tier: 'cache',
+            spec: result.spec,
+            scorecard: result.scorecard,
+            ancVersion: result.anc_version,
+            toolVersion: result.tool_version,
+            registry: registryIndex,
+            origin: siteUrl,
+          });
           return textContent({
             audited: false,
             source: 'live-cache',
             next_tool: 'get_scorecard',
-            scorecard_url,
-            scorecard: result.scorecard,
-            anc_version: result.anc_version,
-            spec_version: SPEC_VERSION,
+            ...envelope,
             message: 'post-discovery cache hit; the next get_scorecard call will return this inline.',
           });
         }
         case 'fresh': {
-          const scorecard_url = `${siteUrl}${scorePath(targetOfSpec(result.spec))}`;
-          return textContent({
-            audited: true,
-            source: 'fresh-audit',
-            scorecard_url,
+          const envelope = cliRunEnvelope({
+            tier: 'live',
+            spec: result.spec,
             scorecard: result.scorecard,
-            anc_version: result.anc_version,
-            spec_version: SPEC_VERSION,
-            ...(result.source_sha ? { source_sha: result.source_sha } : {}),
+            ancVersion: result.anc_version,
+            registry: registryIndex,
+            origin: siteUrl,
+            sourceSha: result.source_sha,
           });
+          return textContent({ audited: true, source: 'fresh-audit', ...envelope });
         }
         case 'resolution_error': {
           return {

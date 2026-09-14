@@ -65,55 +65,72 @@ Both accept exactly one of `slug`, `binary`, `install`, or `github_url`.
 
 ### "I want the scorecard for a CLI I know is in the registry"
 
-Call `get_scorecard` with the slug. On a registry hit, the response carries the inline entry and the source attribution:
+Call `get_scorecard` with the slug. A hit returns the result envelope: the same body `GET /score/<target>/json` serves,
+so the tool result and the page you follow it to cannot disagree.
 
 ```json
 // tools/call get_scorecard { "slug": "ripgrep" }
 {
   "found": true,
-  "source": "registry",
+  "kind": "cli",
+  "tier": "registry",
+  "target": "ripgrep",
   "scorecard_url": "https://anc.dev/score/ripgrep",
-  "entry": {
-    "slug": "ripgrep",
-    "name": "ripgrep",
-    "binary": "rg",
-    "install": "brew install ripgrep",
-    "score_pct": 87,
-    "...": "..."
-  },
-  "spec_version": "2026.05"
+  "markdown_url": "https://anc.dev/score/ripgrep/md",
+  "json_url": "https://anc.dev/score/ripgrep/json",
+  "freshness": { "cached": true, "scored_at": null, "refresh_after": null },
+  "spec_version": "2026.05",
+  "scorecard": { "...": "..." },
+  "score_pct": 87,
+  "anc_version": "0.7.2"
 }
 ```
 
-Use `source` as your cost signal: `registry` means curated and committed; `live-cache` means a prior `score_cli` audit
-cached the result.
+Use `tier` as your cost signal: `registry` means curated and committed, `cache` means a prior audit cached the result,
+and `live` means this call produced it. A curated result carries no `refresh_after`: it changes when the registry does,
+not on a clock.
 
 ### "Is this binary in the live-score cache?"
 
-Same tool, install command as input. A hit returns the cached scorecard with `source: "live-cache"`; a miss returns a
-typed redirect. Not an error.
+Same tool, install command as input. A hit returns the cached scorecard with `tier: "cache"`; a target already being
+audited says so; a miss returns a typed redirect. None of the three is an error.
 
 ```json
 // tools/call get_scorecard { "install": "npm install -g cowsay" }
 // HIT
 {
   "found": true,
-  "source": "live-cache",
-  "scorecard_url": "https://anc.dev/score/live/cowsay",
+  "kind": "cli",
+  "tier": "cache",
+  "target": "cowsay",
+  "scorecard_url": "https://anc.dev/score/cowsay",
+  "markdown_url": "https://anc.dev/score/cowsay/md",
+  "json_url": "https://anc.dev/score/cowsay/json",
+  "freshness": { "cached": true, "scored_at": "2026-09-14T18:02:11.000Z", "refresh_after": "2026-09-21T18:02:11.000Z" },
+  "spec_version": "2026.05",
   "scorecard": { "...": "..." },
-  "anc_version": "0.7.2",
-  "spec_version": "2026.05"
+  "anc_version": "0.7.2"
+}
+
+// ALREADY RUNNING
+{
+  "found": false,
+  "in_progress": true,
+  "started_at": "2026-09-14T18:05:40.000Z",
+  "message": "an audit for this target is already running; poll this tool or read the result page shortly."
 }
 
 // MISS
 {
   "found": false,
   "next_tool": "score_cli",
+  "spec_version": "2026.05",
   "message": "no cached scorecard for this input. Call score_cli with the same arguments to run a fresh audit (subject to the audit rate limit and the operator-controlled live-scoring kill switch)."
 }
 ```
 
-The miss is `isError: false`. Cache state is data, not failure. Follow the `next_tool` pointer.
+The miss is `isError: false`. Cache state is data, not failure. Follow the `next_tool` pointer. An `in_progress` answer
+means a run is already in flight for that target: wait for it rather than starting a second one.
 
 ### "I want to live-audit a CLI that isn't cached yet"
 
@@ -127,7 +144,15 @@ container run, no cost). On a true cache miss it runs a metered audit and return
   "audited": false,
   "source": "live-cache",
   "next_tool": "get_scorecard",
-  "scorecard_url": "https://anc.dev/score/live/some-new-cli",
+  "kind": "cli",
+  "tier": "cache",
+  "target": "some-new-cli",
+  "scorecard_url": "https://anc.dev/score/some-new-cli",
+  "markdown_url": "https://anc.dev/score/some-new-cli/md",
+  "json_url": "https://anc.dev/score/some-new-cli/json",
+  "freshness": { "cached": true, "scored_at": "2026-09-14T18:02:11.000Z", "refresh_after": "2026-09-21T18:02:11.000Z" },
+  "spec_version": "2026.05",
+  "scorecard": { "...": "..." },
   "message": "a cached live-score result already exists; call get_scorecard for the inline record."
 }
 
@@ -135,12 +160,21 @@ container run, no cost). On a true cache miss it runs a metered audit and return
 {
   "audited": true,
   "source": "fresh-audit",
-  "scorecard_url": "https://anc.dev/score/live/some-new-cli",
+  "kind": "cli",
+  "tier": "live",
+  "target": "some-new-cli",
+  "scorecard_url": "https://anc.dev/score/some-new-cli",
+  "markdown_url": "https://anc.dev/score/some-new-cli/md",
+  "json_url": "https://anc.dev/score/some-new-cli/json",
+  "freshness": { "cached": false, "scored_at": "2026-09-14T18:09:02.000Z", "refresh_after": "2026-09-21T18:09:02.000Z" },
+  "spec_version": "2026.05",
   "scorecard": { "...": "..." },
-  "anc_version": "0.7.2",
-  "spec_version": "2026.05"
+  "anc_version": "0.7.2"
 }
 ```
+
+A branch-scoped input (`owner/repo@branch`, or a `/tree/<branch>` URL) resolves to `/score/<owner>/<repo>@<branch>` and
+adds `source_sha`, the commit the sandbox cloned.
 
 The tools are symmetric: `get_scorecard` returns `found: true` exactly when `score_cli` returns `audited: false` on the
 same input. The cost difference (registry/cache lookup vs container run) is the only reason to choose between them.
@@ -151,14 +185,14 @@ Four tools score a website and its MCP server against the same eight principles 
 surface above. The web audit runs entirely as in-Worker network probes (HTTP, JSON-RPC over streamable-HTTP, CORS,
 DNS-over-HTTPS): no container, nothing crawled.
 
-- `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, cached, scored_at, refresh_after, scorecard,
-  share_url, spec_version }` on a cache hit or `{ found: false, next_tool: "audit_website" }` on a miss.
-- `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal scorecard plus its
-  `share_url`. There are no progress notifications: the server runs stateless per-request. A cached result younger than
-  one minute is returned without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP,
-  no anon fallback).
-- `list_website_audits`: the web leaderboard (`anc.dev/web`), curated by default; `view: "all"` adds the user-submitted
-  domains that opted in to public listing.
+- `get_website_audit` (cheap read): pass a `url`; returns `{ found: true, ...envelope }` with `kind: "web"` on a cache
+  hit, `{ found: false, in_progress: true, started_at }` while an audit for that host is already running, or
+  `{ found: false, next_tool: "audit_website" }` on a miss.
+- `audit_website` (metered fresh audit): runs a fresh audit and returns a single terminal envelope. There are no
+  progress notifications: the server runs stateless per-request. A cached result younger than one minute is returned
+  without re-running. Gated by `WEB_AUDIT_ENABLED` + `WEB_AUDIT_LIMITER_IP` (30 per hour per IP, no anon fallback).
+- `list_website_audits`: the website half of the leaderboard, curated by default; `view: "all"` adds the user-submitted
+  domains that opted in to public listing. Each entry carries `scorecard_url`.
 - `get_web_remediation`: the canonical fix for a web-audit `check_id`. Pass the failing row's `evidence` and it is
   appended to the prompt as a delimited, length-bounded data block; omit it for the catalog text alone.
 
@@ -166,18 +200,18 @@ DNS-over-HTTPS): no container, nothing crawled.
 // tools/call audit_website { "url": "anc.dev" }
 ```
 
-**Freshness.** Every result that carries a scorecard carries `cached`, `scored_at`, and `refresh_after` beside it,
-outside the scorecard itself. `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a
-result the call produced; `scored_at` is when the audit ran (`null` on a legacy entry with no stamp); `refresh_after` is
-`scored_at` plus the one-minute cache-reuse window. Past `refresh_after` a repeat call stops reusing the cached entry
-and tries a fresh audit, which is eligibility rather than a promise: the kill switch, the rate limits, and probe
-failures still apply, and the cached scorecard is served as data when they refuse.
+**Freshness.** Every result that carries a scorecard carries a `freshness` object beside it, outside the scorecard
+itself: `cached` is `true` for a served cache entry or a listing-only flag patch and `false` for a result the call
+produced; `scored_at` is when the audit ran (`null` on a legacy entry with no stamp); `refresh_after` is `scored_at`
+plus the one-minute cache-reuse window. Past `refresh_after` a repeat call stops reusing the cached entry and tries a
+fresh audit, which is eligibility rather than a promise: the kill switch, the rate limits, and probe failures still
+apply, and the cached scorecard is served as data when they refuse.
 
 Web scorecards use the `score` / `results` / `coverage_summary` shape documented at
-[/web-scorecard-schema](/web-scorecard-schema); each result page is at `anc.dev/web/<domain>`. That page publishes four
-further read-only tools over WebMCP for a browser agent already on it (`get_worksheet`, `get_fix_prompt`,
-`get_fix_prompts`, `get_audit_summary`); they read the rendered page only and cannot start an audit. Their filter,
-ordering, and pagination contract is at [/web-audit](/web-audit#from-the-result-page).
+[/web-scorecard-schema](/web-scorecard-schema); each result page is at `anc.dev/score/<domain>`, named by the
+envelope's own `scorecard_url`. The scorecard inside the envelope carries the read-time enrichment every surface
+applies: each row's current category and normative keyword, a `result` line, and an inline `remediation` object on
+every non-passing row. `get_web_remediation` is for a check id you do not already hold a row for.
 
 ## Browse the catalog
 

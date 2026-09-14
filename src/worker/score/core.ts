@@ -10,8 +10,13 @@
 // The core never reads a token, a session, or a limiter; admission is the
 // caller's. It keeps the GitHub accessibility probe ahead of resolution.
 
-import { type AuditEnvelope, buildCliEnvelope, buildRegistryEnvelope } from '../../shared/audit-envelope';
-import { targetOfSpec } from '../../shared/audit-routes';
+import {
+  type AuditEnvelope,
+  buildCliEnvelope,
+  buildRegistryEnvelope,
+  type RegistryEntryLike,
+} from '../../shared/audit-envelope';
+import { scorePath, targetOfSpec } from '../../shared/audit-routes';
 import { SPEC_VERSION } from '../spec-version.gen';
 import type { CacheEnv } from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
@@ -130,6 +135,35 @@ export async function readCliTier(
   return { kind: 'miss' };
 }
 
+/**
+ * The curated envelope with its committed scorecard attached, read from the
+ * asset the build emits beside the page. Both the result route's `/json`
+ * representation and the MCP read tool go through here, so a curated
+ * scorecard cannot differ between them. A non-200 or unparseable asset
+ * yields null: the registry projection alone is still a valid envelope, and
+ * the caller decides whether that is a hit.
+ */
+export async function readCuratedEnvelope(
+  env: { ASSETS: Fetcher },
+  entry: RegistryEntryLike,
+  origin: string,
+): Promise<AuditEnvelope | null> {
+  const asset = await env.ASSETS.fetch(new Request(`https://assets.internal${scorePath(entry.name)}.json`));
+  if (asset.status !== 200) return null;
+  let baked: { spec_version?: unknown; scorecard?: unknown };
+  try {
+    baked = (await asset.json()) as { spec_version?: unknown; scorecard?: unknown };
+  } catch {
+    return null;
+  }
+  return buildRegistryEnvelope({
+    entry,
+    origin,
+    specVersion: typeof baked.spec_version === 'string' ? baked.spec_version : SPEC_VERSION,
+    scorecard: baked.scorecard,
+  });
+}
+
 function cachedBinaryOf(scorecard: unknown): string | null {
   const binary = (scorecard as { tool?: { binary?: unknown } } | null)?.tool?.binary;
   return typeof binary === 'string' && binary ? binary : null;
@@ -216,6 +250,42 @@ export async function runCliAudit(input: RunCliAuditInput): Promise<CliRunOutcom
   return outcomeOf(result, input);
 }
 
+export type CliRunEnvelopeInput = {
+  tier: 'cache' | 'live';
+  spec: InstallSpec;
+  scorecard: unknown;
+  ancVersion: string;
+  /** Omitted for a live run, where the audited scorecard is the only source. */
+  toolVersion?: string;
+  registry: RegistryIndex;
+  origin: string;
+  sourceSha?: string | null;
+};
+
+/**
+ * The envelope for one completed CLI run, keyed by the resolved spec. Every
+ * surface that finishes an audit — the endpoint's stream, the MCP transact
+ * tool, the post-discovery cache hit — goes through here, so the URL policy
+ * and the curated-shadow rule apply once. A source clone carries the commit
+ * it scored; an installed binary has none to carry.
+ */
+export function cliRunEnvelope(input: CliRunEnvelopeInput): AuditEnvelope {
+  const record = {
+    spec_version: SPEC_VERSION,
+    anc_version: input.ancVersion,
+    tool_version: input.toolVersion ?? toolVersionOf(input.scorecard),
+    scorecard: input.scorecard,
+  };
+  return buildCliEnvelope({
+    tier: input.tier,
+    target: targetOfSpec(input.spec),
+    record,
+    registry: input.registry,
+    origin: input.origin,
+    sourceSha: input.spec.pm === 'git-clone' ? (input.sourceSha ?? undefined) : undefined,
+  });
+}
+
 function envelopeFor(
   tier: 'cache' | 'live',
   spec: InstallSpec,
@@ -225,14 +295,15 @@ function envelopeFor(
   input: RunCliAuditInput,
   sourceSha?: string,
 ): AuditEnvelope {
-  const record = { spec_version: SPEC_VERSION, anc_version: ancVersion, tool_version: toolVersion, scorecard };
-  return buildCliEnvelope({
+  return cliRunEnvelope({
     tier,
-    target: targetOfSpec(spec),
-    record,
+    spec,
+    scorecard,
+    ancVersion,
+    toolVersion,
     registry: input.indexes.registryIndex,
     origin: input.origin,
-    sourceSha: spec.pm === 'git-clone' ? sourceSha : undefined,
+    sourceSha,
   });
 }
 

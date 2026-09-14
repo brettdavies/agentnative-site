@@ -269,6 +269,98 @@ afterEach(() => {
   _resetHintsIndexCache();
 });
 
+async function callGetScorecard(env: McpEnv, args: Record<string, unknown>): Promise<JsonRpcResult> {
+  await mcpInitialize(env);
+  const { status, body } = await mcpRpc(env, {
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+    params: { name: 'get_scorecard', arguments: args },
+  });
+  expect(status).toBe(200);
+  return body as JsonRpcResult;
+}
+
+// R18: the read tool hands back the shared envelope, so the URLs it mints are
+// the route module's and an agent can follow json_url to the identical body.
+describe('get_scorecard: the shared envelope', () => {
+  test('a curated slug returns tier registry with the three result URLs and the committed scorecard', async () => {
+    const { env } = makeEnv();
+    const body = getJsonContent(await callGetScorecard(env, { slug: 'curl' })) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      found: true,
+      kind: 'cli',
+      tier: 'registry',
+      target: 'curl',
+      scorecard_url: 'https://anc.dev/score/curl',
+      markdown_url: 'https://anc.dev/score/curl/md',
+      json_url: 'https://anc.dev/score/curl/json',
+    });
+    expect(body).not.toHaveProperty('source');
+    expect(body.freshness).toEqual({ cached: true, scored_at: null, refresh_after: null });
+  });
+
+  test('an R2 cached binary returns tier cache and no retired live path', async () => {
+    const { env } = makeEnv({
+      cacheContent: {
+        [`scores/somelib/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          scorecard: { tool: { binary: 'somelib' }, results: [] },
+          anc_version: ANC_VERSION,
+          tool_version: '1.0.0',
+        },
+      },
+    });
+    const body = getJsonContent(await callGetScorecard(env, { install: 'npm install -g somelib' })) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({
+      found: true,
+      kind: 'cli',
+      tier: 'cache',
+      target: 'somelib',
+      scorecard_url: 'https://anc.dev/score/somelib',
+      tool_version: '1.0.0',
+    });
+    expect(JSON.stringify(body)).not.toContain('/score/live/');
+  });
+
+  // A run that has not written yet is not an absence. Answering `next_tool:
+  // score_cli` here would send the agent to start a second audit of a target
+  // the job already has in hand.
+  test('a target already being audited reads as in_progress, not a miss', async () => {
+    const startedAt = '2026-09-11T00:00:00.000Z';
+    const kv: KvStub = {
+      store: new Map([
+        [
+          'inflight:cli:npm install -g somelib',
+          JSON.stringify({ started_at: startedAt, job: 'cli:npm install -g somelib' }),
+        ],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const { env } = makeEnv({ kv });
+    const body = getJsonContent(await callGetScorecard(env, { install: 'npm install -g somelib' })) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ found: false, in_progress: true, started_at: startedAt });
+    expect(body).not.toHaveProperty('next_tool');
+  });
+
+  test('a miss with nothing in flight still points at score_cli', async () => {
+    const { env } = makeEnv();
+    const body = getJsonContent(await callGetScorecard(env, { install: 'npm install -g somelib' })) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ found: false, next_tool: 'score_cli' });
+    expect(body).not.toHaveProperty('in_progress');
+  });
+});
+
 describe('score_cli: MCP_LIVE_SCORING_ENABLED kill switch', () => {
   test('disabled returns isError: false + audited: false + disabled message; downstream never runs', async () => {
     const { env, doSpy, kv } = makeEnv({ liveScoringEnabled: false });

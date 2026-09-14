@@ -304,11 +304,11 @@ describe('MCP surface links back to the origin it was called on', () => {
       }),
     } as unknown as Parameters<typeof mcpRpc>[0];
     const { raw, body } = await callTool(env, 'get_scorecard', { install: 'brew install cowsay' });
-    expect((getJsonToolContent(body) as { source?: string }).source).toBe('live-cache');
+    expect((getJsonToolContent(body) as { tier?: string }).tier).toBe('cache');
     expectServedOnOwnOrigin(raw);
   });
 
-  test('get_website_audit share_url and per-row fix-skill links use the serving origin', async () => {
+  test('get_website_audit result URLs and per-row fix-skill links use the serving origin', async () => {
     const target = 'https://example.com/';
     const env = {
       ASSETS: await makeAssets(),
@@ -321,7 +321,7 @@ describe('MCP surface links back to the origin it was called on', () => {
     expectServedOnOwnOrigin(raw);
   });
 
-  test('list_website_audits share_urls use the serving origin', async () => {
+  test('list_website_audits scorecard_urls use the serving origin', async () => {
     const env = {
       ASSETS: await makeAssets(),
       SCORE_CACHE: makeR2({

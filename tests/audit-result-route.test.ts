@@ -9,7 +9,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry } from '../src/build/13-web-audit-registry.mjs';
-import { buildWebEnvelope } from '../src/shared/audit-envelope';
 import { scoreJsonPath, scoreMarkdownPath, scorePath } from '../src/shared/audit-routes';
 import {
   _resetResultCaches,
@@ -19,6 +18,7 @@ import {
   type ResultEnv,
 } from '../src/worker/audit/result';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
+import { webEnvelope } from '../src/worker/audit-web/core';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { _resetShellTemplateCache } from '../src/worker/shell-template';
@@ -398,10 +398,15 @@ describe('website records', () => {
     });
     expect((await route('/score/seeded.dev', seededRecord)).headers.get('x-robots-tag')).toBeNull();
     const body = (await res.json()) as Record<string, unknown>;
-    const expected = buildWebEnvelope({ tier: 'cache', target: 'anc.dev', record: WEB_RECORD, origin: ORIGIN });
+    const expected = await webEnvelope(env, { tier: 'cache', host: 'anc.dev', record: WEB_RECORD, origin: ORIGIN });
     expect(body.scorecard).toEqual(expected.scorecard);
     expect(body.freshness).toEqual(expected.freshness);
     expect(body).toMatchObject({ kind: 'web', tier: 'cache', target: 'anc.dev', score_pct: 64 });
+    // The envelope carries the read-time enrichment, so the JSON twin and the
+    // rendered page describe the same rows rather than two category splits.
+    const rows = (expected.scorecard as { results: Array<{ id: string; category: string; result?: string }> }).results;
+    expect(rows.map((r) => r.id)).toEqual(['llms-txt', 'openapi']);
+    expect(rows.every((r) => typeof r.result === 'string')).toBe(true);
   });
 
   test('/score/anc.dev.html and /score/anc.dev/ canonicalize to /score/anc.dev without reaching the assets binding', async () => {
