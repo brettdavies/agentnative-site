@@ -77,7 +77,8 @@ import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup'
 import { loadShellTemplate, substituteShell } from '../shell-template';
 import { SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
-import { envelopeJsonBody, readInFlight } from './api';
+import { envelopeJsonBody } from './api';
+import { readInFlight } from './inflight';
 
 export type ResultEnv = {
   ASSETS: Fetcher;

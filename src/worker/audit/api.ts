@@ -16,12 +16,17 @@
 //                              web: cache (a fresh hit serves; a stale hit
 //                                   or a listing change falls through); the
 //                                   operator hatch is CLI-only
-//   in flight ................ the KV flag for this input answers 202 to a
-//                              tokenless POST and attaches a tokened one;
+//   in flight ................ the KV flag names the input's running job: a
+//                              stream reader and a tokened JSON reader attach
+//                              to it and receive its log, then its live
+//                              tail; a tokenless JSON reader gets 202;
 //                              ?fromCache=false bypasses it on the CLI lane
 //   tokenless ................ 403 turnstile_failed, no budget spent
 //   admitTransact ............ kill switch, client identity, siteverify,
 //                              session, limiters
+//   claim .................... the input's AuditJob; a run already running
+//                              there, which the KV read missed, is attached
+//                              to rather than started twice
 //   run ...................... Accept x-ndjson streams the event union;
 //                              otherwise the terminal envelope or the error
 //                              object as one JSON body. The CLI lane relays
@@ -34,7 +39,11 @@
 //                              `score.tier` line and analytics row are
 //                              emitted once the terminal line is known. A
 //                              throw from a lane core is the terminal error
-//                              line, never an escaped exception.
+//                              line, never an escaped exception. Every line
+//                              but a heartbeat is appended to the job, so an
+//                              attached reader sees the run the initiator
+//                              sees, and a stream that ends without a
+//                              terminal line gets a typed error line.
 //
 // During the phased landing the non-streaming JSON responses carry the
 // legacy `share_url` and the registry hit's nested `scorecard.kind` and
@@ -52,6 +61,7 @@ import {
   auditErrorFor,
   CTA_RETRY,
   completeEvent,
+  isTerminalEvent,
 } from '../../shared/audit-events';
 import {
   API_SCORE_PATH,
@@ -96,9 +106,19 @@ import {
 } from '../score/telemetry';
 import { AUDITOR_URL, SITE_SPEC_VERSION, SPEC_VERSION } from '../spec-version.gen';
 import { emitLog } from '../telemetry/log';
-import { type Admission, type AdmitDeps, type AdmitEnv, admitTransact } from './admit';
+import { type Admission, type AdmitDeps, type AdmitEnv, admitTransact, clientIpKey } from './admit';
+import {
+  attachJob,
+  claimJob,
+  type InFlight,
+  type InFlightEnv,
+  InFlightFlags,
+  type JobWriter,
+  RELAY_DEADLINE_SECONDS,
+  readInFlight,
+} from './inflight';
 
-export type AuditApiEnv = AdmitEnv & CliCoreEnv & WebCoreEnv & Partial<ScoreTelemetryEnv>;
+export type AuditApiEnv = AdmitEnv & CliCoreEnv & WebCoreEnv & InFlightEnv & Partial<ScoreTelemetryEnv>;
 
 export type AuditApiDeps = AdmitDeps & {
   /** Injected probe fetch for the website engine in tests. */
@@ -112,15 +132,6 @@ export type AuditApiDeps = AdmitDeps & {
 export function isAuditApiPath(pathname: string): boolean {
   return pathname === API_SCORE_PATH;
 }
-
-/**
- * The relay's deadline over the Durable Object read, and the TTL of the
- * in-flight flags. It sits above the sandbox's own 60 s install-plus-audit
- * budget (`TOTAL_TIMEOUT_MS` in sandbox-exec.ts) so the sandbox answers
- * first and the slack covers the container's cold start, the R2 write, and
- * the purge.
- */
-export const RELAY_DEADLINE_SECONDS = 90;
 
 // The abort reason the relay uses for its own deadline, so the consumer
 // can tell it from any other rejection.
@@ -193,64 +204,6 @@ async function parseBody(request: Request): Promise<ParsedBody | ParseFailure> {
     refresh: body.refresh === true,
     legacyInput,
   };
-}
-
-// ---------------------------------------------------------------------------
-// In-flight flags (KV): `inflight:<lane>:<input>` at accepted, the
-// result-keyed twin once the result target is known, both deleted at the
-// terminal line and expiring with the relay deadline otherwise.
-// ---------------------------------------------------------------------------
-
-type InFlight = { started_at: string };
-
-function inflightKey(lane: Lane, key: string): string {
-  return `inflight:${lane}:${key}`;
-}
-
-// A KV read that fails is a miss: the flag is a dedup hint, never a gate.
-export async function readInFlight(
-  env: { SCORE_KV?: KVNamespace },
-  lane: Lane,
-  input: string,
-): Promise<InFlight | null> {
-  if (!env.SCORE_KV) return null;
-  try {
-    const raw = await env.SCORE_KV.get(inflightKey(lane, input));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<InFlight>;
-    return typeof parsed.started_at === 'string' ? { started_at: parsed.started_at } : null;
-  } catch {
-    return null;
-  }
-}
-
-class InFlightFlags {
-  private keys = new Set<string>();
-  constructor(
-    private readonly env: AuditApiEnv,
-    private readonly lane: Lane,
-    readonly startedAt: string,
-  ) {}
-
-  async mark(...keys: string[]): Promise<void> {
-    const kv = this.env.SCORE_KV;
-    if (!kv) return;
-    const value = JSON.stringify({ started_at: this.startedAt });
-    await Promise.all(
-      keys.map((key) => {
-        const full = inflightKey(this.lane, key);
-        this.keys.add(full);
-        return kv.put(full, value, { expirationTtl: RELAY_DEADLINE_SECONDS }).catch(() => {});
-      }),
-    );
-  }
-
-  async clear(): Promise<void> {
-    const kv = this.env.SCORE_KV;
-    if (!kv) return;
-    await Promise.all([...this.keys].map((key) => kv.delete(key).catch(() => {})));
-    this.keys.clear();
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,7 +334,19 @@ async function handle(
   }
   const origin = new URL(request.url).origin;
   const skipCache = new URL(request.url).searchParams.get('fromCache') === 'false';
-  const common = { request, env, ctx, deps, row, origin, parsed, skipCache, started, abort: new AbortController() };
+  const common = {
+    request,
+    env,
+    ctx,
+    deps,
+    row,
+    origin,
+    parsed,
+    skipCache,
+    started,
+    abort: new AbortController(),
+    admitted: false,
+  };
   return classified.lane === 'web' ? handleWeb(common, classified) : handleCli(common, classified);
 }
 
@@ -397,12 +362,14 @@ type Common = {
   started: number;
   /** Aborted by the relay at its deadline; the CLI core's Durable Object read observes it. */
   abort: AbortController;
+  /** Set once admitTransact passes, so an attach after a lost claim spends no second limiter call. */
+  admitted: boolean;
 };
 
-function inProgressResponse(flag: InFlight): Response {
+function inProgressResponse(flag: InFlight, cookie: Record<string, string> = {}): Response {
   return new Response(JSON.stringify({ in_progress: true, started_at: flag.started_at }), {
     status: 202,
-    headers: jsonHeaders(),
+    headers: jsonHeaders(cookie),
   });
 }
 
@@ -422,6 +389,45 @@ function admissionResponse(admission: Extract<Admission, { ok: false }>, row: Re
     { error: admission.error },
     admission.setCookie ? { 'set-cookie': admission.setCookie } : {},
   );
+}
+
+// Attach this request to a running job's stream. With no job to attach, or
+// a reader that may not hold a stream open, the answer is the 202 that says
+// a run is in flight, never a second run.
+async function attach(
+  common: Common,
+  lane: Lane,
+  input: string,
+  flag: InFlight,
+  cookie: Record<string, string> = {},
+): Promise<Response> {
+  const { env, row } = common;
+  row.tier = 'inflight';
+  const events =
+    flag.job && (await mayAttach(common, lane)) ? await attachJob(env, flag.job, common.abort.signal) : null;
+  if (!events) {
+    row.outcome = 'in_progress';
+    return inProgressResponse(flag, cookie);
+  }
+  row.outcome = 'attach';
+  return relay(common, { lane, target: input, events, flags: null, job: null }, cookie);
+}
+
+// An attach holds a stream open for up to the relay deadline, so a reader
+// that has not passed admission passes the lane's per-IP burst limiter
+// first; it spends no Turnstile check and no audit budget. A tokenless
+// JSON reader never attaches: it polls the 202.
+async function mayAttach(common: Common, lane: Lane): Promise<boolean> {
+  if (common.admitted) return true;
+  if (!common.row.stream && !common.parsed.token) return false;
+  const ip = clientIpKey(common.request.headers.get('cf-connecting-ip'));
+  const limiter = lane === 'cli' ? common.env.SCORE_LIMITER_IP : common.env.WEB_AUDIT_LIMITER_IP;
+  if (!ip || !limiter) return false;
+  try {
+    return (await limiter.limit({ key: ip })).success;
+  } catch {
+    return false;
+  }
 }
 
 async function admit(common: Common, lane: Lane, target: string): Promise<Admission> {
@@ -458,11 +464,12 @@ async function handleWeb(
     return jsonEnvelope(webCacheEnvelope(target, tier.cached, origin));
   }
 
-  const inFlight = await readInFlight(env, 'web', classified.target);
+  // An explicit listing choice is its own request: attaching would answer it
+  // with a run that carries someone else's listing decision, and the opt-in
+  // the caller asked for would never be written.
+  const inFlight = parsed.publicListing === undefined ? await readInFlight(env, 'web', classified.target) : null;
   if (inFlight) {
-    row.tier = 'inflight';
-    row.outcome = parsed.token ? 'attach' : 'in_progress';
-    return inProgressResponse(inFlight);
+    return attach(common, 'web', classified.target, inFlight);
   }
   if (!parsed.token) {
     row.outcome = 'tokenless';
@@ -480,6 +487,7 @@ async function handleWeb(
     return admissionResponse(admission, row);
   }
   const cookie = cookieHeader(admission);
+  common.admitted = true;
 
   if (tier.kind === 'patch') {
     const outcome = await patchWebListing(env, target, tier);
@@ -504,8 +512,14 @@ async function handleWeb(
   }
   const listing = tier.listing;
 
+  const startedAt = new Date().toISOString();
+  const job = await claimJob(env, 'web', classified.target, startedAt);
+  if (job.kind === 'running' && parsed.publicListing === undefined) {
+    return attach(common, 'web', classified.target, { started_at: job.started_at, job: job.name }, cookie);
+  }
   row.tier = 'live';
-  const flags = new InFlightFlags(env, 'web', new Date().toISOString());
+  const writer = job.kind === 'claimed' ? job.writer : null;
+  const flags = new InFlightFlags(env, 'web', startedAt, writer?.name ?? null, job.kind !== 'running');
   await flags.mark(classified.target, target.host);
   const events = runWebAuditStream({
     env,
@@ -516,7 +530,7 @@ async function handleWeb(
     probeFetch: common.deps.probeFetch,
     surface: 'stream',
   });
-  return relay(common, { lane: 'web', target: classified.target }, events, flags, cookie);
+  return relay(common, { lane: 'web', target: classified.target, events, flags, job: writer }, cookie);
 }
 
 // ---------------------------------------------------------------------------
@@ -579,10 +593,8 @@ async function handleCli(
   // The operator hatch bypasses the flag; a refresh attaches like any transact.
   const inFlight = common.skipCache ? null : await readInFlight(env, 'cli', classified.target);
   if (inFlight) {
-    row.tier = 'inflight';
-    row.outcome = parsed.token ? 'attach' : 'in_progress';
     cli.tier = 'inflight';
-    return inProgressResponse(inFlight);
+    return attach(common, 'cli', classified.target, inFlight);
   }
   if (!parsed.token) {
     row.outcome = 'tokenless';
@@ -596,9 +608,19 @@ async function handleCli(
     return admissionResponse(admission, row);
   }
   const cookie = cookieHeader(admission);
+  common.admitted = true;
 
+  const startedAt = new Date().toISOString();
+  const job = await claimJob(env, 'cli', classified.target, startedAt);
+  // The operator hatch runs even while a run holds the job; its lines then
+  // reach no attached reader.
+  if (job.kind === 'running' && !common.skipCache) {
+    cli.tier = 'inflight';
+    return attach(common, 'cli', classified.target, { started_at: job.started_at, job: job.name }, cookie);
+  }
   row.tier = 'live';
-  const flags = new InFlightFlags(env, 'cli', new Date().toISOString());
+  const writer = job.kind === 'claimed' ? job.writer : null;
+  const flags = new InFlightFlags(env, 'cli', startedAt, writer?.name ?? null, job.kind !== 'running');
   const branchTarget =
     branch && validated.kind === 'github-url' && validated.branch
       ? [`${validated.owner}/${validated.repo}@${validated.branch}`]
@@ -613,7 +635,7 @@ async function handleCli(
     cli,
     signal: common.abort.signal,
   });
-  return relay(common, { lane: 'cli', target: classified.target }, events, flags, cookie);
+  return relay(common, { lane: 'cli', target: classified.target, events, flags, job: writer }, cookie);
 }
 
 // Phase lines arrive through a callback while the run is awaited; the
@@ -720,22 +742,27 @@ async function* runCliStream(input: {
 
 const HEARTBEAT_MS = 10_000;
 
-type StreamMeta = { lane: Lane; target: string };
+type RelayRun = {
+  lane: Lane;
+  target: string;
+  events: AsyncGenerator<AuditEvent>;
+  /** A run this request started; null on an attached stream, whose log already holds the initiator's accepted line. */
+  flags: InFlightFlags | null;
+  /** The job every line but a heartbeat is appended to. */
+  job: JobWriter | null;
+};
 
-function isTerminal(event: AuditEvent): boolean {
-  return event.type === 'complete' || event.type === 'incomplete' || event.type === 'bounce' || event.type === 'error';
-}
-
-// Drain a lane core. A throw becomes the terminal error line, so the stream
-// always ends on a typed line and the JSON path answers the shared error
-// object instead of an escaped exception; the relay's own deadline is the
-// one throw that reads as a timeout.
+// Drain a lane core. Every run ends on a typed terminal line: the relay's
+// own deadline is the one throw that reads as a timeout, and any other
+// throw, or a stream that ends without a terminal line, becomes the
+// incomplete_response_contract error. The JSON path therefore answers the
+// shared error object instead of an escaped exception.
 async function consume(
   events: AsyncGenerator<AuditEvent>,
   row: RequestRow,
   forward: (event: AuditEvent) => Promise<void>,
   signal: AbortSignal,
-): Promise<AuditEvent | null> {
+): Promise<AuditEvent> {
   let terminal: AuditEvent | null = null;
   try {
     for await (const event of events) {
@@ -745,33 +772,42 @@ async function consume(
   } catch (err) {
     if (signal.aborted && signal.reason === RELAY_DEADLINE) {
       row.detail = 'relay_deadline';
-      terminal = {
+      return closeWith(row, forward, {
         type: 'error',
         ...auditErrorFor('timeout', { cta: CTA_RETRY, details: 'The relay deadline passed before the run answered.' }),
-      };
-    } else {
-      row.detail = err instanceof Error ? err.message : String(err);
-      terminal = { type: 'error', ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }) };
+      });
     }
-    if (row.cli && row.cli.tier === 'unset') row.cli.tier = `error_${terminal.error.code}`;
-    await forward(terminal);
+    row.detail = err instanceof Error ? err.message : String(err);
+    terminal = null;
   }
+  if (terminal && isTerminalEvent(terminal)) return terminal;
+  return closeWith(row, forward, {
+    type: 'error',
+    ...auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }),
+  });
+}
+
+async function closeWith(
+  row: RequestRow,
+  forward: (event: AuditEvent) => Promise<void>,
+  terminal: Extract<AuditEvent, { type: 'error' }>,
+): Promise<AuditEvent> {
+  if (row.cli && row.cli.tier === 'unset') row.cli.tier = `error_${terminal.error.code}`;
+  await forward(terminal);
   return terminal;
 }
 
-async function relay(
-  common: Common,
-  meta: StreamMeta,
-  events: AsyncGenerator<AuditEvent>,
-  flags: InFlightFlags,
-  cookie: Record<string, string>,
-): Promise<Response> {
+async function relay(common: Common, run: RelayRun, cookie: Record<string, string>): Promise<Response> {
   const { ctx, row, env, request, abort } = common;
-  const accepted: AuditEvent = { type: 'accepted', lane: meta.lane, target: meta.target, started_at: flags.startedAt };
-  // The website engine bounds itself; the Durable Object read is what the
-  // relay deadline bounds.
+  const { events, flags, job } = run;
+  const accepted: AuditEvent | null = flags
+    ? { type: 'accepted', lane: run.lane, target: run.target, started_at: flags.startedAt }
+    : null;
+  if (accepted) job?.append(accepted);
+  // The website engine bounds itself; the Durable Object read and an
+  // attached stream are what the relay deadline bounds.
   const deadline =
-    meta.lane === 'cli'
+    run.lane === 'cli' || !flags
       ? setTimeout(() => abort.abort(RELAY_DEADLINE), common.deps.relayDeadlineMs ?? RELAY_DEADLINE_SECONDS * 1000)
       : null;
   const clearDeadline = () => {
@@ -781,10 +817,11 @@ async function relay(
     let terminal: AuditEvent | null = null;
     await runWithHitMinPurge(ctx, async () => {
       try {
-        terminal = await consume(events, row, async () => {}, abort.signal);
+        terminal = await consume(events, row, async (event) => job?.append(event), abort.signal);
       } finally {
         clearDeadline();
-        await flags.clear();
+        await job?.settled();
+        await flags?.clear();
         await flushHitMinPurge().catch(() => {});
       }
     });
@@ -818,6 +855,9 @@ async function relay(
         if (clientGone) return;
         clientGone = true;
         stopHeartbeat();
+        // An attached relay has no run of its own to finish, so draining the
+        // job's stream after its reader leaves holds a subscriber for nothing.
+        if (!flags) abort.abort(new Error('client_gone'));
         void writer.abort().catch(() => {});
         row.outcome = 'client_gone';
         row.status = 200;
@@ -826,17 +866,18 @@ async function relay(
       if (request.signal.aborted) onClientGone();
       else request.signal.addEventListener('abort', onClientGone, { once: true });
       try {
-        await write(accepted);
+        if (accepted) await write(accepted);
         armHeartbeat();
         terminal = await consume(
           events,
           row,
           async (event) => {
+            job?.append(event);
             // No heartbeat may land after the terminal line.
-            if (isTerminal(event)) stopHeartbeat();
+            if (isTerminalEvent(event)) stopHeartbeat();
             if (clientGone) return;
             await write(event);
-            if (!isTerminal(event)) armHeartbeat();
+            if (!isTerminalEvent(event)) armHeartbeat();
           },
           abort.signal,
         );
@@ -848,7 +889,8 @@ async function relay(
           row.outcome = terminal ? outcomeOf(terminal) : 'incomplete_response_contract';
           row.status = 200;
         }
-        await flags.clear();
+        await job?.settled();
+        await flags?.clear();
         await flushHitMinPurge().catch(() => {});
         await writer.close().catch(() => {});
         emitRequestRow(row, common.started);

@@ -9,6 +9,8 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
+import type { AuditEvent } from '../src/shared/audit-events';
+import type { AuditJob } from '../src/worker/audit/job';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
@@ -17,6 +19,7 @@ import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { fakeJobNamespace } from './helpers/audit-job-state';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -94,6 +97,8 @@ interface WebEnvOpts {
   failRegistry?: boolean;
   // Serve the zero-check registry so a fresh audit finishes without probing.
   minimalRegistry?: boolean;
+  kvSeed?: Record<string, string>;
+  jobs?: DurableObjectNamespace<AuditJob>;
 }
 
 async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
@@ -145,11 +150,12 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
       },
     } as unknown as R2Bucket,
     SCORE_KV: {
-      async get() {
-        return null;
+      async get(key: string) {
+        return opts.kvSeed?.[key] ?? null;
       },
       async put() {},
     } as unknown as KVNamespace,
+    AUDIT_JOB: opts.jobs,
     WEB_AUDIT_ENABLED: (opts.webEnabled ?? true) ? 'true' : undefined,
     MCP_ENABLED: (opts.mcpEnabled ?? true) ? 'true' : undefined,
     WEB_AUDIT_LIMITER_IP: {
@@ -1293,5 +1299,74 @@ describe('audit_website public_listing flip budget', () => {
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
     expect(r2.get(key)).toBe(before);
+  });
+});
+
+describe('audit_website: a run already in flight', () => {
+  const AT = '2026-09-11T00:00:00.000Z';
+  const complete = {
+    type: 'complete',
+    kind: 'web',
+    tier: 'live',
+    target: 'example.com',
+    scorecard_url: 'https://anc.dev/score/example.com',
+    markdown_url: 'https://anc.dev/score/example.com/md',
+    json_url: 'https://anc.dev/score/example.com/json',
+    freshness: { cached: false, scored_at: AT, refresh_after: '2026-09-11T00:01:00.000Z' },
+    spec_version: SPEC_VERSION,
+    target_url: 'https://example.com/',
+    scorecard: { target_url: 'https://example.com/', score_pct: 64, results: [] },
+  } as unknown as AuditEvent;
+
+  async function inFlightEnv(limiterOk: boolean): Promise<McpEnv> {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('web:example.com'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'web', target: 'example.com', started_at: AT });
+    setTimeout(() => void job.append(claim.run, complete), 20);
+    return makeEnv({
+      jobs,
+      limiterOk,
+      kvSeed: { 'inflight:web:example.com': JSON.stringify({ started_at: AT, job: 'web:example.com' }) },
+    });
+  }
+
+  test('a caller the burst limiter denies cannot attach to the run in flight', async () => {
+    // Attaching holds a request open for the rest of someone else's run, so
+    // it waits behind the same per-source gate a fresh audit does.
+    const env = await inFlightEnv(false);
+    const res = await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+
+  test('a caller with no client IP cannot attach to the run in flight', async () => {
+    const env = await inFlightEnv(true);
+    const res = await callTool(env, 'audit_website', { url: 'example.com' });
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+
+  test('an in-flight domain attaches once the caller passes the source gates', async () => {
+    const env = await inFlightEnv(true);
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9'));
+    expect(body).toMatchObject({
+      audited: true,
+      attached: true,
+      source: 'fresh-audit',
+      cached: false,
+      scored_at: AT,
+      spec_version: SPEC_VERSION,
+    });
+    expect(String(body.share_url)).toContain('example.com');
+    expect((body.scorecard as { score_pct: number }).score_pct).toBe(64);
+  });
+
+  test('an explicit public_listing is its own request: it runs the gates rather than attaching', async () => {
+    const env = await inFlightEnv(false);
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.9');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
   });
 });

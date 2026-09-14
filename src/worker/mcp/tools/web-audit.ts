@@ -17,6 +17,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
 import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
 import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from '../../audit-web/audit-log';
 import {
@@ -50,10 +51,11 @@ import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
 import { type NotifyEnv, notifyFailure } from '../../notify';
 import { SPEC_VERSION } from '../../spec-version.gen';
+import { getMcpRequest } from '../request-context';
 import { requestHeader } from '../request-header';
 import { siteOrigin } from '../site-origin';
 
-export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv {
+export interface WebAuditToolsEnv extends AuditLogEnv, NotifyEnv, InFlightEnv {
   ASSETS: Fetcher;
   SCORE_CACHE: R2Bucket;
   SCORE_KV?: KVNamespace;
@@ -274,6 +276,36 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         if (!success)
           return jsonRpcError32099('audit rate limit exceeded — burst window (30 per 60 seconds per source).');
       }
+      // A run already in flight for this domain is attached to rather than
+      // run twice. Attaching spends no audit budget, but it holds a request
+      // open for the rest of that run, so it passes the source gates above
+      // first. An explicit listing choice is its own request: attaching would
+      // answer it with a run that never writes the caller's opt-in.
+      if (public_listing === undefined) {
+        const signal = getMcpRequest()?.signal;
+        const attached = await awaitInFlightTerminal(env, 'web', domain, signal);
+        if (attached?.type === 'complete') {
+          return textContent({
+            audited: true,
+            source: 'fresh-audit',
+            attached: true,
+            ...attached.freshness,
+            scorecard: await enrichForRead(env, attached.scorecard),
+            share_url: shareUrl,
+            spec_version: attached.spec_version,
+          });
+        }
+        if (attached) {
+          const reason = attached.type === 'incomplete' ? 'incomplete' : attached.error.code;
+          return isError(`the audit this call attached to did not finish (${reason}); nothing was cached. Retry.`);
+        }
+        // A null answer after the caller aborted means the wait ended, not
+        // that nothing is running; dispatching now would audit for nobody.
+        if (signal?.aborted) {
+          return jsonRpcError32099('the caller went away while attaching to the audit already in flight.');
+        }
+      }
+
       // Hourly window (shared with the webapp route).
       if (env.SCORE_KV) {
         const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);
