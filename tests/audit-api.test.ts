@@ -37,16 +37,17 @@ describe('POST /api/score: request contract', () => {
     expect(error.cta.length).toBeGreaterThan(0);
   });
 
-  test('bodies with input and with target both succeed during the phased landing', async () => {
-    const a = await call(post({ input: 'ripgrep', turnstile_token: 'x' }), makeEnv());
-    const b = await call(post({ target: 'ripgrep', turnstile_token: 'x' }), makeEnv());
-    expect(a.res.status).toBe(200);
-    expect(b.res.status).toBe(200);
+  test('the body names its subject with target; the retired input key is not a target', async () => {
+    const viaTarget = await call(post({ target: 'ripgrep', turnstile_token: 'x' }), makeEnv());
+    expect(viaTarget.res.status).toBe(200);
+    const viaInput = await call(post({ input: 'ripgrep', turnstile_token: 'x' }), makeEnv());
+    expect(viaInput.res.status).toBe(400);
+    expect((await errorOf(viaInput.res)).code).toBe('target_empty');
   });
 });
 
 describe('POST /api/score: unmetered tiers', () => {
-  test('a registry hit is one JSON body carrying the envelope with tier registry plus the legacy nested fields', async () => {
+  test('a registry hit is one JSON body carrying the envelope and nothing beside it', async () => {
     const tracker = newTracker();
     const { res } = await call(
       post({ target: 'ripgrep', turnstile_token: 'x' }, { accept: 'application/x-ndjson' }),
@@ -65,7 +66,10 @@ describe('POST /api/score: unmetered tiers', () => {
       spec_version: SPEC_VERSION,
       auditor_url: expect.any(String),
     });
-    expect(body.scorecard).toMatchObject({ kind: 'registry_hit', scorecard_url: '/score/ripgrep' });
+    expect(body).not.toHaveProperty('share_url');
+    // The endpoint's registry tier names the curated page; the scorecard body
+    // itself comes from that page's json_url, so the envelope carries none.
+    expect(body.scorecard).toBeNull();
     expect(tracker.limiterCalls).toEqual([]);
   });
 
@@ -96,8 +100,9 @@ describe('POST /api/score: unmetered tiers', () => {
       kind: 'cli',
       tier: 'cache',
       target: 'ouch',
-      share_url: 'https://anc.dev/score/ouch',
+      scorecard_url: 'https://anc.dev/score/ouch',
     });
+    expect(cliBody).not.toHaveProperty('share_url');
     expect(tracker.limiterCalls).toEqual([]);
     expect(tracker.doCalls).toBe(0);
   });
@@ -300,7 +305,7 @@ describe('POST /api/score: response mode', () => {
     expect(body).toMatchObject({ kind: 'web', tier: 'live', target: 'anc.dev', target_url: 'https://anc.dev/' });
   });
 
-  test('a CLI cache miss with a plain Accept yields the envelope beside the legacy triad and share_url', async () => {
+  test('a CLI cache miss with a plain Accept yields the envelope', async () => {
     const tracker = newTracker();
     const { res } = await call(post({ target: 'cargo binstall ouch', turnstile_token: 'x' }), makeEnv({ tracker }));
     expect(res.status).toBe(200);
@@ -311,8 +316,8 @@ describe('POST /api/score: response mode', () => {
       target: 'ouch',
       scorecard_url: 'https://anc.dev/score/ouch',
       anc_version: ANC_VERSION,
-      share_url: 'https://anc.dev/score/ouch',
     });
+    expect(body).not.toHaveProperty('share_url');
     expect(tracker.doCalls).toBe(1);
   });
 
@@ -392,7 +397,6 @@ describe('POST /api/score: refresh and branch snapshots', () => {
       tier: 'live',
       target: 'o/r@main',
       scorecard_url: 'https://anc.dev/score/o/r@main',
-      share_url: 'https://anc.dev/score/o/r@main',
     });
     expect(tracker.doCalls).toBe(1);
   });
@@ -514,11 +518,11 @@ describe('POST /api/score: review pins', () => {
     expect(((await hatch.res.json()) as { tier: string }).tier).toBe('live');
   });
 
-  test('the legacy input key is CLI-only during the phased landing: a website under it is 400 unrecognized_input with no probe, R2 read, or budget', async () => {
+  test('a body carrying only the retired input key is refused before any probe, R2 read, or budget', async () => {
     const tracker = newTracker();
     const { res } = await call(post({ input: 'anc.dev', turnstile_token: 'x' }), makeEnv({ tracker }));
     expect(res.status).toBe(400);
-    expect((await errorOf(res)).code).toBe('unrecognized_input');
+    expect((await errorOf(res)).code).toBe('target_empty');
     expect(tracker.probeCalls).toEqual([]);
     expect(tracker.r2Gets).toEqual([]);
     expect(tracker.limiterCalls).toEqual([]);

@@ -7,8 +7,8 @@
 // (cold start, or a SPEC_VERSION bump that rotated every key) the board
 // renders a scoring-in-progress empty state rather than failing.
 
+import { scorePath } from '../../shared/audit-routes';
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
-import { renderSurfaceSeg } from '../../shared/surface-seg.mjs';
 import type { WebAggregateEntry } from './cache';
 
 /** Board row: an aggregate entry plus whether it came from the curated seed. */
@@ -95,151 +95,6 @@ export function buildBoardViewNav(
   </nav>`;
 }
 
-function siteNoun(n: number): string {
-  return n === 1 ? 'site' : 'sites';
-}
-
-function boardCountLine(opts: Omit<WebBoardRenderOpts, 'sort'>): string {
-  if (opts.view === 'curated') {
-    return `${opts.curatedCount} curated ${siteNoun(opts.curatedCount)} on the board.`;
-  }
-  const total = opts.curatedCount + opts.userCount;
-  return `${total} ${siteNoun(total)} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted).`;
-}
-
-function boardSurfaceSeg(active: 'cli' | 'web'): string {
-  return renderSurfaceSeg({
-    dataAttr: 'data-surface-board-seg',
-    radioName: 'board-surface',
-    cliId: 'board-s-cli',
-    webId: 'board-s-web',
-    checked: active,
-    ariaLabel: 'Leaderboard surface',
-  });
-}
-
-function boardHero(active: 'cli' | 'web'): string {
-  return `<section class="leaderboard-hero">
-  ${boardSurfaceSeg(active)}
-  <h1>Web Agent-Readiness Leaderboard</h1>
-  <p class="leaderboard-hero__lede">Agent-readiness scores for websites and their MCP servers, scored against the same <a href="/">eight principles</a> as the CLI leaderboard. See the <a href="/methodology">methodology</a> for how the web audit probes MCP shape, discovery surfaces, and machine-readable content.</p>`;
-}
-
-function heroMeta(opts: WebBoardRenderOpts): string {
-  return `${boardCountLine(opts)} <a href="/web-audit">Audit your own</a>.`;
-}
-
-/** Build the /web page body HTML from the assembled board entries. */
-export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoardRenderOpts): string {
-  const sortKey = effectiveWebSort(opts.sort);
-  const ranked = rankWebEntries(entries, sortKey);
-  const globalActive = sortKey === 'global';
-
-  if (ranked.length === 0) {
-    return `${boardHero('web')}
-</section>
-<section class="leaderboard-empty">
-  <p>Scoring in progress: board results land after the next rescore pass. <a href="/web-audit">Audit a website</a> to see how it scores.</p>
-</section>`;
-  }
-
-  const rows = ranked
-    .map((entry) => {
-      const { relative, global: globalScore } = entry.score;
-      const friendly =
-        entry.name && entry.name !== entry.domain ? ` <span class="lb-tool__name">(${escHtml(entry.name)})</span>` : '';
-      const sourceTag = entry.curated ? '' : ' <span class="lb-tag">user-submitted</span>';
-      // Whole-row link: the domain anchor stretches over the row via
-      // .lb-rowlink::after so a click anywhere in the row opens the detail
-      // page, never the external site.
-      return `      <tr class="lb-row" data-global="${globalScore}" data-relative="${relative}" data-domain="${escHtml(entry.domain)}">
-        <td class="lb-rank">${entry.rank}</td>
-        <td class="lb-tool"><a class="lb-rowlink" href="/web/${escHtml(entry.domain)}">${escHtml(entry.domain)}</a>${friendly}${sourceTag}</td>
-        <td class="lb-desc">${escHtml(entry.description)}</td>
-        <td class="lb-score lb-score--global" data-sort="${globalScore}">${renderMeter(globalScore)}</td>
-        <td class="lb-score lb-score--relative" data-sort="${relative}">${renderMeter(relative)}</td>
-      </tr>`;
-    })
-    .join('\n');
-
-  return `${boardHero('web')}
-  <p class="leaderboard-hero__meta">${heroMeta(opts)}</p>
-</section>
-
-<section class="leaderboard-filters" aria-label="View and sort">
-  ${buildBoardViewNav(opts)}
-  <div class="tier-filters" role="group" aria-label="Sort the board by">
-    <button type="button" class="tier-filter${globalActive ? '' : ' tier-filter--active'}" data-web-sort="relative" aria-pressed="${globalActive ? 'false' : 'true'}">Relative</button>
-    <button type="button" class="tier-filter${globalActive ? ' tier-filter--active' : ''}" data-web-sort="global" aria-pressed="${globalActive ? 'true' : 'false'}">Global</button>
-  </div>
-</section>
-
-<section class="leaderboard-table-wrap">
-  <table class="leaderboard-table" aria-label="Website agent-readiness scores">
-    <thead>
-      <tr>
-        <th class="lb-rank">#</th>
-        <th class="lb-tool">Site</th>
-        <th class="lb-desc">Description</th>
-        <th class="lb-score">Global</th>
-        <th class="lb-score">Relative</th>
-      </tr>
-    </thead>
-    <tbody>
-${rows}
-    </tbody>
-  </table>
-</section>
-
-<section class="leaderboard-methodology">
-  <h2>How web scoring works</h2>
-  <p>Each website is probed for its MCP server shape, MCP and agent discovery surfaces, machine-readable content
-  (llms.txt, OpenAPI, JSON Schemas), root-HTML affordances, and crawl policy. Checks that do not apply to a site
-  (no MCP server, no API surface, a different declared site type) are excluded rather than counted against it.
-  <strong>Relative</strong> measures how agent-ready a site is for the checks that apply to it, so a site perfect
-  for its type approaches 100%; <strong>Global</strong> measures absolute agent capability against a maximally
-  agent-ready site, so exposing and nailing more surfaces ranks higher. The board sorts by Relative by default;
-  each result page headlines Relative.</p>
-  <p>The curated set is hand-picked; the all view also lists sites audited on demand, which stay on the board
-  until their cached result ages out. To score any public site, use the <a href="/web-audit">web audit</a> or the
-  <code>audit_website</code> MCP tool.</p>
-</section>
-<script defer src="/js/web-leaderboard.js"></script>`;
-}
-
-/**
- * Build the /web.md markdown twin (RELATIVE order, both columns). Links are
- * absolutized against the serving origin so staging and local previews
- * stay self-consistent. The view switch renders as an in-body line (the
- * active view as plain text) because a bare query parameter would be
- * undiscoverable to a reader of the markdown board.
- */
-export function buildWebLeaderboardMarkdown(
-  entries: WebBoardEntry[],
-  origin: string,
-  opts: Omit<WebBoardRenderOpts, 'sort'>,
-): string {
-  const viewSwitch =
-    opts.view === 'curated'
-      ? `View: [All](${origin}/web.md) | Curated`
-      : `View: All | [Curated](${origin}/web.md?view=curated)`;
-  const countLine = boardCountLine(opts);
-  const lines = [
-    '# Web Agent-Readiness Leaderboard',
-    '',
-    `Agent-readiness scores for websites and their MCP servers, scored against the same [eight principles](${origin}/) as the CLI leaderboard.`,
-    '',
-    viewSwitch,
-    '',
-    countLine,
-    '',
-    'Sorted by the Relative score (checks that apply to each site); Global measures absolute agent capability.',
-    '',
-  ];
-  lines.push(buildBoardMarkdownRows(entries, origin));
-  return lines.join('\n');
-}
-
 /**
  * Escape the characters that carry structure inside a markdown table cell. A
  * row's label is an audited site's own title, so an unescaped `]` closes the
@@ -269,7 +124,7 @@ export function buildBoardMarkdownRows(entries: WebBoardEntry[], origin: string)
     );
     const source = entry.curated ? 'curated' : 'on-demand';
     lines.push(
-      `| ${entry.rank} | [${label}](${origin}/web/${entry.domain}) | ${entry.score.global}% | ${entry.score.relative}% | ${source} |`,
+      `| ${entry.rank} | [${label}](${origin}${scorePath(entry.domain)}) | ${entry.score.global}% | ${entry.score.relative}% | ${source} |`,
     );
   }
   lines.push('');
@@ -295,7 +150,7 @@ export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
       const label = escHtml(
         `${named ? `${entry.domain} (${entry.name})` : entry.domain}, score ${pct} percent, rank ${entry.rank}`,
       );
-      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="/web/${domain}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="${scorePath(domain)}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 }
@@ -314,7 +169,7 @@ export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): strin
   const lines = ['| # | Site | Score |', '|---|------|-------|'];
   for (const entry of ranked) {
     const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
-    lines.push(`| ${entry.rank} | [${label}](/web/${entry.domain}) | ${entry.score.relative}% |`);
+    lines.push(`| ${entry.rank} | [${label}](${scorePath(entry.domain)}) | ${entry.score.relative}% |`);
   }
   lines.push('');
   return lines.join('\n');
@@ -343,7 +198,7 @@ export function buildBoardRows(entries: WebBoardEntry[]): string {
       const label = escHtml(
         `${named ? `${entry.domain} (${entry.name})` : entry.domain}, relative score ${relative} percent, global score ${entry.score.global} percent, rank ${entry.rank}`,
       );
-      return `        <a class="lrow ${bandOf(relative)}" aria-label="${label}" href="/web/${domain}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${entry.score.global}% global</span></span>${renderMeter(relative)}</a>`;
+      return `        <a class="lrow ${bandOf(relative)}" aria-label="${label}" href="${scorePath(domain)}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${entry.score.global}% global</span></span>${renderMeter(relative)}</a>`;
     })
     .join('\n');
 }

@@ -24,6 +24,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { AUDIT_PATH } from '../shared/audit-routes';
 import { ANC_VERSION, expiresInOneYearIso, resolveBaseUrl } from './util.mjs';
 
 const MCP_SPEC_VERSION = '2026-07-28';
@@ -208,7 +209,7 @@ export function buildAgentSkillsIndexMd(baseUrl, webAuditSkills = []) {
     '',
     '## Web-audit fix skills',
     '',
-    `One fix skill per [web audit](${baseUrl}/web-audit) check:`,
+    `One fix skill per [web audit](${baseUrl}${AUDIT_PATH}) check:`,
     '',
     ...webAuditSkills.map((skill) => `- [web-audit-fix-${skill.id}](${skill.url}): ${skill.description}`),
     '',

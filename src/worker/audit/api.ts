@@ -45,13 +45,8 @@
 //                              sees, and a stream that ends without a
 //                              terminal line gets a typed error line.
 //
-// During the phased landing the non-streaming JSON responses carry the
-// legacy `share_url` and the registry hit's nested `scorecard.kind` and
-// `scorecard.scorecard_url` beside the envelope, because the deployed
-// homepage reads them until the entry form switches over. A body that
-// carries the legacy `input` key is CLI-only for the same reason: that
-// client cannot render a website envelope, so a website under it is
-// refused as unrecognized input.
+// The body names its subject with `target`; the JSON responses are the
+// shared envelope and nothing beside it.
 
 import type { AuditEnvelope } from '../../shared/audit-envelope';
 import {
@@ -145,8 +140,6 @@ type ParsedBody = {
   siteType: WebSiteType | null;
   publicListing: boolean | undefined;
   refresh: boolean;
-  /** The body used the legacy `input` key, so it came from the deployed CLI form. */
-  legacyInput: boolean;
 };
 
 type ParseFailure = { status: number } & AuditErrorObject;
@@ -187,8 +180,7 @@ async function parseBody(request: Request): Promise<ParsedBody | ParseFailure> {
     return { status: 400, ...auditErrorFor('invalid_body', { cta: CTA_INPUT }) };
   }
   const body = raw as Record<string, unknown>;
-  const legacyInput = typeof body.target !== 'string' && typeof body.input === 'string';
-  const target = typeof body.target === 'string' ? body.target : legacyInput ? (body.input as string) : null;
+  const target = typeof body.target === 'string' ? body.target : null;
   if (target === null) return { status: 400, ...auditErrorFor('target_empty', { cta: CTA_INPUT }) };
   if (body.site_type !== undefined && body.site_type !== 'content' && body.site_type !== 'api') {
     return { status: 400, ...auditErrorFor('invalid_site_type', { cta: 'Use "content" or "api".' }) };
@@ -202,7 +194,6 @@ async function parseBody(request: Request): Promise<ParsedBody | ParseFailure> {
     siteType: (body.site_type as WebSiteType | undefined) ?? null,
     publicListing: body.public_listing as boolean | undefined,
     refresh: body.refresh === true,
-    legacyInput,
   };
 }
 
@@ -328,10 +319,6 @@ async function handle(
   }
   row.lane = classified.lane;
   row.target = classified.target;
-  if (parsed.legacyInput && classified.lane === 'web') {
-    row.outcome = 'error_unrecognized_input';
-    return errorResponse(400, auditErrorFor('unrecognized_input', { cta: CTA_INPUT }));
-  }
   const origin = new URL(request.url).origin;
   const skipCache = new URL(request.url).searchParams.get('fromCache') === 'false';
   const common = {
@@ -569,19 +556,7 @@ async function handleCli(
     cli.binary = tier.entry.binary ?? null;
     cli.freshness = 'registry-hit';
     cli.resolved_step = 'registry';
-    return jsonEnvelope(
-      tier.envelope,
-      {},
-      {
-        scorecard: {
-          kind: 'registry_hit',
-          tool: tier.entry,
-          scorecard_url: tier.scorecardUrl,
-          score_pct: tier.entry.score_pct ?? null,
-        },
-        anc_version: tier.ancVersion,
-      },
-    );
+    return jsonEnvelope(tier.envelope);
   }
   if (tier.kind === 'cache') {
     row.tier = 'cache';
@@ -590,7 +565,7 @@ async function handleCli(
     cli.cache_pre_hit = true;
     cli.binary = tier.binary;
     cli.freshness = 'cache-hit';
-    return jsonEnvelope(tier.envelope, {}, { share_url: tier.shareUrl ?? undefined });
+    return jsonEnvelope(tier.envelope);
   }
 
   // The operator hatch bypasses the flag; a refresh attaches like any transact.
@@ -927,7 +902,7 @@ function terminalResponse(terminal: AuditEvent | null, row: RequestRow, cookie: 
   row.outcome = outcomeOf(terminal);
   if (terminal.type === 'complete') {
     const { type: _type, ...envelope } = terminal;
-    return jsonEnvelope(envelope, cookie, envelope.kind === 'cli' ? legacyCliFields(envelope) : {});
+    return jsonEnvelope(envelope, cookie);
   }
   if (terminal.type === 'bounce' || terminal.type === 'error') {
     return errorResponse(statusForCode(terminal.error.code), { error: terminal.error }, cookie);
@@ -940,11 +915,6 @@ function terminalResponse(terminal: AuditEvent | null, row: RequestRow, cookie: 
   }
   row.outcome = 'incomplete_response_contract';
   return errorResponse(500, auditErrorFor('incomplete_response_contract', { cta: CTA_RETRY }), cookie);
-}
-
-// The deployed homepage forwards to `share_url`; a result with a page names it.
-function legacyCliFields(envelope: AuditEnvelope): Record<string, unknown> {
-  return envelope.scorecard_url ? { share_url: envelope.scorecard_url } : {};
 }
 
 function statusForCode(code: string): number {
@@ -989,12 +959,8 @@ export function envelopeJsonBody(envelope: AuditEnvelope): Record<string, unknow
   };
 }
 
-function jsonEnvelope(
-  envelope: AuditEnvelope,
-  cookie: Record<string, string> = {},
-  legacy: Record<string, unknown> = {},
-): Response {
-  const body = { ...envelopeJsonBody(envelope), ...legacy };
+function jsonEnvelope(envelope: AuditEnvelope, cookie: Record<string, string> = {}): Response {
+  const body = envelopeJsonBody(envelope);
   return new Response(JSON.stringify(body), { status: 200, headers: jsonHeaders(cookie) });
 }
 

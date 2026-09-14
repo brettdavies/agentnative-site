@@ -129,8 +129,8 @@ describe('agent-readiness cross-surface drift (built dist/)', () => {
     expect(llms).toContain(`https://anc.dev${MCP_DESCRIPTOR_CANONICAL_PATH}`);
   });
 
-  test('shell HTML pages load /js/webmcp.js on spec and /web-audit surfaces', async () => {
-    for (const page of ['index.html', 'mcp.html', 'p1.html', 'web-audit.html']) {
+  test('shell HTML pages load /js/webmcp.js on the entry and spec surfaces', async () => {
+    for (const page of ['index.html', 'audit.html', 'mcp.html', 'p1.html']) {
       const html = await readFile(join(DIST_DIR, page), 'utf8');
       expect(html).toContain('/js/webmcp.js');
     }

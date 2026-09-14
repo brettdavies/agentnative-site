@@ -114,8 +114,8 @@ describe('merged leaderboard: the website pane', () => {
   test('injects board rows into the marked region, ranked by relative score', async () => {
     const html = await fetchBoard(makeEnv([boardEntry('next.dev', 60), boardEntry('top.dev', 80)]));
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
-    expect(html).toContain('href="/web/top.dev"');
-    expect(html).toContain('href="/web/next.dev"');
+    expect(html).toContain('href="/score/top.dev"');
+    expect(html).toContain('href="/score/next.dev"');
     expect(html.indexOf('top.dev')).toBeLessThan(html.indexOf('next.dev'));
   });
 
@@ -219,7 +219,7 @@ describe('merged leaderboard: the markdown twin', () => {
     // The twin keeps every column the compact HTML row trades away.
     expect(md).toContain('| # | Tool | Tier | Lang | Score | Principles |');
     expect(md).toContain('| # | Site | Global | Relative | Source |');
-    expect(md).toContain('| 1 | [top.dev](https://anc.dev/web/top.dev) | 80% | 85% | curated |');
+    expect(md).toContain('| 1 | [top.dev](https://anc.dev/score/top.dev) | 80% | 85% | curated |');
   });
 
   test('Accept: text/markdown reaches the same filled twin', async () => {

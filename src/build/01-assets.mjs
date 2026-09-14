@@ -83,25 +83,6 @@ export async function copyAssets({ repoRoot, distDir }) {
     join(repoRoot, 'src/client/leaderboard.ts'),
     join(distDir, 'js/leaderboard.js'),
   );
-  // Homepage live-scoring form (Turnstile lazy-load + 2 s theater +
-  // redirect to /live-score/<binary>). Loaded with defer from the
-  // homepage shell only.
-  const liveScoreJs = await bundleClient(join(repoRoot, 'src/client/live-score.ts'), join(distDir, 'js/live-score.js'));
-  // Web-audit form (validate + navigate to /web/scoring/<host>). Loaded with
-  // defer from the /web-audit page shell only.
-  const webAuditJs = await bundleClient(join(repoRoot, 'src/client/web-audit.ts'), join(distDir, 'js/web-audit.js'));
-  // In-progress scoring page (Turnstile + POST /api/audit-web + NDJSON stream
-  // + forward to /web/<domain>). Worker-served /web/scoring/<domain> loads it.
-  const webAuditScoringJs = await bundleClient(
-    join(repoRoot, 'src/client/web-audit-scoring.ts'),
-    join(distDir, 'js/web-audit-scoring.js'),
-  );
-  // Web leaderboard sort toggle (GLOBAL default, RELATIVE via ?sort=).
-  // Loaded with defer from the /web page shell only.
-  const webLeaderboardJs = await bundleClient(
-    join(repoRoot, 'src/client/web-leaderboard.ts'),
-    join(distDir, 'js/web-leaderboard.js'),
-  );
   const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, 'js/webmcp.js'));
   // Result-page Re-audit control (countdown to refresh_after, then the same
   // transact click as the entry form) and the ?v= forwarding-query strip.
@@ -129,10 +110,6 @@ export async function copyAssets({ repoRoot, distDir }) {
     navJs,
     clipboardJs,
     leaderboardJs,
-    liveScoreJs,
-    webAuditJs,
-    webAuditScoringJs,
-    webLeaderboardJs,
     webmcpJs,
     reauditJs,
     scoringJs,
