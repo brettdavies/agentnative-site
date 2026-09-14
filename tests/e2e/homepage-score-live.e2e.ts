@@ -134,3 +134,15 @@ test.describe('staging homepage form — real Turnstile + real /api/score', () =
     await expect(page.locator('h1')).toContainText(/ripgrep/i);
   });
 });
+
+test.describe('staging /scoring progress page', () => {
+  test('/scoring?target=ripgrep probes, finds the curated scorecard, and forwards to /score/ripgrep', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await page.goto(`${STAGING_BASE}/scoring?target=ripgrep`);
+    await expect(page.locator('[data-scoring-status]')).toContainText('curated', { timeout: 30_000 });
+    await page.waitForURL(/\/score\/ripgrep$/, { timeout: 30_000 });
+    await expect(page.locator('h1')).toContainText(/ripgrep/i);
+  });
+});

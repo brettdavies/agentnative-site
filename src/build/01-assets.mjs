@@ -106,6 +106,9 @@ export async function copyAssets({ repoRoot, distDir }) {
   // Result-page Re-audit control (countdown to refresh_after, then the same
   // transact click as the entry form) and the ?v= forwarding-query strip.
   const reauditJs = await bundleClient(join(repoRoot, 'src/client/reaudit.ts'), join(distDir, 'js/reaudit.js'));
+  // Progress page (/scoring): the stashed click or a probe, the stream, the
+  // forward. The Worker-rendered page loads it; no build shell does.
+  const scoringJs = await bundleClient(join(repoRoot, 'src/client/scoring.ts'), join(distDir, 'js/scoring.js'));
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 
@@ -122,5 +125,6 @@ export async function copyAssets({ repoRoot, distDir }) {
     webLeaderboardJs,
     webmcpJs,
     reauditJs,
+    scoringJs,
   };
 }

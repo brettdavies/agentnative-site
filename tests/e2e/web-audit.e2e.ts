@@ -682,3 +682,28 @@ test.describe('@render web audit — result-page context and WebMCP tools', () =
     }
   });
 });
+
+test.describe('web audit: the /scoring progress page', () => {
+  test('/scoring?target=anc.dev forwards to /score/anc.dev, from a recent result or through Start', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await page.goto(`/scoring?target=${TARGET_DOMAIN}`);
+    // A result younger than the staleness window answers the probe and
+    // forwards at once; otherwise the page offers Start, whose click runs
+    // the audit on staging's always-pass Turnstile key.
+    const start = page.locator('[data-scoring-start]');
+    const outcome = await Promise.race([
+      start.waitFor({ state: 'visible', timeout: 30_000 }).then(
+        () => 'start' as const,
+        () => 'none' as const,
+      ),
+      page.waitForURL(`**/score/${TARGET_DOMAIN}**`, { timeout: 30_000 }).then(() => 'forwarded' as const),
+    ]);
+    if (outcome === 'start') await start.click();
+    await page.waitForURL(`**/score/${TARGET_DOMAIN}**`, { timeout: 90_000 });
+    await expect(page.locator('.result-score .bigscore__n').first()).toContainText(/\d/);
+    await page.goBack();
+    await expect(page).not.toHaveURL(/\/scoring/);
+  });
+});
