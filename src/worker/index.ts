@@ -13,7 +13,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { isScorePath as isResultPath, isScoringPath } from '../shared/audit-routes';
+import { isAuditPath, isScorePath as isResultPath, isScoringPath } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -903,11 +903,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
-  // /web-audit form: same sitekey placeholder as the homepage, no board
-  // inject. Markdown twin and Accept: text/markdown skip this so the
+  // Entry-form pages: same sitekey placeholder as the homepage, no board
+  // inject. Markdown twins and Accept: text/markdown skip this so the
   // token never reaches the agent surface.
-  const isWebAuditForm = pathname === '/web-audit' || pathname === '/web-audit.html';
-  if (isWebAuditForm && upstream.ok) {
+  const isEntryForm = pathname === '/web-audit' || pathname === '/web-audit.html' || isAuditPath(pathname);
+  if (isEntryForm && upstream.ok) {
     const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
     const wantsMarkdown = servedMarkdown || contentType.includes('text/markdown');
     if (!wantsMarkdown && contentType.includes('text/html')) {

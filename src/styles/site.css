@@ -1479,6 +1479,25 @@ body:has(.doc) main {
   margin: 0 0 var(--space-4);
   color: var(--fg-secondary);
 }
+/* The entry form stacks segment, target row, opt-in, examples, and status.
+ * Its row is .board-try, which lays out the input beside the submit, so the
+ * form supplies only the column rhythm; the paragraphs drop their own
+ * margins so one gap governs the spacing. */
+.audit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* The hero's own help-text margin would otherwise reach the shared form and
+ * space it differently from the homepage copy of the same markup. */
+.audit-form > p,
+.audit-hero .audit-form > p {
+  margin: 0;
+}
+.audit-form__row input {
+  flex: 1;
+  min-width: 0;
+}
 .audit-hero__form input {
   flex: 1;
   min-width: 0;
@@ -1496,6 +1515,15 @@ body:has(.doc) main {
   font-size: 0.88rem;
   color: var(--fg-secondary);
   cursor: pointer;
+}
+/* The opt-in belongs to the website lane, and the rule above would otherwise
+ * outrank the pane rule that hides it: both are one class, and this one comes
+ * later. The pane restores the display type the label needs. */
+.audit-hero__optin[data-s="web"] {
+  display: none;
+}
+.scope:has(#s-web:checked) .audit-hero__optin[data-s="web"] {
+  display: inline-flex;
 }
 .audit-hero__optin input {
   flex: none;

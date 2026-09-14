@@ -3091,8 +3091,9 @@ describe('emitHomepage — index.md twin frontmatter', () => {
     expect(indexHtml).toContain('data-s="web"');
     expect(indexHtml).toContain('audit_website anc.dev');
     expect(indexHtml).toContain('bigscore__n">97');
-    expect(indexHtml).toContain('data-web-home-form');
-    expect(indexHtml).toContain('data-web-home-input');
+    expect(indexHtml).toContain('data-audit-form');
+    expect(indexHtml).toContain('data-audit-target');
+    expect(indexHtml).not.toContain('data-web-home-form');
     expect(indexHtml).not.toContain('data-web-audit-form');
   });
 });
@@ -3124,9 +3125,12 @@ describe('emitSubPages — twin frontmatter', () => {
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
     expect(auditHtml).not.toContain('---\ntitle:');
     expect(auditHtml).not.toMatch(/^url: /m);
-    expect(auditHtml).toContain('data-surface-audit-seg');
-    expect(auditHtml).toContain('id="audit-s-cli" checked');
-    expect(auditMd).not.toContain('data-surface-audit-seg');
+    expect(auditHtml).toContain('data-audit-form');
+    expect(auditHtml).toContain('id="s-cli" checked');
+    expect(auditHtml).toContain('<div data-s="web">');
+    expect(auditMd).not.toContain('data-audit-form');
+    expect(auditMd).toContain('## Audit a CLI tool');
+    expect(auditMd).toContain('## Audit a website');
   });
 
   test('privacy twin opens with frontmatter derived from its source; HTML stays clean', async () => {
@@ -3152,9 +3156,9 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(webAuditHtml).toContain('/js/web-audit.js');
   });
 
-  test('CLI /audit HTML does not carry the Turnstile sitekey meta', async () => {
+  test('/audit HTML carries the Turnstile sitekey meta, because its form transacts', async () => {
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
-    expect(auditHtml).not.toContain('turnstile-sitekey');
+    expect(auditHtml).toContain('name="turnstile-sitekey"');
   });
 
   test('widget page twin keeps the prose pointer and no form markup after the frontmatter', async () => {
@@ -3195,6 +3199,7 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
     await writeFile(join(distDir, 'p1.html'), `<html><body><h1 id="${SLUG}">Test</h1></body></html>`);
     await writeFile(join(distDir, 'index.html'), '<html><body><a href="/p1">P1</a></body></html>');
     await writeFile(join(distDir, 'index.md'), '# Home\n\nQuiet twin.\n');
+    await writeFile(join(distDir, 'audit.md'), '# Audit\n\nQuiet twin.\n');
     await writeFile(join(distDir, 'p1.md'), p1Md);
     return { distDir, sourcePath };
   }
@@ -3214,6 +3219,16 @@ describe('runInvariantChecks — principle twin equivalence (invariant #4)', () 
     const { distDir, sourcePath } = await seedDist(expectedTwin());
     try {
       await runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }]);
+    } finally {
+      await rm(distDir, { recursive: true, force: true });
+    }
+  });
+
+  test('an audit twin that names the entry form surface fails the entry-twin silence check', async () => {
+    const { distDir, sourcePath } = await seedDist(expectedTwin());
+    await writeFile(join(distDir, 'audit.md'), '# Audit\n\nThe form runs a Turnstile challenge.\n');
+    try {
+      await expect(runInvariantChecks(distDir, [SLUG], [{ n: 1, sourcePath }])).rejects.toThrow(/audit\.md leaked/);
     } finally {
       await rm(distDir, { recursive: true, force: true });
     }

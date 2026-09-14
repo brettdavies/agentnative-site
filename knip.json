@@ -22,6 +22,7 @@
     "src/client/webmcp.ts",
     "src/client/reaudit.ts",
     "src/client/scoring.ts",
+    "src/client/audit-entry.ts",
     "tests/**/*.test.ts",
     "tests/e2e/**/*.e2e.ts",
     "tests/helpers/**/*.ts",
