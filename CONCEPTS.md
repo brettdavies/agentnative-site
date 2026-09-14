@@ -67,6 +67,33 @@ version). HIT-min is live-board HTML and markdown (`max-age=300`, purge by Cache
 every-request `no-store` (`/web/scoring*`, POST `/mcp`, `/api/score`, `/api/audit-web`). Homepage HTML and homepage
 markdown share HIT-min because they are one object that includes the live web pane.
 
+## Audit funnel
+
+### Target
+
+The one noun both lanes take: the string a visitor or an agent submits to be audited, at most 128 characters.
+Classification decides the lane from the shape alone, so nothing asks the reader which kind of thing they typed. A tool
+name, an install command, or a GitHub URL classifies CLI, and a GitHub URL naming a branch classifies as its own
+branch-scoped kind; a domain or a URL classifies website. The classifier returns the normalized form every later surface
+keys on, or a rejection carrying both a reason and the sentence shown to the reader. Top-level page names are reserved
+and a target can never shadow one.
+
+### Progress page
+
+`/scoring?target=<t>`, the single page both lanes run on. The Worker paints it from the target alone; the client owns
+every state after that, spending a stashed admission token, probing without one, or waiting for the reader to press
+Start, then rendering the stream and forwarding to the result. With no target it serves a pointer to the audit page, and
+a refused target serves that pointer with the reason. The page exists for one run, so it is neither cached at the edge
+nor indexed, and it never loads the in-page tool script: a tool that could reach it could make it transact.
+
+### Result envelope
+
+The one object every result representation is built from, so a result page, its markdown twin, and its JSON cannot
+disagree about what was scored. It names the lane, the tier it was served at, the target, the three representation URLs,
+the freshness pair, the spec version it was scored under, and the scorecard itself. A curated registry result, a live
+CLI result, and a website result each have their own builder, and all three produce this shape. Distinct from the
+scorecard, which is the audit's own output and rides inside the envelope as a single field.
+
 ## Live scoring
 
 ### anc100
