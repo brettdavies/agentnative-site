@@ -13,7 +13,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { isAuditPath, isScorePath as isResultPath, isScoringPath } from '../shared/audit-routes';
+import { isAuditPath, isScorePath as isResultPath, isScoringPath, SCORECARDS_PATH } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -1013,7 +1013,7 @@ async function injectLeaderboardBoard(
   // the switch serves the CLI pane back and hides the list it just filtered.
   const viewNav = opts.markdown
     ? ''
-    : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, '/scorecards', [
+    : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, SCORECARDS_PATH, [
         'lane=web',
       ]);
   // `?lane=web` opens on the website pane. A website result page links back
