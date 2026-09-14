@@ -2054,7 +2054,9 @@ describe('buildLeaderboardBody — audience filter wiring', () => {
     const html = buildLeaderboardBody(lb, '<p>m</p>');
     expect(html).toContain('class="leaderboard-hero__meta"');
     expect(html).toContain('data-surface-board-seg');
-    expect(html).toContain('id="board-s-cli" checked');
+    // The page-scope ids, so the segment drives the shared [data-s] pane rules
+    // in place rather than navigating to a second board.
+    expect(html).toContain('id="s-cli" checked');
     expect(html).toContain('3 audited tools in the corpus');
     // All button no longer carries the redundant "(N)" count — the new
     // subhead owns the headcount.

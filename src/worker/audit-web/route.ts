@@ -393,6 +393,46 @@ export function isWebLeaderboardPath(pathname: string): boolean {
   return pathname === '/web' || pathname === '/web.md';
 }
 
+/**
+ * The board's rows for a view, resolved once for every surface that renders
+ * them. The opt-in gate sits here, upstream of all renderers, so the website
+ * board, its markdown twin, and the merged leaderboard can never disagree on
+ * which non-curated rows list. Curated rows come from the aggregate and never
+ * pass through that gate.
+ */
+export async function resolveBoardEntries(
+  env: WebAuditRouteEnv,
+  view: WebBoardView,
+): Promise<{ entries: WebBoardEntry[]; curatedCount: number; userCount: number }> {
+  const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
+  const curatedEntries: WebBoardEntry[] = (aggregate?.entries ?? []).map((e) => ({ ...e, curated: true }));
+  if (view !== 'all') {
+    return { entries: curatedEntries, curatedCount: curatedEntries.length, userCount: 0 };
+  }
+
+  const excludeDomains = await boardExcludeDomains(
+    env,
+    curatedEntries.map((e) => e.domain),
+  );
+  const userSubmitted = (await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains })).filter(
+    isBoardListable,
+  );
+  const userEntries: WebBoardEntry[] = userSubmitted.map((l) => ({
+    domain: l.domain,
+    url: `https://${l.domain}/`,
+    name: l.name,
+    description: '',
+    score_pct: l.score_pct,
+    score: l.score,
+    curated: false,
+  }));
+  return {
+    entries: curatedEntries.concat(userEntries),
+    curatedCount: curatedEntries.length,
+    userCount: userEntries.length,
+  };
+}
+
 export async function handleWebLeaderboard(request: Request, env: WebAuditRouteEnv): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('method not allowed', {
@@ -408,35 +448,8 @@ export async function handleWebLeaderboard(request: Request, env: WebAuditRouteE
   const sortRaw = url.searchParams.get('sort');
   const sort: 'global' | 'relative' | null = sortRaw === 'relative' || sortRaw === 'global' ? sortRaw : null;
 
-  const aggregate = await getAggregate(env, 'leaderboard', SPEC_VERSION);
-  const curatedEntries: WebBoardEntry[] = (aggregate?.entries ?? []).map((e) => ({ ...e, curated: true }));
-
-  let entries = curatedEntries;
-  let userCount = 0;
-  if (view === 'all') {
-    const excludeDomains = await boardExcludeDomains(
-      env,
-      curatedEntries.map((e) => e.domain),
-    );
-    // Opt-in gate on the shared enumeration, upstream of both renderers, so
-    // the HTML board and its .md twin can never disagree on which non-curated
-    // rows list. Curated rows come from the aggregate above and never pass here.
-    const userSubmitted = (await listAllWebAudits(env, { specVersion: SPEC_VERSION, excludeDomains })).filter(
-      isBoardListable,
-    );
-    const userEntries: WebBoardEntry[] = userSubmitted.map((l) => ({
-      domain: l.domain,
-      url: `https://${l.domain}/`,
-      name: l.name,
-      description: '',
-      score_pct: l.score_pct,
-      score: l.score,
-      curated: false,
-    }));
-    entries = curatedEntries.concat(userEntries);
-    userCount = userEntries.length;
-  }
-  const renderOpts = { view, curatedCount: curatedEntries.length, userCount, sort };
+  const { entries, curatedCount, userCount } = await resolveBoardEntries(env, view);
+  const renderOpts = { view, curatedCount, userCount, sort };
 
   if (wantMarkdown) {
     return new Response(buildWebLeaderboardMarkdown(entries, url.origin, renderOpts), {

@@ -56,20 +56,30 @@ export function rankWebEntries<T extends WebAggregateEntry>(
  * links so switching view keeps that order. Relative (the default) omits
  * `?sort=` so `/web` stays the clean share URL.
  */
-function viewHref(target: WebBoardView, sort: 'global' | 'relative' | null | undefined, markdown: boolean): string {
-  const base = markdown ? '/web.md' : '/web';
+function viewHref(
+  target: WebBoardView,
+  sort: 'global' | 'relative' | null | undefined,
+  markdown: boolean,
+  base = '/web',
+): string {
+  const path = markdown ? `${base}.md` : base;
   const params: string[] = [];
   if (target === 'curated') params.push('view=curated');
   if (!markdown && sort === 'global') params.push('sort=global');
-  return params.length > 0 ? `${base}?${params.join('&')}` : base;
+  return params.length > 0 ? `${path}?${params.join('&')}` : path;
 }
 
-function viewToggleNav(opts: WebBoardRenderOpts): string {
+/**
+ * The board's view switch. The base is a parameter because the same control
+ * renders on the website board and on the merged leaderboard, and a forked
+ * copy would be free to drift on which view is active or where it points.
+ */
+export function buildBoardViewNav(opts: WebBoardRenderOpts, base = '/web'): string {
   const link = (target: WebBoardView, label: string): string => {
     const active = target === opts.view;
     const cls = active ? 'tier-filter tier-filter--active' : 'tier-filter';
     const current = active ? ' aria-current="page"' : '';
-    return `<a class="${cls}"${current} href="${escHtml(viewHref(target, opts.sort, false))}">${label}</a>`;
+    return `<a class="${cls}"${current} href="${escHtml(viewHref(target, opts.sort, false, base))}">${label}</a>`;
   };
   return `<nav class="tier-filters" aria-label="Board view">
     ${link('all', 'All')}
@@ -149,7 +159,7 @@ export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoard
 </section>
 
 <section class="leaderboard-filters" aria-label="View and sort">
-  ${viewToggleNav(opts)}
+  ${buildBoardViewNav(opts)}
   <div class="tier-filters" role="group" aria-label="Sort the board by">
     <button type="button" class="tier-filter${globalActive ? '' : ' tier-filter--active'}" data-web-sort="relative" aria-pressed="${globalActive ? 'false' : 'true'}">Relative</button>
     <button type="button" class="tier-filter${globalActive ? ' tier-filter--active' : ''}" data-web-sort="global" aria-pressed="${globalActive ? 'true' : 'false'}">Global</button>
@@ -201,7 +211,6 @@ export function buildWebLeaderboardMarkdown(
   origin: string,
   opts: Omit<WebBoardRenderOpts, 'sort'>,
 ): string {
-  const ranked = rankWebEntries(entries, 'relative');
   const viewSwitch =
     opts.view === 'curated'
       ? `View: [All](${origin}/web.md) | Curated`
@@ -219,14 +228,22 @@ export function buildWebLeaderboardMarkdown(
     'Sorted by the Relative score (checks that apply to each site); Global measures absolute agent capability.',
     '',
   ];
+  lines.push(buildBoardMarkdownRows(entries, origin));
+  return lines.join('\n');
+}
+
+/**
+ * The board's markdown table, without the document around it: the heading,
+ * the view switch, and the counts belong to whichever page hosts it. Both the
+ * website board's twin and the merged leaderboard's twin render these rows, so
+ * the two can never list a row differently.
+ */
+export function buildBoardMarkdownRows(entries: WebBoardEntry[], origin: string): string {
+  const ranked = rankWebEntries(entries, 'relative');
   if (ranked.length === 0) {
-    lines.push(
-      `Scoring in progress: board results land after the next rescore pass. Audit a website at [/web-audit](${origin}/web-audit).`,
-      '',
-    );
-    return lines.join('\n');
+    return `Scoring in progress: board results land after the next rescore pass. Audit a website at [/web-audit](${origin}/web-audit).\n`;
   }
-  lines.push('| # | Site | Global | Relative | Source |', '|---|------|--------|----------|--------|');
+  const lines = ['| # | Site | Global | Relative | Source |', '|---|------|--------|----------|--------|'];
   for (const entry of ranked) {
     const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
     const source = entry.curated ? 'curated' : 'on-demand';
@@ -279,4 +296,21 @@ export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): strin
 /** Homepage markdown empty state when the frontpage aggregate is missing. */
 export function buildFrontpageBoardMarkdownEmptyState(): string {
   return 'Scoring in progress: web results land after the next rescore pass. [See the board](/web.md) or [audit a website](/web-audit).\n';
+}
+
+/**
+ * The website pane of the merged leaderboard: the same row shape the CLI pane
+ * carries, ranked by relative score with global as the tie-break. The meter is
+ * the relative score, which is the headline; the sub-label carries the global
+ * score, so a row states both without a second column.
+ */
+export function buildBoardRows(entries: WebBoardEntry[]): string {
+  return rankWebEntries(entries, 'relative')
+    .map((entry) => {
+      const relative = entry.score.relative;
+      const domain = escHtml(entry.domain);
+      const friendly = entry.name && entry.name !== entry.domain ? ` (${escHtml(entry.name)})` : '';
+      return `        <a class="lrow ${bandOf(relative)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${entry.score.global}% global</span></span>${renderMeter(relative)}</a>`;
+    })
+    .join('\n');
 }

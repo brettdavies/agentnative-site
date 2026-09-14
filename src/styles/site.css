@@ -954,6 +954,11 @@ main .anchor-icon {
   color: inherit;
   text-decoration: none;
 }
+/* The grid above is an author rule and would otherwise beat the user agent's
+ * [hidden] display, so a filtered-out row would stay on screen. */
+.lrow[hidden] {
+  display: none;
+}
 .lrow:last-child {
   border-bottom: 0;
 }
@@ -1006,6 +1011,16 @@ main .anchor-icon {
   align-items: center;
   flex-wrap: wrap;
 }
+/* The website pane's rubric and its view switch share one line: the rubric
+ * takes the space it needs and the switch keeps its own width, wrapping to a
+ * second line before either is squeezed. */
+.board-view {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
 .board-rubric {
   margin-top: var(--space-4);
   color: var(--fg-secondary);
@@ -1020,6 +1035,13 @@ main .anchor-icon {
 .board > .board-rubric {
   margin: 0;
   padding: var(--space-4) var(--space-5);
+}
+/* After the base rule, not before it: the base sets margin-top and a full
+ * width that would otherwise land last and override the row's flex basis. */
+.board-view .board-rubric {
+  flex: 1 1 32ch;
+  margin: 0;
+  width: auto;
 }
 .board-rubric code {
   font-family: var(--font-mono);
