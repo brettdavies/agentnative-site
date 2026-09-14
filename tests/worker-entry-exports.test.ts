@@ -115,4 +115,21 @@ describe('Worker entry — named export contract for CF Sandbox / Containers SDK
     expect(typeof proto.fetch).toBe('function');
     expect(typeof proto.purgeHitMinTags).toBe('function');
   });
+
+  test('exports `AuditJob` class for the AUDIT_JOB Durable Object binding', () => {
+    // wrangler.jsonc binds `class_name: "AuditJob"` in both environments, and
+    // the runtime looks the class up by that name on the entry module.
+    expect(workerEntry.AuditJob).toBeDefined();
+    expect(typeof workerEntry.AuditJob).toBe('function');
+  });
+
+  test('AuditJob class exposes claim, append, fetch, and alarm', () => {
+    // The transact endpoint and the MCP tools call claim, append, and fetch
+    // through the stub, and the runtime calls alarm; a lost method fails only
+    // at call time.
+    const proto = (workerEntry.AuditJob as unknown as { prototype: Record<string, unknown> }).prototype;
+    for (const method of ['claim', 'append', 'fetch', 'alarm']) {
+      expect(typeof proto[method], `AuditJob.prototype.${method}`).toBe('function');
+    }
+  });
 });

@@ -83,6 +83,8 @@ import { runWithRequestContext } from './telemetry/request-context';
 // (Sandbox `fetch()` missing) — documented in
 // docs/solutions/integration-issues/cloudflare-workers-do-mock-must-mirror-binding-shape-2026-05-15.md.
 export { ContainerProxy } from '@cloudflare/sandbox';
+// Audit job DO class, exported for `class_name: "AuditJob"`.
+export { AuditJob } from './audit/job';
 // Web-rescore Workflow class. Re-exported so wrangler's binding resolver
 // can find `class_name: "WebRescoreWorkflow"` from wrangler.jsonc's
 // workflows section.

@@ -197,6 +197,13 @@ export type AuditEvent =
 
 export type CompleteEvent = Extract<AuditEvent, { type: 'complete' }>;
 
+export type TerminalEvent = Extract<AuditEvent, { type: 'complete' | 'incomplete' | 'bounce' | 'error' }>;
+
+/** Whether `event` ends its stream: nothing follows it. */
+export function isTerminalEvent(event: AuditEvent): event is TerminalEvent {
+  return event.type === 'complete' || event.type === 'incomplete' || event.type === 'bounce' || event.type === 'error';
+}
+
 /** The terminal event: the envelope itself, tagged. */
 export function completeEvent(envelope: AuditEnvelope): CompleteEvent {
   return { type: 'complete', ...envelope };
