@@ -10,15 +10,17 @@
 // src/data/web-audit/hero-anc.dev.json). The web board pane still emits
 // {{WEB_BOARD_ROWS}} for the Worker to fill from R2.
 //
-// The live-scoring form is server-rendered as an inert shell; /js/live-score.js
-// wires submit + Turnstile + redirect on the client side. The Turnstile
-// sitekey is injected by the Worker via meta[name=turnstile-sitekey] — only
-// set on staging until full promotion (DESIGN.md §3.4).
+// The audit entry form (src/build/audit-form.mjs, shared with /audit) is
+// server-rendered as a GET form that only prefills /audit; /js/audit-entry.js
+// takes the submit click, acquires the Turnstile token, and navigates to the
+// progress page. The Turnstile sitekey is injected by the Worker via
+// meta[name=turnstile-sitekey] (DESIGN.md §3.4).
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { bandOf, principleTier, renderMeter } from '../shared/scorecard-format.mjs';
 import { buildWebHeroCardEmptyState, buildWebHeroCardFromSnapshot } from '../shared/web-hero-card.mjs';
+import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractFirstParagraph, extractIntroSummary, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
@@ -194,28 +196,7 @@ ${webHeroHtml}
           <p data-s="web">Public sites, ranked by global agent-readiness.</p>
         </div>
         <div class="board-controls">
-          <div class="seg" role="radiogroup" aria-label="Surface">
-            <input type="radio" name="surface" id="s-cli" checked /><label for="s-cli">CLI</label>
-            <input type="radio" name="surface" id="s-web" /><label for="s-web">Website</label>
-          </div>
-          <form class="board-try" data-s="cli" method="post" action="/api/score" novalidate data-live-score-form>
-            <input
-              id="live-score-input"
-              name="input"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="ripgrep"
-              required
-              aria-label="Tool name, install command, or GitHub URL"
-              aria-describedby="live-score-help"
-            />
-            <button type="submit" class="btn btn--primary" data-live-score-submit>Score</button>
-          </form>
-          <form class="board-try" data-s="web" method="get" action="/web-audit" data-web-home-form>
-            <input name="url" type="text" autocomplete="off" spellcheck="false" placeholder="anc.dev" aria-label="Website URL to audit" data-web-home-input />
-            <button type="submit" class="btn btn--primary">Audit</button>
-          </form>
+${renderAuditForm({ idPrefix: 'home' })}
         </div>
       </div>
       <div class="board" data-s="cli" aria-label="Top CLI tools">
@@ -226,17 +207,6 @@ ${buildCliBoardRows(leaderboard)}
       </div>
       <p class="board-rubric" data-s="cli">Scored against the <strong>${principles.length} principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>
       <p class="board-rubric" data-s="web">Scored against the emerging agent-web standards: <code>MCP</code>, <code>llms.txt</code>, <code>OpenAPI</code>, JSON Schema, discovery. anc audits; it doesn't own them. <a href="/web">Full board&nbsp;▸</a></p>
-      <p id="live-score-help" class="live-score__help" data-s="cli">
-        or try
-        <button type="button" class="live-score__chip" data-live-score-example="ripgrep" aria-label="Try example: ripgrep"><code>ripgrep</code></button>,
-        <button type="button" class="live-score__chip" data-live-score-example="cargo binstall ouch" aria-label="Try example: cargo binstall ouch"><code>cargo binstall ouch</code></button>,
-        <button type="button" class="live-score__chip" data-live-score-example="npm install -g cowsay" aria-label="Try example: npm install -g cowsay"><code>npm install -g cowsay</code></button>,
-        <button type="button" class="live-score__chip" data-live-score-example="pip install black" aria-label="Try example: pip install black"><code>pip install black</code></button>,
-        <button type="button" class="live-score__chip" data-live-score-example="uv tool install rclone" aria-label="Try example: uv tool install rclone"><code>uv tool install rclone</code></button>,
-        or
-        <button type="button" class="live-score__chip" data-live-score-example="https://github.com/cli/cli" aria-label="Try example: github.com/cli/cli"><code>github.com/cli/cli</code></button>.
-      </p>
-      <p class="live-score__status" data-s="cli" data-live-score-status role="status" aria-live="polite" hidden></p>
     </div>
   </section>
   <section class="spec-section" id="principles">
@@ -331,16 +301,15 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
       bodyHtml: indexBody,
       themeInitJs: themeInit,
       isIndex: true,
-      // Homepage carries the live-scoring form. /js/live-score.js is
-      // bundled in assets.mjs alongside theme/clipboard/leaderboard and
-      // loads with `defer`. Lazy-loads Turnstile + handles submit/redirect.
-      extraScripts: ['/js/live-score.js', WEBMCP_SCRIPT],
+      // Homepage carries the audit entry form; /js/audit-entry.js loads
+      // Turnstile on the first interaction and takes the submit click.
+      extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT],
     }),
   );
 
   // index.md — content-only markdown twin, prefixed with title/description/
   // url frontmatter so agents fetching it get the same metadata the HTML
-  // carries in <head>. The live-score form is interactive (button-based
+  // carries in <head>. The entry form is interactive (button-based
   // chip examples); content extractors and agents fetching the twin need
   // the same examples surfaced as inline code so the homepage contract
   // holds without JavaScript.
@@ -358,11 +327,9 @@ export async function emitHomepage({ distDir, contentDir, themeInit, principles,
     '',
     '{{WEB_BOARD_ROWS}}',
     '',
-    '## Score a binary, live.',
+    '## Audit a CLI tool or a website, live.',
     '',
-    '[Install `anc` locally](/install) for source + project depth. The demo here is binary and behavioral audits only.',
-    '',
-    'Paste a tool name, install command, or GitHub URL into the homepage form to score it. Examples: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`.',
+    'Pick CLI or Website on the homepage form or the [audit page](/audit) and enter a target. A CLI target is a tool name, an install command, or a GitHub URL: `ripgrep`, `cargo binstall ouch`, `npm install -g cowsay`, `pip install black`, `uv tool install rclone`, `github.com/cli/cli`. A website target is a domain or a URL: `anc.dev`, `modelcontextprotocol.io`. [Install `anc` locally](/install) for source and project depth.',
     '',
     '## Principles',
     '',

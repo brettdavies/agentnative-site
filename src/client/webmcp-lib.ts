@@ -2,6 +2,7 @@
 // ≤1.5k. Probe document.modelContext then navigator.modelContext; no-op if
 // both are absent. See https://webmachinelearning.github.io/webmcp/
 
+import { isAuditPath as isAuditEntryPath } from '../shared/audit-routes';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { pageMeta } from '../shared/web-audit-findings';
 import { auditTools } from './webmcp-audit';
@@ -164,7 +165,7 @@ export function toolsFor(pathname: string, opts: ToolsForOpts = {}): WebMcpTool[
   if (isHomePath(pathname) || isAuditPath(pathname) || isResultPath(pathname)) {
     tools.push(pageStateTool(pathname, opts));
   }
-  if (isHomePath(pathname)) tools.push(...homeTools(opts));
+  if (isHomePath(pathname) || isAuditEntryPath(normalizePath(pathname))) tools.push(...homeTools(opts));
   if (isAuditPath(pathname)) tools.push(...auditTools(opts));
   if (isResultPath(pathname)) tools.push(...resultTools(opts));
   if (isOrientationPath(pathname)) tools.push(...orientationTools(origin));

@@ -109,6 +109,12 @@ export async function copyAssets({ repoRoot, distDir }) {
   // Progress page (/scoring): the stashed click or a probe, the stream, the
   // forward. The Worker-rendered page loads it; no build shell does.
   const scoringJs = await bundleClient(join(repoRoot, 'src/client/scoring.ts'), join(distDir, 'js/scoring.js'));
+  // Entry form on the homepage and /audit: the lane flip, the lazy Turnstile
+  // render, and the stash the progress page reads back.
+  const auditEntryJs = await bundleClient(
+    join(repoRoot, 'src/client/audit-entry.ts'),
+    join(distDir, 'js/audit-entry.js'),
+  );
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
 

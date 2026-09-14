@@ -291,3 +291,6 @@ focusable
 subpage
 rollup
 SVG's
+affordances
+lookups
+untrusted

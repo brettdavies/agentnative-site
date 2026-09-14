@@ -21,19 +21,11 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { renderSurfaceSeg } from '../shared/surface-seg.mjs';
+import { renderAuditForm } from './audit-form.mjs';
 import { extractDescription, extractTitle } from './content.mjs';
 import { renderMarkdown } from './render.mjs';
 import { emitShell, WEBMCP_SCRIPT } from './shell.mjs';
 import { composeTwin } from './util.mjs';
-
-const auditSurfaceSegCli = renderSurfaceSeg({
-  dataAttr: 'data-surface-audit-seg',
-  radioName: 'audit-surface',
-  cliId: 'audit-s-cli',
-  webId: 'audit-s-web',
-  checked: 'cli',
-  ariaLabel: 'Audit surface',
-});
 
 const auditSurfaceSegWeb = renderSurfaceSeg({
   dataAttr: 'data-surface-audit-seg',
@@ -44,20 +36,18 @@ const auditSurfaceSegWeb = renderSurfaceSeg({
   ariaLabel: 'Audit surface',
 });
 
-// The CLI "score a binary" hero. A plain GET form (works without JS) that
-// prefills the homepage demo via ?score=.
-const CLI_AUDIT_WIDGET = {
-  placeholder: '{{CLI_AUDIT_FORM}}',
+// The audit page's hero: the shared entry form under the page's heading and
+// lede. The content after the slot is the CLI pane and `lanes.web` the
+// website pane; the form's segment shows one at a time, the twin carries both.
+const AUDIT_WIDGET = {
+  placeholder: '{{AUDIT_FORM}}',
   html: `<section class="audit-hero" aria-labelledby="audit-hero-heading">
-  ${auditSurfaceSegCli}
-  <h2 id="audit-hero-heading" class="audit-hero__title">Score a binary, live.</h2>
-  <p class="audit-hero__lede">The homepage demo runs binary and behavioral audits in a sandbox. For source and project depth, run <code>anc audit</code> locally.</p>
-  <form class="board-try audit-hero__form" method="get" action="/">
-    <input name="score" type="text" autocomplete="off" spellcheck="false" placeholder="ripgrep" aria-label="Tool name, install command, or GitHub URL" />
-    <button type="submit" class="btn btn--primary">Score</button>
-  </form>
+  <h2 id="audit-hero-heading" class="audit-hero__title">Audit it live.</h2>
+  <p class="audit-hero__lede">Pick CLI or Website and enter a target. A CLI tool installs in a sandbox and scores in under a minute; a website audit takes a few seconds. Either way you land on a shareable scorecard.</p>
+  ${renderAuditForm({ idPrefix: 'audit' })}
 </section>`,
-  md: 'Score a binary live from the homepage demo at [anc.dev](/), or run `anc audit` locally for source and project depth.',
+  md: 'The audit runs live from this page in a browser. From an agent, use the MCP tools named below.',
+  lanes: { web: '_audit-web.md' },
 };
 
 // The web-audit hero. Submitting navigates to /web/scoring/<host>, which
@@ -101,7 +91,7 @@ const WEB_AUDIT_WIDGET = {
  *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly.
  */
 export const SUB_PAGES = [
-  { name: 'audit', widget: CLI_AUDIT_WIDGET },
+  { name: 'audit', extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT], widget: AUDIT_WIDGET },
   {
     name: 'web-audit',
     extraScripts: ['/js/web-audit.js', WEBMCP_SCRIPT],
@@ -136,17 +126,33 @@ export const SUB_PAGES = [
   { name: 'mcp' },
 ];
 
+// The HTML page gets the widget markup; the twin (and llms-full.txt) get
+// the prose pointer, so no dead form controls reach the agent surface.
+async function renderPage(source, widget) {
+  const htmlSource = widget ? source.replaceAll(widget.placeholder, widget.html) : source;
+  const twinSource = widget ? source.replaceAll(widget.placeholder, widget.md) : source;
+  return { html: await renderMarkdown(htmlSource), twinSource };
+}
+
+// A page with lane panes: the content after the widget is the CLI pane and
+// the `lanes.web` partial the website pane, inside one `.scope` so the
+// form's segment swaps them. The twin carries both panes in order.
+async function renderLanes(source, widget, contentDir) {
+  const [lead, cli] = source.split(widget.placeholder);
+  const web = await readFile(join(contentDir, widget.lanes.web), 'utf8');
+  const html = `<div class="scope">${await renderMarkdown(lead)}${widget.html}<div data-s="cli">${await renderMarkdown(cli)}</div><div data-s="web">${await renderMarkdown(web)}</div></div>`;
+  return { html, twinSource: `${lead}${widget.md}${cli.trimEnd()}\n\n${web}` };
+}
+
 export async function emitSubPages({ distDir, contentDir, themeInit }) {
   const subPageData = [];
   for (const { name, extraScripts, widget } of SUB_PAGES) {
     const source = await readFile(join(contentDir, `${name}.md`), 'utf8');
-    // The HTML page gets the widget markup; the twin (and llms-full.txt) get
-    // the prose pointer, so no dead form controls reach the agent surface.
-    const htmlSource = widget ? source.replaceAll(widget.placeholder, widget.html) : source;
-    const twinSource = widget ? source.replaceAll(widget.placeholder, widget.md) : source;
     const title = extractTitle(source);
     const description = extractDescription(source);
-    const html = await renderMarkdown(htmlSource);
+    const { html, twinSource } = widget?.lanes
+      ? await renderLanes(source, widget, contentDir)
+      : await renderPage(source, widget);
     await writeFile(
       join(distDir, `${name}.html`),
       emitShell({
@@ -157,7 +163,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         bodyHtml: `<article class="container doc">${html}</article>`,
         themeInitJs: themeInit,
         extraScripts: extraScripts ?? (name === 'mcp' ? [WEBMCP_SCRIPT] : []),
-        turnstileSitekey: name === 'web-audit',
+        turnstileSitekey: name === 'web-audit' || name === 'audit',
       }),
     );
     await writeFile(

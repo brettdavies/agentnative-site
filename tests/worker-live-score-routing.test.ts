@@ -35,6 +35,17 @@ const WEB_AUDIT_MD = `# Score a website, live.
 Enter a public URL at anc.dev/web-audit.
 `;
 
+const AUDIT_HTML = `<!doctype html>
+<html><head>
+<title>audit</title>
+<meta name="turnstile-sitekey" content="{{TURNSTILE_SITEKEY}}" />
+</head><body><form data-audit-form><input data-audit-target /></form></body></html>`;
+
+const AUDIT_MD = `# Audit a CLI tool or a website
+
+Enter a target at anc.dev/audit.
+`;
+
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: {
@@ -64,6 +75,18 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
         }
         if (path === '/web-audit.md') {
           return new Response(WEB_AUDIT_MD, {
+            status: 200,
+            headers: { 'content-type': 'text/markdown; charset=utf-8' },
+          });
+        }
+        if (path === '/audit' || path === '/audit.html') {
+          return new Response(AUDIT_HTML, {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8' },
+          });
+        }
+        if (path === '/audit.md') {
+          return new Response(AUDIT_MD, {
             status: 200,
             headers: { 'content-type': 'text/markdown; charset=utf-8' },
           });
@@ -201,12 +224,12 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
 
   test('non-form HTML pages are NOT touched by the substitution', async () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: 'should-not-leak' });
-    // A page that doesn't carry the placeholder shouldn't be rewritten —
-    // substitution is scoped to / (homepage) and /web-audit (web form).
-    const res = await worker.fetch(new Request('https://anc.dev/audit'), env, {} as ExecutionContext);
-    // ASSETS returns 404 in this stub (no /audit.html fixture), so just
-    // confirm the path didn't blow up.
+    // Substitution is scoped to the pages carrying an entry form: the
+    // homepage, /audit, and /web-audit. This stub has no /about fixture,
+    // so the 404 body stands in for any other page: it carries no token.
+    const res = await worker.fetch(new Request('https://anc.dev/about'), env, {} as ExecutionContext);
     expect(res.status).toBeLessThan(500);
+    expect(await res.text()).not.toContain('should-not-leak');
   });
 });
 
@@ -242,6 +265,48 @@ describe('/web-audit TURNSTILE_SITEKEY substitution', () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: 'test-key' });
     const res = await worker.fetch(
       new Request('https://anc.dev/web-audit', { headers: { accept: 'text/markdown' } }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    const md = await res.text();
+    expect(md).not.toContain('test-key');
+    expect(md).not.toContain('turnstile-sitekey');
+  });
+});
+
+describe('/audit TURNSTILE_SITEKEY substitution', () => {
+  test('audit HTML substitutes {{TURNSTILE_SITEKEY}} from env var', async () => {
+    const env = makeEnv({ TURNSTILE_SITEKEY: '1x00000000000000000000AA' });
+    const res = await worker.fetch(new Request('https://anc.dev/audit'), env, {} as ExecutionContext);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('content="1x00000000000000000000AA"');
+    expect(html).not.toContain('{{TURNSTILE_SITEKEY}}');
+  });
+
+  test('unprovisioned env substitutes empty string on /audit', async () => {
+    const env = makeEnv();
+    const res = await worker.fetch(new Request('https://anc.dev/audit'), env, {} as ExecutionContext);
+    const html = await res.text();
+    expect(html).not.toContain('{{TURNSTILE_SITEKEY}}');
+    expect(html).toContain('content=""');
+  });
+
+  test('/audit.md does not receive the sitekey', async () => {
+    const env = makeEnv({ TURNSTILE_SITEKEY: 'test-key' });
+    const res = await worker.fetch(new Request('https://anc.dev/audit.md'), env, {} as ExecutionContext);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    const md = await res.text();
+    expect(md).not.toContain('{{TURNSTILE_SITEKEY}}');
+    expect(md).not.toContain('test-key');
+    expect(md).not.toContain('turnstile-sitekey');
+  });
+
+  test('Accept: text/markdown on /audit bypasses substitution', async () => {
+    const env = makeEnv({ TURNSTILE_SITEKEY: 'test-key' });
+    const res = await worker.fetch(
+      new Request('https://anc.dev/audit', { headers: { accept: 'text/markdown' } }),
       env,
       {} as ExecutionContext,
     );

@@ -135,11 +135,10 @@ function names(pathname: string): string[] {
   return toolsFor(pathname).map((t) => t.name);
 }
 
-function homeDoc(opts: { surface?: 'cli' | 'web'; webUrl?: string; cliText?: string } = {}): {
+function homeDoc(opts: { surface?: 'cli' | 'web'; target?: string } = {}): {
   doc: Document;
   form: Stub;
-  webInput: Stub;
-  cliInput: Stub;
+  input: Stub;
   cliRadio: Stub;
   webRadio: Stub;
 } {
@@ -151,14 +150,12 @@ function homeDoc(opts: { surface?: 'cli' | 'web'; webUrl?: string; cliText?: str
     attrs: { id: 's-web', type: 'radio' },
     checked: opts.surface === 'web',
   });
-  const cliInput = stubEl({ attrs: { id: 'live-score-input' }, value: opts.cliText ?? '' });
-  const webInput = stubEl({ attrs: { 'data-web-home-input': '' }, value: opts.webUrl ?? '' });
-  const form = stubEl({ attrs: { 'data-web-home-form': '' }, children: [webInput] });
+  const input = stubEl({ attrs: { 'data-audit-target': '' }, value: opts.target ?? '' });
+  const form = stubEl({ attrs: { 'data-audit-form': '' }, children: [input] });
   return {
-    doc: stubDoc([cliRadio, webRadio, cliInput, form]),
+    doc: stubDoc([cliRadio, webRadio, form]),
     form,
-    webInput,
-    cliInput,
+    input,
     cliRadio,
     webRadio,
   };
@@ -292,6 +289,10 @@ describe('toolsFor(pathname)', () => {
       'get_mcp_endpoint',
     ]);
     expect(names('/index.html')).toEqual(names('/'));
+  });
+
+  test('/audit registers the entry form tools the homepage has', () => {
+    expect(names('/audit')).toEqual(['set_surface', 'fill_cli_target', 'fill_web_target', 'open_web_audit']);
   });
 
   test('/web-audit registers the video-path prepare tools', () => {
@@ -581,20 +582,24 @@ describe('execute helpers (Document stub)', () => {
     expect(openWebAudit(empty, {})).toContain('homepage');
   });
 
-  test('homepage P1 fills values, switches surface, and submits the GET form', () => {
+  test('the entry form tools fill the one target, select its lane, switch surface, and submit the GET form', () => {
     const page = homeDoc();
     expect(fillCliTarget(page.doc, { text: 'ripgrep' })).toContain('Filled');
-    expect(page.cliInput.value).toBe('ripgrep');
+    expect(page.input.value).toBe('ripgrep');
+    expect(page.cliRadio.checked).toBe(true);
     expect(fillWebTarget(page.doc, { url: 'https://anc.dev' })).toContain('Filled');
-    expect(page.webInput.value).toBe('https://anc.dev');
+    expect(page.input.value).toBe('https://anc.dev');
+    expect(page.webRadio.checked).toBe(true);
+    page.webRadio.checked = false;
+    page.cliRadio.checked = true;
     expect(setSurface(page.doc, { surface: 'web' })).toContain('web');
     expect(page.webRadio.checked).toBe(true);
     expect(page.cliRadio.checked).toBe(false);
     expect(page.webRadio.events[0]?.type).toBe('change');
     const out = openWebAudit(page.doc, { url: 'https://example.com' });
-    expect(page.webInput.value).toBe('https://example.com');
+    expect(page.input.value).toBe('https://example.com');
     expect(page.form.submits).toBe(1);
-    expect(out.toLowerCase()).toContain('web-audit');
+    expect(out.toLowerCase()).toContain('audit page');
   });
 
   test('execute returns a DOMString and never calls fetch or /web/scoring', async () => {

@@ -139,20 +139,21 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
     }
   }
 
-  // 5. Markdown-twin silence for the homepage. The homepage HTML
-  // gains the live-scoring form; the markdown twin MUST NOT carry any of
-  // that surface (no form markup, no JS reference, no Turnstile mention,
-  // no /api/score documentation). Agents pasting `Accept: text/markdown`
-  // against `/` are expected to use `anc audit` locally; the form is
-  // HTML-only by design. A future copy edit that leaks any of these
-  // tokens into the homepage markdown fails the build here.
-  const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
-  const FORBIDDEN_IN_INDEX_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score'];
-  for (const needle of FORBIDDEN_IN_INDEX_MD) {
-    if (indexMd.toLowerCase().includes(needle.toLowerCase())) {
-      throw new Error(
-        `invariant: dist/index.md leaked live-scoring surface "${needle}". The homepage markdown twin stays silent on the form by design.`,
-      );
+  // 5. Markdown-twin silence for the entry pages. The homepage and /audit
+  // HTML carry the audit entry form; their markdown twins MUST NOT carry any
+  // of that surface (no form markup, no JS reference, no Turnstile mention,
+  // no /api/score documentation). An agent fetching either twin is pointed
+  // at the MCP tools and `anc audit`; the form is HTML-only by design. A copy
+  // edit that leaks any of these tokens into either twin fails the build.
+  const FORBIDDEN_IN_ENTRY_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score'];
+  for (const twin of ['index.md', 'audit.md']) {
+    const text = (await readFile(join(distDir, twin), 'utf8')).toLowerCase();
+    for (const needle of FORBIDDEN_IN_ENTRY_MD) {
+      if (text.includes(needle.toLowerCase())) {
+        throw new Error(
+          `invariant: dist/${twin} leaked the entry form's surface "${needle}". An entry page's markdown twin stays silent on the form by design.`,
+        );
+      }
     }
   }
 }

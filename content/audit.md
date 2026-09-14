@@ -1,9 +1,15 @@
-# Audit your CLI
+# Audit a CLI tool or a website
+
+anc.dev audits the two surfaces an agent works through: the command-line tools it runs and the websites it reads. Pick
+CLI or Website, enter a target, and the audit runs live and lands on a shareable scorecard.
+
+{{AUDIT_FORM}}
+
+## Audit a CLI tool
 
 `anc` is the reference linter for this standard. It scores any CLI tool against the eight principles and tells you, by
-audit ID, where it passes and where it falls short.
-
-{{CLI_AUDIT_FORM}}
+audit ID, where it passes and where it falls short. The live audit above installs a tool in a sandbox and runs its
+binary and behavioral audits; for source and project depth, run `anc` locally.
 
 ## Install
 
@@ -69,6 +75,12 @@ A `[PASS]` is a requirement met, not a compliment. A `[WARN]` is a SHOULD the to
 choice, not a bug. A `[FAIL]` is a MUST the tool doesn't satisfy; agents will hit the edge it describes, and the tool
 will surprise them. Nothing here is a vanity metric because the audits map one-to-one to the requirements on the
 [principles page](/).
+
+## From an agent: CLI tools
+
+An MCP client can score a CLI without the form. The [anc.dev MCP server](/mcp) exposes `score_cli`, which installs and
+audits a tool live under its own per-source rate limits, and `get_scorecard`, which reads a curated or cached scorecard.
+Both take a tool name, an install command, or a GitHub URL, and `score_cli` returns the scorecard's URL.
 
 ## See how widely-used CLIs score
 

@@ -1479,6 +1479,25 @@ body:has(.doc) main {
   margin: 0 0 var(--space-4);
   color: var(--fg-secondary);
 }
+/* The entry form stacks segment, target row, opt-in, examples, and status.
+ * Its row is .board-try, which lays out the input beside the submit, so the
+ * form supplies only the column rhythm; the paragraphs drop their own
+ * margins so one gap governs the spacing. */
+.audit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* The hero's own help-text margin would otherwise reach the shared form and
+ * space it differently from the homepage copy of the same markup. */
+.audit-form > p,
+.audit-hero .audit-form > p {
+  margin: 0;
+}
+.audit-form__row input {
+  flex: 1;
+  min-width: 0;
+}
 .audit-hero__form input {
   flex: 1;
   min-width: 0;
