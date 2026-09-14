@@ -44,7 +44,10 @@ export function buildLeaderboardBody(leaderboard, methodology) {
       const binary = escHtml(entry.scorecard?.tool?.binary ?? entry.tool.name);
       const audience = escHtml(entry.scorecard?.audience ?? '');
       const auditProfile = escHtml(entry.scorecard?.audit_profile ?? '');
-      return `        <a class="lrow ${bandOf(pct)}" href="/score/${name}" data-tier="${escHtml(entry.tool.tier)}" data-audience="${audience}" data-audit-profile="${auditProfile}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${binary}</span></span>${renderMeter(pct)}</a>`;
+      // Without a name of its own the row announces as its own contents, which
+      // read as a number salad: rank digits, tool, binary, bare score.
+      const label = escHtml(`${entry.tool.name}, score ${pct} percent, rank ${entry.rank}`);
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="/score/${name}" data-tier="${escHtml(entry.tool.tier)}" data-audience="${audience}" data-audit-profile="${auditProfile}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${binary}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 
@@ -90,7 +93,7 @@ ${boardSurfaceSeg}
   </div>
 </div>
 
-<div class="leaderboard-controls" data-s="cli" aria-label="Filters">
+<div class="leaderboard-controls" data-s="cli" role="group" aria-label="Filters">
   <div class="tier-filters" role="group" aria-label="Filter by tier">
     <button type="button" class="tier-filter tier-filter--active" data-tier="all">All</button>
     <button type="button" class="tier-filter" data-tier="workhorse">Workhorse (${tierCounts.workhorse || 0})</button>
@@ -103,11 +106,11 @@ ${boardSurfaceSeg}
   </label>
 </div>
 
-<div class="board" data-s="cli" aria-label="CLI tool agent-readiness scores">
+<div class="board" data-s="cli" role="group" aria-label="CLI tool agent-readiness scores">
 ${rows}
 </div>
 
-<div class="board" data-s="web" aria-label="Website agent-readiness scores">
+<div class="board" data-s="web" role="group" aria-label="Website agent-readiness scores">
 {{WEB_BOARD_ROWS}}
 </div>
 

@@ -362,6 +362,22 @@ describe('regression #4 — scorecard pages', () => {
     expect(html).not.toContain('class="leaderboard-table"');
   });
 
+  test('both boards name themselves and every built row carries an accessible name', async () => {
+    // An aria-label on a bare div never reaches the accessibility tree, so the
+    // container needs a role for its name to count at all. A row without a name
+    // of its own announces as its contents: rank digits, tool, sub-label and a
+    // bare number.
+    for (const page of ['scorecards.html', 'index.html']) {
+      const html = await readFile(join(DIST, page), 'utf8');
+      const rows = html.match(/class="lrow[^"]*"[^>]*>/g) ?? [];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expect(row).toContain('aria-label="');
+      expect(html).toContain('<span class="rank" aria-hidden="true">');
+      expect(html).toContain('data-s="cli" role="group"');
+      expect(html).toContain('data-s="web" role="group"');
+    }
+  });
+
   test('both scorecards emits carry the web-board placeholder for the Worker to fill', async () => {
     // A missed inject must be impossible to ship: the placeholder has to be in
     // the built HTML and the twin, and the Worker replaces it in both.
