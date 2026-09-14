@@ -15,9 +15,9 @@ web-board rescore (weekly cron, post-deploy hook, on-demand triggers). Pairs wit
 Source of truth: `.github/workflows/deploy.yml` and the `env.staging` / top-level blocks of `wrangler.jsonc`.
 
 **A `dev` merge reaches staging only, never production.** Production `anc.dev` lags `dev` until a release lands on
-`main` (see `RELEASES.md`). So immediately after a `dev` merge, `anc.dev` still serves the previous code and content.
-This matters for any audit that reads the target's own content: an audit of `anc.dev` before the production release
-scores the old content, and the deploy hook re-scores it once the release lands (see
+`main` (see `RELEASES.md`). Immediately after a `dev` merge, `anc.dev` still serves the previous code and content. This
+matters for any audit that reads the target's own content: an audit of `anc.dev` before the production release scores
+the old content, and the deploy hook re-scores it once the release lands (see
 [Operating the board rescore](#operating-the-board-rescore)).
 
 ## The audit endpoint
@@ -159,8 +159,8 @@ wrangler workflows instances describe web-rescore <id>
 A per-domain step failure is logged (`scope: web-rescore`) and skipped; that domain drops off the board until the next
 successful rescore of it.
 
-**Adding a board entry.** Add the row to `seed.yaml`, merge, and either wait for the deploy hook (fires on the same
-merge's deploy) or trigger the endpoint manually.
+**Adding a board entry.** Add the row to `seed.yaml`, merge, and either wait for the deploy hook (fires on that same
+merge) or trigger the endpoint manually.
 
 ## Logging
 
@@ -193,7 +193,7 @@ A target behind a bot-blocking CDN produces one of two log signatures:
   everywhere): the CDN answers, but refuses the auditor. The score is genuine (the site is agent-hostile), and the
   evidence names the status.
 - `terminal: "unreachable"`: nothing (root fetch or discovery probe) returned an HTTP status. The engine ends the run
-  without caching, the page and tool report the target as unreachable. Typically the CDN tarpits datacenter clients.
+  without caching, the page and tool report the target as unreachable. The CDN tarpits datacenter clients.
 
 Probes identify themselves with the `anc-web-audit/1.0` User-Agent (`AUDIT_USER_AGENT` in
 `src/worker/audit-web/ssrf.ts`), which several CDNs treat more leniently than UA-less requests. Do not change it to
