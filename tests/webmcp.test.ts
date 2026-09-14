@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { findingRowsFromElements, selectAssemblePrompts } from '../src/client/assemble-prompt';
 import { fillAuditUrl, setPlan, setPublicListing } from '../src/client/webmcp-audit';
 import { fillCliTarget, fillWebTarget, openWebAudit, setSurface } from '../src/client/webmcp-home';
-import { bindModelContext, initWebMcp, toolsFor, WEBMCP_EXECUTE_MAX } from '../src/client/webmcp-lib';
+import { bindModelContext, getPageState, initWebMcp, toolsFor, WEBMCP_EXECUTE_MAX } from '../src/client/webmcp-lib';
 import { getAuditSummary, getFixPrompt, getFixPrompts, getWorksheet } from '../src/client/webmcp-result';
 import {
   assembleRemediation,
@@ -600,6 +600,21 @@ describe('execute helpers (Document stub)', () => {
     expect(page.input.value).toBe('https://example.com');
     expect(page.form.submits).toBe(1);
     expect(out.toLowerCase()).toContain('audit page');
+  });
+
+  test('get_page_state reads back the target the fill tools wrote', () => {
+    // The read half of fill then verify. Reading a hook the entry form does
+    // not carry answers an empty URL after every successful fill.
+    const page = homeDoc();
+    fillCliTarget(page.doc, { text: 'ripgrep' });
+    const state = JSON.parse(getPageState(page.doc, '/')) as {
+      url: string;
+      surface: string;
+      listing: boolean | null;
+    };
+    expect(state.url).toBe('ripgrep');
+    expect(state.surface).toBe('cli');
+    expect(state.listing).toBeNull();
   });
 
   test('execute returns a DOMString and never calls fetch or /web/scoring', async () => {

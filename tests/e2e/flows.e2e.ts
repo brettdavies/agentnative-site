@@ -269,7 +269,8 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await expect(page.locator('.board[data-s="web"]')).toBeHidden();
     await expect(page.locator('.spec[data-s="cli"] .spec__row')).toHaveCount(PRINCIPLE_COUNT);
     await expect(page.locator('.spec[data-s="web"]')).toBeHidden();
-    await expect(page.locator('form[data-live-score-form]')).toBeVisible();
+    await expect(page.locator('[data-audit-form]')).toBeVisible();
+    await expect(page.locator('[data-audit-form] [data-s="web"]').first()).toBeHidden();
     await expect(page.locator('.hero__proof > [data-s="cli"]')).toBeVisible();
     await expect(page.locator('.hero__proof > [data-s="web"]')).toBeHidden();
     // Board rows are threaded from the computed leaderboard — non-empty,
@@ -294,8 +295,11 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
     await expect(page.locator('.spec[data-s="web"] .spec__row')).toHaveCount(WEB_CHECK_COUNT);
     await expect(page.locator('.spec[data-s="cli"]')).toBeHidden();
-    await expect(page.locator('form[data-s="web"] input[name="url"]')).toBeVisible();
-    await expect(page.locator('form[data-live-score-form]')).toBeHidden();
+    // One form serves both lanes, so what swaps is its website-only opt-in and
+    // its per-lane examples, not the form itself.
+    await expect(page.locator('[data-audit-form]')).toBeVisible();
+    await expect(page.locator('[data-audit-form] [data-s="web"]').first()).toBeVisible();
+    await expect(page.locator('[data-audit-form] [data-s="cli"]').first()).toBeHidden();
     await expect(page.locator('.hero__proof > [data-s="web"]')).toBeVisible();
     await expect(page.locator('.hero__proof > [data-s="cli"]')).toBeHidden();
     await expect(page.locator('.hero__proof > [data-s="web"]')).toContainText('anc.dev');
@@ -549,11 +553,14 @@ test.describe('audit surface nav', () => {
     expect(stored).toBeNull();
   });
 
-  test('Probe A navigates CLI audit → web audit and writes preference', async ({ page }) => {
+  test('the entry form switches lanes in place on /audit and writes the preference', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/audit');
-    await page.locator('label[for="audit-s-web"]').click();
-    await expect(page).toHaveURL(/\/web-audit$/);
+    // One form serves both lanes here, so the lane is a pane switch and not a
+    // navigation. The gesture still writes the preference the nav follows.
+    await page.locator('label[for="s-web"]').click();
+    await expect(page).toHaveURL(/\/audit$/);
+    await expect(page.locator('[data-audit-listing]')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
     await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
   });

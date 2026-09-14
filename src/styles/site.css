@@ -1516,6 +1516,15 @@ body:has(.doc) main {
   color: var(--fg-secondary);
   cursor: pointer;
 }
+/* The opt-in belongs to the website lane, and the rule above would otherwise
+ * outrank the pane rule that hides it: both are one class, and this one comes
+ * later. The pane restores the display type the label needs. */
+.audit-hero__optin[data-s="web"] {
+  display: none;
+}
+.scope:has(#s-web:checked) .audit-hero__optin[data-s="web"] {
+  display: inline-flex;
+}
 .audit-hero__optin input {
   flex: none;
   min-width: auto;

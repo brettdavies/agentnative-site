@@ -140,11 +140,16 @@ export function getPageState(doc: Document, pathname: string): string {
   else if (cli?.checked) surface = 'cli';
   else if (isAuditPath(path) || isResultPath(path)) surface = 'web';
 
-  const homeUrl = (doc.querySelector('[data-web-home-input]') as HTMLInputElement | null)?.value ?? '';
+  // The entry form's hooks first: they are what the fill tools write, so a
+  // read back after a fill has to see them. The legacy website form keeps its
+  // own hooks until that page retires.
+  const entryUrl = (doc.querySelector('[data-audit-target]') as HTMLInputElement | null)?.value ?? '';
   const auditUrl = (doc.querySelector('[data-web-audit-input]') as HTMLInputElement | null)?.value ?? '';
-  const listingEl = doc.querySelector('[data-web-audit-listing]') as HTMLInputElement | null;
+  const listingEl =
+    (doc.querySelector('[data-audit-listing]') as HTMLInputElement | null) ??
+    (doc.querySelector('[data-web-audit-listing]') as HTMLInputElement | null);
   const listing = listingEl ? listingEl.checked : null;
-  return capExecute(JSON.stringify({ path, surface, url: auditUrl || homeUrl, listing }));
+  return capExecute(JSON.stringify({ path, surface, url: entryUrl || auditUrl, listing }));
 }
 
 function pageStateTool(pathname: string, opts: ToolsForOpts): WebMcpTool {

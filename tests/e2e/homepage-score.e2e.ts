@@ -182,6 +182,26 @@ test.describe('entry form — CSP + markdown-twin regressions', () => {
     expect(csp).toMatch(/connect-src[^;]*cloudflareinsights\.com/);
   });
 
+  test('CSP blocks a cross-origin script from executing', async ({ page }) => {
+    await page.goto('/');
+    // The policy permits 'unsafe-inline' because theme-init is load-bearing,
+    // so the control that matters is the cross-origin one: a script from
+    // another host must be refused. Without this, widening script-src ships
+    // green past the positive assertions above.
+    const violations: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error' && /Content Security Policy/i.test(msg.text())) violations.push(msg.text());
+    });
+
+    await page.evaluate(() => {
+      const s = document.createElement('script');
+      s.src = 'https://evil.example.com/x.js';
+      document.head.appendChild(s);
+    });
+    await page.waitForTimeout(500);
+    expect(violations.some((v) => /evil\.example\.com/.test(v))).toBe(true);
+  });
+
   for (const twin of ['/index.md', '/audit.md']) {
     test(`${twin} mentions no form, Turnstile, or endpoint`, async ({ request }) => {
       const res = await request.get(twin);

@@ -138,7 +138,11 @@ async function renderPage(source, widget) {
 // the `lanes.web` partial the website pane, inside one `.scope` so the
 // form's segment swaps them. The twin carries both panes in order.
 async function renderLanes(source, widget, contentDir) {
-  const [lead, cli] = source.split(widget.placeholder);
+  const chunks = source.split(widget.placeholder);
+  if (chunks.length !== 2) {
+    throw new Error(`${widget.placeholder} must appear exactly once; found ${chunks.length - 1}`);
+  }
+  const [lead, cli] = chunks;
   const web = await readFile(join(contentDir, widget.lanes.web), 'utf8');
   const html = `<div class="scope">${await renderMarkdown(lead)}${widget.html}<div data-s="cli">${await renderMarkdown(cli)}</div><div data-s="web">${await renderMarkdown(web)}</div></div>`;
   return { html, twinSource: `${lead}${widget.md}${cli.trimEnd()}\n\n${web}` };

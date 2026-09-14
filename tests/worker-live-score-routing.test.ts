@@ -46,6 +46,11 @@ const AUDIT_MD = `# Audit a CLI tool or a website
 Enter a target at anc.dev/audit.
 `;
 
+// A page with no form and no placeholder, so the substitution branch is
+// reached and declines rather than never being entered at all.
+const ABOUT_HTML = `<!doctype html>
+<html><head><title>about</title></head><body><p>No form here.</p></body></html>`;
+
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return {
     ASSETS: {
@@ -89,6 +94,12 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
           return new Response(AUDIT_MD, {
             status: 200,
             headers: { 'content-type': 'text/markdown; charset=utf-8' },
+          });
+        }
+        if (path === '/about' || path === '/about.html') {
+          return new Response(ABOUT_HTML, {
+            status: 200,
+            headers: { 'content-type': 'text/html; charset=utf-8' },
           });
         }
         if (path === '/_internal/score-live-shell.html') {
@@ -224,12 +235,14 @@ describe('Homepage TURNSTILE_SITEKEY substitution', () => {
 
   test('non-form HTML pages are NOT touched by the substitution', async () => {
     const env = makeEnv({ TURNSTILE_SITEKEY: 'should-not-leak' });
-    // Substitution is scoped to the pages carrying an entry form: the
-    // homepage, /audit, and /web-audit. This stub has no /about fixture,
-    // so the 404 body stands in for any other page: it carries no token.
+    // A served 200 page, so the substitution branch is entered and declines.
+    // Against a 404 the branch is skipped entirely and this would pass even
+    // if the guard were widened to every page.
     const res = await worker.fetch(new Request('https://anc.dev/about'), env, {} as ExecutionContext);
-    expect(res.status).toBeLessThan(500);
-    expect(await res.text()).not.toContain('should-not-leak');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('No form here.');
+    expect(html).not.toContain('should-not-leak');
   });
 });
 

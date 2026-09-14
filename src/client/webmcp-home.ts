@@ -57,7 +57,7 @@ export function homeTools(opts: ToolsForOpts): WebMcpTool[] {
     {
       name: 'set_surface',
       description:
-        'Switch the entry form and the page between CLI and Website. Checks the radio and dispatches change.',
+        'Switch the entry form and the page between CLI and Website. Checks the radio and dispatches change, which also stores the surface as this browser preference, so the site navigation follows it afterwards.',
       inputSchema: {
         type: 'object',
         properties: {

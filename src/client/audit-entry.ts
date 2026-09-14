@@ -49,6 +49,16 @@ function isLane(value: string | null | undefined): value is Lane {
   return value === 'cli' || value === 'web';
 }
 
+/**
+ * The listing decision a submit carries, or null when the visitor never saw
+ * the box: it lives in the website pane, so a target's shape flipping the lane
+ * leaves its unchecked state meaning nothing. Null omits the field, which
+ * leaves whatever listing the site already has alone.
+ */
+export function listingChoice(entered: Lane, resolved: Lane, checked: boolean | null): boolean | null {
+  return entered === 'web' && resolved === 'web' ? checked : null;
+}
+
 function bind(el: EntryElements): void {
   const lane = (): Lane => (el.radios.find((r) => r.checked)?.value === 'web' ? 'web' : 'cli');
   const placeholder = (): void => {
@@ -61,8 +71,10 @@ function bind(el: EntryElements): void {
   };
   const say = (text: string): void => {
     if (!el.status) return;
-    el.status.textContent = text;
+    // Unhide before writing: text written into a hidden live region is
+    // announced inconsistently across screen readers.
     el.status.hidden = text.length === 0;
+    el.status.textContent = text;
   };
 
   for (const radio of el.radios) radio.addEventListener('change', placeholder);
@@ -109,7 +121,7 @@ function bind(el: EntryElements): void {
       return;
     }
     if (classified.lane !== entered) setLane(classified.lane);
-    const listing = classified.lane === 'web' && el.listing ? el.listing.checked : null;
+    const listing = listingChoice(entered, classified.lane, el.listing ? el.listing.checked : null);
     el.submit.setAttribute('aria-disabled', 'true');
     say('Verifying…');
     void startAudit({ target: el.input.value, lane: entered, listing }).then((result) => {
@@ -127,5 +139,8 @@ function init(): void {
   }
 }
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-else init();
+// Guarded so the module's helpers can be imported outside a browser.
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+}
