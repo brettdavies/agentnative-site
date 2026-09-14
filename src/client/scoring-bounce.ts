@@ -55,7 +55,7 @@ function installUnsupported(pm: string | undefined): BouncePanel {
     case 'bun':
       return {
         headline: "`bun install` isn't sandboxed yet.",
-        bodyHtml: `The sandbox doesn't put Bun's global install path on PATH. Try an <code>npm i -g</code> or <code>pipx install</code> equivalent, or ${INSTALL_LOCALLY.toLowerCase().replace('install anc', 'install anc')}.`,
+        bodyHtml: `The sandbox doesn't put Bun's global install path on PATH. Try an <code>npm i -g</code> or <code>pipx install</code> equivalent, or ${INSTALL_LOCALLY.toLowerCase()}.`,
       };
     case 'go_no_binary':
       return {

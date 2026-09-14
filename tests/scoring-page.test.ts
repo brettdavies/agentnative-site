@@ -87,6 +87,16 @@ describe('GET /scoring?target=', () => {
     expect(html).not.toContain('/js/scoring.js');
   });
 
+  test('a target the classifier accepts but no result page can express is the pointer, not a throw', async () => {
+    // An owner/repo shorthand classifies fine, yet the result-path builder
+    // refuses it. An unauthenticated GET must not reach that RangeError.
+    const { res, html } = await page(`/scoring?target=${encodeURIComponent('nlohmann/json')}`);
+    expect(res.status).toBe(400);
+    expect(html).toContain('role="alert"');
+    expect(html).not.toContain('data-scoring');
+    expect(html).not.toContain('/js/scoring.js');
+  });
+
   test('refresh=1 carries through to the page, and a plain target carries none', async () => {
     expect((await page('/scoring?target=ouch&refresh=1')).html).toContain('data-refresh="1"');
     expect((await page('/scoring?target=ouch')).html).not.toContain('data-refresh');
@@ -134,6 +144,15 @@ describe('GET /scoring: the pointer and the representations', () => {
       expect(md).toContain('/score/anc.dev/md');
       expect(md.toLowerCase()).not.toContain('turnstile');
     }
+  });
+
+  test('the twin answers a refused target with the status the page gives it, and names the reason', async () => {
+    // An agent negotiating markdown would otherwise read a rejection as a
+    // successful answer.
+    const res = await handleScoringPage(get(`/scoring.md?target=${'a'.repeat(129)}`, {}), env());
+    expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toContain('text/markdown');
+    expect(await res.text()).toContain('128 characters');
   });
 
   test('a POST is 405', async () => {

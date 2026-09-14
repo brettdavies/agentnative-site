@@ -229,6 +229,39 @@ test.describe('/scoring progress page', () => {
     expect(posts.length).toBe(before);
   });
 
+  test('a run already in flight keeps an escape on screen while the page waits', async ({ page }) => {
+    await mockTurnstile(page);
+    const posts = await mockScore(page, [json(202, { in_progress: true, started_at: AT })]);
+    await page.goto('/scoring?target=ouch');
+    await expect(page.locator('[data-scoring-status]')).toContainText('already running');
+    // The wait repeats on the visitor's own budget, so it never leaves them
+    // with a status line and no way out.
+    await expect(page.locator('[data-scoring-other]')).toBeVisible();
+    await expect.poll(() => posts.length, { timeout: 10_000 }).toBeGreaterThan(1);
+  });
+
+  test('a cached result with no URL of its own renders inline instead of promising a page', async ({ page }) => {
+    await mockTurnstile(page);
+    await mockScore(page, [
+      json(
+        200,
+        envelope({
+          tier: 'cache',
+          target: 'rg',
+          scorecard_url: null,
+          markdown_url: null,
+          json_url: null,
+          summary_html: '<section class="e2e-cached-inline">the cached inline result</section>',
+          freshness: { cached: true, scored_at: AT, refresh_after: null },
+        }),
+      ),
+    ]);
+    await seedStash(page, 'rg', 'cli');
+    await page.goto('/scoring?target=rg');
+    await expect(page.locator('.e2e-cached-inline')).toBeVisible();
+    await expect(page).toHaveURL(/\/scoring\?target=rg$/);
+  });
+
   test('the page never loads the WebMCP script', async ({ page }) => {
     await mockTurnstile(page);
     await mockScore(page, [json(403, { error: { code: 'turnstile_failed', message: 'x', cta: 'y' } })]);

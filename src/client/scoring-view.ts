@@ -119,6 +119,10 @@ export class ScoringView {
   /** Close the running row as passed, then open a running row for `phase`. */
   phase(phase: CliPhase): void {
     this.settle('pass');
+    // The subline counter belongs to the waiting state. Once a row is running
+    // it owns the clock, and a stranded second counter freezes where it stood.
+    this.elapsed?.remove();
+    this.elapsed = null;
     this.running = this.row(phase, CLI_PHASE_LABEL[phase], { cls: 'scoring__pill--running', text: 'running' });
   }
 

@@ -41,6 +41,10 @@ import { getTurnstileToken, loadTurnstileOnFirstInteraction, readSitekey } from 
 const FLOOR_MS = 2000;
 const POLL_MS = 3000;
 const TICK_MS = 1000;
+/** Every poll spends the visitor's own per-IP budget, so the wait is bounded. */
+const MAX_POLLS = 20;
+/** A request that never answers would leave the page on its first-paint line. */
+const REQUEST_TIMEOUT_MS = 30_000;
 
 type Choice = { listing: boolean | null; refresh: boolean };
 
@@ -54,8 +58,10 @@ function formatInstant(iso: string | null | undefined): string | null {
 }
 
 class ScoringRun {
-  private readonly loadedAt = Date.now();
+  private requestedAt = Date.now();
   private clock: number | null = null;
+  private poll: number | null = null;
+  private polls = 0;
   private checks = 0;
   private startBound = false;
 
@@ -90,16 +96,27 @@ class ScoringRun {
 
   private async post(token: string | null, choice: Choice | null): Promise<void> {
     const body = token && choice ? buildScoreBody(this.target, token, choice) : { target: this.target };
+    // Each attempt owns the floor and the count: a second run behind Run again
+    // would otherwise forward at once and carry the first run's checks on.
+    this.requestedAt = Date.now();
+    this.checks = 0;
+    const deadline = new AbortController();
+    // Cleared as soon as the headers land, so the deadline bounds the wait for
+    // an answer without cutting a stream short.
+    const timer = window.setTimeout(() => deadline.abort(), REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
       res = await fetch(apiScorePath(), {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/x-ndjson' },
         body: JSON.stringify(body),
+        signal: deadline.signal,
       });
     } catch {
       this.fail(NETWORK_PANEL);
       return;
+    } finally {
+      window.clearTimeout(timer);
     }
     if ((res.headers.get('content-type') ?? '').includes('application/x-ndjson') && res.body) {
       await this.stream(res.body);
@@ -115,9 +132,16 @@ class ScoringRun {
       return;
     }
     if (res.status === 202 && payload?.in_progress) {
+      this.polls += 1;
+      if (this.polls > MAX_POLLS) {
+        this.fail(STREAM_LOST_PANEL);
+        return;
+      }
       this.view.state('running');
       this.view.say('An audit of this target is already running. Waiting for it to finish.');
-      window.setTimeout(() => void this.post(null, null), POLL_MS);
+      // The visitor keeps a way out of the wait rather than a bare status line.
+      this.view.actions({ start: null, other: true });
+      this.poll = window.setTimeout(() => void this.post(null, null), POLL_MS);
       return;
     }
     const error = payload?.error;
@@ -132,11 +156,17 @@ class ScoringRun {
     this.fail(error ? bouncePanel(error) : { headline: 'The audit could not start.', bodyHtml: 'Run it again.' });
   }
 
-  private hit(envelope: AuditEnvelope): void {
+  private hit(envelope: AuditEnvelope & { summary_html?: string }): void {
+    // A cached result whose name belongs to a curated tool has no URL of its
+    // own; without this the page says it is opening one and never does.
+    if (!envelope.scorecard_url) {
+      this.inline(envelope.summary_html ?? '');
+      return;
+    }
     clearInlineResult(this.target);
     this.view.state('done');
     this.say_result(envelope);
-    if (envelope.scorecard_url) this.forward(envelope.scorecard_url, null);
+    this.forward(envelope.scorecard_url, null);
   }
 
   private say_result(envelope: Pick<AuditEnvelope, 'tier' | 'freshness'>): void {
@@ -156,7 +186,7 @@ class ScoringRun {
 
   private forward(url: string, scoredAt: string | null): void {
     const destination = scoredAt ? `${url}?v=${encodeURIComponent(scoredAt)}` : url;
-    const wait = Math.max(0, FLOOR_MS - (Date.now() - this.loadedAt));
+    const wait = Math.max(0, FLOOR_MS - (Date.now() - this.requestedAt));
     // replace, not assign: the progress page never enters history.
     window.setTimeout(() => window.location.replace(destination), wait);
   }
@@ -180,7 +210,7 @@ class ScoringRun {
   private event(event: AuditEvent): boolean {
     switch (event.type) {
       case 'accepted':
-        this.accepted();
+        this.accepted(event.started_at);
         return false;
       case 'phase':
         this.view.phase(event.phase);
@@ -218,19 +248,25 @@ class ScoringRun {
     return this.checkTotal ? `${this.checks} of ${this.checkTotal}` : `${this.checks}`;
   }
 
-  private accepted(): void {
+  private accepted(startedAt: string): void {
     this.view.state('running');
     this.view.actions({ start: null, other: false });
     this.view.say('Started.');
-    const acceptedAt = Date.now();
+    // An attached tab joins a run already under way, so the counter reads from
+    // when the run started rather than from when this page reached it.
+    const parsed = Date.parse(startedAt);
+    const since = Number.isNaN(parsed) ? Date.now() : parsed;
+    const elapsed = () => Math.max(0, Math.floor((Date.now() - since) / TICK_MS));
     this.stopClock();
-    this.view.tick(0);
-    this.clock = window.setInterval(() => this.view.tick(Math.floor((Date.now() - acceptedAt) / TICK_MS)), TICK_MS);
+    this.view.tick(elapsed());
+    this.clock = window.setInterval(() => this.view.tick(elapsed()), TICK_MS);
   }
 
   private stopClock(): void {
     if (this.clock !== null) window.clearInterval(this.clock);
     this.clock = null;
+    if (this.poll !== null) window.clearTimeout(this.poll);
+    this.poll = null;
   }
 
   private complete(event: CompleteEvent): void {
@@ -304,6 +340,14 @@ class ScoringRun {
     this.startBound = true;
     loadTurnstileOnFirstInteraction([this.view.el.start]);
     this.view.el.start.addEventListener('click', () => void this.onStart());
+    // Turnstile tears its widget down on pagehide, so a page restored from the
+    // back-forward cache would otherwise keep a verification error that the
+    // next click disproves.
+    window.addEventListener('pageshow', (event) => {
+      if (!event.persisted) return;
+      this.view.busy(false);
+      this.view.say(`${LANE_LABEL[this.lane]} audit of ${this.target}. ${LANE_EXPECTATION[this.lane]}`);
+    });
   }
 
   private async onStart(): Promise<void> {

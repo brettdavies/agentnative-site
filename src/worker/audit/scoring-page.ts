@@ -14,7 +14,14 @@
 // representation is stored at the edge or indexed. It never loads the
 // WebMCP script: a tool that could reach this page could make it transact.
 
-import { auditPath, classifyTarget, type Lane, SCORING_PATH, scoreMarkdownPath } from '../../shared/audit-routes';
+import {
+  auditPath,
+  classifyTarget,
+  isResultTarget,
+  type Lane,
+  SCORING_PATH,
+  scoreMarkdownPath,
+} from '../../shared/audit-routes';
 import { escHtml } from '../../shared/esc-html';
 import { LANE_EXPECTATION, scoringHeadingHtml, scoringTitle, TITLE_SUFFIX } from '../../shared/scoring-copy';
 import { detectPreference } from '../accept';
@@ -39,12 +46,24 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
   const url = new URL(request.url);
   const raw = url.searchParams.get('target');
   const classified = raw ? classifyTarget(raw) : null;
-  const accepted: Accepted | null = classified?.ok ? { lane: classified.lane, target: classified.target } : null;
-  const refused = classified && !classified.ok ? classified.message : null;
+  // A target the classifier accepts is not always one the result routes can
+  // express. Building the saved-result link for one of those throws, so an
+  // unroutable target takes the pointer rather than a 500.
+  const routable = classified?.ok === true && isResultTarget(classified.target);
+  const accepted: Accepted | null =
+    classified?.ok && routable ? { lane: classified.lane, target: classified.target } : null;
+  const refused =
+    classified && !classified.ok
+      ? classified.message
+      : classified?.ok && !routable
+        ? 'That target has no result page. Start the audit from the audit page.'
+        : null;
 
   if (url.pathname.endsWith('.md') || detectPreference(request) === 'markdown') {
-    const body = pointerMarkdown(url.origin, accepted);
-    return transient(request, new Response(body, { status: 200 }), true);
+    const body = pointerMarkdown(url.origin, accepted, refused);
+    // The twin answers a refusal with the status the page gives it: an agent
+    // reading 200 here would take a rejection for a result.
+    return transient(request, new Response(body, { status: refused ? 400 : 200 }), true);
   }
 
   let template: string;
@@ -145,7 +164,7 @@ function pointerPage(refused: string | null): Page {
   };
 }
 
-function pointerMarkdown(origin: string, accepted: Accepted | null): string {
+function pointerMarkdown(origin: string, accepted: Accepted | null, refused: string | null): string {
   const audit = `${origin}${auditPath()}`;
   const lines = [
     '# Audit progress',
@@ -153,6 +172,7 @@ function pointerMarkdown(origin: string, accepted: Accepted | null): string {
     `This page follows a live audit in a browser and has no content of its own for an agent. Start an audit at [${audit}](${audit}).`,
     '',
   ];
+  if (refused) lines.push(refused, '');
   if (accepted) {
     const saved = `${origin}${scoreMarkdownPath(accepted.target)}`;
     lines.push(`The saved result for \`${accepted.target}\`, once the audit finishes, is at [${saved}](${saved}).`, '');
