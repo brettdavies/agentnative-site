@@ -194,6 +194,9 @@ export function emitShell({
   alternatesHtml = markdownAlternateLink(markdownTwinPath),
   bodyHtml,
   themeInitJs,
+  // A second inline head script, for a page that needs state applied before
+  // its body paints. Empty on every page that does not.
+  extraHeadJs = '',
   isIndex = false,
   turnstileSitekey = false,
   baseUrl,
@@ -334,7 +337,7 @@ ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{T
     <link rel="stylesheet" href="/css/site.css" />
 
     <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
-    <script>${themeInitJs}</script>
+    <script>${themeInitJs}</script>${extraHeadJs ? `\n    <script>${extraHeadJs}</script>` : ''}
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>

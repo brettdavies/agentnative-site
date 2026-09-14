@@ -117,9 +117,13 @@ export async function copyAssets({ repoRoot, distDir }) {
   );
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
+  // lane-init is inlined into the leaderboard head only, for the same reason:
+  // it has to run before the panes paint. No file emitted.
+  const laneInit = await bundleClient(join(repoRoot, 'src/client/lane-init.ts'));
 
   return {
     themeInit,
+    laneInit,
     themeJs,
     surfaceJs,
     navJs,

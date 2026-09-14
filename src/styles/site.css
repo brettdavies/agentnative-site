@@ -1266,6 +1266,24 @@ body:has(.hero__grid) main {
 [data-s="web"] {
   display: none;
 }
+/* The pre-paint bridge comes first: before the radios parse there is nothing
+ * for :has() to match, so the stored surface rides on <html> and these mirror
+ * the radio rules below. They sit above those rules because :has(#s-web)
+ * carries an id and outranks them; surface.ts deletes the attribute once it
+ * has checked the matching radio, so the two are never both authoritative. */
+html[data-surface="web"] .scope [data-s="cli"] {
+  display: none;
+}
+html[data-surface="web"] .scope [data-s="web"] {
+  display: block;
+}
+html[data-surface="web"] .scope .board-try[data-s="web"] {
+  display: flex;
+}
+html[data-surface="web"] .scope .spec[data-s="web"] {
+  display: grid;
+}
+
 .scope:has(#s-web:checked) [data-s="cli"] {
   display: none;
 }
