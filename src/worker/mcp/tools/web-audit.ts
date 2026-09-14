@@ -107,11 +107,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       title: 'Get a cached website audit',
       description:
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
-        'both outcomes: a hit returns { found:true, cached, scored_at, refresh_after, scorecard, share_url }; a miss ' +
-        'returns { found:false, next_tool:"audit_website" }. cached is always true here; scored_at is when the audit ' +
-        'ran (null on a legacy entry) and refresh_after is the earliest time the entry leaves the 1-minute ' +
-        'cache-reuse window — eligibility only, not a promise a fresh audit will be available, since kill switches, ' +
-        'rate limits, and service failures still apply. The companion tool audit_website runs a fresh audit on a miss.',
+        'every outcome: a hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
+        'markdown_url, json_url, freshness and the scorecard, the same envelope the result page serves at its ' +
+        'json_url; a target already being audited returns { found:false, in_progress:true, started_at }; a miss ' +
+        'returns { found:false, next_tool:"audit_website" }. freshness.cached is always true on a hit; ' +
+        'freshness.scored_at is when the audit ran (null on a legacy entry) and freshness.refresh_after is the ' +
+        'earliest time the entry leaves the 1-minute cache-reuse window, which is eligibility only, not a promise a ' +
+        'fresh audit will be available, since kill switches, rate limits, and service failures still apply. The ' +
+        'companion tool audit_website runs a fresh audit on a miss.',
       inputSchema: {
         url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".'),
       },
@@ -288,7 +291,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // no re-audit runs; the preserving writer rewrites both stores without
       // resetting scored_at. A write failure surfaces a tool error rather than
       // a fabricated success the caller would follow as a saved result. The
-      // response mirrors a normal read: patched scorecard + share_url.
+      // response mirrors a normal read: the envelope over the patched record.
       if (listingWrite.path === 'patch') {
         const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
         if (!wrote) return isError('failed to persist the public_listing change; please retry.');
