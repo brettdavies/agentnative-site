@@ -29,7 +29,9 @@ export const NAV_LINKS = [
     match: ['/scorecards', '/web', '/score'],
     navAttr: 'data-leaderboards-nav',
   },
-  { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit'], navAttr: 'data-audit-nav' },
+  // A fix skill is reached from an audit result, so Audit is the entry the
+  // reader arrived through and the one that should read as current.
+  { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit', '/fix'], navAttr: 'data-audit-nav' },
   { label: 'The standard', href: '/#principles', match: [/^\/p\d+$/] },
   { label: 'Install', href: '/install', match: ['/install'] },
   { label: 'Skill', href: '/skill', match: ['/skill'] },

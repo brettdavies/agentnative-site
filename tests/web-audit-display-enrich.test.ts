@@ -149,7 +149,7 @@ describe('normalizeScorecardCategories', () => {
     };
     const dns = enriched.results.find((r) => r.id === 'dns-aid');
     expect(dns?.category).toBe('mcp');
-    expect(dns?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/dns-aid');
+    expect(dns?.remediation?.skill_url).toBe('https://anc.dev/fix/dns-aid');
   });
 
   test('score, score_pct, summary, and coverage_summary are byte-identical after normalization', () => {
@@ -259,7 +259,7 @@ describe('attachInlineRemediation', () => {
     expect(byId.get('openapi')?.remediation).toBeUndefined();
 
     expect(byId.get('json-schemas')?.result).toContain('Not found');
-    expect(byId.get('json-schemas')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/json-schemas');
+    expect(byId.get('json-schemas')?.remediation?.skill_url).toBe('https://anc.dev/fix/json-schemas');
 
     const broken = byId.get('mcp-tools-list');
     // The finding reaches both surfaces: the result line reports it, and
@@ -312,7 +312,7 @@ describe('attachInlineRemediation', () => {
     const out = attachInlineRemediation(stored, {}, 'https://anc.dev') as {
       results: Array<{ remediation?: { skill_url: string; prompt: string } }>;
     };
-    expect(out.results[0].remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/no-catalog-entry');
+    expect(out.results[0].remediation?.skill_url).toBe('https://anc.dev/fix/no-catalog-entry');
     expect(out.results[0].remediation?.prompt).toContain('--- begin evidence ---\nmissing\n--- end evidence ---');
   });
 });

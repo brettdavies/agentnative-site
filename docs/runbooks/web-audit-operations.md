@@ -15,9 +15,9 @@ web-board rescore (weekly cron, post-deploy hook, on-demand triggers). Pairs wit
 Source of truth: `.github/workflows/deploy.yml` and the `env.staging` / top-level blocks of `wrangler.jsonc`.
 
 **A `dev` merge reaches staging only, never production.** Production `anc.dev` lags `dev` until a release lands on
-`main` (see `RELEASES.md`). So immediately after a `dev` merge, `anc.dev` still serves the previous code and content.
-This matters for any audit that reads the target's own content: an audit of `anc.dev` before the production release
-scores the old content, and the deploy hook re-scores it once the release lands (see
+`main` (see `RELEASES.md`). Immediately after a `dev` merge, `anc.dev` still serves the previous code and content. This
+matters for any audit that reads the target's own content: an audit of `anc.dev` before the production release scores
+the old content, and the deploy hook re-scores it once the release lands (see
 [Operating the board rescore](#operating-the-board-rescore)).
 
 ## The audit endpoint
@@ -69,7 +69,7 @@ token on the staging host sidesteps this; that is what `run.sh` does.
 
 ### Against production (`anc.dev`)
 
-For a real user-facing audit, use the site's audit UI (`https://anc.dev/web-audit`) or the `audit_website` MCP tool. A
+For a real user-facing audit, use the site's audit UI (`https://anc.dev/audit`) or the `audit_website` MCP tool. A
 scripted `POST /api/audit-web` needs a real Turnstile token, which you cannot mint from a script. To preview the
 working-tree engine against live production content, point the helper at it: `scripts/web-audit/run.sh --target
 https://anc.dev/` (a public host, so no Access token is fetched).
@@ -159,8 +159,8 @@ wrangler workflows instances describe web-rescore <id>
 A per-domain step failure is logged (`scope: web-rescore`) and skipped; that domain drops off the board until the next
 successful rescore of it.
 
-**Adding a board entry.** Add the row to `seed.yaml`, merge, and either wait for the deploy hook (fires on the same
-merge's deploy) or trigger the endpoint manually.
+**Adding a board entry.** Add the row to `seed.yaml`, merge, and either wait for the deploy hook (fires on that same
+merge) or trigger the endpoint manually.
 
 ## Logging
 
@@ -193,12 +193,12 @@ A target behind a bot-blocking CDN produces one of two log signatures:
   everywhere): the CDN answers, but refuses the auditor. The score is genuine (the site is agent-hostile), and the
   evidence names the status.
 - `terminal: "unreachable"`: nothing (root fetch or discovery probe) returned an HTTP status. The engine ends the run
-  without caching, the page and tool report the target as unreachable. Typically the CDN tarpits datacenter clients.
+  without caching, the page and tool report the target as unreachable. The CDN tarpits datacenter clients.
 
 Probes identify themselves with the `anc-web-audit/1.0` User-Agent (`AUDIT_USER_AGENT` in
 `src/worker/audit-web/ssrf.ts`), which several CDNs treat more leniently than UA-less requests. Do not change it to
-impersonate a browser: the audit measures how a site treats agents, and evading the block would score a site the
-auditor cannot honestly reach.
+impersonate a browser: the audit measures how a site treats agents, and evading the block would score a site the auditor
+cannot honestly reach.
 
 ## Failure notifications
 
@@ -218,8 +218,8 @@ To provision (Cloudflare Email Service, Email Sending beta, Workers Paid):
    "vars": { "ALERT_EMAIL_FROM": "alerts@<zone>", "ALERT_EMAIL_TO": "<verified destination>" }
    ```
 
-4. Deploy and confirm with a forced failure on staging; expect one email and a `deduped` outcome on an immediate
-   second failure.
+4. Deploy and confirm with a forced failure on staging; expect one email and a `deduped` outcome on an immediate second
+   failure.
 
-Until step 3 lands, `notifyFailure` returns `unprovisioned` and the only failure signal is `web-audit.error` in
-Workers Logs.
+Until step 3 lands, `notifyFailure` returns `unprovisioned` and the only failure signal is `web-audit.error` in Workers
+Logs.

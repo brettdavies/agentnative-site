@@ -777,10 +777,10 @@ describe('handleLegacyWebResultPath', () => {
     const env = resultEnv(await oldShapeCachedFor('https://example.com/'));
     const html = await (await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com'), env)).text();
     expect(html).toContain('class="web-check__fix"');
-    expect(html).toContain('https://anc.dev/web-audit/skill/openapi');
+    expect(html).toContain('https://anc.dev/fix/openapi');
     const md = await (await handleLegacyWebResultPath(new Request('https://anc.dev/web/example.com.md'), env)).text();
     expect(md).toContain('- Fix:');
-    expect(md).toContain('https://anc.dev/web-audit/skill/openapi');
+    expect(md).toContain('https://anc.dev/fix/openapi');
   });
 
   test('a registry-load failure falls back to the stored category shape and still renders 200', async () => {
@@ -894,7 +894,7 @@ describe('result-page audit context, row metadata, and freshness (U3)', () => {
     expect(tag).toContain('data-tier="required"');
     const block = html.slice(html.indexOf(tag), html.indexOf('</details>', html.indexOf(tag)));
     expect(block).not.toContain('data-copy-text');
-    expect(md).not.toContain('Skill: https://anc.dev/web-audit/skill/mcp-tools-list');
+    expect(md).not.toContain('Skill: https://anc.dev/fix/mcp-tools-list');
   });
 
   test('the machine context reports the stored instant, the derived refresh, and every count', async () => {

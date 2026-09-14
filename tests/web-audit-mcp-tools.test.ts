@@ -302,10 +302,10 @@ describe('get_website_audit read-time enrichment', () => {
     const byId = new Map(scorecard.results.map((r) => [r.id, r]));
 
     expect(byId.get('openapi')?.result).toContain('Not found');
-    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
 
     expect(byId.get('mcp-tools-list')?.result).toContain('Present but broken');
-    expect(byId.get('mcp-tools-list')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/mcp-tools-list');
+    expect(byId.get('mcp-tools-list')?.remediation?.skill_url).toBe('https://anc.dev/fix/mcp-tools-list');
 
     const pass = byId.get('llms-txt');
     expect(pass?.result).toContain('Verified');
@@ -323,7 +323,7 @@ describe('get_website_audit read-time enrichment', () => {
     expect(scorecard.categories.map((c) => c.id)).toEqual(['mcp-api']);
     // Remediation still attaches from the catalog.
     const byId = new Map(scorecard.results.map((r) => [r.id, r]));
-    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
   });
 
   test('the minimal-payload guard passes a badge-only scorecard through unchanged', async () => {
@@ -673,7 +673,7 @@ describe('get_web_remediation (reshaped, U13)', () => {
     expect(remediation.check_id).toBe('openapi');
     expect(typeof remediation.goal).toBe('string');
     expect(typeof remediation.fix).toBe('string');
-    expect(remediation.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(remediation.skill_url).toBe('https://anc.dev/fix/openapi');
     expect(Array.isArray(remediation.resources)).toBe(true);
     expect(String(remediation.prompt)).toContain('Goal: ');
   });
@@ -740,7 +740,7 @@ describe('audit_website inline remediation (U13)', () => {
     // The evidence rides the result line; the prompt is site-owned
     // catalog text and carries no target-controlled string (R19).
     expect(absent?.result).toContain('Not found (https://example.com/openapi.json -> 404)');
-    expect(absent?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(absent?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
     expect(absent?.remediation?.prompt).toContain('--- begin evidence ---');
     expect(absent?.remediation?.prompt?.split('Observed (')[0]).not.toContain('openapi.json -> 404');
 

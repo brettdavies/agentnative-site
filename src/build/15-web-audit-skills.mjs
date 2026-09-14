@@ -1,17 +1,17 @@
-// Per-check web-audit fix skills (plan-003 U10, R11/KTD-7). Emits one
-// content page per registry check at dist/web-audit/skill/<id>.html plus
-// its markdown twin, generated from the registry + remediation catalog
-// (STAR: remediation.yaml is the single prose source, so the skill pages
-// and the get_web_remediation tool can never drift apart).
+// Per-check web-audit fix skills. Emits one content page per registry check
+// at dist/fix/<id>.html plus its markdown twin, generated from the registry +
+// remediation catalog (STAR: remediation.yaml is the single prose source, so
+// the skill pages and the get_web_remediation tool can never drift apart).
 //
-// Served through the standard asset-first dispatch: /web-audit/skill/<id>
-// resolves the HTML, the `.md` suffix or `Accept: text/markdown` resolves
-// the twin, and an unknown check id 404s like any missing asset.
+// Served through the standard asset-first dispatch: /fix/<id> resolves the
+// HTML, the `.md` suffix or `Accept: text/markdown` resolves the twin, and an
+// unknown check id 404s like any missing asset.
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
+import { fixPath } from '../shared/audit-routes';
 import { escHtml } from '../shared/scorecard-format.mjs';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from './13-web-audit-registry.mjs';
 import { renderMarkdown } from './render.mjs';
@@ -70,7 +70,7 @@ function assembleSkill(check, remediation, categories, baseUrl) {
   const promptLines = [
     `Goal: ${oneLine(remediation.goal)}`,
     `Fix: ${oneLine(remediation.fix)}`,
-    `Skill: ${baseUrl}/web-audit/skill/${check.id}`,
+    `Skill: ${baseUrl}${fixPath(check.id)}`,
     ...docsLine,
   ];
   const verify = [
@@ -135,7 +135,10 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
     registry.checks.map((c) => c.id),
   );
 
-  const skillDir = join(distDir, 'web-audit', 'skill');
+  const skillDir = join(distDir, 'fix');
+  // dist/ survives between builds, so the pages this replaced would go on
+  // serving their retired path beside the new one.
+  await rm(join(distDir, 'web-audit', 'skill'), { recursive: true, force: true });
   await mkdir(skillDir, { recursive: true });
 
   const pages = [];
@@ -149,7 +152,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
       emitShell({
         title: `Fix: ${check.title}`,
         description,
-        canonicalPath: `/web-audit/skill/${check.id}`,
+        canonicalPath: fixPath(check.id),
         bodyHtml: await buildSkillHtmlBody(check, remediation[check.id], registry.categories, base),
         themeInitJs: themeInit,
       }),
@@ -158,7 +161,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
       id: check.id,
       title: check.title,
       description,
-      url: `${base}/web-audit/skill/${check.id}.md`,
+      url: `${base}${fixPath(check.id)}.md`,
       digest: createHash('sha256').update(served).digest('hex'),
     });
   }

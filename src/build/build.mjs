@@ -32,6 +32,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scorePath } from '../shared/audit-routes';
 import { principleTier } from '../shared/scorecard-format.mjs';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
@@ -311,9 +312,10 @@ export async function build() {
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
   // so it stays out of the sitemap.
-  // /web (web leaderboard) is indexable; the per-domain /web/<domain>
-  // result pages are Worker-served with X-Robots-Tag: noindex (like the
-  // live-score pages) so they stay out of the sitemap.
+  // Both lanes list their result pages: a seeded host's page is indexable
+  // (the result route drops noindex for a seed member), so leaving it out is
+  // the difference between a crawlable corpus and pages nothing points at. An
+  // on-demand host keeps noindex and stays unlisted.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
     extraPaths: [
@@ -322,10 +324,9 @@ export async function build() {
       '/install',
       '/skill',
       '/badge',
-      '/web',
-      '/web-audit',
       '/web-scorecard-schema',
       ...scorecardPaths,
+      ...webSeed.entries.map((entry) => scorePath(entry.domain)),
     ],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);

@@ -22,6 +22,24 @@ import { emitAgentReadiness, emitDiscovery } from '../src/build/11a-discovery-em
 const REPO_ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const DIST_DIR = join(REPO_ROOT, 'dist');
 
+describe('sitemap names the result surface, not the retired boards', () => {
+  test('every seeded domain has a result entry and no retired board path is listed', async () => {
+    const sitemap = await readFile(join(DIST_DIR, 'sitemap.xml'), 'utf8');
+    const seed = JSON.parse(await readFile(join(DIST_DIR, '_internal', 'web-seed.json'), 'utf8')) as Array<{
+      domain: string;
+    }>;
+    expect(seed.length).toBeGreaterThan(0);
+    // A seeded host's result page is indexable (it loses noindex), so leaving
+    // it out of the sitemap is the difference between a crawlable corpus and
+    // a set of pages nothing points at.
+    for (const entry of seed) {
+      expect(sitemap).toContain(`/score/${entry.domain}</loc>`);
+    }
+    expect(sitemap).not.toContain('/web</loc>');
+    expect(sitemap).not.toContain('/web-audit</loc>');
+  });
+});
+
 describe('MCP server card seed (built dist/)', () => {
   test('file exists at _internal/mcp-server-card.json and parses as JSON', async () => {
     const raw = await readFile(join(DIST_DIR, '_internal', 'mcp-server-card.json'), 'utf8');

@@ -294,3 +294,10 @@ SVG's
 affordances
 lookups
 untrusted
+loopback
+authed
+retiering
+tarpits
+datacenter
+CDNs
+deduplicated
