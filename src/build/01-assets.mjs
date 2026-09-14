@@ -132,5 +132,6 @@ export async function copyAssets({ repoRoot, distDir }) {
     webmcpJs,
     reauditJs,
     scoringJs,
+    auditEntryJs,
   };
 }
