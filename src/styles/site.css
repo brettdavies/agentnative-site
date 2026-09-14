@@ -1283,6 +1283,9 @@ html[data-surface="web"] .scope .board-try[data-s="web"] {
 html[data-surface="web"] .scope .spec[data-s="web"] {
   display: grid;
 }
+html[data-surface="web"] .scope .board-view[data-s="web"] {
+  display: flex;
+}
 
 .scope:has(#s-web:checked) [data-s="cli"] {
   display: none;
@@ -1295,6 +1298,12 @@ html[data-surface="web"] .scope .spec[data-s="web"] {
 }
 .scope:has(#s-web:checked) .spec[data-s="web"] {
   display: grid;
+}
+/* Like .board-try and .spec above: the generic pane rule restores `block`,
+ * which would flatten this row's own flex layout in the only state that
+ * shows it. */
+.scope:has(#s-web:checked) .board-view[data-s="web"] {
+  display: flex;
 }
 body:has(#s-web:checked) .hero__proof > [data-s="cli"] {
   display: none;

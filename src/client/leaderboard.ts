@@ -18,7 +18,11 @@ if (board) {
   // Compose tier + audience filters: a row is visible only if both pass.
   // Tier defaults to "all"; audience-only toggle defaults to off.
   // ---------------------------------------------------------------
-  const tierButtons = document.querySelectorAll<HTMLButtonElement>('.tier-filter');
+  // Scoped to the CLI controls: the website pane's view switch reuses
+  // .tier-filter on anchors, so a document-wide selector binds this handler to
+  // them too, clearing the active tier and renumbering rows behind a pane the
+  // reader is not even looking at.
+  const tierButtons = document.querySelectorAll<HTMLButtonElement>('.leaderboard-controls[data-s="cli"] .tier-filter');
   const audienceToggle = document.querySelector<HTMLInputElement>('.audience-filter__input');
   const rows = board.querySelectorAll<HTMLElement>('.lrow');
 

@@ -10,13 +10,28 @@
 // A `?lane=` in the URL wins outright. The Worker has already checked the
 // radio that names, and an explicit link beats a remembered preference.
 //
-// Size budget: ≤ 500 bytes minified. Inlined into the leaderboard shell only.
+// Inlined into the leaderboard shell only, where it bundles to roughly 800
+// bytes. Most of that is the bundler's module preamble rather than the logic
+// below, and no check enforces a ceiling on it.
 
 (() => {
+  const html = document.documentElement;
+  // surface.ts clears the attribute once a radio carries the surface. Should
+  // its bundle never run, the attribute would keep every CLI pane hidden for
+  // good, so the script that set it also takes it back. It no-ops when the
+  // attribute is already gone, which is what keeps it from re-checking the
+  // website radio over a reader who has since chosen CLI.
+  const retire = () => {
+    if (html.dataset.surface !== 'web') return;
+    const web = document.getElementById('s-web') as HTMLInputElement | null;
+    if (web) web.checked = true;
+    delete html.dataset.surface;
+  };
   try {
     if (new URLSearchParams(location.search).has('lane')) return;
     if (localStorage.getItem('anc-surface') === 'web') {
-      document.documentElement.dataset.surface = 'web';
+      html.dataset.surface = 'web';
+      document.addEventListener('DOMContentLoaded', retire, { once: true });
     }
   } catch {
     // Storage blocked (privacy mode, sandboxed iframe): the CLI default stands.

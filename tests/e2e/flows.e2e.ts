@@ -498,11 +498,15 @@ test.describe('leaderboard surface nav', () => {
     expect(stored).toBeNull();
   });
 
-  test('Probe A navigates CLI → Website and writes preference', async ({ page }) => {
+  test('the leaderboard segment swaps panes in place and writes the preference', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/scorecards');
-    await page.locator('label[for="board-s-web"]').click();
-    await expect(page).toHaveURL(/\/web$/);
+    // Both boards live here now, so the segment is a pane switch rather than a
+    // navigation to a second page.
+    await page.locator('label[for="s-web"]').click();
+    await expect(page).toHaveURL(/\/scorecards$/);
+    await expect(page.locator('.board[data-s="web"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
   });
 
