@@ -900,12 +900,12 @@ and a 200 `curl -H 'Accept: text/html'` of it agree.
 | U5   | CLI lane streaming from the Durable Object    | `src/worker/score/do.ts`, `sandbox-exec.ts`, `orchestrate.ts`                                       | U2, U4         | #346        |
 | U6   | Unified result route and JSON representations | `src/worker/audit/result.ts`, `src/build/08-scorecards-emit.mjs`                                    | U1, U2         | #345        |
 | U7   | Cache classes, tags, purge, Link alternates   | `src/worker/headers.ts`                                                                             | U1, U6         | #347        |
-| U8 | Shared entry form on `/` and `/audit` | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md` | U1, U3, U9 |             |
-| U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 |             |
-| U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         |             |
-| U11  | Discovery, inventory, fix-skill move, docs    | `src/build/10-sitemap.mjs`, `09-llms-emit.mjs`, `11a-discovery-emit.mjs`, `15-web-audit-skills.mjs` | U1, U6         |             |
+| U8 | Shared entry form on `/` and `/audit` | `src/build/audit-form.mjs`, `src/client/audit-entry.ts`, `content/audit.md` | U1, U3, U9 | #353 |
+| U9 | Unified progress page | `src/worker/audit/scoring-page.ts`, `src/client/scoring.ts` | U2, U3, U4, U5, U6 | #352 |
+| U10  | Merged leaderboard and nav simplification     | `src/build/08-scorecards-emit.mjs`, `src/build/shell.mjs`, `src/client/surface.ts`                  | U1, U7         | #354 |
+| U11  | Discovery, inventory, fix-skill move, docs    | `src/build/10-sitemap.mjs`, `09-llms-emit.mjs`, `11a-discovery-emit.mjs`, `15-web-audit-skills.mjs` | U1, U6         | #355, #356 |
 | U12  | MCP envelope adoption and WebMCP re-pointing  | `src/worker/mcp/tools/*.ts`, `src/client/webmcp-*.ts`, `content/mcp-skill.md`                       | U2, U6, U8     |             |
-| U14 | Job Durable Object and single-flight attach | `src/worker/audit/job.ts`, `wrangler.jsonc`, `src/worker/audit/api.ts` | U4, U5, U6 |             |
+| U14 | Job Durable Object and single-flight attach | `src/worker/audit/job.ts`, `wrangler.jsonc`, `src/worker/audit/api.ts` | U4, U5, U6 | #350, #351 |
 | U13 | Retire old routes, sweep tests and scripts | `src/worker/index.ts`, `tests/**`, `scripts/**`, `RELEASES*.md` | U8 to U12, U14 |             |
 
 ### U1. Shared route module and target classifier
@@ -1532,11 +1532,7 @@ Design.
   2. Fix-skill emitter writes `dist/fix/<id>.{html,md}`; the agent-skills index, the skills-index markdown, remediation
      `skill_url`, and the result-page pointers use the new path.
   3. Docs describe the present state only (no migration narration); `CONCEPTS.md` gains entries for progress page,
-     target, and result envelope; the web-audit operations runbook records the kill-switch polarity per lane and the
-     deploy-rescore-sitemap ordering. DESIGN.md §4.15 is rewritten to present state: `/score/<target>` and `/scoring` as
-     the emitters' surfaces, the shared result spine, progress rows with the "running" `.stpill` state, the lane chip as
-     a `.tier`-style outline chip in mono beside the h1, the Re-audit countdown control as `.btn--ghost` with tabular
-     numerals, and no mention of `.catcard`, `.scorecard-hero`, `/score/live`, or `/web/<domain>`.
+     target, and result envelope.
 - **Patterns to follow:** three-registrations convention; the rename recipe's `dist/` sweep for the old word in text
   nodes.
 - **Test scenarios:**
@@ -1645,7 +1641,8 @@ Design.
   moved in U4), `scripts/release/mcp-smoke.sh`; modify `RELEASES.md` (a standing checklist step: any release that
   retires or renames a public path runs a zone purge-everything after deploy and before postflight, plus the rollback
   purge), `RELEASES-PREFLIGHT.md`, `RELEASES-POSTFLIGHT.md` (funnel live HTTP path, job-level run verification); modify
-  `.github/workflows/deploy.yml` if paths are inlined.
+  `docs/runbooks/web-audit-operations.md` (kill-switch polarity per lane, deploy-rescore-sitemap ordering) and
+  `DESIGN.md` (§4.15 to present state); modify `.github/workflows/deploy.yml` if paths are inlined.
 - **Approach:**
   1. `rg` for every old path, every removed `data-*` selector, and every `waitForURL` across `tests/` and `scripts/`
      before the sweep closes; re-point fixtures that used old paths as neutral HIT-min or MISS examples to new paths
@@ -1659,6 +1656,12 @@ Design.
      `src/worker/index.ts` to describe only the present order.
   5. The archetype loop in `tests/e2e/flows.e2e.ts` names `/audit`, `/scoring?target=`, and `/scorecards` so the axe and
      overflow sweeps keep covering the funnel.
+  6. The operations runbook records the kill-switch polarity per lane and the deploy-rescore-sitemap ordering, and
+     DESIGN.md §4.15 is rewritten to present state: `/score/<target>` and `/scoring` as the emitters' surfaces, the
+     shared result spine, progress rows with the "running" `.stpill` state, the lane chip as a `.tier`-style outline
+     chip in mono beside the h1, the Re-audit countdown control as `.btn--ghost` with tabular numerals, and no mention
+     of `.catcard`, `.scorecard-hero`, `/score/live`, or `/web/<domain>`. Both wait for this unit: naming the
+     post-retirement state while those routes still serve would leave a tracked doc contradicting running code.
 - **Patterns to follow:** the vestigial-e2e learning's four failure shapes; `tests/helpers/site-facts.ts` derivation of
   counts from build sources.
 - **Test scenarios:**
