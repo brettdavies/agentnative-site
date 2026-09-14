@@ -264,11 +264,6 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         });
       }
 
-      // A run already in flight for this input is attached to, not run twice;
-      // attaching spends no audit budget.
-      const attached = await awaitInFlightTerminal(env, 'cli', inFlightKey(choice.raw), getMcpRequest()?.signal);
-      if (attached) return attachedResult(attached);
-
       // Step 4: cf-connecting-ip presence check (no anon fallback).
       const ipString = requestHeader(extra, 'cf-connecting-ip');
       if (!ipString) {
@@ -282,6 +277,22 @@ export function registerScorecardAuditTool(server: McpServer, _catalog: Catalog,
         const { success } = await env.MCP_AUDIT_LIMITER.limit({ key: ipString });
         if (!success) {
           return jsonRpcError32099('audit rate limit exceeded — burst window (5 per 60 seconds per source).');
+        }
+      }
+
+      // Step 5.5: a run already in flight for this input is attached to
+      // rather than run twice. Attaching spends no audit budget, but it holds
+      // a request open for the rest of that run, so it passes the source
+      // gates above first. A cache bypass forces its own run, which is the
+      // whole purpose of the flag.
+      if (!bypassCache) {
+        const signal = getMcpRequest()?.signal;
+        const attached = await awaitInFlightTerminal(env, 'cli', inFlightKey(choice.raw), signal);
+        if (attached) return attachedResult(attached);
+        // A null answer after the caller aborted means the wait ended, not
+        // that nothing is running; dispatching now would audit for nobody.
+        if (signal?.aborted) {
+          return jsonRpcError32099('the caller went away while attaching to the audit already in flight.');
         }
       }
 

@@ -589,7 +589,7 @@ describe('score_cli: a run already in flight', () => {
     scorecard: { tool: { binary: 'newcli' }, results: [] },
   } as unknown as AuditEvent;
 
-  test('an in-flight binary attaches and returns the terminal envelope without a second run or any audit budget', async () => {
+  test('an in-flight binary attaches after the source gates, with no second run and no hourly budget', async () => {
     const jobs = fakeJobNamespace();
     const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
     const claim = await job.claim(AT, 90_000);
@@ -615,8 +615,53 @@ describe('score_cli: a run already in flight', () => {
       spec_version: SPEC_VERSION,
     });
     expect(doSpy.calls.length).toBe(0);
-    expect(audit.calls).toBe(0);
+    // Attaching holds a request open for the rest of someone else's run, so
+    // it passes the per-source burst gate first. The hourly audit budget sits
+    // behind the attach and stays untouched.
+    expect(audit.calls).toBe(1);
     expect(kv.putCalls).toBe(0);
+  });
+
+  test('a caller with no client IP cannot attach to the run in flight', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, complete);
+    const kv: KvStub = {
+      store: new Map([
+        ['inflight:cli:npm install -g somelib', JSON.stringify({ started_at: AT, job: 'cli:npm install -g somelib' })],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const { env, doSpy } = makeEnv({ jobs, kv });
+    const result = await callScoreCli(env, { install: 'npm install -g somelib' });
+    expect(result.result?.isError).toBe(true);
+    expect(result.result?.content?.[0]?.text).toContain('cf-connecting-ip');
+    expect(doSpy.calls.length).toBe(0);
+  });
+
+  test('bypass_cache runs its own audit rather than attaching to the one in flight', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, complete);
+    const kv: KvStub = {
+      store: new Map([
+        ['inflight:cli:npm install -g somelib', JSON.stringify({ started_at: AT, job: 'cli:npm install -g somelib' })],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const audit: RateStub = { calls: 0, shouldSucceed: true };
+    const { env, doSpy } = makeEnv({ jobs, kv, auditLimiter: audit, cacheBypassAllowed: 'true' });
+    const result = await callScoreCli(env, { install: 'npm install -g somelib', bypass_cache: true }, '198.51.100.7');
+    // The flag exists to exercise the container path, so it may not be served
+    // by another run's result.
+    expect(doSpy.calls.length).toBe(1);
+    expect(getJsonContent(result)).not.toMatchObject({ attached: true });
   });
 
   test('an attached run that bounced is a tool error naming the code', async () => {

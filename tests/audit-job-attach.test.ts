@@ -163,6 +163,25 @@ describe('POST /api/score: attach to a run in flight', () => {
     expect(tracker.doCalls).toBe(1);
   });
 
+  test('the operator hatch runs beside the live run and leaves its flag naming the job', async () => {
+    const tracker = newTracker();
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName(`cli:${CLI}`));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    const flag = JSON.stringify({ started_at: AT, job: `cli:${CLI}` });
+    const env = makeEnv({ tracker, jobs, kvSeed: { [`inflight:cli:${CLI}`]: flag } });
+    const { res, ctx } = await call(post({ target: CLI, turnstile_token: 'x' }, { query: '?fromCache=false' }), env);
+    expect(res.status).toBe(200);
+    await res.json();
+    await settle(ctx);
+    // The run holding the job owns that key. A hatch run that overwrote it
+    // would point every later reader at no job, and clearing it would retire
+    // a flag whose run is still going.
+    expect(JSON.parse(env._kv.get(`inflight:cli:${CLI}`) ?? 'null')).toMatchObject({ job: `cli:${CLI}` });
+    expect(tracker.doCalls).toBe(1);
+  });
+
   test('a claim lost to a run the KV read missed attaches instead of dispatching a second run', async () => {
     const tracker = newTracker();
     const jobs = fakeJobNamespace();
@@ -233,6 +252,25 @@ describe('POST /api/score: attach to a run in flight', () => {
     await settle(first.ctx, second.ctx);
     expect(a.at(-1)?.type).toBe('complete');
     expect(shape(b)).toEqual(shape(a));
+  });
+
+  test('a website POST that names its listing choice runs its own audit instead of attaching', async () => {
+    const tracker = newTracker();
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('web:anc.dev'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    const env = makeEnv({
+      tracker,
+      jobs,
+      kvSeed: { 'inflight:web:anc.dev': JSON.stringify({ started_at: AT, job: 'web:anc.dev' }) },
+    });
+    const { res, ctx } = await call(post({ target: 'anc.dev', turnstile_token: 'x', public_listing: true }), env);
+    await res.text();
+    await settle(ctx);
+    // Attaching would answer the caller with a run that never writes the
+    // listing they asked for, so an explicit choice is its own request.
+    expect(tracker.probeCalls.length).toBeGreaterThan(0);
   });
 
   test('a tokenless stream POST with no client IP, or one the per-IP burst limiter refuses, gets the 202 instead of a stream', async () => {

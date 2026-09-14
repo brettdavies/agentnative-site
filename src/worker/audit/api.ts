@@ -464,7 +464,10 @@ async function handleWeb(
     return jsonEnvelope(webCacheEnvelope(target, tier.cached, origin));
   }
 
-  const inFlight = await readInFlight(env, 'web', classified.target);
+  // An explicit listing choice is its own request: attaching would answer it
+  // with a run that carries someone else's listing decision, and the opt-in
+  // the caller asked for would never be written.
+  const inFlight = parsed.publicListing === undefined ? await readInFlight(env, 'web', classified.target) : null;
   if (inFlight) {
     return attach(common, 'web', classified.target, inFlight);
   }
@@ -511,12 +514,12 @@ async function handleWeb(
 
   const startedAt = new Date().toISOString();
   const job = await claimJob(env, 'web', classified.target, startedAt);
-  if (job.kind === 'running') {
+  if (job.kind === 'running' && parsed.publicListing === undefined) {
     return attach(common, 'web', classified.target, { started_at: job.started_at, job: job.name }, cookie);
   }
   row.tier = 'live';
   const writer = job.kind === 'claimed' ? job.writer : null;
-  const flags = new InFlightFlags(env, 'web', startedAt, writer?.name ?? null);
+  const flags = new InFlightFlags(env, 'web', startedAt, writer?.name ?? null, job.kind !== 'running');
   await flags.mark(classified.target, target.host);
   const events = runWebAuditStream({
     env,
@@ -617,7 +620,7 @@ async function handleCli(
   }
   row.tier = 'live';
   const writer = job.kind === 'claimed' ? job.writer : null;
-  const flags = new InFlightFlags(env, 'cli', startedAt, writer?.name ?? null);
+  const flags = new InFlightFlags(env, 'cli', startedAt, writer?.name ?? null, job.kind !== 'running');
   const branchTarget =
     branch && validated.kind === 'github-url' && validated.branch
       ? [`${validated.owner}/${validated.repo}@${validated.branch}`]
@@ -852,6 +855,9 @@ async function relay(common: Common, run: RelayRun, cookie: Record<string, strin
         if (clientGone) return;
         clientGone = true;
         stopHeartbeat();
+        // An attached relay has no run of its own to finish, so draining the
+        // job's stream after its reader leaves holds a subscriber for nothing.
+        if (!flags) abort.abort(new Error('client_gone'));
         void writer.abort().catch(() => {});
         row.outcome = 'client_gone';
         row.status = 200;

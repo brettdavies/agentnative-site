@@ -1332,9 +1332,24 @@ describe('audit_website: a run already in flight', () => {
     });
   }
 
-  test('an in-flight domain attaches and returns the terminal scorecard ahead of every audit gate', async () => {
-    // The limiter denies: only the attach path can answer with a scorecard.
+  test('a caller the burst limiter denies cannot attach to the run in flight', async () => {
+    // Attaching holds a request open for the rest of someone else's run, so
+    // it waits behind the same per-source gate a fresh audit does.
     const env = await inFlightEnv(false);
+    const res = await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+
+  test('a caller with no client IP cannot attach to the run in flight', async () => {
+    const env = await inFlightEnv(true);
+    const res = await callTool(env, 'audit_website', { url: 'example.com' });
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+
+  test('an in-flight domain attaches once the caller passes the source gates', async () => {
+    const env = await inFlightEnv(true);
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9'));
     expect(body).toMatchObject({
       audited: true,

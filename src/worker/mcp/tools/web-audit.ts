@@ -263,11 +263,27 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         });
       }
 
-      // A run already in flight for this domain is attached to, not run
-      // twice; attaching spends no audit budget. An explicit listing choice
-      // is its own request and goes through the gates below.
+      // cf-connecting-ip presence (no anon fallback).
+      const ipString = requestHeader(extra, 'cf-connecting-ip');
+      if (!ipString) {
+        return jsonRpcError32099(
+          'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable.',
+        );
+      }
+      // Per-IP burst limiter.
+      if (env.WEB_AUDIT_LIMITER_IP) {
+        const { success } = await env.WEB_AUDIT_LIMITER_IP.limit({ key: ipString });
+        if (!success)
+          return jsonRpcError32099('audit rate limit exceeded — burst window (30 per 60 seconds per source).');
+      }
+      // A run already in flight for this domain is attached to rather than
+      // run twice. Attaching spends no audit budget, but it holds a request
+      // open for the rest of that run, so it passes the source gates above
+      // first. An explicit listing choice is its own request: attaching would
+      // answer it with a run that never writes the caller's opt-in.
       if (public_listing === undefined) {
-        const attached = await awaitInFlightTerminal(env, 'web', domain, getMcpRequest()?.signal);
+        const signal = getMcpRequest()?.signal;
+        const attached = await awaitInFlightTerminal(env, 'web', domain, signal);
         if (attached?.type === 'complete') {
           return textContent({
             audited: true,
@@ -283,21 +299,13 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           const reason = attached.type === 'incomplete' ? 'incomplete' : attached.error.code;
           return isError(`the audit this call attached to did not finish (${reason}); nothing was cached. Retry.`);
         }
+        // A null answer after the caller aborted means the wait ended, not
+        // that nothing is running; dispatching now would audit for nobody.
+        if (signal?.aborted) {
+          return jsonRpcError32099('the caller went away while attaching to the audit already in flight.');
+        }
       }
 
-      // cf-connecting-ip presence (no anon fallback).
-      const ipString = requestHeader(extra, 'cf-connecting-ip');
-      if (!ipString) {
-        return jsonRpcError32099(
-          'fresh audits require a source IP; missing cf-connecting-ip is not rate-limit-keyable.',
-        );
-      }
-      // Per-IP burst limiter.
-      if (env.WEB_AUDIT_LIMITER_IP) {
-        const { success } = await env.WEB_AUDIT_LIMITER_IP.limit({ key: ipString });
-        if (!success)
-          return jsonRpcError32099('audit rate limit exceeded — burst window (30 per 60 seconds per source).');
-      }
       // Hourly window (shared with the webapp route).
       if (env.SCORE_KV) {
         const ok = await consumeWebAuditHourlyBudget(env.SCORE_KV, ipString);

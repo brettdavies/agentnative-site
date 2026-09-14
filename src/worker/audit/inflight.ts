@@ -62,11 +62,15 @@ export class InFlightFlags {
     private readonly lane: Lane,
     readonly startedAt: string,
     private readonly job: string | null,
+    // A run proceeding beside the run that holds the job owns none of its
+    // keys: writing them would point every later reader at no job, and
+    // clearing them would retire a flag whose run is still going.
+    private readonly owns = true,
   ) {}
 
   async mark(...keys: string[]): Promise<void> {
     const kv = this.env.SCORE_KV;
-    if (!kv) return;
+    if (!kv || !this.owns) return;
     const value = JSON.stringify({ started_at: this.startedAt, job: this.job });
     await Promise.all(
       keys.map((key) => {
@@ -79,7 +83,7 @@ export class InFlightFlags {
 
   async clear(): Promise<void> {
     const kv = this.env.SCORE_KV;
-    if (!kv) return;
+    if (!kv || !this.owns) return;
     await Promise.all([...this.keys].map((key) => kv.delete(key).catch(() => {})));
     this.keys.clear();
   }
