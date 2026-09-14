@@ -61,9 +61,12 @@ function viewHref(
   sort: 'global' | 'relative' | null | undefined,
   markdown: boolean,
   base = '/web',
+  extraParams: readonly string[] = [],
 ): string {
   const path = markdown ? `${base}.md` : base;
-  const params: string[] = [];
+  // The extras come first and the base carries no query of its own: this joins
+  // with `?`, so a base like `/scorecards?lane=web` would produce two.
+  const params: string[] = [...extraParams];
   if (target === 'curated') params.push('view=curated');
   if (!markdown && sort === 'global') params.push('sort=global');
   return params.length > 0 ? `${path}?${params.join('&')}` : path;
@@ -74,12 +77,17 @@ function viewHref(
  * renders on the website board and on the merged leaderboard, and a forked
  * copy would be free to drift on which view is active or where it points.
  */
-export function buildBoardViewNav(opts: WebBoardRenderOpts, base = '/web'): string {
+export function buildBoardViewNav(
+  opts: WebBoardRenderOpts,
+  base = '/web',
+  extraParams: readonly string[] = [],
+): string {
   const link = (target: WebBoardView, label: string): string => {
     const active = target === opts.view;
     const cls = active ? 'tier-filter tier-filter--active' : 'tier-filter';
     const current = active ? ' aria-current="page"' : '';
-    return `<a class="${cls}"${current} href="${escHtml(viewHref(target, opts.sort, false, base))}">${label}</a>`;
+    const href = escHtml(viewHref(target, opts.sort, false, base, extraParams));
+    return `<a class="${cls}"${current} href="${href}">${label}</a>`;
   };
   return `<nav class="tier-filters" aria-label="Board view">
     ${link('all', 'All')}
@@ -233,6 +241,17 @@ export function buildWebLeaderboardMarkdown(
 }
 
 /**
+ * Escape the characters that carry structure inside a markdown table cell. A
+ * row's label is an audited site's own title, so an unescaped `]` closes the
+ * link text early and forges a link, and a bare `|` shifts every column after
+ * it. Parens are left alone: only `]` ends link text, and escaping them would
+ * litter every legitimate `(Name)` in a table an agent reads.
+ */
+function escMdCell(value: string): string {
+  return value.replace(/[\\|[\]]/g, (ch) => `\\${ch}`);
+}
+
+/**
  * The board's markdown table, without the document around it: the heading,
  * the view switch, and the counts belong to whichever page hosts it. Both the
  * website board's twin and the merged leaderboard's twin render these rows, so
@@ -245,7 +264,9 @@ export function buildBoardMarkdownRows(entries: WebBoardEntry[], origin: string)
   }
   const lines = ['| # | Site | Global | Relative | Source |', '|---|------|--------|----------|--------|'];
   for (const entry of ranked) {
-    const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
+    const label = escMdCell(
+      entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain,
+    );
     const source = entry.curated ? 'curated' : 'on-demand';
     lines.push(
       `| ${entry.rank} | [${label}](${origin}/web/${entry.domain}) | ${entry.score.global}% | ${entry.score.relative}% | ${source} |`,
@@ -266,9 +287,15 @@ export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
     .map((entry) => {
       const pct = entry.score.relative;
       const domain = escHtml(entry.domain);
-      const friendly = entry.name && entry.name !== entry.domain ? ` (${escHtml(entry.name)})` : '';
+      const named = entry.name && entry.name !== entry.domain;
+      const friendly = named ? ` (${escHtml(entry.name)})` : '';
       const desc = escHtml(entry.description);
-      return `        <a class="lrow ${bandOf(pct)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
+      // Without a name of its own the row announces as its own contents, which
+      // read as a number salad: rank digits, domain, description, bare score.
+      const label = escHtml(
+        `${named ? `${entry.domain} (${entry.name})` : entry.domain}, score ${pct} percent, rank ${entry.rank}`,
+      );
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="/web/${domain}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 }
@@ -309,8 +336,14 @@ export function buildBoardRows(entries: WebBoardEntry[]): string {
     .map((entry) => {
       const relative = entry.score.relative;
       const domain = escHtml(entry.domain);
-      const friendly = entry.name && entry.name !== entry.domain ? ` (${escHtml(entry.name)})` : '';
-      return `        <a class="lrow ${bandOf(relative)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${entry.score.global}% global</span></span>${renderMeter(relative)}</a>`;
+      const named = entry.name && entry.name !== entry.domain;
+      const friendly = named ? ` (${escHtml(entry.name)})` : '';
+      // Without a name of its own the row announces as its own contents, which
+      // read as a number salad: rank digits, domain, two bare percentages.
+      const label = escHtml(
+        `${named ? `${entry.domain} (${entry.name})` : entry.domain}, relative score ${relative} percent, global score ${entry.score.global} percent, rank ${entry.rank}`,
+      );
+      return `        <a class="lrow ${bandOf(relative)}" aria-label="${label}" href="/web/${domain}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${entry.score.global}% global</span></span>${renderMeter(relative)}</a>`;
     })
     .join('\n');
 }

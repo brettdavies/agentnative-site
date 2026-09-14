@@ -1009,9 +1009,13 @@ async function injectLeaderboardBoard(
       : buildFrontpageBoardEmptyState();
   // The view switch is HTML-only: the twin's own view line belongs to the
   // document that hosts it, and a second one here would contradict it.
+  // It carries the lane because it renders inside the website pane: dropped,
+  // the switch serves the CLI pane back and hides the list it just filtered.
   const viewNav = opts.markdown
     ? ''
-    : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, '/scorecards');
+    : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, '/scorecards', [
+        'lane=web',
+      ]);
   // `?lane=web` opens on the website pane. A website result page links back
   // here that way, so without this every visitor arriving from one lands on
   // the CLI board and has to switch by hand.
@@ -1025,8 +1029,15 @@ async function injectLeaderboardBoard(
   const headers = new Headers(upstream.headers);
   headers.delete('etag');
   headers.delete('last-modified');
+  // One pass with a function replacement. A string replacement expands `$&`
+  // and its siblings, and a row's name is an audited site's own title; two
+  // sequential passes would also let a name holding the second placeholder
+  // splice the view nav inside a row.
+  const filled = withLane.replace(/\{\{WEB_BOARD_(ROWS|VIEW)\}\}/g, (_match: string, which: string) =>
+    which === 'ROWS' ? slice : viewNav,
+  );
   return applyHeaders(
-    new Response(withLane.replaceAll('{{WEB_BOARD_ROWS}}', slice).replaceAll('{{WEB_BOARD_VIEW}}', viewNav), {
+    new Response(filled, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers,

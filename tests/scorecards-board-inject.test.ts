@@ -147,7 +147,10 @@ describe('merged leaderboard: the website pane', () => {
     const html = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]));
     expect(html).not.toContain('{{WEB_BOARD_VIEW}}');
     expect(html).toContain('aria-label="Board view"');
-    expect(html).toContain('href="/scorecards?view=curated"');
+    // The switch renders only inside the website pane, so it has to keep the
+    // reader there: without the lane the Worker serves the CLI pane and the
+    // curated website list they asked for is the one thing hidden.
+    expect(html).toContain('href="/scorecards?lane=web&amp;view=curated"');
     // A forked copy of the control would quietly send this board's readers to
     // the other board.
     expect(html).not.toContain('href="/web?view=curated"');
@@ -172,6 +175,34 @@ describe('merged leaderboard: the website pane', () => {
     const cli = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]), 'https://anc.dev/scorecards?lane=cli');
     expect(cli).toContain('id="s-cli" checked');
     expect(cli).not.toContain('id="s-web" checked');
+  });
+
+  test('an injected row names itself for assistive tech', async () => {
+    const html = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]));
+    const webPane = html.slice(html.indexOf('data-s="web"'));
+    expect(webPane).toContain('aria-label="top.dev, relative score 85 percent, global score 80 percent, rank 1"');
+    expect(webPane).toContain('<span class="rank" aria-hidden="true">01</span>');
+  });
+
+  test('a site title holding a replacement pattern is injected literally', async () => {
+    // `$&` and its siblings are honored on the right-hand side of a string
+    // replacement, and a name here is an audited site's own title, so a string
+    // replacement would splice the placeholder back into the row.
+    const entry = boardEntry('top.dev', 80);
+    entry.name = 'Acme $& Co';
+    const html = await fetchBoard(makeEnv([entry]));
+    expect(html).toContain('(Acme $&amp; Co)');
+    expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
+  });
+
+  test('a site title holding the other placeholder cannot splice the view nav', async () => {
+    // Substituting the rows first leaves a name that spells the second
+    // placeholder for the pass behind it to fill, so the nav lands inside a row.
+    const entry = boardEntry('top.dev', 80);
+    entry.name = '{{WEB_BOARD_VIEW}}';
+    const html = await fetchBoard(makeEnv([entry]));
+    expect((html.match(/aria-label="Board view"/g) ?? []).length).toBe(1);
+    expect(html).toContain('({{WEB_BOARD_VIEW}})');
   });
 
   test('the injected rows need no client JS', async () => {
@@ -203,6 +234,20 @@ describe('merged leaderboard: the markdown twin', () => {
     const md = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]), 'https://anc.dev/scorecards.md');
     expect(md).not.toContain('{{WEB_BOARD_VIEW}}');
     expect(md).not.toContain('tier-filters');
+  });
+
+  test('a forged link in a site title cannot escape its markdown cell', async () => {
+    // The title comes from the audited site, and the twin is the representation
+    // an agent reads: an unescaped `]` closes the link text and the rest of the
+    // title becomes a link target of the site's own choosing.
+    const entry = boardEntry('top.dev', 80);
+    entry.name = 'Acme](https://evil.test) [x';
+    const md = await fetchBoard(makeEnv([entry]), 'https://anc.dev/scorecards.md');
+    // An escaped cell still holds those characters in sequence, so the bare
+    // substring proves nothing. What matters is that the `]` carries a
+    // backslash and so no longer closes the link text.
+    expect(md).not.toMatch(/[^\\]\]\(https:\/\/evil\.test\)/);
+    expect(md).toContain('Acme\\](https://evil.test) \\[x');
   });
 
   test('an absent aggregate leaves the twin a sentence, not a bare heading', async () => {
