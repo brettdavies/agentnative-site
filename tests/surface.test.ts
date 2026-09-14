@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { auditHref, getSurface, leaderboardsHref, setSurface } from '../src/client/surface';
+import { getSurface, setSurface } from '../src/client/surface';
 
 function mockStorage() {
   const store = new Map<string, string>();
@@ -51,26 +51,17 @@ describe('getSurface', () => {
   });
 });
 
-describe('leaderboardsHref', () => {
-  test('maps cli to /scorecards and web to /web', () => {
+describe('setSurface', () => {
+  test('round-trips the stored preference the panes read', () => {
+    // The header no longer follows the surface: one anchor per entry, and the
+    // segment on the page swaps its panes. The preference is what a returning
+    // visitor's pane selection restores from.
     const ls = mockStorage();
     try {
-      expect(leaderboardsHref()).toBe('/scorecards');
       setSurface('web');
-      expect(leaderboardsHref()).toBe('/web');
-    } finally {
-      ls.restore();
-    }
-  });
-});
-
-describe('auditHref', () => {
-  test('maps cli to /audit and web to /web-audit', () => {
-    const ls = mockStorage();
-    try {
-      expect(auditHref()).toBe('/audit');
-      setSurface('web');
-      expect(auditHref()).toBe('/web-audit');
+      expect(getSurface()).toBe('web');
+      setSurface('cli');
+      expect(getSurface()).toBe('cli');
     } finally {
       ls.restore();
     }

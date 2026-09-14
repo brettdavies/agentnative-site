@@ -28,15 +28,6 @@ export function setSurface(surface: Surface): void {
   }
 }
 
-/** Read-only href map for tests and diagnostics; production nav uses dual anchors + CSS. */
-export function leaderboardsHref(): string {
-  return getSurface() === 'web' ? WEB_BOARD_HREF : CLI_BOARD_HREF;
-}
-
-export function auditHref(): string {
-  return getSurface() === 'web' ? WEB_AUDIT_HREF : CLI_AUDIT_HREF;
-}
-
 type SurfaceProbeConfig = {
   segSelector: string;
   cliRadioId: string;

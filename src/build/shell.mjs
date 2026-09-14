@@ -23,8 +23,13 @@ const SITE_TAGLINE = 'the agent-native standard';
 // nav entry (methodology, coverage, contribute, the web board) stay
 // reachable from the footer meta row and in-page cross-links.
 export const NAV_LINKS = [
-  { label: 'Leaderboards', href: '/scorecards', match: ['/scorecards', '/web', '/score'] },
-  { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit'] },
+  {
+    label: 'Leaderboards',
+    href: '/scorecards',
+    match: ['/scorecards', '/web', '/score'],
+    navAttr: 'data-leaderboards-nav',
+  },
+  { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit'], navAttr: 'data-audit-nav' },
   { label: 'The standard', href: '/#principles', match: [/^\/p\d+$/] },
   { label: 'Install', href: '/install', match: ['/install'] },
   { label: 'Skill', href: '/skill', match: ['/skill'] },
@@ -34,56 +39,13 @@ export const NAV_LINKS = [
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
 
-const leaderboardsCliCurrent = (path) => path === '/scorecards' || path.startsWith('/score/');
-const leaderboardsWebCurrent = (path) =>
-  path === '/web' || (path.startsWith('/web/') && !path.startsWith('/web-audit'));
-
-const auditCliCurrent = (path) => path === '/audit';
-const auditWebCurrent = (path) => path === '/web-audit' || path.startsWith('/web-audit/');
-
-const renderDualSurfaceNav = ({ label, cliHref, webHref, dataNavAttr, path, cliCurrent, webCurrent }) => {
-  const cliCur = cliCurrent(path) ? ' aria-current="page"' : '';
-  const webCur = webCurrent(path) ? ' aria-current="page"' : '';
-  return `          <a href="${cliHref}" data-s="cli" ${dataNavAttr}${cliCur}>${label}</a>
-          <a href="${webHref}" data-s="web" ${dataNavAttr}${webCur}>${label}</a>`;
-};
-
-const renderLeaderboardsNav = (path) =>
-  renderDualSurfaceNav({
-    label: 'Leaderboards',
-    cliHref: '/scorecards',
-    webHref: '/web',
-    dataNavAttr: 'data-leaderboards-nav',
-    path,
-    cliCurrent: leaderboardsCliCurrent,
-    webCurrent: leaderboardsWebCurrent,
-  });
-
-const renderAuditNav = (path) =>
-  renderDualSurfaceNav({
-    label: 'Audit',
-    cliHref: '/audit',
-    webHref: '/web-audit',
-    dataNavAttr: 'data-audit-nav',
-    path,
-    cliCurrent: auditCliCurrent,
-    webCurrent: auditWebCurrent,
-  });
-
-// Dual-surface entries emit a CLI and a Website twin anchor and display
-// only the one matching the active surface.
-const DUAL_SURFACE_NAV_RENDERERS = {
-  Leaderboards: renderLeaderboardsNav,
-  Audit: renderAuditNav,
-};
-
-export const DUAL_SURFACE_NAV_LABELS = Object.keys(DUAL_SURFACE_NAV_RENDERERS);
-
+// One anchor per entry: the boards and the entry forms each live behind a
+// single destination now, and the surface segment on the page itself picks
+// the lane. `navAttr` marks the two the specs address by name.
 const renderNavLink = (entry, path) => {
-  const renderDual = DUAL_SURFACE_NAV_RENDERERS[entry.label];
-  if (renderDual) return renderDual(path);
   const current = navCurrent(path, entry.match) ? ' aria-current="page"' : '';
-  return `          <a href="${entry.href}"${current}>${entry.label}</a>`;
+  const attr = entry.navAttr ? ` ${entry.navAttr}` : '';
+  return `          <a href="${entry.href}"${attr}${current}>${entry.label}</a>`;
 };
 
 // Alt text for the OG card. Single source-of-truth: applies to every
