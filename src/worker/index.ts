@@ -1012,11 +1012,21 @@ async function injectLeaderboardBoard(
   const viewNav = opts.markdown
     ? ''
     : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, '/scorecards');
+  // `?lane=web` opens on the website pane. A website result page links back
+  // here that way, so without this every visitor arriving from one lands on
+  // the CLI board and has to switch by hand.
+  // The minifier writes the boolean out as `checked="checked"`, so the match
+  // has to take the value with it: dropping only the bare word leaves an
+  // orphaned `="checked"` behind and the tag stops parsing as intended.
+  const withLane =
+    !opts.markdown && opts.url.searchParams.get('lane') === 'web'
+      ? body.replace(/id="s-cli"\s+checked(?:="checked")?/, 'id="s-cli"').replace('id="s-web"', 'id="s-web" checked')
+      : body;
   const headers = new Headers(upstream.headers);
   headers.delete('etag');
   headers.delete('last-modified');
   return applyHeaders(
-    new Response(body.replaceAll('{{WEB_BOARD_ROWS}}', slice).replaceAll('{{WEB_BOARD_VIEW}}', viewNav), {
+    new Response(withLane.replaceAll('{{WEB_BOARD_ROWS}}', slice).replaceAll('{{WEB_BOARD_VIEW}}', viewNav), {
       status: upstream.status,
       statusText: upstream.statusText,
       headers,

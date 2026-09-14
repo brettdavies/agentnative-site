@@ -12,6 +12,10 @@ const SCORECARDS_SHELL = `<!doctype html>
 <html><head><title>ANC 100</title></head>
 <body>
   <div class="scope">
+    <div class="seg" role="radiogroup" aria-label="Leaderboard surface" data-surface-board-seg>
+      <input type="radio" name="board-surface" id="s-cli" checked="checked"><label for="s-cli">CLI</label>
+      <input type="radio" name="board-surface" id="s-web"><label for="s-web">Website</label>
+    </div>
     <div class="board" data-s="cli" aria-label="CLI tool agent-readiness scores">
       <a class="lrow good" href="/score/ripgrep"><span class="rank">01</span>ripgrep</a>
     </div>
@@ -147,6 +151,27 @@ describe('merged leaderboard: the website pane', () => {
     // A forked copy of the control would quietly send this board's readers to
     // the other board.
     expect(html).not.toContain('href="/web?view=curated"');
+  });
+
+  test('?lane=web opens on the website pane, which is how a website result links back', async () => {
+    const html = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]), 'https://anc.dev/scorecards?lane=web');
+    expect(html).toContain('id="s-web" checked');
+    expect(html).not.toContain('id="s-cli" checked');
+    // The whole tag, not just the absence of the old attribute: dropping the
+    // bare word out of `checked="checked"` leaves `id="s-cli"="checked"`,
+    // which satisfies the negative assertion above while shipping broken
+    // markup.
+    expect(html).toContain('<input type="radio" name="board-surface" id="s-cli">');
+    expect(html).not.toContain('="checked"');
+  });
+
+  test('no lane, or the CLI lane, leaves the CLI pane checked', async () => {
+    const plain = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]));
+    expect(plain).toContain('id="s-cli" checked');
+    expect(plain).not.toContain('id="s-web" checked');
+    const cli = await fetchBoard(makeEnv([boardEntry('top.dev', 80)]), 'https://anc.dev/scorecards?lane=cli');
+    expect(cli).toContain('id="s-cli" checked');
+    expect(cli).not.toContain('id="s-web" checked');
   });
 
   test('the injected rows need no client JS', async () => {
