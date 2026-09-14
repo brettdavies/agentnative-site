@@ -13,7 +13,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { isScorePath as isResultPath } from '../shared/audit-routes';
+import { isScorePath as isResultPath, isScoringPath } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -23,6 +23,7 @@ import {
   handleResultRoute,
   type ResultEnv,
 } from './audit/result';
+import { handleScoringPage, type ScoringPageEnv } from './audit/scoring-page';
 import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import { webTag } from './audit-web/hit-min-tags';
@@ -803,6 +804,11 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
   }
   if (isResultPath(pathname)) {
     return handleResultRoute(request, env as ResultEnv);
+  }
+  // The progress page and its twin render per request, ahead of the asset
+  // fetch: the page carries a request-time sitekey and exists for one run.
+  if (isScoringPath(pathname)) {
+    return handleScoringPage(request, env as ScoringPageEnv);
   }
 
   // Renamed page: `/check` -> `/audit` (the CLI subcommand rename).
