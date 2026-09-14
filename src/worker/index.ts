@@ -13,7 +13,7 @@
 
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { isLegacyRequest } from '@modelcontextprotocol/server';
-import { isAuditPath, isScorePath as isResultPath, isScoringPath } from '../shared/audit-routes';
+import { isAuditPath, isScorePath as isResultPath, isScoringPath, SCORECARDS_PATH } from '../shared/audit-routes';
 import { classifyGatewayRequest, detectMcpFormat, detectMcpGetFormat, detectPreference } from './accept';
 import { type AuditApiEnv, handleAuditApi, isAuditApiPath } from './audit/api';
 import type { AuditJob } from './audit/job';
@@ -28,10 +28,14 @@ import { getAggregate, type WebAggregateEntry, type WebCacheEnv } from './audit-
 import { flushHitMinPurge, runWithHitMinPurge } from './audit-web/hit-min-purge';
 import { webTag } from './audit-web/hit-min-tags';
 import {
+  buildBoardMarkdownRows,
+  buildBoardRows,
+  buildBoardViewNav,
   buildFrontpageBoardEmptyState,
   buildFrontpageBoardMarkdown,
   buildFrontpageBoardMarkdownEmptyState,
   buildFrontpageBoardRows,
+  type WebBoardView,
 } from './audit-web/leaderboard-render';
 import {
   handleWebBackfill,
@@ -48,6 +52,7 @@ import {
   isWebAuditPath,
   isWebLeaderboardPath,
   isWebScoringPath,
+  resolveBoardEntries,
   type WebAuditRouteEnv,
 } from './audit-web/route';
 import { applyHeaders, isRepresentationPinned } from './headers';
@@ -903,6 +908,25 @@ async function handleSiteRequest(request: Request, env: Env, ctx: ExecutionConte
     }
   }
 
+  // The merged leaderboard: the CLI board ships baked into the asset, the
+  // website pane is filled here from the same aggregate and the same opt-in
+  // gate the website board uses, so the two can never disagree on what lists.
+  // The page already carries the board tag and HIT-min from its path.
+  const isLeaderboard = pathname === '/scorecards' || pathname === '/scorecards.html' || pathname === '/scorecards.md';
+  if (isLeaderboard && upstream.ok) {
+    const contentType = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    const wantsMarkdown = servedMarkdown || pathname === '/scorecards.md' || contentType.includes('text/markdown');
+    if (wantsMarkdown || contentType.includes('text/html')) {
+      return injectLeaderboardBoard(upstream, env, {
+        request,
+        servedMarkdown,
+        pathname,
+        markdown: wantsMarkdown,
+        url,
+      });
+    }
+  }
+
   // Entry-form pages: same sitekey placeholder as the homepage, no board
   // inject. Markdown twins and Accept: text/markdown skip this so the
   // token never reaches the agent surface.
@@ -958,6 +982,62 @@ async function injectTurnstileSitekey(
   headers.delete('last-modified');
   return applyHeaders(
     new Response(substituteTurnstileSitekey(body, env), {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    }),
+    { request: opts.request, servedMarkdown: opts.servedMarkdown, pathname: opts.pathname },
+  );
+}
+
+async function injectLeaderboardBoard(
+  upstream: Response,
+  env: Env,
+  opts: { request: Request; servedMarkdown: boolean; pathname: string; markdown: boolean; url: URL },
+): Promise<Response> {
+  // An unrecognized view falls back to the all board, as the website board
+  // does, so a mistyped parameter never empties a shareable URL.
+  const view: WebBoardView = opts.url.searchParams.get('view') === 'curated' ? 'curated' : 'all';
+  const [body, resolved] = await Promise.all([
+    upstream.text(),
+    resolveBoardEntries(env as unknown as WebAuditRouteEnv, view),
+  ]);
+  const slice = opts.markdown
+    ? buildBoardMarkdownRows(resolved.entries, opts.url.origin)
+    : resolved.entries.length > 0
+      ? buildBoardRows(resolved.entries)
+      : buildFrontpageBoardEmptyState();
+  // The view switch is HTML-only: the twin's own view line belongs to the
+  // document that hosts it, and a second one here would contradict it.
+  // It carries the lane because it renders inside the website pane: dropped,
+  // the switch serves the CLI pane back and hides the list it just filtered.
+  const viewNav = opts.markdown
+    ? ''
+    : buildBoardViewNav({ view, curatedCount: resolved.curatedCount, userCount: resolved.userCount }, SCORECARDS_PATH, [
+        'lane=web',
+      ]);
+  // `?lane=web` opens on the website pane. A website result page links back
+  // here that way, so without this every visitor arriving from one lands on
+  // the CLI board and has to switch by hand.
+  // The minifier writes the boolean out as `checked="checked"`, so the match
+  // has to take the value with it: dropping only the bare word leaves an
+  // orphaned `="checked"` behind and the tag stops parsing as intended.
+  const withLane =
+    !opts.markdown && opts.url.searchParams.get('lane') === 'web'
+      ? body.replace(/id="s-cli"\s+checked(?:="checked")?/, 'id="s-cli"').replace('id="s-web"', 'id="s-web" checked')
+      : body;
+  const headers = new Headers(upstream.headers);
+  headers.delete('etag');
+  headers.delete('last-modified');
+  // One pass with a function replacement. A string replacement expands `$&`
+  // and its siblings, and a row's name is an audited site's own title; two
+  // sequential passes would also let a name holding the second placeholder
+  // splice the view nav inside a row.
+  const filled = withLane.replace(/\{\{WEB_BOARD_(ROWS|VIEW)\}\}/g, (_match: string, which: string) =>
+    which === 'ROWS' ? slice : viewNav,
+  );
+  return applyHeaders(
+    new Response(filled, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers,

@@ -4,13 +4,7 @@
 
 import { expect, type Page, test } from '@playwright/test';
 import { checkA11y, injectAxe } from 'axe-playwright';
-import {
-  AI_PROVIDER_COUNT,
-  DUAL_SURFACE_NAV_COUNT,
-  NAV_ENTRY_COUNT,
-  PRINCIPLE_COUNT,
-  WEB_CHECK_COUNT,
-} from '../helpers/site-facts';
+import { AI_PROVIDER_COUNT, NAV_ENTRY_COUNT, PRINCIPLE_COUNT, WEB_CHECK_COUNT } from '../helpers/site-facts';
 
 // A bare overflow delta names no culprit, and these assertions have failed on
 // the Linux CI runner against layouts that measure clean on a developer
@@ -341,42 +335,27 @@ test.describe('homepage surface toggle (CLI ⇆ Web)', () => {
     }
   });
 
-  test('selecting Website updates visible Leaderboards href in header', async ({ page }) => {
+  test('the header keeps one destination per entry whichever lane is selected', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/');
     const nav = page.locator('.site-nav');
-    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
-    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
+    await expect(nav.locator('[data-leaderboards-nav]')).toHaveAttribute('href', '/scorecards');
+    await expect(nav.locator('[data-audit-nav]')).toHaveAttribute('href', '/audit');
+    // The segment swaps the panes on the page; the header no longer repoints,
+    // so a visitor keeps one Leaderboards and one Audit destination.
     await page.locator('label[for="s-web"]').click();
-    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
-    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
-    await page.reload();
-    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
-    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
-    await expect(page.locator('#s-web')).toBeChecked();
-  });
-
-  test('no-JS: visible Leaderboards href follows homepage segment', async ({ browser }) => {
-    const ctx = await browser.newContext({ javaScriptEnabled: false, viewport: DESKTOP_NAV_VIEWPORT });
-    const page = await ctx.newPage();
-    await page.goto('/');
-    const nav = page.locator('.site-nav');
-    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
-    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
-    await page.locator('label[for="s-web"]').click();
-    await expect(nav.locator('[data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
-    await expect(nav.locator('[data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
-    await ctx.close();
+    await expect(nav.locator('[data-leaderboards-nav]')).toHaveAttribute('href', '/scorecards');
+    await expect(nav.locator('[data-audit-nav]')).toHaveAttribute('href', '/audit');
+    await expect(nav.locator('[data-leaderboards-nav]')).toHaveCount(1);
+    await expect(nav.locator('[data-audit-nav]')).toHaveCount(1);
   });
 });
 
-// Every NAV_LINKS entry in src/build/shell.mjs renders one anchor, except
-// the dual-surface entries, which each emit a CLI and a Website twin and
-// display only the one matching the active surface. So each dual-surface
-// entry raises the anchor total without raising the visible count.
+// Every NAV_LINKS entry in src/build/shell.mjs renders exactly one anchor: the
+// segment on the page picks the lane, so the header carries no hidden twin for
+// the other surface and every anchor it renders is visible.
 const NAV_ENTRIES = NAV_ENTRY_COUNT;
-const DUAL_SURFACE_NAV_ENTRIES = DUAL_SURFACE_NAV_COUNT;
-const NAV_ANCHORS = NAV_ENTRIES + DUAL_SURFACE_NAV_ENTRIES;
+const NAV_ANCHORS = NAV_ENTRIES;
 
 test.describe('shell — grouped nav, hamburger, footer rows', () => {
   test('desktop (1440): grouped nav links inline, hamburger hidden, footer rows present', async ({ page }) => {
@@ -433,7 +412,7 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
       expect(overflow.navDisplay).toBe('flex');
       expect(overflow.links).toBeDefined();
       expect(overflow.links!.filter((l) => l.visible).length).toBe(NAV_ENTRIES);
-      expect(overflow.links!.filter((l) => !l.visible).length).toBe(DUAL_SURFACE_NAV_ENTRIES);
+      expect(overflow.links!.filter((l) => !l.visible).length).toBe(0);
     });
   }
 
@@ -499,30 +478,36 @@ test.describe('shell — grouped nav, hamburger, footer rows', () => {
 });
 
 test.describe('leaderboard surface nav', () => {
-  test('stored web preference flips visible Leaderboards off homepage', async ({ page }) => {
+  test('a stored web preference leaves the header pointing at the one board destination', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
+    expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
     await page.goto('/about');
-    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
+    // The preference selects the pane on a board page; it no longer repoints
+    // the header, which carries one anchor per entry.
+    await expect(page.locator('.site-nav [data-leaderboards-nav]')).toHaveCount(1);
+    await expect(page.locator('.site-nav [data-leaderboards-nav]')).toHaveAttribute('href', '/scorecards');
   });
 
   test('cold /web visit does not write preference (Leaderboards stays CLI default)', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.addInitScript(() => localStorage.removeItem('anc-surface'));
     await page.goto('/web');
-    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/scorecards');
     const stored = await page.evaluate(() => localStorage.getItem('anc-surface'));
     expect(stored).toBeNull();
   });
 
-  test('Probe A navigates CLI → Website and writes preference', async ({ page }) => {
+  test('the leaderboard segment swaps panes in place and writes the preference', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/scorecards');
-    await page.locator('label[for="board-s-web"]').click();
-    await expect(page).toHaveURL(/\/web$/);
+    // Both boards live here now, so the segment is a pane switch rather than a
+    // navigation to a second page.
+    await page.locator('label[for="s-web"]').click();
+    await expect(page).toHaveURL(/\/scorecards$/);
+    await expect(page.locator('.board[data-s="web"]')).toBeVisible();
+    await expect(page.locator('.board[data-s="cli"]')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
-    await expect(page.locator('.site-nav [data-leaderboards-nav]:visible')).toHaveAttribute('href', '/web');
   });
 
   test('Probe A navigates Website → CLI and writes preference', async ({ page }) => {
@@ -536,19 +521,19 @@ test.describe('leaderboard surface nav', () => {
 });
 
 test.describe('audit surface nav', () => {
-  test('stored web preference flips visible Audit off homepage', async ({ page }) => {
+  test('a stored web preference leaves the header pointing at the one audit destination', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/');
     await page.locator('label[for="s-web"]').click();
     await page.goto('/about');
-    await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
+    await expect(page.locator('.site-nav [data-audit-nav]')).toHaveCount(1);
+    await expect(page.locator('.site-nav [data-audit-nav]')).toHaveAttribute('href', '/audit');
   });
 
-  test('cold /web-audit visit does not write preference (Audit stays CLI default)', async ({ page }) => {
+  test('cold /web-audit visit does not write preference', async ({ page }) => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.addInitScript(() => localStorage.removeItem('anc-surface'));
     await page.goto('/web-audit');
-    await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/audit');
     const stored = await page.evaluate(() => localStorage.getItem('anc-surface'));
     expect(stored).toBeNull();
   });
@@ -557,12 +542,12 @@ test.describe('audit surface nav', () => {
     await page.setViewportSize(DESKTOP_NAV_VIEWPORT);
     await page.goto('/audit');
     // One form serves both lanes here, so the lane is a pane switch and not a
-    // navigation. The gesture still writes the preference the nav follows.
+    // navigation. The gesture writes the preference a later page opens on.
     await page.locator('label[for="s-web"]').click();
     await expect(page).toHaveURL(/\/audit$/);
     await expect(page.locator('[data-audit-listing]')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('anc-surface'))).toBe('web');
-    await expect(page.locator('.site-nav [data-audit-nav]:visible')).toHaveAttribute('href', '/web-audit');
+    await expect(page.locator('.site-nav [data-audit-nav]')).toHaveAttribute('href', '/audit');
   });
 
   test('Probe A navigates web audit → CLI audit and writes preference', async ({ page }) => {

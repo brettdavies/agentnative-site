@@ -119,7 +119,10 @@ function buildCliBoardRows(leaderboard) {
       const pct = entry.scorecard.badge.score_pct;
       const name = escHtml(entry.tool.name);
       const desc = escHtml(entry.tool.description ?? '');
-      return `        <a class="lrow ${bandOf(pct)}" href="/score/${name}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
+      // Without a name of its own the row announces as its own contents, which
+      // read as a number salad: rank digits, tool, description, bare score.
+      const label = escHtml(`${entry.tool.name}, score ${pct} percent, rank ${entry.rank}`);
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="/score/${name}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${name} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 }
@@ -199,10 +202,10 @@ ${webHeroHtml}
 ${renderAuditForm({ idPrefix: 'home' })}
         </div>
       </div>
-      <div class="board" data-s="cli" aria-label="Top CLI tools">
+      <div class="board" data-s="cli" role="group" aria-label="Top CLI tools">
 ${buildCliBoardRows(leaderboard)}
       </div>
-      <div class="board" data-s="web" aria-label="Top websites">
+      <div class="board" data-s="web" role="group" aria-label="Top websites">
 {{WEB_BOARD_ROWS}}
       </div>
       <p class="board-rubric" data-s="cli">Scored against the <strong>${principles.length} principles</strong>. Run <code>anc audit &lt;tool&gt;</code> locally for source + project depth. <a href="/scorecards">Full board&nbsp;▸</a></p>

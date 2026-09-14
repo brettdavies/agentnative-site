@@ -1,25 +1,30 @@
-// Leaderboard — client-side filtering (tier + audience) and column sorting.
+// Leaderboard — client-side filtering (tier + audience) over the CLI board.
 //
 // Markup (emitted by buildLeaderboardBody in scorecards-render.mjs):
 //   <button class="tier-filter" data-tier="all|workhorse|agent|notable">
 //   <input class="audience-filter__input" data-filter="agent-optimized-only">
-//   <table class="leaderboard-table">
-//     <th data-sort-col="rank|tool|score|principles">
-//     <tr data-tier="workhorse|agent|notable"
-//         data-audience="agent-optimized|mixed|human-primary|"
-//         data-audit-profile="human-tui|file-traversal|posix-utility|diagnostic-only|">
-//       <td class="lb-score" data-sort="-1|0..100">
-//       <td class="lb-principles" data-sort="0..7">
+//   <div class="board" data-s="cli">
+//     <a class="lrow" data-tier="workhorse|agent|notable"
+//        data-audience="agent-optimized|mixed|human-primary|"
+//        data-audit-profile="human-tui|file-traversal|posix-utility|diagnostic-only|">
+//       <span class="rank">01</span>
+//
+// The controls sit above the board rather than inside it, so they are found
+// on the document and the board is only needed for the rows themselves.
 
-const table = document.querySelector<HTMLTableElement>('.leaderboard-table');
-if (table) {
+const board = document.querySelector<HTMLElement>('.board[data-s="cli"]');
+if (board) {
   // ---------------------------------------------------------------
   // Compose tier + audience filters: a row is visible only if both pass.
   // Tier defaults to "all"; audience-only toggle defaults to off.
   // ---------------------------------------------------------------
-  const tierButtons = document.querySelectorAll<HTMLButtonElement>('.tier-filter');
+  // Scoped to the CLI controls: the website pane's view switch reuses
+  // .tier-filter on anchors, so a document-wide selector binds this handler to
+  // them too, clearing the active tier and renumbering rows behind a pane the
+  // reader is not even looking at.
+  const tierButtons = document.querySelectorAll<HTMLButtonElement>('.leaderboard-controls[data-s="cli"] .tier-filter');
   const audienceToggle = document.querySelector<HTMLInputElement>('.audience-filter__input');
-  const rows = table.querySelectorAll<HTMLTableRowElement>('tbody tr');
+  const rows = board.querySelectorAll<HTMLElement>('.lrow');
 
   let activeTier = 'all';
   let agentOptimizedOnly = false;
@@ -48,88 +53,24 @@ if (table) {
       applyFilters();
     });
   }
-
-  // ---------------------------------------------------------------
-  // Column sorting
-  // ---------------------------------------------------------------
-  const headers = table.querySelectorAll<HTMLTableCellElement>('th[data-sort-col]');
-  let currentSort = '';
-  let ascending = false;
-
-  for (const th of headers) {
-    th.addEventListener('click', () => {
-      const col = th.dataset.sortCol;
-      if (!col) return; // selector requires data-sort-col, but narrow for the type checker
-      if (currentSort === col) {
-        ascending = !ascending;
-      } else {
-        currentSort = col;
-        ascending = col === 'tool'; // tool sorts A-Z by default, others descending
-      }
-
-      const tbody = table.querySelector('tbody');
-      if (!tbody) return;
-      const sorted = [...tbody.querySelectorAll<HTMLTableRowElement>('tr')];
-
-      sorted.sort((a, b) => {
-        const va = getCellValue(a, col);
-        const vb = getCellValue(b, col);
-        if (typeof va === 'number' && typeof vb === 'number') {
-          return ascending ? va - vb : vb - va;
-        }
-        const sa = String(va);
-        const sb = String(vb);
-        return ascending ? sa.localeCompare(sb) : sb.localeCompare(sa);
-      });
-
-      for (const row of sorted) tbody.appendChild(row);
-
-      renumberVisibleRanks(sorted);
-
-      // Visual indicator on sorted header
-      for (const h of headers) h.removeAttribute('aria-sort');
-      th.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
-    });
-  }
 }
 
 // Agent-optimized rows have audience === "agent-optimized" AND no audit_profile.
 // A profile being applied means the tool was scored as a category exception,
 // which the H6 spec excludes from the agent-optimized cohort.
-function isAgentOptimized(row: HTMLTableRowElement): boolean {
+function isAgentOptimized(row: HTMLElement): boolean {
   return row.dataset.audience === 'agent-optimized' && !row.dataset.auditProfile;
 }
 
-function renumberVisibleRanks(rows: ArrayLike<HTMLTableRowElement>): void {
+// Ranks are the board's own numbering, not the corpus position: a filtered
+// board reads 01, 02, 03 rather than the gaps its hidden rows would leave.
+function renumberVisibleRanks(rows: ArrayLike<HTMLElement>): void {
   let rank = 1;
   for (const row of Array.from(rows)) {
     if (row.hidden) continue;
-    const rankCell = row.querySelector('.lb-rank');
-    if (rankCell) rankCell.textContent = String(rank);
+    const rankEl = row.querySelector('.rank');
+    if (rankEl) rankEl.textContent = String(rank).padStart(2, '0');
     rank += 1;
-  }
-}
-
-function getCellValue(row: HTMLTableRowElement, col: string): string | number {
-  switch (col) {
-    case 'rank': {
-      const cell = row.querySelector('.lb-rank');
-      return cell ? Number(cell.textContent) : 0;
-    }
-    case 'tool': {
-      const cell = row.querySelector('.lb-tool');
-      return cell?.textContent?.trim() ?? '';
-    }
-    case 'score': {
-      const cell = row.querySelector<HTMLElement>('.lb-score');
-      return cell ? Number(cell.dataset.sort ?? -1) : -1;
-    }
-    case 'principles': {
-      const cell = row.querySelector<HTMLElement>('.lb-principles');
-      return cell ? Number(cell.dataset.sort ?? 0) : 0;
-    }
-    default:
-      return '';
   }
 }
 

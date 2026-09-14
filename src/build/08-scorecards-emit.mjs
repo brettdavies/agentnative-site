@@ -122,6 +122,7 @@ export async function emitScorecardSurface({
   skillDataPath,
   scorecardsDir,
   themeInit,
+  laneInit,
 }) {
   const registry = await loadRegistry(registryPath);
 
@@ -193,6 +194,9 @@ export async function emitScorecardSurface({
       canonicalPath: '/scorecards',
       bodyHtml: leaderboardBody,
       themeInitJs: themeInit,
+      // This page alone: the panes must settle on the stored surface before
+      // they paint, and no other page carries both boards.
+      extraHeadJs: laneInit,
       extraScripts: ['/js/leaderboard.js'],
     }),
   );

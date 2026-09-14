@@ -8,7 +8,7 @@ import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { WEB_CHECKS } from '../../src/build/06-homepage.mjs';
 import { SUB_PAGES } from '../../src/build/07-subpages.mjs';
-import { AI_PROVIDERS, DUAL_SURFACE_NAV_LABELS, NAV_LINKS } from '../../src/build/shell.mjs';
+import { AI_PROVIDERS, NAV_LINKS } from '../../src/build/shell.mjs';
 
 const PRINCIPLE_FILE_RE = /^p(\d+)-[a-z0-9-]+\.md$/;
 
@@ -25,8 +25,6 @@ export const PRINCIPLE_NUMBERS: number[] = readdirSync(PRINCIPLES_DIR)
 export const PRINCIPLE_COUNT = PRINCIPLE_NUMBERS.length;
 
 export const NAV_ENTRY_COUNT = NAV_LINKS.length;
-
-export const DUAL_SURFACE_NAV_COUNT = DUAL_SURFACE_NAV_LABELS.length;
 
 export const AI_PROVIDER_COUNT = AI_PROVIDERS.length;
 

@@ -28,15 +28,6 @@ export function setSurface(surface: Surface): void {
   }
 }
 
-/** Read-only href map for tests and diagnostics; production nav uses dual anchors + CSS. */
-export function leaderboardsHref(): string {
-  return getSurface() === 'web' ? WEB_BOARD_HREF : CLI_BOARD_HREF;
-}
-
-export function auditHref(): string {
-  return getSurface() === 'web' ? WEB_AUDIT_HREF : CLI_AUDIT_HREF;
-}
-
 type SurfaceProbeConfig = {
   segSelector: string;
   cliRadioId: string;
@@ -65,8 +56,25 @@ function bindHomepage(): void {
   const web = document.getElementById('s-web') as HTMLInputElement | null;
   if (!cli || !web) return;
 
-  if (getSurface() === 'web') web.checked = true;
-  else cli.checked = true;
+  // A lane named in the URL is already checked on the served markup, and an
+  // explicit link beats a remembered preference: restoring the stored surface
+  // here would send a visitor who followed one straight back to the other
+  // pane.
+  let laneInUrl = false;
+  try {
+    laneInUrl = new URLSearchParams(globalThis.location?.search ?? '').has('lane');
+  } catch {
+    // No parseable location: the stored surface is the only signal there is.
+  }
+  if (!laneInUrl) {
+    if (getSurface() === 'web') web.checked = true;
+    else cli.checked = true;
+  }
+
+  // The pre-paint attribute has done its job now that a radio carries the
+  // surface. Leaving it set would overrule a later CLI selection, which is
+  // the fight the off-home reader above refuses to start.
+  delete document.documentElement.dataset.surface;
 
   for (const radio of [cli, web]) {
     radio.addEventListener('change', () => {

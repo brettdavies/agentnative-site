@@ -11,6 +11,7 @@
   "entry": [
     "src/client/theme.ts",
     "src/client/theme-init.ts",
+    "src/client/lane-init.ts",
     "src/client/surface.ts",
     "src/client/nav.ts",
     "src/client/clipboard.ts",

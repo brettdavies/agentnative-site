@@ -170,7 +170,7 @@ export async function build() {
 
   // 1. Copy static assets + bundle client JS. themeInit inlined into every shell.
   // bundleClient also emits /js/live-score.js used by the homepage form.
-  const { themeInit } = await copyAssets({ repoRoot: REPO_ROOT, distDir: DIST_DIR });
+  const { themeInit, laneInit } = await copyAssets({ repoRoot: REPO_ROOT, distDir: DIST_DIR });
 
   // 2. Sorted principle files.
   const principleFiles = await sortedGlob(PRINCIPLES_DIR);
@@ -257,6 +257,7 @@ export async function build() {
       skillDataPath: SKILL_DATA_PATH,
       scorecardsDir: SCORECARDS_DIR,
       themeInit,
+      laneInit,
     });
 
   // 6a. Web seed — the domain list feeding the 11d runtime projection.
