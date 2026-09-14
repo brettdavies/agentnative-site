@@ -198,7 +198,7 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(html).toContain('Not found (https://example.com/openapi.json -&gt; 404)');
     expect(html).toContain('Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(html).toContain('https://spec.openapis.org/oas/latest.html');
-    expect(html).toContain('https://anc.dev/web-audit/skill/openapi');
+    expect(html).toContain('https://anc.dev/fix/openapi');
     // The prompt is carried in a data attribute, never rendered as a <pre>.
     expect(html).not.toContain('<pre>');
     expect(html).toContain('data-copy-text="Goal: Publish an OpenAPI description');
@@ -309,7 +309,7 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('### MISSING — An OpenAPI description is published');
     expect(md).toContain('- Fix: Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(md).toContain('```text');
-    expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(md).toContain('Skill: https://anc.dev/fix/openapi');
     expect(md).not.toContain('Assemble fix prompts');
     expect(md).not.toContain('Include SHOULD');
   });

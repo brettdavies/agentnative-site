@@ -317,7 +317,7 @@ describe('MCP surface links back to the origin it was called on', () => {
     const { raw, body } = await callTool(env, 'get_website_audit', { url: 'example.com' });
     expect((getJsonToolContent(body) as { found?: boolean }).found).toBe(true);
     // The fix-skill link is the exact field the live staging run got wrong.
-    expect(raw).toContain(`${NON_CANONICAL_ORIGIN}/web-audit/skill/openapi`);
+    expect(raw).toContain(`${NON_CANONICAL_ORIGIN}/fix/openapi`);
     expectServedOnOwnOrigin(raw);
   });
 

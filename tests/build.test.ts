@@ -588,7 +588,7 @@ describe('emitShell — one Audit anchor', () => {
   test('aria-current marks the one anchor on every path the entry forms answer', () => {
     expect(shell('/audit')).toContain('href="/audit" data-audit-nav aria-current="page"');
     expect(shell('/web-audit')).toContain('href="/audit" data-audit-nav aria-current="page"');
-    expect(shell('/web-audit/skill/openapi')).toContain('href="/audit" data-audit-nav aria-current="page"');
+    expect(shell('/fix/openapi')).toContain('href="/audit" data-audit-nav aria-current="page"');
     expect(shell('/about')).not.toContain('data-audit-nav aria-current');
   });
 });

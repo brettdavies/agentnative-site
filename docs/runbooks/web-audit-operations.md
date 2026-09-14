@@ -69,7 +69,7 @@ token on the staging host sidesteps this; that is what `run.sh` does.
 
 ### Against production (`anc.dev`)
 
-For a real user-facing audit, use the site's audit UI (`https://anc.dev/web-audit`) or the `audit_website` MCP tool. A
+For a real user-facing audit, use the site's audit UI (`https://anc.dev/audit`) or the `audit_website` MCP tool. A
 scripted `POST /api/audit-web` needs a real Turnstile token, which you cannot mint from a script. To preview the
 working-tree engine against live production content, point the helper at it: `scripts/web-audit/run.sh --target
 https://anc.dev/` (a public host, so no Access token is fetched).
@@ -197,8 +197,8 @@ A target behind a bot-blocking CDN produces one of two log signatures:
 
 Probes identify themselves with the `anc-web-audit/1.0` User-Agent (`AUDIT_USER_AGENT` in
 `src/worker/audit-web/ssrf.ts`), which several CDNs treat more leniently than UA-less requests. Do not change it to
-impersonate a browser: the audit measures how a site treats agents, and evading the block would score a site the
-auditor cannot honestly reach.
+impersonate a browser: the audit measures how a site treats agents, and evading the block would score a site the auditor
+cannot honestly reach.
 
 ## Failure notifications
 
@@ -218,8 +218,8 @@ To provision (Cloudflare Email Service, Email Sending beta, Workers Paid):
    "vars": { "ALERT_EMAIL_FROM": "alerts@<zone>", "ALERT_EMAIL_TO": "<verified destination>" }
    ```
 
-4. Deploy and confirm with a forced failure on staging; expect one email and a `deduped` outcome on an immediate
-   second failure.
+4. Deploy and confirm with a forced failure on staging; expect one email and a `deduped` outcome on an immediate second
+   failure.
 
-Until step 3 lands, `notifyFailure` returns `unprovisioned` and the only failure signal is `web-audit.error` in
-Workers Logs.
+Until step 3 lands, `notifyFailure` returns `unprovisioned` and the only failure signal is `web-audit.error` in Workers
+Logs.
