@@ -316,7 +316,9 @@ describe('live and branch records', () => {
     expect(html.headers.get('x-robots-tag')).toBe('noindex');
     const page = await html.text();
     expect(page).toContain('ouch');
-    expect(page).toContain('class="crumb"');
+    // The trail comes from the shell, not the spine, so it is absent from this
+    // stubbed template; tests/breadcrumb-agreement.test.ts asserts the real one.
+    expect(page).not.toContain('class="crumb"');
     expect(page).toContain('data-reaudit');
     const md = await route('/score/ouch/md', env);
     expect(md.status).toBe(200);

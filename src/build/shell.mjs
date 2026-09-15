@@ -8,6 +8,12 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared/audit-routes.ts';
+import {
+  BREADCRUMB_JSONLD_TOKEN,
+  breadcrumbJsonLd,
+  breadcrumbTrail,
+  renderBreadcrumbNav,
+} from '../shared/breadcrumb.ts';
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
@@ -47,69 +53,6 @@ export const NAV_LINKS = [
 // Published in `.well-known/security.txt` and `ai.txt`; the same address the
 // Organization node hands a crawler.
 const CONTACT_EMAIL = '97-boss-beetle@icloud.com';
-
-/**
- * Prefixes whose next segment is a target rather than a page. The prefix
- * itself is dropped from a trail: `/score/` and `/fix/` are namespaces the
- * route module owns, and the bare path is a 404, so a crumb pointing at one
- * would send a reader to a miss.
- */
-const TARGET_NAMESPACES = new Set([SCORE_PREFIX, FIX_PREFIX].map((prefix) => prefix.replace(/^\/|\/$/g, '')));
-
-/**
- * The trail from the home page to this one, or nothing.
- *
- * Empty for the home page, where a one-item trail names only itself, and for
- * the Worker's shell template, whose canonical path is a placeholder it
- * substitutes per request: a build-time trail would bake `{{CANONICAL_PATH}}`
- * into the graph a crawler reads.
- *
- * A namespace segment is dropped rather than linked. `/score/` and `/fix/`
- * are prefixes the route module owns, not pages: the bare path is a 404, and
- * a crumb pointing at one would send a reader to a miss. The target under
- * them keeps its exact text, because a binary name, a host, and an
- * `owner/repo@branch` are identifiers that title case would corrupt.
- *
- * The last crumb takes the `label` the page supplies. Without one it is the
- * URL segment verbatim, which is deliberately plain: a slug carries no casing
- * a rule could recover, and a wrong-looking crumb is better than a
- * plausible-looking one nobody notices.
- *
- * @param {string} base
- * @param {string} path
- * @param {string|null} label
- * @returns {object[]}
- */
-function breadcrumbNodes(base, path, label = null) {
-  if (path.includes('{{')) return [];
-  const segments = path
-    .replace(/^\/+|\/+$/g, '')
-    .split('/')
-    .filter(Boolean);
-  if (segments.length === 0) return [];
-
-  const namespace = TARGET_NAMESPACES.has(segments[0]) ? segments[0] : null;
-  const items = [{ '@type': 'ListItem', position: 1, name: 'Home', item: base }];
-  if (namespace) {
-    // One crumb for the whole target, however many segments it spans: a
-    // branch-scoped result is `owner/repo@branch`, one identifier with a slash.
-    // A target under a namespace is an identifier: a binary name, a host, an
-    // `owner/repo@branch`. It reads verbatim unless the emitter supplied a
-    // label, which is how a fix page gets the name its registry entry authors
-    // rather than one guessed from the slug.
-    const target = decodeURIComponent(segments.slice(1).join('/'));
-    items.push({ '@type': 'ListItem', position: 2, name: label ?? target, item: `${base}${path}` });
-    return [{ '@type': 'BreadcrumbList', itemListElement: items }];
-  }
-
-  let href = '';
-  segments.forEach((segment, i) => {
-    href += `/${segment}`;
-    const last = i === segments.length - 1;
-    items.push({ '@type': 'ListItem', position: i + 2, name: last && label ? label : segment, item: `${base}${href}` });
-  });
-  return [{ '@type': 'BreadcrumbList', itemListElement: items }];
-}
 
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
@@ -295,6 +238,18 @@ export function emitShell({
   const canonical = base + canonicalPath;
   const ogImage = `${base}/og-image.png`;
 
+  // One trail feeds both renderings, so the nav a reader sees and the
+  // BreadcrumbList a crawler reads can never name different parents.
+  //
+  // The Worker's shell template has no path yet, so it emits a placeholder in
+  // each position and `substituteShell` fills both from the request's path
+  // through this same module. The JSON-LD placeholder is a bare string in the
+  // graph, which serializes to a quoted token the substituter swaps whole.
+  const deferred = canonicalPath.includes('{{');
+  const trail = deferred ? [] : breadcrumbTrail(canonicalPath, breadcrumb);
+  const crumbNav = deferred ? '{{BREADCRUMB_NAV}}' : renderBreadcrumbNav(trail);
+  const crumbNode = deferred ? BREADCRUMB_JSONLD_TOKEN : breadcrumbJsonLd(trail, base);
+
   const orgId = `${base}/#organization`;
   const siteId = `${base}/#website`;
   const jsonLd = {
@@ -341,7 +296,7 @@ export function emitShell({
         },
         publisher: { '@id': orgId },
       },
-      ...breadcrumbNodes(base, canonicalPath, breadcrumb),
+      ...(crumbNode ? [crumbNode] : []),
       {
         '@type': 'SoftwareApplication',
         '@id': `${base}/#anc-cli`,
@@ -498,6 +453,7 @@ ${NAV_LINKS.map((l) => renderNavLink(l, canonicalPath)).join('\n')}
       </div>
     </header>
     <main id="main">
+${crumbNav}
 ${bodyHtml}
     </main>
     <footer class="site-footer">

@@ -206,7 +206,6 @@ export async function build() {
     const tier = principleTier(n);
     const shortTitle = (t) => escHtml(t.replace(/^P\d+:\s*/, ''));
 
-    const crumb = `<div class="crumb"><a href="/#principles">The standard</a><span class="sep" aria-hidden="true">/</span><span>P${n} of ${principles.length}</span></div>`;
     const head = `<div class="doc__head tier-${tier.toLowerCase()}"><span class="doc__num">P${n}</span><span class="tier">${tier}</span></div>`;
     const auditNote = `<div class="audit-note">Audited live by <code>anc audit &lt;tool&gt; --principle ${n}</code>: behavioral and source checks.</div>`;
 
@@ -234,7 +233,7 @@ export async function build() {
       description,
       canonicalPath: `/p${n}`,
       breadcrumb: `Principle ${n}`,
-      bodyHtml: `<article class="container doc">${crumb}${head}${body}${pager}</article>`,
+      bodyHtml: `<article class="container doc">${head}${body}${pager}</article>`,
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],
     });

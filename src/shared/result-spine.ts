@@ -1,9 +1,9 @@
 // The spine every `/score/<target>` page opens with, and the score head
-// under it. The lanes differ in content, not layout: the crumb, the mono
+// under it. The lanes differ in content, not layout: the mono
 // h1 with its lane chip, one meta line (tier, freshness, the two
 // representation links, the Re-audit control), then one headline numeral
 // with its meter and a secondary numeral. Curated pages carry no control;
-// an inline render carries no crumb and no links because it has no page.
+// an inline render carries no links because it has no page.
 
 import { type Lane, leaderboardPath, scoreJsonPath, scoreMarkdownPath } from './audit-routes';
 import { escHtml } from './esc-html';
@@ -26,7 +26,7 @@ export type SpineInput = {
   tier: ResultTier;
   /** The lane's freshness sentence, already escaped HTML. */
   freshnessHtml: string;
-  /** False for the inline render, which has no page: no crumb, no links. */
+  /** False for the inline render, which has no page of its own, so no links. */
   linked: boolean;
   control: ReauditControl | null;
 };
@@ -48,14 +48,11 @@ export function renderReauditControl(control: ReauditControl): string {
 }
 
 export function renderResultSpine(input: SpineInput): string {
-  const crumb = input.linked
-    ? `<nav class="crumb" aria-label="Breadcrumb"><a href="${escHtml(leaderboardPath({ lane: input.lane }))}">Leaderboard</a><span class="sep" aria-hidden="true">›</span><span>${escHtml(input.target)}</span></nav>\n`
-    : '';
   const links = input.linked
     ? `<span class="result-spine__links"><a href="${escHtml(scoreMarkdownPath(input.target))}">Markdown</a> · <a href="${escHtml(scoreJsonPath(input.target))}">JSON</a></span>`
     : '';
   const control = input.control ? renderReauditControl(input.control) : '';
-  return `${crumb}<header class="result-spine">
+  return `<header class="result-spine">
   <h1 class="result-spine__title"><span class="result-spine__target">${escHtml(input.target)}</span> <span class="tier result-spine__lane">${LANE_LABELS[input.lane]}</span></h1>
   <div class="live-score-summary__meta result-spine__meta"><span class="result-spine__tier">${TIER_LABELS[input.tier]}</span><span class="result-spine__freshness">${input.freshnessHtml}</span>${links}${control}</div>
 </header>

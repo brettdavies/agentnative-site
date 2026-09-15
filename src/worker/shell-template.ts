@@ -9,8 +9,10 @@
 // gets `<canonical>.md`; a result page passes its `/md` and `/json`
 // representations.
 
+import { BREADCRUMB_JSONLD_TOKEN, breadcrumbJsonLd, breadcrumbTrail, renderBreadcrumbNav } from '../shared/breadcrumb';
 import { markdownAlternateLink } from '../shared/result-head';
 import { escHtml } from '../shared/scorecard-format.mjs';
+import { CANONICAL_SITE_URL } from '../shared/site-url';
 
 let shellTemplatePromise: Promise<string> | null = null;
 
@@ -43,16 +45,29 @@ export type ShellFields = {
   markdownTwinPath?: string;
   /** The head's alternate links; defaults to the markdown twin alone. */
   alternatesHtml?: string;
+  /** This page's label in its breadcrumb trail; the path's own segment without one. */
+  breadcrumb?: string;
 };
 
 export function substituteShell(template: string, fields: ShellFields): string {
   const twin = fields.markdownTwinPath ?? `${fields.canonicalPath}.md`;
   const alternates = fields.alternatesHtml ?? markdownAlternateLink(twin);
-  return template
-    .replaceAll('{{TITLE}}', escHtml(fields.title))
-    .replaceAll('{{DESCRIPTION}}', escHtml(fields.description))
-    .replaceAll('{{CANONICAL_PATH}}', escHtml(fields.canonicalPath))
-    .replaceAll('{{MARKDOWN_TWIN_PATH}}', escHtml(twin))
-    .replaceAll('{{ALTERNATES}}', alternates)
-    .replaceAll('{{BODY}}', fields.body);
+  // The template deferred its breadcrumb to request time, because a trail
+  // cannot be split out of a path that does not exist at build time. Both
+  // renderings come from one trail here, the same way a built page's do.
+  const trail = breadcrumbTrail(fields.canonicalPath, fields.breadcrumb);
+  const crumbNode = breadcrumbJsonLd(trail, CANONICAL_SITE_URL);
+  return (
+    template
+      .replaceAll('{{BREADCRUMB_NAV}}', renderBreadcrumbNav(trail))
+      // Quoted token and its separating comma: removing both leaves the graph
+      // well-formed when a path has no trail to state.
+      .replaceAll(`,"${BREADCRUMB_JSONLD_TOKEN}"`, crumbNode ? `,${JSON.stringify(crumbNode)}` : '')
+      .replaceAll('{{TITLE}}', escHtml(fields.title))
+      .replaceAll('{{DESCRIPTION}}', escHtml(fields.description))
+      .replaceAll('{{CANONICAL_PATH}}', escHtml(fields.canonicalPath))
+      .replaceAll('{{MARKDOWN_TWIN_PATH}}', escHtml(twin))
+      .replaceAll('{{ALTERNATES}}', alternates)
+      .replaceAll('{{BODY}}', fields.body)
+  );
 }
