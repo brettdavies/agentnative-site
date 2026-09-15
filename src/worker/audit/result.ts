@@ -58,7 +58,13 @@ import { resultAlternateLinks } from '../../shared/result-head';
 import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from '../../shared/result-spine';
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
 import { detectResultPreference } from '../accept';
-import { canonicalTargetOf, getAggregate, get as webCacheGet, keyFor as webKeyFor } from '../audit-web/cache';
+import {
+  canonicalTargetOf,
+  getAggregate,
+  WebCacheUnavailableError,
+  getForRequest as webCacheGet,
+  keyFor as webKeyFor,
+} from '../audit-web/cache';
 import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
 import { loadWebAuditRegistry } from '../audit-web/registry';
@@ -237,7 +243,15 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
   const inFlight = await inFlightResponse(ctx, 'web', host);
   if (inFlight) return inFlight;
   const canonical = canonicalTargetOf(new URL(`https://${host}/`));
-  const record = await webCacheGet(ctx.env, await webKeyFor(canonical, SPEC_VERSION));
+  let record: Awaited<ReturnType<typeof webCacheGet>>;
+  try {
+    record = await webCacheGet(ctx.env, await webKeyFor(canonical, SPEC_VERSION));
+  } catch (err) {
+    // A read that failed is not an audit that never ran. Saying "no audit
+    // exists" here retires a URL the sitemap and the board both advertise.
+    if (err instanceof WebCacheUnavailableError) return cacheUnavailable(ctx, host);
+    throw err;
+  }
   if (!record) return missing(ctx, host, 'web');
 
   const envelope = await webEnvelope(ctx.env, { tier: 'cache', host, record, origin: ctx.origin });
@@ -605,6 +619,21 @@ async function suggestionsFor(env: ResultEnv, deps: ResultDeps, target: string, 
   if (!target || !lane) return [];
   const candidates = lane === 'web' ? await hostCandidates(env, deps.now?.() ?? Date.now()) : await cliCandidates(env);
   return suggestTargets(target, candidates, { limit: SUGGESTION_LIMIT });
+}
+
+/**
+ * The scorecard exists as far as anyone can tell; storage just could not be
+ * read. A 503 with `Retry-After` keeps the URL alive: a crawler holds the page
+ * it already has rather than dropping one the sitemap advertises, and a reader
+ * is told to come back rather than invited to re-run an audit already there.
+ */
+function cacheUnavailable(ctx: RenderContext, target: string): Response {
+  const message = `The scorecard for ${target} could not be read right now. It has not been removed; try again shortly.`;
+  const body =
+    ctx.representation === 'json' ? JSON.stringify({ error: { code: 'cache_unavailable', message } }) : `${message}\n`;
+  const headers: Record<string, string> = { 'retry-after': String(RETRY_AFTER_SECONDS) };
+  if (ctx.representation === 'html') headers['content-type'] = 'text/plain; charset=utf-8';
+  return finish(ctx, new Response(body, { status: 503, headers }), ctx.representation);
 }
 
 function missing(ctx: RenderContext, target: string, lane: Lane): Promise<Response> {

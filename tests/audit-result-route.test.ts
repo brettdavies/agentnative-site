@@ -120,6 +120,7 @@ type Overrides = Partial<{
   kvSeed: Record<string, string>;
   assets: Record<string, string>;
   failRegistry: boolean;
+  failCacheGet: boolean;
   aggregate: unknown;
   sitekey: string;
   seed: unknown[];
@@ -179,6 +180,9 @@ async function makeEnv(overrides: Overrides = {}): Promise<TestEnv> {
     SCORE_CACHE: {
       async get(key: string) {
         r2Gets.push(key);
+        if (overrides.failCacheGet && key !== aggregateKey) {
+          throw new Error('get: We encountered an internal error. Please try again. (10001)');
+        }
         if (key === aggregateKey) {
           env._aggregateReads += 1;
           if (overrides.aggregate === undefined) return null;
@@ -294,6 +298,22 @@ describe('curated slugs (registry first)', () => {
     const res = await route('/score/bare', env);
     expect(res.status).toBe(404);
     expect(env._assetGets.some((p) => p.startsWith('/score/bare'))).toBe(false);
+  });
+
+  // A failed read is not an audit that never ran. Answering 404 here retires a
+  // URL that the sitemap and the board both advertise, and invites a visitor to
+  // re-run an audit that is sitting in the bucket.
+  test('an unreadable cache answers 503 with Retry-After, not 404, in all three representations', async () => {
+    const env = await seededEnv({ failCacheGet: true });
+    for (const path of ['/score/anc.dev', '/score/anc.dev/md', '/score/anc.dev/json']) {
+      const res = await route(path, env);
+      expect({ path, status: res.status, retry: res.headers.get('retry-after') }).toEqual({
+        path,
+        status: 503,
+        retry: '30',
+      });
+      expect(await res.text()).not.toContain('No audit exists');
+    }
   });
 
   test('when the registry index cannot be loaded a CLI-shaped target answers 503 with Retry-After in all three representations', async () => {

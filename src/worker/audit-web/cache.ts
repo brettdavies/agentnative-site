@@ -164,14 +164,64 @@ export function webAuditFreshness(cached: boolean, scoredAt: string | null | und
   return freshnessFor('web', cached, scoredAt);
 }
 
-export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
-  let obj: R2ObjectBody | null;
-  try {
-    obj = await env.SCORE_CACHE.get(key);
-  } catch (err) {
-    emitLog({ scope: 'web-cache.get' }, { key, error: errMsg(err) });
-    return null;
+/**
+ * A read R2 could not answer, which is not the same thing as a key holding
+ * nothing. Reporting the two alike tells a reader that a site has never been
+ * audited because storage blinked, on a URL the sitemap and the board both
+ * promise exists.
+ */
+export class WebCacheUnavailableError extends Error {
+  constructor(
+    readonly key: string,
+    cause: unknown,
+  ) {
+    super(`web cache unreadable for ${key}: ${errMsg(cause)}`);
+    this.name = 'WebCacheUnavailableError';
   }
+}
+
+// R2 answers an internal error with "please try again", and it means it: the
+// four that produced a 404 on a live scorecard were spread over 38 seconds on
+// one key. Only the fetch retries; a parse or shape failure is conclusive.
+const GET_BACKOFF_MS = [50, 200] as const;
+
+async function getObject(env: WebCacheEnv, key: string): Promise<R2ObjectBody | null> {
+  let last: unknown;
+  for (let attempt = 0; attempt <= GET_BACKOFF_MS.length; attempt++) {
+    try {
+      return await env.SCORE_CACHE.get(key);
+    } catch (err) {
+      last = err;
+      const backoff = GET_BACKOFF_MS[attempt];
+      if (backoff !== undefined) await new Promise((r) => setTimeout(r, backoff));
+    }
+  }
+  emitLog({ scope: 'web-cache.get' }, { key, error: errMsg(last), attempts: GET_BACKOFF_MS.length + 1 });
+  throw new WebCacheUnavailableError(key, last);
+}
+
+/**
+ * The tolerant read, for the batch and background paths: a cache it cannot
+ * read is one they re-derive anyway, so an unreadable key degrades to a miss
+ * rather than failing a rescore cycle or an aggregate rebuild. A path that
+ * answers a reader wants `getForRequest` instead.
+ */
+export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
+  try {
+    return await getForRequest(env, key);
+  } catch (err) {
+    if (err instanceof WebCacheUnavailableError) return null;
+    throw err;
+  }
+}
+
+/**
+ * The strict read, for a path that answers a reader or an agent. Throws
+ * `WebCacheUnavailableError` when R2 cannot be read, so the caller can say so
+ * instead of claiming the audit does not exist.
+ */
+export async function getForRequest(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
+  const obj = await getObject(env, key);
   if (obj === null) return null;
 
   let raw: unknown;
