@@ -6,6 +6,7 @@
 // domain rebuild and a batch rebuild resolve last-writer-wins; the next
 // batch self-heals any interleaving.
 
+import { emitLog } from '../telemetry/log';
 import {
   get as cacheGet,
   canonicalTargetOf,
@@ -105,7 +106,7 @@ export async function rebuildAggregatesIfSeeded(
     if (result.wrote) queueHitMinPurge([homeTag(), webTag()]);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.log(JSON.stringify({ scope: 'web-aggregate', domain, error: message }));
+    emitLog({ scope: 'web-aggregate' }, { domain, error: message });
   }
 }
 

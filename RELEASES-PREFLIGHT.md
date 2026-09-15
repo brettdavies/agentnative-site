@@ -21,6 +21,9 @@ catches mechanical regressions inside this repo. This checklist covers what CI s
   [`docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md`](./docs/solutions/workflow-issues/cloudflare-container-rollout-readiness-before-smoke.md)).
 - Distribution surfaces that only exercise on real artifacts (markdown twins, canonical redirects, Static-Assets cache
   headers, skill manifest live render).
+- The browser-level and edge-level contracts. `deep-check.yml` runs the four live Playwright projects on a schedule
+  against `main`, so they describe the PREVIOUS release; the PR gate runs `bun test` only. A contract a release changes
+  therefore has no automated live coverage at the moment the release is cut, which is what the `e2e` gate supplies.
 
 ## Quick start: run the automated gates
 
@@ -43,7 +46,8 @@ Sub-commands let you re-run one section in isolation:
 | `build`     | `bun run build` exit, scorecard corpus orphans, badge SVG coverage, markdown twin coverage                                                            | `bun run build`                                                              |
 | `do-smoke`  | Live `/api/score` smoke against the `--env` target (fresh non-registry github URL)                                                                    | `curl` + `~/.claude/skills/1password` (staging mode)                         |
 | `mcp`       | Delegates to `scripts/release/mcp-smoke.sh` against the `--env` target                                                                                | `scripts/release/mcp-smoke.sh` + `~/.claude/skills/1password` (staging mode) |
-| `dist`      | `/check` → `/audit` redirect and served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode       | `curl`                                                                       |
+| `dist`      | Served `skill.json` version vs source against the `--env` target; `X-Robots-Tag: noindex` only in staging mode                                          | `curl`                                                                       |
+| `e2e`       | The four live Playwright projects against the `--env` target: `staging-mcp`, `edge-hit`, `web-audit`, `web-audit-webkit`. SKIPs in local mode         | `bun x playwright test` + `~/.claude/skills/1password` (staging mode)        |
 | `mechanics` | Leak check vs `origin/main`, unguarded docs added to `main`, diff-B vs `origin/dev` filtered by the guarded set                                        | `git`, `scripts/release/guarded-paths.sh`                                    |
 | `all`       | every above sequentially, drift first                                                                                                                 |                                                                              |
 
@@ -264,7 +268,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
   curl -fSsL -H "Content-Type: application/json" \
     -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    -d "{\"input\":\"https://github.com/<owner>/${BINARY}\",\"turnstile_token\":\"x\"}" \
+    -d "{\"target\":\"https://github.com/<owner>/${BINARY}\",\"turnstile_token\":\"x\"}" \
     https://agentnative-site-staging.brettdavies.workers.dev/api/score \
     | jq '{
         ok:           (.scorecard != null and .scorecard.tool.binary != null),
@@ -272,7 +276,8 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
         score_pct:    .scorecard.badge.score_pct,
         anc_version:  .anc_version,
         spec_version: .spec_version,
-        share_url:    .share_url,
+        tier:         .tier,
+        scorecard_url: .scorecard_url,
         error:        .error
       }'
   ```
@@ -282,7 +287,7 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - `ok: true`, no `error`
 - `binary` matches the input
 - `anc_version` and `spec_version` populated
-- `share_url` shaped `/score/live/<binary>`
+- `tier` is `live` and `scorecard_url` ends in `/score/<binary>`
 
   Red outcomes (block the release):
 
@@ -294,30 +299,29 @@ Driven by `scripts/release/preflight.sh do-smoke`. The fresh-binary picker is th
 - `details: timeout` → DO budget exceeded. Check install or audit duration in observability.
 - HTTP 503 `sandbox_unavailable` → container app not bound. Verify the staging `containers[]` block and `wrangler
   containers list`.
-- [ ] **Share-URL renders the full scorecard.** Confirm the live-scored share URL the smoke just minted renders:
+- [ ] **The result page renders the full scorecard.** Confirm the `scorecard_url` the smoke just minted renders:
 
   ```bash
   curl -fSsL -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    https://agentnative-site-staging.brettdavies.workers.dev/score/live/${BINARY} \
+    https://agentnative-site-staging.brettdavies.workers.dev/score/${BINARY} \
     | grep -E 'scorecard-(summary|audits|meta|embed)'
   ```
 
   At least four classes (`scorecard-summary`, `scorecard-audits`, `scorecard-meta`, `scorecard-embed`) should appear,
   proving the shared renderer is producing parity sections.
-- [ ] **Curated-tool redirect at `/score/live/<curated-binary>` still 301s to `/score/<slug>`.** This is the
-  defense-in-depth redirect for stale cache entries and direct URL construction. Pick any registry binary (e.g., `anc`,
-  `rg`):
+- [ ] **A curated tool's binary alias still 301s to its slug.** One tool owns one page, so the binary name redirects
+  rather than rendering a second copy. Pick any registry binary whose name differs from its slug (`rg` for `ripgrep`):
 
   ```bash
   curl -sSI -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
     -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    https://agentnative-site-staging.brettdavies.workers.dev/score/live/anc \
+    https://agentnative-site-staging.brettdavies.workers.dev/score/rg \
     | grep -E '^(HTTP|location:)'
   ```
 
-  Expect `HTTP/2 301` and `location: /score/anc`. A 200 here means a curated tool would render twice — once at the
-  live path and once at the static path — with no canonical hint.
+  Expect `HTTP/2 301` and `location: /score/ripgrep`. A 200 here means a curated tool renders twice, under its slug and
+  under its binary, with no canonical hint.
 
 ### Live MCP surface (mandatory)
 
@@ -467,17 +471,6 @@ Surfaces that don't fail unit tests but break the user experience.
 
 Driven by `scripts/release/preflight.sh dist`.
 
-- [ ] **`/check` → `/audit` redirect still serves.** The 2026-05-29 rename PR added a 301 from the prior URL. Confirm
-  against staging:
-
-  ```bash
-  curl -sSI -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-    -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-    https://agentnative-site-staging.brettdavies.workers.dev/check | head -3
-  # HTTP/2 301
-  # location: /audit
-  ```
-
 - [ ] **Skill manifest endpoint serves the bumped version.** If `src/data/skill/skill.json` changed in this release:
 
   ```bash
@@ -499,6 +492,31 @@ Driven by `scripts/release/preflight.sh dist`.
   ```
 
   If absent on staging, the staging-host guard in `src/worker/headers.ts` regressed.
+
+### Live e2e suites (mandatory)
+
+Driven by `scripts/release/preflight.sh e2e`.
+
+These four projects are the only coverage of the browser flow, the negotiated markdown and HTML surfaces, the MCP
+transport as a client drives it, and the skip-Worker edge cache classes. `wrangler dev` cannot produce a skip-Worker
+HIT, so `edge-hit` has no local equivalent and the gate SKIPs in local mode; run it in staging mode.
+
+- [ ] The release commit is deployed to staging (step 7 of the overlay recipe) and `wrangler containers list` shows
+      `STATE = ready`. Until then these gates describe `dev`, not the release.
+- [ ] That deploy was dispatched with `--ref <release branch>`, not with `-f ref=<sha>` alone. The input selects the
+      code; the dispatch ref selects the workflow, and the default branch's `deploy.yml` running against the release's
+      build fails any post-deploy smoke the release itself changed. A green `Deploy to staging` step under a red job is
+      this: the Worker published and a stale smoke rejected it.
+- [ ] `staging-mcp`, `edge-hit`, `web-audit`, and `web-audit-webkit` all pass, with a non-zero test count for each.
+
+**A zero count is a failure, not a pass.** Playwright refuses an entire project on a configuration error — a duplicate
+test title is the one that has actually happened — and reports it as a non-zero exit with no failing test. The gate
+reads the counts for that reason; if you run `bun x playwright test` by hand instead, check that tests actually ran.
+
+**Read a failure as a stale test before reading it as a product defect, and then prove which.** Every one of these
+projects consumes a wire contract, so a release that renames a request key or moves a response field breaks the suite
+that asserts the old shape. Trace each failure to the source: the 2026-09-15 unified-funnel release had five stale
+consumers across the gates and the specs, and no product defect behind any of them.
 
 ### Release mechanics sanity
 

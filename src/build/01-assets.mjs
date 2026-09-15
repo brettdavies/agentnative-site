@@ -83,40 +83,36 @@ export async function copyAssets({ repoRoot, distDir }) {
     join(repoRoot, 'src/client/leaderboard.ts'),
     join(distDir, 'js/leaderboard.js'),
   );
-  // Homepage live-scoring form (Turnstile lazy-load + 2 s theater +
-  // redirect to /live-score/<binary>). Loaded with defer from the
-  // homepage shell only.
-  const liveScoreJs = await bundleClient(join(repoRoot, 'src/client/live-score.ts'), join(distDir, 'js/live-score.js'));
-  // Web-audit form (validate + navigate to /web/scoring/<host>). Loaded with
-  // defer from the /web-audit page shell only.
-  const webAuditJs = await bundleClient(join(repoRoot, 'src/client/web-audit.ts'), join(distDir, 'js/web-audit.js'));
-  // In-progress scoring page (Turnstile + POST /api/audit-web + NDJSON stream
-  // + forward to /web/<domain>). Worker-served /web/scoring/<domain> loads it.
-  const webAuditScoringJs = await bundleClient(
-    join(repoRoot, 'src/client/web-audit-scoring.ts'),
-    join(distDir, 'js/web-audit-scoring.js'),
-  );
-  // Web leaderboard sort toggle (GLOBAL default, RELATIVE via ?sort=).
-  // Loaded with defer from the /web page shell only.
-  const webLeaderboardJs = await bundleClient(
-    join(repoRoot, 'src/client/web-leaderboard.ts'),
-    join(distDir, 'js/web-leaderboard.js'),
-  );
   const webmcpJs = await bundleClient(join(repoRoot, 'src/client/webmcp.ts'), join(distDir, 'js/webmcp.js'));
+  // Result-page Re-audit control (countdown to refresh_after, then the same
+  // transact click as the entry form) and the ?v= forwarding-query strip.
+  const reauditJs = await bundleClient(join(repoRoot, 'src/client/reaudit.ts'), join(distDir, 'js/reaudit.js'));
+  // Progress page (/scoring): the stashed click or a probe, the stream, the
+  // forward. The Worker-rendered page loads it; no build shell does.
+  const scoringJs = await bundleClient(join(repoRoot, 'src/client/scoring.ts'), join(distDir, 'js/scoring.js'));
+  // Entry form on the homepage and /audit: the lane flip, the lazy Turnstile
+  // render, and the stash the progress page reads back.
+  const auditEntryJs = await bundleClient(
+    join(repoRoot, 'src/client/audit-entry.ts'),
+    join(distDir, 'js/audit-entry.js'),
+  );
   // theme-init is inlined into every HTML head — no file emitted.
   const themeInit = await bundleClient(join(repoRoot, 'src/client/theme-init.ts'));
+  // lane-init is inlined into the leaderboard head only, for the same reason:
+  // it has to run before the panes paint. No file emitted.
+  const laneInit = await bundleClient(join(repoRoot, 'src/client/lane-init.ts'));
 
   return {
     themeInit,
+    laneInit,
     themeJs,
     surfaceJs,
     navJs,
     clipboardJs,
     leaderboardJs,
-    liveScoreJs,
-    webAuditJs,
-    webAuditScoringJs,
-    webLeaderboardJs,
     webmcpJs,
+    reauditJs,
+    scoringJs,
+    auditEntryJs,
   };
 }

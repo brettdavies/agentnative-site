@@ -237,10 +237,10 @@ test.describe('staging /mcp — modern era (2026-07-28)', () => {
     expect(body.result?.isError).toBeFalsy();
     const parsed = JSON.parse(body.result?.content?.[0]?.text ?? '{}') as {
       found: boolean;
-      source: string;
+      tier: string;
     };
     expect(parsed.found).toBe(true);
-    expect(parsed.source).toBe('registry');
+    expect(parsed.tier).toBe('registry');
   });
 
   test('_meta missing clientCapabilities draws -32602 at HTTP 400 (AE7)', async ({ request }) => {
@@ -309,11 +309,11 @@ test.describe('staging /mcp — registry surface', () => {
     expect(body.result?.isError).toBeFalsy();
     const parsed = JSON.parse(body.result?.content?.[0]?.text ?? '{}') as {
       found: boolean;
-      source: string;
+      tier: string;
       scorecard_url: string;
     };
     expect(parsed.found).toBe(true);
-    expect(parsed.source).toBe('registry');
+    expect(parsed.tier).toBe('registry');
     expect(parsed.scorecard_url).toBe(`${STAGING_BASE}/score/ripgrep`);
   });
 });

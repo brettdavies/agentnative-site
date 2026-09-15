@@ -49,6 +49,8 @@ Sub-commands let you re-run one verification in isolation. Each is parameterized
 | `deploy`    | `deploy.yml` on the env's branch (`dev` for staging, `main` for prod): conclusion=success             | `gh run view`                          |
 | `container` | Env container app (`agentnative-site[-staging]-sandbox`) state is `ready`                             | `bunx wrangler containers list`        |
 | `pages`     | `<env-url>/`, `/scorecards`, and `/api/score` registry-hit all return expected                        | `curl`                                 |
+| `retired`   | Retired paths answer 404 with no redirect, and the published inbound links 301 to a pinned destination; run after the zone purge | `curl`                |
+| `sitemap`   | Every `<loc>` in `<env-url>/sitemap.xml` returns 200                                                  | `curl`                                 |
 | `mcp`       | `<env-url>/mcp` initialize + `tools/list` + registry-tier symmetry + live audit against `$MCP_BINARY` | `scripts/release/mcp-smoke.sh`         |
 | `purge`     | `<env-url>/skill.json` version matches `src/data/skill/skill.json`                                    | `curl`                                 |
 | `backport`  | Merged PR to `dev` with `--release-slug` in its title (prod only; SKIPs on staging)                   | `gh pr list --base dev --state merged` |
@@ -132,9 +134,9 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
-    -d '{"input":"ripgrep","turnstile_token":"x"}' \
-    | jq '.scorecard.kind, .anc_version, .spec_version'
-  # expect: "registry_hit", <anc_version>, <spec_version>
+    -d '{"target":"ripgrep","turnstile_token":"x"}' \
+    | jq '.kind, .tier, .anc_version, .spec_version'
+  # expect: "cli", "registry", <anc_version>, <spec_version>
   ```
 
   All three must succeed. The registry-hit `/api/score` POST confirms the read tier composes `lookupOnly`'s curated
@@ -165,7 +167,7 @@ SKIP with a pointer to the manual recipe below. See the deferred-bypass plan at
 
 - **Manual (operator-only path).** Open `https://anc.dev/` in a browser, paste the same fresh non-registry binary picked
   for staging into the form (e.g., `npm install -g cowsay`), submit, watch the live run complete, then visit the
-  resulting share URL (`/score/live/<binary>`) and confirm the four scorecard classes render (`scorecard-summary`,
+  resulting `/score/<binary>` page and confirm the four scorecard classes render (`scorecard-summary`,
   `scorecard-audits`, `scorecard-meta`, `scorecard-embed`).
 - **Service-token (CI / scripted path).** Once the service-token bypass lands per the plan at
   [`docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md`](./docs/plans/2026-06-01-003-feat-production-live-do-smoke-bypass-plan.md),

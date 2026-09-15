@@ -1,12 +1,17 @@
-// Shared invisible-Turnstile helper for the web-audit surface (the form page
-// and the /web/scoring in-progress page). The widget renders into an
-// off-screen mount and executes once; Cloudflare returns a token in the
-// background or fires error-callback. Invisible mode has no interactive
-// fallback, so the token is acquired on the form's submit gesture (where
-// Cloudflare has an interaction signal and clears silently far more often)
-// and carried to the scoring page through sessionStorage.
+// Shared invisible-Turnstile helper for every transact surface. The widget
+// renders once per page session into an off-screen mount; each acquire
+// resets and re-executes it, because rendering again on the same container
+// while a prior execution settles triggers Turnstile's "already executing"
+// warning and a 400020 on the second submit. Cloudflare returns a token in
+// the background or fires error-callback. Invisible mode has no interactive
+// fallback, so the token is acquired on a click (where Cloudflare has an
+// interaction signal and clears silently far more often), and the script
+// loads on the first interaction with a form, never on a page merely
+// scrolled past.
 
-interface TurnstileApi {
+import { STASH_TTL_MS } from './audit-stash';
+
+export interface TurnstileApi {
   render(
     element: HTMLElement | string,
     options: {
@@ -31,9 +36,6 @@ declare global {
 
 const TURNSTILE_SCRIPT_URL = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
 const STASH_PREFIX = 'web-audit-turnstile:';
-// A carried token must reach the scoring-page POST inside Turnstile's ~300s
-// token lifetime; discard anything older so a stale tab never POSTs a dead one.
-const STASH_TTL_MS = 240_000;
 
 export function readSitekey(): string | null {
   const meta = document.querySelector<HTMLMetaElement>('meta[name=turnstile-sitekey]');
@@ -85,6 +87,12 @@ function settle(result: { token: string } | { error: Error }): void {
   else p.reject(result.error);
 }
 
+/**
+ * Acquire a token on the current gesture. The first call renders the
+ * widget into `mountHost`; later calls reset and re-execute that widget.
+ * A call while one is pending is refused rather than dropping the pending
+ * resolver.
+ */
 export function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountHost: HTMLElement): Promise<string> {
   return new Promise((resolve, reject) => {
     if (pending) {
@@ -93,42 +101,74 @@ export function acquireTurnstileToken(sitekey: string, api: TurnstileApi, mountH
     }
     pending = { resolve, reject };
     pendingTimer = setTimeout(() => settle({ error: new Error('turnstile_timeout') }), ACQUIRE_TIMEOUT_MS);
-    const container = document.createElement('div');
-    container.setAttribute('data-turnstile-mount', '');
-    container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
-    mountHost.appendChild(container);
-    const id = api.render(container, {
-      sitekey,
-      execution: 'execute',
-      callback: (token: string) => settle({ token }),
-      'error-callback': () => settle({ error: new Error('turnstile_error') }),
-      'expired-callback': () => settle({ error: new Error('turnstile_expired') }),
-    });
-    widget = { id, container };
-    api.execute(id);
+    try {
+      if (widget) {
+        api.reset(widget.id);
+        api.execute(widget.id);
+        return;
+      }
+      // A teardown removes the widget but leaves its mount in the document;
+      // a later acquire on a restored page reuses that mount instead of
+      // stacking another.
+      const container =
+        mountHost.querySelector<HTMLDivElement>('[data-turnstile-mount]') ??
+        mountHost.ownerDocument.createElement('div');
+      container.setAttribute('data-turnstile-mount', '');
+      container.style.cssText = 'position:absolute;left:-9999px;width:0;height:0;overflow:hidden';
+      mountHost.appendChild(container);
+      const id = api.render(container, {
+        sitekey,
+        execution: 'execute',
+        callback: (token: string) => settle({ token }),
+        'error-callback': () => settle({ error: new Error('turnstile_error') }),
+        'expired-callback': () => settle({ error: new Error('turnstile_expired') }),
+      });
+      widget = { id, container };
+      api.execute(id);
+    } catch (err) {
+      // A widget API that throws must not leave the pending guard set for
+      // the next click.
+      settle({ error: err instanceof Error ? err : new Error(String(err)) });
+    }
   });
 }
 
-export function teardownTurnstile(): void {
-  if (widget && window.turnstile) {
-    window.turnstile.remove(widget.id);
+/**
+ * Load the Turnstile script on the first interaction with any of
+ * `elements` (focus, paste, click), so the widget is ready by the time the
+ * visitor clicks and a page merely scrolled past never fetches it.
+ */
+export function loadTurnstileOnFirstInteraction(elements: Iterable<EventTarget>): void {
+  for (const element of elements) {
+    const armed = new AbortController();
+    const load = () => {
+      armed.abort();
+      void ensureTurnstileLoaded().catch(() => {
+        // The click path retries the load; a failed prefetch is not an error.
+      });
+    };
+    for (const type of ['focus', 'paste', 'click']) {
+      element.addEventListener(type, load, { signal: armed.signal });
+    }
   }
-  if (pendingTimer !== null) {
-    clearTimeout(pendingTimer);
-    pendingTimer = null;
-  }
-  widget = null;
-  pending = null;
 }
 
-/** Acquire a token end-to-end: load the script, render, execute, resolve. */
+/**
+ * Remove the widget and reject any acquire still waiting on it, so a
+ * caller awaiting the token reaches its error path instead of hanging on
+ * a resolver that will never fire.
+ */
+export function teardownTurnstile(): void {
+  const api = typeof window === 'undefined' ? undefined : window.turnstile;
+  if (widget && api) api.remove(widget.id);
+  widget = null;
+  settle({ error: new Error('turnstile_torn_down') });
+}
+
+/** Acquire a token end-to-end: load the script, render or reuse the widget, execute, resolve. */
 export async function getTurnstileToken(sitekey: string, mountHost: HTMLElement): Promise<string> {
   const api = await ensureTurnstileLoaded();
-  try {
-    return await acquireTurnstileToken(sitekey, api, mountHost);
-  } finally {
-    teardownTurnstile();
-  }
+  return acquireTurnstileToken(sitekey, api, mountHost);
 }
 
 /** Stash a fresh token for the scoring page to consume, keyed by audited host. */
@@ -163,4 +203,5 @@ export function takeTurnstileToken(host: string): string | null {
   return null;
 }
 
-window.addEventListener('pagehide', teardownTurnstile);
+// A bfcache-restored page must not reuse a half-dead widget instance.
+if (typeof window !== 'undefined') window.addEventListener('pagehide', teardownTurnstile);

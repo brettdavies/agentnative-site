@@ -675,9 +675,9 @@ describe('MCP modern-era wire (no initialize)', () => {
       modernToolCallHeaders('get_scorecard'),
     );
     expect(status).toBe(200);
-    const parsed = getJsonContent(body) as { found: boolean; source?: string };
+    const parsed = getJsonContent(body) as { found: boolean; tier?: string };
     expect(parsed.found).toBe(true);
-    expect(parsed.source).toBe('registry');
+    expect(parsed.tier).toBe('registry');
   });
 
   test('tools/call missing clientCapabilities returns -32602 (AE7)', async () => {

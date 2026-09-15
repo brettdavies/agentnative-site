@@ -6,8 +6,9 @@
 // R2 writers stay env-only and do not import this module.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { emitLog } from '../telemetry/log';
 
-export { homeTag, webDomainTag, webTag } from './hit-min-tags';
+export { cliTargetTag, homeTag, webDomainTag, webTag } from './hit-min-tags';
 
 type PurgeResult = { success: boolean; errors?: unknown[] };
 
@@ -15,18 +16,21 @@ type CachedPurgeRpc = {
   purgeHitMinTags(tags: string[]): Promise<PurgeResult>;
 };
 
-type PurgeStore = { ctx: ExecutionContext; tags: Set<string> };
+/** A Worker's ExecutionContext or a Durable Object's state: whatever carries `exports`. */
+export type PurgeCtx = { exports?: unknown };
+
+type PurgeStore = { ctx: PurgeCtx; tags: Set<string> };
 
 const als = new AsyncLocalStorage<PurgeStore>();
 
-export function runWithHitMinPurge<T>(ctx: ExecutionContext, fn: () => T): T {
+export function runWithHitMinPurge<T>(ctx: PurgeCtx, fn: () => T): T {
   return als.run({ ctx, tags: new Set() }, fn);
 }
 
 export function queueHitMinPurge(tags: readonly string[]): void {
   const store = als.getStore();
   if (!store) {
-    console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'queue_without_store', tags }));
+    emitLog({ scope: 'hit-min-purge' }, { error: 'queue_without_store', tags });
     return;
   }
   for (const tag of tags) {
@@ -46,7 +50,7 @@ export async function flushHitMinPurge(): Promise<void> {
  * One RPC with the given tags. Used by the rescore cycle (already batched)
  * and as the flush target. Never sends pathPrefixes.
  */
-export async function invokeCachedPurge(ctx: ExecutionContext, tags: readonly string[]): Promise<void> {
+export async function invokeCachedPurge(ctx: PurgeCtx, tags: readonly string[]): Promise<void> {
   const unique = [...new Set(tags.filter((t) => t.length > 0))];
   if (unique.length === 0) return;
   try {
@@ -54,19 +58,19 @@ export async function invokeCachedPurge(ctx: ExecutionContext, tags: readonly st
     if (rpc) {
       const result = await rpc.purgeHitMinTags(unique);
       if (!result.success) {
-        console.log(JSON.stringify({ scope: 'hit-min-purge', tags: unique, errors: result.errors ?? [] }));
+        emitLog({ scope: 'hit-min-purge' }, { tags: unique, errors: result.errors ?? [] });
       }
       return;
     }
-    console.log(JSON.stringify({ scope: 'hit-min-purge', error: 'cache_purge_unavailable', tags: unique }));
+    emitLog({ scope: 'hit-min-purge' }, { error: 'cache_purge_unavailable', tags: unique });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.log(JSON.stringify({ scope: 'hit-min-purge', error: message, tags: unique }));
+    emitLog({ scope: 'hit-min-purge' }, { error: message, tags: unique });
   }
 }
 
-function cachedPurgeRpc(ctx: ExecutionContext): CachedPurgeRpc | null {
-  const stub = (ctx as ExecutionContext & { exports?: { Cached?: CachedPurgeRpc } }).exports?.Cached;
+function cachedPurgeRpc(ctx: PurgeCtx): CachedPurgeRpc | null {
+  const stub = (ctx.exports as { Cached?: CachedPurgeRpc } | undefined)?.Cached;
   if (stub && typeof stub.purgeHitMinTags === 'function') return stub;
   return null;
 }

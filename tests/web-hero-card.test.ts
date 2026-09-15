@@ -33,12 +33,12 @@ describe('buildWebHeroCard', () => {
     expect(html).toContain('class="st warn">warn'); // mcp partial
   });
 
-  test('empty state keeps the web slot and points at /web and /web-audit', () => {
+  test('empty state keeps the web slot and points at the result page and the entry form', () => {
     const html = buildWebHeroCardEmptyState();
     expect(html).toContain(`data-s="web"`);
     expect(html).toContain('card__pending');
-    expect(html).toContain(`/web/${HERO_WEB_DOMAIN}`);
-    expect(html).toContain('/web-audit');
+    expect(html).toContain(`/score/${HERO_WEB_DOMAIN}`);
+    expect(html).toContain('/audit?lane=web');
   });
 
   test('committed snapshot produces a scored card, not the empty state', async () => {

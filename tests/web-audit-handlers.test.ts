@@ -27,6 +27,7 @@ import { scoreWebAudit } from '../src/worker/audit-web/score';
 import type { EngineResult } from '../src/worker/audit-web/scorecard';
 import worker, { type Env } from '../src/worker/index';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { captureLogs } from './helpers/log-capture';
 import { isModernProbe, MODERN_PROTOCOL } from './helpers/mcp-modern';
 import { resetMcpTestState } from './helpers/mcp-rpc';
 
@@ -2176,8 +2177,7 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
       { op: 'error', method: 'nonexistent/method', expect_code: -32601 },
       ...CONFORMANCE_OPS.map((op) => ({ op })),
     ];
-    const originalLog = console.log;
-    console.log = () => {};
+    const logs = captureLogs();
     const matrix: Array<{ op: unknown; status: string; code: unknown }> = [];
     try {
       for (const w of probes) {
@@ -2188,7 +2188,7 @@ describe('runMcp conformance dogfood against the in-process handler', () => {
         matrix.push({ op: w.op, status: outcome.status, code: outcome.evidence[0]?.error_code });
       }
     } finally {
-      console.log = originalLog;
+      logs.restore();
     }
     return matrix;
   }

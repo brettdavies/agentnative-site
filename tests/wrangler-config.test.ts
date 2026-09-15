@@ -45,24 +45,32 @@ describe('wrangler.jsonc — inherited-property overrides (anc.dev routing-drift
   const config = loadWranglerConfig();
   const staging = getStagingEnv(config);
 
+  test('compatibility_flags carries enable_request_signal (the request abort signal a streaming relay observes)', () => {
+    const flags = config.compatibility_flags as string[];
+    expect(flags).toContain('enable_request_signal');
+    // compatibility_flags is inheritable; a staging override must not drop it.
+    const stagingFlags = staging.compatibility_flags as string[] | undefined;
+    if (stagingFlags) expect(stagingFlags).toContain('enable_request_signal');
+  });
+
   test('env.staging.routes is explicitly set to an empty array (prevents anc.dev inheritance)', () => {
     expect(staging.routes).toBeDefined();
     expect(Array.isArray(staging.routes)).toBe(true);
     expect((staging.routes as unknown[]).length).toBe(0);
   });
 
-  test('env.staging.triggers.crons is an explicit override that matches the top-level weekly rescore', () => {
+  test('env.staging.triggers.crons is an explicit override that matches the top-level schedules', () => {
     // `triggers` is inheritable, so staging must state its crons
-    // deliberately. Both envs run the same weekly web-rescore schedule;
-    // a staging block that silently drops the override would re-inherit
-    // whatever top level says, and a divergent schedule would mean soak
-    // no longer exercises the production path.
+    // deliberately. Both envs run the same weekly web-rescore + daily
+    // lake-freshness schedules; a staging block that silently drops the
+    // override would re-inherit whatever top level says, and a divergent
+    // schedule would mean soak no longer exercises the production path.
     expect(staging.triggers).toBeDefined();
     const stagingCrons = (staging.triggers as Record<string, unknown>).crons;
     const topCrons = (config.triggers as Record<string, unknown>).crons;
     expect(Array.isArray(stagingCrons)).toBe(true);
-    expect(stagingCrons).toEqual(['0 9 * * SUN']);
-    expect(topCrons).toEqual(['0 9 * * SUN']);
+    expect(stagingCrons).toEqual(['0 9 * * SUN', '0 6 * * *']);
+    expect(topCrons).toEqual(['0 9 * * SUN', '0 6 * * *']);
   });
 
   test('both envs declare the WEB_RESCORE_WORKFLOW binding with distinct account-scoped names', () => {
@@ -134,6 +142,18 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
     expect(bindings).toContain('SCORE_KV');
   });
 
+  test('every limiter and KV binding the admission helper reads exists in both environments', () => {
+    const limiterNames = (list: unknown) => (list as Array<Record<string, unknown>>).map((r) => r.name);
+    const kvNames = (list: unknown) => (list as Array<Record<string, unknown>>).map((b) => b.binding);
+    for (const env of [config, staging]) {
+      const limiters = limiterNames(env.ratelimits);
+      for (const name of ['SCORE_LIMITER', 'SCORE_LIMITER_IP', 'WEB_AUDIT_LIMITER', 'WEB_AUDIT_LIMITER_IP']) {
+        expect(limiters).toContain(name);
+      }
+      expect(kvNames(env.kv_namespaces)).toContain('SCORE_KV');
+    }
+  });
+
   test('env.staging.ratelimits declares both SCORE_LIMITER and SCORE_LIMITER_IP', () => {
     expect(staging.ratelimits).toBeDefined();
     const names = (staging.ratelimits as Array<Record<string, unknown>>).map((r) => r.name);
@@ -169,6 +189,45 @@ describe('wrangler.jsonc — env.staging mirrors required non-inheritable bindin
     expect(staging.r2_buckets).toBeDefined();
     const bindings = (staging.r2_buckets as Array<Record<string, unknown>>).map((r) => r.binding);
     expect(bindings).toContain('SCORE_CACHE');
+  });
+});
+
+// Cloudflare records each environment's applied migration tags, and a deploy
+// whose list is not a superset of them fails with API error 10074 on the
+// real deploy; a dry run does not consult applied state. The applied
+// histories are pinned here so dropping or reordering a tag fails this test
+// first. Staging alone carries the two tags of its cross-migration rollback
+// rehearsal (RELEASES.md); apart from those, both environments carry one list.
+
+// An entry lists only tags a successful deploy has applied to that
+// environment, never a tag added to make a config change pass.
+const APPLIED_MIGRATIONS = {
+  production: ['v1'],
+  staging: ['v1', 'v2-drop-sandbox', 'v3-restore-sandbox', 'v4-audit-job'],
+};
+const STAGING_REHEARSAL_TAGS = ['v2-drop-sandbox', 'v3-restore-sandbox'];
+
+describe('wrangler.jsonc — Durable Object migrations', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+  const tagsOf = (block: Record<string, unknown>) => (block.migrations as Array<{ tag: string }>).map((m) => m.tag);
+
+  test('each environment extends the tags already applied to it', () => {
+    expect(tagsOf(config).slice(0, APPLIED_MIGRATIONS.production.length)).toEqual(APPLIED_MIGRATIONS.production);
+    expect(tagsOf(staging).slice(0, APPLIED_MIGRATIONS.staging.length)).toEqual(APPLIED_MIGRATIONS.staging);
+  });
+
+  test('apart from the staging rehearsal tags, both environments carry the same tag list', () => {
+    expect(tagsOf(staging).filter((tag) => !STAGING_REHEARSAL_TAGS.includes(tag))).toEqual(tagsOf(config));
+  });
+
+  test('both environments create AuditJob as a SQLite class and bind it as AUDIT_JOB', () => {
+    for (const block of [config, staging]) {
+      const migration = (block.migrations as Array<Record<string, unknown>>).find((m) => m.tag === 'v4-audit-job');
+      expect(migration?.new_sqlite_classes).toEqual(['AuditJob']);
+      const bindings = (block.durable_objects as { bindings: Array<Record<string, unknown>> }).bindings;
+      expect(bindings).toContainEqual({ name: 'AUDIT_JOB', class_name: 'AuditJob' });
+    }
   });
 });
 
@@ -215,6 +274,67 @@ describe('wrangler.jsonc — analytics_engine_datasets bindings (plan U10)', () 
 });
 
 // ---------------------------------------------------------------------------
+// Telemetry-lake R2 bindings + Logpush opt-in (telemetry plan U1)
+// ---------------------------------------------------------------------------
+
+// The TELEMETRY_LAKE binding is non-inheritable per env, so both top-level
+// (prod) and env.staging must declare it. Each env points at a DISTINCT
+// bucket so staging traffic never lands in the permanent production lake —
+// and the dedicated bucket pair keeps the lake's lifecycle and credentials
+// isolated from anc-score-cache's prefix-scoped expiry rules. This guard
+// fires loudly if either pin moves.
+
+describe('wrangler.jsonc — TELEMETRY_LAKE R2 bindings (telemetry plan U1)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level r2_buckets declares the TELEMETRY_LAKE binding against anc-telemetry-lake', () => {
+    expect(config.r2_buckets).toBeDefined();
+    const buckets = config.r2_buckets as Array<Record<string, unknown>>;
+    const lake = buckets.find((b) => b.binding === 'TELEMETRY_LAKE');
+    expect(lake).toBeDefined();
+    expect(lake?.bucket_name).toBe('anc-telemetry-lake');
+  });
+
+  test('env.staging.r2_buckets declares the TELEMETRY_LAKE binding against anc-telemetry-lake-staging', () => {
+    expect(staging.r2_buckets).toBeDefined();
+    const buckets = staging.r2_buckets as Array<Record<string, unknown>>;
+    const lake = buckets.find((b) => b.binding === 'TELEMETRY_LAKE');
+    expect(lake).toBeDefined();
+    expect(lake?.bucket_name).toBe('anc-telemetry-lake-staging');
+  });
+
+  test('prod and staging point at DISTINCT lake buckets (no accidental merge)', () => {
+    const prodBuckets = config.r2_buckets as Array<Record<string, unknown>>;
+    const stagingBuckets = staging.r2_buckets as Array<Record<string, unknown>>;
+    const prodBucket = prodBuckets.find((b) => b.binding === 'TELEMETRY_LAKE')?.bucket_name;
+    const stagingBucket = stagingBuckets.find((b) => b.binding === 'TELEMETRY_LAKE')?.bucket_name;
+    expect(prodBucket).toBeDefined();
+    expect(stagingBucket).toBeDefined();
+    expect(prodBucket).not.toBe(stagingBucket);
+  });
+});
+
+// Script-level Logpush opt-in: without `logpush: true` the
+// workers-trace-events dataset receives nothing from the script, and the
+// whole lake export chain (Logpush → Pipelines → Iceberg) goes dark with
+// no error anywhere. `logpush` is an inheritable key; this repo states
+// inheritable keys explicitly under env.staging, so both blocks are pinned.
+
+describe('wrangler.jsonc — script-level logpush opt-in (telemetry plan U1)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level declares logpush: true', () => {
+    expect(config.logpush, 'top-level logpush').toBe(true);
+  });
+
+  test('env.staging restates logpush: true explicitly', () => {
+    expect(staging.logpush, 'env.staging logpush').toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // R2 score-cache lifecycle documentation drift (plan U7)
 // ---------------------------------------------------------------------------
 
@@ -244,6 +364,28 @@ describe('RELEASES.md — R2 score-cache lifecycle setup commands (plan U7)', ()
     expect(releases).toMatch(
       /wrangler r2 bucket lifecycle add anc-score-cache-staging scores-7day-ttl scores\/ --expire-days 7/,
     );
+  });
+});
+
+// R2 Data Catalog enablement on the lake buckets lives in the Cloudflare
+// account, NOT in wrangler.jsonc — catalog state isn't a wrangler-config
+// surface. The setup commands live in RELEASES.md so a fresh bucket
+// recreate doesn't lose the catalog (and with it every Iceberg table the
+// pipeline sinks into). Drift on that documentation is silent, so this
+// test pins the literal commands; removal forces a deliberate update.
+
+describe('RELEASES.md — R2 telemetry-lake catalog setup commands (telemetry plan U1)', () => {
+  const releasesPath = join(import.meta.dir, '..', 'RELEASES.md');
+  const releases = readFileSync(releasesPath, 'utf8');
+
+  test('documents the catalog-enable command for the prod lake bucket', () => {
+    // End-of-line anchored: the prod bucket name is a prefix of the staging
+    // one, so an unanchored match would pass on the staging line alone.
+    expect(releases).toMatch(/^bun x wrangler r2 bucket catalog enable anc-telemetry-lake$/m);
+  });
+
+  test('documents the catalog-enable command for the staging lake bucket', () => {
+    expect(releases).toMatch(/^bun x wrangler r2 bucket catalog enable anc-telemetry-lake-staging$/m);
   });
 });
 
@@ -356,6 +498,36 @@ describe('wrangler.jsonc — Workers Caching per-entrypoint map (edge HIT restor
 // `MCP_LIVE_SCORING_ENABLED` are secret-bound, which is what buys the
 // zero-deploy flip that no redeploy can clobber. These guards pin the shape in
 // config so the drift is caught here rather than mid-incident.
+
+// ---------------------------------------------------------------------------
+// TELEMETRY_ENVIRONMENT var (telemetry plan U3)
+// ---------------------------------------------------------------------------
+
+// The daily lake-freshness check names its environment from this var and
+// emails the operator only when it reads "production"; every other value is
+// log-only, because the staging lake is legitimately quiet most days and
+// routine staging alerts would train the operator to ignore the production
+// key. env vars are REPLACE-not-merge, so both blocks must pin their value —
+// a dropped staging entry would inherit nothing and silence the environment
+// name in the status line, and a swapped value either mutes the production
+// alert or floods from staging.
+
+describe('wrangler.jsonc — TELEMETRY_ENVIRONMENT var (telemetry plan U3)', () => {
+  const config = loadWranglerConfig();
+  const staging = getStagingEnv(config);
+
+  test('top-level vars declares TELEMETRY_ENVIRONMENT as the string "production"', () => {
+    const vars = config.vars as Record<string, unknown> | undefined;
+    expect(vars, 'top-level vars block').toBeDefined();
+    expect(vars?.TELEMETRY_ENVIRONMENT).toBe('production');
+  });
+
+  test('env.staging.vars declares TELEMETRY_ENVIRONMENT as the string "staging"', () => {
+    const vars = staging.vars as Record<string, unknown> | undefined;
+    expect(vars, 'env.staging vars block').toBeDefined();
+    expect(vars?.TELEMETRY_ENVIRONMENT).toBe('staging');
+  });
+});
 
 const SECRET_BOUND_MCP_FLAGS = ['MCP_ENABLED', 'MCP_LIVE_SCORING_ENABLED'] as const;
 

@@ -7,9 +7,23 @@
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared/audit-routes.ts';
+import {
+  BREADCRUMB_JSONLD_TOKEN,
+  breadcrumbJsonLd,
+  breadcrumbLabelRequired,
+  breadcrumbTrail,
+  renderBreadcrumbNav,
+} from '../shared/breadcrumb.ts';
+import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
-import { canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
+import { ANC_VERSION, canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
+
+// navCurrent appends the separator itself, so a namespace pattern is the
+// prefix without its trailing slash.
+const SCORE_ROOT = SCORE_PREFIX.replace(/\/$/, '');
+const FIX_ROOT = FIX_PREFIX.replace(/\/$/, '');
 
 const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../content');
 const INSTALL_COMMANDS = loadInstallCommands(CONTENT_DIR);
@@ -22,67 +36,35 @@ const SITE_TAGLINE = 'the agent-native standard';
 // nav entry (methodology, coverage, contribute, the web board) stay
 // reachable from the footer meta row and in-page cross-links.
 export const NAV_LINKS = [
-  { label: 'Leaderboards', href: '/scorecards', match: ['/scorecards', '/web', '/score'] },
-  { label: 'Audit', href: '/audit', match: ['/audit', '/web-audit'] },
+  {
+    label: 'Leaderboards',
+    href: SCORECARDS_PATH,
+    match: [SCORECARDS_PATH, SCORE_ROOT],
+    navAttr: 'data-leaderboards-nav',
+  },
+  // A fix skill is reached from an audit result, so Audit is the entry the
+  // reader arrived through and the one that should read as current.
+  { label: 'Audit', href: AUDIT_PATH, match: [AUDIT_PATH, FIX_ROOT], navAttr: 'data-audit-nav' },
   { label: 'The standard', href: '/#principles', match: [/^\/p\d+$/] },
   { label: 'Install', href: '/install', match: ['/install'] },
   { label: 'Skill', href: '/skill', match: ['/skill'] },
   { label: 'About', href: '/about', match: ['/about'] },
 ];
 
+// Published in `.well-known/security.txt` and `ai.txt`; the same address the
+// Organization node hands a crawler.
+const CONTACT_EMAIL = '97-boss-beetle@icloud.com';
+
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
 
-const leaderboardsCliCurrent = (path) => path === '/scorecards' || path.startsWith('/score/');
-const leaderboardsWebCurrent = (path) =>
-  path === '/web' || (path.startsWith('/web/') && !path.startsWith('/web-audit'));
-
-const auditCliCurrent = (path) => path === '/audit';
-const auditWebCurrent = (path) => path === '/web-audit' || path.startsWith('/web-audit/');
-
-const renderDualSurfaceNav = ({ label, cliHref, webHref, dataNavAttr, path, cliCurrent, webCurrent }) => {
-  const cliCur = cliCurrent(path) ? ' aria-current="page"' : '';
-  const webCur = webCurrent(path) ? ' aria-current="page"' : '';
-  return `          <a href="${cliHref}" data-s="cli" ${dataNavAttr}${cliCur}>${label}</a>
-          <a href="${webHref}" data-s="web" ${dataNavAttr}${webCur}>${label}</a>`;
-};
-
-const renderLeaderboardsNav = (path) =>
-  renderDualSurfaceNav({
-    label: 'Leaderboards',
-    cliHref: '/scorecards',
-    webHref: '/web',
-    dataNavAttr: 'data-leaderboards-nav',
-    path,
-    cliCurrent: leaderboardsCliCurrent,
-    webCurrent: leaderboardsWebCurrent,
-  });
-
-const renderAuditNav = (path) =>
-  renderDualSurfaceNav({
-    label: 'Audit',
-    cliHref: '/audit',
-    webHref: '/web-audit',
-    dataNavAttr: 'data-audit-nav',
-    path,
-    cliCurrent: auditCliCurrent,
-    webCurrent: auditWebCurrent,
-  });
-
-// Dual-surface entries emit a CLI and a Website twin anchor and display
-// only the one matching the active surface.
-const DUAL_SURFACE_NAV_RENDERERS = {
-  Leaderboards: renderLeaderboardsNav,
-  Audit: renderAuditNav,
-};
-
-export const DUAL_SURFACE_NAV_LABELS = Object.keys(DUAL_SURFACE_NAV_RENDERERS);
-
+// One anchor per entry: the boards and the entry forms each live behind a
+// single destination now, and the surface segment on the page itself picks
+// the lane. `navAttr` marks the two the specs address by name.
 const renderNavLink = (entry, path) => {
-  const renderDual = DUAL_SURFACE_NAV_RENDERERS[entry.label];
-  if (renderDual) return renderDual(path);
   const current = navCurrent(path, entry.match) ? ' aria-current="page"' : '';
-  return `          <a href="${entry.href}"${current}>${entry.label}</a>`;
+  const attr = entry.navAttr ? ` ${entry.navAttr}` : '';
+  return `          <a href="${entry.href}"${attr}${current}>${entry.label}</a>`;
 };
 
 // Alt text for the OG card. Single source-of-truth: applies to every
@@ -168,54 +150,80 @@ const esc = escHtml;
 /** Deferred client bundle for browser-agent (WebMCP) tool registration. */
 export const WEBMCP_SCRIPT = '/js/webmcp.js';
 
+// A template-rendered page's footer twin follows the result-path rule:
+// the canonical path plus the segment the route builder appends. The
+// segment is read off the builders so the footer and the substituted
+// head cannot disagree about it.
+
 /**
- * @param {object} args
- * @param {string} args.title                — document <title> + og:title.
- * @param {string} args.description          — meta description + og:description.
- * @param {string} args.canonicalPath        — site-relative path, e.g. '/p3'.
- * @param {string} args.bodyHtml             — rendered principle / page HTML.
- * @param {string} args.themeInitJs          — inline head script source.
- * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
- * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
- *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
- * @param {string=} args.baseUrl             — absolute base (default prod).
- * @returns {string} full HTML document.
- */
-/**
- * Emit a placeholder-only version of the shell. Used by the Worker to
- * render dynamic pages (/score/live/<binary>) without duplicating the
- * shell layout. The template has four placeholders:
+ * Emit a placeholder-only version of the shell. The Worker renders its
+ * dynamic pages from it without duplicating the shell layout. The
+ * template has five placeholders:
  *
  *   {{TITLE}}            — document <title> + og:title (escaped at substitution)
  *   {{DESCRIPTION}}      — meta description + og:description
  *   {{CANONICAL_PATH}}   — site-relative canonical path (no trailing extension)
+ *   {{ALTERNATES}}       — the head's page-specific `rel="alternate"` links,
+ *                          built by src/shared/result-head.ts from the route
+ *                          module's representation builders
  *   {{BODY}}             — already-rendered body HTML (pre-escaped by caller)
  *
  * Same shell layout as the static pages; the only difference is the
- * placeholders for the four dynamic fields. The markdown-twin link in
- * the footer substitutes to `{{CANONICAL_PATH}}.md` so live-score pages
- * carry the same markdown-twin affordance as every other page.
+ * placeholders for the dynamic fields. The footer's markdown-twin anchor
+ * is `{{CANONICAL_PATH}}` plus the route builder's twin segment.
  */
 export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
   return emitShell({
     title: '{{TITLE}}',
     description: '{{DESCRIPTION}}',
     canonicalPath: '{{CANONICAL_PATH}}',
+    markdownTwinPath: '{{MARKDOWN_TWIN_PATH}}',
+    alternatesHtml: '{{ALTERNATES}}',
     bodyHtml: '{{BODY}}',
     themeInitJs: themeInitJs ?? '',
     isIndex: false,
     baseUrl,
-    extraScripts: [],
+    // A result page publishes the read-only worksheet tools to a browser
+    // agent standing on it, so the Worker-rendered shell carries the same
+    // registration script the built entry pages do.
+    extraScripts: [WEBMCP_SCRIPT],
   });
 }
 
+/**
+ * @param {object} args
+ * @param {string} args.title                — document <title> + og:title.
+ * @param {string} args.description          — meta description + og:description.
+ * @param {string} args.canonicalPath        — site-relative path, e.g. '/p3'.
+ * @param {string=} args.markdownTwinPath    — href of the page's markdown twin
+ *     (default `<canonicalPath>.md`, `/index.md` on '/'); the footer anchor and
+ *     the default head alternate both use it.
+ * @param {string=} args.alternatesHtml      — the head's page-specific
+ *     `rel="alternate"` link markup (default: the markdown-twin link alone).
+ * @param {string} args.bodyHtml             — rendered principle / page HTML.
+ * @param {string} args.themeInitJs          — inline head script source.
+ * @param {string=} args.breadcrumb         — this page's label in its breadcrumb
+ *     trail; required of every page that has one.
+ * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
+ * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
+ *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
+ * @param {string=} args.baseUrl             — absolute base (default prod).
+ * @returns {string} full HTML document.
+ */
 export function emitShell({
   title,
   description,
   canonicalPath,
+  markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`,
+  alternatesHtml = markdownAlternateLink(markdownTwinPath),
   bodyHtml,
   themeInitJs,
+  // A second inline head script, for a page that needs state applied before
+  // its body paints. Empty on every page that does not.
+  extraHeadJs = '',
   isIndex = false,
+  // The label this page takes in its breadcrumb trail.
+  breadcrumb = null,
   turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
@@ -228,10 +236,27 @@ export function emitShell({
   // no base at all.
   const base = canonicalBaseUrl(baseUrl);
   const canonical = base + canonicalPath;
-  const markdownTwinPath = canonicalPath === '/' ? '/index.md' : `${canonicalPath}.md`;
   const ogImage = `${base}/og-image.png`;
 
+  // One trail feeds both renderings, so the nav a reader sees and the
+  // BreadcrumbList a crawler reads can never name different parents.
+  //
+  // The Worker's shell template has no path yet, so it emits a placeholder in
+  // each position and `substituteShell` fills both from the request's path
+  // through this same module. The JSON-LD placeholder is a bare string in the
+  // graph, which serializes to a quoted token the substituter swaps whole.
+  const deferred = canonicalPath.includes('{{');
+  if (!deferred && breadcrumb === null && breadcrumbLabelRequired(canonicalPath)) {
+    throw new Error(
+      `emitShell: ${canonicalPath} has a breadcrumb trail and no breadcrumb, so it would state its own URL segment where its name belongs`,
+    );
+  }
+  const trail = deferred ? [] : breadcrumbTrail(canonicalPath, breadcrumb);
+  const crumbNav = deferred ? '{{BREADCRUMB_NAV}}' : renderBreadcrumbNav(trail);
+  const crumbNode = deferred ? BREADCRUMB_JSONLD_TOKEN : breadcrumbJsonLd(trail, base);
+
   const orgId = `${base}/#organization`;
+  const siteId = `${base}/#website`;
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -242,6 +267,24 @@ export function emitShell({
         url: base,
         logo: `${base}/apple-touch-icon-180.png`,
         sameAs: SOURCE_REPOS.map((r) => r.url),
+        contactPoint: {
+          '@type': 'ContactPoint',
+          contactType: 'technical support',
+          email: CONTACT_EMAIL,
+          url: `${base}/.well-known/security.txt`,
+        },
+      },
+      {
+        // The site itself, so each page is part of a named corpus rather than
+        // a standalone article. No SearchAction: there is no search endpoint,
+        // and advertising one sends a crawler somewhere that does not exist.
+        '@type': 'WebSite',
+        '@id': siteId,
+        name: SITE_NAME,
+        alternateName: SITE_TAGLINE,
+        url: base,
+        inLanguage: 'en',
+        publisher: { '@id': orgId },
       },
       {
         '@type': 'TechArticle',
@@ -249,6 +292,7 @@ export function emitShell({
         description,
         url: canonical,
         image: ogImage,
+        isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
           name: 'Brett Davies',
@@ -257,6 +301,7 @@ export function emitShell({
         },
         publisher: { '@id': orgId },
       },
+      ...(crumbNode ? [crumbNode] : []),
       {
         '@type': 'SoftwareApplication',
         '@id': `${base}/#anc-cli`,
@@ -272,7 +317,8 @@ export function emitShell({
         ],
         installUrl: `${base}/install`,
         documentation: 'https://docs.rs/agentnative',
-        url: `${base}/audit`,
+        softwareVersion: ANC_VERSION,
+        url: `${base}${AUDIT_PATH}`,
         offers: { '@type': 'Offer', price: 0, priceCurrency: 'USD' },
         publisher: { '@id': orgId },
       },
@@ -285,6 +331,7 @@ export function emitShell({
           'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, vendored spec.',
         url: `${base}/mcp`,
         documentation: `${base}/mcp-skill`,
+        softwareVersion: SITE_SPEC_VERSION,
         potentialAction: {
           '@type': 'ConsumeAction',
           name: 'Invoke MCP',
@@ -321,7 +368,7 @@ export function emitShell({
     <title>${esc(title)}</title>
     <meta name="description" content="${esc(description)}" />
     <link rel="canonical" href="${canonical}" />
-    <link rel="alternate" type="text/markdown" href="${markdownTwinPath}" title="This page as markdown" />
+    ${alternatesHtml}
     <link rel="alternate" type="text/markdown" href="/llms.txt" title="LLM-friendly index" />
     <link rel="alternate" type="text/markdown" href="/llms-full.txt" title="LLM-friendly full spec" />
     <link rel="alternate" type="application/json" href="/.well-known/mcp/server-card.json" title="MCP server card" />
@@ -356,7 +403,7 @@ ${isIndex || turnstileSitekey ? `    <meta name="turnstile-sitekey" content="{{T
     <link rel="stylesheet" href="/css/site.css" />
 
     <script type="application/ld+json">${JSON.stringify(jsonLd)}</script>
-    <script>${themeInitJs}</script>
+    <script>${themeInitJs}</script>${extraHeadJs ? `\n    <script>${extraHeadJs}</script>` : ''}
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -411,6 +458,7 @@ ${NAV_LINKS.map((l) => renderNavLink(l, canonicalPath)).join('\n')}
       </div>
     </header>
     <main id="main">
+${crumbNav}
 ${bodyHtml}
     </main>
     <footer class="site-footer">
@@ -438,6 +486,7 @@ ${SOURCE_REPOS.map(
           <a href="/methodology">Methodology</a>
           <a href="/coverage">Coverage</a>
           <a href="/contribute">Contribute</a>
+          <a href="/privacy">Privacy</a>
           <a href="/scorecard-schema">Scorecard schema</a>
           <a href="/web-scorecard-schema">Web scorecard schema</a>
           <a href="/llms.txt">llms.txt</a>

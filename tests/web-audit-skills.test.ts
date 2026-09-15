@@ -1,10 +1,10 @@
 // Web-audit fix-skill pages + agent-skills directory tests (plan-003
 // U10/U11, R11): one generated content page per check at
-// /web-audit/skill/<id> (+ .md twin), and the .well-known index as a
+// /fix/<id> (+ .md twin), and the .well-known index as a
 // directory of pointers whose urls resolve to emitted artifacts.
 
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
@@ -61,7 +61,7 @@ describe('buildSkillMarkdown', () => {
     expect(md).toContain('## Resources');
     expect(md).toContain('- [OpenAPI 3.1](https://spec.openapis.org/oas/latest.html)');
     expect(md).toContain('## Copy-paste prompt');
-    expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(md).toContain('Skill: https://anc.dev/fix/openapi');
     expect(md).toContain('Docs: https://spec.openapis.org/oas/latest.html');
     expect(md).toContain('## Verify');
     expect(md).toContain('API, MUST');
@@ -79,7 +79,7 @@ describe('emitWebAuditSkillPages', () => {
     const registry = normalizeWebAuditRegistry(yaml.load(raw) as object);
     const checks = registry.checks as Array<{ id: string }>;
     expect(pages.length).toBe(checks.length);
-    const emitted = await readdir(join(distDir, 'web-audit', 'skill'));
+    const emitted = await readdir(join(distDir, 'fix'));
     expect(emitted.length).toBe(checks.length * 2);
     for (const check of checks) {
       expect(emitted).toContain(`${check.id}.html`);
@@ -92,16 +92,16 @@ describe('emitWebAuditSkillPages', () => {
 
   test('a representative page serves HTML with the skill body and the twin serves markdown', async () => {
     const { distDir } = await emitToTmp();
-    const html = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.html'), 'utf8');
+    const html = await readFile(join(distDir, 'fix', 'openapi.html'), 'utf8');
     expect(html).toContain('<h1');
     expect(html).toContain('Copy-paste prompt');
-    const md = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.md'), 'utf8');
+    const md = await readFile(join(distDir, 'fix', 'openapi.md'), 'utf8');
     expect(md.startsWith('# Fix: ')).toBe(true);
   });
 
   test('skill HTML carries the prompt in a hidden data attribute and renders no fenced prompt', async () => {
     const { distDir } = await emitToTmp();
-    const html = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.html'), 'utf8');
+    const html = await readFile(join(distDir, 'fix', 'openapi.html'), 'utf8');
     // Goal/Fix prose still render as headings.
     expect(html).toContain('Goal');
     expect(html).toContain('Fix');
@@ -114,7 +114,7 @@ describe('emitWebAuditSkillPages', () => {
 
   test('skill .md keeps the Copy-paste prompt heading and fenced prompt', async () => {
     const { distDir } = await emitToTmp();
-    const md = await readFile(join(distDir, 'web-audit', 'skill', 'openapi.md'), 'utf8');
+    const md = await readFile(join(distDir, 'fix', 'openapi.md'), 'utf8');
     expect(md).toContain('## Copy-paste prompt');
     expect(md).toContain('```text');
     // The Issue line is retired; the audit's own finding rides the delimited
@@ -125,12 +125,31 @@ describe('emitWebAuditSkillPages', () => {
   test('every returned entry url maps to an emitted markdown artifact whose digest matches', async () => {
     const { distDir, pages } = await emitToTmp();
     for (const page of pages) {
-      expect(page.url).toBe(`https://anc.dev/web-audit/skill/${page.id}.md`);
-      const artifact = await readFile(join(distDir, 'web-audit', 'skill', `${page.id}.md`));
+      expect(page.url).toBe(`https://anc.dev/fix/${page.id}.md`);
+      const artifact = await readFile(join(distDir, 'fix', `${page.id}.md`));
       const digest = new Bun.CryptoHasher('sha256').update(artifact).digest('hex');
       expect(digest).toBe(page.digest);
     }
   });
+
+  test('a copy left under the retired path does not survive the emit', async () => {
+    // dist/ is not wiped between builds, so a page emitted before the move
+    // would go on answering its old URL beside the new one, and nothing else
+    // in the suite would notice: every other case reads a fresh temp dir.
+    const distDir = await mkdtemp(join(tmpdir(), 'web-audit-skills-stale-'));
+    tmpDirs.push(distDir);
+    const stale = join(distDir, 'web-audit', 'skill');
+    await mkdir(stale, { recursive: true });
+    await writeFile(join(stale, 'openapi.md'), 'stale');
+    await emitWebAuditSkillPages({
+      distDir,
+      registryPath: REGISTRY_PATH,
+      remediationPath: REMEDIATION_PATH,
+      themeInit: '',
+      baseUrl: 'https://anc.dev',
+    });
+    expect(await readdir(stale).catch(() => null)).toBeNull();
+  }, 30_000);
 });
 
 describe('agent-skills directory of pointers (U11)', () => {
@@ -139,7 +158,7 @@ describe('agent-skills directory of pointers (U11)', () => {
       id: 'openapi',
       title: 't',
       description: 'Fix the "openapi" web-audit check.',
-      url: 'https://anc.dev/web-audit/skill/openapi.md',
+      url: 'https://anc.dev/fix/openapi.md',
       digest: 'abc',
     },
   ];
@@ -152,7 +171,7 @@ describe('agent-skills directory of pointers (U11)', () => {
       name: 'web-audit-fix-openapi',
       type: 'skill-md',
       description: 'Fix the "openapi" web-audit check.',
-      url: 'https://anc.dev/web-audit/skill/openapi.md',
+      url: 'https://anc.dev/fix/openapi.md',
       digest: 'sha256:abc',
     });
   });
@@ -160,7 +179,7 @@ describe('agent-skills directory of pointers (U11)', () => {
   test('index.md is a human-readable twin listing the same skills', () => {
     const md = buildAgentSkillsIndexMd('https://anc.dev', webSkills);
     expect(md).toContain('# Agent skills on anc.dev');
-    expect(md).toContain('[web-audit-fix-openapi](https://anc.dev/web-audit/skill/openapi.md)');
+    expect(md).toContain('[web-audit-fix-openapi](https://anc.dev/fix/openapi.md)');
   });
 
   test('the built dist index lists every check with a resolvable target', async () => {
@@ -174,7 +193,7 @@ describe('agent-skills directory of pointers (U11)', () => {
     for (const skill of parsed.skills) {
       if (!skill.name.startsWith('web-audit-fix-')) continue;
       const id = skill.name.slice('web-audit-fix-'.length);
-      const artifact = await readFile(join(REPO_ROOT, 'dist', 'web-audit', 'skill', `${id}.md`), 'utf8');
+      const artifact = await readFile(join(REPO_ROOT, 'dist', 'fix', `${id}.md`), 'utf8');
       expect(artifact.length).toBeGreaterThan(0);
     }
   });

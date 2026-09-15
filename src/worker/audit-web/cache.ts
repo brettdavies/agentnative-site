@@ -16,6 +16,11 @@
 // 7-day lifecycle is prefix-scoped to `scores/` and does not apply to the
 // new `audits/web/` prefix, which defaults to no expiry.
 
+import { type AuditFreshness, freshnessFor, WEB_AUDIT_STALE_AFTER_MS } from '../../shared/audit-envelope';
+import { emitLog, type LogScope } from '../telemetry/log';
+
+export { WEB_AUDIT_STALE_AFTER_MS };
+
 export type WebCacheEnv = { SCORE_CACHE: R2Bucket };
 
 export type CachedWebAudit = {
@@ -48,13 +53,6 @@ export type CachedWebAggregate = {
 };
 
 const CACHE_CONTROL = 'public, max-age=300, s-maxage=300';
-
-// Staleness threshold for the on-demand paths: a hit younger than this
-// serves cached; an older hit falls through to a fresh audit (still
-// behind the kill-switch/limiter/Turnstile gates). Also the interval
-// `refresh_after` adds to a scoring instant, so retuning it here moves
-// every surface's advertised cache-expiry eligibility with it.
-export const WEB_AUDIT_STALE_AFTER_MS = 1 * 60_000;
 
 // Logical display expiry for user-submitted rows on the /web all view:
 // an unseeded entry older than this drops off the board even though the
@@ -92,6 +90,17 @@ export function normalizeTargetUrl(raw: string): string {
 }
 
 /** Canonical audited target: scheme + host + `/` (drops path/query/fragment beyond the origin). */
+/** Prepend https:// when the input carries no scheme; null on unparseable input. */
+export function coerceUrl(raw: unknown): URL | null {
+  if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim()) ? raw.trim() : `https://${raw.trim()}`;
+  try {
+    return new URL(candidate);
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalTargetOf(url: URL): string {
   return `${url.protocol}//${url.host}/`;
 }
@@ -142,48 +151,90 @@ export function isStale(scoredAt: string | undefined, thresholdMs: number, now: 
  * authoritative scoring time and the earliest moment the entry leaves the
  * cache-reuse window.
  */
-export type WebAuditFreshness = {
-  cached: boolean;
-  scored_at: string | null;
-  refresh_after: string | null;
-};
+export type WebAuditFreshness = AuditFreshness;
 
 /**
- * Build the freshness envelope from one scoring instant. `refresh_after`
- * is always derived here, never stored, so a stored stamp and a served
- * refresh time cannot drift; it means cache-expiry eligibility only, not
- * that a fresh audit will be available (the kill switch, limiters, and
- * Turnstile still apply). A missing or unparseable legacy stamp reports
- * both instants as null rather than synthesizing a recent scoring time.
+ * The web lane's freshness from one scoring instant: the shared table
+ * derives `refresh_after` so a stored stamp and a served refresh time
+ * cannot drift. It means cache-expiry eligibility only, not that a fresh
+ * audit will be available (the kill switch, limiters, and Turnstile still
+ * apply).
  */
 export function webAuditFreshness(cached: boolean, scoredAt: string | null | undefined): WebAuditFreshness {
-  if (!scoredAt) return { cached, scored_at: null, refresh_after: null };
-  const t = Date.parse(scoredAt);
-  if (Number.isNaN(t)) return { cached, scored_at: null, refresh_after: null };
-  return { cached, scored_at: scoredAt, refresh_after: new Date(t + WEB_AUDIT_STALE_AFTER_MS).toISOString() };
+  return freshnessFor('web', cached, scoredAt);
 }
 
-export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
-  let obj: R2ObjectBody | null;
-  try {
-    obj = await env.SCORE_CACHE.get(key);
-  } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.get', key, error: errMsg(err) }));
-    return null;
+/**
+ * A read R2 could not answer, which is not the same thing as a key holding
+ * nothing. Reporting the two alike tells a reader that a site has never been
+ * audited because storage blinked, on a URL the sitemap and the board both
+ * promise exists.
+ */
+export class WebCacheUnavailableError extends Error {
+  constructor(
+    readonly key: string,
+    cause: unknown,
+  ) {
+    super(`web cache unreadable for ${key}: ${errMsg(cause)}`);
+    this.name = 'WebCacheUnavailableError';
   }
+}
+
+// R2 answers an internal error with "please try again", and it means it: the
+// four that produced a 404 on a live scorecard were spread over 38 seconds on
+// one key. Only the fetch retries; a parse or shape failure is conclusive.
+const GET_BACKOFF_MS = [50, 200] as const;
+
+async function getObject(env: WebCacheEnv, key: string): Promise<R2ObjectBody | null> {
+  let last: unknown;
+  for (let attempt = 0; attempt <= GET_BACKOFF_MS.length; attempt++) {
+    try {
+      return await env.SCORE_CACHE.get(key);
+    } catch (err) {
+      last = err;
+      const backoff = GET_BACKOFF_MS[attempt];
+      if (backoff !== undefined) await new Promise((r) => setTimeout(r, backoff));
+    }
+  }
+  emitLog({ scope: 'web-cache.get' }, { key, error: errMsg(last), attempts: GET_BACKOFF_MS.length + 1 });
+  throw new WebCacheUnavailableError(key, last);
+}
+
+/**
+ * The tolerant read, for the batch and background paths: a cache it cannot
+ * read is one they re-derive anyway, so an unreadable key degrades to a miss
+ * rather than failing a rescore cycle or an aggregate rebuild. A path that
+ * answers a reader wants `getForRequest` instead.
+ */
+export async function get(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
+  try {
+    return await getForRequest(env, key);
+  } catch (err) {
+    if (err instanceof WebCacheUnavailableError) return null;
+    throw err;
+  }
+}
+
+/**
+ * The strict read, for a path that answers a reader or an agent. Throws
+ * `WebCacheUnavailableError` when R2 cannot be read, so the caller can say so
+ * instead of claiming the audit does not exist.
+ */
+export async function getForRequest(env: WebCacheEnv, key: string): Promise<CachedWebAudit | null> {
+  const obj = await getObject(env, key);
   if (obj === null) return null;
 
   let raw: unknown;
   try {
     raw = await obj.json();
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.get', key, error: `json_parse: ${errMsg(err)}` }));
+    emitLog({ scope: 'web-cache.get' }, { key, error: `json_parse: ${errMsg(err)}` });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
 
   if (!isCachedWebAudit(raw)) {
-    console.log(JSON.stringify({ scope: 'web-cache.get', key, error: 'corrupted_payload' }));
+    emitLog({ scope: 'web-cache.get' }, { key, error: 'corrupted_payload' });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
@@ -267,7 +318,7 @@ async function writeAuditObject(
   env: WebCacheEnv,
   key: string,
   payload: CachedWebAudit & { scored_at: string },
-  scope: string,
+  scope: LogScope,
 ): Promise<boolean> {
   try {
     await env.SCORE_CACHE.put(key, JSON.stringify(payload), {
@@ -276,7 +327,7 @@ async function writeAuditObject(
     });
     return true;
   } catch (err) {
-    console.log(JSON.stringify({ scope, key, error: errMsg(err) }));
+    emitLog({ scope }, { key, error: errMsg(err) });
     return false;
   }
 }
@@ -359,7 +410,7 @@ export async function listAllWebAudits(env: WebCacheEnv, opts: ListAllWebAuditsO
       cursor = page.truncated ? page.cursor : undefined;
     } while (cursor);
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.listAllWebAudits', error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.listAllWebAudits' }, { error: errMsg(err) });
   }
   return out;
 }
@@ -409,7 +460,7 @@ export async function getAggregate(
   try {
     obj = await env.SCORE_CACHE.get(key);
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.getAggregate', key, error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.getAggregate' }, { key, error: errMsg(err) });
     return null;
   }
   if (obj === null) return null;
@@ -418,13 +469,13 @@ export async function getAggregate(
   try {
     raw = await obj.json();
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.getAggregate', key, error: `json_parse: ${errMsg(err)}` }));
+    emitLog({ scope: 'web-cache.getAggregate' }, { key, error: `json_parse: ${errMsg(err)}` });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
 
   if (!isCachedWebAggregate(raw)) {
-    console.log(JSON.stringify({ scope: 'web-cache.getAggregate', key, error: 'corrupted_payload' }));
+    emitLog({ scope: 'web-cache.getAggregate' }, { key, error: 'corrupted_payload' });
     env.SCORE_CACHE.delete(key).catch(() => {});
     return null;
   }
@@ -454,7 +505,7 @@ export async function putAggregate(
     });
     return true;
   } catch (err) {
-    console.log(JSON.stringify({ scope: 'web-cache.putAggregate', key, error: errMsg(err) }));
+    emitLog({ scope: 'web-cache.putAggregate' }, { key, error: errMsg(err) });
     return false;
   }
 }

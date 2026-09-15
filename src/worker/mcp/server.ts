@@ -7,6 +7,7 @@
 
 import { McpServer } from '@modelcontextprotocol/server';
 import { createMcpHandler } from 'agents/mcp/server';
+import type { AuditJob } from '../audit/job';
 import { type Catalog, getWarmCatalog } from './catalog';
 import { getMcpEnv } from './env-context';
 import { buildInstructions, SPEC_REVISION } from './instructions';
@@ -47,6 +48,7 @@ export interface GetMcpHandlerOptions {
 export interface McpEnv {
   ASSETS: Fetcher;
   SCORE?: DurableObjectNamespace;
+  AUDIT_JOB?: DurableObjectNamespace<AuditJob>;
   SCORE_KV?: KVNamespace;
   SCORE_CACHE?: R2Bucket;
   SCORE_LIMITER?: { limit(o: { key: string }): Promise<{ success: boolean }> };

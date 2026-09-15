@@ -26,6 +26,11 @@
 #   container  Env container app state is `ready`
 #   pages      `<env-url>/`, `/scorecards`, `/api/score` registry-hit all return
 #              expected
+#   retired    every path the funnel retired answers 404 with no redirect,
+#              except the published inbound links, which 301 to a pinned
+#              destination. Run after the zone purge, or a cached pre-cut
+#              response answers first.
+#   sitemap    every `<loc>` the sitemap advertises returns 200
 #   mcp        Live MCP suite (transport + symmetry + live audit) via
 #              scripts/release/mcp-smoke.sh against the env URL. Passes
 #              --full-cache-coverage to mcp-smoke.sh against staging so the
@@ -119,7 +124,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help) usage ;;
-    deploy | container | pages | mcp | purge | backport | all)
+    deploy | container | pages | retired | sitemap | mcp | purge | backport | all)
       SUBCMD="$1"
       shift
       ;;
@@ -318,17 +323,104 @@ gate_pages() {
     gate_fail "${ENV_URL}/scorecards" "did not return HTML with leaderboard-table"
   fi
 
-  local body kind anc_v spec_v
+  local body tier scorecard_url spec_v
   body=$(ecurl -fSsL -m 10 "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
-    -d '{"input":"ripgrep","turnstile_token":"x"}' 2>/dev/null || true)
-  kind=$(printf '%s' "$body" | jq -r '.scorecard.kind // empty' 2>/dev/null || true)
-  anc_v=$(printf '%s' "$body" | jq -r '.anc_version // empty' 2>/dev/null || true)
+    -d '{"target":"ripgrep","turnstile_token":"x"}' 2>/dev/null || true)
+  tier=$(printf '%s' "$body" | jq -r '.tier // empty' 2>/dev/null || true)
+  scorecard_url=$(printf '%s' "$body" | jq -r '.scorecard_url // empty' 2>/dev/null || true)
   spec_v=$(printf '%s' "$body" | jq -r '.spec_version // empty' 2>/dev/null || true)
-  if [[ "$kind" == "registry_hit" && -n "$anc_v" && -n "$spec_v" ]]; then
-    gate_pass "${ENV_URL}/api/score registry-hit returns kind=registry_hit, anc=$anc_v, spec=$spec_v"
+  if [[ "$tier" == "registry" && "$scorecard_url" == */score/ripgrep && -n "$spec_v" ]]; then
+    gate_pass "${ENV_URL}/api/score registry hit returns tier=registry, $scorecard_url, spec=$spec_v"
   else
-    gate_fail "${ENV_URL}/api/score registry-hit" "kind=$kind anc=$anc_v spec=$spec_v"
+    gate_fail "${ENV_URL}/api/score registry hit" "tier=$tier scorecard_url=$scorecard_url spec=$spec_v"
+  fi
+}
+
+# Gate: retired -------------------------------------------------------------
+# Every path R20 removed answers the site 404 with no redirect. Run this after
+# the zone purge: a cached 200 or 301 from the pre-cut deploy would otherwise
+# pass as a live answer. No --retry-all-errors here, for the same reason: a
+# retry would paper over the very status this gate exists to read.
+
+RETIRED_PATHS=(
+  /check
+  /web
+  /web.md
+  /web/scoring
+  /web-audit/skill/openapi
+  /score/live/ouch
+  /api/score.md
+)
+
+# Retired paths that still resolve, as `<path>|<location>`. The entry page is
+# one path; the website result is a rule over every audited host, and the row
+# below is one live sample of it rather than the whole set. The gate pins each
+# destination so a redirect cannot quietly become a 404 or start pointing
+# somewhere else.
+RETIRED_REDIRECTS=(
+  "/web-audit|/audit?lane=web"
+  "/web-audit.md|/audit.md"
+  "/web/sounding.brettdavies.workers.dev|/score/sounding.brettdavies.workers.dev"
+)
+
+gate_retired() {
+  header "Retired paths against $ENV_URL"
+  require_bin curl
+
+  local path out code location entry want
+  for path in "${RETIRED_PATHS[@]}"; do
+    out=$(ecurl -sSI -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' "${ENV_URL}${path}" 2>/dev/null || true)
+    code=${out%% *}
+    location=${out#* }
+    if [[ "$code" == "404" && -z "$location" ]]; then
+      gate_pass "$path is 404 with no redirect"
+    else
+      gate_fail "$path retirement" "code=$code redirect=${location:-none}"
+    fi
+  done
+
+  for entry in "${RETIRED_REDIRECTS[@]}"; do
+    path=${entry%%|*}
+    want=${entry#*|}
+    out=$(ecurl -sSI -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' "${ENV_URL}${path}" 2>/dev/null || true)
+    code=${out%% *}
+    location=${out#* }
+    if [[ "$code" == "301" && "$location" == *"$want" ]]; then
+      gate_pass "$path 301s to $want"
+    else
+      gate_fail "$path redirect" "code=$code redirect=${location:-none} want=$want"
+    fi
+  done
+}
+
+# Gate: sitemap -------------------------------------------------------------
+# Every URL the sitemap advertises resolves. A retirement that missed an
+# emitter shows up here as a 404 on a page the site still tells crawlers about.
+
+gate_sitemap() {
+  header "Sitemap walk against $ENV_URL"
+  require_bin curl
+
+  local xml locs loc code failures=0 total=0
+  xml=$(ecurl -fSsL -m 20 "${ENV_URL}/sitemap.xml" 2>/dev/null || true)
+  locs=$(printf '%s' "$xml" | grep -oE '<loc>[^<]+</loc>' | sed -E 's#</?loc>##g' || true)
+  if [[ -z "$locs" ]]; then
+    gate_fail "${ENV_URL}/sitemap.xml" "no <loc> entries parsed"
+    return
+  fi
+  while IFS= read -r loc; do
+    [[ -z "$loc" ]] && continue
+    total=$((total + 1))
+    code=$(ecurl -sS -m 15 --retry 2 --retry-all-errors -o /dev/null -w '%{http_code}' \
+      -H 'Accept: text/html' "$loc" 2>/dev/null || echo "000")
+    if [[ "$code" != "200" ]]; then
+      gate_fail "sitemap entry $loc" "code=$code"
+      failures=$((failures + 1))
+    fi
+  done <<<"$locs"
+  if [[ "$failures" -eq 0 ]]; then
+    gate_pass "all $total sitemap entries return 200"
   fi
 }
 
@@ -427,6 +519,8 @@ case "$SUBCMD" in
   deploy) gate_deploy ;;
   container) gate_container ;;
   pages) gate_pages ;;
+  retired) gate_retired ;;
+  sitemap) gate_sitemap ;;
   mcp) gate_mcp ;;
   purge) gate_purge ;;
   backport) gate_backport ;;
@@ -434,6 +528,8 @@ case "$SUBCMD" in
     gate_deploy
     gate_container
     gate_pages
+    gate_retired
+    gate_sitemap
     gate_mcp
     gate_purge
     gate_backport

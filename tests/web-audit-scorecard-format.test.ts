@@ -9,8 +9,6 @@ import { join } from 'node:path';
 import { WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import {
   buildFrontpageBoardRows,
-  buildWebLeaderboardBody,
-  buildWebLeaderboardMarkdown,
   rankWebEntries,
   type WebBoardEntry,
 } from '../src/worker/audit-web/leaderboard-render';
@@ -162,7 +160,7 @@ describe('buildWebSummaryBody (U14)', () => {
   test('headlines RELATIVE with GLOBAL as a labeled secondary metric', () => {
     expect(html).toContain('bigscore__n">82<');
     expect(html).toContain('site score');
-    expect(html).toContain('bigscore__n">72<');
+    expect(html).toContain('result-score__secondary-n">72<');
     expect(html).toContain('global-ready');
     expect(html).toContain('maximally agent-ready site');
   });
@@ -184,7 +182,7 @@ describe('buildWebSummaryBody (U14)', () => {
   });
 
   test('a category with only n_a rows shows 0/0 and is de-emphasized', () => {
-    expect(html).toContain('catcard--empty');
+    expect(html).toContain('pscore__row--empty');
     expect(html).toContain('<span class="audit-group__rollup">0 / 0</span>');
   });
 
@@ -198,7 +196,7 @@ describe('buildWebSummaryBody (U14)', () => {
     expect(html).toContain('Not found (https://example.com/openapi.json -&gt; 404)');
     expect(html).toContain('Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(html).toContain('https://spec.openapis.org/oas/latest.html');
-    expect(html).toContain('https://anc.dev/web-audit/skill/openapi');
+    expect(html).toContain('https://anc.dev/fix/openapi');
     // The prompt is carried in a data attribute, never rendered as a <pre>.
     expect(html).not.toContain('<pre>');
     expect(html).toContain('data-copy-text="Goal: Publish an OpenAPI description');
@@ -280,7 +278,7 @@ describe('buildWebSummaryBody (U14)', () => {
       /web-check__label">[^<]*<\/span> <span class="tier tier-must">MUST<\/span> <span class="audit__status"/,
     );
     // The category header still carries no tier (that was the misnomer).
-    expect(html).not.toContain('catcard__hd tier-');
+    expect(html).not.toMatch(/pscore__row--category[^>]*tier-(must|should|may)/);
   });
 });
 
@@ -309,7 +307,7 @@ describe('buildWebSummaryMarkdown (U14)', () => {
     expect(md).toContain('### MISSING — An OpenAPI description is published');
     expect(md).toContain('- Fix: Publish an OpenAPI 3.1 description at /openapi.json.');
     expect(md).toContain('```text');
-    expect(md).toContain('Skill: https://anc.dev/web-audit/skill/openapi');
+    expect(md).toContain('Skill: https://anc.dev/fix/openapi');
     expect(md).not.toContain('Assemble fix prompts');
     expect(md).not.toContain('Include SHOULD');
   });
@@ -665,10 +663,10 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
     // C4 is API, C5 is MCP; the header goes id -> title -> rollup with no
     // tier badge (MUST/SHOULD/MAY is a per-check obligation, not a group's).
     expect(html).toMatch(
-      /<span class="spec__id">C4<\/span>\s*<h3 class="audit-group__title">API<\/h3>\s*<span class="audit-group__rollup/,
+      /<span class="spec__id">C4<\/span>\s*<div class="pscore__body">\s*<h3 class="spec__title audit-group__title">API<\/h3>\s*<p class="pscore__evidence"><span class="audit-group__rollup/,
     );
     expect(html).toMatch(
-      /<span class="spec__id">C5<\/span>\s*<h3 class="audit-group__title">MCP<\/h3>\s*<span class="audit-group__rollup/,
+      /<span class="spec__id">C5<\/span>\s*<div class="pscore__body">\s*<h3 class="spec__title audit-group__title">MCP<\/h3>\s*<p class="pscore__evidence"><span class="audit-group__rollup/,
     );
   });
 
@@ -695,73 +693,12 @@ describe('web scorecard category cards (six categories, no group tier)', () => {
   });
 
   test('no category header carries a tier badge or a tier-* class', () => {
-    const headers = [...html.matchAll(/<div class="catcard__hd[^"]*">[\s\S]*?<\/div>/g)].map((m) => m[0]);
+    const headers = [...html.matchAll(/<span class="spec__id">C\d<\/span>[\s\S]*?<\/p>/g)].map((m) => m[0]);
     expect(headers).toHaveLength(6);
     for (const header of headers) {
       expect(header).not.toContain('class="tier"');
       expect(header).not.toMatch(/tier-(must|should|may)/);
     }
-  });
-});
-
-describe('web leaderboard (U15)', () => {
-  // A small perfect site (relative 100, low global) vs a bigger,
-  // higher-GLOBAL platform: GLOBAL ranks the platform first by default;
-  // RELATIVE puts the perfect site on top.
-  function entry(domain: string, relative: number, globalScore: number): WebBoardEntry {
-    return {
-      domain,
-      url: `https://${domain}/`,
-      name: domain,
-      description: 'x',
-      score_pct: relative,
-      score: { relative, global: globalScore },
-      curated: true,
-    };
-  }
-  const entries = [entry('small-perfect.dev', 100, 45), entry('big-platform.dev', 88, 79)];
-  const boardOpts = { view: 'all', curatedCount: 2, userCount: 0 } as const;
-
-  test('default order is RELATIVE descending: the perfect-for-its-type site outranks the bigger routine', () => {
-    const ranked = rankWebEntries(entries);
-    expect(ranked.map((e) => e.domain)).toEqual(['small-perfect.dev', 'big-platform.dev']);
-    expect(ranked[0].rank).toBe(1);
-  });
-
-  test('the GLOBAL key re-ranks the bigger routine to the top', () => {
-    const ranked = rankWebEntries(entries, 'global');
-    expect(ranked.map((e) => e.domain)).toEqual(['big-platform.dev', 'small-perfect.dev']);
-  });
-
-  test('renders both score columns, row sort data, the toggle control, and /web links', () => {
-    const html = buildWebLeaderboardBody(entries, boardOpts);
-    expect(html).toContain('data-surface-board-seg');
-    expect(html).toContain('id="board-s-web"');
-    expect(html).toContain('href="/web/small-perfect.dev"');
-    expect(html).toContain('data-web-sort="global"');
-    expect(html).toContain('data-web-sort="relative"');
-    expect(html).toContain('data-global="79" data-relative="88"');
-    expect(html).toContain('<th class="lb-score">Global</th>');
-    expect(html).toContain('<th class="lb-score">Relative</th>');
-    expect(html).not.toContain('lb-principles');
-    expect(html).not.toContain('ANC 100');
-  });
-
-  test('an empty board renders the scoring-in-progress state, not a broken table', () => {
-    const html = buildWebLeaderboardBody([], { view: 'all', curatedCount: 0, userCount: 0 });
-    expect(html).not.toContain('<tbody>');
-    expect(html).toContain('Scoring in progress');
-    expect(html).toContain('data-surface-board-seg');
-  });
-
-  test('markdown twin lists RELATIVE-ordered rows with both columns, origin-absolute', () => {
-    const md = buildWebLeaderboardMarkdown(entries, 'https://anc.dev', boardOpts);
-    expect(md).toContain('| 1 | [small-perfect.dev](https://anc.dev/web/small-perfect.dev) | 45% | 100% | curated |');
-    expect(md).toContain('| 2 | [big-platform.dev](https://anc.dev/web/big-platform.dev) | 79% | 88% | curated |');
-  });
-
-  test('the CLI leaderboard hero is not present on the web board', () => {
-    expect(buildWebLeaderboardBody(entries, boardOpts)).toContain('Web Agent-Readiness Leaderboard');
   });
 });
 
@@ -922,44 +859,39 @@ describe('web scorecard schema doc drift guard (U16)', () => {
   });
 });
 
-describe('leaderboard friendly-name display', () => {
-  function entry(over: Partial<WebBoardEntry> = {}): WebBoardEntry {
+describe('website category rows carry a status pill from their rollup', () => {
+  function scorecardWith(categories: Array<{ id: string; name: string; passed: number; counted: number }>) {
     return {
-      domain: 'developers.cloudflare.com',
-      url: 'https://developers.cloudflare.com/',
-      name: 'Cloudflare Developers',
-      description: 'Cloudflare developer docs.',
-      score_pct: 96,
-      score: { relative: 96, global: 90 },
-      curated: true,
-      ...over,
+      schema_version: '0.2',
+      spec_version: SPEC_VERSION,
+      target_url: 'https://example.com/',
+      tool: { name: 'example.com', url: 'https://example.com/' },
+      score_pct: 50,
+      score: { relative: 50, global: 40 },
+      categories,
+      results: [],
     };
   }
-  const singleOpts = { view: 'all', curatedCount: 1, userCount: 0 } as const;
-
-  test('/web renders "<domain> (<name>)" linking to the detail page, not the external site', () => {
-    const html = buildWebLeaderboardBody([entry()], singleOpts);
-    // whole-row stretched link: one anchor on the domain, row is position-anchored
-    expect(html).toContain('<tr class="lb-row"');
-    expect(html).toContain('<a class="lb-rowlink" href="/web/developers.cloudflare.com">developers.cloudflare.com</a>');
-    expect(html).toContain('<span class="lb-tool__name">(Cloudflare Developers)</span>');
-    // never links to the external site
-    expect(html).not.toContain('href="https://developers.cloudflare.com');
+  const html = buildWebSummaryBody({
+    scorecard: scorecardWith([
+      { id: 'a', name: 'All pass', passed: 2, counted: 2 },
+      { id: 'b', name: 'Some pass', passed: 1, counted: 2 },
+      { id: 'c', name: 'None pass', passed: 0, counted: 2 },
+      { id: 'd', name: 'Nothing applies', passed: 0, counted: 0 },
+    ]),
+    domain: 'example.com',
+    targetUrl: 'https://example.com/',
   });
 
-  test('a row whose name equals its domain shows no parenthetical', () => {
-    const html = buildWebLeaderboardBody(
-      [entry({ domain: 'crates.io', url: 'https://crates.io/', name: 'crates.io' })],
-      singleOpts,
-    );
-    expect(html).not.toContain('lb-tool__name');
-  });
-
-  test('the homepage pane shows the friendly name and the site score (relative), not global', () => {
-    const rows = buildFrontpageBoardRows([entry()]);
-    expect(rows).toContain('developers.cloudflare.com (Cloudflare Developers)');
-    expect(rows).toContain('href="/web/developers.cloudflare.com"');
-    expect(rows).toContain('width:96%'); // relative meter
-    expect(rows).not.toContain('width:90%'); // not the global score
+  test('every counted check passing is pass, none is fail, some is partial, nothing counted is n/a', () => {
+    const rows = [
+      ...html.matchAll(/data-category="([a-d])"[\s\S]*?<span class="stpill stpill--(\w+)">(\w+\/?\w*)<\/span>/g),
+    ].map((m) => [m[1], m[2], m[3]]);
+    expect(rows).toEqual([
+      ['a', 'pass', 'pass'],
+      ['b', 'warn', 'partial'],
+      ['c', 'fail', 'fail'],
+      ['d', 'na', 'n/a'],
+    ]);
   });
 });

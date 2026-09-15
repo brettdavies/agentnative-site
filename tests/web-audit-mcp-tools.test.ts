@@ -9,14 +9,19 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { normalizeWebAuditRegistry, normalizeWebRemediation } from '../src/build/13-web-audit-registry.mjs';
+import type { AuditEvent } from '../src/shared/audit-events';
+import type { AuditJob } from '../src/worker/audit/job';
+import { _resetResultCaches, handleResultRoute, type ResultEnv } from '../src/worker/audit/result';
+import { resolveBoardEntries, type WebBoardEnv } from '../src/worker/audit-web/board';
 import { keyFor, WEB_AUDIT_STALE_AFTER_MS } from '../src/worker/audit-web/cache';
 import { flushHitMinPurge, runWithHitMinPurge } from '../src/worker/audit-web/hit-min-purge';
+import { enforcePublicListingFlipLimit } from '../src/worker/audit-web/public-listing';
 import { resetWebAuditRegistryCacheForTests } from '../src/worker/audit-web/registry';
-import { handleWebAudit, handleWebLeaderboard, type WebAuditRouteEnv } from '../src/worker/audit-web/route';
 import { resetCatalogCacheForTests } from '../src/worker/mcp/catalog';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { resetWebRemediationCacheForTests } from '../src/worker/mcp/tools/web-remediation';
 import { SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { fakeJobNamespace } from './helpers/audit-job-state';
 import { getJsonToolContent, type JsonRpcBody, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const REPO_ROOT = new URL('..', import.meta.url).pathname;
@@ -94,6 +99,8 @@ interface WebEnvOpts {
   failRegistry?: boolean;
   // Serve the zero-check registry so a fresh audit finishes without probing.
   minimalRegistry?: boolean;
+  kvSeed?: Record<string, string>;
+  jobs?: DurableObjectNamespace<AuditJob>;
 }
 
 async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
@@ -145,11 +152,12 @@ async function makeEnv(opts: WebEnvOpts = {}): Promise<McpEnv> {
       },
     } as unknown as R2Bucket,
     SCORE_KV: {
-      async get() {
-        return null;
+      async get(key: string) {
+        return opts.kvSeed?.[key] ?? null;
       },
       async put() {},
     } as unknown as KVNamespace,
+    AUDIT_JOB: opts.jobs,
     WEB_AUDIT_ENABLED: (opts.webEnabled ?? true) ? 'true' : undefined,
     MCP_ENABLED: (opts.mcpEnabled ?? true) ? 'true' : undefined,
     WEB_AUDIT_LIMITER_IP: {
@@ -206,7 +214,7 @@ afterEach(() => {
 });
 
 describe('get_website_audit', () => {
-  test('cache hit returns found:true with the scorecard and share_url', async () => {
+  test('cache hit returns found:true with the result envelope and its three URLs', async () => {
     const key = await keyFor('https://example.com/', SPEC_VERSION);
     const env = await makeEnv({
       cachePrefill: {
@@ -219,7 +227,15 @@ describe('get_website_audit', () => {
     });
     const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
     expect(body.found).toBe(true);
-    expect(body.share_url).toBe('https://anc.dev/web/example.com');
+    expect(body).toMatchObject({
+      kind: 'web',
+      tier: 'cache',
+      target: 'example.com',
+      scorecard_url: 'https://anc.dev/score/example.com',
+      markdown_url: 'https://anc.dev/score/example.com/md',
+      json_url: 'https://anc.dev/score/example.com/json',
+    });
+    expect(body).not.toHaveProperty('share_url');
     expect((body.scorecard as { badge: { score_pct: number } }).badge.score_pct).toBe(88);
   });
 
@@ -296,10 +312,10 @@ describe('get_website_audit read-time enrichment', () => {
     const byId = new Map(scorecard.results.map((r) => [r.id, r]));
 
     expect(byId.get('openapi')?.result).toContain('Not found');
-    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
 
     expect(byId.get('mcp-tools-list')?.result).toContain('Present but broken');
-    expect(byId.get('mcp-tools-list')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/mcp-tools-list');
+    expect(byId.get('mcp-tools-list')?.remediation?.skill_url).toBe('https://anc.dev/fix/mcp-tools-list');
 
     const pass = byId.get('llms-txt');
     expect(pass?.result).toContain('Verified');
@@ -317,7 +333,7 @@ describe('get_website_audit read-time enrichment', () => {
     expect(scorecard.categories.map((c) => c.id)).toEqual(['mcp-api']);
     // Remediation still attaches from the catalog.
     const byId = new Map(scorecard.results.map((r) => [r.id, r]));
-    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(byId.get('openapi')?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
   });
 
   test('the minimal-payload guard passes a badge-only scorecard through unchanged', async () => {
@@ -485,19 +501,8 @@ function listedRow(domain: string, publicListing?: boolean): ListedObject {
 
 // The domains rendered as user (on-demand) rows on the /web markdown board,
 // pulled from the /web/<domain> link in each on-demand table row.
-function onDemandDomainsFromMarkdown(md: string): string[] {
-  return md
-    .split('\n')
-    .filter((line) => line.includes('| on-demand |'))
-    .map((line) => {
-      const m = line.match(/\/web\/([^)]+)\)/);
-      if (!m) throw new Error(`no domain link in on-demand row: ${line}`);
-      return m[1];
-    });
-}
-
 describe('list_website_audits', () => {
-  test('returns board summaries from the leaderboard aggregate with share_urls', async () => {
+  test('returns board summaries from the leaderboard aggregate with scorecard_urls', async () => {
     const env = await makeEnv({
       cachePrefill: {
         [`audits/web/leaderboard/${SPEC_VERSION}.json`]: {
@@ -518,10 +523,11 @@ describe('list_website_audits', () => {
     });
     const body = jsonContent(await callTool(env, 'list_website_audits', {}));
     expect(body.count).toBe(1);
-    const entries = body.entries as Array<{ domain: string; share_url: string; score_pct: number }>;
+    const entries = body.entries as Array<{ domain: string; scorecard_url: string; score_pct: number }>;
     expect(entries[0].domain).toBe('anc.dev');
     expect(entries[0].score_pct).toBe(67);
-    expect(entries[0].share_url).toBe('https://anc.dev/web/anc.dev');
+    expect(entries[0].scorecard_url).toBe('https://anc.dev/score/anc.dev');
+    expect(entries[0]).not.toHaveProperty('share_url');
   });
 
   test('an absent aggregate returns an empty list, not an error', async () => {
@@ -602,13 +608,16 @@ describe('list_website_audits', () => {
       .filter((d) => !curated.includes(d))
       .sort();
 
-    const res = await handleWebLeaderboard(
-      new Request('https://anc.dev/web.md?view=all'),
-      env as unknown as WebAuditRouteEnv,
-    );
-    const webUserRows = onDemandDomainsFromMarkdown(await res.text()).sort();
+    // The board's own resolver is the other side of the comparison: both the
+    // rendered board and this tool read their non-curated rows from it, so a
+    // divergence here is a divergence on the page.
+    const board = await resolveBoardEntries(env as unknown as WebBoardEnv, 'all');
+    const boardUserRows = board.entries
+      .filter((e) => !e.curated)
+      .map((e) => e.domain)
+      .sort();
 
-    expect(mcpUserRows).toEqual(webUserRows);
+    expect(mcpUserRows).toEqual(boardUserRows);
     expect(mcpUserRows).toEqual(['another-in.dev', 'opted-in.dev']);
   });
 
@@ -667,7 +676,7 @@ describe('get_web_remediation (reshaped, U13)', () => {
     expect(remediation.check_id).toBe('openapi');
     expect(typeof remediation.goal).toBe('string');
     expect(typeof remediation.fix).toBe('string');
-    expect(remediation.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(remediation.skill_url).toBe('https://anc.dev/fix/openapi');
     expect(Array.isArray(remediation.resources)).toBe(true);
     expect(String(remediation.prompt)).toContain('Goal: ');
   });
@@ -734,7 +743,7 @@ describe('audit_website inline remediation (U13)', () => {
     // The evidence rides the result line; the prompt is site-owned
     // catalog text and carries no target-controlled string (R19).
     expect(absent?.result).toContain('Not found (https://example.com/openapi.json -> 404)');
-    expect(absent?.remediation?.skill_url).toBe('https://anc.dev/web-audit/skill/openapi');
+    expect(absent?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
     expect(absent?.remediation?.prompt).toContain('--- begin evidence ---');
     expect(absent?.remediation?.prompt?.split('Observed (')[0]).not.toContain('openapi.json -> 404');
 
@@ -873,7 +882,7 @@ describe('audit_website public_listing', () => {
     const env = await envWithStore(store);
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, IP));
     expect((body.scorecard as { public_listing: boolean }).public_listing).toBe(true);
-    expect(body.share_url).toBe('https://anc.dev/web/example.com');
+    expect(body.scorecard_url).toBe('https://anc.dev/score/example.com');
     const stored = JSON.parse(store.get(key) as string) as {
       scorecard: { public_listing: boolean };
       scored_at: string;
@@ -1008,6 +1017,66 @@ describe('audit_website public_listing', () => {
 // `cached`, `scored_at`, and `refresh_after` beside the scorecard, byte-identical
 // to what the browser API returns for the same stored state; misses,
 // disabled-without-cache, and gate errors carry none.
+// AE5 (R17, R18): the JSON representation and the MCP read tool are the same
+// envelope over the same record. Deep equality is the assertion, not a field
+// list: a new field on one surface has to reach the other or this fails.
+describe('AE5: get_website_audit and /score/<host>/json are one envelope', () => {
+  const HOST = 'example.com';
+
+  test('both surfaces return deep-equal scorecard, freshness, and result URLs for one stored record', async () => {
+    const key = await keyFor(`https://${HOST}/`, SPEC_VERSION);
+    const record = {
+      spec_version: SPEC_VERSION,
+      target_url: `https://${HOST}/`,
+      scored_at: '2026-09-10T20:00:00.000Z',
+      scorecard: {
+        schema_version: '0.2',
+        target_url: `https://${HOST}/`,
+        score_pct: 64,
+        score: { relative: 82, global: 64 },
+        results: [
+          { id: 'llms-txt', status: 'pass', label: 'llms.txt', evidence: '200' },
+          { id: 'openapi', status: 'absent', label: 'OpenAPI', evidence: 'no /openapi.json' },
+        ],
+      },
+    };
+    const env = await makeEnv({ cachePrefill: { [key]: record } });
+
+    const tool = jsonContent(await callTool(env, 'get_website_audit', { url: HOST }));
+
+    _resetResultCaches();
+    const res = await handleResultRoute(new Request(`https://anc.dev/score/${HOST}/json`), env as unknown as ResultEnv);
+    expect(res.status).toBe(200);
+    const route = (await res.json()) as Record<string, unknown>;
+
+    expect(tool.scorecard).toEqual(route.scorecard);
+    expect(tool.freshness).toEqual(route.freshness);
+    expect({
+      kind: tool.kind,
+      tier: tool.tier,
+      target: tool.target,
+      scorecard_url: tool.scorecard_url,
+      markdown_url: tool.markdown_url,
+      json_url: tool.json_url,
+      spec_version: tool.spec_version,
+      score_pct: tool.score_pct,
+    }).toEqual({
+      kind: route.kind,
+      tier: route.tier,
+      target: route.target,
+      scorecard_url: route.scorecard_url,
+      markdown_url: route.markdown_url,
+      json_url: route.json_url,
+      spec_version: route.spec_version,
+      score_pct: route.score_pct,
+    });
+    // The equality is over an enriched body, not two empty ones: the row the
+    // run marked absent carries its fix on both surfaces.
+    const rows = (tool.scorecard as { results: Array<{ id: string; remediation?: { skill_url: string } }> }).results;
+    expect(rows.find((r) => r.id === 'openapi')?.remediation?.skill_url).toBe('https://anc.dev/fix/openapi');
+  });
+});
+
 describe('web-audit MCP freshness envelope', () => {
   const TARGET = 'https://example.com/';
   const IP = '203.0.113.21';
@@ -1017,11 +1086,7 @@ describe('web-audit MCP freshness envelope', () => {
   const refreshAfter = (scoredAt: string) => new Date(Date.parse(scoredAt) + WEB_AUDIT_STALE_AFTER_MS).toISOString();
 
   type Freshness = { cached: unknown; scored_at: unknown; refresh_after: unknown };
-  const freshnessOf = (body: Record<string, unknown>): Freshness => ({
-    cached: body.cached,
-    scored_at: body.scored_at,
-    refresh_after: body.refresh_after,
-  });
+  const freshnessOf = (body: Record<string, unknown>): Freshness => body.freshness as Freshness;
 
   function storedEntry(opts: { scoredAt?: string; stored?: boolean } = {}): string {
     const scorecard: Record<string, unknown> = {
@@ -1069,8 +1134,7 @@ describe('web-audit MCP freshness envelope', () => {
     const body = jsonContent(await callTool(env, 'get_website_audit', { url: 'never-seen.dev' }));
     expect(body.found).toBe(false);
     expect(body).not.toHaveProperty('cached');
-    expect(body).not.toHaveProperty('scored_at');
-    expect(body).not.toHaveProperty('refresh_after');
+    expect(body).not.toHaveProperty('freshness');
   });
 
   test('audit_website serve-cached reports cached:true with the stored instant', async () => {
@@ -1088,7 +1152,7 @@ describe('web-audit MCP freshness envelope', () => {
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
     expect(body.source).toBe('cache');
     expect(freshnessOf(body)).toEqual({ cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) });
-    expect(Date.parse(body.refresh_after as string)).toBeLessThan(Date.now());
+    expect(Date.parse(freshnessOf(body).refresh_after as string)).toBeLessThan(Date.now());
   });
 
   test('an audit_website listing patch reports cached:true and does not restamp the stored instant', async () => {
@@ -1129,20 +1193,18 @@ describe('web-audit MCP freshness envelope', () => {
     const body = jsonContent(await callTool(env, 'audit_website', { url: 'never-seen.dev' }, IP));
     expect(body.audited).toBe(false);
     expect(body).not.toHaveProperty('cached');
-    expect(body).not.toHaveProperty('scored_at');
-    expect(body).not.toHaveProperty('refresh_after');
+    expect(body).not.toHaveProperty('freshness');
   });
 
   test('list_website_audits carries no freshness fields', async () => {
     const env = await makeEnv({ cachePrefill: { [CURATED_AGGREGATE_KEY]: curatedAggregate(['first.dev']) } });
     const body = jsonContent(await callTool(env, 'list_website_audits', {}));
     expect(body).not.toHaveProperty('cached');
-    expect(body).not.toHaveProperty('scored_at');
-    expect(body).not.toHaveProperty('refresh_after');
+    expect(body).not.toHaveProperty('freshness');
   });
 
   // AE5 across surfaces: one stored entry, three read paths, identical values.
-  test('the browser API and both MCP read tools report byte-identical freshness for one stored entry', async () => {
+  test('both MCP read tools and the result JSON report byte-identical freshness for one stored entry', async () => {
     const scoredAt = new Date().toISOString();
     const store = new Map<string, string>();
     store.set(await keyFor(TARGET, SPEC_VERSION), storedEntry({ scoredAt, stored: true }));
@@ -1152,35 +1214,18 @@ describe('web-audit MCP freshness envelope', () => {
     const getBody = jsonContent(await callTool(env, 'get_website_audit', { url: 'example.com' }));
     const auditBody = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, IP));
 
-    // The web route's serve-cached branch precedes every metered gate, so it
-    // needs only R2 to answer.
-    const webEnv = {
-      ASSETS: {
-        async fetch() {
-          return new Response('not found', { status: 404 });
-        },
-      } as unknown as Fetcher,
-      SCORE_CACHE: makeBucket(store),
-      WEB_AUDIT_ENABLED: 'true',
-      TURNSTILE_SECRET: 'test-turnstile-secret',
-      SESSION_HMAC_SECRET: 'test-session-secret',
-    } as unknown as WebAuditRouteEnv;
-    const resp = await handleWebAudit(
-      new Request('https://anc.dev/api/audit-web', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: 'example.com' }),
-      }),
-      webEnv,
-      { waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext,
+    _resetResultCaches();
+    const res = await handleResultRoute(
+      new Request('https://anc.dev/score/example.com/json'),
+      env as unknown as ResultEnv,
     );
-    expect(resp.status).toBe(200);
-    const webBody = (await resp.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    const routeBody = (await res.json()) as Record<string, unknown>;
 
     const expected = { cached: true, scored_at: scoredAt, refresh_after: refreshAfter(scoredAt) };
     expect(freshnessOf(getBody)).toEqual(expected);
     expect(freshnessOf(auditBody)).toEqual(expected);
-    expect(freshnessOf(webBody)).toEqual(expected);
+    expect(freshnessOf(routeBody)).toEqual(expected);
   });
 
   test('both read-tool descriptions document the fields and the eligibility caveat', async () => {
@@ -1244,44 +1289,21 @@ describe('audit_website public_listing flip budget', () => {
     expect(r2.get(key)).toBe(afterFive);
   });
 
-  test('a budget exhausted through the web route blocks the MCP tool for the same domain', async () => {
+  test('a budget exhausted through the shared flip meter blocks the MCP tool for the same domain', async () => {
     const r2 = new Map<string, string>();
     const kv = new Map<string, string>();
     const key = await seed(r2, false, freshStamp());
-    const alwaysPass = { limit: async () => ({ success: true }) };
-    const turnstileFetch = (async () =>
-      new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })) as unknown as typeof fetch;
-    const throwingProbe = (() => {
-      throw new Error('engine must not run on a flag-only patch');
-    }) as unknown as typeof fetch;
-    const makeCtx = () => ({ waitUntil() {}, passThroughOnException() {}, props: {} }) as unknown as ExecutionContext;
-    // The web-route patch path needs no ASSETS or registry, only shared R2 + KV.
-    const webEnv = {
-      ASSETS: {
-        async fetch() {
-          return new Response('not found', { status: 404 });
-        },
-      } as unknown as Fetcher,
-      SCORE_CACHE: makeBucket(r2),
-      SCORE_KV: makeKvStore(kv),
-      WEB_AUDIT_ENABLED: 'true',
-      TURNSTILE_SECRET: 'test-turnstile-secret',
-      SESSION_HMAC_SECRET: 'test-session-secret',
-      WEB_AUDIT_LIMITER: alwaysPass,
-      WEB_AUDIT_LIMITER_IP: alwaysPass,
-    } as unknown as WebAuditRouteEnv;
-    // Exhaust the budget through the web route (five flips, F -> T, F, T, F, T).
+    // Both the transact endpoint and this tool meter a flip through the one
+    // helper, keyed by domain rather than by caller, so spending the budget
+    // through the helper is spending it for every surface.
+    const kvStore = makeKvStore(kv);
     for (let i = 0; i < 5; i++) {
-      const req = new Request('https://anc.dev/api/audit-web', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.13' },
-        body: JSON.stringify({ url: 'example.com', turnstile_token: 'x', public_listing: i % 2 === 0 }),
+      const outcome = await enforcePublicListingFlipLimit({
+        write: { path: 'audit', value: i % 2 === 0, flagChanges: true },
+        kv: kvStore,
+        domain: 'example.com',
       });
-      const resp = await handleWebAudit(req, webEnv, makeCtx(), { turnstileFetch, probeFetch: throwingProbe });
-      expect(resp.status).toBe(200);
+      expect(outcome).toBe('allowed');
     }
     // The MCP tool (fresh IP, same domain) draws from the same exhausted
     // per-domain budget: its sixth flip is rejected and writes nothing.
@@ -1289,9 +1311,79 @@ describe('audit_website public_listing flip budget', () => {
     (mcpEnv as { SCORE_CACHE: R2Bucket }).SCORE_CACHE = makeBucket(r2);
     (mcpEnv as { SCORE_KV: KVNamespace }).SCORE_KV = makeKvStore(kv);
     const before = r2.get(key);
-    const res = await callTool(mcpEnv, 'audit_website', { url: 'example.com', public_listing: false }, '203.0.113.14');
+    // The stored flag is false, so asking for true is a real flip and has to
+    // draw on the exhausted budget rather than serving the cached record.
+    const res = await callTool(mcpEnv, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.14');
     expect(res.result?.isError).toBe(true);
     expect(res.result?.content?.[0]?.text ?? '').toContain('flip_rate_limited');
     expect(r2.get(key)).toBe(before);
+  });
+});
+
+describe('audit_website: a run already in flight', () => {
+  const AT = '2026-09-11T00:00:00.000Z';
+  const complete = {
+    type: 'complete',
+    kind: 'web',
+    tier: 'live',
+    target: 'example.com',
+    scorecard_url: 'https://anc.dev/score/example.com',
+    markdown_url: 'https://anc.dev/score/example.com/md',
+    json_url: 'https://anc.dev/score/example.com/json',
+    freshness: { cached: false, scored_at: AT, refresh_after: '2026-09-11T00:01:00.000Z' },
+    spec_version: SPEC_VERSION,
+    target_url: 'https://example.com/',
+    scorecard: { target_url: 'https://example.com/', score_pct: 64, results: [] },
+  } as unknown as AuditEvent;
+
+  async function inFlightEnv(limiterOk: boolean): Promise<McpEnv> {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('web:example.com'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'web', target: 'example.com', started_at: AT });
+    setTimeout(() => void job.append(claim.run, complete), 20);
+    return makeEnv({
+      jobs,
+      limiterOk,
+      kvSeed: { 'inflight:web:example.com': JSON.stringify({ started_at: AT, job: 'web:example.com' }) },
+    });
+  }
+
+  test('a caller the burst limiter denies cannot attach to the run in flight', async () => {
+    // Attaching holds a request open for the rest of someone else's run, so
+    // it waits behind the same per-source gate a fresh audit does.
+    const env = await inFlightEnv(false);
+    const res = await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+
+  test('a caller with no client IP cannot attach to the run in flight', async () => {
+    const env = await inFlightEnv(true);
+    const res = await callTool(env, 'audit_website', { url: 'example.com' });
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
+  });
+
+  test('an in-flight domain attaches once the caller passes the source gates', async () => {
+    const env = await inFlightEnv(true);
+    const body = jsonContent(await callTool(env, 'audit_website', { url: 'example.com' }, '203.0.113.9'));
+    expect(body).toMatchObject({
+      audited: true,
+      attached: true,
+      source: 'fresh-audit',
+      freshness: { cached: false, scored_at: AT },
+      spec_version: SPEC_VERSION,
+    });
+    expect(String(body.scorecard_url)).toContain('example.com');
+    expect((body.scorecard as { score_pct: number }).score_pct).toBe(64);
+  });
+
+  test('an explicit public_listing is its own request: it runs the gates rather than attaching', async () => {
+    const env = await inFlightEnv(false);
+    const res = await callTool(env, 'audit_website', { url: 'example.com', public_listing: true }, '203.0.113.9');
+    expect(res.result?.isError).toBe(true);
+    expect(res.result?.content?.[0]?.text).toContain('-32099');
   });
 });

@@ -1,23 +1,23 @@
 # agentnative-site
 
 Source for [anc.dev](https://anc.dev), the public surface for the agent-native CLI standard. The site publishes the
-eight principles of the standard, the ANC 100 leaderboard, per-tool curated scorecards, a live-scoring form, the score
-badge surface, and the agent-native-cli skill bundle distribution endpoint.
+eight principles of the standard, the ANC 100 leaderboard, per-tool curated scorecards, one audit entry form for CLI
+tools and websites, the score badge surface, and the agent-native-cli skill bundle distribution endpoint.
 
 ## What it serves
 
-| Route                                                               | Purpose                                                                 |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `/`                                                                 | Homepage with the principle index and a live-score form to `/api/score` |
-| `/scorecards`                                                       | The ANC 100 leaderboard (every curated tool, sortable)                  |
-| `/score/<tool>`                                                     | Per-tool curated scorecards (renders from `scorecards/<tool>.json`)     |
-| `/score/live/<binary>`                                              | Shareable live-score result pages backed by the R2 score cache          |
-| `/audit`, `/install`, `/methodology`, `/badge`, `/scorecard-schema` | Supporting pages on usage, install, scoring methodology, badge, schema  |
-| `/contribute`, `/about`                                             | Contribution map and attribution                                        |
-| `/skill`                                                            | Human-facing install for the `agent-native-cli` skill bundle            |
-| `/skill.json`                                                       | Canonical machine-primary skill manifest                                |
-| `POST /mcp`                                                         | Model Context Protocol server; client skill at `/mcp-skill.md`          |
-| `/llms.txt`, `/llms-full.txt`                                       | llmstxt.org convention (summary index plus full concatenated spec)      |
+| Route                                                               | Purpose                                                                |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `/`                                                                 | Homepage with the principle index and the audit entry form             |
+| `/scorecards`                                                       | The ANC 100 leaderboard (every curated tool, sortable)                 |
+| `/score/<tool>`                                                     | Per-tool curated scorecards (renders from `scorecards/<tool>.json`)    |
+| `/score/live/<binary>`                                              | Shareable live-score result pages backed by the R2 score cache         |
+| `/audit`, `/install`, `/methodology`, `/badge`, `/scorecard-schema` | Supporting pages on usage, install, scoring methodology, badge, schema |
+| `/contribute`, `/about`                                             | Contribution map and attribution                                       |
+| `/skill`                                                            | Human-facing install for the `agent-native-cli` skill bundle           |
+| `/skill.json`                                                       | Canonical machine-primary skill manifest                               |
+| `POST /mcp`                                                         | Model Context Protocol server; client skill at `/mcp-skill.md`         |
+| `/llms.txt`, `/llms-full.txt`                                       | llmstxt.org convention (summary index plus full concatenated spec)     |
 
 Every HTML page has a markdown twin reachable via `.md` suffix or `Accept: text/markdown` content negotiation. Agents
 reach anc.dev's data programmatically via `POST /mcp`; the client integration guide lives at
@@ -66,9 +66,8 @@ when reachable). CI enforces stages 1 through 4; stages 5 through 7 are pre-push
 ## Branch and release model
 
 Feature branches PR to `dev`. Production cuts via `release/<YYYY-MM-DD>-<slug>`, built as an overlay of `dev` onto
-`main`.
-`deploy.yml` ships `main` to `anc.dev` on push. The full procedure lives in [`RELEASES.md`](./RELEASES.md); rationale in
-[`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md).
+`main`. `deploy.yml` ships `main` to `anc.dev` on push. The full procedure lives in [`RELEASES.md`](./RELEASES.md);
+rationale in [`RELEASES-RATIONALE.md`](./RELEASES-RATIONALE.md).
 
 ## Documentation map
 

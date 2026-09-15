@@ -2,10 +2,10 @@
 // ≤1.5k. Probe document.modelContext then navigator.modelContext; no-op if
 // both are absent. See https://webmachinelearning.github.io/webmcp/
 
+import { isAuditPath as isAuditEntryPath, isScorePath, SCORE_PREFIX } from '../shared/audit-routes';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { pageMeta } from '../shared/web-audit-findings';
-import { auditTools } from './webmcp-audit';
-import { homeTools } from './webmcp-home';
+import { entryTools } from './webmcp-entry';
 import { orientationTools } from './webmcp-orientation';
 import { resultTools } from './webmcp-result';
 
@@ -58,12 +58,20 @@ export function isHomePath(pathname: string): boolean {
   return p === '/' || p === '/index.html';
 }
 
+/** The audit entry page. */
 export function isAuditPath(pathname: string): boolean {
-  return normalizePath(pathname) === '/web-audit';
+  return isAuditEntryPath(normalizePath(pathname));
 }
 
+/** Both pages that render the one entry form. */
+export function isEntryPath(pathname: string): boolean {
+  return isHomePath(pathname) || isAuditPath(pathname);
+}
+
+/** A result page under the score namespace, never the bare prefix. */
 export function isResultPath(pathname: string): boolean {
-  return /^\/web\/(?!scoring$)[^/]+$/.test(normalizePath(pathname));
+  const p = normalizePath(pathname);
+  return isScorePath(p) && p.length > SCORE_PREFIX.length;
 }
 
 export function isOrientationPath(pathname: string): boolean {
@@ -134,22 +142,23 @@ export function getPageState(doc: Document, pathname: string): string {
   const path = normalizePath(pathname);
   const cli = doc.getElementById('s-cli') as HTMLInputElement | null;
   const web = doc.getElementById('s-web') as HTMLInputElement | null;
+  // Only the entry form's own radios answer this. A result page states its
+  // lane in prose and in a control this module may not read, so it reports
+  // no surface rather than guessing one from the path.
   let surface: string | null = null;
   if (web?.checked) surface = 'web';
   else if (cli?.checked) surface = 'cli';
-  else if (isAuditPath(path) || isResultPath(path)) surface = 'web';
 
-  const homeUrl = (doc.querySelector('[data-web-home-input]') as HTMLInputElement | null)?.value ?? '';
-  const auditUrl = (doc.querySelector('[data-web-audit-input]') as HTMLInputElement | null)?.value ?? '';
-  const listingEl = doc.querySelector('[data-web-audit-listing]') as HTMLInputElement | null;
+  const target = (doc.querySelector('[data-audit-target]') as HTMLInputElement | null)?.value ?? '';
+  const listingEl = doc.querySelector('[data-audit-listing]') as HTMLInputElement | null;
   const listing = listingEl ? listingEl.checked : null;
-  return capExecute(JSON.stringify({ path, surface, url: auditUrl || homeUrl, listing }));
+  return capExecute(JSON.stringify({ path, surface, target, listing }));
 }
 
 function pageStateTool(pathname: string, opts: ToolsForOpts): WebMcpTool {
   return {
     name: 'get_page_state',
-    description: 'Return this page path, CLI/web surface, filled URL, and public-listing checkbox.',
+    description: 'Return this page path, CLI/web surface, filled target, and public-listing checkbox.',
     inputSchema: emptyObjectSchema(),
     annotations: { readOnlyHint: true },
     execute() {
@@ -161,11 +170,8 @@ function pageStateTool(pathname: string, opts: ToolsForOpts): WebMcpTool {
 export function toolsFor(pathname: string, opts: ToolsForOpts = {}): WebMcpTool[] {
   const origin = resolveOrigin(opts);
   const tools: WebMcpTool[] = [];
-  if (isHomePath(pathname) || isAuditPath(pathname) || isResultPath(pathname)) {
-    tools.push(pageStateTool(pathname, opts));
-  }
-  if (isHomePath(pathname)) tools.push(...homeTools(opts));
-  if (isAuditPath(pathname)) tools.push(...auditTools(opts));
+  if (isEntryPath(pathname) || isResultPath(pathname)) tools.push(pageStateTool(pathname, opts));
+  if (isEntryPath(pathname)) tools.push(...entryTools(opts));
   if (isResultPath(pathname)) tools.push(...resultTools(opts));
   if (isOrientationPath(pathname)) tools.push(...orientationTools(origin));
   return tools;

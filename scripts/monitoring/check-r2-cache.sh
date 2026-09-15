@@ -48,7 +48,11 @@ fi
 
 NOW="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-WOULD_RUN_LIST="bun x wrangler r2 object list $BUCKET --prefix=scores/"
+# Wrangler has no `r2 object list`; it can only get/put/delete one key. The
+# bucket's object listing is REST-only, so reachability is probed there while
+# the lifecycle rule still comes from wrangler.
+OBJECTS_API="accounts/<account>/r2/buckets/$BUCKET/objects?prefix=scores/"
+WOULD_RUN_LIST="curl https://api.cloudflare.com/client/v4/$OBJECTS_API"
 WOULD_RUN_LIFECYCLE="bun x wrangler r2 bucket lifecycle list $BUCKET"
 
 if [ "$DRY_RUN" = true ]; then
@@ -71,12 +75,35 @@ fi
 STDERR_FILE="$(mktemp)"
 trap 'rm -f "$STDERR_FILE"' EXIT
 
+# The account id is deliberately absent from the repo, the same way
+# wrangler.jsonc leaves it out; take it from the environment, else from the
+# authenticated wrangler session.
+ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
+if [ -z "$ACCOUNT_ID" ]; then
+  ACCOUNT_ID="$(bun x wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || true)"
+fi
+if [ -z "$ACCOUNT_ID" ] || [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+  echo "FATAL: need CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID or an authenticated wrangler" >&2
+  exit 3
+fi
+
 set +e
-OBJECT_LIST_STDOUT="$(bun x wrangler r2 object list "$BUCKET" --prefix=scores/ 2>"$STDERR_FILE")"
+OBJECT_LIST_STDOUT="$(curl -sS --fail-with-body -m 30 \
+  -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/r2/buckets/$BUCKET/objects?prefix=scores/&per_page=1000" \
+  2>"$STDERR_FILE")"
 OBJECT_LIST_EXIT=$?
 set -e
 OBJECT_LIST_STDERR="$(cat "$STDERR_FILE")"
 : >"$STDERR_FILE"
+
+# A 200 carrying `success: false` is still a failed listing.
+if [ "$OBJECT_LIST_EXIT" -eq 0 ]; then
+  if [ "$(printf '%s' "$OBJECT_LIST_STDOUT" | "$JQ_BIN" -r '.success' 2>/dev/null)" != "true" ]; then
+    OBJECT_LIST_EXIT=1
+    OBJECT_LIST_STDERR="$(printf '%s' "$OBJECT_LIST_STDOUT" | "$JQ_BIN" -r '[.errors[]?.message] | join("; ")' 2>/dev/null)"
+  fi
+fi
 
 set +e
 LIFECYCLE_STDOUT="$(bun x wrangler r2 bucket lifecycle list "$BUCKET" 2>"$STDERR_FILE")"
@@ -84,7 +111,7 @@ LIFECYCLE_EXIT=$?
 set -e
 LIFECYCLE_STDERR="$(cat "$STDERR_FILE")"
 
-OBJECT_COUNT="$(printf '%s' "$OBJECT_LIST_STDOUT" | grep -cE '^[a-zA-Z0-9._/-]+\s' || true)"
+OBJECT_COUNT="$(printf '%s' "$OBJECT_LIST_STDOUT" | "$JQ_BIN" -r '.result | length' 2>/dev/null || echo 0)"
 LIFECYCLE_PRESENT="$(printf '%s' "$LIFECYCLE_STDOUT" | grep -cE 'scores-7day-ttl' || true)"
 
 if [ "$OBJECT_LIST_EXIT" -ne 0 ]; then

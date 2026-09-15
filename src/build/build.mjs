@@ -32,6 +32,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { API_SCORE_PATH, SCORECARDS_PATH, scorePath } from '../shared/audit-routes';
 import { principleTier } from '../shared/scorecard-format.mjs';
 // Pipeline-stage modules sort in execution order via numeric filename
 // prefixes (00-… → 06-…). Numbering is decorative; build() below is the
@@ -139,20 +140,21 @@ export async function runInvariantChecks(distDir, principleSlugs, principleSourc
     }
   }
 
-  // 5. Markdown-twin silence for the homepage. The homepage HTML
-  // gains the live-scoring form; the markdown twin MUST NOT carry any of
-  // that surface (no form markup, no JS reference, no Turnstile mention,
-  // no /api/score documentation). Agents pasting `Accept: text/markdown`
-  // against `/` are expected to use `anc audit` locally; the form is
-  // HTML-only by design. A future copy edit that leaks any of these
-  // tokens into the homepage markdown fails the build here.
-  const indexMd = await readFile(join(distDir, 'index.md'), 'utf8');
-  const FORBIDDEN_IN_INDEX_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', '/api/score'];
-  for (const needle of FORBIDDEN_IN_INDEX_MD) {
-    if (indexMd.toLowerCase().includes(needle.toLowerCase())) {
-      throw new Error(
-        `invariant: dist/index.md leaked live-scoring surface "${needle}". The homepage markdown twin stays silent on the form by design.`,
-      );
+  // 5. Markdown-twin silence for the entry pages. The homepage and /audit
+  // HTML carry the audit entry form; their markdown twins MUST NOT carry any
+  // of that surface (no form markup, no JS reference, no Turnstile mention,
+  // no /api/score documentation). An agent fetching either twin is pointed
+  // at the MCP tools and `anc audit`; the form is HTML-only by design. A copy
+  // edit that leaks any of these tokens into either twin fails the build.
+  const FORBIDDEN_IN_ENTRY_MD = ['live-score', 'turnstile', 'challenges.cloudflare.com', API_SCORE_PATH];
+  for (const twin of ['index.md', 'audit.md']) {
+    const text = (await readFile(join(distDir, twin), 'utf8')).toLowerCase();
+    for (const needle of FORBIDDEN_IN_ENTRY_MD) {
+      if (text.includes(needle.toLowerCase())) {
+        throw new Error(
+          `invariant: dist/${twin} leaked the entry form's surface "${needle}". An entry page's markdown twin stays silent on the form by design.`,
+        );
+      }
     }
   }
 }
@@ -169,7 +171,7 @@ export async function build() {
 
   // 1. Copy static assets + bundle client JS. themeInit inlined into every shell.
   // bundleClient also emits /js/live-score.js used by the homepage form.
-  const { themeInit } = await copyAssets({ repoRoot: REPO_ROOT, distDir: DIST_DIR });
+  const { themeInit, laneInit } = await copyAssets({ repoRoot: REPO_ROOT, distDir: DIST_DIR });
 
   // 2. Sorted principle files.
   const principleFiles = await sortedGlob(PRINCIPLES_DIR);
@@ -204,7 +206,6 @@ export async function build() {
     const tier = principleTier(n);
     const shortTitle = (t) => escHtml(t.replace(/^P\d+:\s*/, ''));
 
-    const crumb = `<div class="crumb"><a href="/#principles">The standard</a><span class="sep" aria-hidden="true">/</span><span>P${n} of ${principles.length}</span></div>`;
     const head = `<div class="doc__head tier-${tier.toLowerCase()}"><span class="doc__num">P${n}</span><span class="tier">${tier}</span></div>`;
     const auditNote = `<div class="audit-note">Audited live by <code>anc audit &lt;tool&gt; --principle ${n}</code>: behavioral and source checks.</div>`;
 
@@ -215,7 +216,7 @@ export async function build() {
     const next =
       i < principles.length - 1
         ? `<a class="next" href="/p${principles[i + 1].n}"><span class="dir">next ▸</span><span class="t">P${principles[i + 1].n} · ${shortTitle(principles[i + 1].title)}</span></a>`
-        : `<a class="next" href="/scorecards"><span class="dir">next ▸</span><span class="t">The ANC 100</span></a>`;
+        : `<a class="next" href="${SCORECARDS_PATH}"><span class="dir">next ▸</span><span class="t">The ANC 100</span></a>`;
     const pager = `<nav class="pager" aria-label="Principle pages">${prev}${next}</nav>`;
 
     // The audit-note sits ahead of the Requirements section when present,
@@ -231,7 +232,8 @@ export async function build() {
       title,
       description,
       canonicalPath: `/p${n}`,
-      bodyHtml: `<article class="container doc">${crumb}${head}${body}${pager}</article>`,
+      breadcrumb: `Principle ${n}`,
+      bodyHtml: `<article class="container doc">${head}${body}${pager}</article>`,
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],
     });
@@ -256,6 +258,7 @@ export async function build() {
       skillDataPath: SKILL_DATA_PATH,
       scorecardsDir: SCORECARDS_DIR,
       themeInit,
+      laneInit,
     });
 
   // 6a. Web seed — the domain list feeding the 11d runtime projection.
@@ -296,9 +299,9 @@ export async function build() {
     skillMarkdown,
   });
 
-  // 9b. Live-score shell template. Worker's summary-render.ts fetches
-  // this asset to wrap dynamic `/score/live/<binary>` responses in the
-  // same shell as static pages. The `/_internal/*` namespace is
+  // 9b. Worker page shell template. The Worker's shell-template module
+  // fetches this asset to wrap its rendered pages (result pages, the
+  // scoring page) in the same shell as static pages. The `/_internal/*` namespace is
   // intercepted by the Worker entry so direct user access returns 404 —
   // the file exists for internal env.ASSETS fetches only. Filename
   // mirrors the URL path so a future reader greps `score-live` and
@@ -309,21 +312,21 @@ export async function build() {
   // 10. Sitemap (includes scorecard paths). /install (CLI) and /skill (skill
   // bundle) are indexed for humans; /skill.json carries X-Robots-Tag: noindex
   // so it stays out of the sitemap.
-  // /web (web leaderboard) is indexable; the per-domain /web/<domain>
-  // result pages are Worker-served with X-Robots-Tag: noindex (like the
-  // live-score pages) so they stay out of the sitemap.
+  // Both lanes list their result pages: a seeded host's page is indexable
+  // (the result route drops noindex for a seed member), so leaving it out is
+  // the difference between a crawlable corpus and pages nothing points at. An
+  // on-demand host keeps noindex and stays unlisted.
   const sitemap = buildSitemap({
     principleNumbers: principles.map((p) => p.n),
     extraPaths: [
-      '/scorecards',
+      SCORECARDS_PATH,
       '/coverage',
       '/install',
       '/skill',
       '/badge',
-      '/web',
-      '/web-audit',
       '/web-scorecard-schema',
       ...scorecardPaths,
+      ...webSeed.entries.map((entry) => scorePath(entry.domain)),
     ],
   });
   await writeFile(join(DIST_DIR, 'sitemap.xml'), sitemap);
@@ -401,7 +404,7 @@ export async function build() {
   const minifyStats = await minifyDist(DIST_DIR);
 
   const scorecardPageCount = scorecardPaths.length;
-  const leaderboardPageCount = 1; // /scorecards index, counted in htmlPages but not scorecardPages
+  const leaderboardPageCount = 1; // the leaderboard index, counted in htmlPages but not scorecardPages
   // 7: check, install, about, badge, changelog, methodology, coverage
   // (scorecard-schema is in subPages but counts under the sub-pages tally
   // emitted alongside; skill.html is also emitted separately. The

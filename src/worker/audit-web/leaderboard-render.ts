@@ -7,8 +7,8 @@
 // (cold start, or a SPEC_VERSION bump that rotated every key) the board
 // renders a scoring-in-progress empty state rather than failing.
 
+import { AUDIT_PATH, auditPath, leaderboardPath, SCORECARDS_PATH, scorePath } from '../../shared/audit-routes';
 import { bandOf, escHtml, renderMeter } from '../../shared/scorecard-format.mjs';
-import { renderSurfaceSeg } from '../../shared/surface-seg.mjs';
 import type { WebAggregateEntry } from './cache';
 
 /** Board row: an aggregate entry plus whether it came from the curated seed. */
@@ -56,20 +56,38 @@ export function rankWebEntries<T extends WebAggregateEntry>(
  * links so switching view keeps that order. Relative (the default) omits
  * `?sort=` so `/web` stays the clean share URL.
  */
-function viewHref(target: WebBoardView, sort: 'global' | 'relative' | null | undefined, markdown: boolean): string {
-  const base = markdown ? '/web.md' : '/web';
-  const params: string[] = [];
+function viewHref(
+  target: WebBoardView,
+  sort: 'global' | 'relative' | null | undefined,
+  markdown: boolean,
+  base = SCORECARDS_PATH,
+  extraParams: readonly string[] = [],
+): string {
+  const path = markdown ? `${base}.md` : base;
+  // The extras come first and the base carries no query of its own: this joins
+  // with `?`, so a base like `/scorecards?lane=web` would produce two.
+  const params: string[] = [...extraParams];
   if (target === 'curated') params.push('view=curated');
   if (!markdown && sort === 'global') params.push('sort=global');
-  return params.length > 0 ? `${base}?${params.join('&')}` : base;
+  return params.length > 0 ? `${path}?${params.join('&')}` : path;
 }
 
-function viewToggleNav(opts: WebBoardRenderOpts): string {
+/**
+ * The board's view switch. The base is a parameter because the same control
+ * renders on the website board and on the merged leaderboard, and a forked
+ * copy would be free to drift on which view is active or where it points.
+ */
+export function buildBoardViewNav(
+  opts: WebBoardRenderOpts,
+  base = SCORECARDS_PATH,
+  extraParams: readonly string[] = [],
+): string {
   const link = (target: WebBoardView, label: string): string => {
     const active = target === opts.view;
     const cls = active ? 'tier-filter tier-filter--active' : 'tier-filter';
     const current = active ? ' aria-current="page"' : '';
-    return `<a class="${cls}"${current} href="${escHtml(viewHref(target, opts.sort, false))}">${label}</a>`;
+    const href = escHtml(viewHref(target, opts.sort, false, base, extraParams));
+    return `<a class="${cls}"${current} href="${href}">${label}</a>`;
   };
   return `<nav class="tier-filters" aria-label="Board view">
     ${link('all', 'All')}
@@ -77,161 +95,36 @@ function viewToggleNav(opts: WebBoardRenderOpts): string {
   </nav>`;
 }
 
-function siteNoun(n: number): string {
-  return n === 1 ? 'site' : 'sites';
-}
-
-function boardCountLine(opts: Omit<WebBoardRenderOpts, 'sort'>): string {
-  if (opts.view === 'curated') {
-    return `${opts.curatedCount} curated ${siteNoun(opts.curatedCount)} on the board.`;
-  }
-  const total = opts.curatedCount + opts.userCount;
-  return `${total} ${siteNoun(total)} on the board (${opts.curatedCount} curated, ${opts.userCount} user-submitted).`;
-}
-
-function boardSurfaceSeg(active: 'cli' | 'web'): string {
-  return renderSurfaceSeg({
-    dataAttr: 'data-surface-board-seg',
-    radioName: 'board-surface',
-    cliId: 'board-s-cli',
-    webId: 'board-s-web',
-    checked: active,
-    ariaLabel: 'Leaderboard surface',
-  });
-}
-
-function boardHero(active: 'cli' | 'web'): string {
-  return `<section class="leaderboard-hero">
-  ${boardSurfaceSeg(active)}
-  <h1>Web Agent-Readiness Leaderboard</h1>
-  <p class="leaderboard-hero__lede">Agent-readiness scores for websites and their MCP servers, scored against the same <a href="/">eight principles</a> as the CLI leaderboard. See the <a href="/methodology">methodology</a> for how the web audit probes MCP shape, discovery surfaces, and machine-readable content.</p>`;
-}
-
-function heroMeta(opts: WebBoardRenderOpts): string {
-  return `${boardCountLine(opts)} <a href="/web-audit">Audit your own</a>.`;
-}
-
-/** Build the /web page body HTML from the assembled board entries. */
-export function buildWebLeaderboardBody(entries: WebBoardEntry[], opts: WebBoardRenderOpts): string {
-  const sortKey = effectiveWebSort(opts.sort);
-  const ranked = rankWebEntries(entries, sortKey);
-  const globalActive = sortKey === 'global';
-
-  if (ranked.length === 0) {
-    return `${boardHero('web')}
-</section>
-<section class="leaderboard-empty">
-  <p>Scoring in progress: board results land after the next rescore pass. <a href="/web-audit">Audit a website</a> to see how it scores.</p>
-</section>`;
-  }
-
-  const rows = ranked
-    .map((entry) => {
-      const { relative, global: globalScore } = entry.score;
-      const friendly =
-        entry.name && entry.name !== entry.domain ? ` <span class="lb-tool__name">(${escHtml(entry.name)})</span>` : '';
-      const sourceTag = entry.curated ? '' : ' <span class="lb-tag">user-submitted</span>';
-      // Whole-row link: the domain anchor stretches over the row via
-      // .lb-rowlink::after so a click anywhere in the row opens the detail
-      // page, never the external site.
-      return `      <tr class="lb-row" data-global="${globalScore}" data-relative="${relative}" data-domain="${escHtml(entry.domain)}">
-        <td class="lb-rank">${entry.rank}</td>
-        <td class="lb-tool"><a class="lb-rowlink" href="/web/${escHtml(entry.domain)}">${escHtml(entry.domain)}</a>${friendly}${sourceTag}</td>
-        <td class="lb-desc">${escHtml(entry.description)}</td>
-        <td class="lb-score lb-score--global" data-sort="${globalScore}">${renderMeter(globalScore)}</td>
-        <td class="lb-score lb-score--relative" data-sort="${relative}">${renderMeter(relative)}</td>
-      </tr>`;
-    })
-    .join('\n');
-
-  return `${boardHero('web')}
-  <p class="leaderboard-hero__meta">${heroMeta(opts)}</p>
-</section>
-
-<section class="leaderboard-filters" aria-label="View and sort">
-  ${viewToggleNav(opts)}
-  <div class="tier-filters" role="group" aria-label="Sort the board by">
-    <button type="button" class="tier-filter${globalActive ? '' : ' tier-filter--active'}" data-web-sort="relative" aria-pressed="${globalActive ? 'false' : 'true'}">Relative</button>
-    <button type="button" class="tier-filter${globalActive ? ' tier-filter--active' : ''}" data-web-sort="global" aria-pressed="${globalActive ? 'true' : 'false'}">Global</button>
-  </div>
-</section>
-
-<section class="leaderboard-table-wrap">
-  <table class="leaderboard-table" aria-label="Website agent-readiness scores">
-    <thead>
-      <tr>
-        <th class="lb-rank">#</th>
-        <th class="lb-tool">Site</th>
-        <th class="lb-desc">Description</th>
-        <th class="lb-score">Global</th>
-        <th class="lb-score">Relative</th>
-      </tr>
-    </thead>
-    <tbody>
-${rows}
-    </tbody>
-  </table>
-</section>
-
-<section class="leaderboard-methodology">
-  <h2>How web scoring works</h2>
-  <p>Each website is probed for its MCP server shape, MCP and agent discovery surfaces, machine-readable content
-  (llms.txt, OpenAPI, JSON Schemas), root-HTML affordances, and crawl policy. Checks that do not apply to a site
-  (no MCP server, no API surface, a different declared site type) are excluded rather than counted against it.
-  <strong>Relative</strong> measures how agent-ready a site is for the checks that apply to it, so a site perfect
-  for its type approaches 100%; <strong>Global</strong> measures absolute agent capability against a maximally
-  agent-ready site, so exposing and nailing more surfaces ranks higher. The board sorts by Relative by default;
-  each result page headlines Relative.</p>
-  <p>The curated set is hand-picked; the all view also lists sites audited on demand, which stay on the board
-  until their cached result ages out. To score any public site, use the <a href="/web-audit">web audit</a> or the
-  <code>audit_website</code> MCP tool.</p>
-</section>
-<script defer src="/js/web-leaderboard.js"></script>`;
+/**
+ * Escape the characters that carry structure inside a markdown table cell. A
+ * row's label is an audited site's own title, so an unescaped `]` closes the
+ * link text early and forges a link, and a bare `|` shifts every column after
+ * it. Parens are left alone: only `]` ends link text, and escaping them would
+ * litter every legitimate `(Name)` in a table an agent reads.
+ */
+function escMdCell(value: string): string {
+  return value.replace(/[\\|[\]]/g, (ch) => `\\${ch}`);
 }
 
 /**
- * Build the /web.md markdown twin (RELATIVE order, both columns). Links are
- * absolutized against the serving origin so staging and local previews
- * stay self-consistent. The view switch renders as an in-body line (the
- * active view as plain text) because a bare query parameter would be
- * undiscoverable to a reader of the markdown board.
+ * The board's markdown table, without the document around it: the heading,
+ * the view switch, and the counts belong to whichever page hosts it. Both the
+ * website board's twin and the merged leaderboard's twin render these rows, so
+ * the two can never list a row differently.
  */
-export function buildWebLeaderboardMarkdown(
-  entries: WebBoardEntry[],
-  origin: string,
-  opts: Omit<WebBoardRenderOpts, 'sort'>,
-): string {
+export function buildBoardMarkdownRows(entries: WebBoardEntry[], origin: string): string {
   const ranked = rankWebEntries(entries, 'relative');
-  const viewSwitch =
-    opts.view === 'curated'
-      ? `View: [All](${origin}/web.md) | Curated`
-      : `View: All | [Curated](${origin}/web.md?view=curated)`;
-  const countLine = boardCountLine(opts);
-  const lines = [
-    '# Web Agent-Readiness Leaderboard',
-    '',
-    `Agent-readiness scores for websites and their MCP servers, scored against the same [eight principles](${origin}/) as the CLI leaderboard.`,
-    '',
-    viewSwitch,
-    '',
-    countLine,
-    '',
-    'Sorted by the Relative score (checks that apply to each site); Global measures absolute agent capability.',
-    '',
-  ];
   if (ranked.length === 0) {
-    lines.push(
-      `Scoring in progress: board results land after the next rescore pass. Audit a website at [/web-audit](${origin}/web-audit).`,
-      '',
-    );
-    return lines.join('\n');
+    return `Scoring in progress: board results land after the next rescore pass. Audit a website at [${AUDIT_PATH}](${origin}${auditPath({ lane: 'web' })}).\n`;
   }
-  lines.push('| # | Site | Global | Relative | Source |', '|---|------|--------|----------|--------|');
+  const lines = ['| # | Site | Global | Relative | Source |', '|---|------|--------|----------|--------|'];
   for (const entry of ranked) {
-    const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
+    const label = escMdCell(
+      entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain,
+    );
     const source = entry.curated ? 'curated' : 'on-demand';
     lines.push(
-      `| ${entry.rank} | [${label}](${origin}/web/${entry.domain}) | ${entry.score.global}% | ${entry.score.relative}% | ${source} |`,
+      `| ${entry.rank} | [${label}](${origin}${scorePath(entry.domain)}) | ${entry.score.global}% | ${entry.score.relative}% | ${source} |`,
     );
   }
   lines.push('');
@@ -249,16 +142,22 @@ export function buildFrontpageBoardRows(entries: WebAggregateEntry[]): string {
     .map((entry) => {
       const pct = entry.score.relative;
       const domain = escHtml(entry.domain);
-      const friendly = entry.name && entry.name !== entry.domain ? ` (${escHtml(entry.name)})` : '';
+      const named = entry.name && entry.name !== entry.domain;
+      const friendly = named ? ` (${escHtml(entry.name)})` : '';
       const desc = escHtml(entry.description);
-      return `        <a class="lrow ${bandOf(pct)}" href="/web/${domain}"><span class="rank">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
+      // Without a name of its own the row announces as its own contents, which
+      // read as a number salad: rank digits, domain, description, bare score.
+      const label = escHtml(
+        `${named ? `${entry.domain} (${entry.name})` : entry.domain}, score ${pct} percent, rank ${entry.rank}`,
+      );
+      return `        <a class="lrow ${bandOf(pct)}" aria-label="${label}" href="${scorePath(domain)}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${desc}</span></span>${renderMeter(pct)}</a>`;
     })
     .join('\n');
 }
 
 /** Homepage web-board empty state (aggregate absent or empty). */
 export function buildFrontpageBoardEmptyState(): string {
-  return `        <p class="board-rubric">Scoring in progress: web results land after the next rescore pass. <a href="/web">See the board</a> or <a href="/web-audit">audit a website</a>.</p>`;
+  return `        <p class="board-rubric">Scoring in progress: web results land after the next rescore pass. <a href="${leaderboardPath({ lane: 'web' })}">See the board</a> or <a href="${auditPath({ lane: 'web' })}">audit a website</a>.</p>`;
 }
 
 /**
@@ -270,7 +169,7 @@ export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): strin
   const lines = ['| # | Site | Score |', '|---|------|-------|'];
   for (const entry of ranked) {
     const label = entry.name && entry.name !== entry.domain ? `${entry.domain} (${entry.name})` : entry.domain;
-    lines.push(`| ${entry.rank} | [${label}](/web/${entry.domain}) | ${entry.score.relative}% |`);
+    lines.push(`| ${entry.rank} | [${label}](${scorePath(entry.domain)}) | ${entry.score.relative}% |`);
   }
   lines.push('');
   return lines.join('\n');
@@ -278,5 +177,28 @@ export function buildFrontpageBoardMarkdown(entries: WebAggregateEntry[]): strin
 
 /** Homepage markdown empty state when the frontpage aggregate is missing. */
 export function buildFrontpageBoardMarkdownEmptyState(): string {
-  return 'Scoring in progress: web results land after the next rescore pass. [See the board](/web.md) or [audit a website](/web-audit).\n';
+  return `Scoring in progress: web results land after the next rescore pass. [See the board](${leaderboardPath({ lane: 'web' })}) or [audit a website](${auditPath({ lane: 'web' })}).\n`;
+}
+
+/**
+ * The website pane of the merged leaderboard: the same row shape the CLI pane
+ * carries, ranked by relative score with global as the tie-break. The meter is
+ * the relative score, which is the headline; the sub-label carries the global
+ * score, so a row states both without a second column.
+ */
+export function buildBoardRows(entries: WebBoardEntry[]): string {
+  return rankWebEntries(entries, 'relative')
+    .map((entry) => {
+      const relative = entry.score.relative;
+      const domain = escHtml(entry.domain);
+      const named = entry.name && entry.name !== entry.domain;
+      const friendly = named ? ` (${escHtml(entry.name)})` : '';
+      // Without a name of its own the row announces as its own contents, which
+      // read as a number salad: rank digits, domain, two bare percentages.
+      const label = escHtml(
+        `${named ? `${entry.domain} (${entry.name})` : entry.domain}, relative score ${relative} percent, global score ${entry.score.global} percent, rank ${entry.rank}`,
+      );
+      return `        <a class="lrow ${bandOf(relative)}" aria-label="${label}" href="${scorePath(domain)}"><span class="rank" aria-hidden="true">${String(entry.rank).padStart(2, '0')}</span><span class="name">${domain}${friendly} <span class="name-sub">${entry.score.global}% global</span></span>${renderMeter(relative)}</a>`;
+    })
+    .join('\n');
 }

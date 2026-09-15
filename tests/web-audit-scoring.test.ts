@@ -262,6 +262,7 @@ describe('web-audit registry shape', () => {
     antecedent: 'none',
     weight: 1,
     title: 't',
+    breadcrumb: 'X',
     hint: 'h',
     handler: 'http',
     with: {},
@@ -324,6 +325,18 @@ describe('web-audit registry shape', () => {
     expect(() =>
       normalizeWebAuditRegistry({ ...abortBase, category_order: ['c', 'extra'], checks: [abortCheck] }),
     ).toThrow(/category_order/);
+  });
+
+  // Authored, not derived: a slug carries no casing a rule could recover, so a
+  // check that omits its crumb stops the build rather than shipping the slug.
+  test('a check without a breadcrumb aborts normalization', () => {
+    const { breadcrumb: _omitted, ...noCrumb } = abortCheck;
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [noCrumb] })).toThrow(/missing breadcrumb/);
+  });
+
+  test('a breadcrumb too long for a trail aborts normalization', () => {
+    const longCrumb = { ...abortCheck, breadcrumb: 'x'.repeat(41) };
+    expect(() => normalizeWebAuditRegistry({ ...abortBase, checks: [longCrumb] })).toThrow(/over the 40/);
   });
 
   test('duplicate check ids abort normalization', () => {

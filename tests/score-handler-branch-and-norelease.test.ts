@@ -10,14 +10,12 @@
 //      response triad (spec_version + auditor_url; anc_version is
 //      success-only).
 //
-//   2. github-url with an explicit branch (`/tree/<branch>`). Per
-//      b295e3b: branch-scoped inputs ALWAYS skip the curated + cache
-//      tiers and go straight to live scoring. The cache write after
-//      the live run is also skipped (do.ts) because caching under the
-//      bare binary name would clobber the default-branch scorecard.
-//      Two contract checks: branch URL on an uncurated repo runs live;
-//      branch URL on a CURATED repo also runs live (curated cross-check
-//      is skipped when branch is set).
+//   2. github-url with an explicit branch (`/tree/<branch>`). A branch
+//      target is a snapshot: it never serves from the curated or cache
+//      tiers and always runs live, on an uncurated repo and on a curated
+//      one alike. Its record is written under the branch key, so the
+//      response names the branch page as `share_url`; the unified
+//      endpoint's branch result URL is pinned in tests/audit-api.test.ts.
 //
 // All tests mock at the DO boundary using the same Sandbox['fetch']
 // stub shape score-handler.test.ts uses, so any future Sandbox class
@@ -31,6 +29,7 @@ import { _resetIndexCache, handleScore, type ScoreEnv } from '../src/worker/scor
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { validateInput } from '../src/worker/score/validate';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { captureLogs } from './helpers/log-capture';
 
 // Snapshot globalThis.fetch BEFORE the first makeEnv() override so afterAll
 // can restore it. Bun runs tests in a single process; if this file leaves
@@ -397,7 +396,7 @@ describe('/api/score — branch URLs + no-release repos', () => {
     });
   });
 
-  test('branch URL on uncurated repo → live DO dispatched, NO share_url on response', async () => {
+  test('branch URL on uncurated repo → live DO dispatched; the response names the branch page as share_url', async () => {
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,
@@ -436,8 +435,8 @@ describe('/api/score — branch URLs + no-release repos', () => {
     // NOT registry_hit — branch-scoped inputs never wear the curated kind.
     expect(body.scorecard.kind).toBeUndefined();
     expect(body.scorecard.tool.name).toBe('gping');
-    // Branch-scoped inputs never get a share URL (per deriveShareBinary).
-    expect(body.share_url).toBeUndefined();
+    // The branch record is written under its own key, so its page exists.
+    expect(body.share_url).toMatch(/\/score\/orf\/gping@master$/);
     // Response triad on success.
     expect(body.spec_version).toBeTruthy();
     expect(body.auditor_url).toBeTruthy();
@@ -481,16 +480,14 @@ describe('/api/score — branch URLs + no-release repos', () => {
     expect(body.scorecard.scorecard_url).toBeUndefined();
     expect(body.scorecard.tool.name).toBe('ripgrep');
     expect(body.scorecard.score?.value).toBe(88);
-    // No share_url — branch-scoped, even for curated.
-    expect(body.share_url).toBeUndefined();
+    // A curated repo's branch snapshot still has its own page.
+    expect(body.share_url).toMatch(/\/score\/BurntSushi\/ripgrep@/);
     expect(body.anc_version).toBe(ANC_VERSION);
   });
 
-  test('branch URL on curated repo bypasses R2 cache too (prefilled curated key unreachable)', async () => {
-    // Defense-in-depth on the cache tier: if someone prefills the cache
-    // under the curated binary's key (scores/rg/...), a branch-scoped
-    // request must still go live. This pins the "branch URL skips both
-    // tiers" contract; not just the registry tier.
+  test('branch URL on curated repo is a snapshot: the cache tier never serves it', async () => {
+    // A record under the curated binary's key (scores/rg/...) must not
+    // answer a branch-scoped request; a snapshot always runs live.
     const tracker: CallTracker = { doCalls: 0 };
     const env = makeEnv({
       tracker,
@@ -1541,12 +1538,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
     // console.log and verify the shape for two representative paths:
     // a round-2 hit (the new code path this commit adds) and a round-1
     // hit (the existing pre-discovery path).
-    const originalLog = console.log;
-    const logs: string[] = [];
-    console.log = (...args: unknown[]) => {
-      const first = args[0];
-      if (typeof first === 'string') logs.push(first);
-    };
+    const logs = captureLogs();
     try {
       // (a) round-2 hit on a github-url-without-hint.
       {
@@ -1566,20 +1558,22 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
             },
           },
         });
-        logs.length = 0;
+        logs.records.length = 0;
         const res = await handleScore(postScore('https://github.com/openclaw/gogcli'), env);
         expect(res.status).toBe(200);
-        const tierLog = logs
-          .map((l) => {
-            try {
-              return JSON.parse(l) as Record<string, unknown>;
-            } catch {
-              return null;
-            }
-          })
-          .filter((p): p is Record<string, unknown> => p !== null && p.scope === 'score.tier');
+        const tierLog = logs.records.map((r) => r.record).filter((r) => r.scope === 'score.tier');
         expect(tierLog).toHaveLength(1);
         const entry = tierLog[0];
+        expect(Object.keys(entry)).toEqual([
+          'scope',
+          'tier',
+          'cache_pre_attempted',
+          'cache_pre_hit',
+          'cache_post_attempted',
+          'cache_post_hit',
+          'binary',
+          'input_kind',
+        ]);
         expect(entry.tier).toBe('cache_post');
         expect(entry.cache_pre_attempted).toBe(true);
         expect(entry.cache_pre_hit).toBe(false);
@@ -1601,18 +1595,10 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
             },
           },
         });
-        logs.length = 0;
+        logs.records.length = 0;
         const res = await handleScore(postScore('npm install -g dotfiles'), env);
         expect(res.status).toBe(200);
-        const tierLog = logs
-          .map((l) => {
-            try {
-              return JSON.parse(l) as Record<string, unknown>;
-            } catch {
-              return null;
-            }
-          })
-          .filter((p): p is Record<string, unknown> => p !== null && p.scope === 'score.tier');
+        const tierLog = logs.records.map((r) => r.record).filter((r) => r.scope === 'score.tier');
         expect(tierLog).toHaveLength(1);
         const entry = tierLog[0];
         expect(entry.tier).toBe('cache_pre');
@@ -1625,7 +1611,7 @@ describe('/api/score — post-discovery R2 cache (step 6.5)', () => {
         expect(entry.input_kind).toBe('install-command');
       }
     } finally {
-      console.log = originalLog;
+      logs.restore();
     }
   });
 });

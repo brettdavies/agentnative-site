@@ -95,8 +95,8 @@ describe('homepage web-board inject', () => {
   test('injects frontpage rows into the marked region when the aggregate is present', async () => {
     const html = await fetchHomepage(makeEnv([frontpageEntry('top.dev', 80), frontpageEntry('next.dev', 60)]));
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
-    expect(html).toContain('href="/web/top.dev"');
-    expect(html).toContain('href="/web/next.dev"');
+    expect(html).toContain('href="/score/top.dev"');
+    expect(html).toContain('href="/score/next.dev"');
     expect(html.indexOf('top.dev')).toBeLessThan(html.indexOf('next.dev'));
     const webPane = html.slice(html.indexOf('data-s="web"'));
     expect(webPane).toContain('class="lrow');
@@ -159,7 +159,7 @@ describe('homepage web-board inject', () => {
   // view surfaces) must never leak into the teaser board. The mock bucket
   // also has no list(), so an enumeration attempt fails loudly.
   test('a non-seeded cached audit in R2 never appears in the injected rows', async () => {
-    const unseededKey = `audits/web/${'a'.repeat(64)}/${SPEC_VERSION}.json`;
+    const unseededKey = `audits/score/${'a'.repeat(64)}/${SPEC_VERSION}.json`;
     const html = await fetchHomepage(
       makeEnv([frontpageEntry('top.dev', 80)], {
         [unseededKey]: {
@@ -170,7 +170,7 @@ describe('homepage web-board inject', () => {
         },
       }),
     );
-    expect(html).toContain('href="/web/top.dev"');
+    expect(html).toContain('href="/score/top.dev"');
     expect(html).not.toContain('user-submitted.dev');
   });
 });
@@ -198,7 +198,7 @@ describe('homepage markdown board inject', () => {
   test('HTML / still injects the web pane and keeps the baked CLI table', async () => {
     const html = await fetchHomepage(makeEnv([frontpageEntry('top.dev', 80)]));
     expect(html).toContain('href="/score/ripgrep"');
-    expect(html).toContain('href="/web/top.dev"');
+    expect(html).toContain('href="/score/top.dev"');
     expect(html).toContain('class="lrow');
     expect(html).not.toContain('{{WEB_BOARD_ROWS}}');
   });

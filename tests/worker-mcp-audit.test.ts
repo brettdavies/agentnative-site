@@ -11,10 +11,13 @@
 // {fetch} chain so getRandom resolves the same way it would in workerd.
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { AuditEvent } from '../src/shared/audit-events';
+import type { AuditJob } from '../src/worker/audit/job';
 import type { McpEnv } from '../src/worker/mcp/server';
 import { _resetHintsIndexCache } from '../src/worker/score/orchestrate';
 import { _resetRegistryIndexCache } from '../src/worker/score/registry-lookup';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
+import { fakeJobNamespace } from './helpers/audit-job-state';
 import { getJsonToolContent, mcpInitialize, mcpRpc, resetMcpTestState } from './helpers/mcp-rpc';
 
 const FIXTURE_CATALOG = {
@@ -101,6 +104,7 @@ interface MakeEnvOpts {
   // verify the silent-ignore behavior that protects prod (where the binding is
   // absent).
   cacheBypassAllowed?: string;
+  jobs?: DurableObjectNamespace<AuditJob>;
 }
 
 function makeEnv(opts: MakeEnvOpts = {}): {
@@ -193,6 +197,7 @@ function makeEnv(opts: MakeEnvOpts = {}): {
       async delete() {},
     } as unknown as R2Bucket,
     SCORE: scoreBinding,
+    AUDIT_JOB: opts.jobs,
     SCORE_KV: {
       async get(key: string) {
         kvStub.getCalls += 1;
@@ -262,6 +267,98 @@ afterEach(() => {
   resetMcpTestState();
   _resetRegistryIndexCache();
   _resetHintsIndexCache();
+});
+
+async function callGetScorecard(env: McpEnv, args: Record<string, unknown>): Promise<JsonRpcResult> {
+  await mcpInitialize(env);
+  const { status, body } = await mcpRpc(env, {
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+    params: { name: 'get_scorecard', arguments: args },
+  });
+  expect(status).toBe(200);
+  return body as JsonRpcResult;
+}
+
+// R18: the read tool hands back the shared envelope, so the URLs it mints are
+// the route module's and an agent can follow json_url to the identical body.
+describe('get_scorecard: the shared envelope', () => {
+  test('a curated slug returns tier registry with the three result URLs and the committed scorecard', async () => {
+    const { env } = makeEnv();
+    const body = getJsonContent(await callGetScorecard(env, { slug: 'curl' })) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      found: true,
+      kind: 'cli',
+      tier: 'registry',
+      target: 'curl',
+      scorecard_url: 'https://anc.dev/score/curl',
+      markdown_url: 'https://anc.dev/score/curl/md',
+      json_url: 'https://anc.dev/score/curl/json',
+    });
+    expect(body).not.toHaveProperty('source');
+    expect(body.freshness).toEqual({ cached: true, scored_at: null, refresh_after: null });
+  });
+
+  test('an R2 cached binary returns tier cache and no retired live path', async () => {
+    const { env } = makeEnv({
+      cacheContent: {
+        [`scores/somelib/${SPEC_VERSION}.json`]: {
+          spec_version: SPEC_VERSION,
+          scorecard: { tool: { binary: 'somelib' }, results: [] },
+          anc_version: ANC_VERSION,
+          tool_version: '1.0.0',
+        },
+      },
+    });
+    const body = getJsonContent(await callGetScorecard(env, { install: 'npm install -g somelib' })) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({
+      found: true,
+      kind: 'cli',
+      tier: 'cache',
+      target: 'somelib',
+      scorecard_url: 'https://anc.dev/score/somelib',
+      tool_version: '1.0.0',
+    });
+    expect(JSON.stringify(body)).not.toContain('/score/live/');
+  });
+
+  // A run that has not written yet is not an absence. Answering `next_tool:
+  // score_cli` here would send the agent to start a second audit of a target
+  // the job already has in hand.
+  test('a target already being audited reads as in_progress, not a miss', async () => {
+    const startedAt = '2026-09-11T00:00:00.000Z';
+    const kv: KvStub = {
+      store: new Map([
+        [
+          'inflight:cli:npm install -g somelib',
+          JSON.stringify({ started_at: startedAt, job: 'cli:npm install -g somelib' }),
+        ],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const { env } = makeEnv({ kv });
+    const body = getJsonContent(await callGetScorecard(env, { install: 'npm install -g somelib' })) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ found: false, in_progress: true, started_at: startedAt });
+    expect(body).not.toHaveProperty('next_tool');
+  });
+
+  test('a miss with nothing in flight still points at score_cli', async () => {
+    const { env } = makeEnv();
+    const body = getJsonContent(await callGetScorecard(env, { install: 'npm install -g somelib' })) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({ found: false, next_tool: 'score_cli' });
+    expect(body).not.toHaveProperty('in_progress');
+  });
 });
 
 describe('score_cli: MCP_LIVE_SCORING_ENABLED kill switch', () => {
@@ -478,9 +575,29 @@ describe('score_cli: happy path fresh audit', () => {
     };
     expect(body.audited).toBe(true);
     expect(body.source).toBe('fresh-audit');
-    expect(body.scorecard_url).toBe('https://anc.dev/score/live/newcli');
+    expect(body.scorecard_url).toBe('https://anc.dev/score/newcli');
     expect(body.spec_version).toBe(SPEC_VERSION);
     expect(doSpy.calls.length).toBe(1);
+  });
+
+  test('a branch-scoped fresh run names the branch page and carries the SHA it scored', async () => {
+    const audit: RateStub = { calls: 0, shouldSucceed: true };
+    const { env } = makeEnv({
+      auditLimiter: audit,
+      doResponse: new Response(
+        JSON.stringify({
+          scorecard: { tool: { name: 'r', binary: 'r' } },
+          anc_version: SPEC_VERSION,
+          source_sha: 'e'.repeat(40),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    });
+    const result = await callScoreCli(env, { github_url: 'https://github.com/o/r/tree/feature' }, '198.51.100.11');
+    expect(result.result?.isError).toBeFalsy();
+    const body = getJsonContent(result) as { scorecard_url: string; source_sha?: string };
+    expect(body.scorecard_url).toBe('https://anc.dev/score/o/r@feature');
+    expect(body.source_sha).toBe('e'.repeat(40));
   });
 
   test('DO dispatch uses getRandom pool pattern (idFromName called once per request)', async () => {
@@ -545,5 +662,120 @@ describe('score_cli: DO error paths', () => {
     const text = result.result?.content?.[0]?.text ?? '';
     expect(text).toContain('chain_resolved_install_failed');
     expect(text).toContain('sandbox');
+  });
+});
+
+describe('score_cli: a run already in flight', () => {
+  const AT = '2026-09-11T00:00:00.000Z';
+  const complete = {
+    type: 'complete',
+    kind: 'cli',
+    tier: 'live',
+    target: 'newcli',
+    scorecard_url: 'https://anc.dev/score/newcli',
+    markdown_url: 'https://anc.dev/score/newcli/md',
+    json_url: 'https://anc.dev/score/newcli/json',
+    freshness: { cached: false, scored_at: AT, refresh_after: null },
+    spec_version: SPEC_VERSION,
+    anc_version: ANC_VERSION,
+    scorecard: { tool: { binary: 'newcli' }, results: [] },
+  } as unknown as AuditEvent;
+
+  test('an in-flight binary attaches after the source gates, with no second run and no hourly budget', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, { type: 'accepted', lane: 'cli', target: 'newcli', started_at: AT });
+    const kv: KvStub = {
+      store: new Map([
+        ['inflight:cli:npm install -g somelib', JSON.stringify({ started_at: AT, job: 'cli:npm install -g somelib' })],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const audit: RateStub = { calls: 0, shouldSucceed: true };
+    const { env, doSpy } = makeEnv({ jobs, kv, auditLimiter: audit });
+    setTimeout(() => void job.append(claim.run, complete), 20);
+    const result = await callScoreCli(env, { install: 'npm install -g somelib' }, '198.51.100.7');
+    expect(result.result?.isError).toBeFalsy();
+    expect(getJsonContent(result)).toMatchObject({
+      audited: true,
+      attached: true,
+      source: 'fresh-audit',
+      scorecard_url: 'https://anc.dev/score/newcli',
+      spec_version: SPEC_VERSION,
+    });
+    expect(doSpy.calls.length).toBe(0);
+    // Attaching holds a request open for the rest of someone else's run, so
+    // it passes the per-source burst gate first. The hourly audit budget sits
+    // behind the attach and stays untouched.
+    expect(audit.calls).toBe(1);
+    expect(kv.putCalls).toBe(0);
+  });
+
+  test('a caller with no client IP cannot attach to the run in flight', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, complete);
+    const kv: KvStub = {
+      store: new Map([
+        ['inflight:cli:npm install -g somelib', JSON.stringify({ started_at: AT, job: 'cli:npm install -g somelib' })],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const { env, doSpy } = makeEnv({ jobs, kv });
+    const result = await callScoreCli(env, { install: 'npm install -g somelib' });
+    expect(result.result?.isError).toBe(true);
+    expect(result.result?.content?.[0]?.text).toContain('cf-connecting-ip');
+    expect(doSpy.calls.length).toBe(0);
+  });
+
+  test('bypass_cache runs its own audit rather than attaching to the one in flight', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, complete);
+    const kv: KvStub = {
+      store: new Map([
+        ['inflight:cli:npm install -g somelib', JSON.stringify({ started_at: AT, job: 'cli:npm install -g somelib' })],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const audit: RateStub = { calls: 0, shouldSucceed: true };
+    const { env, doSpy } = makeEnv({ jobs, kv, auditLimiter: audit, cacheBypassAllowed: 'true' });
+    const result = await callScoreCli(env, { install: 'npm install -g somelib', bypass_cache: true }, '198.51.100.7');
+    // The flag exists to exercise the container path, so it may not be served
+    // by another run's result.
+    expect(doSpy.calls.length).toBe(1);
+    expect(getJsonContent(result)).not.toMatchObject({ attached: true });
+  });
+
+  test('an attached run that bounced is a tool error naming the code', async () => {
+    const jobs = fakeJobNamespace();
+    const job = jobs.get(jobs.idFromName('cli:npm install -g somelib'));
+    const claim = await job.claim(AT, 90_000);
+    if (!claim.claimed) throw new Error('expected a fresh claim');
+    await job.append(claim.run, {
+      type: 'bounce',
+      error: { code: 'chain_no_resolve', message: 'x', cta: 'y' },
+    });
+    const kv: KvStub = {
+      store: new Map([
+        ['inflight:cli:npm install -g somelib', JSON.stringify({ started_at: AT, job: 'cli:npm install -g somelib' })],
+      ]),
+      getCalls: 0,
+      putCalls: 0,
+    };
+    const { env, doSpy } = makeEnv({ jobs, kv });
+    const result = await callScoreCli(env, { install: 'npm install -g somelib' }, '198.51.100.7');
+    expect(result.result?.isError).toBe(true);
+    expect(getJsonContent(result)).toMatchObject({ error: 'chain_no_resolve', stage: 'attached' });
+    expect(doSpy.calls.length).toBe(0);
   });
 });

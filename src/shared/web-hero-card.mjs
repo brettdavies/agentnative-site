@@ -1,6 +1,7 @@
 // Homepage hero web proof card — build-time HTML for the Website toggle.
 // Snapshot: src/data/web-audit/hero-anc.dev.json (not live R2).
 
+import { auditPath, scorePath } from './audit-routes.ts';
 import { bandOf, escHtml, renderMeter } from './scorecard-format.mjs';
 
 export const HERO_WEB_DOMAIN = 'anc.dev';
@@ -70,7 +71,7 @@ export function buildWebHeroCardEmptyState() {
   return `    <aside class="card band-mid" data-s="web" aria-label="Web scorecard for ${HERO_WEB_DOMAIN}">
       <div class="card__bar"><span aria-hidden="true">●●●</span><span class="card__bar-right">${HERO_WEB_DOMAIN} · web scorecard</span></div>
       <div class="card__cmd"><span class="p">$</span> audit_website ${HERO_WEB_DOMAIN}</div>
-      <p class="card__pending">Scoring in progress. <a href="/web/${HERO_WEB_DOMAIN}">See the scorecard</a> or <a href="/web-audit">run a fresh audit</a>.</p>
+      <p class="card__pending">Scoring in progress. <a href="${scorePath(HERO_WEB_DOMAIN)}">See the scorecard</a> or <a href="${auditPath({ lane: 'web' })}">run a fresh audit</a>.</p>
     </aside>`;
 }
 

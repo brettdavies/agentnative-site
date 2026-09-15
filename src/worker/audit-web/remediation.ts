@@ -6,6 +6,7 @@
 // and therefore identical for every run of a given check, and the
 // always-shown Result line derived from status + evidence.
 
+import { fixPath } from '../../shared/audit-routes';
 import { isRemediableStatus } from '../../shared/web-audit-findings';
 import type { NaReason, ScorecardStatus } from './scorecard';
 
@@ -119,7 +120,7 @@ export function assembleRemediation(
   entry: WebRemediationEntry | undefined,
   input: AssembleInput,
 ): AssembledRemediation {
-  const skillUrl = `${input.origin}/web-audit/skill/${input.checkId}`;
+  const skillUrl = `${input.origin}${fixPath(input.checkId)}`;
   const goal = entry ? oneLine(entry.goal) : `Make the ${input.checkId} web-audit check pass`;
   const fix = entry
     ? oneLine(entry.fix)

@@ -152,8 +152,9 @@ function attachDataButtons() {
 
 function attachAssemblePrompt() {
   const page = document.querySelector('.scorecard-page[data-web-audit-result]');
-  const hero = page?.querySelector('.scorecard-hero');
-  if (!page || !hero || page.querySelector('[data-assemble-prompt]')) return;
+  // The widget sits under the score head; the spine marks a result page.
+  const anchor = page?.querySelector('.result-score__note') ?? page?.querySelector('.result-spine');
+  if (!page || !anchor || page.querySelector('[data-assemble-prompt]')) return;
 
   const rows = findingRowsFromElements(page.querySelectorAll('.web-check[data-id]'));
   // No row carries a prompt means nothing is assemblable, so the widget
@@ -227,7 +228,7 @@ function attachAssemblePrompt() {
   mayBox.addEventListener('change', refresh);
 
   section.append(heading, lede, opts, status, copyBtn);
-  hero.after(section);
+  anchor.after(section);
   refresh();
 }
 

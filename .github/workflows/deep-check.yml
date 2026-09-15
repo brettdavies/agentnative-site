@@ -1,7 +1,8 @@
 # Deep regression check. Full Playwright matrix (Chromium + WebKit across
 # desktop + mobile-android + mobile-ios + tablet) + Lighthouse CI
-# resource-size regression gate + the live staging MCP sweep. Three jobs
-# run in parallel.
+# resource-size regression gate + the live staging sweep (MCP,
+# discoverability, the web-audit result page, and the edge cache classes).
+# Three jobs run in parallel.
 #
 # Triggers:
 #   schedule           — 06:00 UTC daily (~23:00 / 01:00 PT overnight).
@@ -232,11 +233,11 @@ jobs:
           retention-days: 14
 
   staging-mcp:
-    name: staging-mcp · live MCP, discoverability, and web-audit result page
+    name: staging-mcp · live MCP, discoverability, web-audit result page, and edge cache classes
     needs: preflight
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: staging
 
     steps:
@@ -320,6 +321,18 @@ jobs:
           ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
           ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
         run: bun x playwright test --project=web-audit --project=web-audit-webkit
+
+      # Skip-Worker HIT is only observable against a deployed Worker, so
+      # this is the one place the cache classes get asserted. It runs after
+      # the web-audit step because that step writes the anc.dev website
+      # record, and the seeded-host canary skips itself when no record
+      # exists: the reverse order reports green without asserting the class.
+      - name: Edge cache-class canaries (live staging)
+        env:
+          ANC_STAGING_BASE_URL: https://agentnative-site-staging.brettdavies.workers.dev
+          ANC_STAGING_ACCESS_CLIENT_ID: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_ID }}
+          ANC_STAGING_ACCESS_CLIENT_SECRET: ${{ secrets.ANC_STAGING_ACCESS_CLIENT_SECRET }}
+        run: bun x playwright test --project=edge-hit
 
       - name: Upload Playwright artifacts on failure
         if: failure()

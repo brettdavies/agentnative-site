@@ -28,6 +28,7 @@
 // so they fire for genuinely-malformed inputs (e.g., `javascript:` or a
 // repo URL with `/releases/download/...` instead of `/tree/...`).
 
+import { GITHUB_SHORTHAND_RE, RESERVED_REPRESENTATION_SEGMENTS } from '../../shared/audit-routes';
 import type { ParsedInstall } from './parse-install';
 import { parseInstallCommand } from './parse-install';
 
@@ -82,10 +83,11 @@ const OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 // effectively unbounded but anything past 100 is almost certainly a
 // paste mistake).
 const REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
-// `owner/repo` shorthand: exactly two segments split by a single `/`.
-// Substring attacks (`../etc/passwd`, `foo/bar/baz`, leading slashes)
-// fail this regex before the owner+repo character classes run.
-const SHORTHAND_RE = /^([^/\s]+)\/([^/\s]+)$/;
+// `owner/repo` shorthand, with an optional `@<branch>` tail: the shared
+// classifier's regex, so the two cannot drift. Substring attacks
+// (`../etc/passwd`, `foo/bar/baz`, leading slashes) fail it before the
+// owner+repo character classes run.
+const SHORTHAND_RE = GITHUB_SHORTHAND_RE;
 
 // Branch-name shape lock: alphanumeric, dot, underscore, slash, hyphen.
 // Length capped at 250 chars (git itself enforces 255 for refs minus
@@ -151,7 +153,10 @@ export function validateInput(raw: string, registryIndex: RegistryIndexShape): V
   // unrecognized_input here rather than producing a malformed github-url.
   const shorthand = trimmed.match(SHORTHAND_RE);
   if (shorthand && OWNER_RE.test(shorthand[1]) && REPO_RE.test(shorthand[2])) {
-    return { kind: 'github-url', owner: shorthand[1], repo: shorthand[2] };
+    const branch = shorthand[3];
+    if (branch === undefined) return { kind: 'github-url', owner: shorthand[1], repo: shorthand[2] };
+    if (!validBranchName(branch)) return { kind: 'unknown', error: 'invalid_url_path' };
+    return { kind: 'github-url', owner: shorthand[1], repo: shorthand[2], branch };
   }
 
   return { kind: 'unknown', error: 'unrecognized_input' };
@@ -241,10 +246,13 @@ function peelBranch(tail: string): string | null {
 // that would silently re-open the gap).
 export function validBranchName(branch: string): boolean {
   if (!BRANCH_NAME_RE.test(branch)) return false;
-  if (branch.includes('..')) return false;
-  if (branch.startsWith('/') || branch.endsWith('/')) return false;
-  if (branch.startsWith('.') || branch.endsWith('.')) return false;
-  return true;
+  if (branch.includes('..') || branch.endsWith('.')) return false;
+  // Per component, git's ref rules: no empty component, no dot-leading
+  // component, no `.lock` suffix; and the trailing segment must not read as
+  // a result representation under /score/.
+  const components = branch.split('/');
+  if (!components.every((c) => c !== '' && !c.startsWith('.') && !c.endsWith('.lock'))) return false;
+  return !RESERVED_REPRESENTATION_SEGMENTS.includes(components[components.length - 1]);
 }
 
 function stripGitSuffix(repo: string): string {

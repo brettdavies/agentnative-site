@@ -17,6 +17,7 @@
 // arrived on, so an agent that connects to staging is told to keep
 // talking to staging.
 
+import { SCORE_PREFIX } from '../../shared/audit-routes';
 import { siteOrigin } from './site-origin';
 
 export const SPEC_REVISION = '2026-07-28';
@@ -52,12 +53,11 @@ function buildInstructionsText(siteUrl: string): string {
       'runs a fresh audit and returns a single terminal scorecard with no progress notifications (stateless mode); ' +
       'list_website_audits returns the curated web leaderboard; get_web_remediation returns the static fix for a ' +
       'web-audit check id. Web scorecards carry the score_pct/score/categories/results shape at ' +
-      `${siteUrl}/web-scorecard-schema; results live at ${siteUrl}/web/<domain>.`,
-    'The two scorecard tools compose the shared /api/score orchestration so cache semantics never drift. ' +
-      'get_scorecard always returns isError: false for cache-state outcomes (hit returns the inline scorecard; miss ' +
-      'returns next_tool: score_cli). score_cli is the cache-miss-only fresh-audit path; on hit it returns ' +
-      'next_tool: get_scorecard. isError: true is reserved for genuine tool-execution failures (validator rejection, ' +
-      'rate-limit breach, infrastructure error).',
+      `${siteUrl}/web-scorecard-schema.`,
+    'Every read and transact tool returns the one result envelope: { kind, tier, target, scorecard_url, ' +
+      'markdown_url, json_url, freshness, spec_version, scorecard } plus the lane metadata. The same envelope is ' +
+      `what ${siteUrl}${SCORE_PREFIX}<target>/json serves, so a tool result and the page an agent follows it to ` +
+      'cannot disagree. Follow scorecard_url for the page, markdown_url or json_url for the pinned twins.',
     'Errors carry on two layers. Tool-level failures return CallToolResult with isError: true plus a textual ' +
       'message; the JSON-RPC envelope itself is successful. Transport-level failures return JSON-RPC error ' +
       'envelopes at HTTP 200 (-32099 rate-limit breach at either limiter, ' +
