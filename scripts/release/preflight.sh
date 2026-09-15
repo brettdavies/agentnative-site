@@ -368,7 +368,7 @@ gate_build() {
 
 # Resolve a do-smoke binary name to the GitHub owner/repo the live scorer
 # fetches. The binary name drives the registry-membership precheck and the
-# share_url assertion; the owner/repo is the resolvable source. Names with no
+# scorecard_url assertion; the owner/repo is the resolvable source. Names with no
 # mapped repo fall back to the sindresorhus namespace. A case statement keeps
 # this portable to bash 3.2.
 do_fixture_repo() {
