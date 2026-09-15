@@ -1708,7 +1708,15 @@ Design.
 
 - All R1 to R23 hold on staging with the e2e matrix green twice in a row.
 - Every URL minted by MCP tools, the agent-skills index, `llms.txt`, the sitemap, and the `Link` alternates resolves 200
-  on staging.
+  on staging. 52 of the sitemap's entries are `/score/<host>` results served from R2 rather than from `dist`, so this
+  walk reads cache state, not just the build. A 404 among them is a real failure and is not to be retried away: a
+  sitemap entry and a board row both promise the page exists. Record which host failed and at what `scored_at`, because
+  a result that disappears and returns on its own is the open defect below.
+- **Open, blocks this line:** a seeded host's cached result went absent and served "No audit exists yet" for at least
+  three minutes on 2026-09-15, then returned once the rescore rewrote it. Nothing in the rescore path deletes, the R2
+  lifecycle rule covers only `scores/`, the corruption self-heal's guard is too loose to trip, and `keyFor` normalizes
+  both the seed URL and the canonical before hashing, so none of the obvious causes fit. The `web-cache.get` and
+  `web-rescore` events for 15:00 to 15:11 UTC would settle it.
 - The literal guard passes in gate mode: no funnel path outside `src/shared/audit-routes.ts`.
 - `knip` reports no unreachable client entry; the deleted clients and tests are gone, not disabled.
 - Abandoned experiments are removed from the diff (no dead branches, no commented-out old routes).
