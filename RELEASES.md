@@ -108,17 +108,20 @@ git checkout origin/dev -- .
 git diff --name-status origin/main origin/dev | grep '^D'
 trash <each main-only file listed above>
 
-# 3. Strip the paths guard-main-docs forbids on main. The set resolves from the workflow;
-#    never restate it inline, because every hand-kept copy drifted from what CI enforces.
+# 3. Withhold any feature `dev` carries that this release must not ship. Each one
+#    owns a script under scripts/release/, so the removal is applied rather than
+#    re-derived, and the script's residue check fails the cut if the feature
+#    changed shape on dev. This runs BEFORE the strip below: each script is
+#    itself a guarded path, so stripping first would delete the tool that has
+#    not run yet. Delete a script when its feature ships. See § Withheld
+#    features for what is held back and why.
+scripts/release/withhold-telemetry-lake.py
+
+# 3b. Strip the paths guard-main-docs forbids on main, the withholding scripts
+#     among them. The set resolves from the workflow; never restate it inline,
+#     because every hand-kept copy drifted from what CI enforces.
 GUARDED="$(scripts/release/guarded-paths.sh)"
 git ls-files | grep -E "$GUARDED" | xargs -r trash
-
-# 3b. Withhold any feature `dev` carries that this release must not ship. Each
-#     one owns a script under scripts/release/, so the removal is applied
-#     rather than re-derived, and the script's residue check fails the cut if
-#     the feature changed shape on dev. Delete the script when the feature
-#     ships. See § Withheld features for what is held back and why.
-scripts/release/withhold-telemetry-lake.py
 git add -A                                                      # stages adds, mods, AND deletions
 
 # 4. Bump "version" in package.json (this repo's version carrier) to <version>, then build
@@ -199,8 +202,11 @@ Why step 8's live suites gate the release:
 A feature can be complete on `dev` and still not belong in a release. Rather than reverting it off the integration
 branch, the release strips it at cut time: `dev` keeps every line and the feature ships whole once its blocker clears.
 
-Each withheld feature owns a script under `scripts/release/`, run at step 3b. The script is the record of what is held
-back, so the removal is applied rather than re-derived by hand at each cut, and it is deliberately brittle: an exact
+Each withheld feature owns a script under `scripts/release/`, run at step 3 before the guarded-path strip. The scripts
+are themselves guarded, so they never reach `main`: a release describes what it ships, not what it held back, and a
+script that removes files `main` does not have would be dead weight there. Running them first is what keeps the strip
+from deleting a tool that has not run yet. The script is the record of what is held back, so the removal is applied
+rather than re-derived by hand at each cut, and it is deliberately brittle: an exact
 match that no longer matches is a hard error, because a silently skipped edit ships the feature. After applying, it
 greps the tree for every marker the feature owns and fails on any survivor, which catches a miss whichever edit caused
 it. `--check` reports without writing and exits non-zero while anything is still pending.
