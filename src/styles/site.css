@@ -68,6 +68,10 @@ p {
   --space-8: 4rem;
   --space-9: 6rem;
   --space-10: 8rem;
+
+  /* Reading columns. The crumb matches whichever one its page uses. */
+  --col-doc: 52rem;
+  --col-result: 64rem;
   --radius: 10px;
   --radius-lg: 16px;
   --container: 72rem;
@@ -143,6 +147,55 @@ main {
   margin-inline: auto;
   padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem);
   box-sizing: border-box;
+}
+
+/* The breadcrumb is the document's first line, not a bar of header chrome:
+ * it sits on the content's own left edge and binds to the heading under it.
+ *
+ * It is emitted as a sibling of the page's content box, so on the page
+ * families that release main to full bleed it has no column of its own and
+ * needs the one its neighbor uses. The column widths are tokens for that
+ * reason: the crumb and the container it introduces read the same value. */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  margin-bottom: var(--space-5);
+}
+.crumb a {
+  color: var(--fg-secondary);
+  text-decoration: none;
+}
+.crumb a:hover {
+  color: var(--accent);
+}
+.crumb .sep {
+  color: var(--border);
+}
+
+body:has(.doc) .crumb,
+body:has(.scorecard-page) .crumb {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--space-6);
+  padding-block-start: var(--space-7);
+  box-sizing: border-box;
+}
+body:has(.doc) .crumb {
+  max-width: var(--col-doc);
+}
+body:has(.scorecard-page) .crumb {
+  max-width: var(--col-result);
+}
+
+/* The crumb now owns the space under the header, so the container it
+ * introduces no longer opens with its own. */
+main:has(> .crumb) > .doc,
+main:has(> .crumb) > .scorecard-page {
+  padding-block-start: 0;
 }
 
 main h1 {
@@ -1369,7 +1422,7 @@ body:has(.doc) main {
 .doc {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  max-width: 52rem;
+  max-width: var(--col-doc);
   margin-inline: auto;
   padding-block: var(--space-8) var(--space-9);
 }
@@ -1391,26 +1444,6 @@ body:has(.doc) main {
 .doc p,
 .doc li {
   max-width: var(--measure);
-}
-
-.crumb {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  font-family: var(--font-mono, "Monaspace Xenon", ui-monospace, monospace);
-  font-size: 0.78rem;
-  color: var(--fg-muted);
-  margin-bottom: var(--space-5);
-}
-.crumb a {
-  color: var(--fg-secondary);
-  text-decoration: none;
-}
-.crumb a:hover {
-  color: var(--accent);
-}
-.crumb .sep {
-  color: var(--border);
 }
 
 .doc__head {
@@ -2054,14 +2087,10 @@ body:has(.scorecard-page) main {
   padding: 0;
 }
 .scorecard-page {
-  max-width: 64rem;
+  max-width: var(--col-result);
   margin-inline: auto;
   padding-block: var(--space-7) var(--space-9);
 }
-.scorecard-page .crumb {
-  margin-bottom: var(--space-6);
-}
-
 .chiprow {
   display: flex;
   flex-wrap: wrap;
