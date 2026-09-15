@@ -22,6 +22,7 @@ import type { CacheEnv } from './cache';
 import type { InstallSpec, ResolvedStep } from './discover-binary';
 import { checkGithubAccessibility } from './github-accessibility';
 import {
+  _resetHintsIndexCache,
   loadHintsIndex,
   lookupOnly,
   type OrchestrateEnv,
@@ -30,6 +31,7 @@ import {
   runFreshOnly,
 } from './orchestrate';
 import {
+  _resetRegistryIndexCache,
   type DiscoveryHintsIndex,
   deriveShareBinary,
   loadRegistryIndex,
@@ -452,4 +454,10 @@ export function doError(error: string, rawDetails?: string): ScoreError {
         cta_text: CTA_INSTALL_ANC,
       };
   }
+}
+
+/** Test-only — drop in-memory index caches. */
+export function _resetIndexCache(): void {
+  _resetRegistryIndexCache();
+  _resetHintsIndexCache();
 }
