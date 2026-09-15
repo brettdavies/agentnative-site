@@ -317,10 +317,10 @@ gate_pages() {
   fi
 
   scorecards_html=$(ecurl -fSsL -m 10 -H 'Accept: text/html' "${ENV_URL}/scorecards" 2>/dev/null || true)
-  if printf '%s' "$scorecards_html" | grep -q 'leaderboard-table'; then
-    gate_pass "${ENV_URL}/scorecards renders (has leaderboard-table)"
+  if printf '%s' "$scorecards_html" | grep -q 'lrow'; then
+    gate_pass "${ENV_URL}/scorecards renders (has lrow)"
   else
-    gate_fail "${ENV_URL}/scorecards" "did not return HTML with leaderboard-table"
+    gate_fail "${ENV_URL}/scorecards" "did not return HTML with lrow"
   fi
 
   local body tier scorecard_url spec_v
@@ -350,7 +350,11 @@ RETIRED_PATHS=(
   /web/scoring
   /web-audit/skill/openapi
   /score/live/ouch
+  # The legacy GET read lane. `/api/score` itself still answers POST, which is
+  # the transact endpoint, so only the suffixed representations are listed; the
+  # bare path's retired `?input=` read is covered by tests/worker.test.ts.
   /api/score.md
+  /api/score.json
 )
 
 # Retired paths that still resolve, as `<path>|<location>`. The entry page is
