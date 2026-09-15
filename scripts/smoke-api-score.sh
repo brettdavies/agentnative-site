@@ -84,20 +84,23 @@ echo "::group::smoke response"
 echo "${response}" | "$JQ_BIN" .
 echo "::endgroup::"
 
-# Contract: the shared envelope (kind, tier=registry, target, scorecard_url,
-# json_url) beside the legacy triad the deployed homepage still reads.
-# Missing any field is a deploy-stop signal.
+# Contract: the shared result envelope, and nothing beside it. The three
+# result URLs are asserted by shape rather than by host, because the envelope
+# mints them on whichever origin served the request. Missing any field is a
+# deploy-stop signal.
 if ! echo "${response}" | "$JQ_BIN" --exit-status '
     .kind == "cli"
     and .tier == "registry"
     and .target == "'"${SLUG}"'"
-    and (.scorecard_url | type) == "string"
-    and (.json_url | type) == "string"
-    and .scorecard.kind == "registry_hit"
+    and (.scorecard_url | endswith("/score/'"${SLUG}"'"))
+    and (.markdown_url | endswith("/score/'"${SLUG}"'/md"))
+    and (.json_url | endswith("/score/'"${SLUG}"'/json"))
+    and (.freshness.cached | type) == "boolean"
     and (.spec_version | type) == "string"
     and (.site_spec_version | type) == "string"
     and (.anc_version | type) == "string"
     and (.auditor_url | type) == "string"
+    and (has("share_url") | not)
   ' >/dev/null; then
     echo "FATAL: /api/score response missing required fields for ${SLUG}" >&2
     exit 1
