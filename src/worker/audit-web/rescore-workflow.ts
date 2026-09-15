@@ -104,9 +104,28 @@ const RESCORE_MAX_CYCLES = 200;
 const REGISTRY_FINGERPRINT_KEY = 'web_rescore:registry_fp';
 
 /** SHA-256 hex of the normalized registry JSON: any shape change moves it. */
-async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
+/**
+ * Registry fields the audit never reads.
+ *
+ * The fingerprint answers one question: could this registry produce a
+ * different scorecard than the cached ones? A field no audit consumes cannot,
+ * and hashing it spends the whole audit budget re-deriving identical evidence
+ * across every seeded domain. `breadcrumb` labels a check's own page in the
+ * site's URL trail; its only reader is the build that emits those pages.
+ *
+ * Membership here is a claim that the Worker never reads the field. Anything
+ * absent from this set counts as scoring shape, so a new field reflows until
+ * someone establishes otherwise.
+ */
+const SITE_ONLY_REGISTRY_FIELDS: ReadonlySet<string> = new Set(['breadcrumb']);
+
+export async function registryFingerprint(env: WebRescoreEnv): Promise<string> {
   const registry = await loadWebAuditRegistry(env);
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(registry)));
+  // A replacer rather than a rebuilt object: it drops the named keys while
+  // leaving every surviving key in its original order, so the digest stays
+  // stable across runs.
+  const shape = JSON.stringify(registry, (key, value) => (SITE_ONLY_REGISTRY_FIELDS.has(key) ? undefined : value));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(shape));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
