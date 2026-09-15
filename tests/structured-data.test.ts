@@ -31,6 +31,7 @@ function shell(overrides: Partial<Parameters<typeof emitShell>[0]> = {}): string
     title: 'About',
     description: 'About anc.dev',
     canonicalPath: '/about',
+    breadcrumb: 'About',
     bodyHtml: '<article>body</article>',
     themeInitJs: '',
     baseUrl: undefined,
@@ -91,15 +92,13 @@ describe('JSON-LD graph', () => {
 
   // A slug has no casing a rule could recover, so the page names itself and
   // the emitter passes that through rather than guessing from the URL.
-  test('an emitter-supplied breadcrumb names the page instead of its slug', () => {
-    const label = (path: string, breadcrumb?: string) => {
+  test('the emitter-supplied breadcrumb names the page instead of its slug', () => {
+    const label = (path: string, breadcrumb: string) => {
       const crumbs = nodeOf(graphOf(shell({ canonicalPath: path, breadcrumb })), 'BreadcrumbList');
       return (crumbs?.itemListElement as { name: string }[]).at(-1)?.name;
     };
     expect(label('/fix/llms-txt-scoped', 'llms.txt scoped')).toBe('llms.txt scoped');
     expect(label('/fix/oauth-discovery', 'OAuth discovery')).toBe('OAuth discovery');
-    // Without one the segment stands as written; the registry is what supplies it.
-    expect(label('/fix/oauth-discovery')).toBe('oauth-discovery');
   });
 
   // A tool name or a host is an identifier, not prose: `ripgrep` is the binary,
@@ -110,7 +109,7 @@ describe('JSON-LD graph', () => {
       ['/score/anc.dev', 'anc.dev'],
       ['/score/o/r@feature', 'o/r@feature'],
     ] as const) {
-      const crumbs = nodeOf(graphOf(shell({ canonicalPath: path })), 'BreadcrumbList');
+      const crumbs = nodeOf(graphOf(shell({ canonicalPath: path, breadcrumb: name })), 'BreadcrumbList');
       // `/score/` has a real parent page, so the target hangs off the board
       // rather than off the home page.
       expect({ path, trail: (crumbs?.itemListElement as { name: string }[]).map((i) => i.name) }).toEqual({
@@ -122,14 +121,16 @@ describe('JSON-LD graph', () => {
 
   // No label map survives anywhere: a page that wants a readable crumb says so,
   // and one that says nothing gets its segment verbatim rather than a guess.
-  test('without a supplied label the segment stands verbatim', () => {
-    const label = (path: string) => {
-      const crumbs = nodeOf(graphOf(shell({ canonicalPath: path })), 'BreadcrumbList');
-      return (crumbs?.itemListElement as { name: string }[]).at(-1)?.name;
-    };
-    expect(label('/p3')).toBe('p3');
-    expect(label('/mcp-skill')).toBe('mcp-skill');
-    expect(label('/about')).toBe('about');
+  // Falling back to the URL segment is the silent failure this whole surface is
+  // built to prevent: the slug renders, both renderings still agree, and every
+  // test that compares them passes. So a page that has a trail and no label is
+  // refused at build rather than shipped stating `p3` where its name belongs.
+  test('a page with a trail and no breadcrumb is refused', () => {
+    for (const path of ['/p3', '/mcp-skill', '/about', '/score/ripgrep']) {
+      expect(() => shell({ canonicalPath: path, breadcrumb: undefined })).toThrow(/has a breadcrumb trail/);
+    }
+    // The home page draws no trail, so it needs no label and is emitted.
+    expect(() => shell({ canonicalPath: '/', breadcrumb: undefined })).not.toThrow();
   });
 
   test('the home page carries no breadcrumb, because a trail of one names nothing', () => {

@@ -81,6 +81,7 @@ export async function handleScoringPage(request: Request, env: ScoringPageEnv): 
     title: page.title,
     description: page.description,
     canonicalPath: SCORING_PATH,
+    breadcrumb: 'Scoring',
     body: page.body,
   });
   const status = refused ? 400 : 200;

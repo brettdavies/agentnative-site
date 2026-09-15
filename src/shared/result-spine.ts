@@ -5,7 +5,7 @@
 // with its meter and a secondary numeral. Curated pages carry no control;
 // an inline render carries no links because it has no page.
 
-import { type Lane, leaderboardPath, scoreJsonPath, scoreMarkdownPath } from './audit-routes';
+import { type Lane, scoreJsonPath, scoreMarkdownPath } from './audit-routes';
 import { escHtml } from './esc-html';
 import { bandOf, renderMeter } from './meter';
 

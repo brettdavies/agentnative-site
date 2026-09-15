@@ -32,10 +32,12 @@ export type Crumb = { name: string; path: string };
  */
 export const BREADCRUMB_JSONLD_TOKEN = '{{BREADCRUMB_JSONLD}}';
 
+const segmentOf = (prefix: string) => prefix.replaceAll('/', '');
+
 /** The page a namespace's targets belong under, or null when it has none. */
 const NAMESPACE_PARENT: Readonly<Record<string, Crumb | null>> = {
-  score: { name: 'Leaderboard', path: SCORECARDS_PATH },
-  fix: null,
+  [segmentOf(SCORE_PREFIX)]: { name: 'Leaderboard', path: SCORECARDS_PATH },
+  [segmentOf(FIX_PREFIX)]: null,
 };
 
 const namespaceOf = (segment: string): string | null => (Object.hasOwn(NAMESPACE_PARENT, segment) ? segment : null);
@@ -76,6 +78,18 @@ export function breadcrumbTrail(path: string, label?: string | null): Crumb[] {
     trail.push({ name: last && label ? label : segment, path: href });
   });
   return trail;
+}
+
+/**
+ * Whether `path` must be given a label of its own.
+ *
+ * A page with a trail states its own name in the last crumb, and a URL segment
+ * carries no casing a rule could recover from it. Without this the omission is
+ * silent: the slug renders, the two renderings still agree, and every test
+ * that compares them passes.
+ */
+export function breadcrumbLabelRequired(path: string): boolean {
+  return breadcrumbTrail(path).length > 0;
 }
 
 /** The BreadcrumbList node for a trail, or null when there is nothing to state. */

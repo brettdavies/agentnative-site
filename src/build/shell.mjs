@@ -11,6 +11,7 @@ import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared
 import {
   BREADCRUMB_JSONLD_TOKEN,
   breadcrumbJsonLd,
+  breadcrumbLabelRequired,
   breadcrumbTrail,
   renderBreadcrumbNav,
 } from '../shared/breadcrumb.ts';
@@ -201,7 +202,8 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  *     `rel="alternate"` link markup (default: the markdown-twin link alone).
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
- * @param {string=} args.breadcrumb         — this page's label in its breadcrumb trail.
+ * @param {string=} args.breadcrumb         — this page's label in its breadcrumb
+ *     trail; required of every page that has one.
  * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
  * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
  *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
@@ -220,9 +222,7 @@ export function emitShell({
   // its body paints. Empty on every page that does not.
   extraHeadJs = '',
   isIndex = false,
-  // The label this page takes in its breadcrumb trail. Supply it when the
-  // emitter knows a better name than the URL carries; the derived label is a
-  // reasonable default and handles every page that ships today.
+  // The label this page takes in its breadcrumb trail.
   breadcrumb = null,
   turnstileSitekey = false,
   baseUrl,
@@ -246,6 +246,11 @@ export function emitShell({
   // through this same module. The JSON-LD placeholder is a bare string in the
   // graph, which serializes to a quoted token the substituter swaps whole.
   const deferred = canonicalPath.includes('{{');
+  if (!deferred && breadcrumb === null && breadcrumbLabelRequired(canonicalPath)) {
+    throw new Error(
+      `emitShell: ${canonicalPath} has a breadcrumb trail and no breadcrumb, so it would state its own URL segment where its name belongs`,
+    );
+  }
   const trail = deferred ? [] : breadcrumbTrail(canonicalPath, breadcrumb);
   const crumbNav = deferred ? '{{BREADCRUMB_NAV}}' : renderBreadcrumbNav(trail);
   const crumbNode = deferred ? BREADCRUMB_JSONLD_TOKEN : breadcrumbJsonLd(trail, base);

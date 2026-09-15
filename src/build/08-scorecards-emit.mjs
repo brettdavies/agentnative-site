@@ -244,6 +244,7 @@ export async function emitScorecardSurface({
         title: `${tool.name} — Agent-Native Scorecard`,
         description: `Agent-readiness scorecard for ${tool.name}: ${tool.description}`,
         canonicalPath,
+        breadcrumb: tool.name,
         markdownTwinPath: scoreMarkdownPath(tool.name),
         alternatesHtml: resultAlternateLinks(tool.name),
         bodyHtml: scorecardBody,
