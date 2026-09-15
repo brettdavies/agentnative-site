@@ -347,11 +347,11 @@ gate_build() {
   if [[ -d "$REPO_ROOT/dist/badge" && -d "$REPO_ROOT/scorecards" ]]; then
     local missing
     missing=$(comm -23 <(find "$REPO_ROOT/scorecards" -maxdepth 1 -name '*.json' -printf '%f\n' | sed -E 's/-v[^/]+\.json$//' | sort -u) \
-      <(ls "$REPO_ROOT/dist/badge" | sed -E 's/\.svg$//' | sort -u) | head -10)
+      <(ls "$REPO_ROOT/dist/badge" | sed -E 's/\.svg$//' | sort -u))
     if [[ -z "$missing" ]]; then
       gate_pass "badge SVGs cover every scorecard"
     else
-      gate_fail "badge SVG coverage" "diff: $missing"
+      gate_fail "badge SVG coverage" "scorecards with no badge: $(count_and_list "$missing")"
     fi
   else
     gate_skip "badge SVG coverage" "dist/badge or scorecards directory missing"
@@ -362,11 +362,11 @@ gate_build() {
     local twin_diff
     twin_diff=$(comm -23 <(find "$REPO_ROOT/dist" -name '*.html' -not -path "$REPO_ROOT/dist/_internal/*" \
       | sed -E 's/\.html$//' | sort) \
-      <(find "$REPO_ROOT/dist" -name '*.md' | sed -E 's/\.md$//' | sort) | head -10)
+      <(find "$REPO_ROOT/dist" -name '*.md' | sed -E 's/\.md$//' | sort))
     if [[ -z "$twin_diff" ]]; then
       gate_pass "markdown twin exists for every emitted HTML page"
     else
-      gate_fail "markdown twin coverage" "diff: $twin_diff"
+      gate_fail "markdown twin coverage" "HTML pages with no twin: $(count_and_list "$twin_diff")"
     fi
   else
     gate_skip "markdown twin coverage" "dist not present"
@@ -670,7 +670,7 @@ gate_mechanics() {
     if [[ -z "$missed" ]]; then
       gate_pass "diff-B: no missed picks vs origin/dev"
     else
-      gate_skip "diff-B" "files present on dev but not on this branch (review): $(echo "$missed" | head -3 | tr '\n' ' ')"
+      gate_skip "diff-B" "this branch differs from dev outside the guarded set (review each): $(count_and_list "$missed")"
     fi
   else
     gate_skip "triple-diff" "origin/main or origin/dev not fetched"
