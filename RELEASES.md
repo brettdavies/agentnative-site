@@ -112,6 +112,13 @@ trash <each main-only file listed above>
 #    never restate it inline, because every hand-kept copy drifted from what CI enforces.
 GUARDED="$(scripts/release/guarded-paths.sh)"
 git ls-files | grep -E "$GUARDED" | xargs -r trash
+
+# 3b. Withhold any feature `dev` carries that this release must not ship. Each
+#     one owns a script under scripts/release/, so the removal is applied
+#     rather than re-derived, and the script's residue check fails the cut if
+#     the feature changed shape on dev. Delete the script when the feature
+#     ships. See § Withheld features for what is held back and why.
+scripts/release/withhold-telemetry-lake.py
 git add -A                                                      # stages adds, mods, AND deletions
 
 # 4. Bump "version" in package.json (this repo's version carrier) to <version>, then build
@@ -122,8 +129,9 @@ scripts/generate-changelog.py --from-dev-prs --tag v<version>
 git add -A
 
 # 5. Verify before committing.
-#    A: staged tree equals dev's minus the version file, the changelog, and the stripped
-#       guarded paths. Anything else printed here is a mistake.
+#    A: staged tree equals dev's minus the version file, the changelog, the stripped
+#       guarded paths, and whatever step 3b withheld. Anything else printed here is
+#       a mistake; the withheld paths are expected and listed in § Withheld features.
 git diff --cached --name-only origin/dev | grep -Ev "$GUARDED" \
   | grep -Ev '^(package\.json|CHANGELOG\.md)$' \
   && echo "unexpected delta above; investigate" || echo "(clean: only intended deltas)"
@@ -185,6 +193,25 @@ release commit rather than trusting staging-on-`dev`:
 [`RELEASES-RATIONALE.md` § Why the release branch deploys to staging](./RELEASES-RATIONALE.md#why-the-release-branch-deploys-to-staging).
 Why step 8's live suites gate the release:
 [`RELEASES-RATIONALE.md` § Why the live e2e suites gate the release](./RELEASES-RATIONALE.md#why-the-live-e2e-suites-gate-the-release).
+
+### Withheld features
+
+A feature can be complete on `dev` and still not belong in a release. Rather than reverting it off the integration
+branch, the release strips it at cut time: `dev` keeps every line and the feature ships whole once its blocker clears.
+
+Each withheld feature owns a script under `scripts/release/`, run at step 3b. The script is the record of what is held
+back, so the removal is applied rather than re-derived by hand at each cut, and it is deliberately brittle: an exact
+match that no longer matches is a hard error, because a silently skipped edit ships the feature. After applying, it
+greps the tree for every marker the feature owns and fails on any survivor, which catches a miss whichever edit caused
+it. `--check` reports without writing and exits non-zero while anything is still pending.
+
+| Feature        | Script                                      | Held back because                                                        |
+| -------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
+| Telemetry lake | `scripts/release/withhold-telemetry-lake.py` | The stall alert calls `notify()`, which returns `unprovisioned` while no `EMAIL` binding exists, and the privacy posture page describes telemetry the release would not be collecting. |
+
+Delete the script in the same PR that clears the blocker; from the next cut the feature ships with everything else.
+Expect the withheld paths to show up in preflight's diff-B gate, which reports every divergence from `dev` outside the
+guarded set: that gate is how a withholding stays visible rather than becoming invisible drift.
 
 ### Exception: cherry-pick
 
