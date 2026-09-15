@@ -51,16 +51,16 @@ const AUDIT_WIDGET = {
  *          Per-page metadata (twin markdown) consumed by llms-full.txt assembly.
  */
 export const SUB_PAGES = [
-  { name: 'audit', extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT], widget: AUDIT_WIDGET },
-  { name: 'install' },
-  { name: 'about' },
-  { name: 'badge' },
-  { name: 'changelog' },
-  { name: 'contribute' },
-  { name: 'methodology' },
-  { name: 'privacy' },
-  { name: 'scorecard-schema' },
-  { name: 'web-scorecard-schema' },
+  { name: 'audit', breadcrumb: 'Audit', extraScripts: ['/js/audit-entry.js', WEBMCP_SCRIPT], widget: AUDIT_WIDGET },
+  { name: 'install', breadcrumb: 'Install' },
+  { name: 'about', breadcrumb: 'About' },
+  { name: 'badge', breadcrumb: 'Badge' },
+  { name: 'changelog', breadcrumb: 'Changelog' },
+  { name: 'contribute', breadcrumb: 'Contribute' },
+  { name: 'methodology', breadcrumb: 'Methodology' },
+  { name: 'privacy', breadcrumb: 'Privacy' },
+  { name: 'scorecard-schema', breadcrumb: 'Scorecard schema' },
+  { name: 'web-scorecard-schema', breadcrumb: 'Web scorecard schema' },
   // /mcp-skill/ is the client-facing skill page advertised by the
   // /.well-known/mcp pointer's `documentation` field and by the MCP
   // server's handshake `instructions` string. The source filename
@@ -69,7 +69,7 @@ export const SUB_PAGES = [
   // `/mcp/` (which is the Worker-served JSON-RPC endpoint). Operator-
   // facing material lives in the in-repo runbook at
   // `docs/runbooks/mcp-operator.md` and is not published.
-  { name: 'mcp-skill' },
+  { name: 'mcp-skill', breadcrumb: 'MCP skill' },
   // /mcp renders as a regular content page (HTML + MD twin) so a
   // human or crawler clicking the literal endpoint URL lands on a
   // shell-wrapped descriptor — same header, theme toggle, footer as
@@ -78,7 +78,7 @@ export const SUB_PAGES = [
   // /.well-known/mcp). Other GET methods fall through to the asset-
   // first dispatch which serves dist/mcp.html or the .md twin via
   // the site's standard content negotiation.
-  { name: 'mcp' },
+  { name: 'mcp', breadcrumb: 'MCP' },
 ];
 
 // The HTML page gets the widget markup; the twin (and llms-full.txt) get
@@ -105,7 +105,7 @@ async function renderLanes(source, widget, contentDir) {
 
 export async function emitSubPages({ distDir, contentDir, themeInit }) {
   const subPageData = [];
-  for (const { name, extraScripts, widget } of SUB_PAGES) {
+  for (const { name, breadcrumb, extraScripts, widget } of SUB_PAGES) {
     const source = await readFile(join(contentDir, `${name}.md`), 'utf8');
     const title = extractTitle(source);
     const description = extractDescription(source);
@@ -118,6 +118,7 @@ export async function emitSubPages({ distDir, contentDir, themeInit }) {
         title,
         description,
         canonicalPath: `/${name}`,
+        breadcrumb,
         // Every subpage renders inside the shared reading treatment.
         bodyHtml: `<article class="container doc">${html}</article>`,
         themeInitJs: themeInit,

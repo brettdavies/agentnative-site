@@ -233,6 +233,7 @@ export async function build() {
       title,
       description,
       canonicalPath: `/p${n}`,
+      breadcrumb: `Principle ${n}`,
       bodyHtml: `<article class="container doc">${crumb}${head}${body}${pager}</article>`,
       themeInitJs: themeInit,
       extraScripts: [WEBMCP_SCRIPT],

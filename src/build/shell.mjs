@@ -11,7 +11,7 @@ import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
-import { canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
+import { ANC_VERSION, canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
 
 // navCurrent appends the separator itself, so a namespace pattern is the
 // prefix without its trailing slash.
@@ -43,6 +43,73 @@ export const NAV_LINKS = [
   { label: 'Skill', href: '/skill', match: ['/skill'] },
   { label: 'About', href: '/about', match: ['/about'] },
 ];
+
+// Published in `.well-known/security.txt` and `ai.txt`; the same address the
+// Organization node hands a crawler.
+const CONTACT_EMAIL = '97-boss-beetle@icloud.com';
+
+/**
+ * Prefixes whose next segment is a target rather than a page. The prefix
+ * itself is dropped from a trail: `/score/` and `/fix/` are namespaces the
+ * route module owns, and the bare path is a 404, so a crumb pointing at one
+ * would send a reader to a miss.
+ */
+const TARGET_NAMESPACES = new Set([SCORE_PREFIX, FIX_PREFIX].map((prefix) => prefix.replace(/^\/|\/$/g, '')));
+
+/**
+ * The trail from the home page to this one, or nothing.
+ *
+ * Empty for the home page, where a one-item trail names only itself, and for
+ * the Worker's shell template, whose canonical path is a placeholder it
+ * substitutes per request: a build-time trail would bake `{{CANONICAL_PATH}}`
+ * into the graph a crawler reads.
+ *
+ * A namespace segment is dropped rather than linked. `/score/` and `/fix/`
+ * are prefixes the route module owns, not pages: the bare path is a 404, and
+ * a crumb pointing at one would send a reader to a miss. The target under
+ * them keeps its exact text, because a binary name, a host, and an
+ * `owner/repo@branch` are identifiers that title case would corrupt.
+ *
+ * The last crumb takes the `label` the page supplies. Without one it is the
+ * URL segment verbatim, which is deliberately plain: a slug carries no casing
+ * a rule could recover, and a wrong-looking crumb is better than a
+ * plausible-looking one nobody notices.
+ *
+ * @param {string} base
+ * @param {string} path
+ * @param {string|null} label
+ * @returns {object[]}
+ */
+function breadcrumbNodes(base, path, label = null) {
+  if (path.includes('{{')) return [];
+  const segments = path
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .filter(Boolean);
+  if (segments.length === 0) return [];
+
+  const namespace = TARGET_NAMESPACES.has(segments[0]) ? segments[0] : null;
+  const items = [{ '@type': 'ListItem', position: 1, name: 'Home', item: base }];
+  if (namespace) {
+    // One crumb for the whole target, however many segments it spans: a
+    // branch-scoped result is `owner/repo@branch`, one identifier with a slash.
+    // A target under a namespace is an identifier: a binary name, a host, an
+    // `owner/repo@branch`. It reads verbatim unless the emitter supplied a
+    // label, which is how a fix page gets the name its registry entry authors
+    // rather than one guessed from the slug.
+    const target = decodeURIComponent(segments.slice(1).join('/'));
+    items.push({ '@type': 'ListItem', position: 2, name: label ?? target, item: `${base}${path}` });
+    return [{ '@type': 'BreadcrumbList', itemListElement: items }];
+  }
+
+  let href = '';
+  segments.forEach((segment, i) => {
+    href += `/${segment}`;
+    const last = i === segments.length - 1;
+    items.push({ '@type': 'ListItem', position: i + 2, name: last && label ? label : segment, item: `${base}${href}` });
+  });
+  return [{ '@type': 'BreadcrumbList', itemListElement: items }];
+}
 
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
@@ -191,6 +258,7 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
  *     `rel="alternate"` link markup (default: the markdown-twin link alone).
  * @param {string} args.bodyHtml             — rendered principle / page HTML.
  * @param {string} args.themeInitJs          — inline head script source.
+ * @param {string=} args.breadcrumb         — this page's label in its breadcrumb trail.
  * @param {boolean=} args.isIndex            — true on '/', adds the Turnstile sitekey meta.
  * @param {boolean=} args.turnstileSitekey   — true on form pages that acquire
  *     a token (`/` via isIndex, `/web-audit`). Emits the same placeholder meta.
@@ -209,6 +277,10 @@ export function emitShell({
   // its body paints. Empty on every page that does not.
   extraHeadJs = '',
   isIndex = false,
+  // The label this page takes in its breadcrumb trail. Supply it when the
+  // emitter knows a better name than the URL carries; the derived label is a
+  // reasonable default and handles every page that ships today.
+  breadcrumb = null,
   turnstileSitekey = false,
   baseUrl,
   extraScripts = [],
@@ -224,6 +296,7 @@ export function emitShell({
   const ogImage = `${base}/og-image.png`;
 
   const orgId = `${base}/#organization`;
+  const siteId = `${base}/#website`;
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -234,6 +307,24 @@ export function emitShell({
         url: base,
         logo: `${base}/apple-touch-icon-180.png`,
         sameAs: SOURCE_REPOS.map((r) => r.url),
+        contactPoint: {
+          '@type': 'ContactPoint',
+          contactType: 'technical support',
+          email: CONTACT_EMAIL,
+          url: `${base}/.well-known/security.txt`,
+        },
+      },
+      {
+        // The site itself, so each page is part of a named corpus rather than
+        // a standalone article. No SearchAction: there is no search endpoint,
+        // and advertising one sends a crawler somewhere that does not exist.
+        '@type': 'WebSite',
+        '@id': siteId,
+        name: SITE_NAME,
+        alternateName: SITE_TAGLINE,
+        url: base,
+        inLanguage: 'en',
+        publisher: { '@id': orgId },
       },
       {
         '@type': 'TechArticle',
@@ -241,6 +332,7 @@ export function emitShell({
         description,
         url: canonical,
         image: ogImage,
+        isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
           name: 'Brett Davies',
@@ -249,6 +341,7 @@ export function emitShell({
         },
         publisher: { '@id': orgId },
       },
+      ...breadcrumbNodes(base, canonicalPath, breadcrumb),
       {
         '@type': 'SoftwareApplication',
         '@id': `${base}/#anc-cli`,
@@ -264,6 +357,7 @@ export function emitShell({
         ],
         installUrl: `${base}/install`,
         documentation: 'https://docs.rs/agentnative',
+        softwareVersion: ANC_VERSION,
         url: `${base}${AUDIT_PATH}`,
         offers: { '@type': 'Offer', price: 0, priceCurrency: 'USD' },
         publisher: { '@id': orgId },
@@ -277,6 +371,7 @@ export function emitShell({
           'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, vendored spec.',
         url: `${base}/mcp`,
         documentation: `${base}/mcp-skill`,
+        softwareVersion: SITE_SPEC_VERSION,
         potentialAction: {
           '@type': 'ConsumeAction',
           name: 'Invoke MCP',

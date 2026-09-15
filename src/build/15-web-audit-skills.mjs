@@ -154,6 +154,7 @@ export async function emitWebAuditSkillPages({ distDir, registryPath, remediatio
         title: `Fix: ${check.title}`,
         description,
         canonicalPath: fixPath(check.id),
+        breadcrumb: check.breadcrumb,
         bodyHtml: await buildSkillHtmlBody(check, remediation[check.id], registry.categories, base),
         themeInitJs: themeInit,
       }),
