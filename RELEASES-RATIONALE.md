@@ -501,6 +501,13 @@ The deploy has to land before the live gates, and the container rollout has to f
 Cloudflare reports `wrangler deploy` success while instances are still draining. A gate that races the rollout reads a
 warm OLD-image instance and fails in a way indistinguishable from a real defect.
 
+Dispatch it with `--ref <release branch>`. A `workflow_dispatch` takes its workflow definition from the ref it is
+dispatched against, which defaults to the repository's default branch, while `-f ref=<sha>` only moves what the job
+checks out. The two therefore come apart exactly when a release changes the deploy workflow: `main`'s copy of a
+post-deploy smoke runs against the release's build and rejects it. The 2026-09-15 release found this the first time the
+step ran, when `main`'s link smoke, which greps the whole tool payload, rejected an envelope whose attached scorecard
+names the canonical host on purpose. The release's own copy of that smoke reads the minted URLs instead and passes.
+
 ## Why the live e2e suites gate the release
 
 `deep-check.yml` runs the four live Playwright projects on a schedule against `main`. That is the right place for them,
