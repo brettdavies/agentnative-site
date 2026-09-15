@@ -498,6 +498,7 @@ describe('build output separates canonical identity from navigation', () => {
         title: 'P3',
         description: 'desc',
         canonicalPath: '/p3',
+        breadcrumb: 'Principle 3',
         bodyHtml: '<p>body</p>',
         themeInitJs: '',
         baseUrl: undefined,

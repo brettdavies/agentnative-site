@@ -45,8 +45,12 @@ export type ShellFields = {
   markdownTwinPath?: string;
   /** The head's alternate links; defaults to the markdown twin alone. */
   alternatesHtml?: string;
-  /** This page's label in its breadcrumb trail; the path's own segment without one. */
-  breadcrumb?: string;
+  /**
+   * This page's label in its breadcrumb trail. Required, because a URL segment
+   * carries no casing a rule could recover, and a page that omits one states a
+   * slug where its name belongs without ever failing.
+   */
+  breadcrumb: string;
 };
 
 export function substituteShell(template: string, fields: ShellFields): string {
