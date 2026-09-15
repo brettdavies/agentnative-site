@@ -246,6 +246,47 @@ schedule and after each deploy; only one batch runs at a time, so overlapping tr
 double-spending the audit budget. It is what keeps the board's live scores fresh without committing any scorecard
 snapshots. Distinct from an on-demand audit of a single domain, which caches its own result without starting a batch.
 
+### Declared host
+
+A host the entry site names in one of its own machine-readable surfaces: the MCP server card's remote or transport URL,
+an api-catalog anchor, the catalog's service-desc target, or RFC 9728 protected-resource metadata. A declared host is
+evaluated for the entry site's scorecard and never receives a scorecard of its own from that audit.
+
+### Follow phase
+
+The bounded slice of a web audit, after MCP discovery and before wave 1, in which declared hosts are fetched: documents
+by GET through the public-URL guard, one hop from the entry origin, under a wall-clock budget and per-audit caps on
+distinct hosts and requests. Exhaustion resolves dependent rows to not-applicable and never marks the audit incomplete.
+
+### Reciprocity
+
+The proof required before the audit sends an MCP wire probe to a declared host off the entry origin: the target's own
+server card at the SEP-2127 location, its RFC 9728 protected-resource metadata, or an MCP-shaped answer to a GET. Every
+failure mode collapses into one outcome, reciprocity refused, so a caller cannot distinguish them.
+
+### Endpoint of record
+
+The one MCP endpoint a web audit evaluates: the entry origin's own endpoint when it has one, otherwise the first
+followed remote. Other remotes are recorded in the declared-hosts trail as not followed.
+
+### Declared-hosts trail
+
+The scorecard's top-level list of every declared host and its outcome: followed, reciprocity refused, not followed,
+blocked, unreachable, or budget exceeded. It is the reader's explanation for why an entry site carries rows evaluated at
+another host.
+
+### Registry fingerprint
+
+The hash of the normalized web-audit registry, widened with the follow policy version and the follow kill-switch state,
+that the rescore Workflow compares against its stored value to decide whether the curated seeds must reflow. Its prefix
+is stamped on each scorecard as the registry it was scored under.
+
+### Watched source
+
+An entry in the standards manifest: an external specification artifact the registry relies on, with its stability tier,
+source type, pinned value, and canonicalization rule. The scheduled spec-drift poll compares each watched source against
+its pin and opens one issue per drifted source.
+
 ## Agent discovery
 
 ### MCP endpoint
