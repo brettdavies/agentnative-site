@@ -67,7 +67,7 @@ holds traffic (the endpoint samples recent records, so a quiet window lists only
 
 ```bash
 # ACCOUNT_ID + a token with Workers Observability Read; the read-only
-# analytics token is the one to use (name in docs/runbooks/sitewide-analytics.md).
+# analytics token is the one to use (name in 1Password).
 curl -sS -X POST "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/observability/telemetry/keys" \
   -H "Authorization: Bearer $CF_ANALYTICS_READ_TOKEN" -H 'Content-Type: application/json' \
   -d '{"timeframe":{"from":'"$(( $(date +%s000) - 3600000 ))"',"to":'"$(date +%s000)"'},

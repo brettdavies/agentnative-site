@@ -3141,20 +3141,6 @@ describe('emitSubPages — twin frontmatter', () => {
     expect(auditMd).toContain('## Audit a website');
   });
 
-  test('privacy twin opens with frontmatter derived from its source; HTML stays clean', async () => {
-    const source = await readFile(join(CONTENT_DIR, 'privacy.md'), 'utf8');
-    const privacyMd = await readFile(join(distDir, 'privacy.md'), 'utf8');
-    const expectedFm = renderFrontmatter({
-      title: extractTitle(source),
-      description: extractDescription(source),
-      url: 'https://anc.dev/privacy',
-    });
-    expect(privacyMd.startsWith(expectedFm)).toBe(true);
-    const privacyHtml = await readFile(join(distDir, 'privacy.html'), 'utf8');
-    expect(privacyHtml).not.toContain('---\ntitle:');
-    expect(privacyHtml).not.toMatch(/^url: /m);
-  });
-
   test('/audit HTML carries the Turnstile sitekey meta, because its form transacts', async () => {
     const auditHtml = await readFile(join(distDir, 'audit.html'), 'utf8');
     expect(auditHtml).toContain('name="turnstile-sitekey"');

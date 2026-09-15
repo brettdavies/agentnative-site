@@ -58,7 +58,6 @@ export const SUB_PAGES = [
   { name: 'changelog', breadcrumb: 'Changelog' },
   { name: 'contribute', breadcrumb: 'Contribute' },
   { name: 'methodology', breadcrumb: 'Methodology' },
-  { name: 'privacy', breadcrumb: 'Privacy' },
   { name: 'scorecard-schema', breadcrumb: 'Scorecard schema' },
   { name: 'web-scorecard-schema', breadcrumb: 'Web scorecard schema' },
   // /mcp-skill/ is the client-facing skill page advertised by the

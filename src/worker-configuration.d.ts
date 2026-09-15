@@ -4,7 +4,6 @@
 interface __BaseEnv_Env {
 	SCORE_KV: KVNamespace;
 	SCORE_CACHE: R2Bucket;
-	TELEMETRY_LAKE: R2Bucket;
 	SCORE_TELEMETRY: AnalyticsEngineDataset;
 	SCORE_LIMITER: RateLimit;
 	SCORE_LIMITER_IP: RateLimit;
@@ -35,7 +34,6 @@ declare namespace Cloudflare {
 	interface StagingEnv {
 		SCORE_KV: KVNamespace;
 		SCORE_CACHE: R2Bucket;
-		TELEMETRY_LAKE: R2Bucket;
 		SCORE_TELEMETRY: AnalyticsEngineDataset;
 		SCORE_LIMITER: RateLimit;
 		SCORE_LIMITER_IP: RateLimit;

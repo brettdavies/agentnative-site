@@ -486,7 +486,6 @@ ${SOURCE_REPOS.map(
           <a href="/methodology">Methodology</a>
           <a href="/coverage">Coverage</a>
           <a href="/contribute">Contribute</a>
-          <a href="/privacy">Privacy</a>
           <a href="/scorecard-schema">Scorecard schema</a>
           <a href="/web-scorecard-schema">Web scorecard schema</a>
           <a href="/llms.txt">llms.txt</a>

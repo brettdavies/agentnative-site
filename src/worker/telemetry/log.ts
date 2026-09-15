@@ -25,7 +25,6 @@ export type LogScope =
   | 'score.outbound'
   | 'score.telemetry.write_failed'
   | 'score.tier'
-  | 'telemetry.lake-freshness'
   | 'web-aggregate'
   | 'web-audit.check'
   | 'web-audit.discovery'

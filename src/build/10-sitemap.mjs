@@ -28,7 +28,6 @@ export function buildSitemap({ principleNumbers, extraPaths = [], baseUrl, lastm
     '/changelog',
     '/contribute',
     '/methodology',
-    '/privacy',
     '/scorecard-schema',
     '/mcp-skill',
     '/mcp',

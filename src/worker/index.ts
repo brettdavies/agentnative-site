@@ -68,7 +68,6 @@ import { notFoundHtml, notFoundMarkdown } from './not-found';
 import { isScorePath } from './score/content-negotiation';
 import { handleScore, type ScoreEnv } from './score/handler';
 import { SPEC_VERSION } from './spec-version.gen';
-import { LAKE_FRESHNESS_CRON, type LakeFreshnessEnv, runLakeFreshnessCheck } from './telemetry/lake-freshness';
 import { emitLog } from './telemetry/log';
 import { recordPageRequest } from './telemetry/page-request';
 import { runWithRequestContext } from './telemetry/request-context';
@@ -180,13 +179,6 @@ export interface Env {
   // don't exercise the rescore path can stub a minimal env.
   WEB_RESCORE_WORKFLOW?: WebRescoreWorkflowBinding;
   WEB_RESCORE_SECRET?: string;
-  // Telemetry-lake freshness bindings. TELEMETRY_LAKE is the lake bucket
-  // the daily cron lists for stall detection; TELEMETRY_ENVIRONMENT names
-  // the deploy environment so the stall alert emails only from production
-  // (everything else is log-only). Optional so tests that don't exercise
-  // the cron can stub a minimal env.
-  TELEMETRY_LAKE?: R2Bucket;
-  TELEMETRY_ENVIRONMENT?: string;
 }
 
 /**
@@ -1046,9 +1038,6 @@ export default {
       // budget.
       case WEB_RESCORE_CRON:
         await startWebRescore(env as WebRescoreTriggerEnv);
-        return;
-      case LAKE_FRESHNESS_CRON:
-        await runLakeFreshnessCheck(env as LakeFreshnessEnv);
         return;
       default:
         emitLog({ scope: 'scheduled' }, { error: 'unrecognized_cron', cron: controller.cron });
