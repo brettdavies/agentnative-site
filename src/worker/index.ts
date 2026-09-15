@@ -143,9 +143,9 @@ export interface Env {
   SCORE_LIMITER_IP?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   // TURNSTILE_SECRET is a secret (wrangler secret put). TURNSTILE_SITEKEY
   // is a public var the Worker substitutes into <meta name="turnstile-sitekey">
-  // on `/` and `/web-audit`. Absent on production means those forms refuse
-  // to render Turnstile (fail-loud pre-promotion). `/web/scoring` bakes the
-  // same var into the in-progress page body.
+  // on the two entry pages. Absent on production means those forms refuse to
+  // render Turnstile (fail-loud pre-promotion). The progress page and a
+  // result page's Re-audit control bake the same var into their own markup.
   TURNSTILE_SECRET?: string;
   TURNSTILE_SITEKEY?: string;
   SESSION_HMAC_SECRET?: string;

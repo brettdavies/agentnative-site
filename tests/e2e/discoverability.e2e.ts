@@ -310,8 +310,8 @@ test.describe('staging published web-audit contracts', () => {
     return res.text();
   }
 
-  test('/web-audit.md publishes the result-tool filter, order, and pagination contract', async ({ request }) => {
-    const md = await twin(request, '/web-audit.md');
+  test('/mcp-skill.md publishes the result-tool filter, order, and pagination contract', async ({ request }) => {
+    const md = await twin(request, '/mcp-skill.md');
     for (const tool of ['get_worksheet', 'get_fix_prompt', 'get_fix_prompts', 'get_audit_summary']) {
       expect(md).toContain(`\`${tool}\``);
     }

@@ -172,7 +172,10 @@ export function emitShellTemplate({ themeInitJs, baseUrl } = {}) {
     themeInitJs: themeInitJs ?? '',
     isIndex: false,
     baseUrl,
-    extraScripts: [],
+    // A result page publishes the read-only worksheet tools to a browser
+    // agent standing on it, so the Worker-rendered shell carries the same
+    // registration script the built entry pages do.
+    extraScripts: [WEBMCP_SCRIPT],
   });
 }
 

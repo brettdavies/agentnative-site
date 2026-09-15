@@ -2046,7 +2046,7 @@ a.tier-filter {
 }
 
 /* ================================================================
- * Scorecard — /score/<tool> + /score/live/<binary> (shared renderer)
+ * Scorecard — /score/<target>, curated and live (shared renderer)
  * ================================================================ */
 
 body:has(.scorecard-page) main {
@@ -3233,7 +3233,7 @@ main .remediation__body {
 }
 
 /* =============================================================
- * /score/live/<binary> result page — share surface.
+ * Live CLI result page — share surface.
  * Reuses the per-tool scorecard score badge component; adds a
  * compact header with version + binary + freshness marker.
  * ============================================================= */

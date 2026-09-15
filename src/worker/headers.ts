@@ -61,9 +61,9 @@ import { homeTag, resultTag } from './audit-web/hit-min-tags';
 //
 //   MISS                                  Cache-Control: no-store
 //                                         Cloudflare-CDN-Cache-Control: no-store
-//                                         (status >= 400; /scoring*;
-//                                         /web/scoring*; a served MISS class
-//                                         such as a `?v=` result fetch)
+//                                         (status >= 400; the progress page;
+//                                         a served MISS class such as a
+//                                         `?v=` result fetch)
 //
 //   Path-keyed files (.json, .svg, .txt,  Cache-Control: public, max-age=300,
 //   .xml, …; curated /score/<slug>/json)  s-maxage=86400, stale-while-revalidate=60
@@ -253,8 +253,8 @@ function isSvg(pathname: string): boolean {
 
 // Source files with no HTML twin. A curl/agent UA would otherwise rewrite
 // `/llms.txt` to `/llms.txt.md` (same `.json` pitfall DESIGN.md §3.4 called
-// out for `/skill.json`). Keep this list extension-only: `/web/anc.dev` is
-// a result page, not a file, and is dispatched before asset CN.
+// out for `/skill.json`). Keep this list extension-only: a result page such
+// as `/score/anc.dev` is a page, not a file, and is dispatched before asset CN.
 function isUntwinnedSource(pathname: string): boolean {
   return /\.(txt|xml|css|js|mjs|map|png|ico|woff2|webmanifest)$/i.test(pathname);
 }

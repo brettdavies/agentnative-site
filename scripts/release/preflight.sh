@@ -26,7 +26,7 @@
 #             (asserts source=fresh-audit) + cache-hit on the same binary without bypass
 #             (asserts source=live-cache). Both paths must produce their expected outcome; the
 #             cache-miss leg requires MCP_CACHE_BYPASS_ALLOWED bound at the Worker (staging-only).
-#   dist      Distribution surfaces against the --env target — /check -> /audit redirect,
+#   dist      Distribution surfaces against the --env target: the
 #             skill.json served version vs source. The X-Robots-Tag: noindex check runs only in
 #             staging mode (the staging-host guard does not fire for localhost in local mode).
 #   mechanics Release mechanics sanity: leak check (no guarded paths in the diff vs origin/main),
@@ -427,18 +427,22 @@ gate_do_smoke() {
     return
   fi
 
-  local ok binary_resp anc_v share_url err
+  local ok binary_resp anc_v scorecard_url tier err
   ok=$(printf '%s' "$body" | jq -r '.scorecard != null and .scorecard.tool.binary != null' 2>/dev/null || echo "false")
   binary_resp=$(printf '%s' "$body" | jq -r '.scorecard.tool.binary // empty' 2>/dev/null || true)
   anc_v=$(printf '%s' "$body" | jq -r '.anc_version // empty' 2>/dev/null || true)
-  share_url=$(printf '%s' "$body" | jq -r '.share_url // empty' 2>/dev/null || true)
+  scorecard_url=$(printf '%s' "$body" | jq -r '.scorecard_url // empty' 2>/dev/null || true)
+  tier=$(printf '%s' "$body" | jq -r '.tier // empty' 2>/dev/null || true)
   err=$(printf '%s' "$body" | jq -r '.error.code // empty' 2>/dev/null || true)
 
-  if [[ "$ok" == "true" && -n "$binary_resp" && -n "$anc_v" && "$share_url" == "/score/live/${binary_resp}" ]]; then
-    gate_pass "$ENV /api/score returned scorecard for $binary_resp (anc $anc_v, share $share_url)"
+  # The envelope mints an absolute URL on the origin it was served from, so the
+  # gate asserts the path it ends with rather than pinning a host.
+  if [[ "$ok" == "true" && -n "$binary_resp" && -n "$anc_v" && -n "$tier" \
+    && "$scorecard_url" == */score/"${binary_resp}" ]]; then
+    gate_pass "$ENV /api/score returned a $tier scorecard for $binary_resp (anc $anc_v, $scorecard_url)"
   else
     gate_fail "$ENV /api/score response shape" \
-      "ok=$ok binary=$binary_resp anc=$anc_v share=$share_url error=$err"
+      "ok=$ok binary=$binary_resp anc=$anc_v tier=$tier scorecard_url=$scorecard_url error=$err"
   fi
 }
 
@@ -512,16 +516,6 @@ gate_dist() {
       rm -f "$cfg"
       return
     fi
-  fi
-
-  # /check -> /audit redirect.
-  local check_loc
-  check_loc=$(curl -sSI -K "$cfg" "${ENV_URL}/check" 2>/dev/null \
-    | grep -i '^location:' | head -1 | sed -E 's/^[Ll]ocation: *//' | tr -d '\r' || true)
-  if [[ "$check_loc" == "/audit" || "$check_loc" == "${ENV_URL}/audit" ]]; then
-    gate_pass "/check -> /audit 301 redirect serves"
-  else
-    gate_fail "/check -> /audit 301 redirect" "location=$check_loc"
   fi
 
   # Skill manifest version matches source.

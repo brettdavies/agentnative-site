@@ -233,6 +233,19 @@ merge conflicts on every file both sides touched, and a direct push bypasses `de
 → Rationale:
 [`RELEASES-RATIONALE.md` § Why backport main → dev after publish](./RELEASES-RATIONALE.md#why-backport-main--dev-after-publish).
 
+### Releases that retire or rename a public path
+
+A path this release removes still answers from the edge until its cached copy expires, and a cached 200 or 301 is
+indistinguishable from a route that never got removed. Any release whose diff retires or renames a public path takes
+two extra steps:
+
+1. **Purge everything after the deploy and before postflight.** A tag purge is not enough: the retired path's cached
+   entry carries the tag of the route that used to serve it, and that route is gone. Use the zone-wide
+   purge-everything, then run `scripts/release/postflight.sh --env prod retired`, whose gate reads the raw status with
+   no retry so a stale answer fails instead of being retried away.
+2. **Purge again on rollback.** Rolling the Worker back re-exposes the old routes, and by then the edge may be holding
+   the 404s this release taught it. The rollback is not complete until the zone is purged a second time.
+
 ## Rollback
 
 A bad release is rolled back at the Worker first, then repaired in git. Rollback re-points what users get; it does not

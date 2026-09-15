@@ -252,20 +252,19 @@ shape); a 4xx/5xx or an always-MISS path is MISS regardless.
   with an empty cache (`cache.cross_version_cache` stays off). Path-keyed `/llms.txt`, `.json`, `.svg`, and the curated
   `/score/<slug>/json` keep `Cache-Control: public, max-age=300, s-maxage=86400, stale-while-revalidate=60` with no
   `Vary`.
-- **HIT-min** — live boards and live results, every representation alike: `/`, `/index.md`, `/scorecards`,
-  `/scorecards.md`, and their `?lane=`/`?view=` queries; `/web`, `/web.md`, `/web?view=*`; a live or branch-scoped
-  `/score/<target>` with its `/md` and `/json`; a website `/score/<host>` with its `/md` and `/json`; and the legacy
-  `/web/<host>` adapter. Browser: `Cache-Control: public, max-age=0, must-revalidate` so a tag purge is visible on the
-  next navigation. Edge: `Cloudflare-CDN-Cache-Control: public, max-age=300`. `Cache-Tag: home` on `/`, `/index.md`, and
-  `/scorecards*`; `web` on `/web*`; `web:{host}` on a website result; `cli:{binary}` on a live CLI result and
+- **HIT-min** — the live board and live results, every representation alike: `/`, `/index.md`, `/scorecards`,
+  `/scorecards.md`, and their `?lane=`/`?view=` queries; a live or branch-scoped `/score/<target>` with its `/md` and
+  `/json`; and a website `/score/<host>` with its `/md` and `/json`. Browser: `Cache-Control: public, max-age=0,
+  must-revalidate` so a tag purge is visible on the next navigation. Edge: `Cloudflare-CDN-Cache-Control: public,
+  max-age=300`. `Cache-Tag: home` on `/`, `/index.md`, and `/scorecards*`; `web:{host}` on a website result;
+  `cli:{binary}` on a live CLI result and
   `cli:{owner}/{repo}@{branch}` on a branch run. The Durable Object purges the `cli:` tag after its R2 write; the web
   stream and the rescore workflow purge `web:{host}` with `web` and `home`. `/audit` with a query string is HIT-min with
   no tag, so a prefill hop never mints a day-long edge key. Explicit `.md` and `/md` twins and `/json` still have no
   `Vary`.
 - **MISS** — every-request `Cache-Control: no-store` plus `Cloudflare-CDN-Cache-Control: no-store`, untagged.
-  `/scoring*`, `/web/scoring*`, `POST /mcp`, `/api/score`, `/api/audit-web`, a `/score/<target>?v=` fetch, the 202
-  in-progress `/json`, and every Worker 4xx/5xx (including a never-audited `/score/<target>` and `/web/<host>`). A
-  stored 5xx would otherwise become a skip-Worker HIT.
+  `/scoring*`, `POST /mcp`, `/api/score`, a `/score/<target>?v=` fetch, the 202 in-progress `/json`, and every Worker
+  4xx/5xx (including a never-audited `/score/<target>`). A stored 5xx would otherwise become a skip-Worker HIT.
 
 Hashed immutable assets (fonts at `/fonts/*`, the content-hashed `/og-image.png`) carry `Cache-Control: public,
 max-age=31536000, immutable`.
@@ -1155,8 +1154,9 @@ constant in the HTML shell. Documented in `wrangler.toml` per CEO plan (resolvin
 The site's identity is **the instrument**: measurement as the visual language. Committed color, solid surface bands, a
 score-meter motif, and the MUST/SHOULD/MAY tri-color used structurally — deliberately outside the saturated
 editorial-mono lane. Components live in `src/styles/site.css` on top of the generated `foundation.css`; the shared
-markup emitters are wider than the static build (`src/shared/scorecard-format.mjs` also feeds the Worker `/score/live`
-route, and `src/worker/audit-web/summary-render.ts` renders `/web/<domain>` on demand).
+markup emitters are wider than the static build: `src/shared/scorecard-format.mjs` and
+`src/worker/audit-web/summary-render.ts` both feed the Worker's `/score/<target>` route, which renders a curated CLI
+slug, a live binary, a branch snapshot, and a website host from one spine.
 
 - **Two axes, never conflated.** MUST/SHOULD/MAY (`tier-*` classes, `--must/--should/--may`) is the *obligation* axis:
   spec-index ids, tier chips, requirement groups. `band-low/mid/high` (`--band-*`) is the *grading* axis: score
@@ -1173,8 +1173,16 @@ route, and `src/worker/audit-web/summary-render.ts` renders `/web/<domain>` on d
   `[data-s]` pane — board, spec index, try-form, rubric — together with zero JS; CLI is the no-JS default.
 - **Cards and boards**: `.card` is the terminal-flavored proof panel (title bar, command line, `.bigscore` numerals,
   check rows with `.st` chips). `.board` renders leaderboard rows (`.lrow`: rank, name + `.name-sub`, meter). Full-bleed
-  section bands use `.band-surface`. The web result page groups checks into `.catcard`s: C1–C5 id, tier chip,
-  band-colored rollup, and mark-led check rows (pass ✓, missing !, broken/error ✕, n/a –).
+  section bands use `.band-surface`.
+- **The result spine** (`src/shared/result-spine.ts`): every result page opens the same way, whichever lane produced
+  it. A crumb back to the board, a mono `h1` naming the target with the lane beside it as a `.tier`-style outline chip,
+  and one meta line carrying the tier, the freshness sentence, and the two twin links. Under the spine the lanes differ
+  in content, not layout: a CLI result renders principle rows (`.pscore__row`), a website result renders its check
+  rows. A result that can be re-audited carries the control as a `.btn--ghost` with tabular numerals, disabled with a
+  countdown until `freshness.refresh_after`; a curated page carries none.
+- **The progress page** (`/scoring`): the run's phases as status rows, each a `.stpill` that holds a `running` state
+  while its phase is open and resolves to pass or fail. It is the one page with no cached form, so it renders per
+  request and is never stored at the edge.
 - **Dark elevation is token-indirected.** Components consume `--shadow-card`, `--shadow-board`, `--band-surface-bg`,
   `--seg-bg`, `--field-bg`; the dark values swap drop-shadows for raised surfaces with a top edge-highlight, so the
   light/dark fork lives in one token block (§4.2's designed-not-inverted rule, applied to elevation).

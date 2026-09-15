@@ -22,21 +22,22 @@ the old content, and the deploy hook re-scores it once the release lands (see
 
 ## The audit endpoint
 
-`POST /api/audit-web` with a JSON body `{ url, site_type?, public_listing?, turnstile_token }` streams NDJSON. The
-terminal `{ "type": "complete", "cached", "scored_at", "refresh_after", "scorecard", "share_url" }` event carries the
-full web scorecard (schema `0.4`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
+`POST /api/score` with a JSON body `{ target, site_type?, public_listing?, turnstile_token }` streams NDJSON for either
+lane; a website target is any host or URL. The terminal `complete` event is the shared result envelope: `{ kind, tier,
+target, scorecard_url, markdown_url, json_url, freshness, spec_version, scorecard }`, carrying the full web scorecard
+(schema `0.4`). `site_type` is optional (`content` | `api`); omit it to let the audit auto-detect.
 
-A cache hit answers with a single `application/json` body instead of a stream, carrying the same freshness fields and no
-`type`. Content-type is the discriminator: `application/json` means served from cache, NDJSON means the engine ran. Both
-shapes are documented at [/web-scorecard-schema](../../content/web-scorecard-schema.md); the operator-relevant part is
-that `cached`, `scored_at`, and `refresh_after` sit outside the scorecard, so they never move the schema version.
+A cache hit answers with a single `application/json` body instead of a stream: the same envelope with no `type`.
+Content-type is the discriminator: `application/json` means served from cache, NDJSON means the engine ran. Both shapes
+are documented at [/web-scorecard-schema](../../content/web-scorecard-schema.md); the operator-relevant part is that
+`freshness` sits outside the scorecard, so its fields never move the schema version.
 
 Two gates sit in front of the audit and shape how you reach it per environment:
 
 - **Turnstile.** Production verifies a real Turnstile token, which you cannot mint from a script. Staging uses the
   Cloudflare always-passes test secret, so any string works (`"turnstile_token": "x"`).
 - **SSRF.** `src/worker/audit-web/ssrf.ts` blocks loopback, RFC1918, link-local, and `localhost`/`*.internal`. You
-  **cannot** audit a local `bun run dev` server (`http://localhost:8787`) through `/api/audit-web`; the root fetch is
+  **cannot** audit a local `bun run dev` server (`http://localhost:8787`) through the endpoint; the root fetch is
   rejected. The target must be a public host.
 
 ### Quick check: the working-tree engine (`scripts/web-audit/run.sh`)
@@ -70,7 +71,7 @@ token on the staging host sidesteps this; that is what `run.sh` does.
 ### Against production (`anc.dev`)
 
 For a real user-facing audit, use the site's audit UI (`https://anc.dev/audit`) or the `audit_website` MCP tool. A
-scripted `POST /api/audit-web` needs a real Turnstile token, which you cannot mint from a script. To preview the
+scripted `POST /api/score` needs a real Turnstile token, which you cannot mint from a script. To preview the
 working-tree engine against live production content, point the helper at it: `scripts/web-audit/run.sh --target
 https://anc.dev/` (a public host, so no Access token is fetched).
 
@@ -80,7 +81,7 @@ The web leaderboard is curated, not crawled: `src/data/web-audit/seed.yaml` hold
 time to `dist/_internal/web-seed.json`), and every score lives in R2. The rescore Workflow audits each seeded domain
 (one Workflow step per domain) and then rebuilds the two board aggregates (`leaderboard`, `leaderboard-frontpage`) in a
 final step. All board surfaces (`/web`, the homepage web pane, `list_website_audits`) read the aggregate;
-`/web/<domain>` and `get_website_audit` read per-domain R2. Nothing is committed.
+`/score/<domain>` and `get_website_audit` read per-domain R2. Nothing is committed.
 
 Three triggers start a rescore, all coalescing through a single-flight helper (a start while a batch is in flight no-ops
 onto the running instance):
@@ -109,14 +110,14 @@ checks and categories, then records the new fingerprint and returns to increment
 change (for example splitting a category) that does not rotate the `SPEC_VERSION` cache key, and it runs through the
 Workflow's own audit path, so it is not subject to the on-demand endpoint's per-source rate limit. Adding or retiering
 checks in `registry.yaml` is a registry-shape change; the post-deploy rescore after this kind of PR reflows every
-curated seed. Stale `/web/<domain>` URLs keep serving the previous row set until that reflow: missing check ids are
+curated seed. Stale `/score/<domain>` pages keep serving the previous row set until that reflow: missing check ids are
 omitted, not shown as ghost rows.
 
 **Secrets.** `WEB_RESCORE_SECRET` is a `wrangler secret put` value on both Workers (`--env staging` and production) and
 lives in the GitHub environment secret `ANC_WEB_RESCORE_SECRET` for the deploy hook. Rotate by setting a new value in
 both places; there is no fallback window.
 
-**On-demand freshness.** An on-demand audit (`audit_website` or `POST /api/audit-web`) of a seeded domain rebuilds the
+**On-demand freshness.** An on-demand audit (`audit_website` or `POST /api/score`) of a seeded domain rebuilds the
 aggregates immediately, so a board entry refreshes without waiting for the batch. A cached entry younger than 1 minute
 serves as-is; older entries re-run on demand. Every per-target result surface reports that boundary as `refresh_after`,
 the earliest instant a re-audit leaves the cache-reuse window; the kill switch, rate limits, and service failures can
@@ -130,23 +131,53 @@ service-token headers; staging binds the always-passes Turnstile secret, so any 
 
 ```bash
 HOST=https://agentnative-site-staging.<subdomain>.workers.dev
-BODY='{"url":"<target>","turnstile_token":"x"}'
-# 1. fresh run: streams NDJSON; the terminal line carries cached=false
-curl -sSf -X POST "$HOST/api/audit-web" -H 'content-type: application/json' -d "$BODY" \
-  | tail -1 | jq '{cached, scored_at, refresh_after}'
+BODY='{"target":"<target>","turnstile_token":"x"}'
+# 1. fresh run: streams NDJSON; the terminal line carries freshness.cached=false
+curl -sSf -X POST "$HOST/api/score" -H 'content-type: application/json' -d "$BODY" \
+  | tail -1 | jq '.freshness'
 # 2. immediately re-read: a single JSON body, same instants, cached=true
-curl -sSf -X POST "$HOST/api/audit-web" -H 'content-type: application/json' -d "$BODY" \
-  | jq '{cached, scored_at, refresh_after}'
+curl -sSf -X POST "$HOST/api/score" -H 'content-type: application/json' -d "$BODY" \
+  | jq '.freshness'
 ```
 
-`GET /web/<domain>` and its `.md` twin state the same two instants in prose, and `get_website_audit` reports them as
-response fields, so a disagreement between any two of those surfaces means storage and a response have drifted.
+`GET /score/<domain>` and its `.md` twin state the same two instants in prose, `/score/<domain>/json` carries the same
+`freshness` object, and `get_website_audit` returns that same envelope, so a disagreement between any two of those
+surfaces means storage and a response have drifted.
 
-**Result-page tools are read-only.** `/web/<domain>` registers four WebMCP tools (`get_worksheet`, `get_fix_prompt`,
-`get_fix_prompts`, `get_audit_summary`) that read the rendered DOM only. None of them fetches, submits, or navigates, so
-no browser-agent path starts an audit or reaches the endpoint behind Turnstile. Fresh audits arrive only through `POST
-/api/audit-web` (Turnstile-gated) and the `audit_website` MCP tool (IP-gated), which is where the kill switch and the
-limiters sit.
+**In-page tools never transact.** The entry form's three WebMCP tools (`set_surface`, `fill_target`, `open_audit`) fill
+the form and hop to the audit page; none of them submits. The progress page loads no WebMCP script at all. A source
+guard (`tests/webmcp-source-guard.test.ts`) fails the build on any construct that would let a tool transact for a
+visitor. Fresh audits arrive only through `POST /api/score` (Turnstile-gated) and the `audit_website` MCP tool
+(IP-gated), which is where the kill switches and the limiters sit.
+
+### Kill-switch polarity, per lane
+
+The two lanes disagree on what an absent switch means, and the disagreement is deliberate: the CLI lane's switch lives
+in KV where an absent key is the normal steady state, while the website lane's lives in `wrangler.jsonc` vars where an
+absent value means the deploy forgot it.
+
+| Switch                     | Lane | Absent means | Set to `"true"` means | Reaches                                |
+| -------------------------- | ---- | ------------ | --------------------- | -------------------------------------- |
+| `MCP_LIVE_SCORING_ENABLED` | CLI  | disabled     | enabled               | `score_cli`; the read tier stays alive  |
+| `WEB_AUDIT_ENABLED`        | web  | disabled     | enabled               | `audit_website` and the endpoint's web lane |
+| `MCP_ENABLED`              | both | disabled     | enabled               | the whole MCP surface                  |
+
+A missing binding, as opposed to a missing value, fails closed on both lanes. Flipping any of them off leaves every
+cached result readable: the read tiers and the result route never consult a switch, so a disabled lane serves what it
+has and refuses only the fresh run.
+
+### Deploy, rescore, sitemap: the order that matters
+
+Run these in order after a deploy that changes which pages exist. Each step's output is the next step's input, so
+reversing two of them reads as a failure that is really a race:
+
+1. **Deploy**, then wait for the rollout to reach `ready`.
+2. **Purge** the zone when the release retired or renamed a public path (see `RELEASES.md`). A tag purge cannot reach a
+   path whose route is gone.
+3. **Rescore**, and let the instance finish. The post-deploy hook starts it; a manual run uses the endpoint below.
+4. **Walk the sitemap** (`postflight.sh --env <env> sitemap`). The sitemap lists a result page per seeded domain, and a
+   domain the rescore has not written yet answers 404. Walking before the rescore drains reports those 404s as
+   retirement failures, which is the one reading that is certainly wrong.
 
 **Cold start / empty board.** After a fresh deploy or a `SPEC_VERSION` bump, the board and homepage pane render a
 "scoring in progress" empty state until the deploy hook's batch lands. If the empty state persists, check the Workflow:

@@ -8,7 +8,6 @@
 //
 // Also asserts the homepage regressions that outlive the form: the Turnstile
 // CSP directives, the markdown twins' silence about the form, and the
-// /score/live/* URL canonicalization.
 
 import { expect, type Page, test } from '@playwright/test';
 
@@ -223,37 +222,21 @@ test.describe('entry form — CSP + markdown-twin regressions', () => {
   });
 });
 
-test.describe('/live-score URL canonicalization', () => {
-  test('/score/live/<binary>.html → 301 to the unified page', async ({ request }) => {
-    const res = await request.get('/score/live/ripgrep.html', { maxRedirects: 0 });
+test.describe('result URL canonicalization', () => {
+  test('a curated slug serves the page and its markdown twin', async ({ request }) => {
+    const html = await request.get('/score/ripgrep', { maxRedirects: 0 });
+    expect(html.status()).toBe(200);
+    expect(html.headers()['content-type']).toContain('text/html');
+    const md = await request.get('/score/ripgrep/md', { maxRedirects: 0 });
+    expect(md.status()).toBe(200);
+    expect(md.headers()['content-type']).toContain('text/markdown');
+  });
+
+  // One tool owns one page: the binary alias redirects rather than rendering
+  // a second copy under a second URL.
+  test('a curated binary alias 301s to its slug', async ({ request }) => {
+    const res = await request.get('/score/rg', { maxRedirects: 0 });
     expect(res.status()).toBe(301);
     expect(res.headers().location).toBe('/score/ripgrep');
-  });
-
-  test('/score/live/<binary> (no extension) returns HTML 404 when uncached', async ({ request }) => {
-    const res = await request.get('/score/live/unknown-binary-xyz');
-    expect(res.status()).toBe(404);
-    expect(res.headers()['content-type']).toContain('text/html');
-  });
-
-  test('/score/live/<binary>.md returns the markdown twin (404 when uncached)', async ({ request }) => {
-    const res = await request.get('/score/live/unknown-binary-xyz.md');
-    expect(res.status()).toBe(404);
-    expect(res.headers()['content-type']).toContain('text/markdown');
-  });
-
-  // A curated slug is served through the legacy adapter, not redirected: only
-  // a binary alias whose name differs from its slug redirects, and only the
-  // `.html` form canonicalizes.
-  test('/score/live/<curated-slug> serves the unified page', async ({ request }) => {
-    const res = await request.get('/score/live/ripgrep', { maxRedirects: 0 });
-    expect(res.status()).toBe(200);
-    expect(res.headers()['content-type']).toContain('text/html');
-  });
-
-  test('/score/live/<curated-slug>.md serves the markdown twin', async ({ request }) => {
-    const res = await request.get('/score/live/ripgrep.md', { maxRedirects: 0 });
-    expect(res.status()).toBe(200);
-    expect(res.headers()['content-type']).toContain('text/markdown');
   });
 });

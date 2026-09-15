@@ -37,10 +37,10 @@ if (process.env.ANC_STAGING_ACCESS_CLIENT_ID && process.env.ANC_STAGING_ACCESS_C
 }
 
 test.describe('staging /api/score — live round-trip', () => {
-  test('POST {input: "ripgrep"} returns curated registry_hit with response triad', async ({ request }) => {
+  test('POST {target: "ripgrep"} returns curated registry_hit with response triad', async ({ request }) => {
     const res = await request.post(`${STAGING_BASE}/api/score`, {
       headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
-      data: JSON.stringify({ input: 'ripgrep', turnstile_token: 'x' }),
+      data: JSON.stringify({ target: 'ripgrep', turnstile_token: 'x' }),
     });
     expect(res.status()).toBe(200);
     const body = (await res.json()) as {
@@ -58,26 +58,28 @@ test.describe('staging /api/score — live round-trip', () => {
     expect(body.auditor_url).toContain('anc.dev');
   });
 
-  test('POST {input: "cargo install ripgrep"} hits cache OR live path, gets share_url', async ({ request }) => {
+  test('POST {target: "cargo install ripgrep"} hits cache OR live path and names its result page', async ({
+    request,
+  }) => {
     test.setTimeout(120_000); // live path may take ~30-60s on cold cache
     const res = await request.post(`${STAGING_BASE}/api/score`, {
       headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
-      data: JSON.stringify({ input: 'cargo install ripgrep', turnstile_token: 'x' }),
+      data: JSON.stringify({ target: 'cargo install ripgrep', turnstile_token: 'x' }),
     });
     expect(res.status()).toBe(200);
-    const body = (await res.json()) as { share_url?: string; scorecard: unknown };
-    expect(body.share_url).toBe('/score/live/ripgrep');
+    const body = (await res.json()) as { scorecard_url?: string; scorecard: unknown };
+    expect(body.scorecard_url).toMatch(/\/score\/ripgrep$/);
     expect(body.scorecard).toBeTruthy();
   });
 
-  test('GET /score/live/ripgrep renders the cached scorecard as HTML', async ({ request }) => {
+  test('GET /score/ripgrep renders the cached scorecard as HTML', async ({ request }) => {
     test.setTimeout(60_000);
     // Prime the cache first via a POST (cached or live).
     await request.post(`${STAGING_BASE}/api/score`, {
       headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
-      data: JSON.stringify({ input: 'cargo install ripgrep', turnstile_token: 'x' }),
+      data: JSON.stringify({ target: 'cargo install ripgrep', turnstile_token: 'x' }),
     });
-    const res = await request.get(`${STAGING_BASE}/score/live/ripgrep`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/score/ripgrep`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/html');
     const html = await res.text();
@@ -86,13 +88,13 @@ test.describe('staging /api/score — live round-trip', () => {
     expect(html).toContain('href="/install"');
   });
 
-  test('GET /score/live/ripgrep.md returns markdown twin', async ({ request }) => {
+  test('GET /score/ripgrep/md returns the markdown twin', async ({ request }) => {
     test.setTimeout(60_000);
     await request.post(`${STAGING_BASE}/api/score`, {
       headers: { 'content-type': 'application/json', ...ACCESS_HEADERS },
-      data: JSON.stringify({ input: 'cargo install ripgrep', turnstile_token: 'x' }),
+      data: JSON.stringify({ target: 'cargo install ripgrep', turnstile_token: 'x' }),
     });
-    const res = await request.get(`${STAGING_BASE}/score/live/ripgrep.md`, { headers: ACCESS_HEADERS });
+    const res = await request.get(`${STAGING_BASE}/score/ripgrep/md`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('text/markdown');
     const md = await res.text();
@@ -100,17 +102,17 @@ test.describe('staging /api/score — live round-trip', () => {
     expect(md).toContain('**Score:**');
   });
 
-  test('GET /score/live/ripgrep.html → 301 to /score/live/ripgrep', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/score/live/ripgrep.html`, {
+  test('GET /score/ripgrep.html → 301 to /score/ripgrep', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/score/ripgrep.html`, {
       headers: ACCESS_HEADERS,
       maxRedirects: 0,
     });
     expect(res.status()).toBe(301);
-    expect(res.headers().location).toBe('/score/live/ripgrep');
+    expect(res.headers().location).toBe('/score/ripgrep');
   });
 
-  test('GET /score/live/unknown-binary-xyz → 404 HTML', async ({ request }) => {
-    const res = await request.get(`${STAGING_BASE}/score/live/unknown-binary-xyz`, { headers: ACCESS_HEADERS });
+  test('GET /score/unknown-binary-xyz → 404 HTML', async ({ request }) => {
+    const res = await request.get(`${STAGING_BASE}/score/unknown-binary-xyz`, { headers: ACCESS_HEADERS });
     expect(res.status()).toBe(404);
     expect(res.headers()['content-type']).toContain('text/html');
   });

@@ -29,11 +29,10 @@
 //                        live, branch, or website result is HIT-min under
 //                        the tag its writer purges, in every representation
 //
-// The 404 body is one sentence, one prefilled `/audit` link, and a
+// The 404 body is one sentence, one prefilled audit link, and a
 // "Did you mean?" list from the registry (CLI shapes) or the seed list
 // plus the leaderboard aggregate's hosts (host shapes), never a form or a
-// sitekey. The legacy `/score/live/<binary>` and `/web/<host>` paths are
-// adapters over the same renderer.
+// sitekey.
 
 import {
   type AuditEnvelope,
