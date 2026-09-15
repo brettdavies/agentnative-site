@@ -134,9 +134,9 @@ manual recipe below skips the headers; for prod the recipe runs unauthenticated.
   curl -fSsL -H 'Accept: text/html' "${ENV_URL}/scorecards" | grep -q 'leaderboard-table' && echo "leaderboard: ok"
   curl -fSsL "${ENV_URL}/api/score" -X POST \
     -H 'Content-Type: application/json' \
-    -d '{"input":"ripgrep","turnstile_token":"x"}' \
-    | jq '.scorecard.kind, .anc_version, .spec_version'
-  # expect: "registry_hit", <anc_version>, <spec_version>
+    -d '{"target":"ripgrep","turnstile_token":"x"}' \
+    | jq '.kind, .tier, .anc_version, .spec_version'
+  # expect: "cli", "registry", <anc_version>, <spec_version>
   ```
 
   All three must succeed. The registry-hit `/api/score` POST confirms the read tier composes `lookupOnly`'s curated

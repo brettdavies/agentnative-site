@@ -418,7 +418,7 @@ gate_do_smoke() {
   local repo body
   repo=$(do_fixture_repo "$BINARY")
   body=$(curl -fsSL -K "$cfg" -H 'Content-Type: application/json' \
-    -d "{\"input\":\"https://github.com/${repo}\",\"turnstile_token\":\"x\"}" \
+    -d "{\"target\":\"https://github.com/${repo}\",\"turnstile_token\":\"x\"}" \
     "${ENV_URL}/api/score" 2>/dev/null || true)
   rm -f "$cfg"
 

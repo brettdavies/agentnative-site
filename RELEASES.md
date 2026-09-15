@@ -485,9 +485,9 @@ bun x wrangler deployments list --env staging | head -20
 curl -fSsL -H "Content-Type: application/json" \
   -H "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
   -H "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-  -d '{"input":"ripgrep","turnstile_token":"x"}' \
+  -d '{"target":"ripgrep","turnstile_token":"x"}' \
   https://agentnative-site-staging.brettdavies.workers.dev/api/score \
-  | jq '.scorecard.kind, .spec_version'
+  | jq '.kind, .tier, .spec_version'
 
 # 3. Apply the follow-up migration on a throwaway branch.
 #    Edit wrangler.jsonc to add the v2-drop-sandbox migration AND
