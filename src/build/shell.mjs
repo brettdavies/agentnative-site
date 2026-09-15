@@ -11,7 +11,7 @@ import { AUDIT_PATH, FIX_PREFIX, SCORE_PREFIX, SCORECARDS_PATH } from '../shared
 import { markdownAlternateLink } from '../shared/result-head';
 import { CANONICAL_SITE_URL } from '../shared/site-url';
 import { loadInstallCommands } from './install-commands.mjs';
-import { canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
+import { ANC_VERSION, canonicalBaseUrl, escHtml, SITE_SPEC_VERSION } from './util.mjs';
 
 // navCurrent appends the separator itself, so a namespace pattern is the
 // prefix without its trailing slash.
@@ -43,6 +43,57 @@ export const NAV_LINKS = [
   { label: 'Skill', href: '/skill', match: ['/skill'] },
   { label: 'About', href: '/about', match: ['/about'] },
 ];
+
+// Published in `.well-known/security.txt` and `ai.txt`; the same address the
+// Organization node hands a crawler.
+const CONTACT_EMAIL = '97-boss-beetle@icloud.com';
+
+// Title-case a path segment for a breadcrumb label: `mcp-skill` reads as
+// "Mcp Skill" without the override, and the acronyms are the segments a
+// reader would recognize.
+const CRUMB_LABELS = {
+  mcp: 'MCP',
+  'mcp-skill': 'MCP skill',
+  p1: 'Principle 1',
+  p2: 'Principle 2',
+  p3: 'Principle 3',
+  p4: 'Principle 4',
+  p5: 'Principle 5',
+  p6: 'Principle 6',
+  p7: 'Principle 7',
+  p8: 'Principle 8',
+};
+
+const crumbLabel = (segment) =>
+  CRUMB_LABELS[segment] ?? segment.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+/**
+ * The trail from the home page to this one, or nothing.
+ *
+ * Empty for the home page, where a one-item trail names only itself, and for
+ * the Worker's shell template, whose canonical path is a placeholder it
+ * substitutes per request: a build-time trail would bake `{{CANONICAL_PATH}}`
+ * into the graph a crawler reads.
+ *
+ * @param {string} base
+ * @param {string} path
+ * @returns {object[]}
+ */
+function breadcrumbNodes(base, path) {
+  if (path.includes('{{')) return [];
+  const segments = path
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .filter(Boolean);
+  if (segments.length === 0) return [];
+  const items = [{ '@type': 'ListItem', position: 1, name: 'Home', item: base }];
+  let href = '';
+  segments.forEach((segment, i) => {
+    href += `/${segment}`;
+    items.push({ '@type': 'ListItem', position: i + 2, name: crumbLabel(segment), item: `${base}${href}` });
+  });
+  return [{ '@type': 'BreadcrumbList', itemListElement: items }];
+}
 
 const navCurrent = (path, patterns) =>
   patterns.some((p) => (p instanceof RegExp ? p.test(path) : path === p || path.startsWith(`${p}/`)));
@@ -224,6 +275,7 @@ export function emitShell({
   const ogImage = `${base}/og-image.png`;
 
   const orgId = `${base}/#organization`;
+  const siteId = `${base}/#website`;
   const jsonLd = {
     '@context': 'https://schema.org',
     '@graph': [
@@ -234,6 +286,24 @@ export function emitShell({
         url: base,
         logo: `${base}/apple-touch-icon-180.png`,
         sameAs: SOURCE_REPOS.map((r) => r.url),
+        contactPoint: {
+          '@type': 'ContactPoint',
+          contactType: 'technical support',
+          email: CONTACT_EMAIL,
+          url: `${base}/.well-known/security.txt`,
+        },
+      },
+      {
+        // The site itself, so each page is part of a named corpus rather than
+        // a standalone article. No SearchAction: there is no search endpoint,
+        // and advertising one sends a crawler somewhere that does not exist.
+        '@type': 'WebSite',
+        '@id': siteId,
+        name: SITE_NAME,
+        alternateName: SITE_TAGLINE,
+        url: base,
+        inLanguage: 'en',
+        publisher: { '@id': orgId },
       },
       {
         '@type': 'TechArticle',
@@ -241,6 +311,7 @@ export function emitShell({
         description,
         url: canonical,
         image: ogImage,
+        isPartOf: { '@id': siteId },
         author: {
           '@type': 'Person',
           name: 'Brett Davies',
@@ -249,6 +320,7 @@ export function emitShell({
         },
         publisher: { '@id': orgId },
       },
+      ...breadcrumbNodes(base, canonicalPath),
       {
         '@type': 'SoftwareApplication',
         '@id': `${base}/#anc-cli`,
@@ -264,6 +336,7 @@ export function emitShell({
         ],
         installUrl: `${base}/install`,
         documentation: 'https://docs.rs/agentnative',
+        softwareVersion: ANC_VERSION,
         url: `${base}${AUDIT_PATH}`,
         offers: { '@type': 'Offer', price: 0, priceCurrency: 'USD' },
         publisher: { '@id': orgId },
@@ -277,6 +350,7 @@ export function emitShell({
           'Streamable-HTTP MCP server exposing the agent-native CLI standard: scorecards, principles, vendored spec.',
         url: `${base}/mcp`,
         documentation: `${base}/mcp-skill`,
+        softwareVersion: SITE_SPEC_VERSION,
         potentialAction: {
           '@type': 'ConsumeAction',
           name: 'Invoke MCP',
