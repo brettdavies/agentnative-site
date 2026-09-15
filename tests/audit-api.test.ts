@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { isAuditApiPath } from '../src/worker/audit/api';
 import { keyFor as webKeyFor } from '../src/worker/audit-web/cache';
 import { keyFor as cliKeyFor } from '../src/worker/score/cache';
-import { _resetIndexCache } from '../src/worker/score/handler';
+import { _resetIndexCache } from '../src/worker/score/core';
 import { _resetKillSwitchCache } from '../src/worker/score/kill-switch';
 import { ANC_VERSION, SPEC_VERSION } from '../src/worker/spec-version.gen';
 import { CLI_RECORD, call, errorOf, makeEnv, ndjson, newTracker, post, WEB_RECORD } from './helpers/audit-api-env';

@@ -12,7 +12,7 @@ import { RETIRED_REDIRECTS } from '../src/shared/audit-routes';
 import { classifyGatewayRequest, detectPreference } from '../src/worker/accept';
 import { applyHeaders, isRepresentationPinned, isStagingHost, resultCacheClass } from '../src/worker/headers';
 import worker from '../src/worker/index';
-import { _resetIndexCache } from '../src/worker/score/handler';
+import { _resetIndexCache } from '../src/worker/score/core';
 
 function req(url: string, accept?: string, ua?: string): Request {
   const headers: Record<string, string> = {};
@@ -1227,55 +1227,15 @@ describe('worker.fetch — agent-readiness discovery surfaces', () => {
 //      match regressions per the `accept-header-q-value` learning.
 // ---------------------------------------------------------------------------
 
-describe('worker.fetch — /api/score routing', () => {
-  // The handler caches the registry + hints indexes at module scope, so
-  // tests that depend on the stubbed env.ASSETS being reached must reset
-  // the cache before each test — otherwise a prior test's data is served
-  // from memory and the stub is never called.
+describe('worker.fetch — asset-first invariant', () => {
   beforeEach(() => {
     _resetIndexCache();
-  });
-
-  test('/api/score response carries the JSON envelope (not asset content)', async () => {
-    // Confirms index.ts routes /api/score to handleScore rather than the
-    // asset path. The handler always returns JSON; the asset path would
-    // return the stubbed asset body. Asserting on the response shape is
-    // both more robust and more meaningful than the previous fragile
-    // assetCalled flag check.
-    const env = makeEnv({
-      '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}',
-      '/discovery-hints-index.json': '{"by_owner_repo":{}}',
-    });
-    const url = 'https://anc.dev/api/score?input=unknown-tool';
-    const res = await worker.fetch(req(url), env, {} as ExecutionContext);
-    expect(res.headers.get('Content-Type')).toContain('application/json');
-    const body = (await res.json()) as { error?: unknown; spec_version?: unknown; auditor_url?: unknown };
-    expect(body.spec_version).toBeTruthy();
-    expect(body.auditor_url).toBeTruthy();
   });
 
   test('asset-first invariant: /scorecards/ripgrep still proxies to env.ASSETS', async () => {
     const env = makeEnv({ '/scorecards/ripgrep': 'scorecard html' });
     const res = await worker.fetch(req('https://anc.dev/scorecards/ripgrep'), env, {} as ExecutionContext);
     expect(res.headers.get('X-Echo-Path')).toBe('/scorecards/ripgrep');
-  });
-
-  test('q-value: Accept: text/markdown;q=0.1, application/json;q=0.9 → JSON content-type', async () => {
-    // Plan-required test (accept-header-q-value learning). Substring
-    // matching would pick markdown because the header *contains*
-    // 'text/markdown'. The accepts package + q-value parsing picks JSON.
-    const env = makeEnv({
-      '/registry-index.json': '{"by_slug":{},"by_owner_repo":{}}',
-      '/discovery-hints-index.json': '{"by_owner_repo":{}}',
-    });
-    const url = new URL('https://anc.dev/api/score');
-    url.searchParams.set('input', 'unknown-tool');
-    const res = await worker.fetch(
-      new Request(url.toString(), { headers: { accept: 'text/markdown;q=0.1, application/json;q=0.9' } }),
-      env,
-      {} as ExecutionContext,
-    );
-    expect(res.headers.get('Content-Type')).toContain('application/json');
   });
 });
 
@@ -1350,6 +1310,12 @@ describe('worker.fetch — retired paths', () => {
       '/web/scoring/anc.dev',
       '/web/api',
       '/api/audit-web',
+      // The legacy GET read lane. `/api/score` itself still answers POST,
+      // which is the transact endpoint; only the `?input=` read and the two
+      // suffixed representations are retired.
+      '/api/score?input=ripgrep',
+      '/api/score.json?input=ripgrep',
+      '/api/score.md?input=ripgrep',
     ]) {
       const res = await worker.fetch(req(`https://anc.dev${path}`), env, {} as ExecutionContext);
       expect({ path, status: res.status, location: res.headers.get('location') }).toEqual({
