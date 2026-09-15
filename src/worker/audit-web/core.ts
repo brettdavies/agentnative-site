@@ -30,6 +30,7 @@ import {
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
 } from './cache';
+import { enrichWebScorecardForDisplay } from './display';
 import { runWebAudit } from './engine';
 import { queueHitMinPurge, webDomainTag, webTag } from './hit-min-purge';
 import {
@@ -38,8 +39,8 @@ import {
   type PublicListingWrite,
   resolveAuditListing,
 } from './public-listing';
-import type { WebSiteType } from './registry';
-import { loadWebAuditRegistry } from './registry';
+import { loadWebAuditRegistry, type WebAuditRegistry, type WebSiteType } from './registry';
+import { loadWebRemediationCatalog, type WebRemediationCatalog } from './remediation';
 import type { EngineResult } from './scorecard';
 import { validatePublicUrl } from './ssrf';
 
@@ -98,9 +99,49 @@ export async function readWebTier(
   return { kind: 'audit', cached, listing: resolveAuditListing(write, publicListing, cached), write };
 }
 
-/** The envelope for a stored record served as data. */
-export function webCacheEnvelope(target: WebTarget, cached: CachedWebAudit, origin: string): AuditEnvelope {
-  return buildWebEnvelope({ tier: 'cache', target: target.host, record: cached, origin });
+/**
+ * The registry and remediation catalog the read-time enrichment needs.
+ * Either load failing degrades that half of the enrichment rather than the
+ * result: a stored scorecard is still a scorecard without its current
+ * category split or its fix prompts.
+ */
+async function displayInputs(
+  env: WebCoreEnv,
+): Promise<{ registry: WebAuditRegistry | null; catalog: WebRemediationCatalog }> {
+  const [registry, catalog] = await Promise.allSettled([loadWebAuditRegistry(env), loadWebRemediationCatalog(env)]);
+  return {
+    registry: registry.status === 'fulfilled' ? registry.value : null,
+    catalog: catalog.status === 'fulfilled' ? catalog.value : {},
+  };
+}
+
+/**
+ * The one website result envelope. Every surface that hands back a website
+ * result composes it: the endpoint's terminal event and its cache reads,
+ * the result route's three representations, and both MCP web tools.
+ *
+ * The scorecard inside it is the stored run put through the read-time
+ * display enrichment, so the current category split and each row's result
+ * line and remediation reach every surface from one place. Storage stays
+ * raw; deriving on read is what lets a registry or catalog change reach
+ * records that were cached before it.
+ */
+export async function webEnvelope(
+  env: WebCoreEnv,
+  input: { tier: 'cache' | 'live'; host: string; record: CachedWebAudit; origin: string },
+): Promise<AuditEnvelope> {
+  const { registry, catalog } = await displayInputs(env);
+  const scorecard = enrichWebScorecardForDisplay(input.record.scorecard, {
+    registry,
+    catalog,
+    origin: input.origin,
+  });
+  return buildWebEnvelope({
+    tier: input.tier,
+    target: input.host,
+    record: { ...input.record, scorecard },
+    origin: input.origin,
+  });
 }
 
 export type PatchOutcome =
@@ -215,7 +256,7 @@ export async function* runWebAuditStream(input: RunWebAuditInput): AsyncGenerato
       };
       yield {
         type: 'complete',
-        ...buildWebEnvelope({ tier: 'live', target: target.host, record, origin: input.origin }),
+        ...(await webEnvelope(env, { tier: 'live', host: target.host, record, origin: input.origin })),
       };
       return;
     }

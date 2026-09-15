@@ -38,8 +38,6 @@
 import {
   type AuditEnvelope,
   buildCliEnvelope,
-  buildRegistryEnvelope,
-  buildWebEnvelope,
   curatedEntryForBinary,
   hasScorecard,
   type RegistryEntryLike,
@@ -63,6 +61,7 @@ import { type ReauditControl, type ResultTier, type SpineInput, shortDate } from
 import { buildScorecardBody, buildScorecardMarkdown } from '../../shared/scorecard-format.mjs';
 import { detectResultPreference } from '../accept';
 import { canonicalTargetOf, getAggregate, get as webCacheGet, keyFor as webKeyFor } from '../audit-web/cache';
+import { webEnvelope } from '../audit-web/core';
 import { normalizeScorecardCategories } from '../audit-web/display';
 import { loadWebAuditRegistry } from '../audit-web/registry';
 import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../audit-web/remediation';
@@ -73,6 +72,7 @@ import { buildWebSummaryMarkdown } from '../audit-web/summary-markdown';
 import { buildWebSummaryBody } from '../audit-web/summary-render';
 import { applyHeaders, type CacheClassSpec, resultCacheClass } from '../headers';
 import { get as cliCacheGet, keyFor as cliKeyFor } from '../score/cache';
+import { readCuratedEnvelope } from '../score/core';
 import { loadRegistryIndex, type RegistryIndex } from '../score/registry-lookup';
 import { loadShellTemplate, substituteShell } from '../shell-template';
 import { SPEC_VERSION } from '../spec-version.gen';
@@ -280,7 +280,7 @@ async function serveWeb(ctx: RenderContext, host: string): Promise<Response> {
   const record = await webCacheGet(ctx.env, await webKeyFor(canonical, SPEC_VERSION));
   if (!record) return missing(ctx, host, 'web');
 
-  const envelope = buildWebEnvelope({ tier: 'cache', target: host, record, origin: ctx.origin });
+  const envelope = await webEnvelope(ctx.env, { tier: 'cache', host, record, origin: ctx.origin });
   const now = ctx.deps.now?.() ?? Date.now();
   const state = freshnessState(envelope.freshness, now);
   const refreshAfter = envelope.freshness.refresh_after;
@@ -424,24 +424,14 @@ function cliScoredAt(record: { scored_at?: unknown; scorecard: unknown }): strin
 async function serveCurated(ctx: RenderContext, entry: RegistryEntryLike): Promise<Response | null> {
   // The binding's html_handling serves `<slug>.html` at the extensionless
   // path and answers the `.html` form with a redirect; ask the way a browser does.
-  const suffix = ctx.representation === 'json' ? '.json' : ctx.representation === 'md' ? '.md' : '';
-  const asset = await ctx.env.ASSETS.fetch(new Request(`https://assets.internal${scorePath(entry.name)}${suffix}`));
-  if (asset.status !== 200) return null;
   if (ctx.representation === 'json') {
-    let baked: { spec_version?: unknown; scorecard?: unknown };
-    try {
-      baked = (await asset.json()) as { spec_version?: unknown; scorecard?: unknown };
-    } catch {
-      return null;
-    }
-    const envelope = buildRegistryEnvelope({
-      entry,
-      origin: ctx.origin,
-      specVersion: typeof baked.spec_version === 'string' ? baked.spec_version : SPEC_VERSION,
-      scorecard: baked.scorecard,
-    });
+    const envelope = await readCuratedEnvelope(ctx.env, entry, ctx.origin);
+    if (!envelope) return null;
     return finish(ctx, jsonResponse(envelopeJsonBody(envelope)), 'json', { curated: true });
   }
+  const suffix = ctx.representation === 'md' ? '.md' : '';
+  const asset = await ctx.env.ASSETS.fetch(new Request(`https://assets.internal${scorePath(entry.name)}${suffix}`));
+  if (asset.status !== 200) return null;
   const body = await asset.text();
   const headers: Record<string, string> =
     ctx.representation === 'md' ? {} : { 'content-type': 'text/html; charset=utf-8' };

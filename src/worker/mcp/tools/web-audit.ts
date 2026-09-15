@@ -17,7 +17,8 @@
 
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import { awaitInFlightTerminal, type InFlightEnv } from '../../audit/inflight';
+import { leaderboardPath, scorePath } from '../../../shared/audit-routes';
+import { awaitInFlightTerminal, type InFlightEnv, readInFlight } from '../../audit/inflight';
 import { rebuildAggregatesIfSeeded } from '../../audit-web/aggregate';
 import { type AuditLogEnv, instrumentAuditEvents, logAuditError } from '../../audit-web/audit-log';
 import {
@@ -33,9 +34,8 @@ import {
   patchStoredPublicListing,
   scorecardWithPublicListing,
   WEB_AUDIT_STALE_AFTER_MS,
-  webAuditFreshness,
 } from '../../audit-web/cache';
-import { enrichWebScorecardForDisplay } from '../../audit-web/display';
+import { webEnvelope } from '../../audit-web/core';
 import { runWebAudit } from '../../audit-web/engine';
 import { queueHitMinPurge, webDomainTag, webTag } from '../../audit-web/hit-min-purge';
 import { consumeWebAuditHourlyBudget } from '../../audit-web/limiter';
@@ -44,8 +44,7 @@ import {
   enforcePublicListingFlipLimit,
   resolveAuditListing,
 } from '../../audit-web/public-listing';
-import { loadWebAuditRegistry, type WebAuditRegistry } from '../../audit-web/registry';
-import { loadWebRemediationCatalog, type WebRemediationCatalog } from '../../audit-web/remediation';
+import { loadWebAuditRegistry } from '../../audit-web/registry';
 import { canonicalTargetOf, coerceUrl } from '../../audit-web/route';
 import { boardExcludeDomains } from '../../audit-web/seed';
 import { validatePublicUrl } from '../../audit-web/ssrf';
@@ -87,37 +86,6 @@ function isError(message: string) {
   return { content: [{ type: 'text' as const, text: message }], isError: true };
 }
 
-async function catalogOrEmpty(env: WebAuditToolsEnv): Promise<WebRemediationCatalog> {
-  // A missing catalog degrades to generic prompts rather than failing the
-  // audit result.
-  try {
-    return await loadWebRemediationCatalog(env);
-  } catch {
-    return {};
-  }
-}
-
-async function registryOrNull(env: WebAuditToolsEnv): Promise<WebAuditRegistry | null> {
-  // A failed registry load falls back to the stored category shape rather
-  // than failing the read.
-  try {
-    return await loadWebAuditRegistry(env);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Read-time enrichment shared by both MCP read tools: current category
- * split plus per-row remediation. Without a registry the category shape
- * falls back to the stored one, but remediation is still attached.
- */
-async function enrichForRead(env: WebAuditToolsEnv, scorecard: unknown): Promise<unknown> {
-  const catalog = await catalogOrEmpty(env);
-  const registry = await registryOrNull(env);
-  return enrichWebScorecardForDisplay(scorecard, { registry, catalog, origin: siteOrigin() });
-}
-
 /**
  * Resolve a domain's cached audit from per-domain R2 (https then http); null
  * on a miss. The whole envelope is returned, not just the scorecard, because
@@ -139,11 +107,14 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       title: 'Get a cached website audit',
       description:
         'Read a cached website agent-readiness scorecard by URL without re-running the audit. Returns isError:false for ' +
-        'both outcomes: a hit returns { found:true, cached, scored_at, refresh_after, scorecard, share_url }; a miss ' +
-        'returns { found:false, next_tool:"audit_website" }. cached is always true here; scored_at is when the audit ' +
-        'ran (null on a legacy entry) and refresh_after is the earliest time the entry leaves the 1-minute ' +
-        'cache-reuse window — eligibility only, not a promise a fresh audit will be available, since kill switches, ' +
-        'rate limits, and service failures still apply. The companion tool audit_website runs a fresh audit on a miss.',
+        'every outcome: a hit returns { found:true, ...envelope } carrying kind, tier, target, scorecard_url, ' +
+        'markdown_url, json_url, freshness and the scorecard, the same envelope the result page serves at its ' +
+        'json_url; a target already being audited returns { found:false, in_progress:true, started_at }; a miss ' +
+        'returns { found:false, next_tool:"audit_website" }. freshness.cached is always true on a hit; ' +
+        'freshness.scored_at is when the audit ran (null on a legacy entry) and freshness.refresh_after is the ' +
+        'earliest time the entry leaves the 1-minute cache-reuse window, which is eligibility only, not a promise a ' +
+        'fresh audit will be available, since kill switches, rate limits, and service failures still apply. The ' +
+        'companion tool audit_website runs a fresh audit on a miss.',
       inputSchema: {
         url: z.string().describe('The website URL or bare domain, e.g. "anc.dev" or "https://anc.dev/".'),
       },
@@ -158,17 +129,22 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const domain = parsed.host;
       const hit = await resolveCachedAudit(env, domain);
       if (hit) {
+        const envelope = await webEnvelope(env, { tier: 'cache', host: domain, record: hit, origin: siteUrl });
+        return textContent({ found: true, ...envelope });
+      }
+      const running = await readInFlight(env, 'web', domain);
+      if (running) {
         return textContent({
-          found: true,
-          ...webAuditFreshness(true, hit.scored_at),
-          scorecard: await enrichForRead(env, hit.scorecard),
-          share_url: `${siteUrl}/web/${domain}`,
-          spec_version: SPEC_VERSION,
+          found: false,
+          in_progress: true,
+          started_at: running.started_at,
+          message: `an audit for ${domain} is already running; poll this tool or read the result page shortly.`,
         });
       }
       return textContent({
         found: false,
         next_tool: 'audit_website',
+        spec_version: SPEC_VERSION,
         message: `no cached audit for ${domain}. Call audit_website with the same url to run a fresh audit.`,
       });
     },
@@ -184,7 +160,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         'returned without re-running; an older one re-runs (and is still served as-is when the audit is disabled). ' +
         'Every scorecard-bearing result carries cached, scored_at, and refresh_after beside the scorecard: cached is ' +
         'true for a served cache entry or a listing-only patch and false for a result this call produced, scored_at is ' +
-        'when the audit ran (null on a legacy entry), and refresh_after is the earliest time the entry leaves the ' +
+        'when the audit ran (null on a legacy entry, and refresh_after is the earliest time the entry leaves the ' +
         '1-minute cache-reuse window — eligibility only, not a promise a fresh audit will be available, since kill ' +
         'switches, rate limits, and service failures still apply. A fresh audit is gated like score_cli: disabled when ' +
         'WEB_AUDIT_ENABLED or MCP_ENABLED is not "true"; a request without cf-connecting-ip returns -32099 (no anon ' +
@@ -202,7 +178,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           .boolean()
           .optional()
           .describe(
-            'Opt this domain in to (true) or out of (false) the public web leaderboard at anc.dev/web. Omit to keep ' +
+            `Opt this domain in to (true) or out of (false) the public website leaderboard at ${leaderboardPath({ lane: 'web' })}. Omit to keep ` +
               "the current stored choice — a blank never erases a prior opt-in. Defaults to off only on a domain's " +
               'first-ever audit.',
           ),
@@ -219,7 +195,6 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const validation = validatePublicUrl(canonicalTarget);
       if (!validation.ok) return isError(validation.reason);
       const domain = parsed.host;
-      const shareUrl = `${siteUrl}/web/${domain}`;
 
       // Cache hit short-circuits ahead of the kill switch: cache state is
       // data, so a cached scorecard is served even when the audit is off.
@@ -238,9 +213,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         return textContent({
           audited: false,
           source: 'cache',
-          ...webAuditFreshness(true, cached.scored_at),
-          scorecard: await enrichForRead(env, cached.scorecard),
-          share_url: shareUrl,
+          ...(await webEnvelope(env, { tier: 'cache', host: domain, record: cached, origin: siteUrl })),
         });
       }
 
@@ -251,9 +224,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           return textContent({
             audited: false,
             source: 'cache',
-            ...webAuditFreshness(true, cached.scored_at),
-            scorecard: await enrichForRead(env, cached.scorecard),
-            share_url: shareUrl,
+            ...(await webEnvelope(env, { tier: 'cache', host: domain, record: cached, origin: siteUrl })),
           });
         }
         return textContent({
@@ -285,15 +256,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         const signal = getMcpRequest()?.signal;
         const attached = await awaitInFlightTerminal(env, 'web', domain, signal);
         if (attached?.type === 'complete') {
-          return textContent({
-            audited: true,
-            source: 'fresh-audit',
-            attached: true,
-            ...attached.freshness,
-            scorecard: await enrichForRead(env, attached.scorecard),
-            share_url: shareUrl,
-            spec_version: attached.spec_version,
-          });
+          const { type: _tag, ...envelope } = attached;
+          return textContent({ audited: true, source: 'fresh-audit', attached: true, ...envelope });
         }
         if (attached) {
           const reason = attached.type === 'incomplete' ? 'incomplete' : attached.error.code;
@@ -327,18 +291,19 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       // no re-audit runs; the preserving writer rewrites both stores without
       // resetting scored_at. A write failure surfaces a tool error rather than
       // a fabricated success the caller would follow as a saved result. The
-      // response mirrors a normal read: patched scorecard + share_url.
+      // response mirrors a normal read: the envelope over the patched record.
       if (listingWrite.path === 'patch') {
         const wrote = await patchStoredPublicListing(env, listingWrite.cached, listingWrite.value);
         if (!wrote) return isError('failed to persist the public_listing change; please retry.');
         queueHitMinPurge([webTag()]);
-        const patched = scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value);
+        const patched = {
+          ...listingWrite.cached,
+          scorecard: scorecardWithPublicListing(listingWrite.cached.scorecard, listingWrite.value),
+        };
         return textContent({
           audited: false,
           source: 'cache',
-          ...webAuditFreshness(true, listingWrite.cached.scored_at),
-          scorecard: await enrichForRead(env, patched),
-          share_url: shareUrl,
+          ...(await webEnvelope(env, { tier: 'cache', host: domain, record: patched, origin: siteUrl })),
         });
       }
 
@@ -389,13 +354,11 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
       const wrote = await cachePut(env, canonicalTarget, scorecard, SPEC_VERSION, scoredAt);
       if (wrote) queueHitMinPurge([webTag(), webDomainTag(domain)]);
       await rebuildAggregatesIfSeeded(env, domain, SPEC_VERSION);
+      const record = { spec_version: SPEC_VERSION, target_url: canonicalTarget, scorecard, scored_at: scoredAt };
       return textContent({
         audited: true,
         source: 'fresh-audit',
-        ...webAuditFreshness(false, scoredAt),
-        scorecard: await enrichForRead(env, scorecard),
-        share_url: shareUrl,
-        spec_version: SPEC_VERSION,
+        ...(await webEnvelope(env, { tier: 'live', host: domain, record, origin: siteUrl })),
       });
     },
   );
@@ -405,8 +368,8 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
     {
       title: 'List cached website audits',
       description:
-        'Return the web leaderboard (curated + opted-in): summaries of the websites on anc.dev/web. Each entry carries ' +
-        'domain, url, name, score_pct, and share_url. view "curated" (the default) returns only the curated board; ' +
+        'Return the website half of the leaderboard (curated + opted-in). Each entry carries domain, url, name, ' +
+        'score_pct, and scorecard_url. view "curated" (the default) returns only the curated board; ' +
         `view "all" adds the user-submitted domains that opted in to public listing, bounded to the first ${LIST_ALL_MAX_USER_ROWS}. ` +
         'An empty list means the board is mid-rescore; get_website_audit still serves per-domain results.',
       inputSchema: {
@@ -415,7 +378,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           .optional()
           .describe(
             'Which board to return: "curated" (default) for the curated leaderboard only, or "all" to also include ' +
-              'user-submitted domains that opted in to public listing. Mirrors anc.dev/web?view=all.',
+              `user-submitted domains that opted in to public listing. Mirrors ${leaderboardPath({ lane: 'web', view: 'all' })}.`,
           ),
       },
       annotations: { readOnlyHint: true },
@@ -428,7 +391,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
         url: e.url,
         name: e.name,
         score_pct: e.score_pct,
-        share_url: `${siteUrl}/web/${e.domain}`,
+        scorecard_url: `${siteUrl}${scorePath(e.domain)}`,
       }));
       if ((view ?? 'curated') !== 'all') {
         return textContent({ count: curated.length, entries: curated });
@@ -449,7 +412,7 @@ export function registerWebAuditTools(server: McpServer, env: WebAuditToolsEnv):
           url: `https://${l.domain}/`,
           name: l.name,
           score_pct: l.score_pct,
-          share_url: `${siteUrl}/web/${l.domain}`,
+          scorecard_url: `${siteUrl}${scorePath(l.domain)}`,
         }));
       const entries = curated.concat(userRows);
       return textContent({ count: entries.length, entries });
